@@ -1,3 +1,10 @@
+# @knitli/ctx-v1.0.0 (2026-04-03)
+
+
+### Features
+
+* **ctx:** move ctx plugin into plugins/ctx/ ([62a4194](https://github.com/knitli/toolshed/commit/62a41945863fdf5dd67e8427bc8f050d8ddf129b))
+
 # Changelog
 
 All notable changes to the ctx plugin will be documented in this file.
