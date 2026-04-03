@@ -1,0 +1,25 @@
+{
+  "name": "toolshed",
+  "owner": {
+    "name": "Knitli Inc.",
+    "email": "hello@knitli.com"
+  },
+  "plugins": [
+    {
+      "name": "ctx",
+      "source": "./plugins/ctx",
+      "description": "Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files across 10+ tool ecosystems.",
+      "keywords": ["context", "memory", "staleness", "drift", "hygiene"],
+      "category": "quality",
+      "license": "MIT"
+    },
+    {
+      "name": "codeweaver",
+      "source": "./plugins/codeweaver",
+      "description": "Semantic code search with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
+      "keywords": ["search", "semantic", "AST", "indexing", "code-intelligence"],
+      "category": "search",
+      "license": "MIT OR Apache-2.0"
+    }
+  ]
+}
