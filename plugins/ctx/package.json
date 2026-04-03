@@ -1,0 +1,15 @@
+{
+  "name": "@knitli/ctx",
+  "version": "0.1.0",
+  "private": true,
+  "release": {
+    "extends": "semantic-release-monorepo",
+    "plugins": [
+      "@semantic-release/commit-analyzer",
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/changelog",
+      "@semantic-release/git",
+      "@semantic-release/github"
+    ]
+  }
+}
