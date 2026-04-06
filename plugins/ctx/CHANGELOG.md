@@ -1,3 +1,10 @@
+# [@knitli/ctx-v1.0.1](https://github.com/knitli/toolshed/compare/@knitli/ctx-v1.0.0...@knitli/ctx-v1.0.1) (2026-04-06)
+
+
+### Bug Fixes
+
+* **codeweaver,ctx:** Corrected issue with malformed plugin manifests ([07714f5](https://github.com/knitli/toolshed/commit/07714f514bbf9739160dfc3eae48b39234be260f))
+
 # @knitli/ctx-v1.0.0 (2026-04-03)
 
 
