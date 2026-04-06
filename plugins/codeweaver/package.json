@@ -1,6 +1,6 @@
 {
   "name": "@knitli/codeweaver",
-  "version": "0.6.0-alpha",
+  "version": "0.1.0",
   "private": true,
   "release": {
     "extends": "semantic-release-monorepo",
