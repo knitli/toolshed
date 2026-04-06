@@ -18,7 +18,8 @@
   ],
   "userConfig": {
     "VOYAGE_API_KEY": {
-      "label": "Voyage AI API Key",
+      "type": "string",
+      "title": "Voyage AI API Key",
       "description": "API key for Voyage AI embedding provider (get one at https://voyage.ai)",
       "sensitive": true,
       "required": false
