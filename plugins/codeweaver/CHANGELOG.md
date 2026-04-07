@@ -1,3 +1,10 @@
+# [@knitli/codeweaver-v1.0.1](https://github.com/knitli/toolshed/compare/@knitli/codeweaver-v1.0.0...@knitli/codeweaver-v1.0.1) (2026-04-07)
+
+
+### Bug Fixes
+
+* **codeweaver:** Corrected flawed env variable configuration ([1a50d42](https://github.com/knitli/toolshed/commit/1a50d427674941199d6da806f613b2330ef68685))
+
 # @knitli/codeweaver-v1.0.0 (2026-04-06)
 
 
