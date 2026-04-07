@@ -14,6 +14,14 @@
       "license": "MIT"
     },
     {
+      "name": "strip-ansi",
+      "source": "./plugins/strip-ansi",
+      "description": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits via a PostToolUse hook on Bash.",
+      "keywords": ["ansi", "sanitize", "hygiene", "context", "no-color"],
+      "category": "quality",
+      "license": "MIT"
+    },
+    {
       "name": "codeweaver",
       "source": "./plugins/codeweaver",
       "description": "Semantic code search with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
