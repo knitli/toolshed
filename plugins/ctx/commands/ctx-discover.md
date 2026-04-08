@@ -12,13 +12,13 @@ Search the following locations. For each file found, record its path, which tool
 
 ### Locations to scan
 
-**Root-level memory files**: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules`, `.continuerules`, `.clinerules`, `ai-rules.yml`, `.ai-rules.yml`, `.aider.conf.yml`, `.aider.model.settings.yml`
+**Root-level memory files**: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `CRUSH.md`, `.cursorrules`, `.windsurfrules`, `.continuerules`, `.clinerules`, `ai-rules.yml`, `.ai-rules.yml`, `.aider.conf.yml`, `.aider.model.settings.yml`
 
 **Tool directories**: `.claude/`, `.gemini/`, `.codex/`, `.cursor/`, `.continue/`, `.roo/`, `.serena/`, `.specify/`, `.github/agents/`, `.github/skills/`
 
 **Planning/output directories**: `claudedocs/`, `specs/`, `plans/`, `planning/`, `info/`
 
-**Config files**: `.mcp.json`, `.vscode/mcp.json`, `.vscode/settings.json`
+**Config files**: `.mcp.json`, `.vscode/mcp.json`, `.vscode/settings.json`, `.vscode/mcp.json`
 
 **Heuristic detection**: Scan for any additional markdown files in the repo root with ALL_CAPS names that aren't standard (README, LICENSE, CHANGELOG, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, VENDORED). Also check for symlinks between any of the above files.
 

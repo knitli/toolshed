@@ -1,11 +1,21 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
           {
-            "type": "prompt",
-            "prompt": "Check if this session modified code structure, versions, dependencies, or file locations. If so, remind the user that AI context files (CLAUDE.md, AGENTS.md, Serena memories, etc.) may now be stale, and suggest running /ctx:check to validate them. If the session already ran a ctx audit or only read files without modifying anything, say nothing."
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh"
           }
         ]
       }
