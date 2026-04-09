@@ -1,0 +1,8 @@
+[tools]
+node = "latest"
+shfmt = "latest"
+shellcheck = "latest"
+yq = "latest"
+
+[prepare]
+npm = { auto = true }

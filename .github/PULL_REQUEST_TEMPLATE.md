@@ -6,6 +6,7 @@
 
 - [ ] ctx
 - [ ] codeweaver
+- [ ] strip-ansi
 - [ ] None (repo-level change)
 
 ## Checklist
