@@ -6,23 +6,30 @@ description: "Scan the repository and inventory all AI context files across tool
 
 Scan this repository and produce a complete inventory of AI context files across all tool ecosystems.
 
+## Arguments
+
+`$ARGUMENTS`
+
+- **No arguments**: discover all context files across all ecosystems.
+- **Ecosystem names** (e.g., `/ctx:discover cursor serena`): restrict scanning to those ecosystems only.
+- **Directory paths** (e.g., `/ctx:discover .claude/ .serena/`): scan only those directories.
+
 ## Instructions
 
-Search the following locations. For each file found, record its path, which tool ecosystem it belongs to, its type (memory, config, planning, or output), file size, and last-modified date.
+Search every location listed in the plugin's authoritative ecosystem inventory. If the user provided arguments above, restrict the scan to the specified ecosystems or directories. For each file found, record its path, which tool ecosystem it belongs to, its type (memory, config, planning, or output), file size, and last-modified date.
 
 ### Locations to scan
 
-**Root-level memory files**: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `CRUSH.md`, `.cursorrules`, `.windsurfrules`, `.continuerules`, `.clinerules`, `ai-rules.yml`, `.ai-rules.yml`, `.aider.conf.yml`, `.aider.model.settings.yml`
+**The authoritative list of known ecosystems, root files, nested memory files, tool directories, config files, and ignore directories lives in `${CLAUDE_PLUGIN_ROOT}/data/context-files.ini`.** Read that file first — it is the single source of truth. Any file, directory, or glob listed there is in scope; anything not listed is not. When adding support for a new ecosystem, add it to the INI, not here.
 
-**Tool directories**: `.claude/`, `.gemini/`, `.codex/`, `.cursor/`, `.continue/`, `.roo/`, `.serena/`, `.specify/`, `.github/agents/`, `.github/skills/`
+Briefly, the INI covers ~15 ecosystems including Claude Code, universal `AGENTS.md`, Gemini, OpenAI Codex, Cursor, Windsurf, Continue, Roo/Cline, Crush, Aider, Serena, spec-kit, GitHub agents/skills, VS Code, and planning/output directories (`claudedocs/`, `specs/`, `plans/`, etc.). The `[ignore]` section lists directories the scanner must not descend into (`.git`, `node_modules`, `.venv`, build outputs). The `[heuristics]` section lists standard ALL_CAPS markdown filenames to exclude from heuristic detection.
 
-**Planning/output directories**: `claudedocs/`, `specs/`, `plans/`, `planning/`, `info/`
+**Heuristic detection** (not covered by the INI's exact-match entries): after reading the INI and collecting its listed files, also scan for:
+- Markdown files in the repo root with ALL_CAPS names that don't match the `allcaps_exclude` list in `[heuristics]`. These are often context files in disguise.
+- Symlinks between any context files (e.g., `GEMINI.md → CLAUDE.md`).
+- Files in `docs/` that appear AI-agent-targeted (phrases like "project overview", "when working with this repo", "assistant instructions") rather than user-facing.
 
-**Config files**: `.mcp.json`, `.vscode/mcp.json`, `.vscode/settings.json`, `.vscode/mcp.json`
-
-**Heuristic detection**: Scan for any additional markdown files in the repo root with ALL_CAPS names that aren't standard (README, LICENSE, CHANGELOG, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, VENDORED). Also check for symlinks between any of the above files.
-
-Check the `docs/` directory for files that appear to be AI-agent-targeted (contain phrases like "project overview", "architecture overview", "when working with", etc.) rather than user-facing documentation.
+If a shell helper is available, `${CLAUDE_PLUGIN_ROOT}/hooks/lib/scan-context-files.sh` will emit the deduped list of matching files (one per line) using whichever finder binary is available; the same INI drives it.
 
 ### Output format
 

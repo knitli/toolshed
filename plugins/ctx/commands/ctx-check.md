@@ -6,9 +6,18 @@ description: "Validate claims in AI context files against the actual codebase to
 
 Validate claims in AI context files against the actual codebase. Find what's stale, what's broken, and what's drifted from reality.
 
+## Arguments
+
+`$ARGUMENTS`
+
+- **No arguments**: discover all context files, then validate every memory/instruction file.
+- **File paths** (e.g., `/ctx:check CLAUDE.md`): validate only those specific files.
+- **"validate X against Y"** or **"X against Y"** (e.g., `/ctx:check CLAUDE.md against GEMINI.md`): extract claims from all named files, then cross-validate — check whether the claims in each file hold true not just against the codebase but also against the other named files. Flag any disagreements as drift alongside staleness.
+- **Ecosystem names** (e.g., `/ctx:check cursor`): validate all context files belonging to those ecosystems.
+
 ## Instructions
 
-First, run discovery (same as /ctx:discover) to identify all context files. Then, for each **memory and instruction file** (skip config-only files and old planning output), do the following:
+First, run discovery (same as /ctx:discover) to identify all context files — unless the user named specific files above, in which case use those directly. Then, for each **memory and instruction file** in scope (skip config-only files and old planning output), do the following:
 
 ### Extract and validate claims
 

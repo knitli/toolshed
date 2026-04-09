@@ -9,18 +9,15 @@ When working in this repository, be aware that AI context files (CLAUDE.md, AGEN
 
 ## Known context file locations
 
-| Tool | Memory files | Config | Output/Planning |
-|------|-------------|--------|-----------------|
-| Claude Code | `CLAUDE.md` | `.claude/settings*.json`, `.claude/commands/`, `.claude/skills/` | `claudedocs/*` |
-| GitHub Copilot/Codex | `AGENTS.md`, `.github/agents/*` | `.codex/config.toml`, `.vscode/mcp.json` | — |
-| Gemini | `GEMINI.md` | `.gemini/` | — |
-| Cursor | `.cursorrules`, `.cursor/rules/*.mdc` | `.cursor/` | — |
-| Serena | `.serena/memories/*` | `.serena/project.yml` | — |
-| spec-kit | `.specify/memory/*` | `.specify/templates/*` | `specs/*` |
-| Roo/Cline | `.roo/*`, `.clinerules` | `.roo/mcp.json` | — |
-| Continue | `.continuerules` | `.continue/config.json` | — |
-| Aider | `.aider.conf.yml` | — | — |
-| Windsurf | `.windsurfrules` | — | — |
+The authoritative, plugin-wide list of known context files and locations lives at `${CLAUDE_PLUGIN_ROOT}/data/context-files.ini`. Read that file when you need exact paths, globs, or to check whether a particular file is a recognized context file. It is the single source of truth and is updated as new ecosystems are added.
+
+At a high level, the plugin recognizes these ecosystems:
+- **Agent memory files**: `CLAUDE.md` (Claude Code), `AGENTS.md` (universal), `GEMINI.md` (Gemini), `CRUSH.md` (Crush), `.cursorrules` / `.cursor/rules/*.mdc` (Cursor), `.windsurfrules` (Windsurf), `.continuerules` (Continue), `.clinerules` (Roo/Cline), `.aider.conf.yml` (Aider)
+- **Tool directories**: `.claude/`, `.gemini/`, `.codex/`, `.cursor/`, `.continue/`, `.roo/`, `.serena/`, `.specify/`, `.github/agents/`, `.github/skills/`
+- **Planning / output**: `claudedocs/`, `specs/`, `plans/`, `planning/`, `info/`
+- **Config**: `.mcp.json`, `.vscode/mcp.json`, `.vscode/settings.json`
+
+This overview is for quick orientation. Do not rely on it for exact-match scanning — use the INI.
 
 ## Rules for maintaining context hygiene
 

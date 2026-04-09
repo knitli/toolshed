@@ -6,9 +6,18 @@ description: "Find contradictions, gaps, and inconsistencies between AI context 
 
 Find contradictions, gaps, and inconsistencies between AI context files from different tool ecosystems.
 
+## Arguments
+
+`$ARGUMENTS`
+
+- **No arguments**: discover all context files, then compare every pair.
+- **File paths** (e.g., `/ctx:drift CLAUDE.md GEMINI.md AGENTS.md`): compare only the named files against each other. At least two files are needed for a meaningful comparison.
+- **Ecosystem names** (e.g., `/ctx:drift claude-code cursor`): compare all context files belonging to those ecosystems.
+- **Single file** (e.g., `/ctx:drift CLAUDE.md`): compare that file against every other discovered context file to find where it disagrees.
+
 ## Instructions
 
-First, identify all memory and instruction files in the repo (run discovery if needed). Then compare them against each other.
+First, identify all memory and instruction files in the repo (run discovery if needed). If the user provided arguments above, restrict comparison to the specified files or ecosystems. Then compare them against each other.
 
 ### Comparison process
 

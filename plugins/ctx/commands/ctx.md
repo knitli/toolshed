@@ -6,44 +6,28 @@ description: "Run a full context hygiene audit: discover all AI context files, c
 
 Run a complete context hygiene audit: discover all AI context files, check them for staleness against the actual codebase, and detect drift/contradictions across tool boundaries.
 
+## Arguments
+
+`$ARGUMENTS`
+
+- **No arguments**: audit everything — full discovery, check all files, detect all drift.
+- **File paths** (e.g., `/ctx CLAUDE.md`): scope all three phases to just those files. Discovery still runs (to build the full inventory for drift comparison), but staleness checking and drift detection focus on the named files.
+- **Ecosystem names** (e.g., `/ctx cursor serena`): scope to all context files belonging to those ecosystems (as defined in the INI).
+
 ## Instructions
 
-You are running a context hygiene audit on this repository. Complete all three phases in order, then produce a summary report.
+You are running a context hygiene audit on this repository. Complete all three phases in order, then produce a summary report. If the user provided arguments above, scope your work accordingly — but always run discovery first to establish the full context file inventory.
 
 ### Phase 1: Discovery
 
-Scan the repository for ALL AI context files. Check every location in this list:
+Scan the repository for ALL AI context files using the plugin's authoritative ecosystem inventory at `${CLAUDE_PLUGIN_ROOT}/data/context-files.ini`. Read that file first — it lists every ecosystem, root file, nested memory file, tool directory, config file, and ignore directory the plugin knows about. Any entry there is in scope; entries not there are not (unless caught by heuristics, below).
 
-**Memory / instruction files** (check repo root and subdirectories):
-- `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` — root-level agent memory files
-- `.github/agents/*`, `.github/skills/*` — GitHub Copilot agent config
-- `.claude/skills/`, `.claude/commands/`, `.claude/analyze_conversation.md` — Claude Code skills and commands
-- `.gemini/skills/`, `.gemini/commands/` — Gemini CLI config
-- `.codex/`, `.codex/AGENTS.md`, `.codex/config.toml` — OpenAI Codex config
-- `.cursor/rules/*.mdc`, `.cursorrules` — Cursor rules (legacy and current)
-- `.continue/*`, `.continuerules` — Continue config
-- `.roo/*`, `.clinerules` — Roo/Cline config
-- `.serena/memories/*`, `.serena/project.yml` — Serena MCP tool
-- `.specify/memory/*`, `.specify/templates/*` — spec-kit
-- `.windsurfrules` — Windsurf
-- `.aider.conf.yml`, `.aider.model.settings.yml` — Aider
-- `ai-rules.yml`, `.ai-rules.yml` — generic AI rules
+The INI currently covers ~15 ecosystems: Claude Code, universal `AGENTS.md`, Gemini, OpenAI Codex, Cursor, Windsurf, Continue, Roo/Cline, Crush, Aider, Serena, spec-kit, GitHub agents/skills, VS Code, and planning/output directories. See `/ctx:discover` for the full treatment.
 
-**Planning and output directories**:
-- `claudedocs/*` — Claude Code planning docs
-- `specs/*` — specification documents
-- `plans/*`, `planning/*` — planning directories
-- `docs/*` — documentation (flag files that appear AI-generated or agent-targeted)
-- `info/*` — informational docs
-
-**Config files**:
-- `.mcp.json` — root MCP server config
-- `.vscode/mcp.json`, `.vscode/settings.json` — VS Code / Copilot MCP config
-
-**Heuristic checks**:
-- Any markdown file in repo root with all-caps filename not in the standard set (README, LICENSE, CHANGELOG, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT)
-- Symlinks between context files (e.g., GEMINI.md → CLAUDE.md)
-- Files containing phrases like "when working with this repo", "you are an AI", "assistant instructions"
+**Heuristic checks** (beyond the INI's exact-match list):
+- Any markdown file in repo root with an ALL_CAPS filename not in the `allcaps_exclude` list under `[heuristics]` in the INI.
+- Symlinks between context files (e.g., `GEMINI.md → CLAUDE.md`).
+- Files containing phrases like "when working with this repo", "you are an AI", "assistant instructions" — these are often context files regardless of extension or location.
 
 For each file found, record: path, tool ecosystem, file type (memory/config/planning/output), size, last modified date.
 

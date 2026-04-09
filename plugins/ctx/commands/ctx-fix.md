@@ -6,9 +6,18 @@ description: "Fix staleness and drift issues found by /ctx:check and /ctx:drift 
 
 Fix staleness and drift issues found by /ctx:check and /ctx:drift. Operates interactively: proposes each fix and waits for approval before applying.
 
+## Arguments
+
+`$ARGUMENTS`
+
+- **No arguments**: run a full audit, then propose fixes for all issues found.
+- **File paths** (e.g., `/ctx:fix CLAUDE.md`): audit and fix issues only in the named files.
+- **Ecosystem names** (e.g., `/ctx:fix serena`): audit and fix issues only in files belonging to those ecosystems.
+- **Issue types** (e.g., `/ctx:fix broken`, `/ctx:fix versions`): run a full audit but only propose fixes for the specified issue category (broken, stale, versions, contradictions, gaps, orphaned).
+
 ## Instructions
 
-First, run a full audit (/ctx) to identify all issues. Then work through fixes in priority order.
+First, run a full audit (/ctx) to identify all issues — scoped to the user's arguments if provided. Then work through fixes in priority order.
 
 ### Fix priority
 
