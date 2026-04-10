@@ -24,11 +24,8 @@ jobs:
         with:
           node-version: 22
 
-      - name: Regenerate and verify no drift
-        run: node scripts/generate.mjs
-
-      - name: Fail if any generated file was modified
-        run: git diff --exit-code
+      - name: Check generated files for drift
+        run: node scripts/generate.mjs --check
 
   commitlint:
     runs-on: ubuntu-latest

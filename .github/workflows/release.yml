@@ -13,6 +13,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     strategy:
+      max-parallel: 1
       matrix:
         plugin: [ctx, strip-ansi, codeweaver]
     steps:
@@ -32,16 +33,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
 
-      - name: Sync version to marketplace.json and regenerate
-        run: |
-          PKG_VERSION=$(jq -r '.version' plugins/${{ matrix.plugin }}/package.json)
-          jq --arg plugin "${{ matrix.plugin }}" --arg v "$PKG_VERSION" \
-            '(.plugins[] | select(.name == $plugin) | .version) = $v' \
-            .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
-          node scripts/generate.mjs
+      - name: Regenerate plugin.json from bumped package.json
+        run: node scripts/generate.mjs
 
       - name: Commit version sync
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(${{ matrix.plugin }}): sync version to marketplace.json and regenerate files"
-          file_pattern: ".claude-plugin/marketplace.json plugins/${{ matrix.plugin }}/.claude-plugin/plugin.json plugins/${{ matrix.plugin }}/package.json"
+          commit_message: "chore(${{ matrix.plugin }}): sync plugin.json version [skip ci]"
+          file_pattern: "plugins/${{ matrix.plugin }}/.claude-plugin/plugin.json"

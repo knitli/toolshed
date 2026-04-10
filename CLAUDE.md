@@ -20,19 +20,15 @@ All plugin logic is **markdown prompts** interpreted by Claude Code at runtime. 
 
 ### Version sync
 
-Each plugin's version lives in two files that must match:
-- `plugins/<name>/package.json` — semantic-release writes this on merge to main
-- `plugins/<name>/.claude-plugin/plugin.json` — Claude Code reads this at install time
-
-The release workflow auto-syncs `plugin.json` after semantic-release bumps `package.json`. The validation script (`scripts/validate-marketplace.sh`) catches mismatches.
+`package.json` is the sole source of truth for each plugin's version — semantic-release bumps it on merge to main. The generate script reads the version from `package.json` and propagates it to `plugin.json`. The release workflow runs generate after each release to keep them in sync.
 
 ### Key files
 
-- `.claude-plugin/marketplace.json` — Discovery manifest listing all plugins with source paths
+- `.claude-plugin/marketplace.json` — Discovery manifest listing all plugins with metadata (description, keywords, etc. — but NOT version)
 - `plugins/<name>/.claude-plugin/plugin.json` — Per-plugin manifest (name, version, description, mcpServers, userConfig)
-- `plugins/<name>/package.json` — npm package with `semantic-release-monorepo` config
+- `plugins/<name>/package.json` — npm package; version source of truth, release config generated centrally
 - `.commitlintrc.json` — Enforces conventional commits; `scope-enum` must list all plugin names
-- `.github/workflows/release.yml` — Per-plugin semantic-release via matrix; `matrix.plugin` must list all plugin names
+- `.github/workflows/release.yml` — Per-plugin semantic-release via matrix (max-parallel: 1); `matrix.plugin` must list all plugin names
 - `.github/workflows/validate.yml` — PR gate: runs marketplace validation + commitlint
 
 ### Plugin component types
@@ -87,11 +83,9 @@ The Stop event re-fires if the hook's output is treated as new model feedback. L
 
 ## Adding a new plugin
 
-Four files must be updated in sync:
-1. Create `plugins/<name>/.claude-plugin/plugin.json` and `plugins/<name>/package.json` with matching versions
-2. Add entry to `.claude-plugin/marketplace.json` `plugins` array
-3. Add plugin name to `scope-enum` in `.commitlintrc.json`
-4. Add plugin name to `matrix.plugin` in `.github/workflows/release.yml`
+1. Add the plugin entry to `.claude-plugin/marketplace.json` `plugins` array (name, source, description, keywords, etc.)
+2. Run `npm run generate` — this creates all derived files (`plugin.json`, `package.json`, `.commitlintrc.json`, `release.yml`)
+3. Optionally run `npm run generate -- --new <name>` to also scaffold `commands/` directory and `README.md`
 
 ## Commit convention
 

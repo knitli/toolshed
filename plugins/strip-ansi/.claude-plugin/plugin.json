@@ -1,6 +1,6 @@
 {
   "name": "strip-ansi",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits. Injects NO_COLOR into Bash tool calls and sanitizes any residual escapes from output.",
   "author": {
     "name": "Knitli Inc.",

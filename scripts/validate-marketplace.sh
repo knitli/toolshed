@@ -51,16 +51,6 @@ for i in $(seq 0 $((PLUGIN_COUNT - 1))); do
     continue
   fi
 
-  # Version sync: package.json version == plugin.json version
-  if [ -f "$PLUGIN_DIR/package.json" ]; then
-    PKG_VERSION=$(jq -r '.version' "$PLUGIN_DIR/package.json")
-    PLUGIN_VERSION=$(jq -r '.version' "$PLUGIN_DIR/.claude-plugin/plugin.json")
-    if [ "$PKG_VERSION" != "$PLUGIN_VERSION" ]; then
-      echo "    FAIL: version mismatch — package.json=$PKG_VERSION, plugin.json=$PLUGIN_VERSION"
-      ERRORS=$((ERRORS + 1))
-    fi
-  fi
-
   echo "    OK"
 done
 

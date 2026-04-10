@@ -9,7 +9,7 @@
     }
   },
   "name": "codeweaver",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
   "author": {
     "name": "Knitli Inc.",
