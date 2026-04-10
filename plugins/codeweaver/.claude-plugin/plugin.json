@@ -1,23 +1,4 @@
 {
-  "name": "codeweaver",
-  "version": "0.1.0",
-  "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages",
-  "author": {
-    "name": "Knitli Inc."
-  },
-  "homepage": "https://knitli.com",
-  "repository": "https://github.com/knitli/toolshed",
-  "license": "MIT OR Apache-2.0",
-  "keywords": [
-    "mcp",
-    "code-search",
-    "semantic-search",
-    "ast",
-    "embeddings",
-    "vector-search",
-    "hybrid-search",
-    "codebase-analysis"
-  ],
   "userConfig": {
     "VOYAGE_API_KEY": {
       "type": "string",
@@ -27,6 +8,30 @@
       "required": false
     }
   },
+  "name": "codeweaver",
+  "version": "0.1.0",
+  "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
+  "author": {
+    "name": "Knitli Inc.",
+    "email": "hello@knitli.com"
+  },
+  "homepage": "https://knitli.com",
+  "repository": "https://github.com/knitli/toolshed",
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "mcp",
+    "search",
+    "semantic",
+    "code-search",
+    "semantic-search",
+    "AST",
+    "indexing",
+    "code-intelligence",
+    "embeddings",
+    "vector-search",
+    "hybrid-search",
+    "codebase-analysis"
+  ],
   "mcpServers": {
     "codeweaver": {
       "command": "uvx",
