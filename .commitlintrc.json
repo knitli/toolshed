@@ -1,6 +1,16 @@
 {
-  "extends": ["@commitlint/config-conventional"],
+  "extends": [
+    "@commitlint/config-conventional"
+  ],
   "rules": {
-    "scope-enum": [2, "always", ["ctx", "codeweaver", "strip-ansi"]]
+    "scope-enum": [
+      2,
+      "always",
+      [
+        "ctx",
+        "strip-ansi",
+        "codeweaver"
+      ]
+    ]
   }
 }

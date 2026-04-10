@@ -13,6 +13,21 @@ jobs:
       - name: Validate marketplace structure
         run: ./scripts/validate-marketplace.sh
 
+  generated-files-in-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check generated files are in sync
+        run: node scripts/generate.mjs --check
+
+      - name: Fail if any generated file was modified
+        run: git diff --exit-code
+
   commitlint:
     runs-on: ubuntu-latest
     steps:

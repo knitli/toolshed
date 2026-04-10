@@ -2,6 +2,27 @@
   "name": "@knitli/ctx",
   "version": "0.1.0",
   "private": true,
+  "description": "Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files across 10+ tool ecosystems.",
+  "author": {
+    "name": "Knitli Inc.",
+    "email": "hello@knitli.com"
+  },
+  "license": "MIT",
+  "homepage": "https://knitli.com/ctx",
+  "keywords": [
+    "context",
+    "memory",
+    "staleness",
+    "drift",
+    "hygiene",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "multi-agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knitli/toolshed"
+  },
   "release": {
     "extends": "semantic-release-monorepo",
     "plugins": [

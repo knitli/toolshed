@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "description": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits. Injects NO_COLOR into Bash tool calls and sanitizes any residual escapes from output.",
   "author": {
-    "name": "Knitli Inc."
+    "name": "Knitli Inc.",
+    "email": "hello@knitli.com"
   },
   "homepage": "https://knitli.com",
   "repository": "https://github.com/knitli/toolshed",
