@@ -24,7 +24,16 @@ const ROOT = join(__dirname, '..');
 const args = process.argv.slice(2);
 const CHECK_MODE = args.includes('--check');
 const newIdx = args.indexOf('--new');
-const NEW_PLUGIN = newIdx !== -1 ? args[newIdx + 1] : null;
+
+let NEW_PLUGIN = null;
+if (newIdx !== -1) {
+  const candidate = args[newIdx + 1];
+  if (!candidate || candidate.startsWith('--')) {
+    console.error('ERROR: --new requires a plugin name.');
+    process.exit(1);
+  }
+  NEW_PLUGIN = candidate;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -110,11 +119,18 @@ writeOrCheck(releaseYmlPath, updatedReleaseYml);
 
 for (const plugin of plugins) {
   const pluginDir = join(ROOT, plugin.source.replace(/^\.\//, ''));
-  const pluginJsonPath = join(pluginDir, '.claude-plugin', 'plugin.json');
+  const dotClaudePluginDir = join(pluginDir, '.claude-plugin');
+  const pluginJsonPath = join(dotClaudePluginDir, 'plugin.json');
+
+  if (!CHECK_MODE) {
+    mkdirSync(dotClaudePluginDir, { recursive: true });
+  }
 
   const extensions = pluginManifestExtensions[plugin.name] ?? {};
 
+  // Spread extensions first so canonical fields always win if there's a conflict.
   const pluginJson = {
+    ...extensions,
     name: plugin.name,
     version: plugin.version,
     description: plugin.description,
@@ -124,7 +140,6 @@ for (const plugin of plugins) {
     license: plugin.license ?? shared.license,
     keywords: plugin.keywords,
     ...(plugin.mcpServers !== undefined && { mcpServers: plugin.mcpServers }),
-    ...extensions,
   };
 
   writeOrCheck(pluginJsonPath, JSON.stringify(pluginJson, null, 2) + '\n');
@@ -137,6 +152,10 @@ for (const plugin of plugins) {
 for (const plugin of plugins) {
   const pluginDir = join(ROOT, plugin.source.replace(/^\.\//, ''));
   const pkgJsonPath = join(pluginDir, 'package.json');
+
+  if (!CHECK_MODE) {
+    mkdirSync(pluginDir, { recursive: true });
+  }
 
   // Preserve the release config block from the existing file if present.
   const existing = existsSync(pkgJsonPath) ? readJSON(pkgJsonPath) : {};

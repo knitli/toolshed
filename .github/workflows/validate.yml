@@ -25,7 +25,7 @@ jobs:
           node-version: 22
 
       - name: Check generated files are in sync
-        run: node scripts/generate.mjs --check
+        run: node scripts/generate.mjs
 
       - name: Fail if any generated file was modified
         run: git diff --exit-code

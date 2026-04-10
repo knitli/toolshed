@@ -32,15 +32,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
 
-      - name: Sync version to plugin.json
-        working-directory: plugins/${{ matrix.plugin }}
+      - name: Sync version to marketplace.json and regenerate
         run: |
-          PKG_VERSION=$(jq -r '.version' package.json)
-          PLUGIN_JSON=".claude-plugin/plugin.json"
-          jq --arg v "$PKG_VERSION" '.version = $v' "$PLUGIN_JSON" > tmp.json && mv tmp.json "$PLUGIN_JSON"
+          PKG_VERSION=$(jq -r '.version' plugins/${{ matrix.plugin }}/package.json)
+          jq --arg plugin "${{ matrix.plugin }}" --arg v "$PKG_VERSION" \
+            '(.plugins[] | select(.name == $plugin) | .version) = $v' \
+            .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
+          node scripts/generate.mjs
 
       - name: Commit version sync
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore(${{ matrix.plugin }}): sync plugin.json version"
-          file_pattern: "plugins/${{ matrix.plugin }}/.claude-plugin/plugin.json"
+          file_pattern: ".claude-plugin/marketplace.json plugins/${{ matrix.plugin }}/.claude-plugin/plugin.json plugins/${{ matrix.plugin }}/package.json"
