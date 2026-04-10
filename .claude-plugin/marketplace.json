@@ -1,4 +1,5 @@
 {
+  "$schema": "https://catalog.lintel.tools/schemas/claude-code/marketplace/latest.json",
   "name": "toolshed",
   "owner": {
     "name": "Knitli Inc.",
@@ -20,8 +21,7 @@
       "name": "ctx",
       "source": "./plugins/ctx",
       "version": "0.1.0",
-      "description": "Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files across 10+ tool ecosystems.",
-      "pluginDescription": "Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files (CLAUDE.md, AGENTS.md, Serena memories, Cursor rules, and 10+ more tool ecosystems).",
+      "description": "Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files (CLAUDE.md, AGENTS.md, Serena memories, Cursor rules, and 10+ more tool ecosystems).",
       "keywords": ["context", "memory", "staleness", "drift", "hygiene", "CLAUDE.md", "AGENTS.md", "multi-agent"],
       "category": "quality",
       "license": "MIT",
@@ -31,8 +31,7 @@
       "name": "strip-ansi",
       "source": "./plugins/strip-ansi",
       "version": "0.1.0",
-      "description": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits via a PostToolUse hook on Bash.",
-      "pluginDescription": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits. Injects NO_COLOR into Bash tool calls and sanitizes any residual escapes from output.",
+      "description": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits. Injects NO_COLOR into Bash tool calls and sanitizes any residual escapes from output.",
       "keywords": ["ansi", "sanitize", "hygiene", "context", "no-color"],
       "category": "quality",
       "license": "MIT"
@@ -41,20 +40,10 @@
       "name": "codeweaver",
       "source": "./plugins/codeweaver",
       "version": "0.1.0",
-      "description": "Semantic code search with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
-      "pluginDescription": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
+      "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
       "keywords": ["mcp", "search", "semantic", "code-search", "semantic-search", "AST", "indexing", "code-intelligence", "embeddings", "vector-search", "hybrid-search", "codebase-analysis"],
       "category": "search",
       "license": "MIT OR Apache-2.0",
-      "userConfig": {
-        "VOYAGE_API_KEY": {
-          "type": "string",
-          "title": "Voyage AI API Key",
-          "description": "API key for Voyage AI embedding provider (get one at https://voyage.ai)",
-          "sensitive": true,
-          "required": false
-        }
-      },
       "mcpServers": {
         "codeweaver": {
           "command": "uvx",
@@ -76,5 +65,18 @@
         }
       }
     }
-  ]
+  ],
+  "pluginManifestExtensions": {
+    "codeweaver": {
+      "userConfig": {
+        "VOYAGE_API_KEY": {
+          "type": "string",
+          "title": "Voyage AI API Key",
+          "description": "API key for Voyage AI embedding provider (get one at https://voyage.ai)",
+          "sensitive": true,
+          "required": false
+        }
+      }
+    }
+  }
 }

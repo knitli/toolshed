@@ -2,7 +2,7 @@
   "name": "@knitli/strip-ansi",
   "version": "0.1.0",
   "private": true,
-  "description": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits via a PostToolUse hook on Bash.",
+  "description": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits. Injects NO_COLOR into Bash tool calls and sanitizes any residual escapes from output.",
   "author": {
     "name": "Knitli Inc.",
     "email": "hello@knitli.com"

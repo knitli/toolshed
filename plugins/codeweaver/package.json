@@ -2,7 +2,7 @@
   "name": "@knitli/codeweaver",
   "version": "0.1.0",
   "private": true,
-  "description": "Semantic code search with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
+  "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
   "author": {
     "name": "Knitli Inc.",
     "email": "hello@knitli.com"

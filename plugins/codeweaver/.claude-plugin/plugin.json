@@ -23,15 +23,6 @@
     "hybrid-search",
     "codebase-analysis"
   ],
-  "userConfig": {
-    "VOYAGE_API_KEY": {
-      "type": "string",
-      "title": "Voyage AI API Key",
-      "description": "API key for Voyage AI embedding provider (get one at https://voyage.ai)",
-      "sensitive": true,
-      "required": false
-    }
-  },
   "mcpServers": {
     "codeweaver": {
       "command": "uvx",
@@ -50,6 +41,15 @@
         "XDG_CONFIG_HOME": "${CLAUDE_PLUGIN_DATA}/config",
         "VOYAGE_API_KEY": "${user_config.VOYAGE_API_KEY}"
       }
+    }
+  },
+  "userConfig": {
+    "VOYAGE_API_KEY": {
+      "type": "string",
+      "title": "Voyage AI API Key",
+      "description": "API key for Voyage AI embedding provider (get one at https://voyage.ai)",
+      "sensitive": true,
+      "required": false
     }
   }
 }

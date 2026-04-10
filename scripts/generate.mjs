@@ -58,7 +58,7 @@ function writeOrCheck(filePath, content) {
 // ---------------------------------------------------------------------------
 
 const manifest = readJSON(join(ROOT, '.claude-plugin/marketplace.json'));
-const { shared, plugins } = manifest;
+const { shared, plugins, pluginManifestExtensions = {} } = manifest;
 
 if (!shared) {
   console.error('ERROR: marketplace.json is missing the "shared" block.');
@@ -112,17 +112,19 @@ for (const plugin of plugins) {
   const pluginDir = join(ROOT, plugin.source.replace(/^\.\//, ''));
   const pluginJsonPath = join(pluginDir, '.claude-plugin', 'plugin.json');
 
+  const extensions = pluginManifestExtensions[plugin.name] ?? {};
+
   const pluginJson = {
     name: plugin.name,
     version: plugin.version,
-    description: plugin.pluginDescription ?? plugin.description,
+    description: plugin.description,
     author: shared.author,
     homepage: plugin.homepage ?? shared.homepage,
     repository: shared.repository,
     license: plugin.license ?? shared.license,
     keywords: plugin.keywords,
-    ...(plugin.userConfig !== undefined && { userConfig: plugin.userConfig }),
     ...(plugin.mcpServers !== undefined && { mcpServers: plugin.mcpServers }),
+    ...extensions,
   };
 
   writeOrCheck(pluginJsonPath, JSON.stringify(pluginJson, null, 2) + '\n');
