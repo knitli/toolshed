@@ -1,3 +1,16 @@
+# [@knitli/ctx-v1.2.0](https://github.com/knitli/toolshed/compare/@knitli/ctx-v1.1.0...@knitli/ctx-v1.2.0) (2026-04-10)
+
+
+### Bug Fixes
+
+* apply code review fixes to generate.mjs, validate.yml, and release.yml ([894b7ea](https://github.com/knitli/toolshed/commit/894b7ea631f41c3f63e49eb0c691abbe07323925))
+* comply with marketplace.json schema (additionalProperties: false on PluginEntry) ([d9cd49b](https://github.com/knitli/toolshed/commit/d9cd49bfc340f0c5ab02b1f5eb77b3584949f5b6))
+
+
+### Features
+
+* central manifest generator — marketplace.json as source of truth ([65d23a5](https://github.com/knitli/toolshed/commit/65d23a5001184312ea47c286a86f29bc0b14d2f0))
+
 # [@knitli/ctx-v1.1.0](https://github.com/knitli/toolshed/compare/@knitli/ctx-v1.0.1...@knitli/ctx-v1.1.0) (2026-04-09)
 
 
