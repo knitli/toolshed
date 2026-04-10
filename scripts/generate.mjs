@@ -114,11 +114,34 @@ const updatedReleaseYml = releaseYml.replace(
 writeOrCheck(releaseYmlPath, updatedReleaseYml);
 
 // ---------------------------------------------------------------------------
-// 3. plugins/<name>/.claude-plugin/plugin.json
+// Shared release config — generated for every plugin's package.json.
+// Includes @semantic-release/npm (npmPublish: false) so that semantic-release
+// actually bumps the version in package.json on each release.
+// ---------------------------------------------------------------------------
+
+const RELEASE_CONFIG = {
+  extends: 'semantic-release-monorepo',
+  plugins: [
+    '@semantic-release/commit-analyzer',
+    '@semantic-release/release-notes-generator',
+    '@semantic-release/changelog',
+    ['@semantic-release/npm', { npmPublish: false }],
+    '@semantic-release/git',
+    '@semantic-release/github',
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// 3. Per-plugin: .claude-plugin/plugin.json  +  package.json
+//
+// Version source of truth: package.json (managed by semantic-release).
+// The generate script reads the version from the existing package.json
+// and propagates it to plugin.json.  New plugins default to "0.0.0".
 // ---------------------------------------------------------------------------
 
 for (const plugin of plugins) {
   const pluginDir = join(ROOT, plugin.source.replace(/^\.\//, ''));
+  const pkgJsonPath = join(pluginDir, 'package.json');
   const dotClaudePluginDir = join(pluginDir, '.claude-plugin');
   const pluginJsonPath = join(dotClaudePluginDir, 'plugin.json');
 
@@ -126,13 +149,18 @@ for (const plugin of plugins) {
     mkdirSync(dotClaudePluginDir, { recursive: true });
   }
 
+  // Read existing package.json — its version is the source of truth.
+  const existingPkg = existsSync(pkgJsonPath) ? readJSON(pkgJsonPath) : {};
+  const version = existingPkg.version ?? '0.0.0';
+
+  // --- plugin.json ---
   const extensions = pluginManifestExtensions[plugin.name] ?? {};
 
   // Spread extensions first so canonical fields always win if there's a conflict.
   const pluginJson = {
     ...extensions,
     name: plugin.name,
-    version: plugin.version,
+    version,
     description: plugin.description,
     author: shared.author,
     homepage: plugin.homepage ?? shared.homepage,
@@ -143,26 +171,11 @@ for (const plugin of plugins) {
   };
 
   writeOrCheck(pluginJsonPath, JSON.stringify(pluginJson, null, 2) + '\n');
-}
 
-// ---------------------------------------------------------------------------
-// 4. plugins/<name>/package.json
-// ---------------------------------------------------------------------------
-
-for (const plugin of plugins) {
-  const pluginDir = join(ROOT, plugin.source.replace(/^\.\//, ''));
-  const pkgJsonPath = join(pluginDir, 'package.json');
-
-  if (!CHECK_MODE) {
-    mkdirSync(pluginDir, { recursive: true });
-  }
-
-  // Preserve the release config block from the existing file if present.
-  const existing = existsSync(pkgJsonPath) ? readJSON(pkgJsonPath) : {};
-
+  // --- package.json ---
   const pkgJson = {
-    name: existing.name ?? `@${shared.npmScope}/${plugin.name}`,
-    version: plugin.version,
+    name: existingPkg.name ?? `@${shared.npmScope}/${plugin.name}`,
+    version,
     private: shared.private ?? true,
     description: plugin.description,
     author: shared.author,
@@ -173,14 +186,14 @@ for (const plugin of plugins) {
       type: 'git',
       url: shared.repository,
     },
-    ...(existing.release !== undefined && { release: existing.release }),
+    release: RELEASE_CONFIG,
   };
 
   writeOrCheck(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n');
 }
 
 // ---------------------------------------------------------------------------
-// 5. --new  scaffolding
+// 4. --new  scaffolding
 // ---------------------------------------------------------------------------
 
 if (NEW_PLUGIN) {

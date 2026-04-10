@@ -1,6 +1,6 @@
 {
   "name": "@knitli/strip-ansi",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits. Injects NO_COLOR into Bash tool calls and sanitizes any residual escapes from output.",
   "author": {
@@ -26,6 +26,12 @@
       "@semantic-release/commit-analyzer",
       "@semantic-release/release-notes-generator",
       "@semantic-release/changelog",
+      [
+        "@semantic-release/npm",
+        {
+          "npmPublish": false
+        }
+      ],
       "@semantic-release/git",
       "@semantic-release/github"
     ]

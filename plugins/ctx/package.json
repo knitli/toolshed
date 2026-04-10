@@ -1,6 +1,6 @@
 {
   "name": "@knitli/ctx",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files (CLAUDE.md, AGENTS.md, Serena memories, Cursor rules, and 10+ more tool ecosystems).",
   "author": {
@@ -29,6 +29,12 @@
       "@semantic-release/commit-analyzer",
       "@semantic-release/release-notes-generator",
       "@semantic-release/changelog",
+      [
+        "@semantic-release/npm",
+        {
+          "npmPublish": false
+        }
+      ],
       "@semantic-release/git",
       "@semantic-release/github"
     ]

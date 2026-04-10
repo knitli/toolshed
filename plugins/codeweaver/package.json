@@ -1,6 +1,6 @@
 {
   "name": "@knitli/codeweaver",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
   "author": {
@@ -33,6 +33,12 @@
       "@semantic-release/commit-analyzer",
       "@semantic-release/release-notes-generator",
       "@semantic-release/changelog",
+      [
+        "@semantic-release/npm",
+        {
+          "npmPublish": false
+        }
+      ],
       "@semantic-release/git",
       "@semantic-release/github"
     ]
