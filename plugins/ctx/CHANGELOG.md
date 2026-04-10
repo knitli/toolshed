@@ -1,3 +1,15 @@
+# [@knitli/ctx-v1.1.0](https://github.com/knitli/toolshed/compare/@knitli/ctx-v1.0.1...@knitli/ctx-v1.1.0) (2026-04-09)
+
+
+### Bug Fixes
+
+* **ctx:** Fix an issue where in certain situations an LLMs meta-thinking can cause an infinite loop ([38c9422](https://github.com/knitli/toolshed/commit/38c9422c1d90f800768db89e62434aa8b83cbf87))
+
+
+### Features
+
+* **ctx:** Add ability to pass arguments to ctx commands to direct behavior ([7689926](https://github.com/knitli/toolshed/commit/76899260e2ed5eae501fc9278e88934fa6ac6765))
+
 # [@knitli/ctx-v1.0.1](https://github.com/knitli/toolshed/compare/@knitli/ctx-v1.0.0...@knitli/ctx-v1.0.1) (2026-04-06)
 
 
