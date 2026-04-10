@@ -9,6 +9,7 @@
       "name": "Knitli Inc.",
       "email": "hello@knitli.com"
     },
+    "npmScope": "knitli",
     "repository": "https://github.com/knitli/toolshed",
     "homepage": "https://knitli.com",
     "license": "MIT",

@@ -140,7 +140,7 @@ for (const plugin of plugins) {
   const existing = existsSync(pkgJsonPath) ? readJSON(pkgJsonPath) : {};
 
   const pkgJson = {
-    name: existing.name ?? `@knitli/${plugin.name}`,
+    name: existing.name ?? `@${shared.npmScope}/${plugin.name}`,
     version: plugin.version,
     private: shared.private ?? true,
     description: plugin.description,
@@ -164,7 +164,8 @@ for (const plugin of plugins) {
 
 if (NEW_PLUGIN) {
   if (CHECK_MODE) {
-    // --new is incompatible with --check; nothing to do.
+    console.error('ERROR: --new and --check are incompatible flags.');
+    process.exit(1);
   } else {
     const entry = plugins.find((p) => p.name === NEW_PLUGIN);
     if (!entry) {
