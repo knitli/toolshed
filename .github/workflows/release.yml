@@ -43,5 +43,5 @@ jobs:
       - name: Commit version sync
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(${{ matrix.plugin }}): sync plugin.json version"
+          commit_message: "chore(${{ matrix.plugin }}): sync version to marketplace.json and regenerate files"
           file_pattern: ".claude-plugin/marketplace.json plugins/${{ matrix.plugin }}/.claude-plugin/plugin.json plugins/${{ matrix.plugin }}/package.json"

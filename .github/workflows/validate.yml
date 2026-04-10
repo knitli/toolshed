@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Check generated files are in sync
+      - name: Regenerate and verify no drift
         run: node scripts/generate.mjs
 
       - name: Fail if any generated file was modified
