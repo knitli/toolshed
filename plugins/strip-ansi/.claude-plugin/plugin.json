@@ -1,6 +1,6 @@
 {
   "name": "strip-ansi",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Sanitizes ANSI escape sequences from tool output and detects terminal-based prompt injection attacks (CVE-tagged). Full protection for MCP tools via output replacement; partial protection for built-in tools via context injection.",
   "author": {
     "name": "Knitli Inc.",
