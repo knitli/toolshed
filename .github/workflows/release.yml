@@ -23,7 +23,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
 
       - run: npm ci
 
@@ -37,7 +37,7 @@ jobs:
         run: node scripts/generate.mjs
 
       - name: Commit version sync
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "chore(${{ matrix.plugin }}): sync plugin.json version [skip ci]"
           file_pattern: "plugins/${{ matrix.plugin }}/.claude-plugin/plugin.json"
