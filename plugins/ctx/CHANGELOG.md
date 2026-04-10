@@ -1,3 +1,10 @@
+# [@knitli/ctx-v1.2.1](https://github.com/knitli/toolshed/compare/@knitli/ctx-v1.2.0...@knitli/ctx-v1.2.1) (2026-04-10)
+
+
+### Bug Fixes
+
+* version sync and simplify generation system ([62767e3](https://github.com/knitli/toolshed/commit/62767e3926f2a8771b4d05fa8f1cf361d1233eeb))
+
 # [@knitli/ctx-v1.2.0](https://github.com/knitli/toolshed/compare/@knitli/ctx-v1.1.0...@knitli/ctx-v1.2.0) (2026-04-10)
 
 
