@@ -15,6 +15,7 @@ Then install individual plugins:
 ```
 /plugin install ctx@toolshed
 /plugin install codeweaver@toolshed
+/plugin install strip-ansi@toolshed
 ```
 
 ## Plugin catalog
@@ -22,7 +23,8 @@ Then install individual plugins:
 | Plugin | Description | Version | Status |
 |--------|-------------|---------|--------|
 | [ctx](plugins/ctx/) | Context hygiene — finds stale, contradictory AI context files across 10+ tool ecosystems | 0.1.0 | Stable |
-| [codeweaver](plugins/codeweaver/) | Semantic code search with hybrid search, AST understanding, and intelligent chunking for 166+ languages | 0.6.0-alpha | Alpha |
+| [codeweaver](plugins/codeweaver/) | Semantic code search with hybrid search, AST understanding, and intelligent chunking for 166+ languages | 0.1.0 | Stable |
+| [strip-ansi](plugins/strip-ansi) | Clean ANSI escape codes from LLM output -- significantly cuts context bloat, keeps your PRs/issues/files clean and uncorrupted --using [distill-strip-ansi](https://github.com/belt/distill-strip-ansi) | 0.1.0 | Stable |
 
 ## What's a marketplace?
 
