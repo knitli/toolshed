@@ -1,8 +1,20 @@
+[settings]
+experimental = true
+
+[env]
+MISE_EXPERIMENTAL = 1
+MISE_YES = 1
+MISE_TRUST = 1
+
 [tools]
+bun = "latest"
 node = "latest"
 shfmt = "latest"
 shellcheck = "latest"
 yq = "latest"
+"npm:sort-package-json" = "latest"
+uv = "latest"
 
 [prepare]
-npm = { auto = true }
+[prepare.bun]
+auto = true
