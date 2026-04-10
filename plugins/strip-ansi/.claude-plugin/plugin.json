@@ -1,7 +1,7 @@
 {
   "name": "strip-ansi",
   "version": "1.0.0",
-  "description": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits. Injects NO_COLOR into Bash tool calls and sanitizes any residual escapes from output.",
+  "description": "Sanitizes ANSI escape sequences from tool output and detects terminal-based prompt injection attacks (CVE-tagged). Full protection for MCP tools via output replacement; partial protection for built-in tools via context injection.",
   "author": {
     "name": "Knitli Inc.",
     "email": "hello@knitli.com"
@@ -12,8 +12,10 @@
   "keywords": [
     "ansi",
     "sanitize",
+    "security",
+    "mcp",
+    "prompt-injection",
     "hygiene",
-    "context",
-    "no-color"
+    "context"
   ]
 }

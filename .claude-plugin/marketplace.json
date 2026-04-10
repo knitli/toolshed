@@ -14,7 +14,7 @@
     "repository": "https://github.com/knitli/toolshed",
     "homepage": "https://knitli.com",
     "license": "MIT",
-    "private": true
+    "private": false
   },
   "plugins": [
     {
@@ -38,13 +38,15 @@
     {
       "name": "strip-ansi",
       "source": "./plugins/strip-ansi",
-      "description": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits. Injects NO_COLOR into Bash tool calls and sanitizes any residual escapes from output.",
+      "description": "Sanitizes ANSI escape sequences from tool output and detects terminal-based prompt injection attacks (CVE-tagged). Full protection for MCP tools via output replacement; partial protection for built-in tools via context injection.",
       "keywords": [
-        "ansi",
-        "sanitize",
-        "hygiene",
-        "context",
-        "no-color"
+      "ansi",
+      "sanitize",
+      "security",
+      "mcp",
+      "prompt-injection",
+      "hygiene",
+      "context"
       ],
       "category": "quality",
       "license": "MIT"

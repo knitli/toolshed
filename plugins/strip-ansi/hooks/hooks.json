@@ -9,6 +9,24 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/strip-output.sh"
           }
         ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/strip-output.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/strip-output.sh"
+          }
+        ]
       }
     ]
   }
