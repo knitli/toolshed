@@ -34,14 +34,14 @@
     }
   },
   "metadata": {
-    "pluginRoot": "./plugins",
+    "pluginRoot": "../plugins",
     "version": "1.0.0",
     "description": "Knitli's agent plugin marketplace for Claude and other agents. Easily deploy Knitli tools like CodeWeaver, manage context, and keep your sessions clean and secure."
   },
   "plugins": [
     {
       "name": "ctx",
-      "source": "/ctx",
+      "source": "ctx",
       "description": "Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files (CLAUDE.md, AGENTS.md, Serena memories, Cursor rules, and 10+ more tool ecosystems).",
       "keywords": [
         "context",
@@ -58,7 +58,7 @@
     },
     {
       "name": "strip-ansi",
-      "source": "/strip-ansi",
+      "source": "strip-ansi",
       "description": "Sanitizes ANSI escape sequences from tool output and detects terminal-based prompt injection attacks (CVE-tagged). Full protection for MCP tools via output replacement; partial protection for built-in tools via context injection.",
       "keywords": [
       "ansi",
@@ -73,7 +73,7 @@
     },
     {
       "name": "codeweaver",
-      "source": "/codeweaver",
+      "source": "codeweaver",
       "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
       "keywords": [
         "mcp",
