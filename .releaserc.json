@@ -30,6 +30,26 @@
             "release": "patch"
           },
           {
+            "breaking": true,
+            "scope": "mkt",
+            "release": "major"
+          },
+          {
+            "scope": "mkt",
+            "type": "feat",
+            "release": "minor"
+          },
+          {
+            "scope": "mkt",
+            "type": "fix",
+            "release": "patch"
+          },
+          {
+            "scope": "mkt",
+            "type": "perf",
+            "release": "patch"
+          },
+          {
             "release": false
           }
         ]

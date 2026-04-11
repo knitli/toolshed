@@ -60,6 +60,26 @@
               "release": "patch"
             },
             {
+              "breaking": true,
+              "scope": "cw",
+              "release": "major"
+            },
+            {
+              "scope": "cw",
+              "type": "feat",
+              "release": "minor"
+            },
+            {
+              "scope": "cw",
+              "type": "fix",
+              "release": "patch"
+            },
+            {
+              "scope": "cw",
+              "type": "perf",
+              "release": "patch"
+            },
+            {
               "release": false
             }
           ]

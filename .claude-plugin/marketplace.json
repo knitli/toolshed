@@ -15,7 +15,18 @@
     "repository": "https://github.com/knitli/toolshed",
     "homepage": "https://knitli.com",
     "license": "MIT OR Apache-2.0",
-    "private": false
+    "private": false,
+    "scopeAliases": {
+      "marketplace": [
+        "mkt"
+      ],
+      "codeweaver": [
+        "cw"
+      ],
+      "strip-ansi": [
+        "sa"
+      ]
+    }
   },
   "metadata": {
     "version": "1.0.0",

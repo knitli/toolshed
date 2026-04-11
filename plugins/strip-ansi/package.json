@@ -55,6 +55,26 @@
               "release": "patch"
             },
             {
+              "breaking": true,
+              "scope": "sa",
+              "release": "major"
+            },
+            {
+              "scope": "sa",
+              "type": "feat",
+              "release": "minor"
+            },
+            {
+              "scope": "sa",
+              "type": "fix",
+              "release": "patch"
+            },
+            {
+              "scope": "sa",
+              "type": "perf",
+              "release": "patch"
+            },
+            {
               "release": false
             }
           ]

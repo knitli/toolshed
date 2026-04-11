@@ -52,28 +52,121 @@ function readJSON(filePath: string) {
 }
 
 /**
+ * Validate shared.scopeAliases and materialize a routing table.
+ *
+ * Rules:
+ *   - Every key in scopeAliases must be a canonical scope (a plugin name
+ *     or "marketplace").
+ *   - Values must be arrays of non-empty strings.
+ *   - No alias may collide with any canonical scope name.
+ *   - Aliases must be globally unique across the whole map (no alias can
+ *     point at two canonicals).
+ *
+ * Returns:
+ *   - aliasesByScope: canonical → aliases[] (including empty arrays)
+ *   - allScopes: flat list of every canonical + every alias, in stable order,
+ *     suitable for commitlint scope-enum.
+ */
+function buildScopeRouting(
+  pluginNames: string[],
+  rawAliases: Record<string, unknown> | undefined
+): { aliasesByScope: Record<string, string[]>; allScopes: string[] } {
+  const canonicals = [...pluginNames, 'marketplace'];
+  const canonicalSet = new Set(canonicals);
+  const aliasesByScope: Record<string, string[]> = Object.fromEntries(
+    canonicals.map((c) => [c, [] as string[]])
+  );
+  const seenAliases: string[] = [];
+  const seenAliasSet = new Set<string>();
+
+  if (rawAliases !== undefined && rawAliases !== null) {
+    if (typeof rawAliases !== 'object' || Array.isArray(rawAliases)) {
+      console.error('ERROR: shared.scopeAliases must be an object.');
+      process.exit(1);
+    }
+    for (const [canonical, aliases] of Object.entries(rawAliases)) {
+      if (!canonicalSet.has(canonical)) {
+        console.error(
+          `ERROR: shared.scopeAliases key "${canonical}" is not a canonical scope. ` +
+          `Expected one of: ${canonicals.join(', ')}.`
+        );
+        process.exit(1);
+      }
+      if (!Array.isArray(aliases)) {
+        console.error(
+          `ERROR: shared.scopeAliases["${canonical}"] must be an array of strings.`
+        );
+        process.exit(1);
+      }
+      for (const alias of aliases) {
+        if (typeof alias !== 'string' || alias.length === 0) {
+          console.error(
+            `ERROR: shared.scopeAliases["${canonical}"] contains an invalid alias ` +
+            `(must be a non-empty string).`
+          );
+          process.exit(1);
+        }
+        if (canonicalSet.has(alias)) {
+          console.error(
+            `ERROR: alias "${alias}" (under "${canonical}") collides with a canonical scope name.`
+          );
+          process.exit(1);
+        }
+        if (seenAliasSet.has(alias)) {
+          console.error(
+            `ERROR: alias "${alias}" is defined more than once in shared.scopeAliases.`
+          );
+          process.exit(1);
+        }
+        seenAliasSet.add(alias);
+        seenAliases.push(alias);
+        aliasesByScope[canonical].push(alias);
+      }
+    }
+  }
+
+  return {
+    aliasesByScope,
+    allScopes: [...canonicals, ...seenAliases],
+  };
+}
+
+/**
+ * Emit the commit-analyzer releaseRules entries for a single scope (canonical
+ * or alias), in priority order: breaking first, then feat/fix/perf.
+ */
+function releaseRulesForScope(scope: string) {
+  return [
+    { breaking: true, scope, release: 'major' },
+    { scope, type: 'feat', release: 'minor' },
+    { scope, type: 'fix', release: 'patch' },
+    { scope, type: 'perf', release: 'patch' },
+  ];
+}
+
+/**
  * Build a scope-gated semantic-release config for a single plugin.
  *
- * Routing rule: commit must have `scope: <pluginName>` to trigger a release.
- * Any other scope (or no scope) falls through to the catchall `release: false`
- * entry, which short-circuits commit-analyzer's preset defaults.
+ * Routing rule: commit must have `scope: <canonical>` OR `scope: <alias>`
+ * to trigger a release. Any other scope (or no scope) falls through to the
+ * catchall `release: false` entry, which short-circuits commit-analyzer's
+ * preset defaults.
  */
-function buildPluginReleaseConfig(pluginName: string) {
+function buildPluginReleaseConfig(canonical: string, aliases: string[] = []) {
+  const scopes = [canonical, ...aliases];
+  const releaseRules = [
+    ...scopes.flatMap(releaseRulesForScope),
+    { release: false },
+  ];
   return {
     branches: ['main'],
-    tagFormat: `${pluginName}@\${version}`,
+    tagFormat: `${canonical}@\${version}`,
     plugins: [
       [
         '@semantic-release/commit-analyzer',
         {
           preset: 'conventionalcommits',
-          releaseRules: [
-            { breaking: true, scope: pluginName, release: 'major' },
-            { scope: pluginName, type: 'feat', release: 'minor' },
-            { scope: pluginName, type: 'fix', release: 'patch' },
-            { scope: pluginName, type: 'perf', release: 'patch' },
-            { release: false },
-          ],
+          releaseRules,
         },
       ],
       '@semantic-release/release-notes-generator',
@@ -88,12 +181,17 @@ function buildPluginReleaseConfig(pluginName: string) {
 /**
  * Build the scope-gated semantic-release config for the marketplace (repo root).
  *
- * Routing rule: commit must have `scope: marketplace` to trigger a release.
- * Any other scope falls through to the catchall `release: false`. This is
- * written to .releaserc.json at repo root so it wins over any stale
- * `release` field that might be left in package.json.
+ * Routing rule: commit must have `scope: marketplace` OR any marketplace alias
+ * to trigger a release. Any other scope falls through to the catchall
+ * `release: false`. This is written to .releaserc.json at repo root so it
+ * wins over any stale `release` field left in package.json.
  */
-function buildMarketplaceReleaseConfig() {
+function buildMarketplaceReleaseConfig(aliases: string[] = []) {
+  const scopes = ['marketplace', ...aliases];
+  const releaseRules = [
+    ...scopes.flatMap(releaseRulesForScope),
+    { release: false },
+  ];
   return {
     branches: ['main'],
     tagFormat: 'marketplace@${version}',
@@ -102,13 +200,7 @@ function buildMarketplaceReleaseConfig() {
         '@semantic-release/commit-analyzer',
         {
           preset: 'conventionalcommits',
-          releaseRules: [
-            { breaking: true, scope: 'marketplace', release: 'major' },
-            { scope: 'marketplace', type: 'feat', release: 'minor' },
-            { scope: 'marketplace', type: 'fix', release: 'patch' },
-            { scope: 'marketplace', type: 'perf', release: 'patch' },
-            { release: false },
-          ],
+          releaseRules,
         },
       ],
       '@semantic-release/release-notes-generator',
@@ -153,17 +245,24 @@ if (!shared) {
 
 const pluginNames = plugins.map((p: typeof plugins[number]) => p.name);
 
+// Routing table: canonical → aliases, plus a flat list of every accepted
+// scope (canonicals + all aliases). Validated at generate time.
+const { aliasesByScope, allScopes } = buildScopeRouting(
+  pluginNames,
+  shared.scopeAliases
+);
+
 // ---------------------------------------------------------------------------
 // 1. .commitlintrc.json
 // ---------------------------------------------------------------------------
 
 // Scope is authoritative for release routing, so PR-gate commits must carry
-// a valid scope: either a plugin name or `marketplace`. Unscoped commits are
-// rejected.
+// a valid scope: a plugin name, `marketplace`, or any alias thereof.
+// Unscoped commits are rejected.
 const commitlintrc = {
   extends: ['@commitlint/config-conventional'],
   rules: {
-    'scope-enum': [2, 'always', [...pluginNames, 'marketplace']],
+    'scope-enum': [2, 'always', allScopes],
     'scope-empty': [2, 'never'],
   },
 };
@@ -254,7 +353,7 @@ for (const plugin of plugins) {
       url: shared.repository,
       directory: pluginRelPath,
     },
-    release: buildPluginReleaseConfig(plugin.name),
+    release: buildPluginReleaseConfig(plugin.name, aliasesByScope[plugin.name]),
     ...Object.fromEntries(Object.entries(extensions).filter(([key]) => !['name', 'version', 'description', 'author', 'license', 'homepage', 'keywords', 'repository'].includes(key)))
   };
 
@@ -271,7 +370,7 @@ for (const plugin of plugins) {
 
 writeOrCheck(
   join(ROOT, '.releaserc.json'),
-  JSON.stringify(buildMarketplaceReleaseConfig(), null, 2) + '\n'
+  JSON.stringify(buildMarketplaceReleaseConfig(aliasesByScope.marketplace), null, 2) + '\n'
 );
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,10 @@
         "ctx",
         "strip-ansi",
         "codeweaver",
-        "marketplace"
+        "marketplace",
+        "mkt",
+        "cw",
+        "sa"
       ]
     ],
     "scope-empty": [

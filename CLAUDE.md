@@ -107,3 +107,23 @@ type(scope): message
 - `feat` → minor bump, `fix` / `perf` → patch bump, `feat!` or `BREAKING CHANGE` → major bump.
 - `chore`, `docs`, `ci`, `style`, `refactor`, `test` do not trigger releases (catchall rule in commit-analyzer).
 - Marketplace-scoped commits should cover: adding/removing plugins, marketplace.json metadata changes, repo-level tooling (workflows, scripts, CLAUDE.md).
+
+### Scope aliases
+
+Short forms are accepted wherever a canonical scope is. Aliases live in `marketplace.json` under `shared.scopeAliases`, keyed by canonical:
+
+```json
+"scopeAliases": {
+  "marketplace": ["mkt"],
+  "codeweaver":  ["cw"],
+  "strip-ansi":  ["sa"]
+}
+```
+
+`generate.mts` expands aliases into `commitlintrc.scope-enum` and into each scope's `releaseRules`, so `feat(cw): …` and `feat(codeweaver): …` are strictly equivalent. Rules:
+
+- An alias may not collide with any canonical name.
+- An alias may not be reused across canonicals.
+- `generate.mts` fails loudly on either.
+
+Automated commit messages (e.g., the `--new` scaffolding hint, the CI sync commits) always use canonical names. Use aliases when you're typing fast.
