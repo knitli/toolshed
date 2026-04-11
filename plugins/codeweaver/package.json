@@ -32,7 +32,7 @@
     "branches": [
       "main"
     ],
-    "tagFormat": "codeweaver@${version}",
+    "tagFormat": "@knitli/codeweaver-v${version}",
     "plugins": [
       [
         "@semantic-release/commit-analyzer",

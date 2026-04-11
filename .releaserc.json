@@ -1,5 +1,7 @@
 {
-  "branches": ["main"],
+  "branches": [
+    "main"
+  ],
   "tagFormat": "marketplace@${version}",
   "plugins": [
     [
@@ -44,6 +46,46 @@
           },
           {
             "scope": "mkt",
+            "type": "perf",
+            "release": "patch"
+          },
+          {
+            "breaking": true,
+            "scope": "market",
+            "release": "major"
+          },
+          {
+            "scope": "market",
+            "type": "feat",
+            "release": "minor"
+          },
+          {
+            "scope": "market",
+            "type": "fix",
+            "release": "patch"
+          },
+          {
+            "scope": "market",
+            "type": "perf",
+            "release": "patch"
+          },
+          {
+            "breaking": true,
+            "scope": "mp",
+            "release": "major"
+          },
+          {
+            "scope": "mp",
+            "type": "feat",
+            "release": "minor"
+          },
+          {
+            "scope": "mp",
+            "type": "fix",
+            "release": "patch"
+          },
+          {
+            "scope": "mp",
             "type": "perf",
             "release": "patch"
           },

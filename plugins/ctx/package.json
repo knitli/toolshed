@@ -28,7 +28,7 @@
     "branches": [
       "main"
     ],
-    "tagFormat": "ctx@${version}",
+    "tagFormat": "@knitli/ctx-v${version}",
     "plugins": [
       [
         "@semantic-release/commit-analyzer",

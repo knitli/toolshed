@@ -152,15 +152,20 @@ function releaseRulesForScope(scope: string) {
  * catchall `release: false` entry, which short-circuits commit-analyzer's
  * preset defaults.
  */
-function buildPluginReleaseConfig(canonical: string, aliases: string[] = []) {
+function buildPluginReleaseConfig(
+  canonical: string,
+  aliases: string[] = [],
+  npmScope: string = "",
+) {
   const scopes = [canonical, ...aliases];
   const releaseRules = [
     ...scopes.flatMap(releaseRulesForScope),
     { release: false },
   ];
+  const tagPrefix = npmScope ? `@${npmScope}/` : "";
   return {
     branches: ["main"],
-    tagFormat: `${canonical}@\${version}`,
+    tagFormat: `${tagPrefix}${canonical}-v\${version}`,
     plugins: [
       [
         "@semantic-release/commit-analyzer",
@@ -357,7 +362,11 @@ for (const plugin of plugins) {
       url: shared.repository,
       directory: pluginRelPath,
     },
-    release: buildPluginReleaseConfig(plugin.name, aliasesByScope[plugin.name]),
+    release: buildPluginReleaseConfig(
+      plugin.name,
+      aliasesByScope[plugin.name],
+      shared.npmScope,
+    ),
     ...Object.fromEntries(
       Object.entries(extensions).filter(
         ([key]) =>

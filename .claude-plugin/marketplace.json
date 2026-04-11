@@ -33,9 +33,18 @@
     "license": "MIT OR Apache-2.0",
     "private": false,
     "scopeAliases": {
-      "marketplace": ["mkt", "market", "mp"],
-      "codeweaver": ["cw"],
-      "strip-ansi": ["sa", "ansi"]
+      "marketplace": [
+        "mkt",
+        "market",
+        "mp"
+      ],
+      "codeweaver": [
+        "cw"
+      ],
+      "strip-ansi": [
+        "sa",
+        "ansi"
+      ]
     }
   },
   "metadata": {
