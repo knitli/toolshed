@@ -8,7 +8,7 @@ MISE_TRUST = 1
 
 [tools]
 bun = "latest"
-node = "latest"
+node = "24"
 shfmt = "latest"
 shellcheck = "latest"
 yq = "latest"

@@ -1,14 +1,8 @@
 {
-  "name": "@knitli/codeweaver",
+  "name": "@knitli/plugin-codeweaver",
   "version": "1.0.1",
   "private": true,
   "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
-  "author": {
-    "name": "Knitli Inc.",
-    "email": "hello@knitli.com"
-  },
-  "license": "MIT OR Apache-2.0",
-  "homepage": "https://knitli.com",
   "keywords": [
     "mcp",
     "search",
@@ -23,9 +17,15 @@
     "hybrid-search",
     "codebase-analysis"
   ],
+  "homepage": "https://knitli.com",
   "repository": {
     "type": "git",
     "url": "https://github.com/knitli/toolshed"
+  },
+  "license": "MIT OR Apache-2.0",
+  "author": {
+    "name": "Knitli Inc.",
+    "email": "hello@knitli.com"
   },
   "release": {
     "extends": "semantic-release-monorepo",

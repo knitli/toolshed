@@ -1,14 +1,8 @@
 {
-  "name": "@knitli/ctx",
+  "name": "@knitli/plugin-ctx",
   "version": "1.2.1",
   "private": true,
   "description": "Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files (CLAUDE.md, AGENTS.md, Serena memories, Cursor rules, and 10+ more tool ecosystems).",
-  "author": {
-    "name": "Knitli Inc.",
-    "email": "hello@knitli.com"
-  },
-  "license": "MIT",
-  "homepage": "https://knitli.com/ctx",
   "keywords": [
     "context",
     "memory",
@@ -19,9 +13,15 @@
     "AGENTS.md",
     "multi-agent"
   ],
+  "homepage": "https://knitli.com/ctx",
   "repository": {
     "type": "git",
     "url": "https://github.com/knitli/toolshed"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Knitli Inc.",
+    "email": "hello@knitli.com"
   },
   "release": {
     "extends": "semantic-release-monorepo",

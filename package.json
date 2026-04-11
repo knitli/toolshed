@@ -1,9 +1,38 @@
 {
-  "name": "toolshed",
+  "name": "@knitli/toolshed",
+  "displayName": "Knitli Agent Toolshed",
   "private": true,
+  "description": "A marketplace of tools and plugins for AI agents like Claude. Browse, install, and manage a curated collection of MCP tools, context hygiene plugins, security utilities, and more to supercharge your AI-assisted workflows.",
+  "keywords": [
+    "claude",
+    "tools",
+    "plugins",
+    "mcp",
+    "marketplace",
+    "security",
+    "context",
+    "hygiene",
+    "skills"
+  ],
+  "homepage": "https://knitli.com",
+  "bugs": {
+    "url": "https://github.com/knitli/toolshed/issues/new"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/knitli/toolshed"
+  },
+  "license": "MIT OR Apache-2.0",
+  "author": {
+    "name": "Knitli Inc.",
+    "email": "hello@knitli.com"
+  },
   "workspaces": {
-    "packages": ["plugins/*"],
+    "packages": [
+      "plugins/*"
+    ],
     "catalog": {
+      "bun": "^1.3.12",
       "node": "^24.0.0"
     },
     "catalogs": {
@@ -18,23 +47,62 @@
         "@semantic-release/release-notes-generator": "^14.1.0",
         "@commitlint/cli": "^20.5.0",
         "@commitlint/config-conventional": "^20.5.0"
+      },
+      "typing": {
+        "typescript": "^6.0.2"
       }
     }
-  },
-  "devDependencies": {
-    "semantic-release": "^25.0.3",
-    "semantic-release-monorepo": "^8.0.2",
-    "@semantic-release/changelog": "^6.0.3",
-    "@semantic-release/git": "^10.0.1",
-    "@semantic-release/github": "^12.0.6",
-    "@semantic-release/npm": "^13.1.1",
-    "@semantic-release/commit-analyzer": "^13.0.1",
-    "@semantic-release/release-notes-generator": "^14.1.0",
-    "@commitlint/cli": "^20.5.0",
-    "@commitlint/config-conventional": "^20.5.0"
   },
   "scripts": {
     "generate": "node scripts/generate.mjs",
     "validate": "./scripts/validate-marketplace.sh && node scripts/generate.mjs --check"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "catalog:release",
+    "@commitlint/config-conventional": "catalog:release",
+    "@semantic-release/changelog": "catalog:release",
+    "@semantic-release/commit-analyzer": "catalog:release",
+    "@semantic-release/git": "catalog:release",
+    "@semantic-release/github": "catalog:release",
+    "@semantic-release/npm": "catalog:release",
+    "@semantic-release/release-notes-generator": "catalog:release",
+    "@types/bun": "^1.3.12",
+    "@types/node": "^25.6.0",
+    "semantic-release": "catalog:release",
+    "semantic-release-monorepo": "catalog:release"
+  },
+  "engines": {
+    "node": "catalog:"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "bun",
+      "version": "catalog:",
+      "onFail": "download"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/",
+    "tag": "latest"
+  },
+  "icon": "https://knitli.com/favicon.ico",
+  "readme": "./README.md",
+  "release": {
+    "extends": "semantic-release-monorepo",
+    "plugins": [
+      "@semantic-release/commit-analyzer",
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/changelog",
+      [
+        "@semantic-release/npm",
+        {
+          "npmPublish": false
+        }
+      ],
+      "@semantic-release/git",
+      "@semantic-release/github"
+    ]
   }
 }

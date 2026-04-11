@@ -1,14 +1,8 @@
 {
-  "name": "@knitli/strip-ansi",
+  "name": "@knitli/plugin-strip-ansi",
   "version": "1.0.0",
   "private": true,
   "description": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits. Injects NO_COLOR into Bash tool calls and sanitizes any residual escapes from output.",
-  "author": {
-    "name": "Knitli Inc.",
-    "email": "hello@knitli.com"
-  },
-  "license": "MIT",
-  "homepage": "https://knitli.com",
   "keywords": [
     "ansi",
     "sanitize",
@@ -16,9 +10,15 @@
     "context",
     "no-color"
   ],
+  "homepage": "https://knitli.com",
   "repository": {
     "type": "git",
     "url": "https://github.com/knitli/toolshed"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Knitli Inc.",
+    "email": "hello@knitli.com"
   },
   "release": {
     "extends": "semantic-release-monorepo",

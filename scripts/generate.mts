@@ -39,7 +39,7 @@ if (newIdx !== -1) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function readJSON(filePath) {
+function readJSON(filePath: string) {
   return JSON.parse(readFileSync(filePath, 'utf8'));
 }
 
@@ -49,7 +49,7 @@ let drifted = false;
  * In check mode: compare content to disk and record drift.
  * In write mode: write content to disk.
  */
-function writeOrCheck(filePath, content) {
+function writeOrCheck(filePath: string, content: string) {
   if (CHECK_MODE) {
     const existing = existsSync(filePath) ? readFileSync(filePath, 'utf8') : null;
     if (existing !== content) {
@@ -67,14 +67,14 @@ function writeOrCheck(filePath, content) {
 // ---------------------------------------------------------------------------
 
 const manifest = readJSON(join(ROOT, '.claude-plugin/marketplace.json'));
-const { shared, plugins, pluginManifestExtensions = {} } = manifest;
+const { shared, plugins, metadata, pluginManifestExtensions = {} } = manifest;
 
 if (!shared) {
   console.error('ERROR: marketplace.json is missing the "shared" block.');
   process.exit(1);
 }
 
-const pluginNames = plugins.map((p) => p.name);
+const pluginNames = plugins.map((p: typeof plugins[number]) => p.name);
 
 // ---------------------------------------------------------------------------
 // 1. .commitlintrc.json
@@ -119,17 +119,7 @@ writeOrCheck(releaseYmlPath, updatedReleaseYml);
 // actually bumps the version in package.json on each release.
 // ---------------------------------------------------------------------------
 
-const RELEASE_CONFIG = {
-  extends: 'semantic-release-monorepo',
-  plugins: [
-    '@semantic-release/commit-analyzer',
-    '@semantic-release/release-notes-generator',
-    '@semantic-release/changelog',
-    ['@semantic-release/npm', { npmPublish: false }],
-    '@semantic-release/git',
-    '@semantic-release/github',
-  ],
-};
+const releaseConfig = shared.release
 
 // ---------------------------------------------------------------------------
 // 3. Per-plugin: .claude-plugin/plugin.json  +  package.json
@@ -140,7 +130,7 @@ const RELEASE_CONFIG = {
 // ---------------------------------------------------------------------------
 
 for (const plugin of plugins) {
-  const pluginDir = join(ROOT, plugin.source.replace(/^\.\//, ''));
+  const pluginDir = join(ROOT, metadata.pluginRoot, plugin.source.replace(/^\.\//, ''));
   const pkgJsonPath = join(pluginDir, 'package.json');
   const dotClaudePluginDir = join(pluginDir, '.claude-plugin');
   const pluginJsonPath = join(dotClaudePluginDir, 'plugin.json');
@@ -151,7 +141,7 @@ for (const plugin of plugins) {
 
   // Read existing package.json — its version is the source of truth.
   const existingPkg = existsSync(pkgJsonPath) ? readJSON(pkgJsonPath) : {};
-  const version = existingPkg.version ?? '0.0.0';
+  const version = existingPkg.version ?? '1.0.0';
 
   // --- plugin.json ---
   const extensions = pluginManifestExtensions[plugin.name] ?? {};
@@ -174,7 +164,7 @@ for (const plugin of plugins) {
 
   // --- package.json ---
   const pkgJson = {
-    name: existingPkg.name ?? `@${shared.npmScope}/${plugin.name}`,
+    name: existingPkg.name ?? `@${shared.npmScope}/${shared.npmPrefix ?? ''}${plugin.name}`,
     version,
     private: shared.private ?? true,
     description: plugin.description,
@@ -185,8 +175,10 @@ for (const plugin of plugins) {
     repository: {
       type: 'git',
       url: shared.repository,
+      directory: `${metadata.pluginRoot}/${plugin.name}`,
     },
-    release: RELEASE_CONFIG,
+    release: releaseConfig,
+    ...Object.fromEntries(Object.entries(extensions).filter(([key]) => !['name', 'version', 'description', 'author', 'license', 'homepage', 'keywords', 'repository'].includes(key)))
   };
 
   writeOrCheck(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n');
@@ -201,7 +193,7 @@ if (NEW_PLUGIN) {
     console.error('ERROR: --new and --check are incompatible flags.');
     process.exit(1);
   } else {
-    const entry = plugins.find((p) => p.name === NEW_PLUGIN);
+    const entry = plugins.find((p: typeof plugins[number]) => p.name === NEW_PLUGIN);
     if (!entry) {
       console.error(
         `ERROR: "${NEW_PLUGIN}" not found in marketplace.json plugins array.`
@@ -212,7 +204,7 @@ if (NEW_PLUGIN) {
       process.exit(1);
     }
 
-    const pluginDir = join(ROOT, entry.source.replace(/^\.\//, ''));
+    const pluginDir = join(ROOT, metadata.pluginRoot.replace(/^\.\//, ''), entry.source.replace(/^\.\//, ''));
     const dotClaudePluginDir = join(pluginDir, '.claude-plugin');
     const commandsDir = join(pluginDir, 'commands');
 

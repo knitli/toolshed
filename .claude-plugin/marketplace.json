@@ -10,16 +10,36 @@
       "name": "Knitli Inc.",
       "email": "hello@knitli.com"
     },
+    "npmPrefix": "plugin-",
     "npmScope": "knitli",
     "repository": "https://github.com/knitli/toolshed",
     "homepage": "https://knitli.com",
-    "license": "MIT",
-    "private": false
+    "license": "MIT OR Apache-2.0",
+    "private": false,
+    "release": {
+      "extends": "semantic-release-monorepo",
+      "plugins": [
+        "@semantic-release/commit-analyzer",
+        "@semantic-release/release-notes-generator",
+        "@semantic-release/changelog",
+        [
+          "@semantic-release/npm",
+          {
+            "npmPublish": false
+          }
+        ],
+        "@semantic-release/git",
+        "@semantic-release/github"
+      ]
+    }
+  },
+  "metadata": {
+    "pluginRoot": "./plugins"
   },
   "plugins": [
     {
       "name": "ctx",
-      "source": "./plugins/ctx",
+      "source": "ctx",
       "description": "Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files (CLAUDE.md, AGENTS.md, Serena memories, Cursor rules, and 10+ more tool ecosystems).",
       "keywords": [
         "context",
@@ -31,13 +51,12 @@
         "AGENTS.md",
         "multi-agent"
       ],
-      "category": "quality",
-      "license": "MIT",
+      "category": "context-management",
       "homepage": "https://knitli.com/ctx"
     },
     {
       "name": "strip-ansi",
-      "source": "./plugins/strip-ansi",
+      "source": "strip-ansi",
       "description": "Sanitizes ANSI escape sequences from tool output and detects terminal-based prompt injection attacks (CVE-tagged). Full protection for MCP tools via output replacement; partial protection for built-in tools via context injection.",
       "keywords": [
       "ansi",
@@ -48,12 +67,11 @@
       "hygiene",
       "context"
       ],
-      "category": "quality",
-      "license": "MIT"
+      "category": "security"
     },
     {
       "name": "codeweaver",
-      "source": "./plugins/codeweaver",
+      "source": "codeweaver",
       "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
       "keywords": [
         "mcp",
@@ -69,14 +87,13 @@
         "hybrid-search",
         "codebase-analysis"
       ],
-      "category": "search",
-      "license": "MIT OR Apache-2.0",
+      "category": "context-management",
       "mcpServers": {
         "codeweaver": {
           "command": "uvx",
           "args": [
             "--from",
-            "code-weaver",
+            "code-weaver['recommended']",
             "cw",
             "server",
             "--transport",
