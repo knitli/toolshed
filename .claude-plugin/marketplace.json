@@ -34,7 +34,7 @@
     }
   },
   "metadata": {
-    "pluginRoot": "./plugins",
+    "pluginRoot": "../plugins",
     "version": "1.0.0",
     "description": "Knitli's agent plugin marketplace for Claude and other agents. Easily deploy Knitli tools like CodeWeaver, manage context, and keep your sessions clean and secure."
   },
