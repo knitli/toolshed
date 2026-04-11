@@ -1,8 +1,14 @@
 {
   "name": "@knitli/plugin-codeweaver",
   "version": "1.0.1",
-  "private": true,
+  "private": false,
   "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
+  "author": {
+    "name": "Knitli Inc.",
+    "email": "hello@knitli.com"
+  },
+  "license": "MIT OR Apache-2.0",
+  "homepage": "https://knitli.com",
   "keywords": [
     "mcp",
     "search",
@@ -17,20 +23,48 @@
     "hybrid-search",
     "codebase-analysis"
   ],
-  "homepage": "https://knitli.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/knitli/toolshed"
-  },
-  "license": "MIT OR Apache-2.0",
-  "author": {
-    "name": "Knitli Inc.",
-    "email": "hello@knitli.com"
+    "url": "https://github.com/knitli/toolshed",
+    "directory": "plugins/codeweaver"
   },
   "release": {
-    "extends": "semantic-release-monorepo",
+    "branches": [
+      "main"
+    ],
+    "tagFormat": "codeweaver@${version}",
     "plugins": [
-      "@semantic-release/commit-analyzer",
+      [
+        "@semantic-release/commit-analyzer",
+        {
+          "preset": "conventionalcommits",
+          "releaseRules": [
+            {
+              "breaking": true,
+              "scope": "codeweaver",
+              "release": "major"
+            },
+            {
+              "scope": "codeweaver",
+              "type": "feat",
+              "release": "minor"
+            },
+            {
+              "scope": "codeweaver",
+              "type": "fix",
+              "release": "patch"
+            },
+            {
+              "scope": "codeweaver",
+              "type": "perf",
+              "release": "patch"
+            },
+            {
+              "release": false
+            }
+          ]
+        }
+      ],
       "@semantic-release/release-notes-generator",
       "@semantic-release/changelog",
       [
@@ -42,5 +76,14 @@
       "@semantic-release/git",
       "@semantic-release/github"
     ]
+  },
+  "userConfig": {
+    "VOYAGE_API_KEY": {
+      "type": "string",
+      "title": "Voyage AI API Key",
+      "description": "API key for Voyage AI embedding provider (get one at https://voyage.ai)",
+      "sensitive": true,
+      "required": false
+    }
   }
 }

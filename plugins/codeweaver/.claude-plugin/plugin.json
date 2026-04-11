@@ -37,7 +37,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "code-weaver",
+        "code-weaver['recommended']",
         "cw",
         "server",
         "--transport",

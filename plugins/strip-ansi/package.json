@@ -1,29 +1,65 @@
 {
   "name": "@knitli/plugin-strip-ansi",
   "version": "1.1.0",
-  "private": true,
-  "description": "Prevents ANSI escape sequences from polluting agent context, commits, PRs, and file edits. Injects NO_COLOR into Bash tool calls and sanitizes any residual escapes from output.",
-  "keywords": [
-    "ansi",
-    "sanitize",
-    "hygiene",
-    "context",
-    "no-color"
-  ],
-  "homepage": "https://knitli.com",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/knitli/toolshed"
-  },
-  "license": "MIT",
+  "private": false,
+  "description": "Sanitizes ANSI escape sequences from tool output and detects terminal-based prompt injection attacks (CVE-tagged). Full protection for MCP tools via output replacement; partial protection for built-in tools via context injection.",
   "author": {
     "name": "Knitli Inc.",
     "email": "hello@knitli.com"
   },
+  "license": "MIT OR Apache-2.0",
+  "homepage": "https://knitli.com",
+  "keywords": [
+    "ansi",
+    "sanitize",
+    "security",
+    "mcp",
+    "prompt-injection",
+    "hygiene",
+    "context"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knitli/toolshed",
+    "directory": "plugins/strip-ansi"
+  },
   "release": {
-    "extends": "semantic-release-monorepo",
+    "branches": [
+      "main"
+    ],
+    "tagFormat": "strip-ansi@${version}",
     "plugins": [
-      "@semantic-release/commit-analyzer",
+      [
+        "@semantic-release/commit-analyzer",
+        {
+          "preset": "conventionalcommits",
+          "releaseRules": [
+            {
+              "breaking": true,
+              "scope": "strip-ansi",
+              "release": "major"
+            },
+            {
+              "scope": "strip-ansi",
+              "type": "feat",
+              "release": "minor"
+            },
+            {
+              "scope": "strip-ansi",
+              "type": "fix",
+              "release": "patch"
+            },
+            {
+              "scope": "strip-ansi",
+              "type": "perf",
+              "release": "patch"
+            },
+            {
+              "release": false
+            }
+          ]
+        }
+      ],
       "@semantic-release/release-notes-generator",
       "@semantic-release/changelog",
       [

@@ -9,8 +9,13 @@
       [
         "ctx",
         "strip-ansi",
-        "codeweaver"
+        "codeweaver",
+        "marketplace"
       ]
+    ],
+    "scope-empty": [
+      2,
+      "never"
     ]
   }
 }

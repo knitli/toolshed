@@ -1,17 +1,25 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Central manifest generator.
  *
- * Reads .claude-plugin/marketplace.json and writes all derived files:
- *   - .commitlintrc.json          (scope-enum from plugin names)
- *   - .github/workflows/release.yml  (matrix.plugin from plugin names)
+ * Reads .claude-plugin/marketplace.json (and the root package.json version)
+ * and writes all derived files:
+ *   - .commitlintrc.json                            (scope-enum, scope-empty)
+ *   - .github/workflows/release.yml                 (matrix.plugin)
+ *   - .releaserc.json                               (marketplace release config)
+ *   - .claude-plugin/marketplace.json               (metadata.version propagated)
  *   - plugins/<name>/.claude-plugin/plugin.json
- *   - plugins/<name>/package.json
+ *   - plugins/<name>/package.json                   (scope-gated release config)
+ *
+ * Release routing is SCOPE-AUTHORITATIVE: each plugin's and the marketplace's
+ * semantic-release config uses commit-analyzer releaseRules keyed on commit
+ * scope, with a catchall `release: false` to block fallthrough to the preset
+ * defaults. Path-based filtering (semantic-release-monorepo) is NOT used.
  *
  * Usage:
- *   node scripts/generate.mjs              # generate all files
- *   node scripts/generate.mjs --check      # exit 1 if any file differs (for CI)
- *   node scripts/generate.mjs --new <name> # scaffold a new plugin directory
+ *   bun scripts/generate.mts              # generate all files
+ *   bun scripts/generate.mts --check      # exit 1 if any file differs (for CI)
+ *   bun scripts/generate.mts --new <name> # scaffold a new plugin directory
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -43,6 +51,75 @@ function readJSON(filePath: string) {
   return JSON.parse(readFileSync(filePath, 'utf8'));
 }
 
+/**
+ * Build a scope-gated semantic-release config for a single plugin.
+ *
+ * Routing rule: commit must have `scope: <pluginName>` to trigger a release.
+ * Any other scope (or no scope) falls through to the catchall `release: false`
+ * entry, which short-circuits commit-analyzer's preset defaults.
+ */
+function buildPluginReleaseConfig(pluginName: string) {
+  return {
+    branches: ['main'],
+    tagFormat: `${pluginName}@\${version}`,
+    plugins: [
+      [
+        '@semantic-release/commit-analyzer',
+        {
+          preset: 'conventionalcommits',
+          releaseRules: [
+            { breaking: true, scope: pluginName, release: 'major' },
+            { scope: pluginName, type: 'feat', release: 'minor' },
+            { scope: pluginName, type: 'fix', release: 'patch' },
+            { scope: pluginName, type: 'perf', release: 'patch' },
+            { release: false },
+          ],
+        },
+      ],
+      '@semantic-release/release-notes-generator',
+      '@semantic-release/changelog',
+      ['@semantic-release/npm', { npmPublish: false }],
+      '@semantic-release/git',
+      '@semantic-release/github',
+    ],
+  };
+}
+
+/**
+ * Build the scope-gated semantic-release config for the marketplace (repo root).
+ *
+ * Routing rule: commit must have `scope: marketplace` to trigger a release.
+ * Any other scope falls through to the catchall `release: false`. This is
+ * written to .releaserc.json at repo root so it wins over any stale
+ * `release` field that might be left in package.json.
+ */
+function buildMarketplaceReleaseConfig() {
+  return {
+    branches: ['main'],
+    tagFormat: 'marketplace@${version}',
+    plugins: [
+      [
+        '@semantic-release/commit-analyzer',
+        {
+          preset: 'conventionalcommits',
+          releaseRules: [
+            { breaking: true, scope: 'marketplace', release: 'major' },
+            { scope: 'marketplace', type: 'feat', release: 'minor' },
+            { scope: 'marketplace', type: 'fix', release: 'patch' },
+            { scope: 'marketplace', type: 'perf', release: 'patch' },
+            { release: false },
+          ],
+        },
+      ],
+      '@semantic-release/release-notes-generator',
+      '@semantic-release/changelog',
+      ['@semantic-release/npm', { npmPublish: false }],
+      '@semantic-release/git',
+      '@semantic-release/github',
+    ],
+  };
+}
+
 let drifted = false;
 
 /**
@@ -67,7 +144,7 @@ function writeOrCheck(filePath: string, content: string) {
 // ---------------------------------------------------------------------------
 
 const manifest = readJSON(join(ROOT, '.claude-plugin/marketplace.json'));
-const { shared, plugins, metadata, pluginManifestExtensions = {} } = manifest;
+const { shared, plugins, pluginManifestExtensions = {} } = manifest;
 
 if (!shared) {
   console.error('ERROR: marketplace.json is missing the "shared" block.');
@@ -80,10 +157,14 @@ const pluginNames = plugins.map((p: typeof plugins[number]) => p.name);
 // 1. .commitlintrc.json
 // ---------------------------------------------------------------------------
 
+// Scope is authoritative for release routing, so PR-gate commits must carry
+// a valid scope: either a plugin name or `marketplace`. Unscoped commits are
+// rejected.
 const commitlintrc = {
   extends: ['@commitlint/config-conventional'],
   rules: {
-    'scope-enum': [2, 'always', pluginNames],
+    'scope-enum': [2, 'always', [...pluginNames, 'marketplace']],
+    'scope-empty': [2, 'never'],
   },
 };
 
@@ -114,14 +195,6 @@ const updatedReleaseYml = releaseYml.replace(
 writeOrCheck(releaseYmlPath, updatedReleaseYml);
 
 // ---------------------------------------------------------------------------
-// Shared release config — generated for every plugin's package.json.
-// Includes @semantic-release/npm (npmPublish: false) so that semantic-release
-// actually bumps the version in package.json on each release.
-// ---------------------------------------------------------------------------
-
-const releaseConfig = shared.release
-
-// ---------------------------------------------------------------------------
 // 3. Per-plugin: .claude-plugin/plugin.json  +  package.json
 //
 // Version source of truth: package.json (managed by semantic-release).
@@ -130,7 +203,9 @@ const releaseConfig = shared.release
 // ---------------------------------------------------------------------------
 
 for (const plugin of plugins) {
-  const pluginDir = join(ROOT, metadata.pluginRoot, plugin.source.replace(/^\.\//, ''));
+  // plugin.source is a relative path from the repo root, e.g. "./plugins/ctx"
+  const pluginRelPath = plugin.source.replace(/^\.\//, '');
+  const pluginDir = join(ROOT, pluginRelPath);
   const pkgJsonPath = join(pluginDir, 'package.json');
   const dotClaudePluginDir = join(pluginDir, '.claude-plugin');
   const pluginJsonPath = join(dotClaudePluginDir, 'plugin.json');
@@ -140,8 +215,10 @@ for (const plugin of plugins) {
   }
 
   // Read existing package.json — its version is the source of truth.
+  // New plugins default to 0.0.0 (pre-release); the first `feat(<name>): …`
+  // commit lands the plugin's first release.
   const existingPkg = existsSync(pkgJsonPath) ? readJSON(pkgJsonPath) : {};
-  const version = existingPkg.version ?? '1.0.0';
+  const version = existingPkg.version ?? '0.0.0';
 
   // --- plugin.json ---
   const extensions = pluginManifestExtensions[plugin.name] ?? {};
@@ -175,9 +252,9 @@ for (const plugin of plugins) {
     repository: {
       type: 'git',
       url: shared.repository,
-      directory: `${metadata.pluginRoot}/${plugin.name}`,
+      directory: pluginRelPath,
     },
-    release: releaseConfig,
+    release: buildPluginReleaseConfig(plugin.name),
     ...Object.fromEntries(Object.entries(extensions).filter(([key]) => !['name', 'version', 'description', 'author', 'license', 'homepage', 'keywords', 'repository'].includes(key)))
   };
 
@@ -185,7 +262,42 @@ for (const plugin of plugins) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. --new  scaffolding
+// 4. .releaserc.json — marketplace release config at repo root.
+//
+// Semantic-release prefers .releaserc.* over package.json.release, so this
+// is the sole source of truth for the marketplace release and keeps the
+// root package.json hand-managed.
+// ---------------------------------------------------------------------------
+
+writeOrCheck(
+  join(ROOT, '.releaserc.json'),
+  JSON.stringify(buildMarketplaceReleaseConfig(), null, 2) + '\n'
+);
+
+// ---------------------------------------------------------------------------
+// 5. .claude-plugin/marketplace.json — propagate root package.json version.
+//
+// Root package.json.version is the source of truth for the marketplace
+// version (managed by semantic-release). generate.mts reads it and writes
+// it into marketplace.json.metadata.version. All other manifest fields are
+// preserved via spread.
+// ---------------------------------------------------------------------------
+
+const rootPkg = readJSON(join(ROOT, 'package.json'));
+const marketplaceVersion = rootPkg.version ?? '0.0.0';
+
+const updatedManifest = {
+  ...manifest,
+  metadata: { ...manifest.metadata, version: marketplaceVersion },
+};
+
+writeOrCheck(
+  join(ROOT, '.claude-plugin/marketplace.json'),
+  JSON.stringify(updatedManifest, null, 2) + '\n'
+);
+
+// ---------------------------------------------------------------------------
+// 6. --new  scaffolding
 // ---------------------------------------------------------------------------
 
 if (NEW_PLUGIN) {
@@ -204,7 +316,7 @@ if (NEW_PLUGIN) {
       process.exit(1);
     }
 
-    const pluginDir = join(ROOT, metadata.pluginRoot.replace(/^\.\//, ''), entry.source.replace(/^\.\//, ''));
+    const pluginDir = join(ROOT, entry.source.replace(/^\.\//, ''));
     const dotClaudePluginDir = join(pluginDir, '.claude-plugin');
     const commandsDir = join(pluginDir, 'commands');
 
@@ -226,7 +338,8 @@ if (NEW_PLUGIN) {
     // The plugin.json and package.json will already have been written above
     // by the normal generation pass (since the entry is in the manifest).
     console.log(`\nScaffolded: plugins/${NEW_PLUGIN}/`);
-    console.log('Next: add your commands/agents/skills/hooks content.');
+    console.log('Next: add your commands/agents/skills/hooks content, then commit with:');
+    console.log(`      git commit -am "feat(marketplace): add ${NEW_PLUGIN} plugin"`);
   }
 }
 

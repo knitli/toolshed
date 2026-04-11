@@ -34,10 +34,38 @@ jobs:
         run: bunx semantic-release
 
       - name: Regenerate plugin.json from bumped package.json
-        run: bunx scripts/generate.mts
+        run: bun scripts/generate.mts
 
       - name: Commit version sync
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "chore(${{ matrix.plugin }}): sync plugin.json version [skip ci]"
           file_pattern: "plugins/${{ matrix.plugin }}/.claude-plugin/plugin.json"
+
+  release-marketplace:
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun i --frozen-lockfile
+
+      - name: Release marketplace
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bunx semantic-release
+
+      - name: Regenerate marketplace.json from bumped package.json
+        run: bun scripts/generate.mts
+
+      - name: Commit marketplace version sync
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: "chore(marketplace): sync marketplace.json version [skip ci]"
+          file_pattern: ".claude-plugin/marketplace.json"

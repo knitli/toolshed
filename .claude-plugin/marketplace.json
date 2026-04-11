@@ -15,33 +15,16 @@
     "repository": "https://github.com/knitli/toolshed",
     "homepage": "https://knitli.com",
     "license": "MIT OR Apache-2.0",
-    "private": false,
-    "release": {
-      "extends": "semantic-release-monorepo",
-      "plugins": [
-        "@semantic-release/commit-analyzer",
-        "@semantic-release/release-notes-generator",
-        "@semantic-release/changelog",
-        [
-          "@semantic-release/npm",
-          {
-            "npmPublish": false
-          }
-        ],
-        "@semantic-release/git",
-        "@semantic-release/github"
-      ]
-    }
+    "private": false
   },
   "metadata": {
-    "pluginRoot": "../plugins",
     "version": "1.0.0",
     "description": "Knitli's agent plugin marketplace for Claude and other agents. Easily deploy Knitli tools like CodeWeaver, manage context, and keep your sessions clean and secure."
   },
   "plugins": [
     {
       "name": "ctx",
-      "source": "./ctx",
+      "source": "./plugins/ctx",
       "description": "Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files (CLAUDE.md, AGENTS.md, Serena memories, Cursor rules, and 10+ more tool ecosystems).",
       "keywords": [
         "context",
@@ -58,22 +41,22 @@
     },
     {
       "name": "strip-ansi",
-      "source": "./strip-ansi",
+      "source": "./plugins/strip-ansi",
       "description": "Sanitizes ANSI escape sequences from tool output and detects terminal-based prompt injection attacks (CVE-tagged). Full protection for MCP tools via output replacement; partial protection for built-in tools via context injection.",
       "keywords": [
-      "ansi",
-      "sanitize",
-      "security",
-      "mcp",
-      "prompt-injection",
-      "hygiene",
-      "context"
+        "ansi",
+        "sanitize",
+        "security",
+        "mcp",
+        "prompt-injection",
+        "hygiene",
+        "context"
       ],
       "category": "security"
     },
     {
       "name": "codeweaver",
-      "source": "./codeweaver",
+      "source": "./plugins/codeweaver",
       "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
       "keywords": [
         "mcp",

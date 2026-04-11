@@ -8,7 +8,7 @@
   },
   "homepage": "https://knitli.com/ctx",
   "repository": "https://github.com/knitli/toolshed",
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "keywords": [
     "context",
     "memory",

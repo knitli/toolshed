@@ -1,8 +1,14 @@
 {
   "name": "@knitli/plugin-ctx",
   "version": "1.2.1",
-  "private": true,
+  "private": false,
   "description": "Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files (CLAUDE.md, AGENTS.md, Serena memories, Cursor rules, and 10+ more tool ecosystems).",
+  "author": {
+    "name": "Knitli Inc.",
+    "email": "hello@knitli.com"
+  },
+  "license": "MIT OR Apache-2.0",
+  "homepage": "https://knitli.com/ctx",
   "keywords": [
     "context",
     "memory",
@@ -13,20 +19,48 @@
     "AGENTS.md",
     "multi-agent"
   ],
-  "homepage": "https://knitli.com/ctx",
   "repository": {
     "type": "git",
-    "url": "https://github.com/knitli/toolshed"
-  },
-  "license": "MIT",
-  "author": {
-    "name": "Knitli Inc.",
-    "email": "hello@knitli.com"
+    "url": "https://github.com/knitli/toolshed",
+    "directory": "plugins/ctx"
   },
   "release": {
-    "extends": "semantic-release-monorepo",
+    "branches": [
+      "main"
+    ],
+    "tagFormat": "ctx@${version}",
     "plugins": [
-      "@semantic-release/commit-analyzer",
+      [
+        "@semantic-release/commit-analyzer",
+        {
+          "preset": "conventionalcommits",
+          "releaseRules": [
+            {
+              "breaking": true,
+              "scope": "ctx",
+              "release": "major"
+            },
+            {
+              "scope": "ctx",
+              "type": "feat",
+              "release": "minor"
+            },
+            {
+              "scope": "ctx",
+              "type": "fix",
+              "release": "patch"
+            },
+            {
+              "scope": "ctx",
+              "type": "perf",
+              "release": "patch"
+            },
+            {
+              "release": false
+            }
+          ]
+        }
+      ],
       "@semantic-release/release-notes-generator",
       "@semantic-release/changelog",
       [
