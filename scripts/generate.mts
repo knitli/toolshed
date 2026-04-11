@@ -22,22 +22,22 @@
  *   bun scripts/generate.mts --new <name> # scaffold a new plugin directory
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, '..');
+const ROOT = join(__dirname, "..");
 
 const args = process.argv.slice(2);
-const CHECK_MODE = args.includes('--check');
-const newIdx = args.indexOf('--new');
+const CHECK_MODE = args.includes("--check");
+const newIdx = args.indexOf("--new");
 
 let NEW_PLUGIN = null;
 if (newIdx !== -1) {
   const candidate = args[newIdx + 1];
-  if (!candidate || candidate.startsWith('--')) {
-    console.error('ERROR: --new requires a plugin name.');
+  if (!candidate || candidate.startsWith("--")) {
+    console.error("ERROR: --new requires a plugin name.");
     process.exit(1);
   }
   NEW_PLUGIN = candidate;
@@ -48,7 +48,7 @@ if (newIdx !== -1) {
 // ---------------------------------------------------------------------------
 
 function readJSON(filePath: string) {
-  return JSON.parse(readFileSync(filePath, 'utf8'));
+  return JSON.parse(readFileSync(filePath, "utf8"));
 }
 
 /**
@@ -69,52 +69,52 @@ function readJSON(filePath: string) {
  */
 function buildScopeRouting(
   pluginNames: string[],
-  rawAliases: Record<string, unknown> | undefined
+  rawAliases: Record<string, unknown> | undefined,
 ): { aliasesByScope: Record<string, string[]>; allScopes: string[] } {
-  const canonicals = [...pluginNames, 'marketplace'];
+  const canonicals = [...pluginNames, "marketplace"];
   const canonicalSet = new Set(canonicals);
   const aliasesByScope: Record<string, string[]> = Object.fromEntries(
-    canonicals.map((c) => [c, [] as string[]])
+    canonicals.map((c) => [c, [] as string[]]),
   );
   const seenAliases: string[] = [];
   const seenAliasSet = new Set<string>();
 
   if (rawAliases !== undefined && rawAliases !== null) {
-    if (typeof rawAliases !== 'object' || Array.isArray(rawAliases)) {
-      console.error('ERROR: shared.scopeAliases must be an object.');
+    if (typeof rawAliases !== "object" || Array.isArray(rawAliases)) {
+      console.error("ERROR: shared.scopeAliases must be an object.");
       process.exit(1);
     }
     for (const [canonical, aliases] of Object.entries(rawAliases)) {
       if (!canonicalSet.has(canonical)) {
         console.error(
           `ERROR: shared.scopeAliases key "${canonical}" is not a canonical scope. ` +
-          `Expected one of: ${canonicals.join(', ')}.`
+            `Expected one of: ${canonicals.join(", ")}.`,
         );
         process.exit(1);
       }
       if (!Array.isArray(aliases)) {
         console.error(
-          `ERROR: shared.scopeAliases["${canonical}"] must be an array of strings.`
+          `ERROR: shared.scopeAliases["${canonical}"] must be an array of strings.`,
         );
         process.exit(1);
       }
       for (const alias of aliases) {
-        if (typeof alias !== 'string' || alias.length === 0) {
+        if (typeof alias !== "string" || alias.length === 0) {
           console.error(
             `ERROR: shared.scopeAliases["${canonical}"] contains an invalid alias ` +
-            `(must be a non-empty string).`
+              `(must be a non-empty string).`,
           );
           process.exit(1);
         }
         if (canonicalSet.has(alias)) {
           console.error(
-            `ERROR: alias "${alias}" (under "${canonical}") collides with a canonical scope name.`
+            `ERROR: alias "${alias}" (under "${canonical}") collides with a canonical scope name.`,
           );
           process.exit(1);
         }
         if (seenAliasSet.has(alias)) {
           console.error(
-            `ERROR: alias "${alias}" is defined more than once in shared.scopeAliases.`
+            `ERROR: alias "${alias}" is defined more than once in shared.scopeAliases.`,
           );
           process.exit(1);
         }
@@ -137,10 +137,10 @@ function buildScopeRouting(
  */
 function releaseRulesForScope(scope: string) {
   return [
-    { breaking: true, scope, release: 'major' },
-    { scope, type: 'feat', release: 'minor' },
-    { scope, type: 'fix', release: 'patch' },
-    { scope, type: 'perf', release: 'patch' },
+    { breaking: true, scope, release: "major" },
+    { scope, type: "feat", release: "minor" },
+    { scope, type: "fix", release: "patch" },
+    { scope, type: "perf", release: "patch" },
   ];
 }
 
@@ -159,21 +159,21 @@ function buildPluginReleaseConfig(canonical: string, aliases: string[] = []) {
     { release: false },
   ];
   return {
-    branches: ['main'],
+    branches: ["main"],
     tagFormat: `${canonical}@\${version}`,
     plugins: [
       [
-        '@semantic-release/commit-analyzer',
+        "@semantic-release/commit-analyzer",
         {
-          preset: 'conventionalcommits',
+          preset: "conventionalcommits",
           releaseRules,
         },
       ],
-      '@semantic-release/release-notes-generator',
-      '@semantic-release/changelog',
-      ['@semantic-release/npm', { npmPublish: false }],
-      '@semantic-release/git',
-      '@semantic-release/github',
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/changelog",
+      ["@semantic-release/npm", { npmPublish: false }],
+      "@semantic-release/git",
+      "@semantic-release/github",
     ],
   };
 }
@@ -187,27 +187,27 @@ function buildPluginReleaseConfig(canonical: string, aliases: string[] = []) {
  * wins over any stale `release` field left in package.json.
  */
 function buildMarketplaceReleaseConfig(aliases: string[] = []) {
-  const scopes = ['marketplace', ...aliases];
+  const scopes = ["marketplace", ...aliases];
   const releaseRules = [
     ...scopes.flatMap(releaseRulesForScope),
     { release: false },
   ];
   return {
-    branches: ['main'],
-    tagFormat: 'marketplace@${version}',
+    branches: ["main"],
+    tagFormat: `marketplace@\${version}`,
     plugins: [
       [
-        '@semantic-release/commit-analyzer',
+        "@semantic-release/commit-analyzer",
         {
-          preset: 'conventionalcommits',
+          preset: "conventionalcommits",
           releaseRules,
         },
       ],
-      '@semantic-release/release-notes-generator',
-      '@semantic-release/changelog',
-      ['@semantic-release/npm', { npmPublish: false }],
-      '@semantic-release/git',
-      '@semantic-release/github',
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/changelog",
+      ["@semantic-release/npm", { npmPublish: false }],
+      "@semantic-release/git",
+      "@semantic-release/github",
     ],
   };
 }
@@ -220,22 +220,24 @@ let drifted = false;
  */
 function writeOrCheck(filePath: string, content: string) {
   if (CHECK_MODE) {
-    const existing = existsSync(filePath) ? readFileSync(filePath, 'utf8') : null;
+    const existing = existsSync(filePath)
+      ? readFileSync(filePath, "utf8")
+      : null;
     if (existing !== content) {
-      console.error(`  DRIFT: ${filePath.replace(ROOT + '/', '')}`);
+      console.error(`  DRIFT: ${filePath.replace(`${ROOT}/`, "")}`);
       drifted = true;
     }
     return;
   }
-  writeFileSync(filePath, content, 'utf8');
-  console.log(`  wrote: ${filePath.replace(ROOT + '/', '')}`);
+  writeFileSync(filePath, content, "utf8");
+  console.log(`  wrote: ${filePath.replace(`${ROOT}/`, "")}`);
 }
 
 // ---------------------------------------------------------------------------
 // Load manifest
 // ---------------------------------------------------------------------------
 
-const manifest = readJSON(join(ROOT, '.claude-plugin/marketplace.json'));
+const manifest = readJSON(join(ROOT, ".claude-plugin/marketplace.json"));
 const { shared, plugins, pluginManifestExtensions = {} } = manifest;
 
 if (!shared) {
@@ -243,13 +245,13 @@ if (!shared) {
   process.exit(1);
 }
 
-const pluginNames = plugins.map((p: typeof plugins[number]) => p.name);
+const pluginNames = plugins.map((p: (typeof plugins)[number]) => p.name);
 
 // Routing table: canonical → aliases, plus a flat list of every accepted
 // scope (canonicals + all aliases). Validated at generate time.
 const { aliasesByScope, allScopes } = buildScopeRouting(
   pluginNames,
-  shared.scopeAliases
+  shared.scopeAliases,
 );
 
 // ---------------------------------------------------------------------------
@@ -260,24 +262,24 @@ const { aliasesByScope, allScopes } = buildScopeRouting(
 // a valid scope: a plugin name, `marketplace`, or any alias thereof.
 // Unscoped commits are rejected.
 const commitlintrc = {
-  extends: ['@commitlint/config-conventional'],
+  extends: ["@commitlint/config-conventional"],
   rules: {
-    'scope-enum': [2, 'always', allScopes],
-    'scope-empty': [2, 'never'],
+    "scope-enum": [2, "always", allScopes],
+    "scope-empty": [2, "never"],
   },
 };
 
 writeOrCheck(
-  join(ROOT, '.commitlintrc.json'),
-  JSON.stringify(commitlintrc, null, 2) + '\n'
+  join(ROOT, ".commitlintrc.json"),
+  `${JSON.stringify(commitlintrc, null, 2)}\n`,
 );
 
 // ---------------------------------------------------------------------------
 // 2. .github/workflows/release.yml  — update matrix.plugin line in-place
 // ---------------------------------------------------------------------------
 
-const releaseYmlPath = join(ROOT, '.github/workflows/release.yml');
-const releaseYml = readFileSync(releaseYmlPath, 'utf8');
+const releaseYmlPath = join(ROOT, ".github/workflows/release.yml");
+const releaseYml = readFileSync(releaseYmlPath, "utf8");
 
 // Match the existing indentation so the replace is idempotent.
 const matrixMatch = releaseYml.match(/^(\s*)plugin:\s*\[.*\]$/m);
@@ -288,7 +290,7 @@ if (!matrixMatch) {
 const indent = matrixMatch[1];
 const updatedReleaseYml = releaseYml.replace(
   /^(\s*)plugin:\s*\[.*\]$/m,
-  `${indent}plugin: [${pluginNames.join(', ')}]`
+  `${indent}plugin: [${pluginNames.join(", ")}]`,
 );
 
 writeOrCheck(releaseYmlPath, updatedReleaseYml);
@@ -303,11 +305,11 @@ writeOrCheck(releaseYmlPath, updatedReleaseYml);
 
 for (const plugin of plugins) {
   // plugin.source is a relative path from the repo root, e.g. "./plugins/ctx"
-  const pluginRelPath = plugin.source.replace(/^\.\//, '');
+  const pluginRelPath = plugin.source.replace(/^\.\//, "");
   const pluginDir = join(ROOT, pluginRelPath);
-  const pkgJsonPath = join(pluginDir, 'package.json');
-  const dotClaudePluginDir = join(pluginDir, '.claude-plugin');
-  const pluginJsonPath = join(dotClaudePluginDir, 'plugin.json');
+  const pkgJsonPath = join(pluginDir, "package.json");
+  const dotClaudePluginDir = join(pluginDir, ".claude-plugin");
+  const pluginJsonPath = join(dotClaudePluginDir, "plugin.json");
 
   if (!CHECK_MODE) {
     mkdirSync(dotClaudePluginDir, { recursive: true });
@@ -317,7 +319,7 @@ for (const plugin of plugins) {
   // New plugins default to 0.0.0 (pre-release); the first `feat(<name>): …`
   // commit lands the plugin's first release.
   const existingPkg = existsSync(pkgJsonPath) ? readJSON(pkgJsonPath) : {};
-  const version = existingPkg.version ?? '0.0.0';
+  const version = existingPkg.version ?? "0.0.0";
 
   // --- plugin.json ---
   const extensions = pluginManifestExtensions[plugin.name] ?? {};
@@ -336,11 +338,13 @@ for (const plugin of plugins) {
     ...(plugin.mcpServers !== undefined && { mcpServers: plugin.mcpServers }),
   };
 
-  writeOrCheck(pluginJsonPath, JSON.stringify(pluginJson, null, 2) + '\n');
+  writeOrCheck(pluginJsonPath, `${JSON.stringify(pluginJson, null, 2)}\n`);
 
   // --- package.json ---
   const pkgJson = {
-    name: existingPkg.name ?? `@${shared.npmScope}/${shared.npmPrefix ?? ''}${plugin.name}`,
+    name:
+      existingPkg.name ??
+      `@${shared.npmScope}/${shared.npmPrefix ?? ""}${plugin.name}`,
     version,
     private: shared.private ?? true,
     description: plugin.description,
@@ -349,15 +353,29 @@ for (const plugin of plugins) {
     homepage: plugin.homepage ?? shared.homepage,
     keywords: plugin.keywords,
     repository: {
-      type: 'git',
+      type: "git",
       url: shared.repository,
       directory: pluginRelPath,
     },
     release: buildPluginReleaseConfig(plugin.name, aliasesByScope[plugin.name]),
-    ...Object.fromEntries(Object.entries(extensions).filter(([key]) => !['name', 'version', 'description', 'author', 'license', 'homepage', 'keywords', 'repository'].includes(key)))
+    ...Object.fromEntries(
+      Object.entries(extensions).filter(
+        ([key]) =>
+          ![
+            "name",
+            "version",
+            "description",
+            "author",
+            "license",
+            "homepage",
+            "keywords",
+            "repository",
+          ].includes(key),
+      ),
+    ),
   };
 
-  writeOrCheck(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n');
+  writeOrCheck(pkgJsonPath, `${JSON.stringify(pkgJson, null, 2)}\n`);
 }
 
 // ---------------------------------------------------------------------------
@@ -369,8 +387,12 @@ for (const plugin of plugins) {
 // ---------------------------------------------------------------------------
 
 writeOrCheck(
-  join(ROOT, '.releaserc.json'),
-  JSON.stringify(buildMarketplaceReleaseConfig(aliasesByScope.marketplace), null, 2) + '\n'
+  join(ROOT, ".releaserc.json"),
+  `${JSON.stringify(
+    buildMarketplaceReleaseConfig(aliasesByScope.marketplace),
+    null,
+    2,
+  )}\n`,
 );
 
 // ---------------------------------------------------------------------------
@@ -382,8 +404,8 @@ writeOrCheck(
 // preserved via spread.
 // ---------------------------------------------------------------------------
 
-const rootPkg = readJSON(join(ROOT, 'package.json'));
-const marketplaceVersion = rootPkg.version ?? '0.0.0';
+const rootPkg = readJSON(join(ROOT, "package.json"));
+const marketplaceVersion = rootPkg.version ?? "0.0.0";
 
 const updatedManifest = {
   ...manifest,
@@ -391,8 +413,8 @@ const updatedManifest = {
 };
 
 writeOrCheck(
-  join(ROOT, '.claude-plugin/marketplace.json'),
-  JSON.stringify(updatedManifest, null, 2) + '\n'
+  join(ROOT, ".claude-plugin/marketplace.json"),
+  `${JSON.stringify(updatedManifest, null, 2)}\n`,
 );
 
 // ---------------------------------------------------------------------------
@@ -401,44 +423,50 @@ writeOrCheck(
 
 if (NEW_PLUGIN) {
   if (CHECK_MODE) {
-    console.error('ERROR: --new and --check are incompatible flags.');
+    console.error("ERROR: --new and --check are incompatible flags.");
     process.exit(1);
   } else {
-    const entry = plugins.find((p: typeof plugins[number]) => p.name === NEW_PLUGIN);
+    const entry = plugins.find(
+      (p: (typeof plugins)[number]) => p.name === NEW_PLUGIN,
+    );
     if (!entry) {
       console.error(
-        `ERROR: "${NEW_PLUGIN}" not found in marketplace.json plugins array.`
+        `ERROR: "${NEW_PLUGIN}" not found in marketplace.json plugins array.`,
       );
       console.error(
-        'Add the plugin entry to marketplace.json first, then re-run with --new.'
+        "Add the plugin entry to marketplace.json first, then re-run with --new.",
       );
       process.exit(1);
     }
 
-    const pluginDir = join(ROOT, entry.source.replace(/^\.\//, ''));
-    const dotClaudePluginDir = join(pluginDir, '.claude-plugin');
-    const commandsDir = join(pluginDir, 'commands');
+    const pluginDir = join(ROOT, entry.source.replace(/^\.\//, ""));
+    const dotClaudePluginDir = join(pluginDir, ".claude-plugin");
+    const commandsDir = join(pluginDir, "commands");
 
     for (const dir of [dotClaudePluginDir, commandsDir]) {
       if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
-        console.log(`  mkdir: ${dir.replace(ROOT + '/', '')}`);
+        console.log(`  mkdir: ${dir.replace(`${ROOT}/`, "")}`);
       }
     }
 
     // Write README.md if missing
-    const readmePath = join(pluginDir, 'README.md');
+    const readmePath = join(pluginDir, "README.md");
     if (!existsSync(readmePath)) {
       const readme = `# ${entry.name}\n\n${entry.description}\n`;
-      writeFileSync(readmePath, readme, 'utf8');
-      console.log(`  wrote: ${readmePath.replace(ROOT + '/', '')}`);
+      writeFileSync(readmePath, readme, "utf8");
+      console.log(`  wrote: ${readmePath.replace(`${ROOT}/`, "")}`);
     }
 
     // The plugin.json and package.json will already have been written above
     // by the normal generation pass (since the entry is in the manifest).
     console.log(`\nScaffolded: plugins/${NEW_PLUGIN}/`);
-    console.log('Next: add your commands/agents/skills/hooks content, then commit with:');
-    console.log(`      git commit -am "feat(marketplace): add ${NEW_PLUGIN} plugin"`);
+    console.log(
+      "Next: add your commands/agents/skills/hooks content, then commit with:",
+    );
+    console.log(
+      `      git commit -am "feat(marketplace): add ${NEW_PLUGIN} plugin"`,
+    );
   }
 }
 
@@ -448,13 +476,11 @@ if (NEW_PLUGIN) {
 
 if (CHECK_MODE) {
   if (drifted) {
-    console.error(
-      '\nGenerated files are out of sync. Run: npm run generate'
-    );
+    console.error("\nGenerated files are out of sync. Run: npm run generate");
     process.exit(1);
   } else {
-    console.log('All generated files are in sync.');
+    console.log("All generated files are in sync.");
   }
 } else if (!NEW_PLUGIN) {
-  console.log('\nDone. Commit the updated files.');
+  console.log("\nDone. Commit the updated files.");
 }

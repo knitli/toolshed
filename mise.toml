@@ -14,7 +14,28 @@ shellcheck = "latest"
 yq = "latest"
 "npm:sort-package-json" = "latest"
 uv = "latest"
+biome = "latest"
+hk = "latest"
 
 [prepare]
 [prepare.bun]
 auto = true
+
+[tasks.lint]
+run = "hk check"
+
+[tasks.lint.tools]
+biome = "latest"
+shellcheck = "latest"
+"npm:sort-package-json" = "latest"
+shfmt = "latest"
+yq = "latest"
+
+[tasks.fix]
+run = "hk fix"
+
+[tasks.fix.tools]
+biome = "latest"
+"npm:sort-package-json" = "latest"
+shfmt = "latest"
+yq = "latest"

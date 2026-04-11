@@ -13,19 +13,29 @@
     "npmPrefix": "plugin-",
     "npmScope": "knitli",
     "repository": "https://github.com/knitli/toolshed",
+    "engines": {
+      "node": "catalog:"
+    },
+    "publishConfig": {
+      "access": "public",
+      "provenance": true,
+      "registry": "https://registry.npmjs.org/",
+      "tag": "latest"
+    },
+    "devEngines": {
+      "packageManager": {
+        "name": "bun",
+        "version": "catalog:",
+        "onFail": "download"
+      }
+    },
     "homepage": "https://knitli.com",
     "license": "MIT OR Apache-2.0",
     "private": false,
     "scopeAliases": {
-      "marketplace": [
-        "mkt"
-      ],
-      "codeweaver": [
-        "cw"
-      ],
-      "strip-ansi": [
-        "sa"
-      ]
+      "marketplace": ["mkt", "market", "mp"],
+      "codeweaver": ["cw"],
+      "strip-ansi": ["sa", "ansi"]
     }
   },
   "metadata": {

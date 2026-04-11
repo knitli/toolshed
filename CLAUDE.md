@@ -60,6 +60,8 @@ What a plugin can and cannot rely on at execution time. These are the ground rul
 **Permission-gated, may be denied** — never assume; degrade gracefully:
 `Bash`, `Edit`, `Write`, `NotebookEdit`, `WebFetch`, `WebSearch`, all MCP server tools.
 
+*Probably Available* - Claude's plugin system can install plugins from git, pypi, or npm, which means that you can probably count on git, python and node.
+
 Practical consequences:
 - A command/agent can unconditionally `Read ${CLAUDE_PLUGIN_ROOT}/data/foo.json` to load plugin data files. This is the preferred pattern for shared data across prompts.
 - Any prompt that *requires* `Bash`/`Edit`/`Write` to function must state so in its description and fail clearly if denied, rather than silently misbehaving.
@@ -88,6 +90,7 @@ The Stop event re-fires if the hook's output is treated as new model feedback. L
 
 - **ctx** (`plugins/ctx/`) — Context hygiene auditing. Has its own `CLAUDE.md` with detailed architecture.
 - **codeweaver** (`plugins/codeweaver/`) — Semantic code search MCP server. Alpha status. Bundles an MCP server config in `plugin.json` using `uvx`.
+- **strip-ansi** (`plugins/strip-ansi`) - Strips tool output of ANSI escape characters and identifies malicious text with CVE
 
 ## Adding a new plugin
 

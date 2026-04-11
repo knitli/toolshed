@@ -1,0 +1,69 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.11/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "**/*.mts",
+      "**/*.mjs",
+      "**/*.ts",
+      "**/*.js",
+      "**/*.json",
+      "**/*.jsonc",
+      "!!**/node_modules",
+      "!!**/dist"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space"
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "enabled": true,
+      "trailingNewline": true,
+      "indentStyle": "space",
+      "indentWidth": 2
+    },
+    "assist": {
+      "enabled": true
+    }
+  },
+  "json": {
+    "formatter": {
+      "indentWidth": 2,
+      "enabled": true,
+      "trailingNewline": true,
+      "indentStyle": "space"
+    }
+  },
+  "root": true,
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/package.json"],
+      "formatter": {
+        // package.json files formatted by sort-package-json, so disable biome's built in formatter to avoid conflicts
+        "enabled": false
+      }
+    }
+  ]
+}

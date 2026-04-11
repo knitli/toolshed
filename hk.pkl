@@ -1,0 +1,56 @@
+amends "package://github.com/jdx/hk/releases/download/v1.41.1/hk@1.41.1#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v1.41.1/hk@1.41.1#/Builtins.pkl"
+
+local linters = new Mapping<String, Step> {
+  ["sort-package-json"] = Builtins.sort_package_json
+
+  ["biome"] = Builtins.biome
+
+  ["shfmt"] = Builtins.shfmt
+
+  ["shellcheck"] = Builtins.shellcheck
+
+  ["yq"] = Builtins.yq
+
+  ["check-added-large-files"] = Builtins.check_added_large_files
+
+  ["trailing-whitespace"] = Builtins.trailing_whitespace
+
+  ["check-merge-conflict"] = Builtins.check_merge_conflict
+
+  ["check-executables-have-shebangs"] = Builtins.check_executables_have_shebangs
+
+  ["check-symlinks"] = Builtins.check_symlinks
+
+  ["fix-smart-quotes"] = Builtins.fix_smart_quotes
+
+  ["mixed-line-ending"] = Builtins.mixed_line_ending
+
+  ["pkfmt"] = Builtins.pkl_format
+
+  ["pkl"] = Builtins.pkl
+}
+
+local commitLintStep = new Mapping<String, Step> {
+  ["commitlint"] = new Step {
+    check = #"bunx --no-install --bun commitlint --config .commitlintrc.json --edit"#
+  }
+}
+
+hooks {
+  ["commit-msg"] {
+    steps = commitLintStep
+  }
+  ["pre-commit"] {
+    fix = true
+    stash = "git"
+    steps = linters
+  }
+  ["fix"] {
+    fix = true
+    steps = linters
+  }
+  ["check"] {
+    steps = linters
+  }
+}
