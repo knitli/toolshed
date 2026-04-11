@@ -24,7 +24,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      # semantic-release sometimes gets grumpy with bunx
+
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -35,7 +35,7 @@ jobs:
         working-directory: plugins/${{ matrix.plugin }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release
+        run: bunx semantic-release
 
       - name: Regenerate plugin.json from bumped package.json
         run: bun scripts/generate.mts
@@ -67,7 +67,7 @@ jobs:
       - name: Release marketplace
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release
+        run: bunx semantic-release
 
       - name: Regenerate marketplace.json from bumped package.json
         run: bun scripts/generate.mts

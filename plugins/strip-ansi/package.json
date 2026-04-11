@@ -27,7 +27,7 @@
     "branches": [
       "main"
     ],
-    "tagFormat": "strip-ansi@${version}",
+    "tagFormat": "@knitli/strip-ansi-v${version}",
     "plugins": [
       [
         "@semantic-release/commit-analyzer",
@@ -71,6 +71,26 @@
             },
             {
               "scope": "sa",
+              "type": "perf",
+              "release": "patch"
+            },
+            {
+              "breaking": true,
+              "scope": "ansi",
+              "release": "major"
+            },
+            {
+              "scope": "ansi",
+              "type": "feat",
+              "release": "minor"
+            },
+            {
+              "scope": "ansi",
+              "type": "fix",
+              "release": "patch"
+            },
+            {
+              "scope": "ansi",
               "type": "perf",
               "release": "patch"
             },

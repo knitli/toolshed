@@ -1,11 +1,27 @@
 {
-  "extends": ["@commitlint/config-conventional"],
+  "extends": [
+    "@commitlint/config-conventional"
+  ],
   "rules": {
     "scope-enum": [
       2,
       "always",
-      ["ctx", "strip-ansi", "codeweaver", "marketplace", "mkt", "cw", "sa"]
+      [
+        "ctx",
+        "strip-ansi",
+        "codeweaver",
+        "marketplace",
+        "mkt",
+        "market",
+        "mp",
+        "cw",
+        "sa",
+        "ansi"
+      ]
     ],
-    "scope-empty": [2, "never"]
+    "scope-empty": [
+      2,
+      "never"
+    ]
   }
 }
