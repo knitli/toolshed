@@ -1,7 +1,5 @@
 {
-  "extends": [
-    "@commitlint/config-conventional"
-  ],
+  "extends": ["@commitlint/config-conventional"],
   "rules": {
     "scope-enum": [
       2,
@@ -10,18 +8,18 @@
         "ctx",
         "strip-ansi",
         "codeweaver",
+        "decision-accountability",
         "marketplace",
         "mkt",
         "market",
         "mp",
         "cw",
+        "da",
+        "decision",
         "sa",
         "ansi"
       ]
     ],
-    "scope-empty": [
-      2,
-      "never"
-    ]
+    "scope-empty": [2, "never"]
   }
 }

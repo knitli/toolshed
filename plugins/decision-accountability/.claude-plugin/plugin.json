@@ -1,0 +1,13 @@
+{
+  "name": "decision-accountability",
+  "version": "0.0.0",
+  "description": "Increase agent accountability for results and good decisions. By Jacob Dietle",
+  "author": {
+    "name": "Knitli Inc.",
+    "email": "hello@knitli.com"
+  },
+  "homepage": "https://knitli.com",
+  "repository": "https://github.com/knitli/toolshed",
+  "license": "MIT",
+  "keywords": ["context", "quality", "architecture"]
+}

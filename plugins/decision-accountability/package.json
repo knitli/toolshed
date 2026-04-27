@@ -1,0 +1,111 @@
+{
+  "name": "@knitli/plugin-decision-accountability",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Increase agent accountability for results and good decisions. By Jacob Dietle",
+  "keywords": [
+    "context",
+    "quality",
+    "architecture"
+  ],
+  "homepage": "https://knitli.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knitli/toolshed",
+    "directory": "plugins/decision-accountability"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Knitli Inc.",
+    "email": "hello@knitli.com"
+  },
+  "release": {
+    "branches": [
+      "main"
+    ],
+    "plugins": [
+      [
+        "@semantic-release/commit-analyzer",
+        {
+          "preset": "conventionalcommits",
+          "releaseRules": [
+            {
+              "breaking": true,
+              "scope": "decision-accountability",
+              "release": "major"
+            },
+            {
+              "scope": "decision-accountability",
+              "type": "feat",
+              "release": "minor"
+            },
+            {
+              "scope": "decision-accountability",
+              "type": "fix",
+              "release": "patch"
+            },
+            {
+              "scope": "decision-accountability",
+              "type": "perf",
+              "release": "patch"
+            },
+            {
+              "breaking": true,
+              "scope": "da",
+              "release": "major"
+            },
+            {
+              "scope": "da",
+              "type": "feat",
+              "release": "minor"
+            },
+            {
+              "scope": "da",
+              "type": "fix",
+              "release": "patch"
+            },
+            {
+              "scope": "da",
+              "type": "perf",
+              "release": "patch"
+            },
+            {
+              "breaking": true,
+              "scope": "decision",
+              "release": "major"
+            },
+            {
+              "scope": "decision",
+              "type": "feat",
+              "release": "minor"
+            },
+            {
+              "scope": "decision",
+              "type": "fix",
+              "release": "patch"
+            },
+            {
+              "scope": "decision",
+              "type": "perf",
+              "release": "patch"
+            },
+            {
+              "release": false
+            }
+          ]
+        }
+      ],
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/changelog",
+      [
+        "@semantic-release/npm",
+        {
+          "npmPublish": false
+        }
+      ],
+      "@semantic-release/git",
+      "@semantic-release/github"
+    ],
+    "tagFormat": "@knitli/decision-accountability-v${version}"
+  }
+}

@@ -33,18 +33,10 @@
     "license": "MIT OR Apache-2.0",
     "private": false,
     "scopeAliases": {
-      "marketplace": [
-        "mkt",
-        "market",
-        "mp"
-      ],
-      "codeweaver": [
-        "cw"
-      ],
-      "strip-ansi": [
-        "sa",
-        "ansi"
-      ]
+      "marketplace": ["mkt", "market", "mp"],
+      "codeweaver": ["cw"],
+      "decision-accountability": ["da", "decision"],
+      "strip-ansi": ["sa", "ansi"]
     }
   },
   "metadata": {
@@ -123,6 +115,15 @@
           }
         }
       }
+    },
+    {
+      "name": "decision-accountability",
+      "license": "MIT",
+      "owner": "Jacob Dietle",
+      "source": "./plugins/decision-accountability",
+      "description": "Increase agent accountability for results and good decisions. By Jacob Dietle",
+      "keywords": ["context", "quality", "architecture"],
+      "category": "development"
     }
   ],
   "pluginManifestExtensions": {
