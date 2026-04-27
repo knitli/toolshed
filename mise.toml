@@ -17,8 +17,8 @@ uv = "latest"
 biome = "latest"
 hk = "latest"
 
-[prepare]
-[prepare.bun]
+[deps]
+[deps.bun]
 auto = true
 
 [tasks.lint]
