@@ -12,7 +12,8 @@
 #                      forwarding payload text
 #
 # Fails open: if jq or strip-ansi is missing, exits 0 silently.
-# Requires: jq, strip-ansi (cargo install distill-strip-ansi)
+# Requires: jq, strip-ansi (brew install belt/distill/distill-strip-ansi,
+#           or cargo install distill-strip-ansi)
 
 set -euo pipefail
 
