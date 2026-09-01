@@ -444,6 +444,12 @@ commitlint gate. Extending the generator is prerequisite work in the implementat
    is unproven. The `tags` column supports a cheap two-stage retrieval (facet narrow, then rank
    within facet) if flat ranking disappoints. This needs a fixed query set and the §8.5 audit records
    as instrumentation — measure before building alternatives.
+
+   Cloudflare AI Search is a candidate upgrade for the hosted path, as a semantic index layered over
+   the same compiled rows rather than a replacement for them — the SQLite artifact stays the source
+   of truth and fts5 stays the baseline. Unevaluated. Note that adopting it makes hosted and local
+   diverge in retrieval *quality*, not merely in host, which is a decision deferred until the fts5
+   baseline has actually been measured.
 2. **Round-trip cost.** "Accept 5 invites and mark them private" is roughly twelve calls and ten
    approval prompts. Graph's `$batch` is itself a catalogued operation and could collapse that
    without new mechanism — at the cost of pinning it to `write_high` and rendering bundled
