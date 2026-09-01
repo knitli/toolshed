@@ -450,6 +450,11 @@ commitlint gate. Extending the generator is prerequisite work in the implementat
    of truth and fts5 stays the baseline. Unevaluated. Note that adopting it makes hosted and local
    diverge in retrieval *quality*, not merely in host, which is a decision deferred until the fts5
    baseline has actually been measured.
+
+   That divergence is **accepted, not a defect to design around**. The marketplace build is offered
+   as a favour and gets the fts5 baseline; the hosted path may get better retrieval. Do not build
+   local parity machinery for this. If local retrieval later proves to be a real problem, the answer
+   is packaging something like Qdrant in a container — explicitly out of scope now.
 2. **Round-trip cost.** "Accept 5 invites and mark them private" is roughly twelve calls and ten
    approval prompts. Graph's `$batch` is itself a catalogued operation and could collapse that
    without new mechanism — at the cost of pinning it to `write_high` and rendering bundled
