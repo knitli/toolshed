@@ -250,6 +250,13 @@ arguments block. A single `write` tool would therefore collapse Graph mail delet
 deletion, and Cloudflare DNS changes into one approval identity, and one remembered decision would
 cover all of them. Locally the same applies to a client-side allowlist.
 
+This is confirmed, not hypothetical. `overseer.ts` exposes
+`setAutoApprovedActionKind(gatekeeperId, actionKind)`, which persists a user opt-in into
+`autoApproveTags` keyed by `${gatekeeperId}:${actionKind.tag}` — and `actionKind.tag` is
+`${scopeTag}:${toolName}`. The stored rule is **workspace-wide per gatekeeper**, not per user. So the
+tool split is load-bearing, not defence in depth: without it, one person's single "always allow"
+on `write` would auto-approve every mutation on every mounted API, for the whole workspace.
+
 Per mounted API:
 
 | Tool | Does | Classification |
@@ -311,10 +318,13 @@ instruction generalises beyond what a human intended.
 contents — into an agent that can then call `write`. This is the canonical email-to-agent-to-tool
 chain, and for a mail API it is the threat that matters most.
 
-**Approval-on-every-write is the load-bearing mitigation, not a UX side effect.** It works only
-while `trustAnnotations` stays `false`; `autoApprovable` requires `trust === "vetted"`. This is a
-**permanent invariant for this deployment**, not a tunable — revision 1 wrongly framed it as "a real
-UX cost that should be a conscious choice."
+**Approval-on-every-write is the load-bearing mitigation, not a UX side effect.** Auto-approval
+requires two gates (`overseer.ts`): the action's own `autoApprovable` verdict, which needs
+`trust === "vetted"`, AND a stored user opt-in rule. `trustAnnotations: false` fails the first gate,
+so the mechanism is inert today — but it is one configuration flag away from active, and the opt-in
+rules it would then honour are workspace-wide per gatekeeper. `trustAnnotations` staying `false` is
+therefore a **permanent invariant for this deployment**, not a tunable; revision 1 wrongly framed it
+as "a real UX cost that should be a conscious choice."
 
 Rendering discipline follows: `mcp-shared` already has `quoteUntrusted`/`defuseFences` so a malicious
 *tool description* cannot hijack an approval prompt's Markdown. `read` results echoed into a later
@@ -440,6 +450,7 @@ commitlint gate. Extending the generator is prerequisite work in the implementat
    sub-requests intelligibly in one approval prompt. Worth prototyping before accepting the friction.
 3. **v1.0 vs beta.** v1.0 is the target; the motivating Outlook-invite workflow may need beta
    (70,582,558 B, preview stability). Verify before committing.
-4. **Whether a human "remember this decision" affordance exists** anywhere in the gatekeeper chain
-   independent of `trustAnnotations`. Not verified — it needs `workshop-shared/gatekeeper`. If it
-   exists, §6's tool split is load-bearing rather than defence-in-depth.
+*(A fourth question — whether a human "remember this decision" affordance exists independent of
+`trustAnnotations` — was resolved during review. It does exist, is keyed at tool-name granularity,
+and its rules are workspace-wide per gatekeeper; it is gated off only by `trustAnnotations: false`.
+See §6 and §8.1.)*
