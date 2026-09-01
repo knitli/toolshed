@@ -1,8 +1,8 @@
 {
   "name": "@knitli/plugin-codeweaver",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": false,
-  "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
+  "description": "[DEPRECATED — unmaintained] Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
   "author": {
     "name": "Knitli Inc.",
     "email": "hello@knitli.com"

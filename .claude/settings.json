@@ -1,6 +1,6 @@
 {
   "enabledPlugins": {
     "strip-ansi@toolshed": true,
-    "ctx@toolshed": true
+    "ctx@toolshed": false
   }
 }

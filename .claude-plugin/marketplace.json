@@ -33,21 +33,29 @@
     "license": "MIT OR Apache-2.0",
     "private": false,
     "scopeAliases": {
-      "marketplace": ["mkt", "market", "mp"],
-      "codeweaver": ["cw"],
-      "decision-accountability": ["da", "decision"],
-      "strip-ansi": ["sa", "ansi"]
+      "marketplace": [
+        "mkt",
+        "market",
+        "mp"
+      ],
+      "codeweaver": [
+        "cw"
+      ],
+      "strip-ansi": [
+        "sa",
+        "ansi"
+      ]
     }
   },
   "metadata": {
     "version": "1.0.0",
-    "description": "Knitli's agent plugin marketplace for Claude and other agents. Easily deploy Knitli tools like CodeWeaver, manage context, and keep your sessions clean and secure."
+    "description": "Knitli's agent plugin marketplace for Claude and other agents. Keep your sessions clean, secure, and context-efficient."
   },
   "plugins": [
     {
       "name": "ctx",
       "source": "./plugins/ctx",
-      "description": "Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files (CLAUDE.md, AGENTS.md, Serena memories, Cursor rules, and 10+ more tool ecosystems).",
+      "description": "[DEPRECATED — unmaintained] Context hygiene for AI-assisted codebases. Finds stale, contradictory, and drifting AI context files (CLAUDE.md, AGENTS.md, Serena memories, Cursor rules, and 10+ more tool ecosystems).",
       "keywords": [
         "context",
         "memory",
@@ -79,7 +87,7 @@
     {
       "name": "codeweaver",
       "source": "./plugins/codeweaver",
-      "description": "Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
+      "description": "[DEPRECATED — unmaintained] Exquisite Context for AI Agents — Semantic code search MCP server with hybrid search, AST-level understanding, and intelligent chunking for 166+ languages.",
       "keywords": [
         "mcp",
         "search",
@@ -115,15 +123,6 @@
           }
         }
       }
-    },
-    {
-      "name": "decision-accountability",
-      "license": "MIT",
-      "owner": "Jacob Dietle",
-      "source": "./plugins/decision-accountability",
-      "description": "Increase agent accountability for results and good decisions. By Jacob Dietle",
-      "keywords": ["context", "quality", "architecture"],
-      "category": "development"
     }
   ],
   "pluginManifestExtensions": {
