@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
 import { compile } from "../src/compile";
 import { FORMAT_VERSION } from "../src/schema";
 
@@ -14,9 +14,34 @@ const opts = {
 
 afterEach(() => {
   try { unlinkSync(OUT); } catch { /* already gone */ }
+  try { rmSync(`${OUT}.building`, { recursive: true }); } catch { /* already gone */ }
 });
 
 describe("compile", () => {
+  test("a successful compile leaves no build file behind", async () => {
+    await compile(opts);
+    expect(existsSync(`${OUT}.building`)).toBe(false);
+    expect(existsSync(OUT)).toBe(true);
+  });
+
+  test("a failed rebuild leaves the previous artifact intact", async () => {
+    await compile(opts);
+    const before = await Bun.file(OUT).arrayBuffer();
+
+    // Block the sibling the rebuild writes into, so the compile fails after
+    // the point where an in-place rebuild would already have destroyed OUT.
+    mkdirSync(`${OUT}.building`);
+    expect(compile(opts)).rejects.toThrow();
+
+    const after = await Bun.file(OUT).arrayBuffer();
+    expect(new Uint8Array(after)).toEqual(new Uint8Array(before));
+    const db = new Database(OUT, { readonly: true });
+    expect(
+      db.query<{ n: number }, []>("SELECT COUNT(*) n FROM operations").get()?.n,
+    ).toBe(6);
+    db.close();
+  });
+
   test("writes every operation and schema", async () => {
     const result = await compile(opts);
     expect(result.operations).toBe(6);
@@ -120,13 +145,10 @@ describe("compile", () => {
       Database.prototype.run = originalRun;
     }
 
-    // A rollback that undoes schema creation too leaves an empty file: no
-    // tables at all, not a schema-only or partially-populated one.
-    const db = new Database(OUT, { readonly: true });
-    const tables = db
-      .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'")
-      .all();
-    expect(tables).toEqual([]);
-    db.close();
+    // The failure happened inside the sibling build file, which is removed on
+    // the way out. Nothing is published: no schema-only artifact, no empty
+    // database, and no leftover build file for the next run to trip over.
+    expect(existsSync(OUT)).toBe(false);
+    expect(existsSync(`${OUT}.building`)).toBe(false);
   });
 });

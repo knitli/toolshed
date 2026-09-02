@@ -44,11 +44,26 @@ describe("extractOperations", () => {
     expect(op.bodyRef).toBe("#/components/schemas/Widget");
   });
 
-  test("applies safety classification including overrides", async () => {
+  test("applies safety classification", async () => {
     expect((await byId("tiny:widgets.ListWidgets")).safety).toBe("read");
     expect((await byId("tiny:widgets.CreateWidget")).safety).toBe("write");
-    expect((await byId("tiny:widgets.getByIds")).safety).toBe("read");
     expect((await byId("tiny:batch.Batch")).safety).toBe("write");
+  });
+
+  test("read overrides follow the api argument, not the operation id alone", async () => {
+    // Same document, same operation id: only the API the override list was
+    // derived from may downgrade a POST to the no-approval read tool.
+    const doc = await loadSpec(FIXTURE);
+    const asTiny = extractOperations(doc, "tiny").find(
+      (o) => o.operationId === "widgets.getByIds",
+    );
+    const asGraph = extractOperations(doc, "graph").find(
+      (o) => o.operationId === "widgets.getByIds",
+    );
+    expect(asTiny?.safety).toBe("write");
+    expect(asTiny?.risk).toBe("high");
+    expect(asGraph?.safety).toBe("read");
+    expect(asGraph?.risk).toBe("routine");
   });
 
   test("$batch is high risk", async () => {
@@ -157,5 +172,113 @@ describe("extractOperations", () => {
       },
     };
     expect(() => extractOperations(doc, "tiny")).toThrow(/servers/);
+  });
+});
+
+const synthetic = (op: Record<string, unknown>): OpenApiDoc => ({
+  openapi: "3.0.4",
+  servers: [{ url: "https://synthetic.example.com" }],
+  paths: { "/thing": { post: { operationId: "thing.Do", ...op } } },
+});
+const only = (doc: OpenApiDoc) => extractOperations(doc, "tiny")[0];
+
+describe("request body capture", () => {
+  test("keeps a component $ref unresolved and stores no inline copy", () => {
+    const op = only(
+      synthetic({
+        requestBody: {
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/Widget" } },
+          },
+        },
+      }),
+    );
+    expect(op?.bodyRef).toBe("#/components/schemas/Widget");
+    expect(op?.bodySchemaJson).toBeNull();
+  });
+
+  test("stores an inline schema rather than dropping the body contract", () => {
+    const schema = { type: "object", properties: { id: { type: "string" } } };
+    const op = only(
+      synthetic({ requestBody: { content: { "application/json": { schema } } } }),
+    );
+    expect(op?.bodyRef).toBeNull();
+    expect(JSON.parse(op?.bodySchemaJson ?? "null")).toEqual(schema);
+    expect(op?.bodyMediaType).toBe("application/json");
+  });
+
+  test("falls back to a non-JSON media type instead of discarding it", () => {
+    const schema = { type: "string", format: "binary" };
+    const op = only(
+      synthetic({
+        requestBody: { content: { "application/octet-stream": { schema } } },
+      }),
+    );
+    expect(op?.bodyMediaType).toBe("application/octet-stream");
+    expect(JSON.parse(op?.bodySchemaJson ?? "null")).toEqual(schema);
+  });
+
+  test("prefers JSON when the operation offers several media types", () => {
+    const op = only(
+      synthetic({
+        requestBody: {
+          content: {
+            "application/xml": { schema: { type: "string" } },
+            "application/json": { schema: { type: "object" } },
+          },
+        },
+      }),
+    );
+    expect(op?.bodyMediaType).toBe("application/json");
+    expect(JSON.parse(op?.bodySchemaJson ?? "null")).toEqual({ type: "object" });
+  });
+
+  test("an operation with no request body carries no contract", () => {
+    const op = only(synthetic({}));
+    expect(op?.bodyRef).toBeNull();
+    expect(op?.bodySchemaJson).toBeNull();
+    expect(op?.bodyMediaType).toBeNull();
+  });
+});
+
+describe("parameter precedence", () => {
+  const withParams = (pathLevel: unknown[], opLevel: unknown[]): OpenApiDoc => ({
+    openapi: "3.0.4",
+    servers: [{ url: "https://synthetic.example.com" }],
+    paths: {
+      "/thing/{id}": {
+        parameters: pathLevel,
+        get: { operationId: "thing.Get", parameters: opLevel },
+      } as unknown as Record<string, never>,
+    },
+  });
+
+  test("an operation parameter overrides the path item's, not duplicates it", () => {
+    const op = only(
+      withParams(
+        [{ name: "id", in: "path", required: false, schema: { type: "string" } }],
+        [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+      ),
+    );
+    const params = JSON.parse(op?.paramsJson ?? "[]") as Array<{
+      name: string;
+      required: boolean;
+      schema: { type: string };
+    }>;
+    expect(params).toHaveLength(1);
+    expect(params[0]?.required).toBe(true);
+    expect(params[0]?.schema.type).toBe("integer");
+  });
+
+  test("same name in a different location stays a separate parameter", () => {
+    const op = only(
+      withParams(
+        [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        [{ name: "id", in: "query", required: false, schema: { type: "string" } }],
+      ),
+    );
+    const params = JSON.parse(op?.paramsJson ?? "[]") as Array<{ in: string }>;
+    expect(params).toHaveLength(2);
+    expect(params.map((p) => p.in).sort()).toEqual(["path", "query"]);
   });
 });

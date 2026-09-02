@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { unlinkSync } from "node:fs";
+import { renameSync, unlinkSync } from "node:fs";
 import { loadSpec } from "./load";
 import { extractOperations } from "./operations";
 import {
@@ -48,16 +48,25 @@ export async function compile(
   if (options.append && !exists) {
     throw new Error(`${options.outPath} does not exist; cannot append`);
   }
+  // A fresh compile builds into a sibling and renames over the target only
+  // after a clean close. Replacing in place would destroy a valid artifact the
+  // instant anything downstream failed — rollback can only empty the new
+  // database, it cannot bring the old one back. Append has nothing to protect:
+  // it mutates the existing artifact under its own transaction.
+  const buildPath = options.append
+    ? options.outPath
+    : `${options.outPath}.building`;
   if (!options.append) {
     try {
-      unlinkSync(options.outPath);
+      unlinkSync(buildPath);
     } catch {
-      // No previous artifact; nothing to remove.
+      // No leftover build file from an interrupted run.
     }
   }
 
   let existingApis: string[] = [];
-  const db = new Database(options.outPath, { create: true });
+  let committed = false;
+  const db = new Database(buildPath, { create: true });
   try {
     db.run("BEGIN");
     if (options.append) {
@@ -86,8 +95,9 @@ export async function compile(
       `INSERT INTO operations
        (qualified_id, api, operation_id, method, path, safety, risk,
         operation_type, pageable, deprecated, permissions, perm_confidence,
-        privilege_level, summary, tags, params_json, body_ref, server_url)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        privilege_level, summary, tags, params_json, body_ref, body_schema,
+        body_media_type, server_url)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     );
     for (const op of operations) {
       insertOp.run(
@@ -96,7 +106,8 @@ export async function compile(
         op.pageable ? 1 : 0, op.deprecated ? 1 : 0,
         op.permissions ? JSON.stringify(op.permissions) : null,
         op.permConfidence, op.privilegeLevel, op.summary, op.tags,
-        op.paramsJson, op.bodyRef, op.serverUrl,
+        op.paramsJson, op.bodyRef, op.bodySchemaJson, op.bodyMediaType,
+        op.serverUrl,
       );
     }
 
@@ -138,6 +149,7 @@ export async function compile(
     }
 
     db.run("COMMIT");
+    committed = true;
   } catch (err) {
     try {
       db.run("ROLLBACK");
@@ -148,7 +160,18 @@ export async function compile(
     throw err;
   } finally {
     db.close();
+    // Cleared only after the handle is closed, so this is safe on platforms
+    // that refuse to unlink an open file.
+    if (!committed && buildPath !== options.outPath) {
+      try {
+        unlinkSync(buildPath);
+      } catch {
+        // Never created, or already gone.
+      }
+    }
   }
+
+  if (buildPath !== options.outPath) renameSync(buildPath, options.outPath);
 
   return {
     operations: operations.length,

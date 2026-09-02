@@ -3,24 +3,32 @@ import type { Risk, Safety } from "./types";
 const READ_METHODS = new Set(["GET", "HEAD"]);
 
 /**
- * Operation-id suffixes that are POSTs by protocol but reads by semantics.
- * Derived from Microsoft Graph, where 53 operations match. This list is
- * engine code, not artifact data: the server recomputes safety at load and
- * honours a stored `read` on a mutating method only if it also appears here.
+ * Operation-id suffixes that are POSTs by protocol but reads by semantics,
+ * keyed by the API they were derived from. Scoping is load-bearing, not
+ * tidiness: `preview` and `query` are generic enough that another mounted API
+ * will have a genuinely mutating `POST .../query`, and a global list would
+ * classify it `read` — reachable through the no-approval read tool. An API
+ * with no entry here gets no overrides, so mutating methods stay `write`.
+ *
+ * This table is engine code, not artifact data: the server recomputes safety
+ * at load and honours a stored `read` on a mutating method only if the same
+ * `(api, suffix)` pair appears here.
  */
-export const READ_OVERRIDE_SUFFIXES = [
-  "getByIds",
-  "getMemberGroups",
-  "getMemberObjects",
-  "checkMemberGroups",
-  "checkMemberObjects",
-  "getAvailableExtensionProperties",
-  "findMeetingTimes",
-  "getSchedule",
-  "translateExchangeIds",
-  "preview",
-  "query",
-] as const;
+export const READ_OVERRIDES: Record<string, readonly string[]> = {
+  graph: [
+    "getByIds",
+    "getMemberGroups",
+    "getMemberObjects",
+    "checkMemberGroups",
+    "checkMemberObjects",
+    "getAvailableExtensionProperties",
+    "findMeetingTimes",
+    "getSchedule",
+    "translateExchangeIds",
+    "preview",
+    "query",
+  ],
+};
 
 /** A batch endpoint bundles arbitrary sub-request methods, so it is never a read. */
 export function isBatch(path: string): boolean {
@@ -29,17 +37,20 @@ export function isBatch(path: string): boolean {
 
 /**
  * Classifies an operation as read or write. Method is the default; the
- * override list corrects semantically-read POSTs. `$batch` always wins.
+ * API's own override list corrects semantically-read POSTs. `$batch` always
+ * wins, and an unrecognised API never gets an override.
  */
 export function classifySafety(
   method: string,
   path: string,
   operationId: string,
+  api: string,
 ): Safety {
   if (isBatch(path)) return "write";
   if (READ_METHODS.has(method.toUpperCase())) return "read";
   const tail = operationId.split(".").pop() ?? "";
-  return READ_OVERRIDE_SUFFIXES.some((s) => s === tail) ? "read" : "write";
+  const overrides = READ_OVERRIDES[api] ?? [];
+  return overrides.some((s) => s === tail) ? "read" : "write";
 }
 
 /**

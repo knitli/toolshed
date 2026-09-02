@@ -34,7 +34,12 @@ function collectParams(
     ...((pathItem.parameters as unknown[]) ?? []),
     ...((op.parameters as unknown[]) ?? []),
   ];
-  const out: ParamRecord[] = [];
+  // OpenAPI identifies a parameter by `(name, in)` and lets the operation
+  // override the path item's. Operation entries come second, so a plain
+  // last-write-wins keyed insert gives exactly that precedence — whereas
+  // concatenating would emit both and leave the caller two conflicting
+  // schemas for one parameter.
+  const out = new Map<string, ParamRecord>();
   for (const entry of raw) {
     const p = (
       typeof entry === "object" && entry !== null && "$ref" in entry
@@ -42,25 +47,53 @@ function collectParams(
         : entry
     ) as Record<string, unknown> | undefined;
     if (!p || typeof p.name !== "string") continue;
-    out.push({
+    const where = typeof p.in === "string" ? p.in : "query";
+    out.set(`${where}:${p.name}`, {
       name: p.name,
-      in: typeof p.in === "string" ? p.in : "query",
+      in: where,
       required: p.required === true,
       schema: p.schema ?? { type: "string" },
     });
   }
-  return out;
+  return [...out.values()];
 }
 
-function bodyRefOf(op: OpenApiOperation): string | null {
+interface BodyContract {
+  ref: string | null;
+  schemaJson: string | null;
+  mediaType: string | null;
+}
+
+const NO_BODY: BodyContract = { ref: null, schemaJson: null, mediaType: null };
+
+/**
+ * Captures an operation's request-body contract. A `$ref` is kept as a ref and
+ * resolved lazily from the schema store, which is the whole point of the thin
+ * artifact. Anything else — an inline schema, or a body under a non-JSON media
+ * type — is stored verbatim instead of dropped: a write whose body contract is
+ * missing is either unusable or, worse, executable with no validation at all.
+ */
+function bodyOf(op: OpenApiOperation): BodyContract {
   const rb = op.requestBody as Record<string, unknown> | undefined;
-  if (!rb) return null;
-  if (typeof rb.$ref === "string") return rb.$ref;
+  if (!rb) return NO_BODY;
+  if (typeof rb.$ref === "string") {
+    return { ref: rb.$ref, schemaJson: null, mediaType: null };
+  }
+
   const content = rb.content as Record<string, { schema?: unknown }> | undefined;
-  const schema = content?.["application/json"]?.schema as
-    | { $ref?: string }
-    | undefined;
-  return typeof schema?.$ref === "string" ? schema.$ref : null;
+  if (!content) return NO_BODY;
+  // Prefer JSON, but fall back to whatever the operation actually declares —
+  // the media type travels with the schema so the server can set Content-Type.
+  const mediaType =
+    "application/json" in content ? "application/json" : Object.keys(content)[0];
+  if (mediaType === undefined) return NO_BODY;
+  const schema = content[mediaType]?.schema;
+  if (schema === undefined) return NO_BODY;
+
+  const ref = (schema as { $ref?: unknown }).$ref;
+  return typeof ref === "string"
+    ? { ref, schemaJson: null, mediaType }
+    : { ref: null, schemaJson: JSON.stringify(schema), mediaType };
 }
 
 /** Extracts one thin record per operation. `$ref`s are stored, never resolved. */
@@ -99,7 +132,8 @@ export function extractOperations(
       seen.add(qualifiedId);
 
       const upper = method.toUpperCase();
-      const safety = classifySafety(upper, path, operationId);
+      const body = bodyOf(op);
+      const safety = classifySafety(upper, path, operationId, api);
       const summary = (op.summary ?? op.description ?? null)?.slice(
         0,
         MAX_SUMMARY,
@@ -125,7 +159,9 @@ export function extractOperations(
         summary: summary ?? null,
         tags: Array.isArray(op.tags) ? op.tags.join(" ") : null,
         paramsJson: JSON.stringify(collectParams(doc, pathItem, op)),
-        bodyRef: bodyRefOf(op),
+        bodyRef: body.ref,
+        bodySchemaJson: body.schemaJson,
+        bodyMediaType: body.mediaType,
         serverUrl,
       });
     }

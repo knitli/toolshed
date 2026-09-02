@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 
 /** Bumped when the artifact layout changes incompatibly. Servers refuse unknown versions. */
-export const FORMAT_VERSION = 1;
+export const FORMAT_VERSION = 2;
 
 // `fts5` MUST be lower-case: D1 rejects `FTS5` as "not authorized".
 const DDL = `
@@ -23,6 +23,8 @@ CREATE TABLE operations (
   tags            TEXT,
   params_json     TEXT NOT NULL,
   body_ref        TEXT,
+  body_schema     TEXT,
+  body_media_type TEXT,
   server_url      TEXT NOT NULL
 );
 
