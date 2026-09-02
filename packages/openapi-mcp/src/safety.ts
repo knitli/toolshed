@@ -36,8 +36,8 @@ export function classifySafety(
   path: string,
   operationId: string,
 ): Safety {
-  if (READ_METHODS.has(method.toUpperCase())) return "read";
   if (isBatch(path)) return "write";
+  if (READ_METHODS.has(method.toUpperCase())) return "read";
   const tail = operationId.split(".").pop() ?? "";
   return READ_OVERRIDE_SUFFIXES.some((s) => s === tail) ? "read" : "write";
 }
@@ -52,8 +52,8 @@ export function riskFor(
   privilegeLevel: number | null,
   path: string,
 ): Risk {
-  if (safety === "read") return "routine";
   if (isBatch(path)) return "high";
+  if (safety === "read") return "routine";
   if (privilegeLevel === null) return "high";
   return privilegeLevel >= 4 ? "high" : "routine";
 }

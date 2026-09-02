@@ -37,6 +37,12 @@ describe("classifySafety", () => {
     expect(classifySafety("POST", "/$batch", "widgets.getByIds")).toBe("write");
   });
 
+  test("$batch is hard-pinned to write even on a GET", () => {
+    // A GET would normally short-circuit to "read" before the batch check
+    // ever runs — $batch must win regardless of method.
+    expect(classifySafety("GET", "/$batch", "batch.Batch")).toBe("write");
+  });
+
   test("overrides never promote a GET to a write", () => {
     expect(classifySafety("GET", "/widgets/getByIds", "widgets.getByIds")).toBe("read");
   });
@@ -63,5 +69,11 @@ describe("riskFor", () => {
 
   test("$batch is always high regardless of privilege", () => {
     expect(riskFor("write", 1, "/$batch")).toBe("high");
+  });
+
+  test("$batch is high risk even if safety is (incorrectly) read", () => {
+    // safety="read" would normally short-circuit to "routine" before the
+    // batch check ever runs — a batch path can never be routine.
+    expect(riskFor("read", 1, "/$batch")).toBe("high");
   });
 });
