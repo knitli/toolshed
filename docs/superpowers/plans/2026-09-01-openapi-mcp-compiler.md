@@ -615,7 +615,7 @@ describe("loadSpec", () => {
   test("parses YAML", async () => {
     const doc = await loadSpec(FIXTURE);
     expect(doc.openapi).toBe("3.0.4");
-    expect(Object.keys(doc.paths)).toHaveLength(5);
+    expect(Object.keys(doc.paths)).toHaveLength(4);
   });
 
   test("parses JSON with the same result", async () => {
