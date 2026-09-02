@@ -66,17 +66,23 @@ function releaseRulesForScope(scope: string) {
 }
 
 /**
- * Build a scope-gated semantic-release config for a single plugin.
+ * Build a scope-gated semantic-release config for a single plugin (or
+ * extra-scope npm package — see the packages/<scope> loop below).
  *
  * Routing rule: commit must have `scope: <canonical>` OR `scope: <alias>`
  * to trigger a release. Any other scope (or no scope) falls through to the
  * catchall `release: false` entry, which short-circuits commit-analyzer's
  * preset defaults.
+ *
+ * Plugins are marketplace-installed prompts, not npm-consumed packages, so
+ * they default to `npmPublish: false`. Pass `npmPublish: true` for a real
+ * npm package (e.g. openapi-mcp).
  */
 function buildPluginReleaseConfig(
   canonical: string,
   aliases: string[] = [],
   npmScope: string = "",
+  npmPublish: boolean = false,
 ) {
   const scopes = [canonical, ...aliases];
   const releaseRules = [
@@ -97,7 +103,7 @@ function buildPluginReleaseConfig(
       ],
       "@semantic-release/release-notes-generator",
       "@semantic-release/changelog",
-      ["@semantic-release/npm", { npmPublish: false }],
+      ["@semantic-release/npm", { npmPublish }],
       "@semantic-release/git",
       "@semantic-release/github",
     ],
@@ -311,6 +317,35 @@ for (const plugin of plugins) {
   };
 
   writeOrCheck(pkgJsonPath, `${JSON.stringify(pkgJson, null, 2)}\n`);
+}
+
+// ---------------------------------------------------------------------------
+// 3b. Extra-scope npm packages under packages/<scope> (e.g. openapi-mcp).
+//
+// These are real npm packages, not plugins: no plugin.json, and their
+// package.json is otherwise hand-maintained (name, bin, exports, deps, ...).
+// generate.mts owns only the `release` field here, merged in with npm
+// publishing enabled (unlike plugins, which keep npmPublish: false). Any
+// extraScope without a matching packages/<scope>/package.json is skipped —
+// not every commitlint extra scope is necessarily a package.
+// ---------------------------------------------------------------------------
+
+for (const scope of shared.extraScopes ?? []) {
+  const pkgJsonPath = join(ROOT, "packages", scope, "package.json");
+  if (!existsSync(pkgJsonPath)) continue;
+
+  const existingPkg = readJSON(pkgJsonPath);
+  const updatedPkg = {
+    ...existingPkg,
+    release: buildPluginReleaseConfig(
+      scope,
+      aliasesByScope[scope],
+      shared.npmScope,
+      true,
+    ),
+  };
+
+  writeOrCheck(pkgJsonPath, `${JSON.stringify(updatedPkg, null, 2)}\n`);
 }
 
 // ---------------------------------------------------------------------------

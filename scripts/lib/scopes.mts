@@ -2,8 +2,9 @@
  * Validate shared.scopeAliases and materialize a routing table.
  *
  * Canonical scopes are plugin names, any extra non-plugin workspace scopes,
- * and "marketplace". Extra scopes appear in commitlint's scope-enum but get
- * no release config — they are not plugins.
+ * and "marketplace". Extra scopes appear in commitlint's scope-enum; they
+ * are not plugins, but generate.mts gives one a scope-gated `release` field
+ * (with npm publishing on) when it has a matching packages/<scope>/package.json.
  */
 export function buildScopeRouting(
   pluginNames: string[],

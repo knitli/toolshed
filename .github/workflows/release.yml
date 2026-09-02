@@ -37,9 +37,35 @@ jobs:
         with:
           commit_message: 'chore(${{ matrix.plugin }}): sync plugin.json version [skip ci]'
           file_pattern: plugins/${{ matrix.plugin }}/.claude-plugin/plugin.json
+  release-openapi-mcp:
+    needs:
+      - release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: bun i --frozen-lockfile
+      - name: Build
+        working-directory: packages/openapi-mcp
+        run: bun run build
+      - name: Release openapi-mcp
+        working-directory: packages/openapi-mcp
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bunx semantic-release
   release-marketplace:
     needs:
       - release
+      - release-openapi-mcp
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
