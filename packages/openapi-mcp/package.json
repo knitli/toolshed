@@ -5,9 +5,17 @@
   "type": "module",
   "description": "Compiles OpenAPI documents into signed SQLite artifacts for MCP serving.",
   "license": "MIT OR Apache-2.0",
-  "bin": { "openapi-mcp": "./src/cli.ts" },
+  "bin": {
+    "openapi-mcp": "./src/cli.ts"
+  },
   "scripts": {
     "test": "bun test",
     "check": "bunx biome check ."
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
   }
 }
