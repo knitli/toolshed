@@ -11,6 +11,12 @@
       "pathSets": [
         { "methods": ["POST", "DELETE"], "paths": { "/widgets": {} } }
       ]
+    },
+    "Widget.ReadWrite.Own": {
+      "schemes": { "DelegatedWork": { "privilegeLevel": 1 } },
+      "pathSets": [
+        { "methods": ["DELETE"], "paths": { "/widgets/{id}": {} } }
+      ]
     }
   }
 }

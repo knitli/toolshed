@@ -37,6 +37,27 @@ describe("lookupPermissions", () => {
     expect(m?.confidence).toBe("prefix");
   });
 
+  test("longest prefix wins over a shorter one when both exist", () => {
+    // Both depths carry a different permission at a different privilege
+    // level, so picking the wrong one is observable.
+    const depthDataset: PermissionsDataset = {
+      permissions: {
+        "Foo.Read": {
+          schemes: { DelegatedWork: { privilegeLevel: 1 } },
+          pathSets: [{ methods: ["GET"], paths: { "/foo": {} } }],
+        },
+        "Foo.Bar.ReadWrite": {
+          schemes: { DelegatedWork: { privilegeLevel: 8 } },
+          pathSets: [{ methods: ["GET"], paths: { "/foo/bar": {} } }],
+        },
+      },
+    };
+    const depthIndex = buildPermissionIndex(depthDataset);
+    const m = lookupPermissions(depthIndex, "/foo/bar/baz", "GET");
+    expect(m?.permissions).toEqual(["Foo.Bar.ReadWrite"]);
+    expect(m?.privilegeLevel).toBe(8);
+  });
+
   test("returns null when nothing matches", () => {
     expect(lookupPermissions(index, "/gadgets", "GET")).toBeNull();
   });
@@ -82,12 +103,23 @@ describe("applyPermissions", () => {
 
     const list = ops.find((o) => o.qualifiedId === "tiny:widgets.ListWidgets");
     expect(list?.permissions).toEqual(["Widget.Read"]);
+    expect(list?.permConfidence).toBe("exact");
     expect(list?.privilegeLevel).toBe(2);
     expect(list?.risk).toBe("routine");
 
     const create = ops.find((o) => o.qualifiedId === "tiny:widgets.CreateWidget");
     expect(create?.privilegeLevel).toBe(5);
     expect(create?.risk).toBe("high");
+
+    // Exact match beats the prefix fallback, and the low privilege level it
+    // resolves to must actually flip risk from its pre-mapping "high".
+    const del = ops.find(
+      (o) => o.qualifiedId === "tiny:widgets.widget.DeleteWidget",
+    );
+    expect(del?.permissions).toEqual(["Widget.ReadWrite.Own"]);
+    expect(del?.permConfidence).toBe("exact");
+    expect(del?.privilegeLevel).toBe(1);
+    expect(del?.risk).toBe("routine");
   });
 
   test("unmapped write operations stay high risk", async () => {
