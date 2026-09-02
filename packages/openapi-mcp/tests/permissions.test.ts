@@ -49,6 +49,27 @@ describe("lookupPermissions", () => {
     const m = lookupPermissions(index, "/widgets", "POST");
     expect(m?.privilegeLevel).toBe(5);
   });
+
+  test("resolves the true maximum privilege when two permissions overlap on the same path and method, not the alphabetically-first one", () => {
+    // "AAA.Low" sorts before "ZZZ.High" but has the lower privilege level.
+    // A naive `levels[0]` after sorting `permissions` would wrongly return 1.
+    const overlapDataset: PermissionsDataset = {
+      permissions: {
+        "AAA.Low": {
+          schemes: { DelegatedWork: { privilegeLevel: 1 } },
+          pathSets: [{ methods: ["GET"], paths: { "/overlap": {} } }],
+        },
+        "ZZZ.High": {
+          schemes: { DelegatedWork: { privilegeLevel: 9 } },
+          pathSets: [{ methods: ["GET"], paths: { "/overlap": {} } }],
+        },
+      },
+    };
+    const overlapIndex = buildPermissionIndex(overlapDataset);
+    const m = lookupPermissions(overlapIndex, "/overlap", "GET");
+    expect(m?.permissions).toEqual(["AAA.Low", "ZZZ.High"]);
+    expect(m?.privilegeLevel).toBe(9);
+  });
 });
 
 describe("applyPermissions", () => {
