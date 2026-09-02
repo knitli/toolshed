@@ -10,12 +10,21 @@ describe("loadSpec", () => {
     expect(Object.keys(doc.paths)).toHaveLength(4);
   });
 
-  test("parses JSON with the same result", async () => {
+  test("gives stable results when the same doc is re-serialized as JSON", async () => {
     const yaml = await loadSpec(FIXTURE);
     const jsonPath = `${import.meta.dir}/tmp-load.json`;
     await Bun.write(jsonPath, JSON.stringify(yaml));
     const json = await loadSpec(jsonPath);
     expect(json).toEqual(yaml);
+  });
+
+  test("routes .json files through JSON.parse, not the YAML parser", async () => {
+    // Block-style YAML is valid YAML but invalid JSON (no braces, unquoted
+    // keys). If the .json branch dispatched to Bun.YAML.parse instead of
+    // JSON.parse, this would parse cleanly and the throw would never fire.
+    const path = `${import.meta.dir}/tmp-block-yaml.json`;
+    await Bun.write(path, "openapi: 3.0.4\npaths:\n  /x: {}\n");
+    await expect(loadSpec(path)).rejects.toThrow();
   });
 
   test("rejects a document with no paths", async () => {
