@@ -1,0 +1,76 @@
+openapi: 3.0.4
+info:
+  title: Tiny API
+  version: v1
+servers:
+  - url: https://tiny.example.com
+paths:
+  /widgets:
+    get:
+      operationId: widgets.ListWidgets
+      summary: List widgets
+      tags: [widgets]
+      x-ms-pageable:
+        nextLinkName: "@odata.nextLink"
+      responses:
+        "200": { description: ok }
+    post:
+      operationId: widgets.CreateWidget
+      summary: Create a widget
+      tags: [widgets]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Widget"
+      responses:
+        "201": { description: created }
+  /widgets/{widget-id}:
+    get:
+      operationId: widgets.widget.GetWidget
+      summary: Get a widget
+      tags: [widgets]
+      parameters:
+        - name: widget-id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: ok }
+    delete:
+      operationId: widgets.widget.DeleteWidget
+      summary: Delete a widget
+      tags: [widgets]
+      deprecated: true
+      parameters:
+        - name: widget-id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: gone }
+  /widgets/getByIds:
+    post:
+      operationId: widgets.getByIds
+      summary: Look up widgets by id
+      tags: [widgets]
+      responses:
+        "200": { description: ok }
+  /$batch:
+    post:
+      operationId: batch.Batch
+      summary: Send a batch of requests
+      tags: [batch]
+      responses:
+        "200": { description: ok }
+components:
+  schemas:
+    Widget:
+      type: object
+      properties:
+        id: { type: string }
+        owner: { $ref: "#/components/schemas/Owner" }
+    Owner:
+      type: object
+      properties:
+        name: { type: string }
