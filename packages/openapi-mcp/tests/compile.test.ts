@@ -102,4 +102,31 @@ describe("compile", () => {
     expect(second).toEqual(first);
     expect(first).toHaveLength(6);
   });
+
+  test("leaves no half-built artifact when a mid-transaction step fails", async () => {
+    // Force the fts5 population step (the last DML before meta) to throw,
+    // simulating a failure after schema creation and every row insert.
+    const originalRun = Database.prototype.run;
+    Database.prototype.run = function (this: Database, sql: string, ...args: unknown[]) {
+      if (sql.includes("INSERT INTO operations_fts")) {
+        throw new Error("simulated mid-transaction failure");
+      }
+      return originalRun.call(this, sql, ...args);
+    } as typeof Database.prototype.run;
+
+    try {
+      await expect(compile(opts)).rejects.toThrow("simulated mid-transaction failure");
+    } finally {
+      Database.prototype.run = originalRun;
+    }
+
+    // A rollback that undoes schema creation too leaves an empty file: no
+    // tables at all, not a schema-only or partially-populated one.
+    const db = new Database(OUT, { readonly: true });
+    const tables = db
+      .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all();
+    expect(tables).toEqual([]);
+    db.close();
+  });
 });

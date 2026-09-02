@@ -50,8 +50,8 @@ export async function compile(
 
   const db = new Database(options.outPath, { create: true });
   try {
-    createSchema(db);
     db.run("BEGIN");
+    createSchema(db);
 
     const insertOp = db.prepare(
       `INSERT INTO operations
@@ -99,7 +99,12 @@ export async function compile(
 
     db.run("COMMIT");
   } catch (err) {
-    db.run("ROLLBACK");
+    try {
+      db.run("ROLLBACK");
+    } catch {
+      // No active transaction (e.g. BEGIN itself failed) — the original
+      // error is what matters; don't let a rollback failure mask it.
+    }
     throw err;
   } finally {
     db.close();
