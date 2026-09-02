@@ -39,24 +39,25 @@ openapi-mcp compile --spec <path> --api <name> --out <path> \
 ### `keygen`
 
 ```bash
-openapi-mcp keygen
+openapi-mcp keygen [--out <dir>]
 ```
 
-Generates an Ed25519 keypair and prints the public key PEM followed by the
-private key PEM to stdout. Keep the private key to sign artifacts with
-`compile --sign-key`; ship the public key alongside consumers so they can
-verify.
+Generates an Ed25519 keypair and writes it as two files, `openapi-mcp.pub`
+and `openapi-mcp.key` (private key written with mode `0600`), into the
+current directory or `--out` if given. Prints both paths on success. Refuses
+to overwrite an existing file, failing with `error: <path> exists`. Keep the
+private key to sign artifacts with `compile --sign-key`; ship the public key
+alongside consumers so they can verify.
 
-### `verify` (in progress)
+### `verify`
 
 ```bash
 openapi-mcp verify --artifact <path> --sig <path> --pub <path>
 ```
 
-Verifies an artifact's Ed25519 signature against a public key PEM, exiting
-non-zero on mismatch. This subcommand is landing in a parallel change to this
-package; the signing/verification primitives it wraps already exist in
-`src/sign.ts`.
+Verifies an artifact's Ed25519 signature against a public key PEM, printing
+`valid` and exiting 0 on success, or printing `invalid` and exiting non-zero
+on mismatch.
 
 ## Artifact format
 
@@ -67,7 +68,10 @@ or any SQLite client) with:
   (`read`/`write`), risk (`routine`/`high`), permissions, privilege level,
   summary, tags, parameters, and request body schema reference.
 - **`operations_fts`** — an `fts5` full-text index over operation id, summary,
-  path, tags, and api, for fast keyword lookup across large specs.
+  path, tags, api, and `search_text`, for fast keyword lookup across large
+  specs. `search_text` is a word-split shadow of the operation id and path —
+  it breaks camelCase/kebab-case identifiers like `sendMail` into separate
+  words, so a multi-word query like "send mail" matches.
 - **`schemas`** — named JSON schema definitions, keyed by `(api, name)`.
 - **`meta`** — key/value provenance: `format_version`, `compiler_version`,
   the JSON array `apis` of every API mounted into this artifact, and
@@ -75,8 +79,10 @@ or any SQLite client) with:
 
 `FORMAT_VERSION` is bumped whenever the layout changes incompatibly; artifacts
 carry their format version in `meta` so a server can refuse to load an
-artifact it doesn't understand. `--append` mounts an additional API into an
-existing artifact without disturbing rows already compiled from other APIs.
+artifact it doesn't understand. The current `FORMAT_VERSION` is `3`; v3 added
+the `search_text` column and its FTS indexing described above. `--append`
+mounts an additional API into an existing artifact without disturbing rows
+already compiled from other APIs.
 
 ## Permissions dataset format
 
