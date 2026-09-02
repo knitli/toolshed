@@ -31,7 +31,10 @@ describe.skipIf(!SPEC)("Microsoft Graph invariants", () => {
     ).toBe(17777);
 
     // Safety invariant: no mutating method may be stored as a read unless an
-    // override produced it. Overrides only ever apply to POST.
+    // override produced it. Overrides only ever apply to POST. This query
+    // excludes POST by construction, so it can only ever see the rows the
+    // override list is not allowed to touch — kept for that narrower check,
+    // but the override's actual effect is asserted below.
     expect(
       db.query<{ n: number }, []>(
         `SELECT COUNT(*) n FROM operations
@@ -39,13 +42,29 @@ describe.skipIf(!SPEC)("Microsoft Graph invariants", () => {
       ).get()?.n,
     ).toBe(0);
 
-    // $batch is never a read and never routine.
+    // The override list (READ_OVERRIDE_SUFFIXES) applies only to POST:
+    // assert its real effect rather than a query that excludes every POST
+    // it could touch. Count measured 2026-09-01 against the real spec.
+    expect(
+      db.query<{ n: number }, []>(
+        "SELECT COUNT(*) n FROM operations WHERE safety = 'read' AND method = 'POST'",
+      ).get()?.n,
+    ).toBe(101);
+
+    // Graph v1.0's OpenAPI document declares no `/$batch` path (batch is
+    // documented outside the spec), so this is expected to be empty; the
+    // write+high classification itself is covered by the fixture tests
+    // (tiny-api.yaml has one, asserted in Task 5). Kept as a guard in case
+    // a future revision adds `$batch` to the document.
     const batch = db
       .query<{ safety: string; risk: string }, []>(
         "SELECT safety, risk FROM operations WHERE path LIKE '%$batch'",
       )
       .all();
-    expect(batch.every((b) => b.safety === "write" && b.risk === "high")).toBe(true);
+    expect(batch.length).toBe(0);
+    if (batch.length > 0) {
+      expect(batch.every((b) => b.safety === "write" && b.risk === "high")).toBe(true);
+    }
 
     // Pageable and deprecated counts measured on the same revision.
     expect(
