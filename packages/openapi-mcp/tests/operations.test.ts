@@ -121,4 +121,41 @@ describe("extractOperations", () => {
     doc.paths["/widgets"].get.operationId = undefined;
     expect(() => extractOperations(doc, "tiny")).toThrow(/operationId/);
   });
+
+  test("throws on an operation-level servers override", () => {
+    // Real documents (Microsoft Graph included) never declare these — this
+    // must be an inline doc, not a fixture mutation. The compiler fails
+    // closed rather than silently emitting the wrong server_url.
+    const doc: OpenApiDoc = {
+      openapi: "3.0.4",
+      servers: [{ url: "https://tiny.example.com" }],
+      paths: {
+        "/widgets": {
+          get: {
+            operationId: "widgets.ListWidgets",
+            servers: [{ url: "https://override.example.com" }],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    expect(() => extractOperations(doc, "tiny")).toThrow(/servers/);
+  });
+
+  test("throws on a path-item-level servers override", () => {
+    const doc: OpenApiDoc = {
+      openapi: "3.0.4",
+      servers: [{ url: "https://tiny.example.com" }],
+      paths: {
+        "/widgets": {
+          servers: [{ url: "https://override.example.com" }],
+          get: {
+            operationId: "widgets.ListWidgets",
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    expect(() => extractOperations(doc, "tiny")).toThrow(/servers/);
+  });
 });

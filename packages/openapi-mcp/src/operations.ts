@@ -75,8 +75,18 @@ export function extractOperations(
   const records: OperationRecord[] = [];
 
   for (const [path, pathItem] of Object.entries(doc.paths)) {
+    if (pathItem.servers !== undefined) {
+      throw new Error(
+        `${path}: path-item-level "servers" overrides are not supported`,
+      );
+    }
     for (const [method, op] of Object.entries(pathItem)) {
       if (!HTTP_METHODS.has(method)) continue;
+      if (op.servers !== undefined) {
+        throw new Error(
+          `${method.toUpperCase()} ${path}: operation-level "servers" overrides are not supported`,
+        );
+      }
 
       const operationId = op.operationId;
       if (typeof operationId !== "string" || operationId.length === 0) {
