@@ -38,12 +38,13 @@ describe("cli", () => {
   test("exits non-zero when --spec is missing", async () => {
     const r = await run(["compile", "--api", "tiny", "--out", OUT]);
     expect(r.code).not.toBe(0);
-    expect(r.stderr).toContain("--spec");
+    expect(r.stderr).toContain("--spec is required");
   });
 
   test("exits non-zero on an unknown subcommand", async () => {
     const r = await run(["frobnicate"]);
     expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain('unknown command "frobnicate"');
   });
 
   test("keygen prints a usable keypair", async () => {
