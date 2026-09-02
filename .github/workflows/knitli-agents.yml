@@ -1,0 +1,258 @@
+# SPDX-FileCopyrightText: 2025 Knitli Inc. <knitli@knitli.com>
+# SPDX-FileContributor: Adam Poulemanos <adam@knitli.com>
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+#
+# Knitli Agent personas — consolidated caller for marque-dev.
+#
+# Org secrets required (inherited): KNITLI_AGENT_CLIENT_ID,
+# KNITLI_AGENT_PRIVATE_KEY, CLAUDE_CODE_OAUTH_TOKEN.
+#
+# Personas / how to invoke:
+#   review    auto on PRs        + "@knitli-review"   in a PR comment
+#   triage    auto on new issues + "@knitli-triage"   in an issue comment
+#   security  on-demand          : "@knitli-security"  in a PR comment, or an issue labeled "security"
+#   docs      on-demand          : "@knitli-docs"      (opens a PR)
+#   fix       on-demand          : "@knitli-fix"       (opens a PR; highest trust)
+#
+# Comment out any job you don't want enabled on this repo.
+
+name: Knitli Agents
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+  issues:
+    types: [opened, reopened, labeled, assigned]
+  issue_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created]
+
+# Restrictive default: any job that doesn't declare its own `permissions:`
+# gets read-only contents access. Every job below overrides this with the
+# scopes its reusable workflow actually needs.
+permissions:
+  contents: read
+
+jobs:
+  # 2026-08 CI-usage reduction, part 2: gates the `review` job's auto-fire
+  # branch on `ci.yml` having actually passed. Reviewing a commit CI hasn't
+  # judged yet wastes an LLM call on code that may not even build, and
+  # without this a fix-iterate cycle got a full Claude review on every
+  # single push. Only runs for the same auto-fire events `review` itself
+  # auto-fires on; the explicit "@knitli-review" comment branch bypasses
+  # this entirely (see the `review` job's `if:` below).
+  #
+  # Also functions as the "runs once" behavior for a burst of pushes:
+  # `ci.yml`'s own `cancel-in-progress` concurrency group cancels every
+  # push's CI run but the last, so scripts/wait-for-ci.sh reports a
+  # non-`success` conclusion for those and `review` skips them too — only
+  # the final, actually-green push gets reviewed.
+  wait-for-ci:
+    name: Wait for CI to pass (review gate)
+    # `edited` requires `github.event.changes.base == null` (review finding
+    # on #2142): GitHub's `edited` action covers title/body changes AND base-
+    # branch retargets — the payload's `changes.base` key is present only for
+    # the latter. ci.yml never triggers on `edited` at all, so a retarget
+    # gets no fresh CI run against the new base either way; excluding it here
+    # means that case gets no automatic review (rather than one waved through
+    # on a CI result that validated the OLD base), consistent with
+    # scripts/wait-for-ci.sh's EVENT_TIME epoch carve-out existing ONLY for
+    # the harmless title/body case.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft != true &&
+      (github.event.action == 'opened' ||
+      github.event.action == 'reopened' ||
+      github.event.action == 'synchronize' ||
+      (github.event.action == 'edited' && github.event.changes.base == null) ||
+      github.event.action == 'ready_for_review')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # `contents: read` is required here even though the workflow-level
+    # default (top of file) already grants it — a job-level `permissions:`
+    # block REPLACES the default for that job rather than adding to it, so
+    # omitting `contents` here drops checkout to no repo access at all
+    # (surfaces as a confusing "repository not found" on this private repo,
+    # not a permissions-denied error). `pull-requests: read` is for
+    # scripts/wait-for-ci.sh's final live draft-state re-check.
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      conclusion: ${{ steps.wait.outputs.conclusion }}
+    steps:
+      # Checked out from the PR's BASE commit, not the default merge ref —
+      # load-bearing, not a style choice (review finding on #2142). The
+      # default `pull_request` checkout includes the PR's own changes, so a
+      # PR that edits this very script could rewrite it to unconditionally
+      # `echo conclusion=success`, bypassing the CI gate entirely and
+      # launching the secret-bearing `review` job regardless of whether CI
+      # actually passed. Pinning to `base.sha` means the gate always runs
+      # the trusted, already-reviewed-and-merged version of itself, never
+      # the version under review. (This also means wait-for-ci can't
+      # exercise ITS OWN changes until they're merged to main — expected,
+      # not a bug: that's the trust boundary working as intended.)
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+
+      - name: Poll for the CI workflow's conclusion
+        id: wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Freshness floor (review finding on #2142): a draft PR marked
+          # ready without a new commit keeps its head_sha, and ci.yml's
+          # draft-time run for that SHA already completed successfully
+          # (its slow jobs were skipped, not failed). Without this, a poll
+          # landing before the new ready_for_review run is created could
+          # grab that stale success and wave the review through early.
+          #
+          # Epoch (no-op filter) specifically for `edited`: ci.yml's own
+          # `pull_request.types` is [opened, reopened, synchronize,
+          # ready_for_review] — it does NOT include `edited`, so a PR
+          # title/body edit never produces a new ci.yml run at all. Applying
+          # the freshness floor there would starve the poll for the full
+          # MAX_WAIT_SECONDS looking for a run that will never arrive,
+          # silently suppressing the review an edit-triggered event should
+          # still get for the unchanged, already-green SHA (review finding
+          # on #2142). See scripts/wait-for-ci.sh's header for the rest of
+          # the rationale, including the final live draft re-check.
+          EVENT_TIME: ${{ github.event.action != 'edited' && github.event.pull_request.updated_at || '1970-01-01T00:00:00Z' }}
+        run: bash scripts/wait-for-ci.sh
+
+  review:
+    name: Maintainer decision review
+    needs: wait-for-ci
+    # `!cancelled()` — same reason ci.yml's `wasm` job carries it: `wait-for-ci`
+    # is itself gated (skipped for the comment-triggered branch below), and a
+    # bare `if:` would implicitly require `success()` on `needs`, cascade-
+    # skipping `review` for exactly the events that don't touch `wait-for-ci`
+    # at all.
+    #
+    # 2026-08 CI-usage reduction: the auto-fire branch (PR opened/
+    # reopened/synchronize/edited/ready_for_review) now skips a draft PR AND
+    # requires `wait-for-ci` to have observed a successful `ci.yml` run for
+    # this exact head SHA — a draft still under agent iteration, or a commit
+    # CI hasn't (yet, or successfully) judged, doesn't get a Claude review.
+    # `ready_for_review` picks a PR up once it actually is one. The explicit
+    # "@knitli-review" comment branch below is deliberately NOT gated on
+    # draft or CI status: a maintainer asking for review by name should get
+    # it regardless.
+    if: >-
+      !cancelled() &&
+      (
+      (
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft != true &&
+      needs.wait-for-ci.outputs.conclusion == 'success' &&
+      (github.event.action == 'opened' ||
+      github.event.action == 'reopened' ||
+      github.event.action == 'synchronize' ||
+      (github.event.action == 'edited' && github.event.changes.base == null) ||
+      github.event.action == 'ready_for_review')
+      ) ||
+      ((
+      (github.event_name == 'issue_comment' && github.event.pull_request != null) ||
+      github.event_name == 'pull_request_review_comment' ||
+      github.event_name == 'pull_request_review'
+      ) &&
+      (contains(github.event.comment.body, '@knitli-review') &&
+      (
+      github.event.comment.author_association == 'MEMBER' ||
+      github.event.comment.author_association == 'OWNER'
+      )
+      ))
+      )
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      id-token: write
+      issues: read
+      pull-requests: write
+    uses: knitli/.github/.github/workflows/claude-pr-reviewer.yml@dcae94003fadba215b451f4232a0b5e41b95755a
+    secrets: inherit
+
+  triage:
+    if: >-
+      (github.event_name == 'issues' ||
+      github.event_name == 'issue_comment') &&
+      contains(github.event.comment.body, '@knitli-triage') &&
+      (github.event.comment.author_association == 'MEMBER' ||
+      github.event.comment.author_association == 'OWNER')
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      id-token: write
+      issues: write
+      pull-requests: read
+    uses: knitli/.github/.github/workflows/claude-issue-triage.yml@dcae94003fadba215b451f4232a0b5e41b95755a
+    secrets: inherit
+
+  security:
+    # On-call, not automatic: fires only on an explicit "@knitli-security"
+    # request or a "security" label — never on every PR open (that was
+    # crowding out the `review` job, which does auto-fire on open).
+    if: >-
+      ((
+      (github.event_name == 'issue_comment' && github.event.pull_request != null) ||
+      github.event_name == 'pull_request_review_comment'
+      ) &&
+      contains(github.event.comment.body, '@knitli-security') &&
+      (github.event.comment.author_association == 'MEMBER' ||
+      github.event.comment.author_association == 'OWNER')) ||
+      (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'security')
+    permissions:
+      actions: read
+      contents: read
+      checks: read
+      id-token: write
+      issues: write
+      pull-requests: write
+      security-events: read
+    uses: knitli/.github/.github/workflows/claude-security-review.yml@dcae94003fadba215b451f4232a0b5e41b95755a
+    secrets: inherit
+
+  docs:
+    if: >-
+      (github.event_name == 'issue_comment' ||
+      github.event_name == 'pull_request_review_comment') &&
+      contains(github.event.comment.body, '@knitli-docs') &&
+      (github.event.comment.author_association == 'MEMBER' ||
+      github.event.comment.author_association == 'OWNER')
+    permissions:
+      actions: read
+      contents: write
+      checks: read
+      id-token: write
+      issues: write
+      pull-requests: write
+    uses: knitli/.github/.github/workflows/claude-docs.yml@dcae94003fadba215b451f4232a0b5e41b95755a
+    secrets: inherit
+
+  fix:
+    if: >-
+      (github.event_name == 'issues' && github.event.action == 'assigned' && contains(github.event.assignee, 'knitli-agent')) ||
+      ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_comment' || github.event_name == 'pull_request_review_comment') && contains(github.event.comment.body, '@knitli-fix') && (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.pull_request.assignees, 'knitli-agent') && github.event.review.state == 'changes_requested')
+    permissions:
+      actions: read
+      contents: write
+      checks: read
+      id-token: write
+      issues: write
+      pull-requests: write
+      security-events: read
+    
+    uses: knitli/.github/.github/workflows/claude-fix.yml@dcae94003fadba215b451f4232a0b5e41b95755a
+    secrets: inherit
