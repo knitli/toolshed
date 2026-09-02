@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -31,15 +30,17 @@ if (command === "keygen") {
   const dir = values.out ?? ".";
   const pubPath = join(dir, "openapi-mcp.pub");
   const keyPath = join(dir, "openapi-mcp.key");
-  for (const p of [pubPath, keyPath]) {
-    if (existsSync(p)) fail(`${p} exists`, { usage: false });
-  }
   try {
     const { publicKeyPem, privateKeyPem } = generateKeypair();
-    await writeFile(pubPath, publicKeyPem);
-    await writeFile(keyPath, privateKeyPem, { mode: 0o600 });
+    // "wx" fails with EEXIST on any existing file *or* symlink (dangling or
+    // not) instead of following it — existsSync + a separate write would
+    // both race and let a pre-planted symlink redirect these bytes.
+    await writeFile(pubPath, publicKeyPem, { flag: "wx" });
+    await writeFile(keyPath, privateKeyPem, { flag: "wx", mode: 0o600 });
   } catch (err) {
-    fail(err instanceof Error ? err.message : String(err), { usage: false });
+    const e = err as NodeJS.ErrnoException;
+    if (e.code === "EEXIST") fail(`${e.path} exists`, { usage: false });
+    fail(e instanceof Error ? e.message : String(e), { usage: false });
   }
   console.log(pubPath);
   console.log(keyPath);

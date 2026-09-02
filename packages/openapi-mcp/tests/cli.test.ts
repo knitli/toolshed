@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { statSync, unlinkSync } from "node:fs";
+import { existsSync, statSync, symlinkSync, unlinkSync } from "node:fs";
 import { generateKeypair, signArtifact } from "../src/sign.ts";
 
 const CLI = `${import.meta.dir}/../src/cli.ts`;
@@ -89,6 +89,17 @@ describe("cli", () => {
     expect(second.code).toBe(1);
     expect(second.stderr).toContain("error:");
     expect(second.stderr).toContain("exists");
+  });
+
+  test("keygen refuses to write through a pre-planted dangling symlink", async () => {
+    const trap = "/tmp/does-not-exist-openapi-mcp-symlink-target";
+    symlinkSync(trap, KEY);
+    const r = await run(["keygen", "--out", import.meta.dir]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("error:");
+    expect(r.stderr).toContain("exists");
+    // The private key must never be written through the symlink.
+    expect(existsSync(trap)).toBe(false);
   });
 
   test("verify accepts a good signature and rejects a tampered artifact", async () => {
