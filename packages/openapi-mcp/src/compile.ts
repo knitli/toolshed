@@ -100,9 +100,9 @@ export async function compile(
       `INSERT INTO operations
        (qualified_id, api, operation_id, method, path, safety, risk,
         operation_type, pageable, deprecated, permissions, perm_confidence,
-        privilege_level, summary, tags, params_json, body_ref, body_schema,
-        body_media_type, server_url)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        privilege_level, summary, tags, params_json, search_text, body_ref,
+        body_schema, body_media_type, server_url)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     );
     for (const op of operations) {
       insertOp.run(
@@ -111,7 +111,7 @@ export async function compile(
         op.pageable ? 1 : 0, op.deprecated ? 1 : 0,
         op.permissions ? JSON.stringify(op.permissions) : null,
         op.permConfidence, op.privilegeLevel, op.summary, op.tags,
-        op.paramsJson, op.bodyRef, op.bodySchemaJson, op.bodyMediaType,
+        op.paramsJson, op.searchText, op.bodyRef, op.bodySchemaJson, op.bodyMediaType,
         op.serverUrl,
       );
     }
@@ -126,14 +126,14 @@ export async function compile(
     // mount's rows are already indexed and must not be touched again.
     if (options.append) {
       db.prepare(
-        `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api)
-         SELECT rowid, qualified_id, operation_id, summary, path, tags, api
+        `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api, search_text)
+         SELECT rowid, qualified_id, operation_id, summary, path, tags, api, search_text
          FROM operations WHERE api = ?`,
       ).run(options.api);
     } else {
       db.exec(
-        `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api)
-         SELECT rowid, qualified_id, operation_id, summary, path, tags, api FROM operations`,
+        `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api, search_text)
+         SELECT rowid, qualified_id, operation_id, summary, path, tags, api, search_text FROM operations`,
       );
     }
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { OpenApiDoc } from "../src/load.ts";
 import { loadSpec } from "../src/load.ts";
-import { extractOperations, MAX_SUMMARY } from "../src/operations.ts";
+import { extractOperations, MAX_SUMMARY, splitWords } from "../src/operations.ts";
 
 const FIXTURE = `${import.meta.dir}/../fixtures/tiny-api.yaml`;
 const load = async () => extractOperations(await loadSpec(FIXTURE), "tiny");
@@ -110,6 +110,14 @@ describe("extractOperations", () => {
     expect(names).toEqual(["limit", "widget-id"]);
   });
 
+  test("builds searchText from operationId and path via splitWords", async () => {
+    const op = await byId("tiny:widgets.widget.GetWidget");
+    expect(op.searchText).toBe(
+      `${splitWords(op.operationId)} ${splitWords(op.path)}`,
+    );
+    expect(op.searchText).toContain("widget");
+  });
+
   test("uses the document server url", async () => {
     expect((await byId("tiny:widgets.ListWidgets")).serverUrl).toBe(
       "https://tiny.example.com",
@@ -172,6 +180,23 @@ describe("extractOperations", () => {
       },
     };
     expect(() => extractOperations(doc, "tiny")).toThrow(/servers/);
+  });
+});
+
+describe("splitWords", () => {
+  test("splits camelCase boundaries", () => {
+    expect(splitWords("sendMail")).toBe("send mail");
+  });
+
+  test("splits on . / _ - and {} separators, and lowercases", () => {
+    expect(splitWords("me.sendMail")).toBe("me send mail");
+    expect(splitWords("/me/sendMail")).toBe("me send mail");
+    expect(splitWords("/widgets/{widget-id}")).toBe("widgets widget id");
+    expect(splitWords("SCREAMING_SNAKE_CASE")).toBe("screaming snake case");
+  });
+
+  test("collapses whitespace and skips empty segments", () => {
+    expect(splitWords("//me//sendMail//")).toBe("me send mail");
   });
 });
 

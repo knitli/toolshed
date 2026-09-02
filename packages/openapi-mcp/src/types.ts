@@ -19,6 +19,7 @@ export interface OperationRecord {
   summary: string | null;
   tags: string | null;
   paramsJson: string;
+  searchText: string;
   bodyRef: string | null;
   bodySchemaJson: string | null;
   bodyMediaType: string | null;

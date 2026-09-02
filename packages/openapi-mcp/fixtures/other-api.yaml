@@ -18,3 +18,10 @@ paths:
       tags: [zones]
       responses:
         "201": { description: created }
+  /me/sendMail:
+    post:
+      operationId: me.sendMail
+      summary: Send a mail message
+      tags: [me]
+      responses:
+        "202": { description: accepted }
