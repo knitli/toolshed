@@ -69,7 +69,7 @@ Raw payloads from threat events are logged to `${TMPDIR}/strip-ansi-threats/` fo
   No Rust toolchain needed. To build from source instead — or to enable the homograph feature
   below, which the formula does not include:
   ```sh
-  cargo install distill-strip-ansi
+  cargo install distill-strip-ansi --features unicode-normalize
   ```
 - `jq` (almost always already installed)
 
