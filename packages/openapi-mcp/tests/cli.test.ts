@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { unlinkSync } from "node:fs";
+import { statSync, unlinkSync } from "node:fs";
 import { generateKeypair, signArtifact } from "../src/sign.ts";
 
 const CLI = `${import.meta.dir}/../src/cli.ts`;
@@ -74,6 +74,12 @@ describe("cli", () => {
     expect(r.stdout).toContain(KEY);
     expect(await Bun.file(PUB).text()).toContain("BEGIN PUBLIC KEY");
     expect(await Bun.file(KEY).text()).toContain("BEGIN PRIVATE KEY");
+  });
+
+  test("keygen writes the private key file with 0600 permissions", async () => {
+    const r = await run(["keygen", "--out", import.meta.dir]);
+    expect(r.code).toBe(0);
+    expect(statSync(KEY).mode & 0o777).toBe(0o600);
   });
 
   test("keygen refuses to overwrite existing key files", async () => {

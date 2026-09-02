@@ -37,7 +37,7 @@ if (command === "keygen") {
   try {
     const { publicKeyPem, privateKeyPem } = generateKeypair();
     await writeFile(pubPath, publicKeyPem);
-    await writeFile(keyPath, privateKeyPem);
+    await writeFile(keyPath, privateKeyPem, { mode: 0o600 });
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err), { usage: false });
   }
