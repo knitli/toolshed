@@ -30,7 +30,8 @@
   },
   "workspaces": {
     "packages": [
-      "plugins/*"
+      "plugins/*",
+      "packages/*"
     ],
     "catalog": {
       "bun": "^1.3.12",
