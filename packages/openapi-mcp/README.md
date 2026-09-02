@@ -13,7 +13,8 @@ npm i -g @knitli/openapi-mcp
 bunx @knitli/openapi-mcp compile --spec ./openapi.yaml --api my-api --out ./my-api.sqlite
 ```
 
-Requires Node >=24 or Bun. Both runtimes work end to end; Bun is substantially
+Requires Node >=24 or Bun >=1.4 (the first Bun release that ships
+`node:sqlite`). Both runtimes work end to end; Bun is substantially
 faster on large YAML specs (see Performance below).
 
 ## CLI

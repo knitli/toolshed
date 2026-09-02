@@ -10,11 +10,13 @@ export const MAX_SUMMARY = 600;
  * fts5's unicode61 tokenizer already folds case but treats `sendMail` as one
  * token, so `MATCH 'send mail'` misses it — this widens the indexed text with
  * a word-split shadow so both the joined and split forms are searchable.
- * Splits camelCase boundaries, `. / _ - { }` separators, and whitespace, then
+ * Splits camelCase boundaries (including acronym runs: `getURLValue` →
+ * `get url value`), `. / _ - { }` separators, and whitespace, then
  * lowercases and collapses runs of whitespace. Deduping words is not required.
  */
 export function splitWords(text: string): string {
   return text
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .split(/[._/\-{}\s]+/)
     .filter(Boolean)

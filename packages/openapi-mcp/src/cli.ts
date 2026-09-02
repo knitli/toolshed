@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parseArgs } from "node:util";
+import { type ParseArgsConfig, parseArgs } from "node:util";
 import { compile } from "./compile.ts";
 import { generateKeypair, signArtifact, verifyArtifact } from "./sign.ts";
 
@@ -19,10 +19,19 @@ function fail(message: string, opts: { usage?: boolean } = {}): never {
   process.exit(1);
 }
 
+/** parseArgs throws on unknown flags and missing values; route that through fail. */
+function parseOrFail<T extends ParseArgsConfig>(config: T) {
+  try {
+    return parseArgs(config);
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err));
+  }
+}
+
 const [command, ...rest] = process.argv.slice(2);
 
 if (command === "keygen") {
-  const { values } = parseArgs({
+  const { values } = parseOrFail({
     args: rest,
     options: { out: { type: "string" } },
     strict: true,
@@ -36,7 +45,13 @@ if (command === "keygen") {
     // not) instead of following it — existsSync + a separate write would
     // both race and let a pre-planted symlink redirect these bytes.
     await writeFile(pubPath, publicKeyPem, { flag: "wx" });
-    await writeFile(keyPath, privateKeyPem, { flag: "wx", mode: 0o600 });
+    try {
+      await writeFile(keyPath, privateKeyPem, { flag: "wx", mode: 0o600 });
+    } catch (err) {
+      // All-or-nothing: never leave a public key with no matching private key.
+      await unlink(pubPath).catch(() => {});
+      throw err;
+    }
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
     if (e.code === "EEXIST") fail(`${e.path} exists`, { usage: false });
@@ -48,7 +63,7 @@ if (command === "keygen") {
 }
 
 if (command === "verify") {
-  const { values } = parseArgs({
+  const { values } = parseOrFail({
     args: rest,
     options: {
       artifact: { type: "string" },
@@ -77,7 +92,7 @@ if (command !== "compile") {
   fail(command ? `unknown command "${command}"` : "no command given");
 }
 
-const { values } = parseArgs({
+const { values } = parseOrFail({
   args: rest,
   options: {
     spec: { type: "string" },

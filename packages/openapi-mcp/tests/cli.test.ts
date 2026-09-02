@@ -91,6 +91,23 @@ describe("cli", () => {
     expect(second.stderr).toContain("exists");
   });
 
+  test("keygen rolls back the public key when only the private key exists", async () => {
+    await Bun.write(KEY, "pre-existing private key");
+    const r = await run(["keygen", "--out", import.meta.dir]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("exists");
+    // The freshly generated public key must not be left behind mismatched.
+    expect(existsSync(PUB)).toBe(false);
+  });
+
+  test("malformed flags print a clean error with no stack trace", async () => {
+    const r = await run(["verify", "--bogus"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("error:");
+    expect(r.stderr).not.toContain(" at ");
+    expect(r.stderr).not.toContain(CLI);
+  });
+
   test("keygen refuses to write through a pre-planted dangling symlink", async () => {
     const trap = "/tmp/does-not-exist-openapi-mcp-symlink-target";
     symlinkSync(trap, KEY);

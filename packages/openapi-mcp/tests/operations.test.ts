@@ -188,6 +188,11 @@ describe("splitWords", () => {
     expect(splitWords("sendMail")).toBe("send mail");
   });
 
+  test("splits acronym runs followed by a capitalized word", () => {
+    expect(splitWords("getURLValue")).toBe("get url value");
+    expect(splitWords("getAPIKeys")).toBe("get api keys");
+  });
+
   test("splits on . / _ - and {} separators, and lowercases", () => {
     expect(splitWords("me.sendMail")).toBe("me send mail");
     expect(splitWords("/me/sendMail")).toBe("me send mail");
