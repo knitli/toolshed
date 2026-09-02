@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { OpenApiDoc } from "../src/load";
 import { loadSpec } from "../src/load";
 import { extractOperations, MAX_SUMMARY } from "../src/operations";
 
@@ -60,6 +61,38 @@ describe("extractOperations", () => {
     expect(params).toHaveLength(1);
     expect(params[0].name).toBe("widget-id");
     expect(params[0].required).toBe(true);
+  });
+
+  test("merges path-item-level parameters with operation-level parameters", async () => {
+    // 10,101 of Microsoft Graph's 11,493 paths declare parameters at the
+    // path-item level, not the operation level — tiny-api.yaml never does,
+    // so this must be an inline doc, not a fixture mutation.
+    const doc: OpenApiDoc = {
+      openapi: "3.0.4",
+      servers: [{ url: "https://tiny.example.com" }],
+      paths: {
+        "/widgets/{widget-id}/parts": {
+          parameters: [
+            { name: "widget-id", in: "path", required: true, schema: { type: "string" } },
+          ],
+          get: {
+            operationId: "widgets.widget.ListParts",
+            parameters: [
+              { name: "limit", in: "query", required: false, schema: { type: "integer" } },
+            ],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const op = extractOperations(doc, "tiny").find(
+      (o) => o.qualifiedId === "tiny:widgets.widget.ListParts",
+    );
+    if (!op) throw new Error("missing tiny:widgets.widget.ListParts");
+    const names = (JSON.parse(op.paramsJson) as Array<{ name: string }>)
+      .map((p) => p.name)
+      .sort();
+    expect(names).toEqual(["limit", "widget-id"]);
   });
 
   test("uses the document server url", async () => {
