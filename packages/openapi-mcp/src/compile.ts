@@ -15,6 +15,8 @@ export interface CompileOptions {
   api: string;
   outPath: string;
   permissionsPath?: string;
+  /** Mount into an existing artifact instead of replacing it. */
+  append?: boolean;
 }
 
 export interface CompileResult {
@@ -42,16 +44,43 @@ export async function compile(
     applyPermissions(operations, { byMethod: new Map(), privilege: new Map() });
   }
 
-  try {
-    unlinkSync(options.outPath);
-  } catch {
-    // No previous artifact; nothing to remove.
+  const exists = await Bun.file(options.outPath).exists();
+  if (options.append && !exists) {
+    throw new Error(`${options.outPath} does not exist; cannot append`);
+  }
+  if (!options.append) {
+    try {
+      unlinkSync(options.outPath);
+    } catch {
+      // No previous artifact; nothing to remove.
+    }
   }
 
+  let existingApis: string[] = [];
   const db = new Database(options.outPath, { create: true });
   try {
     db.run("BEGIN");
-    createSchema(db);
+    if (options.append) {
+      const version = db
+        .query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
+        .get("format_version")?.value;
+      if (version !== String(FORMAT_VERSION)) {
+        throw new Error(
+          `format_version mismatch: artifact is ${version}, compiler is ${FORMAT_VERSION}`,
+        );
+      }
+      const mounted = JSON.parse(
+        db
+          .query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
+          .get("apis")?.value ?? "[]",
+      ) as string[];
+      if (mounted.includes(options.api)) {
+        throw new Error(`api "${options.api}" is already mounted`);
+      }
+      existingApis = mounted;
+    } else {
+      createSchema(db);
+    }
 
     const insertOp = db.prepare(
       `INSERT INTO operations
@@ -77,10 +106,21 @@ export async function compile(
     for (const s of schemas) insertSchema.run(s.api, s.name, s.json);
 
     // External-content fts5: populate from the base table after loading it.
-    db.run(
-      `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api)
-       SELECT rowid, qualified_id, operation_id, summary, path, tags, api FROM operations`,
-    );
+    // Appending only indexes the newly mounted api's rows — the first
+    // mount's rows are already indexed and must not be touched again.
+    if (options.append) {
+      db.run(
+        `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api)
+         SELECT rowid, qualified_id, operation_id, summary, path, tags, api
+         FROM operations WHERE api = ?`,
+        options.api,
+      );
+    } else {
+      db.run(
+        `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api)
+         SELECT rowid, qualified_id, operation_id, summary, path, tags, api FROM operations`,
+      );
+    }
 
     // Global keys plus per-api namespaced provenance. `apis` is a JSON array so
     // a second mount can append to it without rewriting anything.
@@ -90,7 +130,7 @@ export async function compile(
     for (const [key, value] of Object.entries({
       format_version: String(FORMAT_VERSION),
       compiler_version: COMPILER_VERSION,
-      apis: JSON.stringify([options.api]),
+      apis: JSON.stringify([...existingApis, options.api]),
       [`${options.api}.source_path`]: options.specPath,
       [`${options.api}.compiled_at`]: new Date().toISOString(),
     })) {

@@ -5,7 +5,7 @@ import { generateKeypair, signArtifact } from "./sign";
 
 const USAGE = `openapi-mcp — compile OpenAPI documents into signed MCP artifacts
 
-  compile --spec <path> --api <name> --out <path> [--permissions <path>] [--sign-key <path>]
+  compile --spec <path> --api <name> --out <path> [--append] [--permissions <path>] [--sign-key <path>]
   keygen
 `;
 
@@ -33,6 +33,7 @@ const { values } = parseArgs({
     spec: { type: "string" },
     api: { type: "string" },
     out: { type: "string" },
+    append: { type: "boolean" },
     permissions: { type: "string" },
     "sign-key": { type: "string" },
   },
@@ -48,6 +49,7 @@ const result = await compile({
   specPath: values.spec,
   api: values.api,
   outPath: values.out,
+  append: values.append === true,
   permissionsPath: values.permissions,
 });
 
