@@ -45,7 +45,10 @@
         "sa",
         "ansi"
       ]
-    }
+    },
+    "extraScopes": [
+      "openapi-mcp"
+    ]
   },
   "metadata": {
     "version": "1.0.0",

@@ -10,6 +10,7 @@
         "ctx",
         "strip-ansi",
         "codeweaver",
+        "openapi-mcp",
         "marketplace",
         "mkt",
         "market",
