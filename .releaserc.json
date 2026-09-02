@@ -1,5 +1,7 @@
 {
-  "branches": ["main"],
+  "branches": [
+    "main"
+  ],
   "tagFormat": "marketplace@${version}",
   "plugins": [
     [
@@ -43,52 +45,7 @@
             "release": "patch"
           },
           {
-            "breaking": true,
-            "scope": "repo",
-            "release": "major"
-          },
-          {
             "scope": "mkt",
-            "type": "perf",
-            "release": "patch"
-          },
-          {
-            "scope": "repo",
-            "type": "feat",
-            "release": "minor"
-          },
-          {
-            "scope": "repo",
-            "type": "fix",
-            "release": "patch"
-          },
-          {
-            "scope": "repo",
-            "type": "perf",
-            "release": "patch"
-          },
-          {
-            "breaking": true,
-            "scope": "ci",
-            "release": "major"
-          },
-          {
-            "scope": "ci",
-            "type": "perf",
-            "release": "patch"
-          },
-          {
-            "scope": "ci",
-            "type": "feat",
-            "release": "minor"
-          },
-          {
-            "scope": "ci",
-            "type": "fix",
-            "release": "patch"
-          },
-          {
-            "scope": "ci",
             "type": "perf",
             "release": "patch"
           },
