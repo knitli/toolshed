@@ -35,7 +35,7 @@ jobs:
       - name: Commit version sync
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
-          commit_message: 'chore(${{ matrix.plugin }}): sync plugin.json version [skip ci]'
+          commit_message: "chore(${{ matrix.plugin }}): sync plugin.json version [skip ci]"
           file_pattern: plugins/${{ matrix.plugin }}/.claude-plugin/plugin.json
   release-openapi-mcp:
     needs:
@@ -87,5 +87,5 @@ jobs:
       - name: Commit marketplace version sync
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
-          commit_message: 'chore(marketplace): sync marketplace.json version [skip ci]'
+          commit_message: "chore(marketplace): sync marketplace.json version [skip ci]"
           file_pattern: .claude-plugin/marketplace.json
