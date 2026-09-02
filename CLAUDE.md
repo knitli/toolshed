@@ -88,9 +88,12 @@ The Stop event re-fires if the hook's output is treated as new model feedback. L
 
 ## Current plugins
 
+- **strip-ansi** (`plugins/strip-ansi/`) — Strips tool output of ANSI escape characters and identifies malicious text with CVE. The only actively maintained plugin.
+
+Deprecated — still in the manifest so existing installs resolve, but unmaintained and slated for removal. Don't extend these; each has a `DEPRECATED.md`:
+
 - **ctx** (`plugins/ctx/`) — Context hygiene auditing. Has its own `CLAUDE.md` with detailed architecture.
-- **codeweaver** (`plugins/codeweaver/`) — Semantic code search MCP server. Alpha status. Bundles an MCP server config in `plugin.json` using `uvx`.
-- **strip-ansi** (`plugins/strip-ansi`) - Strips tool output of ANSI escape characters and identifies malicious text with CVE
+- **codeweaver** (`plugins/codeweaver/`) — Semantic code search MCP server. Bundles an MCP server config in `plugin.json` using `uvx`.
 
 ## Adding a new plugin
 
@@ -105,7 +108,7 @@ type(scope): message
 ```
 
 - **Scope is required** (`scope-empty: [2, 'never']`). Unscoped commits are rejected by the PR gate.
-- Valid scopes: any plugin name (`ctx`, `strip-ansi`, `codeweaver`) or `marketplace`.
+- Valid scopes: any plugin name (`strip-ansi`, `ctx`, `codeweaver`) or `marketplace`. Deprecated plugins keep their scopes so a critical `fix(...)` can still ship.
 - Routing is **scope-authoritative**, not path-based: a commit with `feat(ctx): …` releases ctx regardless of which files it touched, and nothing else. A commit with `feat(marketplace): …` releases the marketplace.
 - `feat` → minor bump, `fix` / `perf` → patch bump, `feat!` or `BREAKING CHANGE` → major bump.
 - `chore`, `docs`, `ci`, `style`, `refactor`, `test` do not trigger releases (catchall rule in commit-analyzer).
@@ -117,9 +120,9 @@ Short forms are accepted wherever a canonical scope is. Aliases live in `marketp
 
 ```json
 "scopeAliases": {
-  "marketplace": ["mkt"],
+  "marketplace": ["mkt", "market", "mp"],
   "codeweaver":  ["cw"],
-  "strip-ansi":  ["sa"]
+  "strip-ansi":  ["sa", "ansi"]
 }
 ```
 

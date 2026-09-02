@@ -1,6 +1,17 @@
 # ANSI Stripping for LLM Workflows — Context Handoff
 
-> Handoff doc for continuing this work in the `knitli/toolshed` repo. Self-contained: read this and you have everything from the prior conversation.
+> Historical decision record, 2026-04-07. Self-contained: read this and you have everything from
+> the prior conversation.
+>
+> **Status:** "Recommended Work" §1 (the Claude Code hook) shipped as the `strip-ansi` plugin —
+> `PostToolUse` on Bash, Read, and `mcp__.*`, shelling out to `distill-strip-ansi`, with full
+> replacement for MCP tools and `additionalContext` counter-signal for built-ins. The passive-vs-active
+> open question resolved as *both*. §2 resolved upstream rather than here: we opened the coordination
+> issue as the doc advised, and the author shipped an official tap at
+> <https://github.com/belt/homebrew-distill> (`brew install belt/distill/distill-strip-ansi`), so
+> there is no Knitli tap to build. §3 (threat-DB contributions), §4 (benchmarking against real LLM
+> output), and the git-hook / `gh`-extension ideas in §1 are all still open. The tool evaluation and the "don't write a parser" decision remain the rationale for
+> the plugin's dependency choice.
 
 ## The Problem
 
@@ -144,8 +155,12 @@ distill-strip-ansi = "0.4"
 ```
 
 **Upstream:**
+- Repo: <https://github.com/belt/distill-strip-ansi>
 - crates.io: <https://crates.io/crates/distill-strip-ansi>
-- (Find the repo via crates.io — wasn't captured in this conversation.)
+- Homebrew tap: <https://github.com/belt/homebrew-distill> — `brew install belt/distill/distill-strip-ansi`
+
+> Note: the table above evaluated v0.4.0; upstream is v0.6.1 as of the tap formula, and now ships a
+> second `distill-ansi` binary alongside `strip-ansi`.
 
 ## TL;DR for the next conversation
 

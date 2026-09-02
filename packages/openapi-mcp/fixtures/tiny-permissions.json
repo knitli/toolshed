@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "Widget.Read": {
+      "schemes": { "DelegatedWork": { "privilegeLevel": 2 } },
+      "pathSets": [
+        { "methods": ["GET"], "paths": { "/widgets": {}, "/widgets/{id}": {} } }
+      ]
+    },
+    "Widget.ReadWrite.All": {
+      "schemes": { "DelegatedWork": { "privilegeLevel": 5 } },
+      "pathSets": [
+        { "methods": ["POST", "DELETE"], "paths": { "/widgets": {} } }
+      ]
+    },
+    "Widget.ReadWrite.Own": {
+      "schemes": { "DelegatedWork": { "privilegeLevel": 1 } },
+      "pathSets": [
+        { "methods": ["DELETE"], "paths": { "/widgets/{id}": {} } }
+      ]
+    }
+  }
+}

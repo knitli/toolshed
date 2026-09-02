@@ -25,6 +25,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildScopeRouting } from "./lib/scopes.mts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -49,86 +50,6 @@ if (newIdx !== -1) {
 
 function readJSON(filePath: string) {
   return JSON.parse(readFileSync(filePath, "utf8"));
-}
-
-/**
- * Validate shared.scopeAliases and materialize a routing table.
- *
- * Rules:
- *   - Every key in scopeAliases must be a canonical scope (a plugin name
- *     or "marketplace").
- *   - Values must be arrays of non-empty strings.
- *   - No alias may collide with any canonical scope name.
- *   - Aliases must be globally unique across the whole map (no alias can
- *     point at two canonicals).
- *
- * Returns:
- *   - aliasesByScope: canonical → aliases[] (including empty arrays)
- *   - allScopes: flat list of every canonical + every alias, in stable order,
- *     suitable for commitlint scope-enum.
- */
-function buildScopeRouting(
-  pluginNames: string[],
-  rawAliases: Record<string, unknown> | undefined,
-): { aliasesByScope: Record<string, string[]>; allScopes: string[] } {
-  const canonicals = [...pluginNames, "marketplace"];
-  const canonicalSet = new Set(canonicals);
-  const aliasesByScope: Record<string, string[]> = Object.fromEntries(
-    canonicals.map((c) => [c, [] as string[]]),
-  );
-  const seenAliases: string[] = [];
-  const seenAliasSet = new Set<string>();
-
-  if (rawAliases !== undefined && rawAliases !== null) {
-    if (typeof rawAliases !== "object" || Array.isArray(rawAliases)) {
-      console.error("ERROR: shared.scopeAliases must be an object.");
-      process.exit(1);
-    }
-    for (const [canonical, aliases] of Object.entries(rawAliases)) {
-      if (!canonicalSet.has(canonical)) {
-        console.error(
-          `ERROR: shared.scopeAliases key "${canonical}" is not a canonical scope. ` +
-            `Expected one of: ${canonicals.join(", ")}.`,
-        );
-        process.exit(1);
-      }
-      if (!Array.isArray(aliases)) {
-        console.error(
-          `ERROR: shared.scopeAliases["${canonical}"] must be an array of strings.`,
-        );
-        process.exit(1);
-      }
-      for (const alias of aliases) {
-        if (typeof alias !== "string" || alias.length === 0) {
-          console.error(
-            `ERROR: shared.scopeAliases["${canonical}"] contains an invalid alias ` +
-              `(must be a non-empty string).`,
-          );
-          process.exit(1);
-        }
-        if (canonicalSet.has(alias)) {
-          console.error(
-            `ERROR: alias "${alias}" (under "${canonical}") collides with a canonical scope name.`,
-          );
-          process.exit(1);
-        }
-        if (seenAliasSet.has(alias)) {
-          console.error(
-            `ERROR: alias "${alias}" is defined more than once in shared.scopeAliases.`,
-          );
-          process.exit(1);
-        }
-        seenAliasSet.add(alias);
-        seenAliases.push(alias);
-        aliasesByScope[canonical].push(alias);
-      }
-    }
-  }
-
-  return {
-    aliasesByScope,
-    allScopes: [...canonicals, ...seenAliases],
-  };
 }
 
 /**
@@ -254,10 +175,18 @@ const pluginNames = plugins.map((p: (typeof plugins)[number]) => p.name);
 
 // Routing table: canonical → aliases, plus a flat list of every accepted
 // scope (canonicals + all aliases). Validated at generate time.
-const { aliasesByScope, allScopes } = buildScopeRouting(
-  pluginNames,
-  shared.scopeAliases,
-);
+let aliasesByScope: Record<string, string[]>;
+let allScopes: string[];
+try {
+  ({ aliasesByScope, allScopes } = buildScopeRouting(
+    pluginNames,
+    shared.scopeAliases,
+    shared.extraScopes ?? [],
+  ));
+} catch (err) {
+  console.error((err as Error).message);
+  process.exit(1);
+}
 
 // ---------------------------------------------------------------------------
 // 1. .commitlintrc.json

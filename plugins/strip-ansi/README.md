@@ -46,7 +46,8 @@ Install distill-strip-ansi with the `unicode-normalize` feature to additionally 
 cargo install distill-strip-ansi --features unicode-normalize
 ```
 
-This feature is off by default to avoid false positives in legitimate multilingual content.
+This feature is off by default to avoid false positives in legitimate multilingual content. The
+Homebrew formula builds with default features, so homograph detection requires the cargo install.
 
 ## What never gets forwarded
 
@@ -60,9 +61,15 @@ Raw payloads from threat events are logged to `${TMPDIR}/strip-ansi-threats/` fo
 
 ## Requirements
 
-- [`distill-strip-ansi`](https://crates.io/crates/distill-strip-ansi) on PATH:
+- [`distill-strip-ansi`](https://github.com/belt/distill-strip-ansi) on PATH, which provides the
+  `strip-ansi` binary the hook calls:
   ```sh
-  cargo install distill-strip-ansi
+  brew install belt/distill/distill-strip-ansi
+  ```
+  No Rust toolchain needed. To build from source instead — or to enable the homograph feature
+  below, which the formula does not include:
+  ```sh
+  cargo install distill-strip-ansi --features unicode-normalize
   ```
 - `jq` (almost always already installed)
 

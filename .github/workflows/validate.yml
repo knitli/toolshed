@@ -2,7 +2,6 @@ name: Validate
 
 on:
   pull_request:
-    branches: [main]
 
 jobs:
   validate:
@@ -12,6 +11,13 @@ jobs:
 
       - name: Validate marketplace structure
         run: ./scripts/validate-marketplace.sh
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Test packages
+        run: bun test
 
   generated-files-in-sync:
     runs-on: ubuntu-latest

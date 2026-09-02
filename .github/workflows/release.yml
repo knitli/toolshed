@@ -13,11 +13,7 @@ jobs:
     strategy:
       max-parallel: 1
       matrix:
-        plugin:
-          - ctx
-          - strip-ansi
-          - codeweaver
-          - decision-accountability
+        plugin: [ctx, strip-ansi, codeweaver]
     steps:
       - uses: actions/checkout@v6
         with:

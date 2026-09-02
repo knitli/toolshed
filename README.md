@@ -10,11 +10,9 @@ Add the marketplace:
 /plugin marketplace add knitli/toolshed
 ```
 
-Then install individual plugins:
+Then install a plugin:
 
 ```
-/plugin install ctx@toolshed
-/plugin install codeweaver@toolshed
 /plugin install strip-ansi@toolshed
 ```
 
@@ -22,9 +20,14 @@ Then install individual plugins:
 
 | Plugin | Description | Version | Status |
 |--------|-------------|---------|--------|
-| [ctx](plugins/ctx/) | Context hygiene — finds stale, contradictory AI context files across 10+ tool ecosystems | 0.1.0 | Stable |
-| [codeweaver](plugins/codeweaver/) | Semantic code search with hybrid search, AST understanding, and intelligent chunking for 166+ languages | 0.1.0 | Stable |
-| [strip-ansi](plugins/strip-ansi) | Clean ANSI escape codes from LLM output -- significantly cuts context bloat, keeps your PRs/issues/files clean and uncorrupted --using [distill-strip-ansi](https://github.com/belt/distill-strip-ansi) | 0.1.0 | Stable |
+| [strip-ansi](plugins/strip-ansi/) | Strips ANSI escape sequences from tool output and flags terminal-based prompt injection — cuts context bloat and keeps PRs, issues, and files uncorrupted, using [distill-strip-ansi](https://github.com/belt/distill-strip-ansi) | 1.1.0 | Stable |
+| [ctx](plugins/ctx/) | Context hygiene — finds stale, contradictory AI context files across 10+ tool ecosystems | 1.2.1 | [Deprecated](plugins/ctx/DEPRECATED.md) |
+| [codeweaver](plugins/codeweaver/) | Semantic code search with hybrid search, AST understanding, and intelligent chunking for 166+ languages | 1.1.0 | [Deprecated](plugins/codeweaver/DEPRECATED.md) |
+
+Deprecated plugins still install and still work, but are unmaintained and will be removed from the
+marketplace in a future release. See each plugin's `DEPRECATED.md` for migration notes.
+
+More plugins are in the works — the catalog above is a floor, not a ceiling.
 
 ## What's a marketplace?
 
