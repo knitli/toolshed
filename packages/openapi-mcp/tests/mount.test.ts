@@ -61,21 +61,47 @@ describe("mounting a second api", () => {
     db.close();
   });
 
-  test("refuses to mount the same api twice", async () => {
+  test("refuses to mount the same api twice, and the original rows survive", async () => {
     await compile({ specPath: TINY, api: "tiny", outPath: OUT });
-    expect(
+    await expect(
       compile({ specPath: TINY, api: "tiny", outPath: OUT, append: true }),
     ).rejects.toThrow(/already mounted/);
+
+    const db = new Database(OUT, { readonly: true });
+    expect(
+      db.query<{ n: number }, []>("SELECT COUNT(*) n FROM operations").get()?.n,
+    ).toBe(6);
+    const apis = db
+      .query<{ api: string }, []>("SELECT DISTINCT api FROM operations")
+      .all()
+      .map((r) => r.api);
+    expect(apis).toEqual(["tiny"]);
+    const meta = db
+      .query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
+      .get("apis")?.value;
+    expect(JSON.parse(meta ?? "[]")).toEqual(["tiny"]);
+    db.close();
   });
 
-  test("refuses to append to an artifact with a different format_version", async () => {
+  test("refuses to append to an artifact with a different format_version, and the original rows survive", async () => {
     await compile({ specPath: TINY, api: "tiny", outPath: OUT });
     const db = new Database(OUT);
     db.run("UPDATE meta SET value = '999' WHERE key = 'format_version'");
     db.close();
-    expect(
+    await expect(
       compile({ specPath: OTHER, api: "other", outPath: OUT, append: true }),
     ).rejects.toThrow(/format_version/);
+
+    const readback = new Database(OUT, { readonly: true });
+    expect(
+      readback.query<{ n: number }, []>("SELECT COUNT(*) n FROM operations").get()?.n,
+    ).toBe(6);
+    const apis = readback
+      .query<{ api: string }, []>("SELECT DISTINCT api FROM operations")
+      .all()
+      .map((r) => r.api);
+    expect(apis).toEqual(["tiny"]);
+    readback.close();
   });
 
   test("append on a missing file fails rather than silently creating one", async () => {
