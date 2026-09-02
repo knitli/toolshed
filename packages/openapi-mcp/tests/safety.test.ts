@@ -7,6 +7,10 @@ describe("classifySafety", () => {
     expect(classifySafety("HEAD", "/widgets", "widgets.Head")).toBe("read");
   });
 
+  test("method matching is case-insensitive", () => {
+    expect(classifySafety("get", "/widgets", "widgets.Do")).toBe("read");
+  });
+
   test("POST, PATCH, PUT, DELETE are writes", () => {
     for (const m of ["POST", "PATCH", "PUT", "DELETE"]) {
       expect(classifySafety(m, "/widgets", "widgets.Do")).toBe("write");
@@ -23,9 +27,14 @@ describe("classifySafety", () => {
     ).toBe("read");
   });
 
+  test("overrides match a dotless operationId as its own tail", () => {
+    expect(classifySafety("POST", "/x/getByIds", "getByIds")).toBe("read");
+  });
+
   test("$batch is a write even though overrides might match", () => {
     expect(classifySafety("POST", "/$batch", "batch.Batch")).toBe("write");
     expect(isBatch("/$batch")).toBe(true);
+    expect(classifySafety("POST", "/$batch", "widgets.getByIds")).toBe("write");
   });
 
   test("overrides never promote a GET to a write", () => {
