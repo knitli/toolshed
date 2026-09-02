@@ -1,6 +1,6 @@
-import type { OpenApiDoc, OpenApiOperation } from "./load";
-import { classifySafety, riskFor } from "./safety";
-import type { OperationRecord } from "./types";
+import type { OpenApiDoc, OpenApiOperation } from "./load.ts";
+import { classifySafety, riskFor } from "./safety.ts";
+import type { OperationRecord } from "./types.ts";
 
 /** The gatekeeper caps rendered descriptions at 600 characters. */
 export const MAX_SUMMARY = 600;

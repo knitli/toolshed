@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { generateKeypair, signArtifact, verifyArtifact } from "../src/sign";
+import { generateKeypair, signArtifact, verifyArtifact } from "../src/sign.ts";
 
 const FILE = `${import.meta.dir}/tmp-sign.bin`;
 afterEach(() => {

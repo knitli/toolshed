@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { createSchema, FORMAT_VERSION } from "../src/schema";
+import { createSchema, FORMAT_VERSION } from "../src/schema.ts";
 
 describe("createSchema", () => {
   test("creates every table the artifact needs", () => {

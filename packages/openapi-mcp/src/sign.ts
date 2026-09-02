@@ -5,6 +5,7 @@ import {
   sign,
   verify,
 } from "node:crypto";
+import { readFile } from "node:fs/promises";
 
 /** Ed25519 keypair, PEM encoded. The public key ships in plugin source. */
 export function generateKeypair(): {
@@ -25,7 +26,7 @@ export async function signArtifact(
   path: string,
   privateKeyPem: string,
 ): Promise<string> {
-  const bytes = Buffer.from(await Bun.file(path).arrayBuffer());
+  const bytes = await readFile(path);
   const key = createPrivateKey(privateKeyPem);
   return sign(null, bytes, key).toString("base64");
 }
@@ -40,7 +41,7 @@ export async function verifyArtifact(
   publicKeyPem: string,
 ): Promise<boolean> {
   try {
-    const bytes = Buffer.from(await Bun.file(path).arrayBuffer());
+    const bytes = await readFile(path);
     const key = createPublicKey(publicKeyPem);
     return verify(null, bytes, key, Buffer.from(signatureB64, "base64"));
   } catch {

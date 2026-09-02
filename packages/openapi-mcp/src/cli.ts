@@ -1,7 +1,8 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
+import { readFile, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
-import { compile } from "./compile";
-import { generateKeypair, signArtifact } from "./sign";
+import { compile } from "./compile.ts";
+import { generateKeypair, signArtifact } from "./sign.ts";
 
 const USAGE = `openapi-mcp — compile OpenAPI documents into signed MCP artifacts
 
@@ -14,7 +15,7 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-const [command, ...rest] = Bun.argv.slice(2);
+const [command, ...rest] = process.argv.slice(2);
 
 if (command === "keygen") {
   const { publicKeyPem, privateKeyPem } = generateKeypair();
@@ -59,8 +60,8 @@ console.log(
 );
 
 if (values["sign-key"]) {
-  const privateKeyPem = await Bun.file(values["sign-key"]).text();
+  const privateKeyPem = await readFile(values["sign-key"], "utf8");
   const sig = await signArtifact(values.out, privateKeyPem);
-  await Bun.write(`${values.out}.sig`, sig);
+  await writeFile(`${values.out}.sig`, sig);
   console.log(`signed -> ${values.out}.sig`);
 }

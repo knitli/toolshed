@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import type { OpenApiDoc } from "../src/load";
-import { loadSpec } from "../src/load";
-import { extractOperations, MAX_SUMMARY } from "../src/operations";
+import type { OpenApiDoc } from "../src/load.ts";
+import { loadSpec } from "../src/load.ts";
+import { extractOperations, MAX_SUMMARY } from "../src/operations.ts";
 
 const FIXTURE = `${import.meta.dir}/../fixtures/tiny-api.yaml`;
 const load = async () => extractOperations(await loadSpec(FIXTURE), "tiny");

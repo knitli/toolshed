@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loadSpec } from "../src/load";
+import { loadSpec } from "../src/load.ts";
 
 const FIXTURE = `${import.meta.dir}/../fixtures/tiny-api.yaml`;
 

@@ -1,5 +1,5 @@
-import type { OpenApiDoc } from "./load";
-import type { SchemaRecord } from "./types";
+import type { OpenApiDoc } from "./load.ts";
+import type { SchemaRecord } from "./types.ts";
 
 /**
  * Stores each component schema exactly as written, with `$ref`s intact.

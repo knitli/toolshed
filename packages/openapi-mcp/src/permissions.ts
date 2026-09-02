@@ -1,5 +1,5 @@
-import { riskFor } from "./safety";
-import type { OperationRecord, PermConfidence } from "./types";
+import { riskFor } from "./safety.ts";
+import type { OperationRecord, PermConfidence } from "./types.ts";
 
 export interface PermissionsDataset {
   permissions: Record<

@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 
 /** Bumped when the artifact layout changes incompatibly. Servers refuse unknown versions. */
 export const FORMAT_VERSION = 2;
@@ -50,6 +50,6 @@ CREATE TABLE meta (
 `;
 
 /** Creates every table, index, and virtual table the artifact needs. */
-export function createSchema(db: Database): void {
-  db.run(DDL);
+export function createSchema(db: DatabaseSync): void {
+  db.exec(DDL);
 }

@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 export interface OpenApiOperation {
   operationId?: string;
   summary?: string;
@@ -22,14 +24,20 @@ export interface OpenApiDoc {
 }
 
 /**
- * Reads an OpenAPI 3.x document from disk. YAML is parsed with Bun's native
- * parser, which handles the 44 MB Microsoft Graph document in well under a
- * second — do not add a JS YAML dependency.
+ * Reads an OpenAPI 3.x document from disk. Under Bun, YAML is parsed with
+ * Bun's native parser, which handles the 44 MB Microsoft Graph document in
+ * ~0.5s. Under Node, it falls back to the `yaml` package, which takes ~12.6s
+ * on the same document — acceptable for a compile step, and JSON specs skip
+ * YAML parsing entirely either way.
  */
 export async function loadSpec(path: string): Promise<OpenApiDoc> {
-  const text = await Bun.file(path).text();
+  const text = await readFile(path, "utf8");
   const doc = (
-    path.endsWith(".json") ? JSON.parse(text) : Bun.YAML.parse(text)
+    path.endsWith(".json")
+      ? JSON.parse(text)
+      : typeof Bun !== "undefined"
+        ? Bun.YAML.parse(text)
+        : (await import("yaml")).parse(text)
   ) as OpenApiDoc;
 
   if (!doc || typeof doc !== "object" || typeof doc.paths !== "object") {

@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { compile } from "../src/compile";
+import { compile } from "../src/compile.ts";
 
 const OUT = `${import.meta.dir}/tmp-mount.sqlite`;
 const TINY = `${import.meta.dir}/../fixtures/tiny-api.yaml`;
