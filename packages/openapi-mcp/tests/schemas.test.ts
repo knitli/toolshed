@@ -33,4 +33,10 @@ describe("extractSchemas", () => {
     doc.components = undefined;
     expect(extractSchemas(doc, "tiny")).toEqual([]);
   });
+
+  test("tracks the given api rather than a fixed value", async () => {
+    const rows = extractSchemas(await loadSpec(FIXTURE), "other");
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.api === "other")).toBe(true);
+  });
 });
