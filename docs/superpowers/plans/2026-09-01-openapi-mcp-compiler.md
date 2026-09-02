@@ -10,6 +10,31 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-01-openapi-mcp-engine-design.md` (revision 2)
 
+
+## As-built deltas
+
+This plan was executed; the code is in `packages/openapi-mcp`. Five things the
+shipped compiler does differently, recorded here so nobody implements the plan's
+version of them a second time:
+
+- **Append validation runs inside the transaction, and `ROLLBACK` is guarded.**
+  Task 12's snippet validates `format_version` and duplicate mounts before
+  `BEGIN` while keeping Task 8's unconditional rollback, which throws
+  `cannot rollback - no transaction is active` and masks the real diagnostic.
+  Shipped: `BEGIN` first, rollback wrapped in its own try.
+- **Read overrides are keyed by API.** `READ_OVERRIDE_SUFFIXES` as planned was a
+  flat list applied to every mount, so a second API's genuinely mutating
+  `POST .../query` would classify as `read`. Shipped as `READ_OVERRIDES`, a
+  `Record<api, suffixes>`; an unlisted API gets none.
+- **Request bodies keep inline schemas and their media type.** The planned
+  `bodyRefOf` stored only a direct `application/json` `$ref` and silently
+  dropped everything else. Shipped with `body_schema` and `body_media_type`
+  columns beside `body_ref` (FORMAT_VERSION 2).
+- **Path-item and operation parameters merge on `(name, in)`**, operation
+  winning, rather than concatenating into two conflicting entries.
+- **A fresh compile builds into a `.building` sibling and renames on success**
+  rather than unlinking the target first.
+
 ## Global Constraints
 
 - Runtime is **Bun 1.4.0**; Node 24 is the declared floor in `mise.toml`. Use `bun test`, not vitest or jest.

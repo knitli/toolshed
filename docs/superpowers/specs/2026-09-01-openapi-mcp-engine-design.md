@@ -237,6 +237,9 @@ to a single string. This conserves the 40-servers-per-portal budget, and the tra
 rather than free: the portal's grant and approval model has no concept of `api=graph` vs
 `api=cloudflare`, so mounting is only safe because §6 gives each API its own tool names.
 
+Sharing an artifact is not sharing a session. APIs whose credentials differ are served by separate
+authenticated instances reading the same file — see §7.
+
 **Operational note:** D1 export does not work on databases containing virtual tables. Recompile from
 source rather than exporting.
 
@@ -284,6 +287,18 @@ challenges on 401, forwarding the caller's user-scoped bearer untouched; local, 
 auth-code + PKCE against Entra. The Cloudflare API takes a caller-supplied token. **We never hold a
 credential that can exceed the caller** — already Knitli's established pattern
 (`deployment.jsonc` sets `mcpPortal.auth: "oauth"`).
+
+**One session carries one credential, so a second API needs its own session.** §5 lets Graph and
+Cloudflare share one artifact, but §6's tool surface has no credential parameter and the MCP session
+carries exactly one bearer — the Entra one. There is no safe way to reach Cloudflare from that
+session: forwarding the Entra bearer would both fail Cloudflare's authentication and disclose a
+Microsoft token to a third party, which §8.2 forbids outright, and omitting it would leave the call
+unauthenticated. **Mounting two APIs in one artifact is therefore a packaging convenience, not a
+licence to serve both from one session.** Each API is served by its own authenticated server
+instance, reading the same artifact and exposing only its own `<api>_*` tools. A single instance
+mounting two APIs whose credentials differ is a configuration error the server rejects at startup
+rather than a case it tries to bridge at request time. Revisit only with a per-API credential
+channel that is explicitly designed — not by widening the tool signature.
 
 **Scope pre-flight is advisory.** Using the §5 permission data, the server can tell a caller that an
 operation needs `Mail.ReadWrite` before attempting it, and drive incremental consent for exactly that
