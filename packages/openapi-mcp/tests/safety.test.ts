@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifySafety, isBatch, riskFor } from "../src/safety";
+import { classifySafety, isBatch, riskFor } from "../src/safety.ts";
 
 describe("classifySafety", () => {
   test("GET and HEAD are reads", () => {

@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { unlinkSync } from "node:fs";
+import { existsSync, statSync, symlinkSync, unlinkSync } from "node:fs";
+import { generateKeypair, signArtifact } from "../src/sign.ts";
 
 const CLI = `${import.meta.dir}/../src/cli.ts`;
 const OUT = `${import.meta.dir}/tmp-cli.sqlite`;
 const SPEC = `${import.meta.dir}/../fixtures/tiny-api.yaml`;
+const PUB = `${import.meta.dir}/openapi-mcp.pub`;
+const KEY = `${import.meta.dir}/openapi-mcp.key`;
+const SIG = `${import.meta.dir}/tmp-cli.sig`;
 
 afterEach(() => {
-  for (const f of [OUT, `${OUT}.sig`]) {
+  for (const f of [OUT, `${OUT}.sig`, PUB, KEY, SIG]) {
     try {
       unlinkSync(f);
     } catch {
@@ -47,10 +51,88 @@ describe("cli", () => {
     expect(r.stderr).toContain('unknown command "frobnicate"');
   });
 
-  test("keygen prints a usable keypair", async () => {
-    const r = await run(["keygen"]);
+  test("compile runtime failures print a clean error with no stack trace", async () => {
+    const r = await run([
+      "compile",
+      "--spec",
+      `${import.meta.dir}/does-not-exist.yaml`,
+      "--api",
+      "tiny",
+      "--out",
+      OUT,
+    ]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("error:");
+    expect(r.stderr).not.toContain(" at ");
+    expect(r.stderr).not.toContain(CLI);
+  });
+
+  test("keygen writes separate public and private key files", async () => {
+    const r = await run(["keygen", "--out", import.meta.dir]);
     expect(r.code).toBe(0);
-    expect(r.stdout).toContain("BEGIN PUBLIC KEY");
-    expect(r.stdout).toContain("BEGIN PRIVATE KEY");
+    expect(r.stdout).toContain(PUB);
+    expect(r.stdout).toContain(KEY);
+    expect(await Bun.file(PUB).text()).toContain("BEGIN PUBLIC KEY");
+    expect(await Bun.file(KEY).text()).toContain("BEGIN PRIVATE KEY");
+  });
+
+  test("keygen writes the private key file with 0600 permissions", async () => {
+    const r = await run(["keygen", "--out", import.meta.dir]);
+    expect(r.code).toBe(0);
+    expect(statSync(KEY).mode & 0o777).toBe(0o600);
+  });
+
+  test("keygen refuses to overwrite existing key files", async () => {
+    const first = await run(["keygen", "--out", import.meta.dir]);
+    expect(first.code).toBe(0);
+    const second = await run(["keygen", "--out", import.meta.dir]);
+    expect(second.code).toBe(1);
+    expect(second.stderr).toContain("error:");
+    expect(second.stderr).toContain("exists");
+  });
+
+  test("keygen rolls back the public key when only the private key exists", async () => {
+    await Bun.write(KEY, "pre-existing private key");
+    const r = await run(["keygen", "--out", import.meta.dir]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("exists");
+    // The freshly generated public key must not be left behind mismatched.
+    expect(existsSync(PUB)).toBe(false);
+  });
+
+  test("malformed flags print a clean error with no stack trace", async () => {
+    const r = await run(["verify", "--bogus"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("error:");
+    expect(r.stderr).not.toContain(" at ");
+    expect(r.stderr).not.toContain(CLI);
+  });
+
+  test("keygen refuses to write through a pre-planted dangling symlink", async () => {
+    const trap = "/tmp/does-not-exist-openapi-mcp-symlink-target";
+    symlinkSync(trap, KEY);
+    const r = await run(["keygen", "--out", import.meta.dir]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("error:");
+    expect(r.stderr).toContain("exists");
+    // The private key must never be written through the symlink.
+    expect(existsSync(trap)).toBe(false);
+  });
+
+  test("verify accepts a good signature and rejects a tampered artifact", async () => {
+    const { publicKeyPem, privateKeyPem } = generateKeypair();
+    await Bun.write(OUT, "artifact bytes");
+    const sig = await signArtifact(OUT, privateKeyPem);
+    await Bun.write(SIG, sig);
+    await Bun.write(PUB, publicKeyPem);
+
+    const good = await run(["verify", "--artifact", OUT, "--sig", SIG, "--pub", PUB]);
+    expect(good.code).toBe(0);
+    expect(good.stdout.trim()).toBe("valid");
+
+    await Bun.write(OUT, "tampered bytes");
+    const bad = await run(["verify", "--artifact", OUT, "--sig", SIG, "--pub", PUB]);
+    expect(bad.code).toBe(1);
+    expect(bad.stdout.trim()).toBe("invalid");
   });
 });

@@ -1,6 +1,7 @@
 node_modules/
 .npm
 *.log
+packages/*/dist/
 *.headroom*
 *.local.*
 .wrangler/

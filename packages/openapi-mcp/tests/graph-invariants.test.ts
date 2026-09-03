@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { compile } from "../src/compile";
+import { compile } from "../src/compile.ts";
 
 const SPEC = process.env.OPENAPI_MCP_GRAPH_SPEC;
 const OUT = `${import.meta.dir}/tmp-graph.sqlite`;

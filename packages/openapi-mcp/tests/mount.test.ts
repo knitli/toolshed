@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { compile } from "../src/compile";
+import { compile } from "../src/compile.ts";
 
 const OUT = `${import.meta.dir}/tmp-mount.sqlite`;
 const TINY = `${import.meta.dir}/../fixtures/tiny-api.yaml`;
@@ -19,12 +19,43 @@ describe("mounting a second api", () => {
     const db = new Database(OUT, { readonly: true });
     expect(
       db.query<{ n: number }, []>("SELECT COUNT(*) n FROM operations").get()?.n,
-    ).toBe(8);
+    ).toBe(9);
     const apis = db
       .query<{ api: string }, []>("SELECT DISTINCT api FROM operations ORDER BY api")
       .all()
       .map((r) => r.api);
     expect(apis).toEqual(["other", "tiny"]);
+    db.close();
+  });
+
+  test("appending keeps the fts external-content index consistent", async () => {
+    await compile({ specPath: TINY, api: "tiny", outPath: OUT });
+    await compile({ specPath: OTHER, api: "other", outPath: OUT, append: true });
+
+    // Not readonly: fts5's integrity-check command runs as a write statement
+    // even though it only verifies. A mismatch between operations_fts and its
+    // external content table (e.g. a shadow column left out of an INSERT)
+    // makes this throw.
+    const db = new Database(OUT);
+    expect(() =>
+      db.run("INSERT INTO operations_fts(operations_fts) VALUES('integrity-check')"),
+    ).not.toThrow();
+    db.close();
+  });
+
+  test("word-split search_text finds a camelCase operation by its split words", async () => {
+    await compile({ specPath: TINY, api: "tiny", outPath: OUT });
+    await compile({ specPath: OTHER, api: "other", outPath: OUT, append: true });
+
+    const db = new Database(OUT, { readonly: true });
+    const hits = db
+      .query<{ qualified_id: string }, [string]>(
+        `SELECT o.qualified_id FROM operations_fts f
+         JOIN operations o ON o.rowid = f.rowid
+         WHERE operations_fts MATCH ? ORDER BY bm25(operations_fts)`,
+      )
+      .all("send mail");
+    expect(hits.map((h) => h.qualified_id)).toEqual(["other:me.sendMail"]);
     db.close();
   });
 

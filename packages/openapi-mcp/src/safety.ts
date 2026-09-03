@@ -1,4 +1,4 @@
-import type { Risk, Safety } from "./types";
+import type { Risk, Safety } from "./types.ts";
 
 const READ_METHODS = new Set(["GET", "HEAD"]);
 

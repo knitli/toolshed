@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { loadSpec } from "../src/load";
-import { extractOperations } from "../src/operations";
+import { loadSpec } from "../src/load.ts";
+import { extractOperations } from "../src/operations.ts";
 import {
   applyPermissions,
   buildPermissionIndex,
   lookupPermissions,
   type PermissionsDataset,
-} from "../src/permissions";
+} from "../src/permissions.ts";
 
 const dataset = (await Bun.file(
   `${import.meta.dir}/../fixtures/tiny-permissions.json`,

@@ -1,8 +1,9 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
-import { compile } from "../src/compile";
-import { FORMAT_VERSION } from "../src/schema";
+import { DatabaseSync } from "node:sqlite";
+import { compile } from "../src/compile.ts";
+import { FORMAT_VERSION } from "../src/schema.ts";
 
 const OUT = `${import.meta.dir}/tmp-compile.sqlite`;
 const opts = {
@@ -131,18 +132,18 @@ describe("compile", () => {
   test("leaves no half-built artifact when a mid-transaction step fails", async () => {
     // Force the fts5 population step (the last DML before meta) to throw,
     // simulating a failure after schema creation and every row insert.
-    const originalRun = Database.prototype.run;
-    Database.prototype.run = function (this: Database, sql: string, ...args: unknown[]) {
+    const originalExec = DatabaseSync.prototype.exec;
+    DatabaseSync.prototype.exec = function (this: DatabaseSync, sql: string) {
       if (sql.includes("INSERT INTO operations_fts")) {
         throw new Error("simulated mid-transaction failure");
       }
-      return originalRun.call(this, sql, ...args);
-    } as typeof Database.prototype.run;
+      return originalExec.call(this, sql);
+    } as typeof DatabaseSync.prototype.exec;
 
     try {
       await expect(compile(opts)).rejects.toThrow("simulated mid-transaction failure");
     } finally {
-      Database.prototype.run = originalRun;
+      DatabaseSync.prototype.exec = originalExec;
     }
 
     // The failure happened inside the sibling build file, which is removed on

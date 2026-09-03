@@ -1,7 +1,7 @@
-import type { Database } from "bun:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 
 /** Bumped when the artifact layout changes incompatibly. Servers refuse unknown versions. */
-export const FORMAT_VERSION = 2;
+export const FORMAT_VERSION = 3;
 
 // `fts5` MUST be lower-case: D1 rejects `FTS5` as "not authorized".
 const DDL = `
@@ -22,6 +22,7 @@ CREATE TABLE operations (
   summary         TEXT,
   tags            TEXT,
   params_json     TEXT NOT NULL,
+  search_text     TEXT NOT NULL,
   body_ref        TEXT,
   body_schema     TEXT,
   body_media_type TEXT,
@@ -32,7 +33,7 @@ CREATE INDEX operations_api ON operations (api);
 CREATE INDEX operations_safety ON operations (api, safety, risk);
 
 CREATE VIRTUAL TABLE operations_fts USING fts5(
-  qualified_id, operation_id, summary, path, tags, api,
+  qualified_id, operation_id, summary, path, tags, api, search_text,
   content='operations', content_rowid='rowid'
 );
 
@@ -50,6 +51,6 @@ CREATE TABLE meta (
 `;
 
 /** Creates every table, index, and virtual table the artifact needs. */
-export function createSchema(db: Database): void {
-  db.run(DDL);
+export function createSchema(db: DatabaseSync): void {
+  db.exec(DDL);
 }

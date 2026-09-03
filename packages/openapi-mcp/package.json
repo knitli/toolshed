@@ -1,15 +1,100 @@
 {
   "name": "@knitli/openapi-mcp",
   "version": "0.0.0",
-  "private": true,
   "type": "module",
   "description": "Compiles OpenAPI documents into signed SQLite artifacts for MCP serving.",
   "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knitli/toolshed",
+    "directory": "packages/openapi-mcp"
+  },
+  "keywords": [
+    "openapi",
+    "mcp",
+    "model-context-protocol",
+    "sqlite",
+    "api",
+    "codegen"
+  ],
   "bin": {
-    "openapi-mcp": "./src/cli.ts"
+    "openapi-mcp": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24",
+    "bun": ">=1.4"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "bun run build",
     "test": "bun test",
     "check": "bunx biome check ."
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "release": {
+    "branches": [
+      "main"
+    ],
+    "tagFormat": "@knitli/openapi-mcp-v${version}",
+    "plugins": [
+      [
+        "@semantic-release/commit-analyzer",
+        {
+          "preset": "conventionalcommits",
+          "releaseRules": [
+            {
+              "breaking": true,
+              "scope": "openapi-mcp",
+              "release": "major"
+            },
+            {
+              "scope": "openapi-mcp",
+              "type": "feat",
+              "release": "minor"
+            },
+            {
+              "scope": "openapi-mcp",
+              "type": "fix",
+              "release": "patch"
+            },
+            {
+              "scope": "openapi-mcp",
+              "type": "perf",
+              "release": "patch"
+            },
+            {
+              "release": false
+            }
+          ]
+        }
+      ],
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/changelog",
+      [
+        "@semantic-release/npm",
+        {
+          "npmPublish": true
+        }
+      ],
+      "@semantic-release/git",
+      "@semantic-release/github"
+    ]
   }
 }

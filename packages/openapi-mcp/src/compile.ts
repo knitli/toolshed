@@ -1,14 +1,15 @@
-import { Database } from "bun:sqlite";
-import { renameSync, unlinkSync } from "node:fs";
-import { loadSpec } from "./load";
-import { extractOperations } from "./operations";
+import { existsSync, renameSync, unlinkSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
+import { loadSpec } from "./load.ts";
+import { extractOperations } from "./operations.ts";
 import {
   applyPermissions,
   buildPermissionIndex,
   type PermissionsDataset,
-} from "./permissions";
-import { createSchema, FORMAT_VERSION } from "./schema";
-import { extractSchemas } from "./schemas";
+} from "./permissions.ts";
+import { createSchema, FORMAT_VERSION } from "./schema.ts";
+import { extractSchemas } from "./schemas.ts";
 
 export interface CompileOptions {
   specPath: string;
@@ -35,16 +36,16 @@ export async function compile(
   const schemas = extractSchemas(doc, options.api);
 
   if (options.permissionsPath) {
-    const dataset = (await Bun.file(
-      options.permissionsPath,
-    ).json()) as PermissionsDataset;
+    const dataset = JSON.parse(
+      await readFile(options.permissionsPath, "utf8"),
+    ) as PermissionsDataset;
     applyPermissions(operations, buildPermissionIndex(dataset));
   } else {
     // Still recompute risk so unmapped writes land on `high`.
     applyPermissions(operations, { byMethod: new Map(), privilege: new Map() });
   }
 
-  const exists = await Bun.file(options.outPath).exists();
+  const exists = existsSync(options.outPath);
   if (options.append && !exists) {
     throw new Error(`${options.outPath} does not exist; cannot append`);
   }
@@ -66,22 +67,26 @@ export async function compile(
 
   let existingApis: string[] = [];
   let committed = false;
-  const db = new Database(buildPath, { create: true });
+  const db = new DatabaseSync(buildPath);
   try {
-    db.run("BEGIN");
+    db.exec("BEGIN");
     if (options.append) {
-      const version = db
-        .query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
-        .get("format_version")?.value;
+      const version = (
+        db
+          .prepare("SELECT value FROM meta WHERE key = ?")
+          .get("format_version") as { value: string } | undefined
+      )?.value;
       if (version !== String(FORMAT_VERSION)) {
         throw new Error(
           `format_version mismatch: artifact is ${version}, compiler is ${FORMAT_VERSION}`,
         );
       }
       const mounted = JSON.parse(
-        db
-          .query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
-          .get("apis")?.value ?? "[]",
+        (
+          db
+            .prepare("SELECT value FROM meta WHERE key = ?")
+            .get("apis") as { value: string } | undefined
+        )?.value ?? "[]",
       ) as string[];
       if (mounted.includes(options.api)) {
         throw new Error(`api "${options.api}" is already mounted`);
@@ -95,9 +100,9 @@ export async function compile(
       `INSERT INTO operations
        (qualified_id, api, operation_id, method, path, safety, risk,
         operation_type, pageable, deprecated, permissions, perm_confidence,
-        privilege_level, summary, tags, params_json, body_ref, body_schema,
-        body_media_type, server_url)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        privilege_level, summary, tags, params_json, search_text, body_ref,
+        body_schema, body_media_type, server_url)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     );
     for (const op of operations) {
       insertOp.run(
@@ -106,7 +111,7 @@ export async function compile(
         op.pageable ? 1 : 0, op.deprecated ? 1 : 0,
         op.permissions ? JSON.stringify(op.permissions) : null,
         op.permConfidence, op.privilegeLevel, op.summary, op.tags,
-        op.paramsJson, op.bodyRef, op.bodySchemaJson, op.bodyMediaType,
+        op.paramsJson, op.searchText, op.bodyRef, op.bodySchemaJson, op.bodyMediaType,
         op.serverUrl,
       );
     }
@@ -120,16 +125,15 @@ export async function compile(
     // Appending only indexes the newly mounted api's rows — the first
     // mount's rows are already indexed and must not be touched again.
     if (options.append) {
-      db.run(
-        `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api)
-         SELECT rowid, qualified_id, operation_id, summary, path, tags, api
+      db.prepare(
+        `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api, search_text)
+         SELECT rowid, qualified_id, operation_id, summary, path, tags, api, search_text
          FROM operations WHERE api = ?`,
-        options.api,
-      );
+      ).run(options.api);
     } else {
-      db.run(
-        `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api)
-         SELECT rowid, qualified_id, operation_id, summary, path, tags, api FROM operations`,
+      db.exec(
+        `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api, search_text)
+         SELECT rowid, qualified_id, operation_id, summary, path, tags, api, search_text FROM operations`,
       );
     }
 
@@ -148,11 +152,11 @@ export async function compile(
       insertMeta.run(key, value);
     }
 
-    db.run("COMMIT");
+    db.exec("COMMIT");
     committed = true;
   } catch (err) {
     try {
-      db.run("ROLLBACK");
+      db.exec("ROLLBACK");
     } catch {
       // No active transaction (e.g. BEGIN itself failed) — the original
       // error is what matters; don't let a rollback failure mask it.
