@@ -48,10 +48,11 @@
         "@semantic-release/commit-analyzer": "^13.0.1",
         "@semantic-release/release-notes-generator": "^14.1.1",
         "@commitlint/cli": "^21.2.2",
-        "@commitlint/config-conventional": "^21.2.2"
+        "@commitlint/config-conventional": "^21.2.2",
+        "@commitlint/resolve-extends": "^21.2.2"
       },
       "typing": {
-        "typescript": "^6.0.2"
+        "typescript": "^7.0.2"
       }
     }
   },
@@ -62,6 +63,7 @@
   "devDependencies": {
     "@commitlint/cli": "catalog:release",
     "@commitlint/config-conventional": "catalog:release",
+    "@commitlint/resolve-extends": "catalog:release",
     "@semantic-release/changelog": "catalog:release",
     "@semantic-release/commit-analyzer": "catalog:release",
     "@semantic-release/git": "catalog:release",
@@ -81,6 +83,11 @@
       "name": "bun",
       "version": "catalog:",
       "onFail": "download"
+    },
+    "runtime": {
+      "name": "bun",
+      "version": "catalog:",
+      "onFail": "download"
     }
   },
   "publishConfig": {
@@ -90,8 +97,5 @@
     "tag": "latest"
   },
   "icon": "https://knitli.com/favicon.ico",
-  "readme": "./README.md",
-  "dependencies": {
-    "@commitlint/resolve-extends": "^21.2.2"
-  }
+  "readme": "./README.md"
 }
