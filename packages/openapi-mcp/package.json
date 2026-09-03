@@ -1,5 +1,6 @@
 {
   "name": "@knitli/openapi-mcp",
+  "private": false,
   "version": "0.0.0",
   "type": "module",
   "description": "Wraps any openapi schema of any size into an MCP-servable sqlite database for 'code mode' style deployments.",
@@ -30,11 +31,13 @@
     "dist"
   ],
   "engines": {
-    "node": ">=24",
-    "bun": ">=1.4"
+    "node": "catalog:",
+    "bun": "catalog:"
   },
   "publishConfig": {
-    "access": "public"
+    "registry": "https://registry.npmjs.org/",
+    "access": "public",
+    "tag": "latest"
   },
   "scripts": {
     "build": "tsc",
@@ -46,11 +49,11 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "typescript": "^7.0.2"
+    "typescript": "catalog:typing"
   },
   "devEngines":{
-    "node": ">=24",
-    "bun": ">=1.4"    
+    "node": "catalog:",
+    "bun": "catalog:"    
   },
   "release": {
     "branches": [
@@ -84,7 +87,7 @@
               "release": "patch"
             },
             {
-              "release": false
+              "release": true
             }
           ]
         }

@@ -90,12 +90,6 @@
       "onFail": "download"
     }
   },
-  "publishConfig": {
-    "access": "public",
-    "provenance": true,
-    "registry": "https://registry.npmjs.org/",
-    "tag": "latest"
-  },
   "icon": "https://knitli.com/favicon.ico",
   "readme": "./README.md"
 }
