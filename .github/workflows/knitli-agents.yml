@@ -253,6 +253,6 @@ jobs:
       issues: write
       pull-requests: write
       security-events: read
-    
+
     uses: knitli/.github/.github/workflows/claude-fix.yml@dcae94003fadba215b451f4232a0b5e41b95755a
     secrets: inherit
