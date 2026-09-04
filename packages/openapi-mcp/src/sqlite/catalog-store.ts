@@ -184,18 +184,67 @@ function isV4(rows: unknown[]): boolean {
   );
 }
 
-function forceCloseDatabase(database: DatabaseSync): void {
-  const close = database.close as unknown as (
-    this: DatabaseSync,
-    force?: boolean,
-  ) => void;
-  close.call(database, true);
+interface SqliteStatement {
+  all(...values: readonly unknown[]): unknown[];
+  get(...values: readonly unknown[]): unknown;
+  finalize?: () => void;
 }
 
-function bridge(database: DatabaseSync): D1CatalogDatabase {
+interface SqliteDatabase {
+  prepare(sql: string): SqliteStatement;
+  close(strict?: boolean): void;
+}
+
+interface BunSqliteModule {
+  Database: new (path: string, options: { readonly: true }) => SqliteDatabase;
+}
+
+function bunSqlite(): BunSqliteModule | undefined {
+  return process.getBuiltinModule?.("bun:sqlite") as
+    | BunSqliteModule
+    | undefined;
+}
+
+function openReadOnlyDatabase(path: string): SqliteDatabase {
+  const module = bunSqlite();
+  if (module !== undefined)
+    return new module.Database(path, { readonly: true });
+  return new DatabaseSync(path, { readOnly: true });
+}
+
+function all(
+  database: SqliteDatabase,
+  sql: string,
+  values: readonly unknown[] = [],
+): unknown[] {
+  const statement = database.prepare(sql);
+  try {
+    return statement.all(...values);
+  } finally {
+    statement.finalize?.();
+  }
+}
+
+function first(
+  database: SqliteDatabase,
+  sql: string,
+  values: readonly unknown[],
+): unknown {
+  const statement = database.prepare(sql);
+  try {
+    return statement.get(...values);
+  } finally {
+    statement.finalize?.();
+  }
+}
+
+function closeDatabase(database: SqliteDatabase): void {
+  database.close(true);
+}
+
+function bridge(database: SqliteDatabase): D1CatalogDatabase {
   return {
     prepare(sql: string): D1CatalogPreparedStatement {
-      const statement = database.prepare(sql);
       let values: readonly D1CatalogValue[] = [];
       return {
         bind(...next: readonly D1CatalogValue[]): D1CatalogPreparedStatement {
@@ -205,12 +254,15 @@ function bridge(database: DatabaseSync): D1CatalogDatabase {
         async all<Row extends Record<string, unknown>>(): Promise<
           D1CatalogResult<Row>
         > {
-          return { success: true, results: statement.all(...values) as Row[] };
+          return {
+            success: true,
+            results: all(database, sql, values) as Row[],
+          };
         },
         async first<
           Row extends Record<string, unknown>,
         >(): Promise<Row | null> {
-          return (statement.get(...values) as Row | undefined) ?? null;
+          return (first(database, sql, values) as Row | undefined) ?? null;
         },
       };
     },
@@ -220,26 +272,24 @@ function bridge(database: DatabaseSync): D1CatalogDatabase {
 /** Read-only v4 store with an explicit inventory-only v3 migration mode. */
 export class SqliteCatalogStore implements CatalogStore {
   readonly legacyInventoryOnly: boolean;
-  #database: DatabaseSync | undefined;
+  #database: SqliteDatabase | undefined;
   #v4: CatalogStore | undefined;
   #legacyIdentity: LegacyV3CatalogIdentity | undefined;
   #limits: RuntimeLimits;
 
   constructor(path: string, options: SqliteCatalogStoreOptions = {}) {
-    let database: DatabaseSync | undefined;
+    let database: SqliteDatabase | undefined;
     try {
       this.#limits = resolveRuntimeLimits(options.limits);
-      database = new DatabaseSync(path, { readOnly: true });
-      const tables = database.prepare(SCHEMA_PROBE).all() as unknown[];
+      database = openReadOnlyDatabase(path);
+      const tables = all(database, SCHEMA_PROBE);
       if (exactly(tables, "release_metadata")) {
-        const versions = database.prepare(V4_VERSION_PROBE).all() as unknown[];
+        const versions = all(database, V4_VERSION_PROBE);
         if (!isV4(versions)) throw unsupported("Artifact format unsupported");
         this.legacyInventoryOnly = false;
         this.#v4 = createD1CatalogStore(bridge(database), this.#limits);
       } else if (exactly(tables, "meta")) {
-        const versions = database
-          .prepare(V3_VERSION_PROBE)
-          .all("format_version") as unknown[];
+        const versions = all(database, V3_VERSION_PROBE, ["format_version"]);
         if (
           versions.length !== 1 ||
           typeof versions[0] !== "object" ||
@@ -252,13 +302,13 @@ export class SqliteCatalogStore implements CatalogStore {
       } else throw unsupported("Artifact format is unsupported");
       this.#database = database;
     } catch (error) {
-      if (database !== undefined) forceCloseDatabase(database);
+      if (database !== undefined) closeDatabase(database);
       if (error instanceof OpenApiMcpError) throw error;
       throw unsupported("Artifact format is unsupported");
     }
   }
   close(): void {
-    if (this.#database !== undefined) forceCloseDatabase(this.#database);
+    if (this.#database !== undefined) closeDatabase(this.#database);
     this.#database = undefined;
   }
   #v4Store(): CatalogStore {
@@ -281,14 +331,12 @@ export class SqliteCatalogStore implements CatalogStore {
       throw unsupported("v3 inventory requires an explicit catalog identity");
     const snapshot = snapshotLegacySearchQuery(query, this.#limits);
     try {
-      const rows = this.#database
-        .prepare(V3_SEARCH_SQL)
-        .all(
-          snapshot.query,
-          snapshot.api,
-          snapshot.api,
-          snapshot.limit,
-        ) as unknown[];
+      const rows = all(this.#database, V3_SEARCH_SQL, [
+        snapshot.query,
+        snapshot.api,
+        snapshot.api,
+        snapshot.limit,
+      ]);
       if (rows.length > snapshot.limit) throw new Error();
       const seen = new Set<string>();
       return rows.map((row) => {

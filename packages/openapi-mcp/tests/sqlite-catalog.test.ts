@@ -693,6 +693,185 @@ test("constructor rejects absent, unsupported, and ambiguous artifact formats", 
   }
 });
 
+test("Bun probe statements finalize before strict close on failure", () => {
+  const originalGetBuiltinModule = process.getBuiltinModule;
+  const events: string[] = [];
+  let finalized = false;
+  class InstrumentedDatabase {
+    prepare(_sql: string) {
+      return {
+        all() {
+          throw new Error("driver secret");
+        },
+        get() {
+          return undefined;
+        },
+        finalize() {
+          if (finalized) throw new Error("statement finalized twice");
+          finalized = true;
+          events.push("finalize");
+        },
+      };
+    }
+
+    close(strict?: boolean) {
+      if (!finalized) throw new Error("strict close observed a live statement");
+      events.push(`close:${String(strict)}`);
+    }
+  }
+
+  process.getBuiltinModule = ((id: string) =>
+    id === "bun:sqlite"
+      ? { Database: InstrumentedDatabase }
+      : originalGetBuiltinModule(id)) as typeof process.getBuiltinModule;
+  try {
+    expect(() => new SqliteCatalogStore("unused.sqlite")).toThrow(
+      expect.objectContaining(unsupported),
+    );
+    expect(events).toEqual(["finalize", "close:true"]);
+  } finally {
+    process.getBuiltinModule = originalGetBuiltinModule;
+  }
+});
+
+test("Bun bridge statements finalize before strict close on successful v4 search", async () => {
+  const originalGetBuiltinModule = process.getBuiltinModule;
+  const prepared: Array<{ readonly sql: string; finalizations: number }> = [];
+  const events: string[] = [];
+  class InstrumentedDatabase {
+    prepare(sql: string) {
+      const entry = { sql, finalizations: 0 };
+      prepared.push(entry);
+      const rows = sql.includes("sqlite_schema")
+        ? [{ name: "release_metadata", type: "table" }]
+        : sql.includes("DISTINCT format")
+          ? [{ format: 4, contract: 1 }]
+          : [
+              {
+                catalog_id: catalogId,
+                release_id: releaseA,
+                record_id: operationId,
+              },
+            ];
+      return {
+        all() {
+          return rows;
+        },
+        get() {
+          return undefined;
+        },
+        finalize() {
+          entry.finalizations += 1;
+          events.push("finalize");
+        },
+      };
+    }
+
+    close(strict?: boolean) {
+      if (prepared.some(({ finalizations }) => finalizations !== 1))
+        throw new Error("strict close observed a live statement");
+      events.push(`close:${String(strict)}`);
+    }
+  }
+  process.getBuiltinModule = ((id: string) =>
+    id === "bun:sqlite"
+      ? { Database: InstrumentedDatabase }
+      : originalGetBuiltinModule?.(id)) as typeof process.getBuiltinModule;
+  try {
+    const store = new SqliteCatalogStore("unused.sqlite");
+    await expect(
+      store.searchCandidates({ query: "item", api: "api", limit: 1 }),
+    ).resolves.toEqual([{ catalogId, releaseId: releaseA, operationId }]);
+    store.close();
+    expect(prepared).toHaveLength(3);
+    expect(prepared.map(({ finalizations }) => finalizations)).toEqual([
+      1, 1, 1,
+    ]);
+    expect(events).toEqual(["finalize", "finalize", "finalize", "close:true"]);
+  } finally {
+    process.getBuiltinModule = originalGetBuiltinModule;
+  }
+});
+
+test("Bun inventory statements finalize before strict close on v3 search", async () => {
+  const originalGetBuiltinModule = process.getBuiltinModule;
+  const prepared: Array<{ readonly sql: string; finalizations: number }> = [];
+  const events: string[] = [];
+  class InstrumentedDatabase {
+    prepare(sql: string) {
+      const entry = { sql, finalizations: 0 };
+      prepared.push(entry);
+      const rows = sql.includes("sqlite_schema")
+        ? [{ name: "meta", type: "table" }]
+        : sql.includes("FROM meta")
+          ? [{ value: "3" }]
+          : [{ qualified_id: "api:widgets.widget.FindWidget" }];
+      return {
+        all() {
+          return rows;
+        },
+        get() {
+          return undefined;
+        },
+        finalize() {
+          entry.finalizations += 1;
+          events.push("finalize");
+        },
+      };
+    }
+
+    close(strict?: boolean) {
+      if (prepared.some(({ finalizations }) => finalizations !== 1))
+        throw new Error("strict close observed a live statement");
+      events.push(`close:${String(strict)}`);
+    }
+  }
+  process.getBuiltinModule = ((id: string) =>
+    id === "bun:sqlite"
+      ? { Database: InstrumentedDatabase }
+      : originalGetBuiltinModule?.(id)) as typeof process.getBuiltinModule;
+  try {
+    const store = new SqliteCatalogStore("unused.sqlite", {
+      legacyIdentity: { catalogId, releaseId: releaseA },
+    });
+    await expect(
+      store.searchCandidates({ query: "widget", api: "api", limit: 1 }),
+    ).resolves.toEqual([
+      {
+        catalogId,
+        releaseId: releaseA,
+        operationId: "operation:api:widgets.widget.FindWidget",
+      },
+    ]);
+    store.close();
+    expect(prepared).toHaveLength(3);
+    expect(prepared.at(-1)?.sql).toContain("FROM operations_fts");
+    expect(prepared.map(({ finalizations }) => finalizations)).toEqual([
+      1, 1, 1,
+    ]);
+    expect(events).toEqual(["finalize", "finalize", "finalize", "close:true"]);
+  } finally {
+    process.getBuiltinModule = originalGetBuiltinModule;
+  }
+});
+
+test("uses the Node sqlite fallback when Bun native sqlite is unavailable", () => {
+  const artifact = createV4Catalog();
+  const originalGetBuiltinModule = process.getBuiltinModule;
+  process.getBuiltinModule = ((id: string) =>
+    id === "bun:sqlite"
+      ? undefined
+      : originalGetBuiltinModule?.(id)) as typeof process.getBuiltinModule;
+  try {
+    const store = new SqliteCatalogStore(artifact.path);
+    expect(store.legacyInventoryOnly).toBe(false);
+    store.close();
+  } finally {
+    process.getBuiltinModule = originalGetBuiltinModule;
+    rmSync(artifact.directory, { recursive: true, force: true });
+  }
+});
+
 test("store close releases the artifact after a prepared lookup", async () => {
   const artifact = createV4Catalog();
   let store: SqliteCatalogStore | undefined;
