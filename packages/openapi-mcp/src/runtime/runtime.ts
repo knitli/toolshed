@@ -1,7 +1,9 @@
 import { OpenApiMcpError } from "./errors.ts";
 import {
   type AdmittedManifest,
-  admitManifest,
+  type AuthenticatedManifest,
+  admitAuthenticatedManifest,
+  authenticateManifest,
   type ManifestTrust,
 } from "./manifest.ts";
 import { encodeOperationRef } from "./references.ts";
@@ -385,13 +387,19 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
       }> = [];
       const warnings: SearchWarning[] = [];
       const seen = new Set<string>();
-      const manifests = new Map<string, AdmittedManifest>();
+      const manifests = new Map<
+        string,
+        { authenticated: AuthenticatedManifest; admitted?: AdmittedManifest }
+      >();
       const failedManifests = new Set<string>();
       let admissionAttempts = 0;
-      const admitCandidateRelease = async (
+      const authenticateCandidateRelease = async (
         catalogId: CandidateRef["catalogId"],
         releaseId: CandidateRef["releaseId"],
-      ): Promise<AdmittedManifest> => {
+      ): Promise<{
+        authenticated: AuthenticatedManifest;
+        admitted?: AdmittedManifest;
+      }> => {
         const key = manifestKey(catalogId, releaseId);
         const cached = manifests.get(key);
         if (cached !== undefined) return cached;
@@ -413,15 +421,14 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
             catalogId,
             releaseId,
           );
-          const admitted = await admitManifest(
+          const authenticated = await authenticateManifest(
             envelope,
             options.trust,
-            options.generations,
             limits,
           );
           if (
-            admitted.manifest.catalogId !== catalogId ||
-            admitted.manifest.releaseId !== releaseId
+            authenticated.manifest.catalogId !== catalogId ||
+            authenticated.manifest.releaseId !== releaseId
           ) {
             throw new OpenApiMcpError(
               "RECORD_NOT_ADMITTED",
@@ -432,8 +439,9 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
             const oldest = manifests.keys().next().value;
             if (oldest !== undefined) manifests.delete(oldest);
           }
-          manifests.set(key, admitted);
-          return admitted;
+          const entry = { authenticated };
+          manifests.set(key, entry);
+          return entry;
         } catch (error) {
           failedManifests.add(key);
           throw error;
@@ -449,13 +457,12 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
             warnings: [...candidateWarnings],
           } as unknown as JsonObject),
         ).length <= limits.maxResponseBytes;
+      const limitWarning: SearchWarning = {
+        code: "RESPONSE_LIMIT_EXCEEDED",
+        message: "Search response limit reached",
+      };
       const addWarning = (candidateWarning: SearchWarning): boolean => {
-        if (
-          !responseFits(
-            operations.map(({ item }) => item),
-            [...warnings, candidateWarning],
-          )
-        )
+        if (!responseFits([], [...warnings, candidateWarning, limitWarning]))
           return false;
         warnings.push(candidateWarning);
         return true;
@@ -468,10 +475,7 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
         try {
           candidate = normalizeCandidate(rawCandidate);
         } catch (error) {
-          if (!addWarning(warning(error))) {
-            responseLimited = true;
-            break;
-          }
+          if (!addWarning(warning(error))) responseLimited = true;
           continue;
         }
         if (
@@ -480,10 +484,8 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
         ) {
           if (
             !addWarning(warning(new OpenApiMcpError("RECORD_DIGEST_MISMATCH")))
-          ) {
+          )
             responseLimited = true;
-            break;
-          }
           continue;
         }
         const key = manifestKey(candidate.catalogId, candidate.releaseId);
@@ -491,7 +493,7 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
         if (seen.has(identity)) continue;
         seen.add(identity);
         try {
-          const admitted = await admitCandidateRelease(
+          const entry = await authenticateCandidateRelease(
             candidate.catalogId,
             candidate.releaseId,
           );
@@ -506,7 +508,11 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
               "Search candidate record is missing",
             );
           }
-          const operation = await verifyStoredRecord(admitted, row, limits);
+          const operation = await verifyStoredRecord(
+            entry.authenticated,
+            row,
+            limits,
+          );
           if (operation.id !== candidate.operationId) {
             throw new OpenApiMcpError(
               "RECORD_DIGEST_MISMATCH",
@@ -518,6 +524,21 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
               "RECORD_DIGEST_MISMATCH",
               "Search candidate API does not match its filter",
             );
+          }
+          let admitted = entry.admitted;
+          if (admitted === undefined) {
+            try {
+              admitted = await admitAuthenticatedManifest(
+                entry.authenticated,
+                options.trust,
+                options.generations,
+              );
+            } catch (error) {
+              failedManifests.add(key);
+              manifests.delete(key);
+              throw error;
+            }
+            entry.admitted = admitted;
           }
           const runtimeClassification = classification(operation);
           const retained = {
@@ -543,15 +564,6 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
               advisory: advisoryPermissions(operation.advisory),
             },
           };
-          if (
-            !responseFits(
-              [...operations.map(({ item }) => item), retained.item],
-              warnings,
-            )
-          ) {
-            responseLimited = true;
-            break;
-          }
           operations.push(retained);
         } catch (error) {
           if (
@@ -561,10 +573,7 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
             admissionLimited = true;
             break;
           }
-          if (!addWarning(warning(error))) {
-            responseLimited = true;
-            break;
-          }
+          if (!addWarning(warning(error))) responseLimited = true;
         }
       }
 
@@ -578,18 +587,42 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
           responseLimited = true;
       }
 
-      for (let index = operations.length - 1; index >= 0; index -= 1) {
-        const admission = operations[index].admission;
-        let state: Awaited<ReturnType<GenerationStore["get"]>>;
+      const finalStates = new Map<
+        string,
+        {
+          activeGeneration: number;
+          activeManifestDigest: string;
+        } | null
+      >();
+      for (const { admission } of operations) {
+        const key = `${admission.catalogId}\0${admission.issuer}`;
+        if (finalStates.has(key)) continue;
         try {
-          state = await options.generations.get(
+          const state = await options.generations.get(
             admission.catalogId as CandidateRef["catalogId"],
             admission.issuer,
+          );
+          finalStates.set(
+            key,
+            state === null
+              ? null
+              : {
+                  activeGeneration: state.activeGeneration,
+                  activeManifestDigest: state.activeManifestDigest,
+                },
           );
         } catch {
           throw upstreamUnavailable("Generation state is unavailable");
         }
+      }
+
+      for (let index = operations.length - 1; index >= 0; index -= 1) {
+        const admission = operations[index].admission;
+        const state = finalStates.get(
+          `${admission.catalogId}\0${admission.issuer}`,
+        );
         if (
+          state === undefined ||
           state === null ||
           state.activeGeneration !== admission.generation ||
           state.activeManifestDigest !== admission.digest
@@ -600,21 +633,6 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
         }
       }
 
-      if (responseLimited) {
-        const limitWarning: SearchWarning = {
-          code: "RESPONSE_LIMIT_EXCEEDED",
-          message: "Search response limit reached",
-        };
-        while (!addWarning(limitWarning)) {
-          if (operations.pop() === undefined) {
-            throw new OpenApiMcpError(
-              "RESPONSE_LIMIT_EXCEEDED",
-              "Search response limit is too small",
-            );
-          }
-        }
-      }
-
       operations.sort((left, right) => {
         if (left.item.deprecated !== right.item.deprecated) {
           return left.item.deprecated ? 1 : -1;
@@ -622,8 +640,32 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
         if (left.rank !== right.rank) return left.rank - right.rank;
         return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
       });
+      const returnedOperations = operations.slice(0, query.limit);
+      if (
+        !responseFits(
+          returnedOperations.map(({ item }) => item),
+          warnings,
+        )
+      )
+        responseLimited = true;
+      if (responseLimited) {
+        while (
+          !responseFits(
+            returnedOperations.map(({ item }) => item),
+            [...warnings, limitWarning],
+          )
+        ) {
+          if (returnedOperations.pop() === undefined) {
+            throw new OpenApiMcpError(
+              "RESPONSE_LIMIT_EXCEEDED",
+              "Search response limit is too small",
+            );
+          }
+        }
+        warnings.push(limitWarning);
+      }
       return {
-        operations: operations.slice(0, query.limit).map(({ item }) => item),
+        operations: returnedOperations.map(({ item }) => item),
         warnings,
       };
     },
