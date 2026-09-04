@@ -8,7 +8,7 @@ import {
   buildPermissionIndex,
   type PermissionsDataset,
 } from "./permissions.ts";
-import { createSchema, FORMAT_VERSION } from "./schema.ts";
+import { createSchema, LEGACY_FORMAT_VERSION } from "./schema.ts";
 import { extractSchemas } from "./schemas.ts";
 
 export interface CompileOptions {
@@ -28,9 +28,7 @@ export interface CompileResult {
 
 const COMPILER_VERSION = "0.1.0";
 
-export async function compile(
-  options: CompileOptions,
-): Promise<CompileResult> {
+export async function compile(options: CompileOptions): Promise<CompileResult> {
   const doc = await loadSpec(options.specPath);
   const operations = extractOperations(doc, options.api);
   const schemas = extractSchemas(doc, options.api);
@@ -76,16 +74,16 @@ export async function compile(
           .prepare("SELECT value FROM meta WHERE key = ?")
           .get("format_version") as { value: string } | undefined
       )?.value;
-      if (version !== String(FORMAT_VERSION)) {
+      if (version !== String(LEGACY_FORMAT_VERSION)) {
         throw new Error(
-          `format_version mismatch: artifact is ${version}, compiler is ${FORMAT_VERSION}`,
+          `format_version mismatch: artifact is ${version}, compiler is ${LEGACY_FORMAT_VERSION}`,
         );
       }
       const mounted = JSON.parse(
         (
-          db
-            .prepare("SELECT value FROM meta WHERE key = ?")
-            .get("apis") as { value: string } | undefined
+          db.prepare("SELECT value FROM meta WHERE key = ?").get("apis") as
+            | { value: string }
+            | undefined
         )?.value ?? "[]",
       ) as string[];
       if (mounted.includes(options.api)) {
@@ -106,12 +104,26 @@ export async function compile(
     );
     for (const op of operations) {
       insertOp.run(
-        op.qualifiedId, op.api, op.operationId, op.method, op.path,
-        op.safety, op.risk, op.operationType,
-        op.pageable ? 1 : 0, op.deprecated ? 1 : 0,
+        op.qualifiedId,
+        op.api,
+        op.operationId,
+        op.method,
+        op.path,
+        op.safety,
+        op.risk,
+        op.operationType,
+        op.pageable ? 1 : 0,
+        op.deprecated ? 1 : 0,
         op.permissions ? JSON.stringify(op.permissions) : null,
-        op.permConfidence, op.privilegeLevel, op.summary, op.tags,
-        op.paramsJson, op.searchText, op.bodyRef, op.bodySchemaJson, op.bodyMediaType,
+        op.permConfidence,
+        op.privilegeLevel,
+        op.summary,
+        op.tags,
+        op.paramsJson,
+        op.searchText,
+        op.bodyRef,
+        op.bodySchemaJson,
+        op.bodyMediaType,
         op.serverUrl,
       );
     }
@@ -143,7 +155,7 @@ export async function compile(
       "INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)",
     );
     for (const [key, value] of Object.entries({
-      format_version: String(FORMAT_VERSION),
+      format_version: String(LEGACY_FORMAT_VERSION),
       compiler_version: COMPILER_VERSION,
       apis: JSON.stringify([...existingApis, options.api]),
       [`${options.api}.source_path`]: options.specPath,

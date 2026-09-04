@@ -31,3 +31,17 @@ export interface SchemaRecord {
   name: string;
   json: string;
 }
+
+export type {
+  CanonicalMediaTypeV4,
+  EncodingHeaderV4,
+  MediaEncodingV4,
+  OperationRecordV4,
+  ParameterLocationV4,
+  ParameterRecordV4,
+  ParameterStyleV4,
+  RequestBodyMediaV4,
+  RequestBodyRecordV4,
+  SchemaRecordV4,
+  SchemaUseV4,
+} from "./runtime/types.ts";

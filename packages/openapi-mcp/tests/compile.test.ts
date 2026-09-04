@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { compile } from "../src/compile.ts";
-import { FORMAT_VERSION } from "../src/schema.ts";
+import { LEGACY_FORMAT_VERSION } from "../src/schema.ts";
 
 const OUT = `${import.meta.dir}/tmp-compile.sqlite`;
 const opts = {
@@ -14,8 +14,16 @@ const opts = {
 };
 
 afterEach(() => {
-  try { unlinkSync(OUT); } catch { /* already gone */ }
-  try { rmSync(`${OUT}.building`, { recursive: true }); } catch { /* already gone */ }
+  try {
+    unlinkSync(OUT);
+  } catch {
+    /* already gone */
+  }
+  try {
+    rmSync(`${OUT}.building`, { recursive: true });
+  } catch {
+    /* already gone */
+  }
 });
 
 describe("compile", () => {
@@ -70,7 +78,9 @@ describe("compile", () => {
       )
       .all("widget");
     expect(hits.length).toBeGreaterThan(0);
-    expect(hits.map((h) => h.qualified_id)).toContain("tiny:widgets.CreateWidget");
+    expect(hits.map((h) => h.qualified_id)).toContain(
+      "tiny:widgets.CreateWidget",
+    );
     db.close();
   });
 
@@ -78,11 +88,14 @@ describe("compile", () => {
     await compile(opts);
     const db = new Database(OUT, { readonly: true });
     const meta = Object.fromEntries(
-      db.query<{ key: string; value: string }, []>("SELECT key, value FROM meta")
+      db
+        .query<{ key: string; value: string }, []>(
+          "SELECT key, value FROM meta",
+        )
         .all()
         .map((r) => [r.key, r.value]),
     );
-    expect(meta.format_version).toBe(String(FORMAT_VERSION));
+    expect(meta.format_version).toBe(String(LEGACY_FORMAT_VERSION));
     // `apis` is the mounted-API list; per-api keys are namespaced so a second
     // mount (Task 12) cannot collide with the first.
     expect(JSON.parse(meta.apis)).toEqual(["tiny"]);
@@ -141,7 +154,9 @@ describe("compile", () => {
     } as typeof DatabaseSync.prototype.exec;
 
     try {
-      await expect(compile(opts)).rejects.toThrow("simulated mid-transaction failure");
+      await expect(compile(opts)).rejects.toThrow(
+        "simulated mid-transaction failure",
+      );
     } finally {
       DatabaseSync.prototype.exec = originalExec;
     }

@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 /** Bumped when the artifact layout changes incompatibly. Servers refuse unknown versions. */
-export const FORMAT_VERSION = 3;
+export const LEGACY_FORMAT_VERSION = 3;
 
 // `fts5` MUST be lower-case: D1 rejects `FTS5` as "not authorized".
 const DDL = `

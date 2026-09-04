@@ -1,10 +1,23 @@
 import { describe, expect, test } from "bun:test";
 import { DatabaseSync } from "node:sqlite";
-import { createSchema, FORMAT_VERSION } from "../src/schema.ts";
+import { createSchema, LEGACY_FORMAT_VERSION } from "../src/schema.ts";
 
 const insertOp = (
   db: DatabaseSync,
-  values: [string, string, string, string, string, string, string, number, number, string, string, string],
+  values: [
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    number,
+    number,
+    string,
+    string,
+    string,
+  ],
 ) =>
   db
     .prepare(
@@ -35,9 +48,18 @@ describe("createSchema", () => {
     const db = new DatabaseSync(":memory:");
     createSchema(db);
     insertOp(db, [
-      "g:users.ListMessages", "g", "users.ListMessages", "GET",
-      "/users/{id}/messages", "read", "routine", 0, 0, "[]",
-      "users list messages users id messages", "https://graph.microsoft.com",
+      "g:users.ListMessages",
+      "g",
+      "users.ListMessages",
+      "GET",
+      "/users/{id}/messages",
+      "read",
+      "routine",
+      0,
+      0,
+      "[]",
+      "users list messages users id messages",
+      "https://graph.microsoft.com",
     ]);
     db.exec(
       `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api, search_text)
@@ -58,9 +80,18 @@ describe("createSchema", () => {
     const db = new DatabaseSync(":memory:");
     createSchema(db);
     insertOp(db, [
-      "g:me.sendMail", "g", "me.sendMail", "POST", "/me/sendMail",
-      "write", "routine", 0, 0, "[]",
-      "me send mail me send mail", "https://graph.microsoft.com",
+      "g:me.sendMail",
+      "g",
+      "me.sendMail",
+      "POST",
+      "/me/sendMail",
+      "write",
+      "routine",
+      0,
+      0,
+      "[]",
+      "me send mail me send mail",
+      "https://graph.microsoft.com",
     ]);
     db.exec(
       `INSERT INTO operations_fts (rowid, qualified_id, operation_id, summary, path, tags, api, search_text)
@@ -82,13 +113,24 @@ describe("createSchema", () => {
     createSchema(db);
     const insert = () =>
       insertOp(db, [
-        "g:dup", "g", "dup", "GET", "/dup", "read", "routine", 0, 0, "[]", "dup", "https://x",
+        "g:dup",
+        "g",
+        "dup",
+        "GET",
+        "/dup",
+        "read",
+        "routine",
+        0,
+        0,
+        "[]",
+        "dup",
+        "https://x",
       ]);
     insert();
     expect(insert).toThrow();
   });
 
-  test("FORMAT_VERSION is 3", () => {
-    expect(FORMAT_VERSION).toBe(3);
+  test("LEGACY_FORMAT_VERSION is 3", () => {
+    expect(LEGACY_FORMAT_VERSION).toBe(3);
   });
 });

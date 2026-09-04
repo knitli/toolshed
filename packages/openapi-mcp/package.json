@@ -25,13 +25,29 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./compiler": {
+      "types": "./dist/compiler.d.ts",
+      "default": "./dist/compiler.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "default": "./dist/runtime/index.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite/index.d.ts",
+      "default": "./dist/sqlite/index.js"
+    },
+    "./conformance": {
+      "types": "./dist/conformance/index.d.ts",
+      "default": "./dist/conformance/index.js"
     }
   },
   "files": [
     "dist"
   ],
   "engines": {
-    "node": "catalog:",
+    "node": ">=24.16.0 <25",
     "bun": "catalog:"
   },
   "publishConfig": {
@@ -51,9 +67,9 @@
   "devDependencies": {
     "typescript": "catalog:typing"
   },
-  "devEngines":{
+  "devEngines": {
     "node": "catalog:",
-    "bun": "catalog:"    
+    "bun": "catalog:"
   },
   "release": {
     "branches": [
@@ -87,7 +103,7 @@
               "release": "patch"
             },
             {
-              "release": true
+              "release": false
             }
           ]
         }

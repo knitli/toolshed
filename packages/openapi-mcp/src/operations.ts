@@ -25,7 +25,13 @@ export function splitWords(text: string): string {
 }
 
 const HTTP_METHODS = new Set([
-  "get", "post", "put", "patch", "delete", "head", "options",
+  "get",
+  "post",
+  "put",
+  "patch",
+  "delete",
+  "head",
+  "options",
 ]);
 
 interface ParamRecord {
@@ -35,13 +41,93 @@ interface ParamRecord {
   schema: unknown;
 }
 
-function resolveLocal(doc: OpenApiDoc, ref: string): unknown {
+const FORBIDDEN_POINTER_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+]);
+
+/**
+ * Canonicalize the URI-fragment representation of an RFC 6901 pointer.
+ *
+ * The returned value is an internal, already URI-decoded physical address. It
+ * must not be fed through URI decoding a second time.
+ */
+export function canonicalLocalPointer(ref: string): string {
+  if (ref === "") return "#";
+  if (!ref.startsWith("#"))
+    throw new Error("local reference must be a JSON Pointer fragment");
+  let pointer: string;
+  try {
+    pointer = decodeURIComponent(ref.slice(1));
+  } catch {
+    throw new Error("JSON Pointer contains an invalid URI escape");
+  }
+  if (pointer === "") return "#";
+  if (!pointer.startsWith("/"))
+    throw new Error("local reference must be a JSON Pointer fragment");
+  const tokens = pointer.slice(1).split("/");
+  for (const rawToken of tokens) {
+    if (/(?:~(?:[^01]|$))/.test(rawToken))
+      throw new Error("JSON Pointer contains an invalid ~ escape");
+    const token = rawToken.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (FORBIDDEN_POINTER_KEYS.has(token))
+      throw new Error("JSON Pointer contains a forbidden prototype key");
+  }
+  return `#/${tokens.join("/")}`;
+}
+
+/** Resolve an already canonicalized physical JSON Pointer address. */
+export function resolveCanonicalPointer(
+  doc: unknown,
+  pointer: string,
+): unknown {
+  if (pointer === "#") return doc;
+  if (!pointer.startsWith("#/"))
+    throw new Error("canonical pointer must be a JSON Pointer fragment");
   let node: unknown = doc;
-  for (const part of ref.replace(/^#\//, "").split("/")) {
-    if (typeof node !== "object" || node === null) return undefined;
-    node = (node as Record<string, unknown>)[part];
+  for (const rawToken of pointer.slice(2).split("/")) {
+    if (/(?:~(?:[^01]|$))/.test(rawToken)) {
+      throw new Error("JSON Pointer contains an invalid ~ escape");
+    }
+    const token = rawToken.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (FORBIDDEN_POINTER_KEYS.has(token)) {
+      throw new Error("JSON Pointer contains a forbidden prototype key");
+    }
+    if (Array.isArray(node)) {
+      if (!/^(?:0|[1-9][0-9]*)$/.test(token)) {
+        throw new Error("JSON Pointer array index is not canonical");
+      }
+      const index = Number(token);
+      if (
+        !Number.isSafeInteger(index) ||
+        index >= node.length ||
+        !Object.hasOwn(node, index)
+      ) {
+        throw new Error("JSON Pointer array index was not found");
+      }
+      node = node[index];
+      continue;
+    }
+    if (
+      typeof node !== "object" ||
+      node === null ||
+      !Object.hasOwn(node, token)
+    ) {
+      throw new Error("JSON Pointer target was not found");
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(node, token);
+    if (descriptor === undefined || !("value" in descriptor)) {
+      throw new Error("JSON Pointer target is not an own data property");
+    }
+    node = descriptor.value;
   }
   return node;
+}
+
+/** Resolve a URI-decoded, one-pass RFC 6901 fragment through own properties only. */
+export function resolveLocalPointer(doc: unknown, ref: string): unknown {
+  return resolveCanonicalPointer(doc, canonicalLocalPointer(ref));
 }
 
 function collectParams(
@@ -62,7 +148,7 @@ function collectParams(
   for (const entry of raw) {
     const p = (
       typeof entry === "object" && entry !== null && "$ref" in entry
-        ? resolveLocal(doc, (entry as { $ref: string }).$ref)
+        ? resolveLocalPointer(doc, (entry as { $ref: string }).$ref)
         : entry
     ) as Record<string, unknown> | undefined;
     if (!p || typeof p.name !== "string") continue;
@@ -99,12 +185,16 @@ function bodyOf(op: OpenApiOperation): BodyContract {
     return { ref: rb.$ref, schemaJson: null, mediaType: null };
   }
 
-  const content = rb.content as Record<string, { schema?: unknown }> | undefined;
+  const content = rb.content as
+    | Record<string, { schema?: unknown }>
+    | undefined;
   if (!content) return NO_BODY;
   // Prefer JSON, but fall back to whatever the operation actually declares —
   // the media type travels with the schema so the server can set Content-Type.
   const mediaType =
-    "application/json" in content ? "application/json" : Object.keys(content)[0];
+    "application/json" in content
+      ? "application/json"
+      : Object.keys(content)[0];
   if (mediaType === undefined) return NO_BODY;
   const schema = content[mediaType]?.schema;
   if (schema === undefined) return NO_BODY;
