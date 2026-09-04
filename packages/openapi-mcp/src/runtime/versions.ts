@@ -8,6 +8,23 @@ export const ARTIFACT_FORMAT_VERSION = 4 as const;
 export const PREPARED_CALL_VERSION = 1 as const;
 
 /** Application security and availability limits for every runtime adapter. */
+export interface RuntimeLimits {
+  readonly maxManifestBytes: number;
+  readonly maxManifestRecords: number;
+  readonly maxRecordBytes: number;
+  readonly maxJsonDepth: number;
+  readonly maxSchemaClosureBytes: number;
+  readonly maxSchemaRefHops: number;
+  readonly maxSearchResults: number;
+  readonly defaultSearchResults: number;
+  readonly maxArgumentsBytes: number;
+  readonly maxResponseBytes: number;
+  readonly maxPages: number;
+  readonly maxPaginationBytes: number;
+  readonly maxRedirects: number;
+  readonly requestDeadlineMs: number;
+}
+
 export const DEFAULT_RUNTIME_LIMITS = {
   maxManifestBytes: 8 * 1024 * 1024,
   maxManifestRecords: 100_000,
@@ -23,6 +40,32 @@ export const DEFAULT_RUNTIME_LIMITS = {
   maxPaginationBytes: 16 * 1024 * 1024,
   maxRedirects: 3,
   requestDeadlineMs: 30_000,
-} as const;
+} as const satisfies RuntimeLimits;
 
-export type RuntimeLimits = typeof DEFAULT_RUNTIME_LIMITS;
+/**
+ * Apply operator limits without allowing a caller to relax the signed-runtime
+ * availability envelope. Every supplied value must be a positive safe integer
+ * no greater than the portable default.
+ */
+export function resolveRuntimeLimits(
+  overrides: Partial<RuntimeLimits> = {},
+): RuntimeLimits {
+  const resolved: Record<keyof RuntimeLimits, number> = {
+    ...DEFAULT_RUNTIME_LIMITS,
+  };
+
+  for (const key of Object.keys(overrides) as (keyof RuntimeLimits)[]) {
+    const value = overrides[key];
+    if (
+      value === undefined ||
+      !Number.isSafeInteger(value) ||
+      value < 1 ||
+      value > DEFAULT_RUNTIME_LIMITS[key]
+    ) {
+      throw new RangeError(`Runtime limit ${key} must only lower its default`);
+    }
+    resolved[key] = value;
+  }
+
+  return resolved;
+}

@@ -1,3 +1,8 @@
+import {
+  type CatalogStoreFactory,
+  type ConformanceTestAdapter,
+  RUNTIME_CONFORMANCE_FIXTURE,
+} from "../src/conformance/index.ts";
 import type {
   CallOutcome,
   OperationRefPayload,
@@ -8,6 +13,7 @@ import type {
 } from "../src/runtime/index.ts";
 import {
   ARTIFACT_FORMAT_VERSION,
+  createD1CatalogStore,
   PREPARED_CALL_VERSION,
   RUNTIME_CONTRACT_VERSION,
 } from "../src/runtime/index.ts";
@@ -50,4 +56,22 @@ type _compilerOwnedReferenceMap =
   // @ts-expect-error Reference maps remain compiler-owned until Task 4.
   import("../src/runtime/index.ts").ReferenceMapV1;
 
-void [ARTIFACT_FORMAT_VERSION, PREPARED_CALL_VERSION, RUNTIME_CONTRACT_VERSION];
+type _workerConformanceFactory = Assert<
+  Equal<CatalogStoreFactory extends () => unknown ? true : false, true>
+>;
+type _workerConformanceAdapter = Assert<
+  Equal<
+    ConformanceTestAdapter["test"] extends (...args: never[]) => unknown
+      ? true
+      : false,
+    true
+  >
+>;
+
+void [
+  ARTIFACT_FORMAT_VERSION,
+  PREPARED_CALL_VERSION,
+  RUNTIME_CONTRACT_VERSION,
+  createD1CatalogStore,
+  RUNTIME_CONFORMANCE_FIXTURE,
+];

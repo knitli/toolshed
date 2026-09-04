@@ -37,6 +37,10 @@
     "./sqlite": {
       "types": "./dist/sqlite/index.d.ts",
       "default": "./dist/sqlite/index.js"
+    },
+    "./conformance": {
+      "types": "./dist/conformance/index.d.ts",
+      "default": "./dist/conformance/index.js"
     }
   },
   "files": [

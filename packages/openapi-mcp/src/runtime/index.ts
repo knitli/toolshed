@@ -12,6 +12,14 @@ export {
   encodeOperationRef,
   parseTypedRecordId,
 } from "./references.ts";
+export {
+  CATALOG_STORE_PUBLIC_MESSAGES,
+  createD1CatalogStore,
+  type D1CatalogDatabase,
+  type D1CatalogPreparedStatement,
+  type D1CatalogResult,
+  type D1CatalogValue,
+} from "./store.ts";
 export type { StrictJsonLimits } from "./strict-json.ts";
 export {
   canonicalJson,
@@ -76,4 +84,5 @@ export {
   DEFAULT_RUNTIME_LIMITS,
   PREPARED_CALL_VERSION,
   RUNTIME_CONTRACT_VERSION,
+  resolveRuntimeLimits,
 } from "./versions.ts";
