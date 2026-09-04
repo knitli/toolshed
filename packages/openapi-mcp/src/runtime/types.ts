@@ -1,4 +1,5 @@
 import type { OpenApiMcpErrorCode } from "./errors.ts";
+import type { RuntimeLimits } from "./versions.ts";
 
 export type Sha256 = string & { readonly __sha256: unique symbol };
 export type CatalogId = string & { readonly __catalogId: unique symbol };
@@ -23,6 +24,18 @@ export interface OpenApiArguments {
   query?: Readonly<Record<string, OpenApiValue>>;
   headers?: Readonly<Record<string, string>>;
   body?: OpenApiValue;
+}
+
+/** A host-owned transport location reserved for later credential injection. */
+export interface CredentialSlot {
+  readonly placement: "header" | "query";
+  readonly name: string;
+}
+
+/** Host-only serializer policy. This is deliberately outside OpenApiArguments. */
+export interface SerializeArgumentsOptions {
+  readonly limits?: Readonly<Partial<RuntimeLimits>>;
+  readonly reservedCredentialSlots?: readonly CredentialSlot[];
 }
 
 export type HttpMethod =
@@ -157,6 +170,7 @@ export interface OperationRecordV4 {
   path: string;
   origin: string;
   summary: string | null;
+  tags: readonly string[];
   deprecated: boolean;
   parameters: readonly ParameterRecordV4[];
   requestBody: RequestBodyRecordV4 | null;

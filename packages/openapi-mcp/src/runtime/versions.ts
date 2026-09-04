@@ -10,6 +10,11 @@ export const PREPARED_CALL_VERSION = 1 as const;
 /** Fixed UTF-8 envelope for a single catalog search query. */
 export const MAX_SEARCH_QUERY_BYTES = 4 * 1024;
 
+/** Fixed bounds for authenticated OpenAPI operation tags. */
+export const MAX_OPERATION_TAGS = 32;
+export const MAX_OPERATION_TAG_BYTES = 128;
+export const MAX_OPERATION_TAG_BYTES_TOTAL = 2 * 1024;
+
 /** Application security and availability limits for every runtime adapter. */
 export interface RuntimeLimits {
   /**

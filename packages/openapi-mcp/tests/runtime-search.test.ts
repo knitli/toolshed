@@ -158,6 +158,7 @@ function operation(
     parameters: [],
     requestBody: null,
     schemaIds: [],
+    tags: [],
     advisory: { safety: "poisoned", origin: "must-not-leak" },
     ...overrides,
   };

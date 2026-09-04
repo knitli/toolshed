@@ -45,6 +45,11 @@ import {
   sha256,
   verifyStoredRecord,
 } from "../src/runtime/index.ts";
+import {
+  MAX_OPERATION_TAG_BYTES,
+  MAX_OPERATION_TAG_BYTES_TOTAL,
+  MAX_OPERATION_TAGS,
+} from "../src/runtime/versions.ts";
 import { generateKeypair } from "../src/sign.ts";
 
 const roots: string[] = [];
@@ -375,6 +380,96 @@ describe("immutable v4 construction", () => {
       database.close();
     }
     await discardCompiledRelease(compiled);
+  });
+
+  test("signs source-order operation tags", async () => {
+    const root = await temporaryRoot();
+    const options = await constructionOptions(root, "signed-tags");
+    await writeFile(
+      options.specPath,
+      JSON.stringify({
+        ...SPEC,
+        paths: {
+          "/tags": {
+            get: {
+              operationId: "getTagged",
+              tags: ["refund", "billing"],
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+      }),
+    );
+    const compiled = await compileRelease(options);
+    const database = new DatabaseSync(compiled.paths.sqlite, {
+      readOnly: true,
+    });
+    try {
+      const row = database
+        .prepare("SELECT record_json FROM operations WHERE operation_id = ?")
+        .get("getTagged") as { record_json: string };
+      expect((JSON.parse(row.record_json) as OperationRecordV4).tags).toEqual([
+        "refund",
+        "billing",
+      ]);
+    } finally {
+      database.close();
+    }
+    await discardCompiledRelease(compiled);
+  });
+
+  test("rejects malformed and one-over operation tags before signing", async () => {
+    const cases: readonly [string, unknown][] = [
+      ["non-array", "refund"],
+      ["duplicate", ["refund", "refund"]],
+      [
+        "count one-over",
+        Array.from(
+          { length: MAX_OPERATION_TAGS + 1 },
+          (_, index) => `tag-${index}`,
+        ),
+      ],
+      [
+        "UTF-8 bytes one-over",
+        ["😀".repeat(Math.floor(MAX_OPERATION_TAG_BYTES / 4) + 1)],
+      ],
+      [
+        "aggregate UTF-8 bytes one-over",
+        [
+          ...Array.from(
+            {
+              length: MAX_OPERATION_TAG_BYTES_TOTAL / MAX_OPERATION_TAG_BYTES,
+            },
+            (_, index) =>
+              `${index.toString().padStart(3, "0")}${"a".repeat(MAX_OPERATION_TAG_BYTES - 3)}`,
+          ),
+          "z",
+        ],
+      ],
+    ];
+
+    for (const [index, [_name, tags]] of cases.entries()) {
+      const root = await temporaryRoot();
+      const options = await constructionOptions(root, `invalid-tags-${index}`);
+      await writeFile(
+        options.specPath,
+        JSON.stringify({
+          ...SPEC,
+          paths: {
+            "/tags": {
+              get: {
+                operationId: "getTagged",
+                tags,
+                responses: { "200": { description: "ok" } },
+              },
+            },
+          },
+        }),
+      );
+      await expect(compileRelease(options)).rejects.toThrow(
+        "operation tags are invalid",
+      );
+    }
   });
 
   test("bounds emitted SQLite reread when its inode grows after capped stat", async () => {
