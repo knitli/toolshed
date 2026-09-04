@@ -335,6 +335,55 @@ test("v4 on-disk catalog serves manifest, search, operation, and schemas without
   rmSync(artifact.directory, { recursive: true, force: true });
 });
 
+test("mixed v4 and v5 releases remain readable through one SQLite catalog", async () => {
+  const artifact = createV4Catalog();
+  const database = new DatabaseSync(artifact.path);
+  database
+    .prepare(
+      "UPDATE release_metadata SET format = 5, manifest_json = ? WHERE catalog_id = ? AND release_id = ?",
+    )
+    .run(
+      JSON.stringify({
+        format: 5,
+        contract: 1,
+        catalogId,
+        releaseId: releaseB,
+      }),
+      catalogId,
+      releaseB,
+    );
+  database.close();
+
+  const store = new SqliteCatalogStore(artifact.path);
+  try {
+    expect(
+      await store.searchCandidates({ query: "item", api: "api", limit: 2 }),
+    ).toEqual([
+      { catalogId, releaseId: releaseA, operationId },
+      { catalogId, releaseId: releaseB, operationId },
+    ]);
+    await expect(store.getManifest(catalogId, releaseA)).resolves.toMatchObject(
+      {
+        manifestJson: expect.stringContaining('"format":4'),
+      },
+    );
+    await expect(store.getManifest(catalogId, releaseB)).resolves.toMatchObject(
+      {
+        manifestJson: expect.stringContaining('"format":5'),
+      },
+    );
+    await expect(
+      store.getOperation(catalogId, releaseA, operationId),
+    ).resolves.toMatchObject({ record: { summary: releaseA } });
+    await expect(
+      store.getOperation(catalogId, releaseB, operationId),
+    ).resolves.toMatchObject({ record: { summary: releaseB } });
+  } finally {
+    store.close();
+    rmSync(artifact.directory, { recursive: true, force: true });
+  }
+});
+
 test("closing a v4 store is idempotent and disables every catalog operation", async () => {
   const artifact = createV4Catalog();
   try {
@@ -1011,8 +1060,22 @@ test("constructor rejects absent, unsupported, and ambiguous artifact formats", 
     );
     unsupportedDatabase
       .prepare("INSERT INTO release_metadata VALUES (?, ?)")
-      .run(5, 1);
+      .run(6, 1);
     unsupportedDatabase.close();
+
+    const mixedUnsupported = temporaryArtifact("mixed-unsupported.sqlite");
+    fixtures.push(mixedUnsupported);
+    const mixedUnsupportedDatabase = new DatabaseSync(mixedUnsupported.path);
+    mixedUnsupportedDatabase.exec(
+      "CREATE TABLE release_metadata (format INTEGER, contract INTEGER)",
+    );
+    const insertMixedVersion = mixedUnsupportedDatabase.prepare(
+      "INSERT INTO release_metadata VALUES (?, ?)",
+    );
+    insertMixedVersion.run(4, 1);
+    insertMixedVersion.run(5, 1);
+    insertMixedVersion.run(6, 1);
+    mixedUnsupportedDatabase.close();
 
     const ambiguous = temporaryArtifact("ambiguous.sqlite");
     fixtures.push(ambiguous);

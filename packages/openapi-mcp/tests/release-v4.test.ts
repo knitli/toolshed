@@ -51,6 +51,7 @@ import {
   MAX_OPERATION_TAGS,
 } from "../src/runtime/versions.ts";
 import { generateKeypair } from "../src/sign.ts";
+import { SqliteCatalogStore } from "../src/sqlite/catalog-store.ts";
 
 const roots: string[] = [];
 async function temporaryRoot(): Promise<string> {
@@ -79,6 +80,60 @@ test("path identity rejects inode reuse with a new birth time", () => {
   expect(() => pathIdentityFromStats({ ...original, birthtimeNs: 0n })).toThrow(
     "path identity requires a nonzero birthtimeNs",
   );
+});
+
+test("compiler v5 output is executable through the SQLite catalog bridge", async () => {
+  const root = await temporaryRoot();
+  const { compiled, publicKeyPem } = await fixture(root, "executable-v5");
+  const store = new SqliteCatalogStore(compiled.paths.sqlite);
+  try {
+    const envelope = await store.getManifest(
+      compiled.manifest.catalogId,
+      compiled.manifest.releaseId,
+    );
+    const admitted = await admitManifest(
+      envelope,
+      {
+        releaseKeys: [
+          {
+            issuer: compiled.manifest.issuer,
+            keyId: compiled.manifest.keyId,
+            publicKey: createPublicKey(publicKeyPem)
+              .export({ type: "spki", format: "der" })
+              .toString("base64url"),
+          },
+        ],
+        rollbackKeys: [],
+      },
+      new MemoryGenerationStore(),
+    );
+    const [candidate] = await store.searchCandidates({
+      query: "updateThing",
+      api: "tiny",
+      limit: 1,
+    });
+    expect(candidate).toBeDefined();
+    const row = await store.getOperation(
+      compiled.manifest.catalogId,
+      compiled.manifest.releaseId,
+      candidate?.operationId as never,
+    );
+    expect(row).not.toBeNull();
+    const operation = await verifyStoredRecord(admitted, row as never);
+    expect(operation.tags).toEqual([]);
+    const schemas = await store.getSchemas(
+      compiled.manifest.catalogId,
+      compiled.manifest.releaseId,
+      operation.schemaIds,
+    );
+    expect(schemas).toHaveLength(operation.schemaIds.length);
+    for (const schema of schemas) {
+      await expect(verifyStoredRecord(admitted, schema)).resolves.toBeDefined();
+    }
+  } finally {
+    store.close();
+    await discardCompiledRelease(compiled);
+  }
 });
 
 async function runChildWithDeadline(
@@ -367,6 +422,7 @@ describe("immutable v4 construction", () => {
       }),
     );
     const compiled = await compileRelease(options);
+    expect(compiled.manifest).toMatchObject({ format: 5, contract: 1 });
     const database = new DatabaseSync(compiled.paths.sqlite, {
       readOnly: true,
     });
@@ -701,8 +757,8 @@ describe("immutable v4 construction", () => {
           canonicalJson(JSON.parse(row.record_json)),
         );
         const domain = row.record_id.startsWith("operation:")
-          ? "knitli.openapi-mcp.operation-record.v4"
-          : "knitli.openapi-mcp.schema-record.v4";
+          ? "knitli.openapi-mcp.operation-record.v5"
+          : "knitli.openapi-mcp.schema-record.v5";
         expect(row.logical_digest).toBe(
           await sha256(domain, JSON.parse(row.record_json)),
         );
@@ -1017,7 +1073,7 @@ describe("runtime operation record invariants", () => {
       .toString("base64url");
     for (const [name, record] of cases) {
       const digest = (await sha256(
-        "knitli.openapi-mcp.operation-record.v4",
+        "knitli.openapi-mcp.operation-record.v5",
         record,
       )) as Sha256;
       const manifest = {

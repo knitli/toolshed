@@ -2023,7 +2023,7 @@ export async function compileReleaseWithCheckpoint(
 
     await mkdir(options.outDir, { recursive: true });
     const outDir = resolve(options.outDir);
-    stage = await mkdtemp(join(outDir, ".openapi-mcp-v4-"));
+    stage = await mkdtemp(join(outDir, ".openapi-mcp-v5-"));
     stageOwnership.directory = await capturePathIdentity(stage, "directory");
     const paths = {
       directory: stage,
@@ -2050,7 +2050,7 @@ export async function compileReleaseWithCheckpoint(
         source_uri, source_revision, source_content_sha256,
         reference_graph_digest, manifest_json, signature_algorithm,
         signature_key_id, signature
-      ) VALUES (?, ?, 4, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'Ed25519', ?, '')`)
+      ) VALUES (?, ?, 5, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'Ed25519', ?, '')`)
         .run(
           ids.catalogId,
           ids.releaseId,
@@ -2074,7 +2074,7 @@ export async function compileReleaseWithCheckpoint(
       for (const record of records.operations) {
         const json = checkedRecordJson(record as unknown as JsonValue, limits);
         const digest = await sha256(
-          "knitli.openapi-mcp.operation-record.v4",
+          "knitli.openapi-mcp.operation-record.v5",
           record as unknown as JsonObject,
         );
         insertOperation.run(
@@ -2096,7 +2096,7 @@ export async function compileReleaseWithCheckpoint(
       for (const record of records.schemas) {
         const json = checkedRecordJson(record as unknown as JsonValue, limits);
         const digest = await sha256(
-          "knitli.openapi-mcp.schema-record.v4",
+          "knitli.openapi-mcp.schema-record.v5",
           record as unknown as JsonObject,
         );
         insertSchema.run(ids.catalogId, ids.releaseId, record.id, json, digest);
@@ -2133,8 +2133,8 @@ export async function compileReleaseWithCheckpoint(
         maxKeys: limits.maxDocumentKeys,
       }) as unknown as OperationRecordV4 | SchemaRecordV4;
       const domain = id.startsWith("operation:")
-        ? "knitli.openapi-mcp.operation-record.v4"
-        : "knitli.openapi-mcp.schema-record.v4";
+        ? "knitli.openapi-mcp.operation-record.v5"
+        : "knitli.openapi-mcp.schema-record.v5";
       const digest = await sha256(domain, record as unknown as JsonObject);
       if (digest !== row.logical_digest)
         throw new Error("reread logical record digest mismatch");
@@ -2266,8 +2266,8 @@ export async function compileReleaseWithCheckpoint(
           throw new Error("reread emitted record_json is invalid");
         }
         const domain = id.startsWith("operation:")
-          ? "knitli.openapi-mcp.operation-record.v4"
-          : "knitli.openapi-mcp.schema-record.v4";
+          ? "knitli.openapi-mcp.operation-record.v5"
+          : "knitli.openapi-mcp.schema-record.v5";
         const digest = await sha256(domain, record as unknown as JsonObject);
         if (digest !== row.logical_digest)
           throw new Error("reread emitted record digest mismatch");

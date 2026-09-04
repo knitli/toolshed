@@ -444,6 +444,7 @@ function validateSchemaReferences(value: unknown): void {
 function validateRecord(
   record: unknown,
   wrapperId: unknown,
+  format: 4 | 5,
 ): OperationRecordV4 | SchemaRecordV4 {
   let id: TypedRecordId;
   try {
@@ -453,15 +454,10 @@ function validateRecord(
     throw mismatch("Stored row ID is malformed");
   }
   const isOperation = id.startsWith("operation:");
-  const hasSignedTags =
-    isOperation &&
-    typeof record === "object" &&
-    record !== null &&
-    Object.hasOwn(record, "tags");
   const object = exactObject(
     record,
     isOperation
-      ? hasSignedTags
+      ? format === 5
         ? operationKeys
         : legacyOperationKeys
       : schemaKeys,
@@ -495,7 +491,7 @@ function validateRecord(
       )
     )
       throw mismatch("Operation record fields are invalid");
-    const tags = hasSignedTags ? object.tags : [];
+    const tags = format === 5 ? object.tags : [];
     validateOperationTags(tags);
     if (`operation:${object.api}:${object.operationId}` !== id) {
       throw mismatch(
@@ -521,7 +517,7 @@ function validateRecord(
     ) {
       throw mismatch("Operation schema IDs do not equal direct schema uses");
     }
-    return (hasSignedTags
+    return (format === 5
       ? object
       : { ...object, tags }) as unknown as OperationRecordV4;
   } else if (
@@ -595,7 +591,11 @@ export async function verifyStoredRecord<
   let copy: T;
   try {
     digestInput = detached(row.record, limits);
-    copy = validateRecord(digestInput, wrapperId) as T;
+    copy = validateRecord(
+      digestInput,
+      wrapperId,
+      admitted.manifest.format,
+    ) as T;
   } catch (error) {
     if (
       error instanceof OpenApiMcpError &&
@@ -604,9 +604,8 @@ export async function verifyStoredRecord<
       throw error;
     throw mismatch("Logical record cannot be canonicalized");
   }
-  const domain = copy.id.startsWith("operation:")
-    ? "knitli.openapi-mcp.operation-record.v4"
-    : "knitli.openapi-mcp.schema-record.v4";
+  const recordKind = copy.id.startsWith("operation:") ? "operation" : "schema";
+  const domain = `knitli.openapi-mcp.${recordKind}-record.v${admitted.manifest.format}`;
   const digest = await sha256(domain, digestInput as JsonObject);
   if (digest !== row.logicalDigest)
     throw mismatch("Stored logical digest does not match the row");
