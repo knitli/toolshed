@@ -6,12 +6,14 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   type CatalogId,
   canonicalJson,
@@ -893,6 +895,59 @@ test("record verification rejects wrapper/record extras, ID disagreement, malfor
   ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
 });
 
+test("stored wrapper reflection traps are stable and never traverse its record", async () => {
+  const admitted = await admitFixture();
+  let recordTraversed = false;
+  const record = new Proxy(operation(), {
+    getPrototypeOf() {
+      recordTraversed = true;
+      return Object.prototype;
+    },
+  });
+  const wrapper = { id: operationId, logicalDigest: digestA, record };
+  const trapped = [
+    new Proxy(wrapper, {
+      getPrototypeOf() {
+        throw new Error("wrapper prototype trap");
+      },
+    }),
+    new Proxy(wrapper, {
+      ownKeys() {
+        throw new Error("wrapper ownKeys trap");
+      },
+    }),
+    new Proxy(wrapper, {
+      getOwnPropertyDescriptor() {
+        throw new Error("wrapper descriptor trap");
+      },
+    }),
+  ];
+  for (const candidate of trapped) {
+    await expect(
+      verifyStoredRecord(admitted, candidate as never),
+    ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+    expect(recordTraversed).toBe(false);
+  }
+});
+
+test("stored wrapper extraction never invokes Proxy get traps", async () => {
+  const admitted = await admitFixture();
+  let invoked = false;
+  const wrapper = new Proxy(
+    { id: operationId, logicalDigest: digestA, record: operation() },
+    {
+      get() {
+        invoked = true;
+        throw new Error("wrapper get trap");
+      },
+    },
+  );
+  await expect(
+    verifyStoredRecord(admitted, wrapper as never),
+  ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+  expect(invoked).toBe(false);
+});
+
 test("unadmitted wrapper ID is rejected before hostile record traversal", async () => {
   const admitted = await admitFixture();
   let traversed = false;
@@ -1146,6 +1201,34 @@ async function tempStatePath(): Promise<string> {
   return join(directory, "generations.json");
 }
 
+function mutexPath(statePath: string): string {
+  return join(dirname(statePath), `.${basename(statePath)}.mutex.sqlite3`);
+}
+
+function expectValidMutex(path: string): void {
+  const database = new DatabaseSync(path, { readOnly: true });
+  try {
+    expect(database.prepare("PRAGMA user_version").get()).toEqual({
+      user_version: 1,
+    });
+    expect(
+      database
+        .prepare(
+          "SELECT singleton, format, marker FROM knitli_generation_mutex",
+        )
+        .all(),
+    ).toEqual([
+      {
+        singleton: 1,
+        format: 1,
+        marker: "knitli.openapi-mcp.generation-mutex.v1",
+      },
+    ]);
+  } finally {
+    database.close();
+  }
+}
+
 async function writeChildAcceptHelper(directory: string): Promise<string> {
   const helper = join(directory, "accept-child.ts");
   const moduleUrl = new URL(
@@ -1175,6 +1258,38 @@ async function childAccept(
   const exitCode = await child.exited;
   if (exitCode !== 0) throw new Error(await error);
   return JSON.parse(await output) as GenerationState | null;
+}
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    try {
+      await lstat(path);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await Bun.sleep(5);
+    }
+  }
+  throw new Error(`Timed out waiting for ${basename(path)}`);
+}
+
+async function writeMutexHolderHelper(directory: string): Promise<string> {
+  const helper = join(directory, "mutex-holder.ts");
+  await writeFile(
+    helper,
+    `import { existsSync, writeFileSync } from "node:fs";\nimport { DatabaseSync } from "node:sqlite";\nconst [mutex, ready, release] = process.argv.slice(2);\nconst database = new DatabaseSync(mutex, { timeout: 2000 });\ndatabase.exec("BEGIN EXCLUSIVE");\nwriteFileSync(ready, "ready");\nwhile (!existsSync(release)) await Bun.sleep(5);\ndatabase.exec("COMMIT");\ndatabase.close();\n`,
+  );
+  return helper;
+}
+
+async function writeCrashCheckpointHelper(directory: string): Promise<string> {
+  const helper = join(directory, "mutex-crash-checkpoint.ts");
+  await writeFile(
+    helper,
+    `import { constants } from "node:fs";\nimport { open, rename } from "node:fs/promises";\nimport { dirname } from "node:path";\nimport { DatabaseSync } from "node:sqlite";\nconst [mutex, target, temporary, payload, checkpoint] = process.argv.slice(2);\nconst database = new DatabaseSync(mutex, { timeout: 2000 });\ndatabase.exec("BEGIN EXCLUSIVE");\nconst file = await open(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);\nawait file.writeFile(payload);\nawait file.sync();\nawait file.close();\nif (checkpoint === "before-rename") process.kill(process.pid, "SIGKILL");\nawait rename(temporary, target);\nif (checkpoint === "after-rename") process.kill(process.pid, "SIGKILL");\nconst parent = await open(dirname(target), constants.O_RDONLY);\nawait parent.sync();\nawait parent.close();\nif (checkpoint === "after-sync") process.kill(process.pid, "SIGKILL");\ndatabase.exec("COMMIT");\nif (checkpoint === "after-commit") process.kill(process.pid, "SIGKILL");\n`,
+  );
+  return helper;
 }
 
 test("FileGenerationStore persists 0600 state and enforces CAS across concurrent accepts", async () => {
@@ -1212,28 +1327,28 @@ test("FileGenerationStore provides OS-visible CAS across relative, absolute, and
   await symlink(realDirectory, linkedParent, "dir");
   const helper = await writeChildAcceptHelper(harnessDirectory);
   const barrier = join(harnessDirectory, "start");
-  const transitions: GenerationTransition[] = [
-    { expectedRevision: null, next: { ...state(1, digestA), revision: 0 } },
-    { expectedRevision: null, next: { ...state(2, digestB), revision: 0 } },
-    { expectedRevision: null, next: { ...state(3, digestA), revision: 0 } },
-  ];
-  const attempts = [
+  const transitions = Array.from({ length: 32 }, (_, index) => index + 1).map(
+    (generation): GenerationTransition => ({
+      expectedRevision: null,
+      next: {
+        ...state(generation, generation % 2 === 0 ? digestB : digestA),
+        revision: 0,
+      },
+    }),
+  );
+  const attempts = transitions.map((transition, index) =>
     childAccept(
       helper,
       realDirectory,
-      "generations.json",
-      transitions[0],
+      index % 3 === 0
+        ? "generations.json"
+        : index % 3 === 1
+          ? path
+          : join(linkedParent, "generations.json"),
+      transition,
       barrier,
     ),
-    childAccept(helper, realDirectory, path, transitions[1], barrier),
-    childAccept(
-      helper,
-      realDirectory,
-      join(linkedParent, "generations.json"),
-      transitions[2],
-      barrier,
-    ),
-  ];
+  );
   await Bun.sleep(50);
   await writeFile(barrier, "go");
   const results = await Promise.all(attempts);
@@ -1243,6 +1358,155 @@ test("FileGenerationStore provides OS-visible CAS across relative, absolute, and
     "issuer.example",
   );
   expect(persisted).toEqual(results.find((result) => result !== null));
+  expect((await lstat(mutexPath(path))).mode & 0o777).toBe(0o600);
+  expect((await lstat(mutexPath(path))).nlink).toBe(1);
+  expectValidMutex(mutexPath(path));
+});
+
+test("FileGenerationStore reports bounded typed contention while another process holds its mutex", async () => {
+  const path = await tempStatePath();
+  const store = new FileGenerationStore(path);
+  await store.accept(catalogId, "issuer.example", {
+    expectedRevision: null,
+    next: { ...state(1, digestA), revision: 0 },
+  });
+  const harness = await mkdtemp(join(tmpdir(), "openapi-mcp-mutex-holder-"));
+  temporaryDirectories.push(harness);
+  const helper = await writeMutexHolderHelper(harness);
+  const ready = join(harness, "ready");
+  const release = join(harness, "release");
+  const holder = Bun.spawn(
+    [process.execPath, helper, mutexPath(path), ready, release],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  await waitForFile(ready);
+  const started = Date.now();
+  const error = await store
+    .accept(catalogId, "issuer.example", {
+      expectedRevision: 0,
+      next: { ...state(2, digestB), revision: 1 },
+    })
+    .then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+  const elapsed = Date.now() - started;
+  expect((error as Error | null)?.constructor.name).toBe(
+    "GenerationStoreContentionError",
+  );
+  expect((error as Error | null)?.message).toBe(
+    "Generation state mutex contention exceeded its bounded deadline",
+  );
+  expect(elapsed).toBeGreaterThanOrEqual(1_500);
+  expect(elapsed).toBeLessThan(3_500);
+  await writeFile(release, "release");
+  expect(await holder.exited).toBe(0);
+
+  const readPath = await tempStatePath();
+  const readStore = new FileGenerationStore(readPath);
+  await readStore.get(catalogId, "issuer.example");
+  const readReady = join(harness, "read-ready");
+  const readRelease = join(harness, "read-release");
+  const readHolder = Bun.spawn(
+    [process.execPath, helper, mutexPath(readPath), readReady, readRelease],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  await waitForFile(readReady);
+  const readError = await readStore.get(catalogId, "issuer.example").then(
+    () => null,
+    (reason: unknown) => reason,
+  );
+  expect((readError as Error | null)?.constructor.name).toBe(
+    "GenerationStoreContentionError",
+  );
+  expect((readError as Error | null)?.message).toBe(
+    "Generation state mutex contention exceeded its bounded deadline",
+  );
+  await writeFile(readRelease, "release");
+  expect(await readHolder.exited).toBe(0);
+}, 10_000);
+
+test("FileGenerationStore mutex is released by the kernel after SIGKILL", async () => {
+  const path = await tempStatePath();
+  const store = new FileGenerationStore(path);
+  await store.accept(catalogId, "issuer.example", {
+    expectedRevision: null,
+    next: { ...state(1, digestA), revision: 0 },
+  });
+  expectValidMutex(mutexPath(path));
+  const harness = await mkdtemp(join(tmpdir(), "openapi-mcp-mutex-kill-"));
+  temporaryDirectories.push(harness);
+  const helper = await writeMutexHolderHelper(harness);
+  const ready = join(harness, "ready");
+  const holder = Bun.spawn(
+    [process.execPath, helper, mutexPath(path), ready, join(harness, "never")],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  await waitForFile(ready);
+  holder.kill(9);
+  expect(await holder.exited).not.toBe(0);
+  await expect(
+    store.accept(catalogId, "issuer.example", {
+      expectedRevision: 0,
+      next: { ...state(2, digestB), revision: 1 },
+    }),
+  ).resolves.toMatchObject({ highestGeneration: 2, revision: 1 });
+});
+
+test("FileGenerationStore crash checkpoints preserve a recoverable durable result", async () => {
+  const harness = await mkdtemp(join(tmpdir(), "openapi-mcp-mutex-crash-"));
+  temporaryDirectories.push(harness);
+  const helper = await writeCrashCheckpointHelper(harness);
+  for (const checkpoint of [
+    "before-rename",
+    "after-rename",
+    "after-sync",
+    "after-commit",
+  ] as const) {
+    const path = await tempStatePath();
+    const store = new FileGenerationStore(path);
+    const initial = { ...state(1, digestA), revision: 0 };
+    const next = { ...state(2, digestB), revision: 1 };
+    await store.accept(catalogId, "issuer.example", {
+      expectedRevision: null,
+      next: initial,
+    });
+    expectValidMutex(mutexPath(path));
+    const payload = canonicalJson({
+      entries: [{ catalogId, issuer: "issuer.example", state: next }],
+      version: 1,
+    });
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        helper,
+        mutexPath(path),
+        path,
+        `${path}.${checkpoint}.tmp`,
+        payload,
+        checkpoint,
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    expect(await child.exited).not.toBe(0);
+    if (checkpoint === "before-rename") {
+      await expect(
+        store.accept(catalogId, "issuer.example", {
+          expectedRevision: 0,
+          next,
+        }),
+      ).resolves.toEqual(next);
+    } else {
+      expect(
+        await store.accept(catalogId, "issuer.example", {
+          expectedRevision: 0,
+          next,
+        }),
+      ).toBeNull();
+      expect(await store.get(catalogId, "issuer.example")).toEqual(next);
+    }
+    expectValidMutex(mutexPath(path));
+  }
 });
 
 test("FileGenerationStore rejects security-history rewrites and undefined transitions", async () => {
@@ -1473,149 +1737,6 @@ test("FileGenerationStore rejects a state file not owned by the effective user",
   }
 });
 
-test("FileGenerationStore recovers a dead lock but never reclaims a live lock by age", async () => {
-  const deadPath = await tempStatePath();
-  const deadLock = join(
-    dirname(deadPath),
-    `.${deadPath.split("/").at(-1)}.lock`,
-  );
-  await writeFile(
-    deadLock,
-    JSON.stringify({
-      version: 1,
-      pid: 2_147_483_647,
-      createdAtEpochMs: 0,
-      token: "00000000-0000-4000-8000-000000000000",
-    }),
-    { mode: 0o600 },
-  );
-  const created = { ...state(1, digestA), revision: 0 };
-  await expect(
-    new FileGenerationStore(deadPath).accept(catalogId, "issuer.example", {
-      expectedRevision: null,
-      next: created,
-    }),
-  ).resolves.toEqual(created);
-
-  const livePath = await tempStatePath();
-  const liveLock = join(
-    dirname(livePath),
-    `.${livePath.split("/").at(-1)}.lock`,
-  );
-  await writeFile(
-    liveLock,
-    JSON.stringify({
-      version: 1,
-      pid: process.pid,
-      createdAtEpochMs: 0,
-      token: "00000000-0000-4000-8000-000000000001",
-    }),
-    { mode: 0o600 },
-  );
-  await expect(
-    new FileGenerationStore(livePath).accept(catalogId, "issuer.example", {
-      expectedRevision: null,
-      next: created,
-    }),
-  ).rejects.toThrow(/contention/i);
-  expect((await lstat(liveLock)).isFile()).toBe(true);
-});
-
-test("FileGenerationStore recovery admits exactly one child across repeated dead-lock races", async () => {
-  const harnessDirectory = await mkdtemp(
-    join(tmpdir(), "openapi-mcp-generation-recovery-child-"),
-  );
-  temporaryDirectories.push(harnessDirectory);
-  const helper = await writeChildAcceptHelper(harnessDirectory);
-  for (let round = 0; round < 8; round += 1) {
-    const path = await tempStatePath();
-    const lock = join(dirname(path), `.${path.split("/").at(-1)}.lock`);
-    const recovery = `${lock}.recovery`;
-    await writeFile(
-      lock,
-      JSON.stringify({
-        version: 1,
-        pid: 2_147_483_647,
-        createdAtEpochMs: 0,
-        token: `00000000-0000-4000-8000-${String(round).padStart(12, "0")}`,
-      }),
-      { mode: 0o600 },
-    );
-    const barrier = join(harnessDirectory, `start-${round}`);
-    const transitions = Array.from({ length: 32 }, (_, index) => index + 1).map(
-      (generation): GenerationTransition => ({
-        expectedRevision: null,
-        next: {
-          ...state(generation, generation % 2 === 0 ? digestB : digestA),
-          revision: 0,
-        },
-      }),
-    );
-    const attempts = transitions.map((transition) =>
-      childAccept(helper, dirname(path), path, transition, barrier),
-    );
-    await Bun.sleep(25);
-    await writeFile(barrier, "go");
-    const results = await Promise.all(attempts);
-    const accepted = results.filter(
-      (result): result is GenerationState => result !== null,
-    );
-    expect(accepted).toHaveLength(1);
-    expect(
-      await new FileGenerationStore(path).get(catalogId, "issuer.example"),
-    ).toEqual(accepted[0]);
-    await expect(lstat(lock)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(lstat(recovery)).rejects.toMatchObject({ code: "ENOENT" });
-  }
-}, 20_000);
-
-test("FileGenerationStore clears crashed recovery markers before and after lock replacement", async () => {
-  for (const crashPoint of [
-    "before-replacement",
-    "after-replacement",
-  ] as const) {
-    const path = await tempStatePath();
-    const lock = join(dirname(path), `.${path.split("/").at(-1)}.lock`);
-    const recovery = `${lock}.recovery`;
-    const crashedClaim = `${recovery}.dead-claim`;
-    const dead = JSON.stringify({
-      version: 1,
-      pid: 2_147_483_647,
-      createdAtEpochMs: 0,
-      token:
-        crashPoint === "before-replacement"
-          ? "00000000-0000-4000-8000-000000000003"
-          : "00000000-0000-4000-8000-000000000004",
-    });
-    await writeFile(crashedClaim, dead, { mode: 0o600 });
-    if (crashPoint === "before-replacement") {
-      await writeFile(
-        lock,
-        JSON.stringify({
-          version: 1,
-          pid: 2_147_483_647,
-          createdAtEpochMs: 0,
-          token: "00000000-0000-4000-8000-000000000005",
-        }),
-        { mode: 0o600 },
-      );
-    } else {
-      await link(crashedClaim, lock);
-    }
-    await link(crashedClaim, recovery);
-
-    const created = { ...state(1, digestA), revision: 0 };
-    await expect(
-      new FileGenerationStore(path).accept(catalogId, "issuer.example", {
-        expectedRevision: null,
-        next: created,
-      }),
-    ).resolves.toEqual(created);
-    await expect(lstat(lock)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(lstat(recovery)).rejects.toMatchObject({ code: "ENOENT" });
-  }
-});
-
 test("FileGenerationStore rejects identities its durable decoder cannot reload", async () => {
   const path = await tempStatePath();
   const store = new FileGenerationStore(path);
@@ -1632,7 +1753,7 @@ test("FileGenerationStore rejects identities its durable decoder cannot reload",
   await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
 });
 
-test("FileGenerationStore rejects unsafe parent and lock permissions", async () => {
+test("FileGenerationStore rejects unsafe parent permissions", async () => {
   const parentPath = await tempStatePath();
   const parent = dirname(parentPath);
   await chmod(parent, 0o777);
@@ -1643,25 +1764,89 @@ test("FileGenerationStore rejects unsafe parent and lock permissions", async () 
   } finally {
     await chmod(parent, 0o700);
   }
+});
 
-  const lockPath = await tempStatePath();
-  const lock = join(dirname(lockPath), `.${lockPath.split("/").at(-1)}.lock`);
-  await writeFile(
-    lock,
-    JSON.stringify({
-      version: 1,
-      pid: process.pid,
-      createdAtEpochMs: Date.now(),
-      token: "00000000-0000-4000-8000-000000000002",
-    }),
-    { mode: 0o644 },
+test("FileGenerationStore rejects unsafe persistent mutex files and sidecars", async () => {
+  async function initialized(): Promise<{ path: string; mutex: string }> {
+    const path = await tempStatePath();
+    await new FileGenerationStore(path).get(catalogId, "issuer.example");
+    return { path, mutex: mutexPath(path) };
+  }
+
+  {
+    const { path, mutex } = await initialized();
+    await chmod(mutex, 0o644);
+    await expect(
+      new FileGenerationStore(path).get(catalogId, "issuer.example"),
+    ).rejects.toThrow(/mutex/i);
+  }
+  {
+    const { path, mutex } = await initialized();
+    const target = `${mutex}.target`;
+    await rename(mutex, target);
+    await symlink(target, mutex);
+    await expect(
+      new FileGenerationStore(path).get(catalogId, "issuer.example"),
+    ).rejects.toThrow(/mutex/i);
+  }
+  {
+    const { path, mutex } = await initialized();
+    await link(mutex, `${mutex}.alias`);
+    await expect(
+      new FileGenerationStore(path).get(catalogId, "issuer.example"),
+    ).rejects.toThrow(/mutex/i);
+  }
+  {
+    const { path, mutex } = await initialized();
+    await rm(mutex);
+    const database = new DatabaseSync(mutex);
+    database.exec("CREATE TABLE unexpected(value TEXT)");
+    database.close();
+    await chmod(mutex, 0o600);
+    await expect(
+      new FileGenerationStore(path).get(catalogId, "issuer.example"),
+    ).rejects.toThrow(/mutex/i);
+  }
+  {
+    const { path, mutex } = await initialized();
+    await rm(mutex);
+    await writeFile(mutex, "not sqlite", { mode: 0o600 });
+    await expect(
+      new FileGenerationStore(path).get(catalogId, "issuer.example"),
+    ).rejects.toThrow(/mutex/i);
+  }
+  {
+    const { path, mutex } = await initialized();
+    await rm(mutex);
+    await writeFile(mutex, new Uint8Array(1024 * 1024 + 1), { mode: 0o600 });
+    await expect(
+      new FileGenerationStore(path).get(catalogId, "issuer.example"),
+    ).rejects.toThrow(/mutex.*byte limit/i);
+  }
+  {
+    const { path, mutex } = await initialized();
+    await writeFile(`${mutex}-wal`, "unexpected", { mode: 0o600 });
+    await expect(
+      new FileGenerationStore(path).get(catalogId, "issuer.example"),
+    ).rejects.toThrow(/mutex/i);
+  }
+});
+
+test("FileGenerationStore clears only a crashed internal mutex initializer alias", async () => {
+  const path = await tempStatePath();
+  const store = new FileGenerationStore(path);
+  await store.get(catalogId, "issuer.example");
+  const mutex = mutexPath(path);
+  const initializer = join(
+    dirname(path),
+    `.${basename(path)}.${process.pid}.${crypto.randomUUID()}.mutex-init`,
   );
-  await expect(
-    new FileGenerationStore(lockPath).accept(catalogId, "issuer.example", {
-      expectedRevision: null,
-      next: { ...state(1, digestA), revision: 0 },
-    }),
-  ).rejects.toThrow(/lock/i);
+  await link(mutex, initializer);
+  expect((await lstat(mutex)).nlink).toBe(2);
+  await expect(store.get(catalogId, "issuer.example")).resolves.toBeNull();
+  expect((await lstat(mutex)).nlink).toBe(1);
+  await expect(lstat(initializer)).rejects.toMatchObject({ code: "ENOENT" });
+  expectValidMutex(mutex);
 });
 
 test("FileGenerationStore bounds state serialization before replacing durable state", async () => {

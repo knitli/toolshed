@@ -4,13 +4,14 @@ import {
   link,
   lstat,
   open,
+  readdir,
   realpath,
   rename,
   unlink,
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
-  canonicalJson,
   canonicalJsonBounded,
   parseJsonStrict,
 } from "../runtime/strict-json.ts";
@@ -32,22 +33,7 @@ interface StateEntry {
 interface StoreLocation {
   target: string;
   parent: string;
-  lock: string;
-  recovery: string;
-}
-
-interface LockMetadata {
-  version: 1;
-  pid: number;
-  createdAtEpochMs: number;
-  token: string;
-}
-
-interface LockLease {
-  location: StoreLocation;
-  claim: string;
-  handle: FileHandle;
-  metadata: LockMetadata;
+  mutex: string;
 }
 
 const pathQueues = new Map<string, Promise<void>>();
@@ -61,19 +47,33 @@ const stateKeys = [
   "highestManifestDigest",
   "revision",
 ];
-const lockKeys = ["createdAtEpochMs", "pid", "token", "version"];
-const lockTimeoutMs = 2_000;
-const deadLockMinimumAgeMs = 100;
-const lockPollMs = 10;
+const mutexMarker = "knitli.openapi-mcp.generation-mutex.v1";
+const mutexTable = "knitli_generation_mutex";
+const mutexTimeoutMs = 2_000;
+const mutexInitializationGraceMs = 500;
+const maximumMutexBytes = 1024 * 1024;
+const maximumStateBytes = 16 * 1024 * 1024;
 
-class LockChangedError extends Error {
+class MutexLinkCountError extends Error {
+  constructor(label: string) {
+    super(`Generation state ${label} must have exactly one link`);
+  }
+}
+
+/** Stable bounded failure when another process retains the generation mutex. */
+export class GenerationStoreContentionError extends Error {
   constructor() {
-    super("Generation state lock changed while opening");
+    super("Generation state mutex contention exceeded its bounded deadline");
+    this.name = "GenerationStoreContentionError";
   }
 }
 
 function failure(message: string, cause?: unknown): Error {
   return new Error(`Generation state ${message}`, { cause });
+}
+
+function mutexFailure(message: string): Error {
+  return failure(`mutex ${message}`);
 }
 
 function exactObject(
@@ -169,7 +169,7 @@ function decodeFile(text: string): StateEntry[] {
   let value: unknown;
   try {
     value = parseJsonStrict(text, {
-      maxBytes: 16 * 1024 * 1024,
+      maxBytes: maximumStateBytes,
       maxDepth: 8,
       maxKeys: 1_000_000,
     });
@@ -277,304 +277,323 @@ async function serialized<T>(
   }
 }
 
-function assertPrivateRegular(metadata: Stats, label: string): void {
+function assertPrivateRegular(
+  metadata: Stats,
+  label: string,
+  requireSingleLink = false,
+): void {
   if (!metadata.isFile() || metadata.isSymbolicLink())
     throw failure(`${label} must be a regular non-symlink file`);
   if (typeof process.getuid === "function" && metadata.uid !== process.getuid())
-    throw failure(`${label} has the wrong owner`);
+    throw failure(`${label} has wrong owner`);
   if ((metadata.mode & 0o077) !== 0)
     throw failure(`${label} must not be group or world accessible`);
+  if (requireSingleLink && metadata.nlink !== 1)
+    throw new MutexLinkCountError(label);
 }
 
-function decodeLock(text: string): LockMetadata {
-  const value = parseJsonStrict(text, {
-    maxBytes: 4096,
-    maxDepth: 2,
-    maxKeys: 4,
-  });
-  const object = exactObject(value, lockKeys, "lock");
+function sameFile(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sqliteRows(database: DatabaseSync, sql: string): unknown[] {
+  return database.prepare(sql).all();
+}
+
+function validateMutexSchema(database: DatabaseSync): void {
+  const version = database.prepare("PRAGMA user_version").get() as
+    | Record<string, unknown>
+    | undefined;
+  const tables = sqliteRows(
+    database,
+    "SELECT name, type FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name",
+  ) as Record<string, unknown>[];
+  const columns = sqliteRows(
+    database,
+    `PRAGMA table_info(${mutexTable})`,
+  ) as Record<string, unknown>[];
+  const rows = sqliteRows(
+    database,
+    `SELECT singleton, format, marker FROM ${mutexTable}`,
+  ) as Record<string, unknown>[];
+  const integrity = database.prepare("PRAGMA integrity_check").get() as
+    | Record<string, unknown>
+    | undefined;
   if (
-    object.version !== 1 ||
-    !Number.isSafeInteger(object.pid) ||
-    (object.pid as number) <= 0 ||
-    !integer(object.createdAtEpochMs) ||
-    typeof object.token !== "string" ||
-    !/^[0-9a-f-]{36}$/.test(object.token)
+    version?.user_version !== 1 ||
+    tables.length !== 1 ||
+    tables[0]?.name !== mutexTable ||
+    tables[0]?.type !== "table" ||
+    columns.length !== 3 ||
+    columns[0]?.name !== "singleton" ||
+    columns[0]?.type !== "INTEGER" ||
+    columns[0]?.pk !== 1 ||
+    columns[1]?.name !== "format" ||
+    columns[1]?.type !== "INTEGER" ||
+    columns[1]?.notnull !== 1 ||
+    columns[2]?.name !== "marker" ||
+    columns[2]?.type !== "TEXT" ||
+    columns[2]?.notnull !== 1 ||
+    rows.length !== 1 ||
+    rows[0]?.singleton !== 1 ||
+    rows[0]?.format !== 1 ||
+    rows[0]?.marker !== mutexMarker ||
+    integrity?.integrity_check !== "ok"
   )
-    throw failure("lock metadata is invalid");
-  return object as unknown as LockMetadata;
+    throw mutexFailure("database schema or marker is invalid");
 }
 
-function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
-    return true;
-  }
-}
-
-async function readLock(path: string): Promise<{
-  metadata: LockMetadata;
-  stats: Stats;
-}> {
-  const before = await lstat(path);
-  assertPrivateRegular(before, "lock");
-  const handle = await open(
-    path,
-    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
-  );
-  try {
-    const stats = await handle.stat();
-    assertPrivateRegular(stats, "lock");
-    if (stats.dev !== before.dev || stats.ino !== before.ino)
-      throw new LockChangedError();
-    return { metadata: decodeLock(await handle.readFile("utf8")), stats };
-  } finally {
-    await handle.close();
-  }
-}
-
-function sameLock(
-  left: Awaited<ReturnType<typeof readLock>>,
-  right: Awaited<ReturnType<typeof readLock>>,
-): boolean {
-  return (
-    left.stats.dev === right.stats.dev &&
-    left.stats.ino === right.stats.ino &&
-    left.metadata.version === right.metadata.version &&
-    left.metadata.pid === right.metadata.pid &&
-    left.metadata.createdAtEpochMs === right.metadata.createdAtEpochMs &&
-    left.metadata.token === right.metadata.token
-  );
-}
-
-async function writeClaim(
-  location: StoreLocation,
-): Promise<{ claim: string; handle: FileHandle; metadata: LockMetadata }> {
-  const token = crypto.randomUUID();
-  const claim = join(
-    location.parent,
-    `.${basename(location.target)}.${process.pid}.${token}.claim`,
-  );
-  const handle = await open(
-    claim,
-    constants.O_CREAT |
-      constants.O_EXCL |
-      constants.O_RDWR |
-      (constants.O_NOFOLLOW ?? 0),
-    0o600,
-  );
-  const metadata: LockMetadata = {
-    version: 1,
-    pid: process.pid,
-    createdAtEpochMs: Date.now(),
-    token,
-  };
-  try {
-    assertPrivateRegular(await handle.stat(), "claim");
-    await handle.writeFile(
-      `${canonicalJson(metadata as unknown as JsonObject)}\n`,
-    );
-    await handle.sync();
-    return { claim, handle, metadata };
-  } catch (error) {
-    await handle.close();
+async function requireNoMutexSidecars(mutex: string): Promise<void> {
+  for (const suffix of ["-journal", "-wal", "-shm"] as const) {
     try {
-      await unlink(claim);
-    } catch {}
-    throw error;
-  }
-}
-
-async function tryInstallClaim(
-  location: StoreLocation,
-  claim: string,
-): Promise<boolean> {
-  try {
-    await lstat(location.recovery);
-    return false;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  try {
-    await link(claim, location.lock);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-    throw failure("lock cannot be installed", error);
-  }
-}
-
-async function clearStaleRecovery(location: StoreLocation): Promise<void> {
-  let observed: Awaited<ReturnType<typeof readLock>>;
-  try {
-    observed = await readLock(location.recovery);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-    if (error instanceof LockChangedError) return;
-    throw error;
-  }
-  if (
-    processIsAlive(observed.metadata.pid) ||
-    Date.now() - observed.metadata.createdAtEpochMs < deadLockMinimumAgeMs
-  )
-    return;
-  let current: Awaited<ReturnType<typeof readLock>>;
-  try {
-    current = await readLock(location.recovery);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-    if (error instanceof LockChangedError) return;
-    throw error;
-  }
-  if (!sameLock(current, observed) || processIsAlive(current.metadata.pid))
-    return;
-  try {
-    await unlink(location.recovery);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-}
-
-async function removeOwnedRecoveryMarker(
-  location: StoreLocation,
-  claimOwner: Awaited<ReturnType<typeof readLock>>,
-): Promise<void> {
-  try {
-    const recoveryOwner = await readLock(location.recovery);
-    if (sameLock(recoveryOwner, claimOwner)) await unlink(location.recovery);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-}
-
-async function tryRecoverDeadLock(
-  location: StoreLocation,
-  claim: string,
-): Promise<boolean> {
-  try {
-    await lstat(location.recovery);
-    return false;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  let observed: Awaited<ReturnType<typeof readLock>>;
-  try {
-    observed = await readLock(location.lock);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    if (error instanceof LockChangedError) return false;
-    throw error;
-  }
-  if (
-    processIsAlive(observed.metadata.pid) ||
-    Date.now() - observed.metadata.createdAtEpochMs < deadLockMinimumAgeMs
-  )
-    return false;
-  const claimOwner = await readLock(claim);
-  try {
-    await link(claim, location.recovery);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-    throw failure("dead lock cannot be claimed for recovery", error);
-  }
-  try {
-    const recoveryOwner = await readLock(location.recovery);
-    if (!sameLock(recoveryOwner, claimOwner))
-      throw failure("recovery marker ownership is invalid");
-
-    const deadBeforeUnlink = await readLock(location.lock);
-    if (
-      !sameLock(deadBeforeUnlink, observed) ||
-      processIsAlive(deadBeforeUnlink.metadata.pid) ||
-      Date.now() - deadBeforeUnlink.metadata.createdAtEpochMs <
-        deadLockMinimumAgeMs
-    )
-      return false;
-
-    const recoveryImmediatelyBeforeUnlink = await readLock(location.recovery);
-    const lockImmediatelyBeforeUnlink = await readLock(location.lock);
-    if (
-      !sameLock(recoveryImmediatelyBeforeUnlink, claimOwner) ||
-      !sameLock(lockImmediatelyBeforeUnlink, observed) ||
-      processIsAlive(lockImmediatelyBeforeUnlink.metadata.pid) ||
-      Date.now() - lockImmediatelyBeforeUnlink.metadata.createdAtEpochMs <
-        deadLockMinimumAgeMs
-    )
-      return false;
-
-    await unlink(location.lock);
-    try {
-      await link(claim, location.lock);
+      const metadata = await lstat(`${mutex}${suffix}`);
+      assertPrivateRegular(metadata, `mutex ${suffix} sidecar`, true);
+      throw mutexFailure(`${suffix} sidecar is unexpected`);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-      throw failure("recovered lock cannot be installed", error);
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    const installed = await readLock(location.lock);
-    if (!sameLock(installed, claimOwner))
-      throw failure("recovered lock ownership is invalid");
-    return true;
-  } finally {
-    await removeOwnedRecoveryMarker(location, claimOwner);
   }
 }
 
-async function acquireLock(location: StoreLocation): Promise<LockLease> {
-  const claim = await writeClaim(location);
-  const deadline = Date.now() + lockTimeoutMs;
+async function validateMutexMetadata(mutex: string): Promise<Stats> {
+  let before: Stats;
   try {
-    while (Date.now() <= deadline) {
-      await clearStaleRecovery(location);
-      if (
-        (await tryInstallClaim(location, claim.claim)) ||
-        (await tryRecoverDeadLock(location, claim.claim))
-      )
-        return { location, ...claim };
-      await new Promise<void>((resolveDelay) =>
-        setTimeout(resolveDelay, lockPollMs),
-      );
-    }
-    throw failure("lock contention exceeded its bounded deadline");
+    before = await lstat(mutex);
+    assertPrivateRegular(before, "mutex database", true);
+    if (before.size > maximumMutexBytes)
+      throw mutexFailure("database exceeds its byte limit");
+    await requireNoMutexSidecars(mutex);
   } catch (error) {
-    await claim.handle.close();
-    try {
-      await unlink(claim.claim);
-    } catch {}
-    throw error;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw error;
+    if ((error as Error).message?.startsWith("Generation state")) throw error;
+    throw mutexFailure("database cannot be inspected");
   }
+  return before;
 }
 
-async function requireLeaseOwnership(lease: LockLease): Promise<void> {
-  const [lock, claim] = await Promise.all([
-    readLock(lease.location.lock),
-    lease.handle.stat(),
-  ]);
-  if (
-    lock.stats.dev !== claim.dev ||
-    lock.stats.ino !== claim.ino ||
-    lock.metadata.token !== lease.metadata.token ||
-    lock.metadata.pid !== lease.metadata.pid
-  )
-    throw failure("lock ownership changed during admission");
+function regexEscape(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function releaseLock(lease: LockLease): Promise<void> {
-  try {
-    await requireLeaseOwnership(lease);
-    await unlink(lease.location.lock);
-    const parent = await open(lease.location.parent, constants.O_RDONLY);
+async function clearMutexInitializerAlias(
+  location: StoreLocation,
+): Promise<void> {
+  const final = await lstat(location.mutex);
+  const namePattern = new RegExp(
+    `^\\.${regexEscape(basename(location.target))}\\.\\d+\\.` +
+      "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.mutex-init$",
+    "i",
+  );
+  let removed = false;
+  for (const name of await readdir(location.parent)) {
+    if (!namePattern.test(name)) continue;
+    const candidate = join(location.parent, name);
+    let metadata: Stats;
+    try {
+      metadata = await lstat(candidate);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    assertPrivateRegular(metadata, "mutex initializer");
+    if (!sameFile(final, metadata)) continue;
+    let finalImmediatelyBefore: Stats;
+    let aliasImmediatelyBefore: Stats;
+    try {
+      finalImmediatelyBefore = await lstat(location.mutex);
+      aliasImmediatelyBefore = await lstat(candidate);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (
+      !sameFile(final, finalImmediatelyBefore) ||
+      !sameFile(finalImmediatelyBefore, aliasImmediatelyBefore)
+    )
+      continue;
+    try {
+      await unlink(candidate);
+      removed = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  if (removed) {
+    const parent = await open(location.parent, constants.O_RDONLY);
     try {
       await parent.sync();
     } finally {
       await parent.close();
     }
-  } finally {
-    await lease.handle.close();
+  }
+}
+
+async function initializeMutex(location: StoreLocation): Promise<void> {
+  const observationDeadline = Date.now() + mutexInitializationGraceMs;
+  while (true) {
     try {
-      await unlink(lease.claim);
+      await validateMutexMetadata(location.mutex);
+      return;
+    } catch (error) {
+      if (
+        error instanceof MutexLinkCountError &&
+        Date.now() < observationDeadline
+      ) {
+        await clearMutexInitializerAlias(location);
+        await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 5));
+        continue;
+      }
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      break;
+    }
+  }
+
+  const temporary = join(
+    location.parent,
+    `.${basename(location.target)}.${process.pid}.${crypto.randomUUID()}.mutex-init`,
+  );
+  let handle: FileHandle | undefined;
+  let database: DatabaseSync | undefined;
+  try {
+    handle = await open(
+      temporary,
+      constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_RDWR |
+        (constants.O_NOFOLLOW ?? 0),
+      0o600,
+    );
+    assertPrivateRegular(await handle.stat(), "mutex initializer", true);
+    await handle.close();
+    handle = undefined;
+    database = new DatabaseSync(temporary, { timeout: mutexTimeoutMs });
+    database.exec(
+      `PRAGMA journal_mode=DELETE;
+       PRAGMA synchronous=FULL;
+       CREATE TABLE ${mutexTable} (
+         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+         format INTEGER NOT NULL CHECK (format = 1),
+         marker TEXT NOT NULL CHECK (marker = '${mutexMarker}')
+       ) WITHOUT ROWID;
+       INSERT INTO ${mutexTable}(singleton, format, marker)
+       VALUES (1, 1, '${mutexMarker}');
+       PRAGMA user_version=1;`,
+    );
+    database.close();
+    database = undefined;
+    handle = await open(
+      temporary,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+    );
+    assertPrivateRegular(await handle.stat(), "mutex initializer", true);
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await requireNoMutexSidecars(temporary);
+
+    try {
+      await link(temporary, location.mutex);
+      try {
+        await unlink(temporary);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      const parent = await open(location.parent, constants.O_RDONLY);
+      try {
+        await parent.sync();
+      } finally {
+        await parent.close();
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  } catch {
+    throw mutexFailure("database cannot be initialized");
+  } finally {
+    try {
+      database?.close();
     } catch {}
+    try {
+      await handle?.close();
+    } catch {}
+    try {
+      await unlink(temporary);
+    } catch {}
+  }
+  const installationDeadline = Date.now() + mutexInitializationGraceMs;
+  while (true) {
+    try {
+      await validateMutexMetadata(location.mutex);
+      return;
+    } catch (error) {
+      if (
+        error instanceof MutexLinkCountError &&
+        Date.now() < installationDeadline
+      ) {
+        await clearMutexInitializerAlias(location);
+        await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 5));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+async function openMutex(location: StoreLocation): Promise<DatabaseSync> {
+  await initializeMutex(location);
+  const before = await validateMutexMetadata(location.mutex);
+  let database: DatabaseSync | undefined;
+  try {
+    // DatabaseSync has no fd constructor. A canonical 0700 parent prevents an
+    // untrusted path swap between these inode checks and the path-based open.
+    database = new DatabaseSync(location.mutex, { timeout: mutexTimeoutMs });
+    const after = await lstat(location.mutex);
+    assertPrivateRegular(after, "mutex database", true);
+    if (!sameFile(before, after))
+      throw mutexFailure("database changed while opening");
+    await requireNoMutexSidecars(location.mutex);
+    return database;
+  } catch (error) {
+    try {
+      database?.close();
+    } catch {}
+    if (isSqliteBusy(error)) throw new GenerationStoreContentionError();
+    if ((error as Error).message?.startsWith("Generation state")) throw error;
+    throw mutexFailure("database is corrupt or inaccessible");
+  }
+}
+
+function isSqliteBusy(error: unknown): boolean {
+  const candidate = error as { errcode?: unknown };
+  if (typeof candidate?.errcode !== "number") return false;
+  const primaryCode = candidate.errcode & 0xff;
+  return primaryCode === 5 || primaryCode === 6;
+}
+
+function beginExclusive(database: DatabaseSync): void {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      database.exec("BEGIN EXCLUSIVE");
+      return;
+    } catch (error) {
+      if (isSqliteBusy(error)) throw new GenerationStoreContentionError();
+      // Bun/macOS may transiently surface SQLITE_IOERR_LOCK on the first lock
+      // syscall after a prior connection closes. Retry once; only a subsequent
+      // canonical BUSY/LOCKED result is classified as contention.
+      if (attempt === 0 && (error as { errcode?: unknown }).errcode === 3850)
+        continue;
+      throw mutexFailure("exclusive transaction cannot be acquired");
+    }
+  }
+}
+
+function requireValidOpenMutex(database: DatabaseSync): void {
+  try {
+    validateMutexSchema(database);
+  } catch (error) {
+    if (isSqliteBusy(error)) throw new GenerationStoreContentionError();
+    if ((error as Error).message?.startsWith("Generation state")) throw error;
+    throw mutexFailure("database is corrupt or inaccessible");
   }
 }
 
@@ -595,11 +614,31 @@ export class FileGenerationStore implements GenerationStore {
     requireIdentity(catalogId, issuer);
     const location = await this.#location();
     return serialized(location.target, async () => {
-      const entries = await this.#read(location.target);
-      const state = entries.find(
-        (entry) => entry.catalogId === catalogId && entry.issuer === issuer,
-      )?.state;
-      return state ? cloneState(state) : null;
+      const database = await openMutex(location);
+      let transactionOpen = false;
+      try {
+        beginExclusive(database);
+        transactionOpen = true;
+        requireValidOpenMutex(database);
+        const entries = await this.#read(location.target);
+        const state = entries.find(
+          (entry) => entry.catalogId === catalogId && entry.issuer === issuer,
+        )?.state;
+        database.exec("COMMIT");
+        transactionOpen = false;
+        return state ? cloneState(state) : null;
+      } catch (error) {
+        if (transactionOpen) {
+          try {
+            database.exec("ROLLBACK");
+          } catch {}
+        }
+        throw error;
+      } finally {
+        try {
+          database.close();
+        } catch {}
+      }
     });
   }
 
@@ -611,15 +650,22 @@ export class FileGenerationStore implements GenerationStore {
     requireIdentity(catalogId, issuer);
     const location = await this.#location();
     return serialized(location.target, async () => {
-      const lease = await acquireLock(location);
+      const database = await openMutex(location);
+      let transactionOpen = false;
       try {
+        beginExclusive(database);
+        transactionOpen = true;
+        requireValidOpenMutex(database);
         const entries = await this.#read(location.target);
         const index = entries.findIndex(
           (entry) => entry.catalogId === catalogId && entry.issuer === issuer,
         );
         const current = index < 0 ? null : entries[index].state;
-        if ((current?.revision ?? null) !== transition.expectedRevision)
+        if ((current?.revision ?? null) !== transition.expectedRevision) {
+          database.exec("COMMIT");
+          transactionOpen = false;
           return null;
+        }
         const next = decodeState(transition.next);
         requireLegalTransition(current, next);
         const replacement: StateEntry = { catalogId, issuer, state: next };
@@ -630,11 +676,21 @@ export class FileGenerationStore implements GenerationStore {
             `${right.catalogId}\0${right.issuer}`,
           ),
         );
-        await requireLeaseOwnership(lease);
         await this.#persist(location, entries);
+        database.exec("COMMIT");
+        transactionOpen = false;
         return cloneState(next);
+      } catch (error) {
+        if (transactionOpen) {
+          try {
+            database.exec("ROLLBACK");
+          } catch {}
+        }
+        throw error;
       } finally {
-        await releaseLock(lease);
+        try {
+          database.close();
+        } catch {}
       }
     });
   }
@@ -648,15 +704,14 @@ export class FileGenerationStore implements GenerationStore {
       typeof process.getuid === "function" &&
       metadata.uid !== process.getuid()
     )
-      throw failure("parent has the wrong owner");
-    if ((metadata.mode & 0o022) !== 0)
-      throw failure("parent must not be group or world writable");
+      throw failure("parent has wrong owner");
+    if ((metadata.mode & 0o077) !== 0)
+      throw failure("parent must be owner-only (0700)");
     const target = join(parent, basename(this.#requestedPath));
     return {
       target,
       parent,
-      lock: join(parent, `.${basename(target)}.lock`),
-      recovery: join(parent, `.${basename(target)}.lock.recovery`),
+      mutex: join(parent, `.${basename(target)}.mutex.sqlite3`),
     };
   }
 
@@ -666,11 +721,10 @@ export class FileGenerationStore implements GenerationStore {
       metadata = await lstat(target);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw failure("cannot be inspected", error);
+      throw failure("cannot be read", error);
     }
     assertPrivateRegular(metadata, "file");
-    if (metadata.size > 16 * 1024 * 1024)
-      throw failure("file exceeds its byte limit");
+    if (metadata.size > maximumStateBytes) throw failure("file is too large");
     let handle: FileHandle | undefined;
     try {
       handle = await open(
@@ -679,15 +733,11 @@ export class FileGenerationStore implements GenerationStore {
       );
       const opened = await handle.stat();
       assertPrivateRegular(opened, "file");
-      if (opened.dev !== metadata.dev || opened.ino !== metadata.ino)
+      if (!sameFile(opened, metadata))
         throw failure("file changed while opening");
       return decodeFile(await handle.readFile("utf8"));
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.startsWith("Generation state")
-      )
-        throw error;
+      if ((error as Error).message?.startsWith("Generation state")) throw error;
       throw failure("cannot be read", error);
     } finally {
       await handle?.close();
@@ -696,7 +746,7 @@ export class FileGenerationStore implements GenerationStore {
 
   async #persist(
     location: StoreLocation,
-    entries: readonly StateEntry[],
+    entries: StateEntry[],
   ): Promise<void> {
     const temporary = join(
       location.parent,
@@ -705,6 +755,14 @@ export class FileGenerationStore implements GenerationStore {
     let handle: FileHandle | undefined;
     let renamed = false;
     try {
+      const payload = canonicalJsonBounded(
+        { version: 1, entries } as unknown as JsonObject,
+        {
+          maxBytes: maximumStateBytes,
+          maxDepth: 8,
+          maxNodes: 1_000_000,
+        },
+      );
       handle = await open(
         temporary,
         constants.O_CREAT |
@@ -713,10 +771,7 @@ export class FileGenerationStore implements GenerationStore {
           (constants.O_NOFOLLOW ?? 0),
         0o600,
       );
-      const payload = canonicalJsonBounded(
-        { version: 1, entries } as unknown as JsonObject,
-        { maxBytes: 16 * 1024 * 1024, maxDepth: 8, maxNodes: 1_000_000 },
-      );
+      assertPrivateRegular(await handle.stat(), "temporary file", true);
       await handle.writeFile(payload, "utf8");
       await handle.sync();
       await handle.close();

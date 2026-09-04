@@ -66,6 +66,45 @@ function exactObject(
   return value as Record<string, unknown>;
 }
 
+interface ExtractedStoredRecord {
+  id: unknown;
+  logicalDigest: unknown;
+  record: unknown;
+}
+
+function extractStoredRecord(value: unknown): ExtractedStoredRecord {
+  try {
+    const object = exactObject(value, wrapperKeys, "stored row");
+    const id = Object.getOwnPropertyDescriptor(object, "id");
+    const logicalDigest = Object.getOwnPropertyDescriptor(
+      object,
+      "logicalDigest",
+    );
+    const record = Object.getOwnPropertyDescriptor(object, "record");
+    if (
+      id === undefined ||
+      !("value" in id) ||
+      logicalDigest === undefined ||
+      !("value" in logicalDigest) ||
+      record === undefined ||
+      !("value" in record)
+    )
+      throw mismatch("Stored row properties must be own data");
+    return {
+      id: id.value,
+      logicalDigest: logicalDigest.value,
+      record: record.value,
+    };
+  } catch (error) {
+    if (
+      error instanceof OpenApiMcpError &&
+      error.code === "RECORD_DIGEST_MISMATCH"
+    )
+      throw error;
+    throw mismatch("Stored row wrapper cannot be inspected");
+  }
+}
+
 function validateRecord(
   record: unknown,
   wrapperId: unknown,
@@ -182,7 +221,7 @@ export async function verifyStoredRecord<
     ...DEFAULT_RUNTIME_LIMITS,
     ...limitOverrides,
   } as RuntimeLimits;
-  const row = exactObject(rowValue, wrapperKeys, "stored row");
+  const row = extractStoredRecord(rowValue);
   let wrapperId: TypedRecordId;
   try {
     if (typeof row.id !== "string") throw new Error();
