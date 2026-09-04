@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  link,
   mkdir,
   readFile,
   realpath,
@@ -18,6 +19,7 @@ import {
   loadSpecV4,
   resolveLocalPointer,
 } from "../src/compiler.ts";
+import { readFileBoundedV4 } from "../src/release/load-v4.ts";
 import { parseTypedRecordId } from "../src/runtime/references.ts";
 import { generateKeypair } from "../src/sign.ts";
 
@@ -86,6 +88,48 @@ function releaseOptions(root: string, specPath: string): CompileReleaseOptions {
 }
 
 describe("strict v4 loading", () => {
+  test("bounds regular and streaming source reads before unbounded allocation", async () => {
+    const root = await temporaryRoot();
+    const regular = await write(root, "bounded.bin", "x".repeat(65));
+    await expect(readFileBoundedV4(regular, 64, "test source")).rejects.toThrow(
+      /byte|size|limit/i,
+    );
+    await expect(
+      readFileBoundedV4(regular, 65, "test source"),
+    ).resolves.toHaveLength(65);
+
+    const symlinkPath = join(root, "bounded-link.bin");
+    await symlink(regular, symlinkPath);
+    await expect(
+      readFileBoundedV4(symlinkPath, 65, "test source"),
+    ).rejects.toThrow(/symbolic|no.?follow|unsafe/i);
+
+    const fifo = join(root, "bounded-fifo.bin");
+    const mkfifo = Bun.spawn(["mkfifo", fifo]);
+    expect(await mkfifo.exited).toBe(0);
+    const writer = Bun.spawn([
+      "/bin/sh",
+      "-c",
+      '{ printf %s "$2"; sleep 2; } > "$1"',
+      "writer",
+      fifo,
+      "x".repeat(65),
+    ]);
+    try {
+      const outcome = await Promise.race([
+        readFileBoundedV4(fifo, 64, "test source", true).then(
+          () => "resolved",
+          () => "rejected",
+        ),
+        Bun.sleep(500).then(() => "timeout"),
+      ]);
+      expect(outcome).toBe("rejected");
+    } finally {
+      writer.kill();
+      await writer.exited;
+    }
+  });
+
   test("uses the exact frozen compiler defaults", () => {
     expect(DEFAULT_COMPILER_LIMITS).toEqual({
       maxSourceBytes: 128 * 1024 * 1024,
@@ -168,10 +212,10 @@ describe("strict v4 loading", () => {
       "openapi: 3.1.0\npaths: {}\nx: &x { value: 1 }\ny: *x\n",
     );
     await expect(
-      loadSpecV4(aliases, limits({ maxYamlAliasExpansions: 1 })),
+      loadSpecV4(aliases, limits({ maxYamlAliasExpansions: 2 })),
     ).resolves.toBeDefined();
     await expect(
-      loadSpecV4(aliases, limits({ maxYamlAliasExpansions: 0 })),
+      loadSpecV4(aliases, limits({ maxYamlAliasExpansions: 1 })),
     ).rejects.toThrow(/alias/i);
     const text = await write(
       root,
@@ -187,6 +231,26 @@ describe("strict v4 loading", () => {
       );
       await expect(loadSpecV4(path)).rejects.toThrow(/OpenAPI version/i);
     }
+  });
+
+  test("uses the caller-effective YAML alias expansion limit during conversion", async () => {
+    const root = await temporaryRoot();
+    const aliases = Array.from(
+      { length: 101 },
+      (_, index) => `alias${index}: *shared`,
+    ).join("\n");
+    const path = await write(
+      root,
+      "caller-alias-limit.yaml",
+      `openapi: 3.1.0\npaths: {}\nshared: &shared { value: 1 }\n${aliases}\n`,
+    );
+
+    await expect(
+      loadSpecV4(path, limits({ maxYamlAliasExpansions: 102 })),
+    ).resolves.toBeDefined();
+    await expect(
+      loadSpecV4(path, limits({ maxYamlAliasExpansions: 101 })),
+    ).rejects.toThrow(/alias|resource exhaustion/i);
   });
 });
 
@@ -230,6 +294,55 @@ describe("safe local pointers", () => {
 });
 
 describe("compiler contract limits and provenance", () => {
+  test("reads the root source once and binds records and provenance to those bytes", async () => {
+    const root = await temporaryRoot();
+    const fifo = join(root, "swapped.json");
+    const makeDocument = (operationId: string) =>
+      JSON.stringify(
+        minimalDocument({
+          paths: {
+            "/probe": {
+              get: {
+                operationId,
+                responses: { "204": { description: "ok" } },
+              },
+            },
+          },
+        }),
+      );
+    const first = makeDocument("firstRead");
+    const second = makeDocument("secondRead");
+    const mkfifo = Bun.spawn(["mkfifo", fifo]);
+    expect(await mkfifo.exited).toBe(0);
+    const writer = Bun.spawn([
+      "/bin/sh",
+      "-c",
+      'printf %s "$2" > "$1"; sleep 0.1; printf %s "$3" > "$1"',
+      "writer",
+      fifo,
+      first,
+      second,
+    ]);
+
+    let compiled: Awaited<ReturnType<typeof compileRelease>> | undefined;
+    try {
+      compiled = await compileRelease(releaseOptions(root, fifo));
+      expect(compiled.manifest.source.contentSha256).toBe(
+        new Bun.CryptoHasher("sha256").update(first).digest("hex"),
+      );
+      expect(Object.keys(compiled.manifest.records)).toContain(
+        "operation:tiny:firstRead",
+      );
+      expect(Object.keys(compiled.manifest.records)).not.toContain(
+        "operation:tiny:secondRead",
+      );
+    } finally {
+      if (compiled) await discardCompiledRelease(compiled);
+      writer.kill();
+      await writer.exited;
+    }
+  });
+
   test("validates provenance before reading the local source and canonicalizes HTTPS", async () => {
     const root = await temporaryRoot();
     const missing = join(root, "secret", "missing.json");
@@ -262,6 +375,52 @@ describe("compiler contract limits and provenance", () => {
       await realpath(root),
     );
     await discardCompiledRelease(compiled);
+  });
+
+  test("rejects non-root-relative or non-normalized OpenAPI path keys", async () => {
+    const root = await temporaryRoot();
+    for (const [name, path] of [
+      ["absolute", "https://evil.example/escape"],
+      ["authority", "//evil.example/escape"],
+      ["backslash", "/safe\\escape"],
+      ["query", "/safe?escape=1"],
+      ["fragment", "/safe#escape"],
+      ["dot-segment", "/safe/../escape"],
+      ["control", "/safe\u0000escape"],
+      ["malformed-template", "/safe/{id"],
+      ["duplicate-template", "/safe/{id}/{id}"],
+    ] as const) {
+      const parameters = path.includes("{id")
+        ? [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ]
+        : [];
+      const spec = await write(
+        root,
+        `${name}.json`,
+        JSON.stringify(
+          minimalDocument({
+            paths: {
+              [path]: {
+                get: {
+                  operationId: name,
+                  parameters,
+                  responses: { "204": { description: "ok" } },
+                },
+              },
+            },
+          }),
+        ),
+      );
+      await expect(compileRelease(releaseOptions(root, spec))).rejects.toThrow(
+        /path|request-target|template|normalized/i,
+      );
+    }
   });
 
   test("enforces exact and one-over structural operation/schema limits", async () => {
@@ -489,6 +648,32 @@ describe("compiler contract limits and provenance", () => {
       }),
     );
     await expect(compileRelease(base)).rejects.toThrow(/media type/i);
+
+    await symlink("other.json", join(refs, "inside-link.json"));
+    await writeFile(
+      map,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          { uri: "other.json", file: "inside-link.json", sha256: digest },
+        ],
+      }),
+    );
+    await expect(compileRelease(base)).rejects.toThrow(
+      /symbolic|no.?follow|single-link|unsafe/i,
+    );
+
+    await link(join(refs, "other.json"), join(refs, "hard-link.json"));
+    await writeFile(
+      map,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          { uri: "other.json", file: "hard-link.json", sha256: digest },
+        ],
+      }),
+    );
+    await expect(compileRelease(base)).rejects.toThrow(/single-link|unsafe/i);
 
     const outside = await write(root, "outside.json", external);
     await symlink(outside, join(refs, "escape.json"));

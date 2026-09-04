@@ -180,9 +180,15 @@ function validateSchemaUse(value: unknown, label: string): string {
   return schemaId(candidate.schemaId, `${label} schema ID`);
 }
 
-function validateParameters(value: unknown): string[] {
+interface ValidatedParameters {
+  readonly schemaIds: string[];
+  readonly pathNames: string[];
+}
+
+function validateParameters(value: unknown): ValidatedParameters {
   if (!Array.isArray(value)) throw mismatch("Operation parameters are invalid");
   const schemaIds: string[] = [];
+  const pathNames: string[] = [];
   let previousLocation = -1;
   let previousName = "";
   for (const [index, raw] of value.entries()) {
@@ -202,6 +208,7 @@ function validateParameters(value: unknown): string[] {
       throw mismatch(`parameter ${index} fields are invalid`);
     if (parameter.in === "path" && parameter.required !== true)
       throw mismatch("Path parameters must be required");
+    if (parameter.in === "path") pathNames.push(parameter.name);
     const location = locations.indexOf(parameter.in);
     if (
       location < previousLocation ||
@@ -214,7 +221,63 @@ function validateParameters(value: unknown): string[] {
       validateSchemaUse(parameter.value, `parameter ${index} value`),
     );
   }
-  return schemaIds;
+  return { schemaIds, pathNames };
+}
+
+export function parseOperationPathTemplateV4(path: string): readonly string[] {
+  if (
+    !path.startsWith("/") ||
+    path.startsWith("//") ||
+    !/^[\x21-\x7e]+$/.test(path) ||
+    path.includes("\\") ||
+    path.includes("?") ||
+    path.includes("#")
+  )
+    throw new Error("operation path must be a root-relative request target");
+  const matches = [...path.matchAll(/\{([^{}]+)\}/g)];
+  const withoutValidTemplates = path.replace(/\{([^{}]+)\}/g, "");
+  if (
+    withoutValidTemplates.includes("{") ||
+    withoutValidTemplates.includes("}")
+  ) {
+    throw new Error("operation path template is malformed");
+  }
+  const variables = matches.map((match) => match[1] as string);
+  if (new Set(variables).size !== variables.length) {
+    throw new Error("operation path template variables must be unique");
+  }
+  const comparablePath = path.replace(/\{([^{}]+)\}/g, "openapi-template");
+  const normalized = new URL(comparablePath, "https://openapi.invalid");
+  if (
+    normalized.origin !== "https://openapi.invalid" ||
+    normalized.pathname !== comparablePath ||
+    normalized.search !== "" ||
+    normalized.hash !== ""
+  )
+    throw new Error("operation path must be normalized");
+  return variables;
+}
+
+function validatePathTemplate(
+  path: string,
+  pathNames: readonly string[],
+): void {
+  let variables: readonly string[];
+  try {
+    variables = parseOperationPathTemplateV4(path);
+  } catch {
+    throw mismatch("Operation path template is invalid");
+  }
+  const sortedVariables = [...variables].sort();
+  const sortedPathNames = [...pathNames].sort();
+  if (
+    sortedVariables.length !== sortedPathNames.length ||
+    sortedVariables.some((name, index) => name !== sortedPathNames[index])
+  ) {
+    throw mismatch(
+      "Operation path parameters must exactly match path-template variables",
+    );
+  }
 }
 
 function validateRequestBody(value: unknown): string[] {
@@ -370,8 +433,10 @@ function validateRecord(
         "Operation record ID does not match its API and operation ID",
       );
     }
+    const parameters = validateParameters(object.parameters);
+    validatePathTemplate(object.path, parameters.pathNames);
     const directSchemaIds = [
-      ...validateParameters(object.parameters),
+      ...parameters.schemaIds,
       ...validateRequestBody(object.requestBody),
     ].sort();
     const declaredSchemaIds = object.schemaIds.map((value) =>

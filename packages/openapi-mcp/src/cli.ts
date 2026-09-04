@@ -149,7 +149,12 @@ if (command === "compile-release") {
   if (!Number.isSafeInteger(generation) || generation < 0)
     fail("--generation must be a non-negative safe integer");
   try {
-    const privateKeyPem = await readFile(values["sign-key"] as string, "utf8");
+    const privateKeyPem = await readFile(
+      values["sign-key"] as string,
+      "utf8",
+    ).catch((error) => {
+      throw new Error("signing key could not be read", { cause: error });
+    });
     const provenance =
       values["source-uri"] !== undefined
         ? { sourceUri: values["source-uri"] }

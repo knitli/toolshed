@@ -1,13 +1,7 @@
 import { createHash } from "node:crypto";
-import {
-  mkdir,
-  mkdtemp,
-  open,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { constants } from "node:fs";
+import { mkdir, mkdtemp, open, readFile } from "node:fs/promises";
+import { extname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { OpenApiDoc } from "../load.ts";
 import { resolveLocalPointer, splitWords } from "../operations.ts";
@@ -50,20 +44,32 @@ import type {
   TypedRecordId,
   TypedSchemaId,
 } from "../runtime/types.ts";
-import { verifyStoredRecord } from "../runtime/verify-record.ts";
+import {
+  parseOperationPathTemplateV4,
+  verifyStoredRecord,
+} from "../runtime/verify-record.ts";
 import { DEFAULT_RUNTIME_LIMITS } from "../runtime/versions.ts";
 import { classifySafety, riskFor } from "../safety.ts";
 import { deriveReleasePublicKeyV4 } from "../sign.ts";
 import {
   type CompilerLimits,
   DEFAULT_COMPILER_LIMITS,
-  loadSpecV4,
+  parseSpecBytesV4,
+  readFileBoundedV4,
 } from "./load-v4.ts";
 import {
   buildManifestEnvelopeV4,
   buildReleaseManifestV4,
 } from "./manifest-builder.ts";
-import { type CompiledRelease, registerCompiledRelease } from "./publish.ts";
+import {
+  type CompiledRelease,
+  type CompiledReleaseOwnership,
+  type CompiledReleasePaths,
+  capturePathIdentity,
+  cleanupOwnedStage,
+  type PathIdentity,
+  registerCompiledRelease,
+} from "./publish.ts";
 import {
   normalizeHttpsUri,
   ReferenceGraphV4,
@@ -553,9 +559,7 @@ async function normalizeParameters(
       merged.set(key, parameter);
     }
   }
-  const variables = new Set(
-    [...path.matchAll(/\{([^{}]+)\}/g)].map((match) => match[1]),
-  );
+  const variables = new Set(parseOperationPathTemplateV4(path));
   if (merged.size > materializer.limits.maxParametersPerOperation)
     throw new Error("Parameters exceed maxParametersPerOperation limit");
   const pathParameters = [...merged.values()].filter(
@@ -922,6 +926,33 @@ async function syncPath(path: string): Promise<void> {
   }
 }
 
+async function createOwnedStageFile(
+  path: string,
+  contents: string | undefined,
+  recordIdentity: (identity: PathIdentity) => void,
+): Promise<void> {
+  if (typeof constants.O_NOFOLLOW !== "number" || constants.O_NOFOLLOW === 0)
+    throw new Error("compiler staging requires O_NOFOLLOW support");
+  const handle = await open(
+    path,
+    constants.O_CREAT |
+      constants.O_EXCL |
+      constants.O_WRONLY |
+      constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    const metadata = await handle.stat({ bigint: true });
+    if (!metadata.isFile() || metadata.nlink !== 1n)
+      throw new Error("compiler-created stage file is unsafe");
+    recordIdentity({ dev: metadata.dev, ino: metadata.ino });
+    if (contents !== undefined) await handle.writeFile(contents);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 function sourceIdentity(options: CompileReleaseOptions): string {
   const hasUri = typeof options.sourceUri === "string";
   const hasLabel = typeof options.sourceLabel === "string";
@@ -967,13 +998,37 @@ export async function compileRelease(
     throw new Error("source revision is invalid");
   }
   let stage: string | undefined;
+  let stagePaths: CompiledReleasePaths | undefined;
+  const stageOwnership: {
+    -readonly [Kind in keyof CompiledReleaseOwnership]?: CompiledReleaseOwnership[Kind];
+  } = {};
   try {
-    const rootBytes = await readFile(options.specPath).catch((error) => {
+    const rootBytes = await readFileBoundedV4(
+      options.specPath,
+      limits.maxSourceBytes,
+      "source document",
+      true,
+    ).catch((error) => {
+      if (
+        error instanceof Error &&
+        error.message.includes("exceeds byte limit")
+      )
+        throw new Error("aggregate source bytes exceed limit", {
+          cause: error,
+        });
       throw new Error("source document could not be read", { cause: error });
     });
-    if (rootBytes.byteLength > limits.maxSourceBytes)
-      throw new Error("aggregate source bytes exceed limit");
-    const document = await loadSpecV4(options.specPath, limits);
+    const extension = extname(options.specPath).toLowerCase();
+    const sourceMediaType =
+      extension === ".json"
+        ? "json"
+        : extension === ".yaml" || extension === ".yml"
+          ? "yaml"
+          : null;
+    if (sourceMediaType === null) {
+      throw new Error("unsupported OpenAPI media type file extension");
+    }
+    const document = parseSpecBytesV4(rootBytes, sourceMediaType, limits);
     const graph = await ReferenceGraphV4.create({
       sourceUri,
       mapPath: options.referenceMapPath,
@@ -1016,13 +1071,18 @@ export async function compileRelease(
     await mkdir(options.outDir, { recursive: true });
     const outDir = resolve(options.outDir);
     stage = await mkdtemp(join(outDir, ".openapi-mcp-v4-"));
+    stageOwnership.directory = await capturePathIdentity(stage, "directory");
     const paths = {
       directory: stage,
       sqlite: join(stage, `${options.releaseId}.sqlite`),
       signature: join(stage, `${options.releaseId}.manifest.sig`),
       manifest: join(stage, `${options.releaseId}.manifest.json`),
     } as const;
+    stagePaths = paths;
     const compiledAt = new Date().toISOString();
+    await createOwnedStageFile(paths.sqlite, undefined, (identity) => {
+      stageOwnership.sqlite = identity;
+    });
     const database = new DatabaseSync(paths.sqlite);
     try {
       database.exec("BEGIN IMMEDIATE");
@@ -1210,15 +1270,20 @@ export async function compileRelease(
     } finally {
       metadataDatabase.close();
     }
-    await writeFile(
+    await createOwnedStageFile(
       paths.signature,
       canonicalJson(envelope.signature as unknown as JsonValue),
-      { flag: "wx", mode: 0o600 },
+      (identity) => {
+        stageOwnership.signature = identity;
+      },
     );
-    await writeFile(paths.manifest, envelope.manifestJson, {
-      flag: "wx",
-      mode: 0o600,
-    });
+    await createOwnedStageFile(
+      paths.manifest,
+      envelope.manifestJson,
+      (identity) => {
+        stageOwnership.manifest = identity;
+      },
+    );
     for (const path of [paths.sqlite, paths.signature, paths.manifest, stage])
       await syncPath(path);
 
@@ -1263,10 +1328,14 @@ export async function compileRelease(
         ]),
       ),
     ) as Record<"sqlite" | "signature" | "manifest", string>;
-    return registerCompiledRelease(compiled, outDir, stageDigests);
+    return registerCompiledRelease(
+      compiled,
+      outDir,
+      stageDigests,
+      stageOwnership as CompiledReleaseOwnership,
+    );
   } catch (error) {
-    if (stage)
-      await rm(stage, { recursive: true, force: true }).catch(() => {});
+    if (stagePaths) await cleanupOwnedStage(stagePaths, stageOwnership);
     throw error;
   }
 }

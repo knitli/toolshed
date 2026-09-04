@@ -4,8 +4,10 @@ import {
   mkdir,
   readdir,
   readFile,
+  rename,
   rm,
   stat,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,11 +19,14 @@ import {
   discardCompiledRelease,
   publishRelease,
 } from "../src/compiler.ts";
+import { buildManifestEnvelopeV4 } from "../src/release/manifest-builder.ts";
 import { publishReleaseWithCheckpoint } from "../src/release/publish.ts";
 import type {
   CatalogId,
   GenerationState,
   GenerationStore,
+  OperationRecordV4,
+  Sha256,
 } from "../src/runtime/index.ts";
 import {
   admitManifest,
@@ -99,7 +104,11 @@ async function fixture(root: string, releaseId = "release-1") {
     outDir: root,
     privateKeyPem,
   };
-  return { compiled: await compileRelease(options), publicKeyPem };
+  return {
+    compiled: await compileRelease(options),
+    privateKeyPem,
+    publicKeyPem,
+  };
 }
 
 class MemoryGenerationStore implements GenerationStore {
@@ -335,6 +344,91 @@ describe("immutable v4 construction", () => {
   });
 });
 
+describe("runtime operation record invariants", () => {
+  test("rejects path-template and normalized path-parameter disagreement", async () => {
+    const root = await temporaryRoot();
+    const { compiled, privateKeyPem, publicKeyPem } = await fixture(root);
+    const db = new DatabaseSync(compiled.paths.sqlite, { readOnly: true });
+    const stored = db
+      .prepare(
+        "SELECT record_id, record_json FROM operations WHERE operation_id = ?",
+      )
+      .get("updateThing") as { record_id: string; record_json: string };
+    db.close();
+    const valid = JSON.parse(stored.record_json) as OperationRecordV4;
+    const cases: Array<readonly [string, OperationRecordV4]> = [
+      [
+        "missing",
+        {
+          ...valid,
+          parameters: valid.parameters.filter((item) => item.in !== "path"),
+        },
+      ],
+      [
+        "extra",
+        {
+          ...valid,
+          path: "/things",
+        },
+      ],
+      [
+        "duplicate template",
+        {
+          ...valid,
+          path: "/things/{id}/{id}",
+        },
+      ],
+      [
+        "malformed template",
+        {
+          ...valid,
+          path: "/things/{id",
+        },
+      ],
+      ["absolute URL", { ...valid, path: "https://evil.example/{id}" }],
+      ["network authority", { ...valid, path: "//evil.example/{id}" }],
+      ["backslash", { ...valid, path: "/things\\{id}" }],
+      ["query", { ...valid, path: "/things/{id}?escape=1" }],
+      ["fragment", { ...valid, path: "/things/{id}#escape" }],
+      ["dot segment", { ...valid, path: "/safe/../things/{id}" }],
+      ["control", { ...valid, path: "/things/{id}\u0000" }],
+    ];
+
+    const publicKey = createPublicKey(publicKeyPem)
+      .export({ type: "spki", format: "der" })
+      .toString("base64url");
+    for (const [name, record] of cases) {
+      const digest = (await sha256(
+        "knitli.openapi-mcp.operation-record.v4",
+        record,
+      )) as Sha256;
+      const manifest = {
+        ...compiled.manifest,
+        records: { ...compiled.manifest.records, [record.id]: digest },
+      };
+      const admitted = await admitManifest(
+        buildManifestEnvelopeV4(manifest, privateKeyPem),
+        {
+          releaseKeys: [
+            { issuer: "test-issuer", keyId: "test-key", publicKey },
+          ],
+          rollbackKeys: [],
+        },
+        new MemoryGenerationStore(),
+      );
+      await expect(
+        verifyStoredRecord(admitted, {
+          id: record.id,
+          logicalDigest: digest,
+          record,
+        }),
+        name,
+      ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+    }
+    await discardCompiledRelease(compiled);
+  });
+});
+
 describe("manifest-last publication", () => {
   test("publishes payload, signature, and manifest in order while observers see no early manifest", async () => {
     const root = await temporaryRoot();
@@ -417,6 +511,169 @@ describe("manifest-last publication", () => {
     expect(await readdir(target)).not.toContain("release-1.manifest.sig");
     expect(await readdir(target)).not.toContain(".release-1.publish.lock");
     await expect(stat(compiled.paths.directory)).rejects.toThrow();
+  });
+
+  test("atomically refuses a target inserted after publication begins", async () => {
+    const root = await temporaryRoot();
+    const target = join(root, "published");
+    await mkdir(target);
+    const { compiled } = await fixture(root);
+    const sentinel = "do-not-overwrite";
+    const signature = join(target, "release-1.manifest.sig");
+
+    await expect(
+      publishReleaseWithCheckpoint(
+        compiled,
+        { directory: target },
+        async (at) => {
+          if (at === "payload-published") {
+            await writeFile(signature, sentinel, { flag: "wx" });
+          }
+        },
+      ),
+    ).rejects.toThrow(/exists|publish/i);
+    expect(await readFile(signature, "utf8")).toBe(sentinel);
+    expect(await readdir(target)).not.toContain("release-1.manifest.json");
+  });
+
+  test("fails closed when its lock is lost while another publisher completes", async () => {
+    const root = await temporaryRoot();
+    const target = join(root, "published");
+    await mkdir(target);
+    const first = await fixture(root, "release-2");
+    const second = await fixture(root, "release-2");
+    const lock = join(target, ".release-2.publish.lock");
+    const payload = join(target, "release-2.sqlite");
+
+    const firstResult = publishReleaseWithCheckpoint(
+      first.compiled,
+      { directory: target },
+      async (at) => {
+        if (at === "payload-published") {
+          await unlink(lock);
+          await unlink(payload);
+          await publishRelease(second.compiled, { directory: target });
+        }
+      },
+    );
+    await expect(firstResult).rejects.toThrow(/lock|identity|ownership/i);
+    expect(
+      await readFile(join(target, "release-2.manifest.json"), "utf8"),
+    ).toBe(second.compiled.envelope.manifestJson);
+  });
+
+  test("cleanup preserves a substituted published target", async () => {
+    const root = await temporaryRoot();
+    const target = join(root, "published");
+    await mkdir(target);
+    const { compiled } = await fixture(root);
+    const payload = join(target, "release-1.sqlite");
+    const sentinel = "replacement-payload";
+
+    await expect(
+      publishReleaseWithCheckpoint(
+        compiled,
+        { directory: target },
+        async (at) => {
+          if (at === "payload-published") {
+            await unlink(payload);
+            await writeFile(payload, sentinel, { flag: "wx" });
+            throw new Error("forced failure after substitution");
+          }
+        },
+      ),
+    ).rejects.toThrow("forced failure after substitution");
+    expect(await readFile(payload, "utf8")).toBe(sentinel);
+  });
+
+  test("discard preserves a substituted stage directory", async () => {
+    const root = await temporaryRoot();
+    const { compiled } = await fixture(root);
+    const directory = compiled.paths.directory;
+    await rm(directory, { recursive: true });
+    await mkdir(directory);
+    const sentinel = join(directory, "unowned.txt");
+    await writeFile(sentinel, "replacement-directory");
+
+    await discardCompiledRelease(compiled);
+    expect(await readFile(sentinel, "utf8")).toBe("replacement-directory");
+  });
+
+  test("discard preserves a substituted stage file", async () => {
+    const root = await temporaryRoot();
+    const { compiled } = await fixture(root);
+    const sentinel = "replacement-manifest";
+    await unlink(compiled.paths.manifest);
+    await writeFile(compiled.paths.manifest, sentinel, { flag: "wx" });
+
+    await discardCompiledRelease(compiled);
+    expect(await readFile(compiled.paths.manifest, "utf8")).toBe(sentinel);
+  });
+
+  test("publication preserves a substituted pending stage file", async () => {
+    const root = await temporaryRoot();
+    const target = join(root, "published");
+    await mkdir(target);
+    const { compiled } = await fixture(root);
+    const sentinel = "replacement-stage-signature";
+
+    await expect(
+      publishReleaseWithCheckpoint(
+        compiled,
+        { directory: target },
+        async (at) => {
+          if (at === "payload-published") {
+            await unlink(compiled.paths.signature);
+            await writeFile(compiled.paths.signature, sentinel, { flag: "wx" });
+          }
+        },
+      ),
+    ).rejects.toThrow(/identity|ownership|staged/i);
+    expect(await readFile(compiled.paths.signature, "utf8")).toBe(sentinel);
+    expect(await readdir(target)).not.toContain("release-1.manifest.json");
+  });
+
+  test("publication preserves a substituted stage directory", async () => {
+    const root = await temporaryRoot();
+    const target = join(root, "published");
+    await mkdir(target);
+    const { compiled } = await fixture(root);
+    const moved = `${compiled.paths.directory}.owned-moved`;
+    const sentinel = join(compiled.paths.directory, "unowned.txt");
+
+    await expect(
+      publishReleaseWithCheckpoint(
+        compiled,
+        { directory: target },
+        async (at) => {
+          if (at === "payload-published") {
+            await rename(compiled.paths.directory, moved);
+            await mkdir(compiled.paths.directory);
+            await writeFile(sentinel, "replacement-directory");
+          }
+        },
+      ),
+    ).rejects.toThrow();
+    expect(await readFile(sentinel, "utf8")).toBe("replacement-directory");
+    expect(await readdir(target)).not.toContain("release-1.manifest.json");
+  });
+
+  test("partial crash residue fails closed without deleting either file", async () => {
+    const root = await temporaryRoot();
+    const target = join(root, "published");
+    await mkdir(target);
+    const payload = join(target, "release-1.sqlite");
+    const signature = join(target, "release-1.manifest.sig");
+    await writeFile(payload, "partial-payload");
+    await writeFile(signature, "partial-signature");
+    const { compiled } = await fixture(root);
+
+    await expect(
+      publishRelease(compiled, { directory: target }),
+    ).rejects.toThrow(/exists/i);
+    expect(await readFile(payload, "utf8")).toBe("partial-payload");
+    expect(await readFile(signature, "utf8")).toBe("partial-signature");
+    expect(await readdir(target)).not.toContain("release-1.manifest.json");
   });
 
   test("a crash-residue lock fails closed and is never reclaimed", async () => {

@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { type BigIntStats, constants } from "node:fs";
 import {
+  link,
   lstat,
   mkdir,
   open,
   readFile,
   realpath,
-  rename,
-  rm,
+  rmdir,
   unlink,
 } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
@@ -31,6 +31,19 @@ interface CompiledState {
   paths: CompiledReleasePaths;
   consumed: boolean;
   digests: Readonly<Record<"sqlite" | "signature" | "manifest", string>>;
+  ownership: CompiledReleaseOwnership;
+}
+
+export interface PathIdentity {
+  readonly dev: bigint;
+  readonly ino: bigint;
+}
+
+export interface CompiledReleaseOwnership {
+  readonly directory: PathIdentity;
+  readonly sqlite: PathIdentity;
+  readonly signature: PathIdentity;
+  readonly manifest: PathIdentity;
 }
 
 const compiledStates = new WeakMap<object, CompiledState>();
@@ -40,12 +53,19 @@ export function registerCompiledRelease(
   compiled: CompiledRelease,
   outDir: string,
   digests: Readonly<Record<"sqlite" | "signature" | "manifest", string>>,
+  ownership: CompiledReleaseOwnership,
 ): CompiledRelease {
   compiledStates.set(compiled, {
     outDir,
     paths: { ...compiled.paths },
     consumed: false,
     digests: { ...digests },
+    ownership: {
+      directory: { ...ownership.directory },
+      sqlite: { ...ownership.sqlite },
+      signature: { ...ownership.signature },
+      manifest: { ...ownership.manifest },
+    },
   });
   return compiled;
 }
@@ -57,30 +77,125 @@ function stateFor(compiled: CompiledRelease): CompiledState {
   return state;
 }
 
+function identityOf(stat: { dev: bigint; ino: bigint }): PathIdentity {
+  return { dev: stat.dev, ino: stat.ino };
+}
+
+function sameIdentity(
+  stat: { dev: bigint; ino: bigint },
+  identity: PathIdentity,
+): boolean {
+  return stat.dev === identity.dev && stat.ino === identity.ino;
+}
+
+export async function capturePathIdentity(
+  path: string,
+  kind: "directory" | "file",
+): Promise<PathIdentity> {
+  const metadata = await lstat(path, { bigint: true });
+  const validKind =
+    kind === "directory" ? metadata.isDirectory() : metadata.isFile();
+  if (!validKind || metadata.isSymbolicLink())
+    throw new Error(`compiler-created ${kind} is unsafe`);
+  if (kind === "file" && metadata.nlink !== 1n)
+    throw new Error("compiler-created file must have one link");
+  return identityOf(metadata);
+}
+
+async function ownedMetadata(
+  path: string,
+  identity: PathIdentity,
+): Promise<BigIntStats | null> {
+  const metadata = await lstat(path, { bigint: true }).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  });
+  return metadata && sameIdentity(metadata, identity) ? metadata : null;
+}
+
+async function requireOwnedFile(
+  path: string,
+  identity: PathIdentity,
+  label: string,
+  requireSingleLink = true,
+): Promise<void> {
+  const metadata = await ownedMetadata(path, identity);
+  if (
+    !metadata?.isFile() ||
+    metadata.isSymbolicLink() ||
+    (requireSingleLink && metadata.nlink !== 1n)
+  )
+    throw new Error(`${label} identity or ownership was lost`);
+}
+
+async function requireOwnedDirectory(
+  path: string,
+  identity: PathIdentity,
+  label: string,
+): Promise<void> {
+  const metadata = await ownedMetadata(path, identity);
+  if (!metadata?.isDirectory() || metadata.isSymbolicLink())
+    throw new Error(`${label} identity or ownership was lost`);
+}
+
+async function removeOwnedFile(
+  path: string,
+  identity: PathIdentity,
+): Promise<boolean> {
+  const metadata = await ownedMetadata(path, identity);
+  if (!metadata?.isFile() || metadata.isSymbolicLink()) return false;
+  await unlink(path);
+  return true;
+}
+
+export async function cleanupOwnedStage(
+  paths: CompiledReleasePaths,
+  ownership: Partial<CompiledReleaseOwnership>,
+): Promise<void> {
+  for (const kind of ["manifest", "signature", "sqlite"] as const) {
+    const identity = ownership[kind];
+    if (identity)
+      await removeOwnedFile(paths[kind], identity).catch(() => false);
+  }
+  if (!ownership.directory) return;
+  const directory = await ownedMetadata(paths.directory, ownership.directory);
+  if (!directory?.isDirectory() || directory.isSymbolicLink()) return;
+  await rmdir(paths.directory).catch(() => {});
+}
+
 async function validateStage(
   compiled: CompiledRelease,
   state: CompiledState,
 ): Promise<void> {
   const root = await realpath(state.outDir);
-  const directory = await realpath(state.paths.directory);
   if (compiled.paths.directory !== state.paths.directory)
     throw new Error("compiled release staged directory was substituted");
+  await requireOwnedDirectory(
+    state.paths.directory,
+    state.ownership.directory,
+    "compiled release stage",
+  );
+  const directory = await realpath(state.paths.directory);
   if (dirname(directory) !== root || relative(root, directory).includes(sep))
     throw new Error("compiled release stage is outside its output directory");
-  for (const [kind, path] of Object.entries(state.paths)) {
-    if (kind === "directory") continue;
-    if (
-      compiled.paths[kind as keyof CompiledReleasePaths] !== path ||
-      dirname(path) !== directory
-    )
+  for (const kind of ["sqlite", "signature", "manifest"] as const) {
+    const path = state.paths[kind];
+    if (compiled.paths[kind] !== path || dirname(path) !== directory)
       throw new Error("compiled release staged path was substituted");
-    const metadata = await lstat(path);
-    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1)
-      throw new Error("compiled release staged file is unsafe");
+    await requireOwnedFile(
+      path,
+      state.ownership[kind],
+      "compiled release staged file",
+    );
     const digest = createHash("sha256")
       .update(await readFile(path))
       .digest("hex");
-    if (digest !== state.digests[kind as "sqlite" | "signature" | "manifest"])
+    await requireOwnedFile(
+      path,
+      state.ownership[kind],
+      "compiled release staged file",
+    );
+    if (digest !== state.digests[kind])
       throw new Error("compiled release staged content was modified");
   }
   if (
@@ -95,13 +210,17 @@ async function validateStage(
     );
 }
 
-async function syncFile(path: string): Promise<void> {
+async function syncFile(path: string, identity: PathIdentity): Promise<void> {
   const handle = await open(path, "r");
   try {
+    const metadata = await handle.stat({ bigint: true });
+    if (!metadata.isFile() || !sameIdentity(metadata, identity))
+      throw new Error("compiled release staged file identity was lost");
     await handle.sync();
   } finally {
     await handle.close();
   }
+  await requireOwnedFile(path, identity, "compiled release staged file");
 }
 
 async function syncDirectory(path: string): Promise<void> {
@@ -123,6 +242,20 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+async function requireLock(
+  path: string,
+  identity: PathIdentity,
+): Promise<void> {
+  const metadata = await ownedMetadata(path, identity);
+  if (
+    !metadata?.isFile() ||
+    metadata.isSymbolicLink() ||
+    metadata.nlink !== 1n ||
+    (metadata.mode & 0o777n) !== 0o600n
+  )
+    throw new Error("release publication lock identity or ownership was lost");
+}
+
 export type PublishCheckpoint =
   | "payload-published"
   | "signature-published"
@@ -137,25 +270,28 @@ export async function publishReleaseWithCheckpoint(
 ): Promise<void> {
   const state = stateFor(compiled);
   state.consumed = true;
-  const createdTargets: string[] = [];
+  const createdTargets = new Map<string, PathIdentity>();
   let lockHandle: Awaited<ReturnType<typeof open>> | undefined;
-  let lockIdentity: { dev: number | bigint; ino: number | bigint } | undefined;
+  let lockIdentity: PathIdentity | undefined;
   let lockPath: string | undefined;
+  let targetDirectory: string | undefined;
   try {
     await validateStage(compiled, state);
     await mkdir(target.directory, { recursive: false }).catch((error) => {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     });
-    const targetDirectory = await realpath(target.directory);
+    targetDirectory = await realpath(target.directory);
     lockPath = join(
       targetDirectory,
       `.${compiled.manifest.releaseId}.publish.lock`,
     );
+    if (typeof constants.O_NOFOLLOW !== "number" || constants.O_NOFOLLOW === 0)
+      throw new Error("release publication requires O_NOFOLLOW support");
     const flags =
       constants.O_CREAT |
       constants.O_EXCL |
       constants.O_WRONLY |
-      (constants.O_NOFOLLOW ?? 0);
+      constants.O_NOFOLLOW;
     lockHandle = await open(lockPath, flags, 0o600).catch((error) => {
       if ((error as NodeJS.ErrnoException).code === "EEXIST")
         throw new Error(
@@ -163,14 +299,15 @@ export async function publishReleaseWithCheckpoint(
         );
       throw error;
     });
-    const lockStat = await lockHandle.stat();
+    const lockStat = await lockHandle.stat({ bigint: true });
     if (
       !lockStat.isFile() ||
-      lockStat.nlink !== 1 ||
-      (lockStat.mode & 0o777) !== 0o600
+      lockStat.nlink !== 1n ||
+      (lockStat.mode & 0o777n) !== 0o600n
     )
       throw new Error("release publication lock is unsafe");
-    lockIdentity = { dev: lockStat.dev, ino: lockStat.ino };
+    lockIdentity = identityOf(lockStat);
+    await requireLock(lockPath, lockIdentity);
 
     const targets = [
       join(targetDirectory, `${compiled.manifest.releaseId}.sqlite`),
@@ -180,16 +317,15 @@ export async function publishReleaseWithCheckpoint(
     if ((await Promise.all(targets.map(exists))).some(Boolean))
       throw new Error("release target already exists");
 
-    for (const path of [
-      state.paths.sqlite,
-      state.paths.signature,
-      state.paths.manifest,
-    ])
-      await syncFile(path);
     const sources = [
       state.paths.sqlite,
       state.paths.signature,
       state.paths.manifest,
+    ];
+    const identities = [
+      state.ownership.sqlite,
+      state.ownership.signature,
+      state.ownership.manifest,
     ];
     const checkpoints: PublishCheckpoint[] = [
       "payload-published",
@@ -197,32 +333,46 @@ export async function publishReleaseWithCheckpoint(
       "manifest-published",
     ];
     for (let index = 0; index < sources.length; index += 1) {
-      await rename(sources[index], targets[index]);
-      createdTargets.push(targets[index]);
+      const source = sources[index] as string;
+      const destination = targets[index] as string;
+      const identity = identities[index] as PathIdentity;
+      await requireLock(lockPath, lockIdentity);
+      await syncFile(source, identity);
+      try {
+        await link(source, destination);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST")
+          throw new Error("release target already exists", { cause: error });
+        throw error;
+      }
+      const destinationMetadata = await lstat(destination, { bigint: true });
+      if (
+        !destinationMetadata.isFile() ||
+        destinationMetadata.isSymbolicLink() ||
+        !sameIdentity(destinationMetadata, identity)
+      )
+        throw new Error("published target identity is unsafe");
+      createdTargets.set(destination, identity);
+      await requireLock(lockPath, lockIdentity);
+      if (!(await removeOwnedFile(source, identity)))
+        throw new Error("compiled release staged file identity was lost");
       await syncDirectory(targetDirectory);
       await checkpoint(checkpoints[index]);
+      await requireLock(lockPath, lockIdentity);
     }
   } catch (error) {
-    for (const path of createdTargets.reverse())
-      await unlink(path).catch(() => {});
-    if (createdTargets.length > 0)
-      await syncDirectory(target.directory).catch(() => {});
+    for (const [path, identity] of [...createdTargets.entries()].reverse())
+      await removeOwnedFile(path, identity).catch(() => false);
+    if (createdTargets.size > 0 && targetDirectory)
+      await syncDirectory(targetDirectory).catch(() => {});
     throw error;
   } finally {
     await lockHandle?.close().catch(() => {});
     if (lockPath && lockIdentity) {
-      const current = await lstat(lockPath).catch(() => null);
-      if (
-        current &&
-        current.dev === lockIdentity.dev &&
-        current.ino === lockIdentity.ino
-      )
-        await unlink(lockPath).catch(() => {});
-      await syncDirectory(target.directory).catch(() => {});
+      await removeOwnedFile(lockPath, lockIdentity).catch(() => false);
+      if (targetDirectory) await syncDirectory(targetDirectory).catch(() => {});
     }
-    await rm(state.paths.directory, { recursive: true, force: true }).catch(
-      () => {},
-    );
+    await cleanupOwnedStage(state.paths, state.ownership);
   }
 }
 
@@ -238,5 +388,5 @@ export async function discardCompiledRelease(
 ): Promise<void> {
   const state = stateFor(compiled);
   state.consumed = true;
-  await rm(state.paths.directory, { recursive: true, force: true });
+  await cleanupOwnedStage(state.paths, state.ownership);
 }

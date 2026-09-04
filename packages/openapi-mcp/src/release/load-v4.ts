@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open } from "node:fs/promises";
 import { extname } from "node:path";
 import { isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml";
 import type { OpenApiDoc } from "../load.ts";
@@ -39,6 +40,71 @@ export const DEFAULT_COMPILER_LIMITS: CompilerLimits = Object.freeze({
 });
 
 const forbiddenKeys = new Set(["__proto__", "prototype", "constructor"]);
+
+export async function readFileBoundedV4(
+  path: string,
+  maxBytes: number,
+  label: string,
+  allowStreaming = false,
+): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0)
+    throw new Error(`${label} byte limit is invalid`);
+  if (typeof constants.O_NOFOLLOW !== "number" || constants.O_NOFOLLOW === 0)
+    throw new Error(`${label} requires O_NOFOLLOW support`);
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOOP")
+      throw new Error(`${label} is unsafe or symbolic`, { cause: error });
+    throw error;
+  }
+  try {
+    const before = await handle.stat({ bigint: true });
+    if (
+      (!before.isFile() && !(allowStreaming && before.isFIFO())) ||
+      before.nlink !== 1n
+    )
+      throw new Error(`${label} is not a safe single-link file`);
+    if (before.isFile() && before.size > BigInt(maxBytes))
+      throw new Error(`${label} exceeds byte limit`);
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes + 1) || 1);
+    while (true) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        buffer.byteLength,
+        null,
+      );
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > maxBytes) throw new Error(`${label} exceeds byte limit`);
+      chunks.push(Uint8Array.from(buffer.subarray(0, bytesRead)));
+    }
+    const after = await handle.stat({ bigint: true });
+    if (after.dev !== before.dev || after.ino !== before.ino)
+      throw new Error(`${label} identity changed while reading`);
+    const current = await lstat(path, { bigint: true }).catch(() => null);
+    if (
+      !current ||
+      current.isSymbolicLink() ||
+      current.dev !== before.dev ||
+      current.ino !== before.ino
+    )
+      throw new Error(`${label} pathname identity changed while reading`);
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
 
 function requirePositiveLimits(limits: CompilerLimits): void {
   for (const [name, value] of Object.entries(limits)) {
@@ -189,7 +255,7 @@ export function parseDocumentBytesV4(
     }
     validateYamlAst(document.contents, limits);
     parsed = document.toJS({
-      maxAliasCount: DEFAULT_COMPILER_LIMITS.maxYamlAliasExpansions,
+      maxAliasCount: limits.maxYamlAliasExpansions,
     });
   }
   return detachAndValidate(parsed, limits);
@@ -223,6 +289,8 @@ export async function loadSpecV4(
   path: string,
   limitOverrides: Partial<CompilerLimits> = {},
 ): Promise<OpenApiDoc> {
+  const limits = { ...DEFAULT_COMPILER_LIMITS, ...limitOverrides };
+  requirePositiveLimits(limits);
   const extension = extname(path).toLowerCase();
   const mediaType =
     extension === ".json"
@@ -234,11 +302,18 @@ export async function loadSpecV4(
     throw new Error("unsupported OpenAPI media type or file extension");
   let bytes: Uint8Array;
   try {
-    bytes = await readFile(path);
+    bytes = await readFileBoundedV4(
+      path,
+      limits.maxSourceBytes,
+      "source document",
+      true,
+    );
   } catch (error) {
+    if (error instanceof Error && error.message.includes("exceeds byte limit"))
+      throw new Error("source bytes exceed limit", { cause: error });
     throw new Error(`source document could not be read`, { cause: error });
   }
-  return parseSpecBytesV4(bytes, mediaType, limitOverrides);
+  return parseSpecBytesV4(bytes, mediaType, limits);
 }
 
 export function redactSourcePath(

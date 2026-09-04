@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
 import { extname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { sha256 } from "../runtime/digest.ts";
 import { parseJsonStrict } from "../runtime/strict-json.ts";
@@ -8,6 +8,7 @@ import {
   type CompilerLimits,
   DEFAULT_COMPILER_LIMITS,
   parseDocumentBytesV4,
+  readFileBoundedV4,
 } from "./load-v4.ts";
 
 export interface ReferenceMapEntryV1 {
@@ -150,7 +151,12 @@ export async function loadReferenceMap(
 ): Promise<ReferenceMapV1> {
   let text: string;
   try {
-    text = await readFile(mapPath, "utf8");
+    const bytes = await readFileBoundedV4(
+      mapPath,
+      Math.min(limits.maxSourceBytes, 8 * 1024 * 1024),
+      "reference map",
+    );
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch (error) {
     throw new Error("reference map could not be read", { cause: error });
   }
@@ -307,6 +313,11 @@ export class ReferenceGraphV4 {
       let mediaType: "json" | "yaml";
       if (this.#resolver) {
         const result = await this.#resolver.resolve(uri);
+        if (
+          result.bytes.byteLength >
+          this.#limits.maxSourceBytes - this.#bytesUsed
+        )
+          throw new Error("aggregate source bytes exceed limit");
         bytes = new Uint8Array(result.bytes);
         mediaType = result.mediaType;
       } else {
@@ -323,10 +334,18 @@ export class ReferenceGraphV4 {
           isAbsolute(relation)
         )
           throw new Error("reference-map file escapes reference root");
-        const metadata = await lstat(actual);
-        if (!metadata.isFile())
-          throw new Error("reference-map target is not a regular file");
-        bytes = await readFile(actual);
+        bytes = await readFileBoundedV4(
+          candidate,
+          this.#limits.maxSourceBytes - this.#bytesUsed,
+          "referenced document",
+        ).catch((error) => {
+          if (
+            error instanceof Error &&
+            error.message.includes("exceeds byte limit")
+          )
+            throw new Error("aggregate source bytes exceed limit");
+          throw error;
+        });
         const extension = extname(entry.file).toLowerCase();
         mediaType =
           extension === ".json"
