@@ -3,18 +3,26 @@ import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type ParseArgsConfig, parseArgs } from "node:util";
 import { compile } from "./compile.ts";
+import { compileRelease } from "./release/compile-release.ts";
+import { publishRelease } from "./release/publish.ts";
 import { generateKeypair, signArtifact, verifyArtifact } from "./sign.ts";
 
 const USAGE = `openapi-mcp — compile OpenAPI documents into signed MCP artifacts
 
-  compile --spec <path> --api <name> --out <path> [--append] [--permissions <path>] [--sign-key <path>]
-  verify --artifact <path> --sig <path> --pub <path>
+  compile --spec <path> --api <name> --out <path> [--append] [--permissions <path>] [--sign-key <path>]  (legacy v3)
+  compile-release --spec <path> (--source-uri <https-uri> | --source-label <label>) --source-revision <revision>
+    --catalog <id> --release <id> --generation <n> --issuer <id> --key-id <id>
+    --policy-id <id> --allowed-origin <https-origin> --out <directory> --sign-key <path>
+    [--permissions <path>] [--reference-root <path> --reference-map <path>]
+  verify --artifact <path> --sig <path> --pub <path>  (legacy v3 exact-file signature)
   keygen [--out <dir>]
 `;
 
 function fail(message: string, opts: { usage?: boolean } = {}): never {
   console.error(
-    opts.usage === false ? `error: ${message}` : `error: ${message}\n\n${USAGE}`,
+    opts.usage === false
+      ? `error: ${message}`
+      : `error: ${message}\n\n${USAGE}`,
   );
   process.exit(1);
 }
@@ -86,6 +94,89 @@ if (command === "verify") {
   }
   console.log(ok ? "valid" : "invalid");
   process.exit(ok ? 0 : 1);
+}
+
+if (command === "compile-release") {
+  const { values } = parseOrFail({
+    args: rest,
+    options: {
+      spec: { type: "string" },
+      "source-uri": { type: "string" },
+      "source-label": { type: "string" },
+      "source-revision": { type: "string" },
+      catalog: { type: "string" },
+      release: { type: "string" },
+      generation: { type: "string" },
+      issuer: { type: "string" },
+      "key-id": { type: "string" },
+      "policy-id": { type: "string" },
+      "allowed-origin": { type: "string", multiple: true },
+      out: { type: "string" },
+      "sign-key": { type: "string" },
+      permissions: { type: "string" },
+      "reference-root": { type: "string" },
+      "reference-map": { type: "string" },
+    },
+    strict: true,
+  });
+  for (const [flag, value] of [
+    ["--spec", values.spec],
+    ["--source-revision", values["source-revision"]],
+    ["--catalog", values.catalog],
+    ["--release", values.release],
+    ["--generation", values.generation],
+    ["--issuer", values.issuer],
+    ["--key-id", values["key-id"]],
+    ["--policy-id", values["policy-id"]],
+    ["--allowed-origin", values["allowed-origin"]?.[0]],
+    ["--out", values.out],
+    ["--sign-key", values["sign-key"]],
+  ] as const)
+    if (!value) fail(`${flag} is required`);
+  if (
+    (values["source-uri"] === undefined) ===
+    (values["source-label"] === undefined)
+  ) {
+    fail("exactly one of --source-uri or --source-label is required");
+  }
+  if (
+    (values["reference-root"] === undefined) !==
+    (values["reference-map"] === undefined)
+  ) {
+    fail("--reference-root and --reference-map must be supplied together");
+  }
+  const generation = Number(values.generation);
+  if (!Number.isSafeInteger(generation) || generation < 0)
+    fail("--generation must be a non-negative safe integer");
+  try {
+    const privateKeyPem = await readFile(values["sign-key"] as string, "utf8");
+    const provenance =
+      values["source-uri"] !== undefined
+        ? { sourceUri: values["source-uri"] }
+        : { sourceLabel: values["source-label"] as string };
+    const compiled = await compileRelease({
+      ...provenance,
+      specPath: values.spec as string,
+      sourceRevision: values["source-revision"] as string,
+      catalogId: values.catalog as string,
+      releaseId: values.release as string,
+      generation,
+      issuer: values.issuer as string,
+      keyId: values["key-id"] as string,
+      policyId: values["policy-id"] as string,
+      allowedOrigins: values["allowed-origin"] as string[],
+      outDir: values.out as string,
+      privateKeyPem,
+      permissionsPath: values.permissions,
+      referenceRoot: values["reference-root"],
+      referenceMapPath: values["reference-map"],
+    });
+    await publishRelease(compiled, { directory: values.out as string });
+    console.log(`compiled immutable v4 release ${values.release}`);
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err), { usage: false });
+  }
+  process.exit(0);
 }
 
 if (command !== "compile") {

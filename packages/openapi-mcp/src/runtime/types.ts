@@ -88,6 +88,66 @@ export interface StoredRecord<TRecord> {
 }
 
 /** Logical operation data admitted through a signed v4 manifest. */
+export type ParameterLocationV4 = "path" | "query" | "header" | "cookie";
+
+export type ParameterStyleV4 =
+  | "matrix"
+  | "label"
+  | "form"
+  | "simple"
+  | "spaceDelimited"
+  | "pipeDelimited"
+  | "deepObject";
+
+export type CanonicalMediaTypeV4 = string & {
+  readonly __canonicalMediaTypeV4: unique symbol;
+};
+
+export type SchemaUseV4 =
+  | { readonly kind: "schema"; readonly schemaId: TypedSchemaId }
+  | {
+      readonly kind: "content";
+      readonly mediaType: CanonicalMediaTypeV4;
+      readonly schemaId: TypedSchemaId;
+    };
+
+export interface ParameterRecordV4 {
+  readonly name: string;
+  readonly in: ParameterLocationV4;
+  readonly required: boolean;
+  readonly deprecated: boolean;
+  readonly style: ParameterStyleV4;
+  readonly explode: boolean;
+  readonly allowReserved: boolean;
+  readonly value: SchemaUseV4;
+}
+
+export interface EncodingHeaderV4 {
+  readonly name: string;
+  readonly required: boolean;
+  readonly value: SchemaUseV4;
+}
+
+export interface MediaEncodingV4 {
+  readonly property: string;
+  readonly contentType: CanonicalMediaTypeV4 | null;
+  readonly style: ParameterStyleV4 | null;
+  readonly explode: boolean | null;
+  readonly allowReserved: boolean;
+  readonly headers: readonly EncodingHeaderV4[];
+}
+
+export interface RequestBodyMediaV4 {
+  readonly mediaType: CanonicalMediaTypeV4;
+  readonly schemaId: TypedSchemaId;
+  readonly encoding: readonly MediaEncodingV4[];
+}
+
+export interface RequestBodyRecordV4 {
+  readonly required: boolean;
+  readonly content: readonly RequestBodyMediaV4[];
+}
+
 export interface OperationRecordV4 {
   id: TypedOperationId;
   api: string;
@@ -97,8 +157,8 @@ export interface OperationRecordV4 {
   origin: string;
   summary: string | null;
   deprecated: boolean;
-  parameters: readonly JsonObject[];
-  requestBody: JsonObject | null;
+  parameters: readonly ParameterRecordV4[];
+  requestBody: RequestBodyRecordV4 | null;
   schemaIds: readonly TypedSchemaId[];
   advisory: JsonObject;
 }

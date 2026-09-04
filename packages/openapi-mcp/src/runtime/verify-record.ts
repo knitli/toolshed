@@ -28,7 +28,42 @@ const operationKeys = [
 ];
 const schemaKeys = ["id", "schema"];
 const wrapperKeys = ["id", "logicalDigest", "record"];
+const parameterKeys = [
+  "allowReserved",
+  "deprecated",
+  "explode",
+  "in",
+  "name",
+  "required",
+  "style",
+  "value",
+];
+const schemaUseSchemaKeys = ["kind", "schemaId"];
+const schemaUseContentKeys = ["kind", "mediaType", "schemaId"];
+const requestBodyKeys = ["content", "required"];
+const requestBodyMediaKeys = ["encoding", "mediaType", "schemaId"];
+const encodingKeys = [
+  "allowReserved",
+  "contentType",
+  "explode",
+  "headers",
+  "property",
+  "style",
+];
+const encodingHeaderKeys = ["name", "required", "value"];
 const digestPattern = /^[0-9a-f]{64}$/;
+const mediaTypePattern = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/;
+const headerPattern = /^[a-z0-9!#$%&'*+.^_`|~-]+$/;
+const locations = ["path", "query", "header", "cookie"];
+const styles = [
+  "matrix",
+  "label",
+  "form",
+  "simple",
+  "spaceDelimited",
+  "pipeDelimited",
+  "deepObject",
+];
 
 function mismatch(message: string): OpenApiMcpError {
   return new OpenApiMcpError("RECORD_DIGEST_MISMATCH", message);
@@ -105,6 +140,187 @@ function extractStoredRecord(value: unknown): ExtractedStoredRecord {
   }
 }
 
+function schemaId(value: unknown, label: string): string {
+  try {
+    if (
+      typeof value !== "string" ||
+      !parseTypedRecordId(value).startsWith("schema:")
+    )
+      throw new Error();
+    return value;
+  } catch {
+    throw mismatch(`${label} is not a typed schema ID`);
+  }
+}
+
+function sortedUnique(values: readonly string[], label: string): void {
+  for (let index = 1; index < values.length; index += 1) {
+    if (values[index - 1] >= values[index])
+      throw mismatch(`${label} must be sorted and unique`);
+  }
+}
+
+function validateSchemaUse(value: unknown, label: string): string {
+  const candidate = exactObject(
+    value,
+    (value as { kind?: unknown })?.kind === "content"
+      ? schemaUseContentKeys
+      : schemaUseSchemaKeys,
+    label,
+  );
+  if (candidate.kind !== "schema" && candidate.kind !== "content")
+    throw mismatch(`${label} discriminant is invalid`);
+  if (
+    candidate.kind === "content" &&
+    (typeof candidate.mediaType !== "string" ||
+      !mediaTypePattern.test(candidate.mediaType))
+  ) {
+    throw mismatch(`${label} media type is invalid`);
+  }
+  return schemaId(candidate.schemaId, `${label} schema ID`);
+}
+
+function validateParameters(value: unknown): string[] {
+  if (!Array.isArray(value)) throw mismatch("Operation parameters are invalid");
+  const schemaIds: string[] = [];
+  let previousLocation = -1;
+  let previousName = "";
+  for (const [index, raw] of value.entries()) {
+    const parameter = exactObject(raw, parameterKeys, `parameter ${index}`);
+    if (
+      typeof parameter.name !== "string" ||
+      parameter.name.length === 0 ||
+      typeof parameter.in !== "string" ||
+      !locations.includes(parameter.in) ||
+      typeof parameter.required !== "boolean" ||
+      typeof parameter.deprecated !== "boolean" ||
+      typeof parameter.style !== "string" ||
+      !styles.includes(parameter.style) ||
+      typeof parameter.explode !== "boolean" ||
+      typeof parameter.allowReserved !== "boolean"
+    )
+      throw mismatch(`parameter ${index} fields are invalid`);
+    if (parameter.in === "path" && parameter.required !== true)
+      throw mismatch("Path parameters must be required");
+    const location = locations.indexOf(parameter.in);
+    if (
+      location < previousLocation ||
+      (location === previousLocation && parameter.name <= previousName)
+    )
+      throw mismatch("Operation parameters must be sorted and unique");
+    previousLocation = location;
+    previousName = parameter.name;
+    schemaIds.push(
+      validateSchemaUse(parameter.value, `parameter ${index} value`),
+    );
+  }
+  return schemaIds;
+}
+
+function validateRequestBody(value: unknown): string[] {
+  if (value === null) return [];
+  const body = exactObject(value, requestBodyKeys, "request body");
+  if (
+    typeof body.required !== "boolean" ||
+    !Array.isArray(body.content) ||
+    body.content.length === 0
+  )
+    throw mismatch("Request body fields are invalid");
+  const schemaIds: string[] = [];
+  let previousMedia = "";
+  for (const [mediaIndex, rawMedia] of body.content.entries()) {
+    const media = exactObject(
+      rawMedia,
+      requestBodyMediaKeys,
+      `request body media ${mediaIndex}`,
+    );
+    if (
+      typeof media.mediaType !== "string" ||
+      !mediaTypePattern.test(media.mediaType) ||
+      media.mediaType <= previousMedia ||
+      !Array.isArray(media.encoding)
+    ) {
+      throw mismatch("Request body media entries are invalid or unsorted");
+    }
+    previousMedia = media.mediaType;
+    schemaIds.push(schemaId(media.schemaId, "request body schema ID"));
+    let previousProperty = "";
+    for (const [encodingIndex, rawEncoding] of media.encoding.entries()) {
+      const encoding = exactObject(
+        rawEncoding,
+        encodingKeys,
+        `encoding ${encodingIndex}`,
+      );
+      if (
+        typeof encoding.property !== "string" ||
+        encoding.property.length === 0 ||
+        encoding.property <= previousProperty ||
+        !(
+          encoding.contentType === null ||
+          (typeof encoding.contentType === "string" &&
+            mediaTypePattern.test(encoding.contentType))
+        ) ||
+        !(
+          encoding.style === null ||
+          (typeof encoding.style === "string" &&
+            styles.includes(encoding.style))
+        ) ||
+        !(encoding.explode === null || typeof encoding.explode === "boolean") ||
+        typeof encoding.allowReserved !== "boolean" ||
+        !Array.isArray(encoding.headers)
+      )
+        throw mismatch("Request body encoding fields are invalid or unsorted");
+      previousProperty = encoding.property;
+      let previousHeader = "";
+      for (const [headerIndex, rawHeader] of encoding.headers.entries()) {
+        const header = exactObject(
+          rawHeader,
+          encodingHeaderKeys,
+          `encoding header ${headerIndex}`,
+        );
+        if (
+          typeof header.name !== "string" ||
+          !headerPattern.test(header.name) ||
+          header.name <= previousHeader ||
+          typeof header.required !== "boolean"
+        ) {
+          throw mismatch("Encoding headers are invalid or unsorted");
+        }
+        previousHeader = header.name;
+        schemaIds.push(
+          validateSchemaUse(
+            header.value,
+            `encoding header ${headerIndex} value`,
+          ),
+        );
+      }
+    }
+  }
+  return schemaIds;
+}
+
+function validateSchemaReferences(value: unknown): void {
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (Array.isArray(current)) {
+      stack.push(...current);
+      continue;
+    }
+    if (typeof current !== "object" || current === null) continue;
+    for (const [key, child] of Object.entries(current)) {
+      if (
+        ["$dynamicRef", "$recursiveRef", "$anchor", "$dynamicAnchor"].includes(
+          key,
+        )
+      )
+        throw mismatch(`${key} is unsupported in a schema record`);
+      if (key === "$ref") schemaId(child, "schema $ref");
+      else stack.push(child);
+    }
+  }
+}
+
 function validateRecord(
   record: unknown,
   wrapperId: unknown,
@@ -141,12 +357,6 @@ function validateRecord(
       typeof object.origin !== "string" ||
       !(object.summary === null || typeof object.summary === "string") ||
       typeof object.deprecated !== "boolean" ||
-      !Array.isArray(object.parameters) ||
-      !(
-        object.requestBody === null ||
-        (typeof object.requestBody === "object" &&
-          !Array.isArray(object.requestBody))
-      ) ||
       !Array.isArray(object.schemaIds) ||
       !(
         typeof object.advisory === "object" &&
@@ -160,16 +370,22 @@ function validateRecord(
         "Operation record ID does not match its API and operation ID",
       );
     }
-    for (const schemaId of object.schemaIds) {
-      try {
-        if (
-          typeof schemaId !== "string" ||
-          !parseTypedRecordId(schemaId).startsWith("schema:")
-        )
-          throw new Error();
-      } catch {
-        throw mismatch("Operation schema ID is invalid");
-      }
+    const directSchemaIds = [
+      ...validateParameters(object.parameters),
+      ...validateRequestBody(object.requestBody),
+    ].sort();
+    const declaredSchemaIds = object.schemaIds.map((value) =>
+      schemaId(value, "Operation schema ID"),
+    );
+    sortedUnique(declaredSchemaIds, "Operation schema IDs");
+    const expectedSchemaIds = [...new Set(directSchemaIds)].sort();
+    if (
+      declaredSchemaIds.length !== expectedSchemaIds.length ||
+      declaredSchemaIds.some(
+        (value, index) => value !== expectedSchemaIds[index],
+      )
+    ) {
+      throw mismatch("Operation schema IDs do not equal direct schema uses");
     }
   } else if (
     !(
@@ -179,6 +395,8 @@ function validateRecord(
     )
   ) {
     throw mismatch("Schema record is invalid");
+  } else {
+    validateSchemaReferences(object.schema);
   }
   return object as unknown as OperationRecordV4 | SchemaRecordV4;
 }

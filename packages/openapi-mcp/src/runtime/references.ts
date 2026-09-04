@@ -12,7 +12,8 @@ import type {
   TypedSchemaId,
 } from "./types.ts";
 
-const base64urlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const base64urlAlphabet =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const operationRefPrefix = "opref.v1.";
 const maxShortSegmentLength = 128;
 const maxTailLength = 512;
@@ -20,12 +21,21 @@ const maxOperationRefLength = 2048;
 const digestPattern = /^[0-9a-f]{64}$/;
 const standardSegmentPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const schemaNamePattern = /^[A-Za-z0-9][A-Za-z0-9._~-]*$/;
+const syntheticSchemaNamePattern = /^__openapi_mcp_v4_[0-9a-f]{64}$/;
 
 function invalidReference(message: string): OpenApiMcpError {
-  return new OpenApiMcpError("OPERATION_REF_INVALID", `OPERATION_REF_INVALID: ${message}`);
+  return new OpenApiMcpError(
+    "OPERATION_REF_INVALID",
+    `OPERATION_REF_INVALID: ${message}`,
+  );
 }
 
-function assertSegment(value: string, maximumLength: number, pattern: RegExp, label: string): void {
+function assertSegment(
+  value: string,
+  maximumLength: number,
+  pattern: RegExp,
+  label: string,
+): void {
   if (
     value.length === 0 ||
     value.length > maximumLength ||
@@ -38,17 +48,28 @@ function assertSegment(value: string, maximumLength: number, pattern: RegExp, la
 }
 
 function parseCatalogId(value: string): CatalogId {
-  assertSegment(value, maxShortSegmentLength, standardSegmentPattern, "catalog ID");
+  assertSegment(
+    value,
+    maxShortSegmentLength,
+    standardSegmentPattern,
+    "catalog ID",
+  );
   return value as CatalogId;
 }
 
 function parseReleaseId(value: string): ReleaseId {
-  assertSegment(value, maxShortSegmentLength, standardSegmentPattern, "release ID");
+  assertSegment(
+    value,
+    maxShortSegmentLength,
+    standardSegmentPattern,
+    "release ID",
+  );
   return value as ReleaseId;
 }
 
 function parseManifestDigest(value: string): Sha256 {
-  if (!digestPattern.test(value)) throw invalidReference("manifest digest is invalid");
+  if (!digestPattern.test(value))
+    throw invalidReference("manifest digest is invalid");
   return value as Sha256;
 }
 
@@ -58,8 +79,18 @@ export function parseTypedRecordId(value: string): TypedRecordId {
     const parts = value.slice("operation:".length).split(":");
     if (parts.length !== 2) throw invalidReference("operation ID is invalid");
     const [api, operation] = parts;
-    assertSegment(api, maxShortSegmentLength, standardSegmentPattern, "API segment");
-    assertSegment(operation, maxTailLength, standardSegmentPattern, "operation segment");
+    assertSegment(
+      api,
+      maxShortSegmentLength,
+      standardSegmentPattern,
+      "API segment",
+    );
+    assertSegment(
+      operation,
+      maxTailLength,
+      standardSegmentPattern,
+      "operation segment",
+    );
     return value as TypedOperationId;
   }
 
@@ -70,8 +101,20 @@ export function parseTypedRecordId(value: string): TypedRecordId {
     if (markerIndex < 1) throw invalidReference("schema ID is invalid");
     const api = body.slice(0, markerIndex);
     const schemaName = body.slice(markerIndex + marker.length);
-    assertSegment(api, maxShortSegmentLength, standardSegmentPattern, "API segment");
-    assertSegment(schemaName, maxTailLength, schemaNamePattern, "schema segment");
+    assertSegment(
+      api,
+      maxShortSegmentLength,
+      standardSegmentPattern,
+      "API segment",
+    );
+    if (!syntheticSchemaNamePattern.test(schemaName)) {
+      assertSegment(
+        schemaName,
+        maxTailLength,
+        schemaNamePattern,
+        "schema segment",
+      );
+    }
     return value as TypedSchemaId;
   }
 
@@ -90,7 +133,8 @@ function encodeBase64Url(bytes: Uint8Array): string {
       encoded += base64urlAlphabet[(accumulator >> bits) & 0x3f];
     }
   }
-  if (bits > 0) encoded += base64urlAlphabet[(accumulator << (6 - bits)) & 0x3f];
+  if (bits > 0)
+    encoded += base64urlAlphabet[(accumulator << (6 - bits)) & 0x3f];
   return encoded;
 }
 
@@ -124,15 +168,30 @@ function normalizePayload(value: unknown): OperationRefPayload {
   if (prototype !== null && prototype !== Object.prototype) {
     throw invalidReference("payload prototype is invalid");
   }
-  const expectedKeys = ["catalogId", "manifestDigest", "operationId", "releaseId"];
+  const expectedKeys = [
+    "catalogId",
+    "manifestDigest",
+    "operationId",
+    "releaseId",
+  ];
   const keys = Object.keys(value).sort();
-  if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
+  if (
+    keys.length !== expectedKeys.length ||
+    keys.some((key, index) => key !== expectedKeys[index])
+  ) {
     throw invalidReference("payload shape is invalid");
   }
-  const fields: Record<string, string> = Object.create(null) as Record<string, string>;
+  const fields: Record<string, string> = Object.create(null) as Record<
+    string,
+    string
+  >;
   for (const key of expectedKeys) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (descriptor === undefined || !("value" in descriptor) || typeof descriptor.value !== "string") {
+    if (
+      descriptor === undefined ||
+      !("value" in descriptor) ||
+      typeof descriptor.value !== "string"
+    ) {
       throw invalidReference("payload fields are invalid");
     }
     fields[key] = descriptor.value;
@@ -147,7 +206,8 @@ function normalizePayload(value: unknown): OperationRefPayload {
 
 function parseOperationId(value: string): TypedOperationId {
   const parsed = parseTypedRecordId(value);
-  if (!parsed.startsWith("operation:")) throw invalidReference("record ID is not an operation");
+  if (!parsed.startsWith("operation:"))
+    throw invalidReference("record ID is not an operation");
   return parsed as TypedOperationId;
 }
 
@@ -165,7 +225,10 @@ export function encodeOperationRef(payload: OperationRefPayload): OperationRef {
 
 /** Decode only canonical `opref.v1` data; authorization remains a later runtime concern. */
 export function decodeOperationRef(reference: string): OperationRefPayload {
-  if (!reference.startsWith(operationRefPrefix) || reference.length > maxOperationRefLength) {
+  if (
+    !reference.startsWith(operationRefPrefix) ||
+    reference.length > maxOperationRefLength
+  ) {
     throw invalidReference("wire prefix or length is invalid");
   }
   const encoded = reference.slice(operationRefPrefix.length);
@@ -195,6 +258,7 @@ export function decodeOperationRef(reference: string): OperationRefPayload {
   } catch {
     throw invalidReference("wire payload cannot be canonicalized");
   }
-  if (json !== canonical) throw invalidReference("wire payload is not canonical");
+  if (json !== canonical)
+    throw invalidReference("wire payload is not canonical");
   return payload;
 }

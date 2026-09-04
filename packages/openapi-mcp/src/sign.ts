@@ -6,6 +6,14 @@ import {
   verify,
 } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { canonicalJson } from "./runtime/strict-json.ts";
+import type {
+  JsonValue,
+  ManifestSignature,
+  ReleaseManifestV4,
+} from "./runtime/types.ts";
+
+const MANIFEST_SIGNATURE_DOMAIN = "knitli.openapi-mcp.release-manifest.v4\0";
 
 /** Ed25519 keypair, PEM encoded. The public key ships in plugin source. */
 export function generateKeypair(): {
@@ -47,4 +55,33 @@ export async function verifyArtifact(
   } catch {
     return false;
   }
+}
+
+/** Sign canonical v4 manifest JSON under its distinct domain separator. */
+export function signReleaseManifestV4(
+  manifest: ReleaseManifestV4,
+  keyId: string,
+  privateKeyPem: string,
+): { manifestJson: string; signature: ManifestSignature } {
+  const manifestJson = canonicalJson(manifest as unknown as JsonValue);
+  const payload = Buffer.concat([
+    Buffer.from(MANIFEST_SIGNATURE_DOMAIN, "utf8"),
+    Buffer.from(manifestJson, "utf8"),
+  ]);
+  const signature = sign(
+    null,
+    payload,
+    createPrivateKey(privateKeyPem),
+  ).toString("base64url");
+  return {
+    manifestJson,
+    signature: { algorithm: "Ed25519", keyId, signature },
+  };
+}
+
+/** Derive the unpadded base64url SPKI used by the Worker-safe trust contract. */
+export function deriveReleasePublicKeyV4(privateKeyPem: string): string {
+  return createPublicKey(createPrivateKey(privateKeyPem))
+    .export({ type: "spki", format: "der" })
+    .toString("base64url");
 }

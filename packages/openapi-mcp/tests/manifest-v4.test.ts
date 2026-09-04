@@ -1167,8 +1167,21 @@ test("schema logical records use their own digest domain and are deeply frozen",
 });
 
 test("verified logical records are detached and deeply frozen", async () => {
+  const parameterSchemaId = "schema:api:#/components/schemas/Limit" as const;
   const record = operation({
-    parameters: [{ name: "limit", schema: { type: "integer" } }],
+    parameters: [
+      {
+        name: "limit",
+        in: "query",
+        required: false,
+        deprecated: false,
+        style: "form",
+        explode: true,
+        allowReserved: false,
+        value: { kind: "schema", schemaId: parameterSchemaId },
+      },
+    ],
+    schemaIds: [parameterSchemaId],
   });
   const digest = await operationDigest(record);
   const { release, trust, value } = await fixture();
@@ -1189,7 +1202,7 @@ test("verified logical records are detached and deeply frozen", async () => {
   expect(verified).not.toBe(record);
   expect(Object.isFrozen(verified)).toBe(true);
   expect(Object.isFrozen(verified.parameters)).toBe(true);
-  expect(Object.isFrozen(verified.parameters[0].schema)).toBe(true);
+  expect(Object.isFrozen(verified.parameters[0].value)).toBe(true);
   (record.parameters[0] as Record<string, unknown>).name =
     "changed-after-verification";
   expect(verified.parameters[0].name).toBe("limit");
