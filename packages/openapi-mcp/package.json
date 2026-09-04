@@ -71,9 +71,9 @@
   "devDependencies": {
     "typescript": "catalog:typing"
   },
-  "devEngines":{
+  "devEngines": {
     "node": "catalog:",
-    "bun": "catalog:"    
+    "bun": "catalog:"
   },
   "release": {
     "branches": [
