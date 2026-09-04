@@ -79,6 +79,11 @@ export interface AdmittedManifest {
   readonly manifestDigest: Sha256;
 }
 
+export interface AuthenticatedManifest extends AdmittedManifest {
+  readonly rollback: RollbackAuthorization | undefined;
+  readonly rollbackMalformed: boolean;
+}
+
 function manifestInvalid(message: string): OpenApiMcpError {
   return new OpenApiMcpError("MANIFEST_INVALID", message);
 }
@@ -388,6 +393,55 @@ function rollbackUnsigned(value: RollbackAuthorization): JsonObject {
   };
 }
 
+function parseRollback(value: unknown): RollbackAuthorization {
+  const object = requireExactShape(
+    value,
+    rollbackKeys,
+    "rollback authorization",
+  );
+  const rollback = {
+    id: requireIdentifier(ownData(object, "id"), "rollback authorization ID"),
+    catalogId: requireIdentifier(
+      ownData(object, "catalogId"),
+      "rollback catalog ID",
+    ) as CatalogId,
+    issuer: requireString(
+      ownData(object, "issuer"),
+      "rollback issuer",
+      256,
+      boundedAsciiPattern,
+    ),
+    currentHighestGeneration: requireInteger(
+      ownData(object, "currentHighestGeneration"),
+      "rollback current generation",
+    ),
+    targetGeneration: requireInteger(
+      ownData(object, "targetGeneration"),
+      "rollback target generation",
+    ),
+    targetManifestDigest: requireDigest(
+      ownData(object, "targetManifestDigest"),
+      "rollback target digest",
+    ),
+    reason: requireString(ownData(object, "reason"), "rollback reason", 1024),
+    expiresAt: requireTimestamp(
+      ownData(object, "expiresAt"),
+      "rollback expiry",
+    ),
+    keyId: requireIdentifier(ownData(object, "keyId"), "rollback key ID"),
+    algorithm: ownData(object, "algorithm") as "Ed25519",
+    signature: requireString(
+      ownData(object, "signature"),
+      "rollback signature",
+      256,
+      /^[A-Za-z0-9_-]+$/,
+    ),
+  };
+  if (rollback.algorithm !== "Ed25519")
+    throw manifestInvalid("rollback algorithm is invalid");
+  return rollback;
+}
+
 async function requireRollback(
   manifest: ReleaseManifestV4,
   manifestDigest: Sha256,
@@ -399,51 +453,7 @@ async function requireRollback(
     throw rollbackRejected("A signed rollback authorization is required");
   let value: RollbackAuthorization;
   try {
-    const object = requireExactShape(
-      candidate,
-      rollbackKeys,
-      "rollback authorization",
-    );
-    value = {
-      id: requireIdentifier(ownData(object, "id"), "rollback authorization ID"),
-      catalogId: requireIdentifier(
-        ownData(object, "catalogId"),
-        "rollback catalog ID",
-      ) as CatalogId,
-      issuer: requireString(
-        ownData(object, "issuer"),
-        "rollback issuer",
-        256,
-        boundedAsciiPattern,
-      ),
-      currentHighestGeneration: requireInteger(
-        ownData(object, "currentHighestGeneration"),
-        "rollback current generation",
-      ),
-      targetGeneration: requireInteger(
-        ownData(object, "targetGeneration"),
-        "rollback target generation",
-      ),
-      targetManifestDigest: requireDigest(
-        ownData(object, "targetManifestDigest"),
-        "rollback target digest",
-      ),
-      reason: requireString(ownData(object, "reason"), "rollback reason", 1024),
-      expiresAt: requireTimestamp(
-        ownData(object, "expiresAt"),
-        "rollback expiry",
-      ),
-      keyId: requireIdentifier(ownData(object, "keyId"), "rollback key ID"),
-      algorithm: ownData(object, "algorithm") as "Ed25519",
-      signature: requireString(
-        ownData(object, "signature"),
-        "rollback signature",
-        256,
-        /^[A-Za-z0-9_-]+$/,
-      ),
-    };
-    if (value.algorithm !== "Ed25519")
-      throw manifestInvalid("rollback algorithm is invalid");
+    value = parseRollback(candidate);
   } catch {
     throw rollbackRejected("Rollback authorization is malformed");
   }
@@ -545,13 +555,12 @@ function detachedManifest(
   );
 }
 
-/** Verify a v4 manifest and atomically admit its generation policy transition. */
-export async function admitManifest(
+/** Authenticate a v4 manifest without reading or mutating generation state. */
+export async function authenticateManifest(
   envelope: ManifestEnvelope,
   trust: ManifestTrust,
-  generations: GenerationStore,
   limitOverrides?: Partial<RuntimeLimits>,
-): Promise<AdmittedManifest> {
+): Promise<AuthenticatedManifest> {
   const limits = resolveRuntimeLimits(limitOverrides);
   if (!isObject(envelope))
     throw manifestInvalid("manifest envelope must be an object");
@@ -567,9 +576,9 @@ export async function admitManifest(
   if (typeof manifestJson !== "string")
     throw manifestInvalid("manifestJson must be a string");
   const signature = ownData(checkedEnvelope, "signature") as ManifestSignature;
-  const rollback =
+  const rollbackCandidate =
     envelopeKeys.length === 3
-      ? (ownData(checkedEnvelope, "rollback") as RollbackAuthorization)
+      ? ownData(checkedEnvelope, "rollback")
       : undefined;
   let manifest: ReleaseManifestV4;
   try {
@@ -584,11 +593,33 @@ export async function admitManifest(
     manifestDigestDomain,
     manifest as unknown as JsonObject,
   );
-  const admitted = deepFreeze({
+  let rollback: RollbackAuthorization | undefined;
+  let rollbackMalformed = false;
+  if (rollbackCandidate !== undefined) {
+    try {
+      rollback = parseRollback(rollbackCandidate);
+    } catch {
+      rollback = undefined;
+      rollbackMalformed = true;
+    }
+  }
+  return deepFreeze({
     manifest: detachedManifest(manifest, limits),
     manifestDigest,
+    rollback,
+    rollbackMalformed,
   });
+}
 
+/** Atomically commit the generation transition for an authenticated manifest. */
+export async function admitAuthenticatedManifest(
+  authenticated: AuthenticatedManifest,
+  trust: ManifestTrust,
+  generations: GenerationStore,
+): Promise<AdmittedManifest> {
+  const { manifest, manifestDigest, rollback, rollbackMalformed } =
+    authenticated;
+  const admitted: AdmittedManifest = { manifest, manifestDigest };
   for (let attempt = 0; attempt < 32; attempt += 1) {
     const state = await generations.get(manifest.catalogId, manifest.issuer);
     if (
@@ -608,6 +639,8 @@ export async function admitManifest(
       throw rollbackRejected("Inactive high-water release cannot reactivate");
     }
     if (state !== null && manifest.generation < state.highestGeneration) {
+      if (rollbackMalformed)
+        throw rollbackRejected("Rollback authorization is malformed");
       const rollbackId = await requireRollback(
         manifest,
         manifestDigest,
@@ -641,4 +674,19 @@ export async function admitManifest(
     "MANIFEST_GENERATION_CONFLICT",
     "Generation state changed too many times; retry admission",
   );
+}
+
+/** Verify a v4 manifest and atomically admit its generation policy transition. */
+export async function admitManifest(
+  envelope: ManifestEnvelope,
+  trust: ManifestTrust,
+  generations: GenerationStore,
+  limitOverrides?: Partial<RuntimeLimits>,
+): Promise<AdmittedManifest> {
+  const authenticated = await authenticateManifest(
+    envelope,
+    trust,
+    limitOverrides,
+  );
+  return admitAuthenticatedManifest(authenticated, trust, generations);
 }

@@ -332,7 +332,7 @@ export async function resolveSchemaClosure(
       }
       offset += chunk.length;
     }
-    frontier = [...next].sort();
+    frontier = [...next].filter((id) => !visited.has(id)).sort();
     hop += 1;
   }
 

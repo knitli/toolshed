@@ -656,6 +656,123 @@ test("one search returns only the generation still active after all candidates a
   ).toBe("release-2");
 });
 
+test("search snapshots final generation state once per catalog and issuer", async () => {
+  const fixture = await searchFixture([operation("one"), operation("two")]);
+  let reads = 0;
+  let state: GenerationState | null = null;
+  const generations: GenerationStore = {
+    async get() {
+      reads += 1;
+      if (reads > 2) return null;
+      return state;
+    },
+    async accept(_candidateCatalog, _issuer, transition) {
+      if ((state?.revision ?? null) !== transition.expectedRevision)
+        return null;
+      state = transition.next;
+      return state;
+    },
+  };
+  const result = await createOpenApiRuntime({
+    store: fixture.store,
+    trust: fixture.trust,
+    generations,
+  }).search({ query: "widgets" });
+  expect(result.operations).toHaveLength(2);
+  expect(reads).toBe(2);
+});
+
+test("a missing candidate row cannot advance persisted generation state", async () => {
+  const fixture = await searchFixture([operation("list")]);
+  const release2 = admitted(fixture.manifest.manifest.records, {
+    releaseId: "release-2" as ReleaseId,
+    generation: 2,
+  });
+  const signed2 = await envelope(release2.manifest, fixture.privateKey);
+  const runtime = createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return [
+          {
+            catalogId,
+            releaseId: release2.manifest.releaseId,
+            operationId: fixture.rows[0].id,
+          },
+        ];
+      },
+      async getManifest() {
+        return signed2;
+      },
+      async getOperation() {
+        return null;
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+  });
+  const result = await runtime.search({ query: "widgets" });
+  expect(result.operations).toEqual([]);
+  expect(fixture.generations.state).toBeNull();
+});
+
+test("a mismatched candidate catalog cannot advance persisted generation state", async () => {
+  const fixture = await searchFixture([operation("list")]);
+  const foreign = admitted(fixture.manifest.manifest.records, {
+    catalogId: "foreign" as CatalogId,
+    releaseId: "release-2" as ReleaseId,
+    generation: 2,
+  });
+  const signed = await envelope(foreign.manifest, fixture.privateKey);
+  const runtime = createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async getManifest() {
+        return signed;
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+  });
+  const result = await runtime.search({ query: "widgets" });
+  expect(result.operations).toEqual([]);
+  expect(fixture.generations.state).toBeNull();
+});
+
+test("a verified higher-generation candidate advances persisted state", async () => {
+  const fixture = await searchFixture([operation("list")]);
+  await fixture.runtime.search({ query: "widgets" });
+  const release2 = admitted(fixture.manifest.manifest.records, {
+    releaseId: "release-2" as ReleaseId,
+    generation: 2,
+  });
+  const signed2 = await envelope(release2.manifest, fixture.privateKey);
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return [
+          {
+            catalogId,
+            releaseId: release2.manifest.releaseId,
+            operationId: fixture.rows[0].id,
+          },
+        ];
+      },
+      async getManifest() {
+        return signed2;
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+  }).search({ query: "widgets" });
+  expect(result.operations).toHaveLength(1);
+  expect(fixture.generations.state).toMatchObject({
+    highestGeneration: 2,
+    activeGeneration: 2,
+  });
+});
+
 test("search enforces API filters against candidates and verified operations", async () => {
   const foreign = operation("list", {
     id: "operation:other:list",
@@ -742,6 +859,30 @@ test("search enforces the aggregate response byte budget during hydration", asyn
   ).toBeLessThanOrEqual(900);
   expect(result.operations.length).toBeLessThan(3);
   expect(result.warnings).toContainEqual({
+    code: "RESPONSE_LIMIT_EXCEEDED",
+    message: "Search response limit reached",
+  });
+});
+
+test("response sizing ignores candidates outside the ranked return set", async () => {
+  const fixture = await searchFixture([
+    operation("top"),
+    operation("irrelevant", {
+      deprecated: true,
+      summary: "x".repeat(600),
+    }),
+  ]);
+  const result = await createOpenApiRuntime({
+    store: fixture.store,
+    trust: fixture.trust,
+    generations: fixture.generations,
+    limits: { maxResponseBytes: 500 },
+  }).search({ query: "widgets", limit: 1 });
+  expect(result.operations).toHaveLength(1);
+  expect(
+    (await decodeOperationRef(result.operations[0].operation)).operationId,
+  ).toBe("operation:tiny:top");
+  expect(result.warnings).not.toContainEqual({
     code: "RESPONSE_LIMIT_EXCEEDED",
     message: "Search response limit reached",
   });
@@ -862,6 +1003,43 @@ test("schema resolution verifies and batches each breadth-first hop", async () =
   expect(calls).toEqual([[rootId], [ownerId, partId]]);
   expect([...result.keys()]).toEqual([rootId, ownerId, partId]);
   expect(Object.isFrozen(result.get(rootId))).toBe(true);
+});
+
+test("schema resolution does not advance a same-frontier reference to another hop", async () => {
+  const terminalId = "schema:tiny:#/components/schemas/Zeta" as TypedSchemaId;
+  const { calls, manifest, store } = await schemaFixture({
+    [ownerId]: { $ref: rootId },
+    [rootId]: { $ref: terminalId },
+    [terminalId]: { type: "object" },
+  });
+  const result = await resolveSchemaClosure(
+    store,
+    manifest,
+    [ownerId, rootId],
+    limits({ maxSchemaRefHops: 1 }),
+  );
+  expect(calls).toEqual([[ownerId, rootId], [terminalId]]);
+  expect([...result.keys()]).toEqual([ownerId, rootId, terminalId]);
+});
+
+test("schema resolution accounts same-frontier references only once", async () => {
+  const fixture = await schemaFixture({
+    [ownerId]: { $ref: rootId },
+    [rootId]: { type: "object" },
+  });
+  const exactClosureBytes = fixture.rows.reduce(
+    (total, row) =>
+      total + new TextEncoder().encode(canonicalJson(row.record)).length,
+    0,
+  );
+  const result = await resolveSchemaClosure(
+    fixture.store,
+    fixture.manifest,
+    [ownerId, rootId],
+    limits({ maxSchemaClosureBytes: exactClosureBytes }),
+  );
+  expect(fixture.calls.flat()).toEqual([ownerId, rootId]);
+  expect([...result.keys()]).toEqual([ownerId, rootId]);
 });
 
 test("schema resolution normalizes store throws and rejections", async () => {
