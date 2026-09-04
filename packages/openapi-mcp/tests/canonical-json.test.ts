@@ -60,6 +60,42 @@ test("canonical JSON rejects sparse arrays instead of silently changing their sh
   expect(() => canonicalJson(sparse as never)).toThrow(/sparse/i);
 });
 
+async function expectCanonicalAndDigestRejection(value: unknown): Promise<void> {
+  expect(() => canonicalJson(value as never)).toThrow(/canonical/i);
+  await expect(sha256("test.hidden-properties", value as never)).rejects.toMatchObject({
+    code: "MANIFEST_INVALID",
+  });
+}
+
+test("canonical JSON rejects enumerable and non-enumerable array extras", async () => {
+  const enumerableExtra = [1] as Array<unknown> & Record<string, unknown>;
+  enumerableExtra.extra = true;
+  await expectCanonicalAndDigestRejection(enumerableExtra);
+
+  const hiddenExtra: unknown[] = [1];
+  Object.defineProperty(hiddenExtra, "hidden", { enumerable: false, value: true });
+  await expectCanonicalAndDigestRejection(hiddenExtra);
+});
+
+test("canonical JSON rejects non-enumerable and accessor object properties", async () => {
+  const hiddenData: Record<string, unknown> = { visible: true };
+  Object.defineProperty(hiddenData, "hidden", { enumerable: false, value: true });
+  await expectCanonicalAndDigestRejection(hiddenData);
+
+  const accessor: Record<string, unknown> = { visible: true };
+  Object.defineProperty(accessor, "computed", { enumerable: true, get: () => true });
+  await expectCanonicalAndDigestRejection(accessor);
+});
+
+test("canonical JSON rejects symbol properties", async () => {
+  const objectWithSymbol = { visible: true, [Symbol("hidden")]: true };
+  await expectCanonicalAndDigestRejection(objectWithSymbol);
+
+  const arrayWithSymbol = [true];
+  arrayWithSymbol[Symbol("hidden")] = true;
+  await expectCanonicalAndDigestRejection(arrayWithSymbol);
+});
+
 test("strict JSON retains null-prototype objects and observes duplicate keys", () => {
   const parsed = parseJsonStrict('{"a":1,"nested":{"b":true}}');
   expect(Object.getPrototypeOf(parsed)).toBeNull();

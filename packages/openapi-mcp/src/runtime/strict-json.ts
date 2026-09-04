@@ -273,6 +273,24 @@ function serializeCanonical(value: JsonValue, ancestors: Set<object>): string {
     if (Object.getPrototypeOf(value) !== Array.prototype) {
       throw invalidJson("Canonical JSON array has an invalid prototype");
     }
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== "string") {
+        throw invalidJson("Canonical JSON array has a symbol property");
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined || !("value" in descriptor)) {
+        throw invalidJson("Canonical JSON array has an accessor property");
+      }
+      if (key === "length") {
+        if (descriptor.enumerable || descriptor.value !== value.length) {
+          throw invalidJson("Canonical JSON array has an invalid length property");
+        }
+        continue;
+      }
+      if (!descriptor.enumerable || !isCanonicalArrayIndex(key, value.length)) {
+        throw invalidJson("Canonical JSON array has a noncanonical own property");
+      }
+    }
     if (ancestors.has(value)) throw invalidJson("Canonical JSON does not allow cycles");
     ancestors.add(value);
     try {
@@ -302,7 +320,21 @@ function serializeCanonical(value: JsonValue, ancestors: Set<object>): string {
   if (ancestors.has(value)) throw invalidJson("Canonical JSON does not allow cycles");
   ancestors.add(value);
   try {
-    const keys = Object.keys(value).sort();
+    const keys: string[] = [];
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== "string") {
+        throw invalidJson("Canonical JSON object has a symbol property");
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined || !descriptor.enumerable) {
+        throw invalidJson("Canonical JSON object has a non-enumerable property");
+      }
+      if (!("value" in descriptor)) {
+        throw invalidJson("Canonical JSON object has an accessor property");
+      }
+      keys.push(key);
+    }
+    keys.sort();
     const properties = keys.map((key) => {
       if (forbiddenKeys.has(key)) {
         throw invalidJson("Canonical JSON object contains a forbidden prototype key");
@@ -318,4 +350,10 @@ function serializeCanonical(value: JsonValue, ancestors: Set<object>): string {
   } finally {
     ancestors.delete(value);
   }
+}
+
+function isCanonicalArrayIndex(key: string, length: number): boolean {
+  if (!/^(?:0|[1-9]\d*)$/.test(key)) return false;
+  const index = Number(key);
+  return Number.isSafeInteger(index) && index >= 0 && index < length && String(index) === key;
 }
