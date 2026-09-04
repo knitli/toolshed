@@ -184,6 +184,14 @@ function isV4(rows: unknown[]): boolean {
   );
 }
 
+function forceCloseDatabase(database: DatabaseSync): void {
+  const close = database.close as unknown as (
+    this: DatabaseSync,
+    force?: boolean,
+  ) => void;
+  close.call(database, true);
+}
+
 function bridge(database: DatabaseSync): D1CatalogDatabase {
   return {
     prepare(sql: string): D1CatalogPreparedStatement {
@@ -244,13 +252,13 @@ export class SqliteCatalogStore implements CatalogStore {
       } else throw unsupported("Artifact format is unsupported");
       this.#database = database;
     } catch (error) {
-      database?.close();
+      if (database !== undefined) forceCloseDatabase(database);
       if (error instanceof OpenApiMcpError) throw error;
       throw unsupported("Artifact format is unsupported");
     }
   }
   close(): void {
-    this.#database?.close();
+    if (this.#database !== undefined) forceCloseDatabase(this.#database);
     this.#database = undefined;
   }
   #v4Store(): CatalogStore {

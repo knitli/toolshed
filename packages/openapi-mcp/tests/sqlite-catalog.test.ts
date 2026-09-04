@@ -693,6 +693,22 @@ test("constructor rejects absent, unsupported, and ambiguous artifact formats", 
   }
 });
 
+test("store close releases the artifact after a prepared lookup", async () => {
+  const artifact = createV4Catalog();
+  let store: SqliteCatalogStore | undefined;
+  try {
+    const before = openFileDescriptorsFor(artifact.path);
+    store = new SqliteCatalogStore(artifact.path);
+    await store.getManifest(catalogId, releaseA);
+    store.close();
+    const after = openFileDescriptorsFor(artifact.path);
+    if (before !== undefined && after !== undefined) expect(after).toBe(before);
+  } finally {
+    store?.close();
+    rmSync(artifact.directory, { recursive: true, force: true });
+  }
+});
+
 test("constructor closes the database when its format probe fails", () => {
   const artifact = temporaryArtifact("bad-probe.sqlite");
   try {
