@@ -115,11 +115,13 @@ function requireExactShape(
   if (Reflect.ownKeys(value).some((key) => typeof key !== "string")) {
     throw manifestInvalid(`${label} has a symbol property`);
   }
-  const keys = Object.keys(value).sort();
+  const keys = Reflect.ownKeys(value).sort();
   const sortedExpected = [...expected].sort();
   if (
     keys.length !== sortedExpected.length ||
-    keys.some((key, index) => key !== sortedExpected[index])
+    keys.some((key, index) =>
+      typeof key === "string" ? key !== sortedExpected[index] : true,
+    )
   ) {
     throw manifestInvalid(`${label} shape is invalid`);
   }
@@ -533,10 +535,13 @@ function deepFreeze<T>(value: T): T {
   return Object.freeze(value);
 }
 
-function detachedManifest(manifest: ReleaseManifestV4): ReleaseManifestV4 {
+function detachedManifest(
+  manifest: ReleaseManifestV4,
+  limits: RuntimeLimits,
+): ReleaseManifestV4 {
   return parseManifest(
     canonicalJson(manifest as unknown as JsonObject),
-    DEFAULT_RUNTIME_LIMITS,
+    limits,
   );
 }
 
@@ -582,10 +587,29 @@ export async function admitManifest(
     manifestDigestDomain,
     manifest as unknown as JsonObject,
   );
+  const admitted = deepFreeze({
+    manifest: detachedManifest(manifest, limits),
+    manifestDigest,
+  });
 
   for (let attempt = 0; attempt < 32; attempt += 1) {
     const state = await generations.get(manifest.catalogId, manifest.issuer);
+    if (
+      state !== null &&
+      manifest.generation === state.activeGeneration &&
+      manifestDigest === state.activeManifestDigest
+    ) {
+      return admitted;
+    }
     let next = nextNormalState(state, manifest, manifestDigest);
+    if (
+      state !== null &&
+      manifest.generation === state.highestGeneration &&
+      manifestDigest === state.highestManifestDigest &&
+      state.activeGeneration !== state.highestGeneration
+    ) {
+      throw rollbackRejected("Inactive high-water release cannot reactivate");
+    }
     if (state !== null && manifest.generation < state.highestGeneration) {
       const rollbackId = await requireRollback(
         manifest,
@@ -605,11 +629,7 @@ export async function admitManifest(
         ],
       };
     }
-    if (next === null)
-      return deepFreeze({
-        manifest: detachedManifest(manifest),
-        manifestDigest,
-      });
+    if (next === null) return admitted;
     const accepted = await generations.accept(
       manifest.catalogId,
       manifest.issuer,
@@ -618,11 +638,7 @@ export async function admitManifest(
         next,
       },
     );
-    if (accepted !== null)
-      return deepFreeze({
-        manifest: detachedManifest(manifest),
-        manifestDigest,
-      });
+    if (accepted !== null) return admitted;
   }
   throw new OpenApiMcpError(
     "MANIFEST_GENERATION_CONFLICT",

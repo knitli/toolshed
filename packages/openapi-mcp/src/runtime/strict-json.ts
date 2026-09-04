@@ -71,7 +71,10 @@ class StrictJsonParser {
       case "n":
         return this.parseLiteral("null", null);
       default:
-        if (token === "-" || (token !== undefined && token >= "0" && token <= "9")) {
+        if (
+          token === "-" ||
+          (token !== undefined && token >= "0" && token <= "9")
+        ) {
           return this.parseNumber();
         }
         throw invalidJson("JSON input has an invalid value");
@@ -139,13 +142,13 @@ class StrictJsonParser {
       }
       if (character === "\\") {
         this.#position += 1;
-        const escape = this.text[this.#position];
+        const escapeSequence = this.text[this.#position];
         this.#position += 1;
-        switch (escape) {
+        switch (escapeSequence) {
           case '"':
           case "\\":
           case "/":
-            value += escape;
+            value += escapeSequence;
             break;
           case "b":
             value += "\b";
@@ -256,6 +259,213 @@ export function canonicalJson(value: JsonValue): string {
   return serializeCanonical(value, new Set<object>());
 }
 
+export interface BoundedCanonicalJsonLimits {
+  maxBytes: number;
+  maxDepth: number;
+  maxNodes: number;
+}
+
+class BoundedCanonicalWriter {
+  readonly #chunks: string[] = [];
+  readonly #ancestors = new Set<object>();
+  #segment = "";
+  #bytes = 0;
+  #nodes = 0;
+
+  constructor(readonly limits: BoundedCanonicalJsonLimits) {}
+
+  serialize(value: JsonValue): string {
+    this.#value(value, 0);
+    this.#flush();
+    return this.#chunks.join("");
+  }
+
+  #write(fragment: string, bytes = fragment.length): void {
+    if (this.#bytes + bytes > this.limits.maxBytes) {
+      throw invalidJson("Canonical JSON exceeds its byte limit");
+    }
+    this.#bytes += bytes;
+    this.#segment += fragment;
+    if (this.#segment.length >= 4096) this.#flush();
+  }
+
+  #flush(): void {
+    if (this.#segment.length === 0) return;
+    this.#chunks.push(this.#segment);
+    this.#segment = "";
+  }
+
+  #string(value: string): void {
+    assertWellFormedString(value);
+    this.#write('"');
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value.charCodeAt(index);
+      if (code === 0x22) this.#write('\\"');
+      else if (code === 0x5c) this.#write("\\\\");
+      else if (code === 0x08) this.#write("\\b");
+      else if (code === 0x0c) this.#write("\\f");
+      else if (code === 0x0a) this.#write("\\n");
+      else if (code === 0x0d) this.#write("\\r");
+      else if (code === 0x09) this.#write("\\t");
+      else if (code < 0x20)
+        this.#write(`\\u${code.toString(16).padStart(4, "0")}`);
+      else if (code <= 0x7f) this.#write(value[index]);
+      else if (code <= 0x7ff) this.#write(value[index], 2);
+      else if (code >= 0xd800 && code <= 0xdbff) {
+        this.#write(value.slice(index, index + 2), 4);
+        index += 1;
+      } else this.#write(value[index], 3);
+    }
+    this.#write('"');
+  }
+
+  #container(value: object, depth: number): void {
+    if (depth >= this.limits.maxDepth) {
+      throw invalidJson("Canonical JSON exceeds its nesting depth limit");
+    }
+    if (this.#ancestors.has(value)) {
+      throw invalidJson("Canonical JSON does not allow cycles");
+    }
+    this.#ancestors.add(value);
+  }
+
+  #value(value: JsonValue, depth: number): void {
+    this.#nodes += 1;
+    if (this.#nodes > this.limits.maxNodes) {
+      throw invalidJson("Canonical JSON exceeds its traversal limit");
+    }
+    if (value === null) {
+      this.#write("null");
+      return;
+    }
+    if (typeof value === "boolean") {
+      this.#write(value ? "true" : "false");
+      return;
+    }
+    if (typeof value === "number") {
+      if (!Number.isFinite(value))
+        throw invalidJson("Canonical JSON does not allow non-finite numbers");
+      this.#write(JSON.stringify(value));
+      return;
+    }
+    if (typeof value === "string") {
+      this.#string(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      if (Object.getPrototypeOf(value) !== Array.prototype) {
+        throw invalidJson("Canonical JSON array has an invalid prototype");
+      }
+      if (this.#nodes + value.length > this.limits.maxNodes) {
+        throw invalidJson("Canonical JSON exceeds its traversal limit");
+      }
+      for (const key of Reflect.ownKeys(value)) {
+        if (typeof key !== "string")
+          throw invalidJson("Canonical JSON array has a symbol property");
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        if (descriptor === undefined || !("value" in descriptor)) {
+          throw invalidJson("Canonical JSON array has an accessor property");
+        }
+        if (key === "length") {
+          if (descriptor.enumerable || descriptor.value !== value.length) {
+            throw invalidJson(
+              "Canonical JSON array has an invalid length property",
+            );
+          }
+        } else if (
+          !descriptor.enumerable ||
+          !isCanonicalArrayIndex(key, value.length)
+        ) {
+          throw invalidJson(
+            "Canonical JSON array has a noncanonical own property",
+          );
+        }
+      }
+      this.#container(value, depth);
+      try {
+        this.#write("[");
+        for (let index = 0; index < value.length; index += 1) {
+          if (index > 0) this.#write(",");
+          const descriptor = Object.getOwnPropertyDescriptor(
+            value,
+            String(index),
+          );
+          if (descriptor === undefined || !("value" in descriptor)) {
+            throw invalidJson("Canonical JSON does not allow sparse arrays");
+          }
+          this.#value(descriptor.value as JsonValue, depth + 1);
+        }
+        this.#write("]");
+      } finally {
+        this.#ancestors.delete(value);
+      }
+      return;
+    }
+
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== null && prototype !== Object.prototype) {
+      throw invalidJson("Canonical JSON object has an invalid prototype");
+    }
+    const keys: string[] = [];
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== "string")
+        throw invalidJson("Canonical JSON object has a symbol property");
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (
+        descriptor === undefined ||
+        !descriptor.enumerable ||
+        !("value" in descriptor)
+      ) {
+        throw invalidJson("Canonical JSON object has an invalid property");
+      }
+      if (forbiddenKeys.has(key))
+        throw invalidJson(
+          "Canonical JSON object contains a forbidden prototype key",
+        );
+      keys.push(key);
+      if (this.#nodes + keys.length > this.limits.maxNodes) {
+        throw invalidJson("Canonical JSON exceeds its traversal limit");
+      }
+    }
+    keys.sort();
+    this.#container(value, depth);
+    try {
+      this.#write("{");
+      for (let index = 0; index < keys.length; index += 1) {
+        if (index > 0) this.#write(",");
+        const key = keys[index];
+        this.#string(key);
+        this.#write(":");
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        if (descriptor === undefined || !("value" in descriptor)) {
+          throw invalidJson("Canonical JSON object has an accessor property");
+        }
+        this.#value(descriptor.value as JsonValue, depth + 1);
+      }
+      this.#write("}");
+    } finally {
+      this.#ancestors.delete(value);
+    }
+  }
+}
+
+/** Canonicalize hostile values while bounding output and traversal before allocation. */
+export function canonicalJsonBounded(
+  value: JsonValue,
+  limits: BoundedCanonicalJsonLimits,
+): string {
+  if (!Number.isSafeInteger(limits.maxBytes) || limits.maxBytes < 0) {
+    throw invalidJson("Canonical JSON byte limit is invalid");
+  }
+  if (!Number.isSafeInteger(limits.maxDepth) || limits.maxDepth < 1) {
+    throw invalidJson("Canonical JSON depth limit is invalid");
+  }
+  if (!Number.isSafeInteger(limits.maxNodes) || limits.maxNodes < 1) {
+    throw invalidJson("Canonical JSON traversal limit is invalid");
+  }
+  return new BoundedCanonicalWriter(limits).serialize(value);
+}
+
 function serializeCanonical(value: JsonValue, ancestors: Set<object>): string {
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
@@ -283,27 +493,37 @@ function serializeCanonical(value: JsonValue, ancestors: Set<object>): string {
       }
       if (key === "length") {
         if (descriptor.enumerable || descriptor.value !== value.length) {
-          throw invalidJson("Canonical JSON array has an invalid length property");
+          throw invalidJson(
+            "Canonical JSON array has an invalid length property",
+          );
         }
         continue;
       }
       if (!descriptor.enumerable || !isCanonicalArrayIndex(key, value.length)) {
-        throw invalidJson("Canonical JSON array has a noncanonical own property");
+        throw invalidJson(
+          "Canonical JSON array has a noncanonical own property",
+        );
       }
     }
-    if (ancestors.has(value)) throw invalidJson("Canonical JSON does not allow cycles");
+    if (ancestors.has(value))
+      throw invalidJson("Canonical JSON does not allow cycles");
     ancestors.add(value);
     try {
       const values: string[] = [];
       for (let index = 0; index < value.length; index += 1) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        const descriptor = Object.getOwnPropertyDescriptor(
+          value,
+          String(index),
+        );
         if (descriptor === undefined) {
           throw invalidJson("Canonical JSON does not allow sparse arrays");
         }
         if (!("value" in descriptor)) {
           throw invalidJson("Canonical JSON array has an accessor property");
         }
-        values.push(serializeCanonical(descriptor.value as JsonValue, ancestors));
+        values.push(
+          serializeCanonical(descriptor.value as JsonValue, ancestors),
+        );
       }
       return `[${values.join(",")}]`;
     } finally {
@@ -317,7 +537,8 @@ function serializeCanonical(value: JsonValue, ancestors: Set<object>): string {
   if (prototype !== null && prototype !== Object.prototype) {
     throw invalidJson("Canonical JSON object has an invalid prototype");
   }
-  if (ancestors.has(value)) throw invalidJson("Canonical JSON does not allow cycles");
+  if (ancestors.has(value))
+    throw invalidJson("Canonical JSON does not allow cycles");
   ancestors.add(value);
   try {
     const keys: string[] = [];
@@ -327,7 +548,9 @@ function serializeCanonical(value: JsonValue, ancestors: Set<object>): string {
       }
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (descriptor === undefined || !descriptor.enumerable) {
-        throw invalidJson("Canonical JSON object has a non-enumerable property");
+        throw invalidJson(
+          "Canonical JSON object has a non-enumerable property",
+        );
       }
       if (!("value" in descriptor)) {
         throw invalidJson("Canonical JSON object has an accessor property");
@@ -337,7 +560,9 @@ function serializeCanonical(value: JsonValue, ancestors: Set<object>): string {
     keys.sort();
     const properties = keys.map((key) => {
       if (forbiddenKeys.has(key)) {
-        throw invalidJson("Canonical JSON object contains a forbidden prototype key");
+        throw invalidJson(
+          "Canonical JSON object contains a forbidden prototype key",
+        );
       }
       assertWellFormedString(key);
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
@@ -355,5 +580,10 @@ function serializeCanonical(value: JsonValue, ancestors: Set<object>): string {
 function isCanonicalArrayIndex(key: string, length: number): boolean {
   if (!/^(?:0|[1-9]\d*)$/.test(key)) return false;
   const index = Number(key);
-  return Number.isSafeInteger(index) && index >= 0 && index < length && String(index) === key;
+  return (
+    Number.isSafeInteger(index) &&
+    index >= 0 &&
+    index < length &&
+    String(index) === key
+  );
 }

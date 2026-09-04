@@ -2,7 +2,7 @@ import { sha256 } from "./digest.ts";
 import { OpenApiMcpError } from "./errors.ts";
 import type { AdmittedManifest } from "./manifest.ts";
 import { parseTypedRecordId } from "./references.ts";
-import { canonicalJson, parseJsonStrict } from "./strict-json.ts";
+import { canonicalJsonBounded, parseJsonStrict } from "./strict-json.ts";
 import type {
   JsonObject,
   OperationRecordV4,
@@ -148,9 +148,16 @@ function detached<T extends OperationRecordV4 | SchemaRecordV4>(
   record: T,
   limits: RuntimeLimits,
 ): T {
-  const json = canonicalJson(record as unknown as JsonObject);
-  if (new TextEncoder().encode(json).byteLength > limits.maxRecordBytes)
-    throw mismatch("Logical record exceeds its byte limit");
+  let json: string;
+  try {
+    json = canonicalJsonBounded(record as unknown as JsonObject, {
+      maxBytes: limits.maxRecordBytes,
+      maxDepth: limits.maxJsonDepth,
+      maxNodes: Math.max(1, limits.maxRecordBytes),
+    });
+  } catch {
+    throw mismatch("Logical record cannot be bounded and canonicalized");
+  }
   return parseJsonStrict(json, {
     maxBytes: limits.maxRecordBytes,
     maxDepth: limits.maxJsonDepth,
@@ -179,17 +186,34 @@ export async function verifyStoredRecord<
     ...limitOverrides,
   } as RuntimeLimits;
   const row = exactObject(rowValue, wrapperKeys, "stored row");
+  let wrapperId: TypedRecordId;
+  try {
+    if (typeof row.id !== "string") throw new Error();
+    wrapperId = parseTypedRecordId(row.id);
+  } catch {
+    throw mismatch("Stored row ID is malformed");
+  }
+  if (!Object.hasOwn(admitted.manifest.records, wrapperId)) {
+    throw new OpenApiMcpError(
+      "RECORD_NOT_ADMITTED",
+      "Logical record is absent from the admitted manifest",
+    );
+  }
   if (
     typeof row.logicalDigest !== "string" ||
     !digestPattern.test(row.logicalDigest)
   )
     throw mismatch("Stored row digest is invalid");
-  const logical = validateRecord(row.record, row.id) as T;
+  const logical = validateRecord(row.record, wrapperId) as T;
   let copy: T;
   try {
     copy = detached(logical, limits);
   } catch (error) {
-    if (error instanceof OpenApiMcpError) throw error;
+    if (
+      error instanceof OpenApiMcpError &&
+      error.code === "RECORD_DIGEST_MISMATCH"
+    )
+      throw error;
     throw mismatch("Logical record cannot be canonicalized");
   }
   const domain = copy.id.startsWith("operation:")
@@ -198,12 +222,6 @@ export async function verifyStoredRecord<
   const digest = await sha256(domain, copy as unknown as JsonObject);
   if (digest !== row.logicalDigest)
     throw mismatch("Stored logical digest does not match the row");
-  if (!Object.hasOwn(admitted.manifest.records, copy.id)) {
-    throw new OpenApiMcpError(
-      "RECORD_NOT_ADMITTED",
-      "Logical record is absent from the admitted manifest",
-    );
-  }
   if (admitted.manifest.records[copy.id] !== digest) {
     throw mismatch(
       "Logical record digest does not match the admitted manifest",

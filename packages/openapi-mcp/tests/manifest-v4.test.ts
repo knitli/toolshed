@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import {
   chmod,
+  link,
   lstat,
   mkdir,
   mkdtemp,
@@ -10,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   type CatalogId,
   canonicalJson,
@@ -30,6 +31,7 @@ import {
   admitManifest,
   type ManifestTrust,
 } from "../src/runtime/manifest.ts";
+import { canonicalJsonBounded } from "../src/runtime/strict-json.ts";
 import { verifyStoredRecord } from "../src/runtime/verify-record.ts";
 import { FileGenerationStore } from "../src/sqlite/generation-store.ts";
 
@@ -245,6 +247,47 @@ async function admitFixture(): Promise<AdmittedManifest> {
   return admitManifest(envelope, trust, new MemoryGenerationStore());
 }
 
+test("bounded canonical JSON is byte-identical for signed-data values", () => {
+  for (const value of [
+    null,
+    true,
+    -0,
+    1.25e-7,
+    'quote" slash\\ controls\b\f\n\r\t\u000b',
+    "Unicode 😀 é  ",
+    [3, "two", { z: false, a: true }],
+    { z: [1, 2], a: { y: "yes", x: "x" } },
+  ]) {
+    expect(
+      canonicalJsonBounded(value, {
+        maxBytes: 4096,
+        maxDepth: 16,
+        maxNodes: 100,
+      }),
+    ).toBe(canonicalJson(value));
+  }
+});
+
+test("bounded canonical JSON stops at node budget before descending", () => {
+  let descended = false;
+  const poison = new Proxy(
+    {},
+    {
+      getPrototypeOf() {
+        descended = true;
+        return Object.prototype;
+      },
+    },
+  );
+  expect(() =>
+    canonicalJsonBounded(
+      { a: true, b: poison },
+      { maxBytes: 4096, maxDepth: 16, maxNodes: 2 },
+    ),
+  ).toThrow(/traversal/i);
+  expect(descended).toBe(false);
+});
+
 test("admits a canonical exactly shaped v4 manifest and updates generation state", async () => {
   const { envelope, trust } = await fixture();
   const generations = new MemoryGenerationStore();
@@ -371,6 +414,20 @@ test("requires manifest envelope fields to be own data with no extras", async ()
     admitManifest(accessorEnvelope, trust, new MemoryGenerationStore()),
   ).rejects.toMatchObject({ code: "MANIFEST_INVALID" });
   expect(inheritedRollbackRead).toBe(false);
+  const hiddenEnvelope = { ...envelope };
+  Object.defineProperty(hiddenEnvelope, "hidden", { value: true });
+  await expect(
+    admitManifest(hiddenEnvelope, trust, new MemoryGenerationStore()),
+  ).rejects.toMatchObject({ code: "MANIFEST_INVALID" });
+  const hiddenSignature = { ...envelope.signature };
+  Object.defineProperty(hiddenSignature, "hidden", { value: true });
+  await expect(
+    admitManifest(
+      { ...envelope, signature: hiddenSignature },
+      trust,
+      new MemoryGenerationStore(),
+    ),
+  ).rejects.toMatchObject({ code: "MANIFEST_SIGNATURE_INVALID" });
 });
 
 test("requires exact manifest and source shapes with all required fields", async () => {
@@ -590,6 +647,116 @@ test("signed rollback changes active state, preserves high-water, and consumes i
   });
 });
 
+test("persisted rollback target is restart-idempotent without replaying authorization", async () => {
+  const path = await tempStatePath();
+  const originalStore = new FileGenerationStore(path);
+  const { envelope, trust, value } = await fixture();
+  const targetDigest = await sha256(
+    "knitli.openapi-mcp.release-manifest.v4",
+    value,
+  );
+  const initial = { ...state(8, digestA), revision: 0 };
+  await originalStore.accept(catalogId, "issuer.example", {
+    expectedRevision: null,
+    next: initial,
+  });
+  await originalStore.accept(catalogId, "issuer.example", {
+    expectedRevision: 0,
+    next: {
+      ...initial,
+      revision: 1,
+      activeGeneration: 7,
+      activeManifestDigest: targetDigest,
+      consumedRollbackAuthorizationIds: ["rollback-7"],
+    },
+  });
+  const restarted = new FileGenerationStore(path);
+  await expect(
+    admitManifest(
+      { manifestJson: envelope.manifestJson, signature: envelope.signature },
+      trust,
+      restarted,
+    ),
+  ).resolves.toMatchObject({ manifestDigest: targetDigest });
+  expect((await restarted.get(catalogId, "issuer.example"))?.revision).toBe(1);
+});
+
+test("inactive high-water release cannot reactivate without a strictly higher generation", async () => {
+  const { release, trust } = await fixture();
+  const highManifest = await manifest({
+    generation: 8,
+    releaseId: "release-8" as never,
+  });
+  const highDigest = await sha256(
+    "knitli.openapi-mcp.release-manifest.v4",
+    highManifest,
+  );
+  const highEnvelope = await signedEnvelope(highManifest, release);
+  const store = new MemoryGenerationStore({
+    revision: 4,
+    highestGeneration: 8,
+    highestManifestDigest: highDigest,
+    activeGeneration: 7,
+    activeManifestDigest: digestB,
+    consumedRollbackAuthorizationIds: ["rollback-7"],
+  });
+  await expect(admitManifest(highEnvelope, trust, store)).rejects.toMatchObject(
+    {
+      code: "MANIFEST_ROLLBACK_REJECTED",
+    },
+  );
+  expect((await store.get(catalogId, "issuer.example"))?.activeGeneration).toBe(
+    7,
+  );
+  const newer = await manifest({
+    generation: 9,
+    releaseId: "release-9" as never,
+  });
+  await expect(
+    admitManifest(await signedEnvelope(newer, release), trust, store),
+  ).resolves.toMatchObject({ manifest: { generation: 9 } });
+});
+
+test("rollback exact shape rejects hidden properties", async () => {
+  const { envelope, trust, rollback, value } = await fixture();
+  const targetDigest = await sha256(
+    "knitli.openapi-mcp.release-manifest.v4",
+    value,
+  );
+  const authorization = await rollbackAuthorization(
+    value,
+    targetDigest,
+    rollback,
+  );
+  Object.defineProperty(authorization, "hidden", { value: true });
+  await expect(
+    admitManifest(
+      { ...envelope, rollback: authorization },
+      trust,
+      new MemoryGenerationStore(state(8, digestA)),
+    ),
+  ).rejects.toMatchObject({ code: "MANIFEST_ROLLBACK_REJECTED" });
+});
+
+test("configured manifest limits are honored through detachment before CAS", async () => {
+  const { release, trust, value } = await fixture();
+  const records: Record<string, Sha256> = Object.create(null);
+  for (let index = 0; index <= 100_000; index += 1) {
+    records[`operation:tiny:r${String(index).padStart(6, "0")}`] = digestA;
+  }
+  const large = { ...value, records } as ReleaseManifestV4;
+  const envelope = await signedEnvelope(large, release);
+  const generations = new MemoryGenerationStore();
+  const maxManifestBytes = encoder.encode(envelope.manifestJson).byteLength + 1;
+  await expect(
+    admitManifest(envelope, trust, generations, {
+      maxManifestBytes,
+      maxManifestRecords: 100_001,
+    } as never),
+  ).resolves.toMatchObject({ manifest: { generation: 7 } });
+  expect(generations.accepts).toBe(1);
+});
+
 test("rollback rejects expiry, replay, binding mismatches, malformed signature, and ordinary release keys", async () => {
   const { release, rollback, trust, value, envelope } = await fixture();
   const manifestDigest = await sha256(
@@ -713,7 +880,7 @@ test("record verification rejects wrapper/record extras, ID disagreement, malfor
       ...row,
       id: "operation:tiny:other",
     } as never),
-  ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+  ).rejects.toMatchObject({ code: "RECORD_NOT_ADMITTED" });
   await expect(
     verifyStoredRecord(admitted, {
       ...row,
@@ -723,6 +890,107 @@ test("record verification rejects wrapper/record extras, ID disagreement, malfor
   ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
   await expect(
     verifyStoredRecord(admitted, row, { maxRecordBytes: 8 } as never),
+  ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+});
+
+test("unadmitted wrapper ID is rejected before hostile record traversal", async () => {
+  const admitted = await admitFixture();
+  let traversed = false;
+  const poison = new Proxy(
+    {},
+    {
+      getPrototypeOf() {
+        traversed = true;
+        return Object.prototype;
+      },
+    },
+  );
+  await expect(
+    verifyStoredRecord(admitted, {
+      id: "operation:tiny:users.extra",
+      logicalDigest: digestA,
+      record: poison,
+    } as never),
+  ).rejects.toMatchObject({ code: "RECORD_NOT_ADMITTED" });
+  expect(traversed).toBe(false);
+});
+
+test("record byte bound aborts traversal before later poisoned values", async () => {
+  const { release, trust, value } = await fixture();
+  const admitted = await admitManifest(
+    await signedEnvelope(
+      { ...value, records: { [operationId]: digestA } },
+      release,
+    ),
+    trust,
+    new MemoryGenerationStore(),
+  );
+  let traversed = false;
+  const poison = new Proxy(
+    {},
+    {
+      getPrototypeOf() {
+        traversed = true;
+        return Object.prototype;
+      },
+    },
+  );
+  const record = operation({
+    advisory: { aOversized: "x".repeat(1024), zPoison: poison },
+  });
+  await expect(
+    verifyStoredRecord(
+      admitted,
+      { id: record.id, logicalDigest: digestA, record },
+      { maxRecordBytes: 256 } as never,
+    ),
+  ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+  expect(traversed).toBe(false);
+});
+
+test("record depth bound aborts traversal before later poisoned values", async () => {
+  const { release, trust, value } = await fixture();
+  const admitted = await admitManifest(
+    await signedEnvelope(
+      { ...value, records: { [operationId]: digestA } },
+      release,
+    ),
+    trust,
+    new MemoryGenerationStore(),
+  );
+  let traversed = false;
+  const poison = new Proxy(
+    {},
+    {
+      getPrototypeOf() {
+        traversed = true;
+        return Object.prototype;
+      },
+    },
+  );
+  const record = operation({
+    advisory: { aDeep: { one: { two: { three: true } } }, zPoison: poison },
+  });
+  await expect(
+    verifyStoredRecord(
+      admitted,
+      { id: record.id, logicalDigest: digestA, record },
+      { maxJsonDepth: 3 } as never,
+    ),
+  ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+  expect(traversed).toBe(false);
+});
+
+test("hostile record canonicalization errors stay in the record error domain", async () => {
+  const admitted = await admitFixture();
+  const record = operation();
+  Object.defineProperty(record.advisory, "hidden", { value: true });
+  await expect(
+    verifyStoredRecord(admitted, {
+      id: record.id,
+      logicalDigest: digestA,
+      record,
+    }),
   ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
 });
 
@@ -825,6 +1093,37 @@ async function tempStatePath(): Promise<string> {
   return join(directory, "generations.json");
 }
 
+async function writeChildAcceptHelper(directory: string): Promise<string> {
+  const helper = join(directory, "accept-child.ts");
+  const moduleUrl = new URL(
+    "../src/sqlite/generation-store.ts",
+    import.meta.url,
+  ).href;
+  await writeFile(
+    helper,
+    `import { existsSync } from "node:fs";\nimport { FileGenerationStore } from ${JSON.stringify(moduleUrl)};\nconst [statePath, transitionJson, barrier] = process.argv.slice(2);\nwhile (!existsSync(barrier)) await Bun.sleep(1);\nconst result = await new FileGenerationStore(statePath).accept("tiny", "issuer.example", JSON.parse(transitionJson));\nprocess.stdout.write(JSON.stringify(result));\n`,
+  );
+  return helper;
+}
+
+async function childAccept(
+  helper: string,
+  cwd: string,
+  statePath: string,
+  transition: GenerationTransition,
+  barrier: string,
+): Promise<GenerationState | null> {
+  const child = Bun.spawn(
+    [process.execPath, helper, statePath, JSON.stringify(transition), barrier],
+    { cwd, stdout: "pipe", stderr: "pipe" },
+  );
+  const output = new Response(child.stdout).text();
+  const error = new Response(child.stderr).text();
+  const exitCode = await child.exited;
+  if (exitCode !== 0) throw new Error(await error);
+  return JSON.parse(await output) as GenerationState | null;
+}
+
 test("FileGenerationStore persists 0600 state and enforces CAS across concurrent accepts", async () => {
   const path = await tempStatePath();
   const store = new FileGenerationStore(path);
@@ -849,7 +1148,146 @@ test("FileGenerationStore persists 0600 state and enforces CAS across concurrent
   expect(JSON.parse(await readFile(path, "utf8")).version).toBe(1);
 });
 
-test("FileGenerationStore makes rollback replay consumption atomic across instances", async () => {
+test("FileGenerationStore provides OS-visible CAS across relative, absolute, and symlink-parent aliases", async () => {
+  const path = await tempStatePath();
+  const realDirectory = dirname(path);
+  const harnessDirectory = await mkdtemp(
+    join(tmpdir(), "openapi-mcp-generation-child-"),
+  );
+  temporaryDirectories.push(harnessDirectory);
+  const linkedParent = join(harnessDirectory, "linked-parent");
+  await symlink(realDirectory, linkedParent, "dir");
+  const helper = await writeChildAcceptHelper(harnessDirectory);
+  const barrier = join(harnessDirectory, "start");
+  const transitions: GenerationTransition[] = [
+    { expectedRevision: null, next: { ...state(1, digestA), revision: 0 } },
+    { expectedRevision: null, next: { ...state(2, digestB), revision: 0 } },
+    { expectedRevision: null, next: { ...state(3, digestA), revision: 0 } },
+  ];
+  const attempts = [
+    childAccept(
+      helper,
+      realDirectory,
+      "generations.json",
+      transitions[0],
+      barrier,
+    ),
+    childAccept(helper, realDirectory, path, transitions[1], barrier),
+    childAccept(
+      helper,
+      realDirectory,
+      join(linkedParent, "generations.json"),
+      transitions[2],
+      barrier,
+    ),
+  ];
+  await Bun.sleep(50);
+  await writeFile(barrier, "go");
+  const results = await Promise.all(attempts);
+  expect(results.filter((result) => result !== null)).toHaveLength(1);
+  const persisted = await new FileGenerationStore(path).get(
+    catalogId,
+    "issuer.example",
+  );
+  expect(persisted).toEqual(results.find((result) => result !== null));
+});
+
+test("FileGenerationStore rejects security-history rewrites and undefined transitions", async () => {
+  for (const invalidNext of [
+    {
+      ...state(7, digestB),
+      revision: 2,
+      consumedRollbackAuthorizationIds: ["used"],
+    },
+    {
+      ...state(8, digestB),
+      revision: 2,
+      consumedRollbackAuthorizationIds: ["used"],
+    },
+    {
+      ...state(8, digestA, 7),
+      revision: 2,
+      activeManifestDigest: digestB,
+      consumedRollbackAuthorizationIds: ["other"],
+    },
+    {
+      ...state(8, digestA, 6),
+      revision: 2,
+      activeManifestDigest: digestB,
+      consumedRollbackAuthorizationIds: ["used"],
+    },
+  ]) {
+    const path = await tempStatePath();
+    const store = new FileGenerationStore(path);
+    const initial = { ...state(8, digestA), revision: 0 };
+    const rolledBack = {
+      ...initial,
+      revision: 1,
+      activeGeneration: 7,
+      activeManifestDigest: digestB,
+      consumedRollbackAuthorizationIds: ["used"],
+    };
+    await store.accept(catalogId, "issuer.example", {
+      expectedRevision: null,
+      next: initial,
+    });
+    await store.accept(catalogId, "issuer.example", {
+      expectedRevision: 0,
+      next: rolledBack,
+    });
+    await expect(
+      store.accept(catalogId, "issuer.example", {
+        expectedRevision: 1,
+        next: invalidNext,
+      }),
+    ).rejects.toThrow(/transition/i);
+    expect(await store.get(catalogId, "issuer.example")).toEqual(rolledBack);
+  }
+});
+
+test("FileGenerationStore accepts only creation, higher-normal, and rollback transition shapes", async () => {
+  const path = await tempStatePath();
+  const store = new FileGenerationStore(path);
+  await expect(
+    store.accept(catalogId, "issuer.example", {
+      expectedRevision: null,
+      next: {
+        ...state(1, digestA),
+        revision: 0,
+        consumedRollbackAuthorizationIds: ["not-creation"],
+      },
+    }),
+  ).rejects.toThrow(/transition/i);
+  const created = { ...state(1, digestA), revision: 0 };
+  expect(
+    await store.accept(catalogId, "issuer.example", {
+      expectedRevision: null,
+      next: created,
+    }),
+  ).toEqual(created);
+  const higher = { ...state(2, digestB), revision: 1 };
+  expect(
+    await store.accept(catalogId, "issuer.example", {
+      expectedRevision: 0,
+      next: higher,
+    }),
+  ).toEqual(higher);
+  const rollback = {
+    ...higher,
+    revision: 2,
+    activeGeneration: 1,
+    activeManifestDigest: digestA,
+    consumedRollbackAuthorizationIds: ["rollback-once"],
+  };
+  expect(
+    await store.accept(catalogId, "issuer.example", {
+      expectedRevision: 1,
+      next: rollback,
+    }),
+  ).toEqual(rollback);
+});
+
+test("FileGenerationStore reconciles concurrent rollback retry without consuming twice", async () => {
   const path = await tempStatePath();
   const firstStore = new FileGenerationStore(path);
   const secondStore = new FileGenerationStore(path);
@@ -876,15 +1314,11 @@ test("FileGenerationStore makes rollback replay consumption atomic across instan
   ]);
   expect(
     results.filter((result) => result.status === "fulfilled"),
-  ).toHaveLength(1);
-  const rejected = results.find(
-    (result) => result.status === "rejected",
-  ) as PromiseRejectedResult;
-  expect(rejected.reason).toMatchObject({ code: "MANIFEST_ROLLBACK_REJECTED" });
-  expect(
-    (await firstStore.get(catalogId, "issuer.example"))
-      ?.consumedRollbackAuthorizationIds,
-  ).toEqual(["rollback-7"]);
+  ).toHaveLength(2);
+  expect(await firstStore.get(catalogId, "issuer.example")).toMatchObject({
+    revision: 1,
+    consumedRollbackAuthorizationIds: ["rollback-7"],
+  });
 });
 
 test("FileGenerationStore rejects impossible invariants, duplicate entries, and duplicate rollback identities", async () => {
@@ -986,6 +1420,194 @@ test("FileGenerationStore rejects a state file not owned by the effective user",
   }
 });
 
+test("FileGenerationStore recovers a dead lock but never reclaims a live lock by age", async () => {
+  const deadPath = await tempStatePath();
+  const deadLock = join(
+    dirname(deadPath),
+    `.${deadPath.split("/").at(-1)}.lock`,
+  );
+  await writeFile(
+    deadLock,
+    JSON.stringify({
+      version: 1,
+      pid: 2_147_483_647,
+      createdAtEpochMs: 0,
+      token: "00000000-0000-4000-8000-000000000000",
+    }),
+    { mode: 0o600 },
+  );
+  const created = { ...state(1, digestA), revision: 0 };
+  await expect(
+    new FileGenerationStore(deadPath).accept(catalogId, "issuer.example", {
+      expectedRevision: null,
+      next: created,
+    }),
+  ).resolves.toEqual(created);
+
+  const livePath = await tempStatePath();
+  const liveLock = join(
+    dirname(livePath),
+    `.${livePath.split("/").at(-1)}.lock`,
+  );
+  await writeFile(
+    liveLock,
+    JSON.stringify({
+      version: 1,
+      pid: process.pid,
+      createdAtEpochMs: 0,
+      token: "00000000-0000-4000-8000-000000000001",
+    }),
+    { mode: 0o600 },
+  );
+  await expect(
+    new FileGenerationStore(livePath).accept(catalogId, "issuer.example", {
+      expectedRevision: null,
+      next: created,
+    }),
+  ).rejects.toThrow(/contention/i);
+  expect((await lstat(liveLock)).isFile()).toBe(true);
+});
+
+test("FileGenerationStore clears a crashed dead-owner recovery hard link safely", async () => {
+  const path = await tempStatePath();
+  const lock = join(dirname(path), `.${path.split("/").at(-1)}.lock`);
+  const recovery = `${lock}.recovery`;
+  await writeFile(
+    lock,
+    JSON.stringify({
+      version: 1,
+      pid: 2_147_483_647,
+      createdAtEpochMs: 0,
+      token: "00000000-0000-4000-8000-000000000003",
+    }),
+    { mode: 0o600 },
+  );
+  await link(lock, recovery);
+  const created = { ...state(1, digestA), revision: 0 };
+  await expect(
+    new FileGenerationStore(path).accept(catalogId, "issuer.example", {
+      expectedRevision: null,
+      next: created,
+    }),
+  ).resolves.toEqual(created);
+});
+
+test("FileGenerationStore rejects identities its durable decoder cannot reload", async () => {
+  const path = await tempStatePath();
+  const store = new FileGenerationStore(path);
+  const transition = {
+    expectedRevision: null,
+    next: { ...state(1, digestA), revision: 0 },
+  };
+  await expect(
+    store.accept(".." as CatalogId, "issuer.example", transition),
+  ).rejects.toThrow(/identity/i);
+  await expect(
+    store.accept(catalogId, "bad issuer", transition),
+  ).rejects.toThrow(/identity/i);
+  await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("FileGenerationStore rejects unsafe parent and lock permissions", async () => {
+  const parentPath = await tempStatePath();
+  const parent = dirname(parentPath);
+  await chmod(parent, 0o777);
+  try {
+    await expect(
+      new FileGenerationStore(parentPath).get(catalogId, "issuer.example"),
+    ).rejects.toThrow(/parent/i);
+  } finally {
+    await chmod(parent, 0o700);
+  }
+
+  const lockPath = await tempStatePath();
+  const lock = join(dirname(lockPath), `.${lockPath.split("/").at(-1)}.lock`);
+  await writeFile(
+    lock,
+    JSON.stringify({
+      version: 1,
+      pid: process.pid,
+      createdAtEpochMs: Date.now(),
+      token: "00000000-0000-4000-8000-000000000002",
+    }),
+    { mode: 0o644 },
+  );
+  await expect(
+    new FileGenerationStore(lockPath).accept(catalogId, "issuer.example", {
+      expectedRevision: null,
+      next: { ...state(1, digestA), revision: 0 },
+    }),
+  ).rejects.toThrow(/lock/i);
+});
+
+test("FileGenerationStore bounds state serialization before replacing durable state", async () => {
+  const path = await tempStatePath();
+  const limit = 16 * 1024 * 1024;
+  const fixedId = (index: number) =>
+    `r${String(index).padStart(6, "0")}${"x".repeat(110)}`;
+  let count = Math.floor((limit - 1_000) / 120);
+  const consumed = Array.from({ length: count }, (_, index) => fixedId(index));
+  const durable = () =>
+    canonicalJson({
+      entries: [
+        {
+          catalogId,
+          issuer: "issuer.example",
+          state: {
+            ...state(2, digestA),
+            revision: 0,
+            consumedRollbackAuthorizationIds: consumed,
+          },
+        },
+      ],
+      version: 1,
+    });
+
+  let text = durable();
+  let remaining = limit - encoder.encode(text).byteLength;
+  if (remaining > 130) {
+    const additional = Math.floor((remaining - 1) / 120);
+    consumed.push(
+      ...Array.from({ length: additional }, (_, index) =>
+        fixedId(count + index),
+      ),
+    );
+    count += additional;
+    text = durable();
+    remaining = limit - encoder.encode(text).byteLength;
+  }
+  if (remaining <= 4) {
+    consumed.pop();
+    text = durable();
+    remaining = limit - encoder.encode(text).byteLength;
+  }
+  const tuningLength = remaining - 4;
+  expect(tuningLength).toBeGreaterThan(0);
+  expect(tuningLength).toBeLessThanOrEqual(128);
+  consumed.push(`t${"y".repeat(tuningLength - 1)}`);
+  text = durable();
+  expect(encoder.encode(text).byteLength).toBeLessThanOrEqual(limit);
+  await writeFile(path, text, { mode: 0o600 });
+
+  const store = new FileGenerationStore(path);
+  await expect(
+    store.accept(catalogId, "issuer.example", {
+      expectedRevision: 0,
+      next: {
+        ...state(1, digestB),
+        highestGeneration: 2,
+        highestManifestDigest: digestA,
+        revision: 1,
+        consumedRollbackAuthorizationIds: [
+          ...consumed,
+          `overflow-${"z".repeat(110)}`,
+        ],
+      },
+    }),
+  ).rejects.toThrow(/size limit|persisted atomically/i);
+  expect(await readFile(path, "utf8")).toBe(text);
+});
+
 test("FileGenerationStore preserves the prior file when atomic replacement fails", async () => {
   const path = await tempStatePath();
   const store = new FileGenerationStore(path);
@@ -1003,7 +1625,7 @@ test("FileGenerationStore preserves the prior file when atomic replacement fails
         expectedRevision: 0,
         next: { ...state(2, digestB), revision: 1 },
       }),
-    ).rejects.toThrow(/persisted atomically/i);
+    ).rejects.toThrow();
   } finally {
     await chmod(directory, 0o700);
   }
