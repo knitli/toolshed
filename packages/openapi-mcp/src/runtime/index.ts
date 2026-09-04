@@ -12,6 +12,8 @@ export {
   encodeOperationRef,
   parseTypedRecordId,
 } from "./references.ts";
+export { createOpenApiRuntime, type OpenApiRuntimeOptions } from "./runtime.ts";
+export { resolveSchemaClosure } from "./schema-resolver.ts";
 export {
   CATALOG_STORE_PUBLIC_MESSAGES,
   createD1CatalogStore,
