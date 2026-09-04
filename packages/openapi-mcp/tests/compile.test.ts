@@ -14,8 +14,16 @@ const opts = {
 };
 
 afterEach(() => {
-  try { unlinkSync(OUT); } catch { /* already gone */ }
-  try { rmSync(`${OUT}.building`, { recursive: true }); } catch { /* already gone */ }
+  try {
+    unlinkSync(OUT);
+  } catch {
+    /* already gone */
+  }
+  try {
+    rmSync(`${OUT}.building`, { recursive: true });
+  } catch {
+    /* already gone */
+  }
 });
 
 describe("compile", () => {
@@ -70,7 +78,9 @@ describe("compile", () => {
       )
       .all("widget");
     expect(hits.length).toBeGreaterThan(0);
-    expect(hits.map((h) => h.qualified_id)).toContain("tiny:widgets.CreateWidget");
+    expect(hits.map((h) => h.qualified_id)).toContain(
+      "tiny:widgets.CreateWidget",
+    );
     db.close();
   });
 
@@ -78,7 +88,10 @@ describe("compile", () => {
     await compile(opts);
     const db = new Database(OUT, { readonly: true });
     const meta = Object.fromEntries(
-      db.query<{ key: string; value: string }, []>("SELECT key, value FROM meta")
+      db
+        .query<{ key: string; value: string }, []>(
+          "SELECT key, value FROM meta",
+        )
         .all()
         .map((r) => [r.key, r.value]),
     );
@@ -141,7 +154,9 @@ describe("compile", () => {
     } as typeof DatabaseSync.prototype.exec;
 
     try {
-      await expect(compile(opts)).rejects.toThrow("simulated mid-transaction failure");
+      await expect(compile(opts)).rejects.toThrow(
+        "simulated mid-transaction failure",
+      );
     } finally {
       DatabaseSync.prototype.exec = originalExec;
     }

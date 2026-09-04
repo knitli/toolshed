@@ -28,9 +28,7 @@ export interface CompileResult {
 
 const COMPILER_VERSION = "0.1.0";
 
-export async function compile(
-  options: CompileOptions,
-): Promise<CompileResult> {
+export async function compile(options: CompileOptions): Promise<CompileResult> {
   const doc = await loadSpec(options.specPath);
   const operations = extractOperations(doc, options.api);
   const schemas = extractSchemas(doc, options.api);
@@ -83,9 +81,9 @@ export async function compile(
       }
       const mounted = JSON.parse(
         (
-          db
-            .prepare("SELECT value FROM meta WHERE key = ?")
-            .get("apis") as { value: string } | undefined
+          db.prepare("SELECT value FROM meta WHERE key = ?").get("apis") as
+            | { value: string }
+            | undefined
         )?.value ?? "[]",
       ) as string[];
       if (mounted.includes(options.api)) {
@@ -106,12 +104,26 @@ export async function compile(
     );
     for (const op of operations) {
       insertOp.run(
-        op.qualifiedId, op.api, op.operationId, op.method, op.path,
-        op.safety, op.risk, op.operationType,
-        op.pageable ? 1 : 0, op.deprecated ? 1 : 0,
+        op.qualifiedId,
+        op.api,
+        op.operationId,
+        op.method,
+        op.path,
+        op.safety,
+        op.risk,
+        op.operationType,
+        op.pageable ? 1 : 0,
+        op.deprecated ? 1 : 0,
         op.permissions ? JSON.stringify(op.permissions) : null,
-        op.permConfidence, op.privilegeLevel, op.summary, op.tags,
-        op.paramsJson, op.searchText, op.bodyRef, op.bodySchemaJson, op.bodyMediaType,
+        op.permConfidence,
+        op.privilegeLevel,
+        op.summary,
+        op.tags,
+        op.paramsJson,
+        op.searchText,
+        op.bodyRef,
+        op.bodySchemaJson,
+        op.bodyMediaType,
         op.serverUrl,
       );
     }
