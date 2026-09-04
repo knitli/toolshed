@@ -1,17 +1,23 @@
+export { sha256, verifyEd25519 } from "./digest.ts";
 export type { OpenApiMcpErrorCode } from "./errors.ts";
 export { OpenApiMcpError } from "./errors.ts";
-export { sha256, verifyEd25519 } from "./digest.ts";
+export type {
+  AdmittedManifest,
+  ManifestTrust,
+  TrustedManifestKey,
+} from "./manifest.ts";
+export { admitManifest } from "./manifest.ts";
 export {
   decodeOperationRef,
   encodeOperationRef,
   parseTypedRecordId,
 } from "./references.ts";
+export type { StrictJsonLimits } from "./strict-json.ts";
 export {
   canonicalJson,
   DEFAULT_STRICT_JSON_LIMITS,
   parseJsonStrict,
 } from "./strict-json.ts";
-export type { StrictJsonLimits } from "./strict-json.ts";
 export type {
   ActionAuthorizer,
   ActionCardinality,
@@ -63,6 +69,7 @@ export type {
   TypedRecordId,
   TypedSchemaId,
 } from "./types.ts";
+export { verifyStoredRecord } from "./verify-record.ts";
 export type { RuntimeLimits } from "./versions.ts";
 export {
   ARTIFACT_FORMAT_VERSION,
