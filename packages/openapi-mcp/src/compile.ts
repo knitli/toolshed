@@ -8,7 +8,7 @@ import {
   buildPermissionIndex,
   type PermissionsDataset,
 } from "./permissions.ts";
-import { createSchema, FORMAT_VERSION } from "./schema.ts";
+import { createSchema, LEGACY_FORMAT_VERSION } from "./schema.ts";
 import { extractSchemas } from "./schemas.ts";
 
 export interface CompileOptions {
@@ -76,9 +76,9 @@ export async function compile(
           .prepare("SELECT value FROM meta WHERE key = ?")
           .get("format_version") as { value: string } | undefined
       )?.value;
-      if (version !== String(FORMAT_VERSION)) {
+      if (version !== String(LEGACY_FORMAT_VERSION)) {
         throw new Error(
-          `format_version mismatch: artifact is ${version}, compiler is ${FORMAT_VERSION}`,
+          `format_version mismatch: artifact is ${version}, compiler is ${LEGACY_FORMAT_VERSION}`,
         );
       }
       const mounted = JSON.parse(
@@ -143,7 +143,7 @@ export async function compile(
       "INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)",
     );
     for (const [key, value] of Object.entries({
-      format_version: String(FORMAT_VERSION),
+      format_version: String(LEGACY_FORMAT_VERSION),
       compiler_version: COMPILER_VERSION,
       apis: JSON.stringify([...existingApis, options.api]),
       [`${options.api}.source_path`]: options.specPath,

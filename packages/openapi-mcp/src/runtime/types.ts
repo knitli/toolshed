@@ -1,0 +1,361 @@
+export type Sha256 = string & { readonly __sha256: unique symbol };
+export type CatalogId = string & { readonly __catalogId: unique symbol };
+export type ReleaseId = string & { readonly __releaseId: unique symbol };
+export type TypedOperationId = `operation:${string}`;
+export type TypedSchemaId = `schema:${string}`;
+export type TypedRecordId = TypedOperationId | TypedSchemaId;
+
+export type OpenApiValue =
+  | null
+  | boolean
+  | number
+  | string
+  | OpenApiValue[]
+  | { [key: string]: OpenApiValue };
+export type JsonValue = OpenApiValue;
+export type JsonObject = { [key: string]: JsonValue };
+
+export interface OpenApiArguments {
+  path?: Readonly<Record<string, string | number | boolean>>;
+  query?: Readonly<Record<string, OpenApiValue>>;
+  headers?: Readonly<Record<string, string>>;
+  body?: OpenApiValue;
+}
+
+export type HttpMethod =
+  | "GET"
+  | "HEAD"
+  | "POST"
+  | "PUT"
+  | "PATCH"
+  | "DELETE"
+  | "OPTIONS"
+  | "TRACE";
+
+export interface ReferenceMapEntryV1 {
+  uri: string;
+  contentSha256: Sha256;
+}
+
+/** A canonical URI-to-content-digest reference graph. */
+export type ReferenceMapV1 = readonly ReferenceMapEntryV1[];
+
+export interface ReleaseManifestV4 {
+  format: 4;
+  contract: 1;
+  catalogId: CatalogId;
+  releaseId: ReleaseId;
+  generation: number;
+  issuer: string;
+  keyId: string;
+  policyId: string;
+  allowedOrigins: readonly string[];
+  compiledAt: string;
+  compilerVersion: string;
+  source: {
+    uri: string;
+    revision: string;
+    contentSha256: Sha256;
+    referenceGraphDigest: Sha256;
+  };
+  records: Readonly<Record<TypedRecordId, Sha256>>;
+}
+
+export interface ManifestSignature {
+  algorithm: "Ed25519";
+  keyId: string;
+  signature: string;
+}
+
+export interface RollbackAuthorization {
+  id: string;
+  catalogId: CatalogId;
+  issuer: string;
+  currentHighestGeneration: number;
+  targetGeneration: number;
+  targetManifestDigest: Sha256;
+  reason: string;
+  expiresAt: string;
+  keyId: string;
+  algorithm: "Ed25519";
+  signature: string;
+}
+
+export interface ManifestEnvelope {
+  manifestJson: string;
+  signature: ManifestSignature;
+  rollback?: RollbackAuthorization;
+}
+
+export interface StoredRecord<TRecord> {
+  id: TypedRecordId;
+  logicalDigest: Sha256;
+  record: TRecord;
+}
+
+/** Logical operation data admitted through a signed v4 manifest. */
+export interface OperationRecordV4 {
+  id: TypedOperationId;
+  api: string;
+  operationId: string;
+  method: HttpMethod;
+  path: string;
+  origin: string;
+  summary: string | null;
+  deprecated: boolean;
+  parameters: readonly JsonObject[];
+  requestBody: JsonObject | null;
+  schemaIds: readonly TypedSchemaId[];
+  advisory: JsonObject;
+}
+
+/** Logical schema data admitted through a signed v4 manifest. */
+export interface SchemaRecordV4 {
+  id: TypedSchemaId;
+  schema: JsonObject;
+}
+
+export interface SearchQuery {
+  query: string;
+  api?: string;
+  limit: number;
+}
+
+export interface CandidateRef {
+  catalogId: CatalogId;
+  releaseId: ReleaseId;
+  operationId: TypedOperationId;
+}
+
+export interface CatalogStore {
+  getManifest(
+    catalogId: CatalogId,
+    releaseId: ReleaseId,
+  ): Promise<ManifestEnvelope>;
+  searchCandidates(query: SearchQuery): Promise<readonly CandidateRef[]>;
+  getOperation(
+    catalogId: CatalogId,
+    releaseId: ReleaseId,
+    id: TypedOperationId,
+  ): Promise<StoredRecord<OperationRecordV4> | null>;
+  getSchemas(
+    catalogId: CatalogId,
+    releaseId: ReleaseId,
+    ids: readonly TypedSchemaId[],
+  ): Promise<readonly StoredRecord<SchemaRecordV4>[]>;
+}
+
+/** Immutable high-water data plus the release currently admitted for use. */
+export interface GenerationState {
+  revision: number;
+  highestGeneration: number;
+  highestManifestDigest: Sha256;
+  activeGeneration: number;
+  activeManifestDigest: Sha256;
+  consumedRollbackAuthorizationIds: readonly string[];
+}
+
+/** A compare-and-swap transition expected to move state from one revision. */
+export interface GenerationTransition {
+  expectedRevision: number | null;
+  next: GenerationState;
+}
+
+export interface GenerationStore {
+  get(catalogId: CatalogId, issuer: string): Promise<GenerationState | null>;
+  accept(
+    catalogId: CatalogId,
+    issuer: string,
+    transition: GenerationTransition,
+  ): Promise<GenerationState | null>;
+}
+
+export interface OperationRefPayload {
+  catalogId: CatalogId;
+  releaseId: ReleaseId;
+  operationId: TypedOperationId;
+  operationDigest: Sha256;
+}
+
+/** Opaque `opref.v1.*` wire representation. */
+export type OperationRef = string & { readonly __operationRef: unique symbol };
+
+export interface SearchInput {
+  query: string;
+  api?: string;
+  limit?: number;
+}
+
+export interface SearchResultItem {
+  operation: OperationRef;
+  summary: string | null;
+  safety: "read" | "action";
+  actionKind: ActionKind | null;
+  cardinality: ActionCardinality | null;
+  deprecated: boolean;
+  advisory: JsonObject;
+}
+
+export interface SearchResult {
+  results: readonly SearchResultItem[];
+}
+
+export interface PrepareInput {
+  operation: OperationRef;
+  arguments: OpenApiArguments;
+  pageToken?: string;
+}
+
+export type ActionKind =
+  | "create"
+  | "update"
+  | "delete"
+  | "communicate"
+  | "authority"
+  | "transaction"
+  | "execute"
+  | "unknown";
+
+export type ActionCardinality =
+  | { kind: "single" }
+  | { kind: "bounded"; maxAffected: number }
+  | { kind: "unbounded" }
+  | { kind: "unknown" };
+
+export interface PreparedCall {
+  version: 1;
+  catalogId: CatalogId;
+  releaseId: ReleaseId;
+  operationId: TypedOperationId;
+  operationDigest: Sha256;
+  manifestDigest: Sha256;
+  method: HttpMethod;
+  origin: string;
+  relativeUrl: string;
+  headers: Readonly<Record<string, string>>;
+  body: Uint8Array | null;
+  normalizedArguments: JsonObject;
+  safety: "read" | "action";
+  actionKind: ActionKind | null;
+  cardinality: ActionCardinality | null;
+  inputDigest: Sha256;
+  preparedCallDigest: Sha256;
+}
+
+export interface OpenApiRuntime {
+  search(input: SearchInput): Promise<SearchResult>;
+  prepareRead(input: PrepareInput): Promise<PreparedCall>;
+  prepareAction(input: PrepareInput): Promise<PreparedCall>;
+  revalidate(call: PreparedCall): Promise<PreparedCall>;
+}
+
+export interface AuthorizationContext {
+  now: Date;
+  requestState?: string;
+}
+
+export interface SafeApprovalPresentation {
+  catalogId: string;
+  releaseId: string;
+  operationId: string;
+  method: HttpMethod;
+  origin: string;
+  relativeUrl: string;
+  actionKind: ActionKind;
+  cardinality: ActionCardinality;
+  normalizedArguments: string;
+  preparedCallDigest: Sha256;
+}
+
+export interface ActionAuthorizer {
+  authorize(
+    call: PreparedCall,
+    context: AuthorizationContext,
+  ): Promise<AuthorizationDecision>;
+}
+
+export type AuthorizationDecision =
+  | {
+      status: "authorized";
+      callDigest: Sha256;
+      path: "per-call" | "exact-policy";
+    }
+  | { status: "confirmation-required"; presentation: SafeApprovalPresentation }
+  | { status: "denied"; reason: string };
+
+export type AuthProfile =
+  | { type: "bearer-env"; env: string }
+  | {
+      type: "api-key-env";
+      env: string;
+      placement: "header" | "query";
+      name: string;
+    }
+  | {
+      type: "oauth2-pkce";
+      authorizationEndpoint: string;
+      tokenEndpoint: string;
+      clientId: string;
+      scopes: readonly string[];
+      resource?: string;
+    };
+
+export interface SecretStore {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+export type Credential =
+  | { type: "bearer"; token: string }
+  | {
+      type: "api-key";
+      placement: "header" | "query";
+      name: string;
+      value: string;
+    };
+
+export type CredentialResolution =
+  | { status: "ready"; credential: Credential }
+  | { status: "auth-required"; authorizationUrl: string; expiresAt: string };
+
+export interface CredentialProvider {
+  resolve(): Promise<CredentialResolution>;
+}
+
+export interface DestinationPolicy {
+  allows(origin: string): Promise<boolean>;
+}
+
+export interface PaginationTokenState {
+  catalogId: CatalogId;
+  releaseId: ReleaseId;
+  manifestDigest: Sha256;
+  operationId: TypedOperationId;
+  inputDigest: Sha256;
+  nextRelativeUrl: string;
+  expiresAt: string;
+  pageCount: number;
+  cumulativeBytes: number;
+}
+
+/** Host-owned opaque continuation token codec; implementations must bind every field. */
+export interface PaginationTokenCodec {
+  encode(state: PaginationTokenState): Promise<string>;
+  decode(token: string): Promise<PaginationTokenState>;
+}
+
+export type CallOutcome =
+  | {
+      status: "success";
+      statusCode: number;
+      headers: Readonly<Record<string, string>>;
+      body: Uint8Array;
+      pageToken?: string;
+    }
+  | { status: "redirect-blocked"; location: string | null }
+  | { status: "not-modified" };
+
+export interface AuthorizedTransport {
+  dispatch(call: PreparedCall, credential: Credential): Promise<CallOutcome>;
+}

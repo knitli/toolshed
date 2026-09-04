@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { compile } from "../src/compile.ts";
-import { FORMAT_VERSION } from "../src/schema.ts";
+import { LEGACY_FORMAT_VERSION } from "../src/schema.ts";
 
 const OUT = `${import.meta.dir}/tmp-compile.sqlite`;
 const opts = {
@@ -82,7 +82,7 @@ describe("compile", () => {
         .all()
         .map((r) => [r.key, r.value]),
     );
-    expect(meta.format_version).toBe(String(FORMAT_VERSION));
+    expect(meta.format_version).toBe(String(LEGACY_FORMAT_VERSION));
     // `apis` is the mounted-API list; per-api keys are namespaced so a second
     // mount (Task 12) cannot collide with the first.
     expect(JSON.parse(meta.apis)).toEqual(["tiny"]);

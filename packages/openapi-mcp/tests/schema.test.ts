@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DatabaseSync } from "node:sqlite";
-import { createSchema, FORMAT_VERSION } from "../src/schema.ts";
+import { createSchema, LEGACY_FORMAT_VERSION } from "../src/schema.ts";
 
 const insertOp = (
   db: DatabaseSync,
@@ -88,7 +88,7 @@ describe("createSchema", () => {
     expect(insert).toThrow();
   });
 
-  test("FORMAT_VERSION is 3", () => {
-    expect(FORMAT_VERSION).toBe(3);
+  test("LEGACY_FORMAT_VERSION is 3", () => {
+    expect(LEGACY_FORMAT_VERSION).toBe(3);
   });
 });
