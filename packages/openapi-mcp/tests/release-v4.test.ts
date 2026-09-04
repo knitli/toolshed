@@ -61,6 +61,25 @@ afterEach(async () =>
   ),
 );
 
+async function runChildWithDeadline(
+  script: string,
+  deadlineMs = 750,
+): Promise<{ kind: "exit"; code: number } | { kind: "timeout" }> {
+  const child = Bun.spawn([process.execPath, "-e", script], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const outcome = await Promise.race([
+    child.exited.then((code) => ({ kind: "exit" as const, code })),
+    Bun.sleep(deadlineMs).then(() => ({ kind: "timeout" as const })),
+  ]);
+  if (outcome.kind === "timeout") {
+    child.kill();
+    await child.exited;
+  }
+  return outcome;
+}
+
 const SPEC = {
   openapi: "3.1.0",
   info: { title: "Tiny", version: "1" },
@@ -533,6 +552,119 @@ describe("immutable v4 construction", () => {
     await expect(stat(compiled.paths.directory)).rejects.toThrow();
     expect(await readdir(target)).toEqual([]);
   });
+
+  test("rejects persistently oversized staged content without unbounded reads", async () => {
+    const root = await temporaryRoot();
+    const target = join(root, "published");
+    await mkdir(target);
+    const { compiled } = await fixture(root);
+    const probePath = join(root, "publication-file-handle-probe");
+    await writeFile(probePath, "probe");
+    const probe = await open(probePath, "r");
+    const prototype = Object.getPrototypeOf(probe) as {
+      readFile: (...args: unknown[]) => Promise<unknown>;
+    };
+    await probe.close();
+    const originalReadFile = prototype.readFile;
+    let unboundedReadFileCalls = 0;
+    prototype.readFile = function (...args: unknown[]): Promise<unknown> {
+      unboundedReadFileCalls += 1;
+      return Reflect.apply(originalReadFile, this, args) as Promise<unknown>;
+    };
+    try {
+      await appendFile(compiled.paths.sqlite, Buffer.alloc(1024 * 1024, 0x61));
+      await expect(
+        publishRelease(compiled, { directory: target }),
+      ).rejects.toThrow(/size|modified/i);
+      expect(unboundedReadFileCalls).toBe(0);
+    } finally {
+      prototype.readFile = originalReadFile;
+    }
+    await expect(stat(compiled.paths.directory)).rejects.toThrow();
+    expect(await readdir(target)).toEqual([]);
+  });
+
+  test("bounds staged hashing when the owned inode grows after capped stat", async () => {
+    const root = await temporaryRoot();
+    const target = join(root, "published");
+    await mkdir(target);
+    const { compiled } = await fixture(root);
+    const probePath = join(root, "publication-growth-file-handle-probe");
+    await writeFile(probePath, "probe");
+    const probe = await open(probePath, "r");
+    const prototype = Object.getPrototypeOf(probe) as {
+      readFile: (...args: unknown[]) => Promise<unknown>;
+    };
+    await probe.close();
+    const originalReadFile = prototype.readFile;
+    let unboundedReadFileCalls = 0;
+    prototype.readFile = function (...args: unknown[]): Promise<unknown> {
+      unboundedReadFileCalls += 1;
+      return Reflect.apply(originalReadFile, this, args) as Promise<unknown>;
+    };
+    try {
+      await expect(
+        publishReleaseWithCheckpoint(
+          compiled,
+          { directory: target },
+          async (checkpoint) => {
+            if ((checkpoint as string) !== "before-sqlite-validation-read")
+              return;
+            await appendFile(
+              compiled.paths.sqlite,
+              Buffer.alloc(1024 * 1024, 0x62),
+            );
+          },
+        ),
+      ).rejects.toThrow(
+        "compiled release staged content was modified: exceeds recorded size",
+      );
+      expect(unboundedReadFileCalls).toBe(0);
+    } finally {
+      prototype.readFile = originalReadFile;
+    }
+    await expect(stat(compiled.paths.directory)).rejects.toThrow();
+    expect(await readdir(target)).toEqual([]);
+  });
+
+  test("rejects a staged FIFO substitution without waiting for a writer", async () => {
+    const root = await temporaryRoot();
+    const target = join(root, "published");
+    await mkdir(target);
+    const options = await constructionOptions(root);
+    const compilerModule = fileURLToPath(
+      new URL("../src/compiler.ts", import.meta.url),
+    );
+    const publishModule = fileURLToPath(
+      new URL("../src/release/publish.ts", import.meta.url),
+    );
+    const script = `
+      const compiler = await import(${JSON.stringify(compilerModule)});
+      const publisher = await import(${JSON.stringify(publishModule)});
+      const fs = await import("node:fs/promises");
+      const compiled = await compiler.compileRelease(${JSON.stringify(options)});
+      try {
+        await publisher.publishReleaseWithCheckpoint(
+          compiled,
+          { directory: ${JSON.stringify(target)} },
+          async (checkpoint) => {
+            if (checkpoint !== "before-sqlite-validation-open") return;
+            await fs.unlink(compiled.paths.sqlite);
+            const mkfifo = Bun.spawn(["mkfifo", compiled.paths.sqlite]);
+            if (await mkfifo.exited !== 0) process.exit(4);
+          },
+        );
+        process.exit(2);
+      } catch (error) {
+        process.exit(error instanceof Error && /staged file|identity|modified/.test(error.message) ? 0 : 3);
+      }
+    `;
+    expect(await runChildWithDeadline(script)).toEqual({
+      kind: "exit",
+      code: 0,
+    });
+    expect(await readdir(target)).toEqual([]);
+  });
 });
 
 describe("runtime operation record invariants", () => {
@@ -638,6 +770,12 @@ describe("manifest-last publication", () => {
       },
     );
     expect(checkpoints).toEqual([
+      "before-sqlite-validation-open",
+      "before-sqlite-validation-read",
+      "before-signature-validation-open",
+      "before-signature-validation-read",
+      "before-manifest-validation-open",
+      "before-manifest-validation-read",
       "payload-published",
       "signature-published",
       "manifest-published",

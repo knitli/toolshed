@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdir, mkdtemp, open, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { OpenApiDoc } from "../load.ts";
@@ -1177,11 +1177,28 @@ export async function compileReleaseWithCheckpoint(
     });
     let permissionIndex: PermissionIndex | undefined;
     if (options.permissionsPath) {
+      let permissionsBytes: Uint8Array;
+      try {
+        permissionsBytes = await readFileBoundedV4(
+          options.permissionsPath,
+          limits.maxSourceBytes,
+          "permissions dataset",
+        );
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "permissions dataset exceeds byte limit"
+        )
+          throw error;
+        throw new Error("permissions dataset could not be read");
+      }
       let permissionsText: string;
       try {
-        permissionsText = await readFile(options.permissionsPath, "utf8");
+        permissionsText = new TextDecoder("utf-8", { fatal: true }).decode(
+          permissionsBytes,
+        );
       } catch {
-        throw new Error("permissions dataset could not be read");
+        throw new Error("permissions dataset is not valid UTF-8");
       }
       const dataset = parseJsonStrict(permissionsText, {
         maxBytes: limits.maxSourceBytes,
@@ -1545,10 +1562,16 @@ export async function compileReleaseWithCheckpoint(
         .update(envelope.manifestJson)
         .digest("hex"),
     };
+    const stageSizes = {
+      sqlite: emittedBytes.byteLength,
+      signature: Buffer.byteLength(signatureBytes),
+      manifest: Buffer.byteLength(envelope.manifestJson),
+    };
     return registerCompiledRelease(
       compiled,
       outDir,
       stageDigests,
+      stageSizes,
       stageOwnership as CompiledReleaseOwnership,
     );
   } catch (error) {

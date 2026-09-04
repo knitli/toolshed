@@ -5,7 +5,6 @@ import {
   lstat,
   mkdir,
   open,
-  readFile,
   realpath,
   rmdir,
   unlink,
@@ -26,11 +25,15 @@ export interface CompiledRelease {
   readonly paths: CompiledReleasePaths;
 }
 
+type StageFileKind = "sqlite" | "signature" | "manifest";
+type StageFileRecord<T> = Readonly<Record<StageFileKind, T>>;
+
 interface CompiledState {
   outDir: string;
   paths: CompiledReleasePaths;
   consumed: boolean;
-  digests: Readonly<Record<"sqlite" | "signature" | "manifest", string>>;
+  digests: StageFileRecord<string>;
+  sizes: StageFileRecord<number>;
   ownership: CompiledReleaseOwnership;
 }
 
@@ -52,7 +55,8 @@ const compiledStates = new WeakMap<object, CompiledState>();
 export function registerCompiledRelease(
   compiled: CompiledRelease,
   outDir: string,
-  digests: Readonly<Record<"sqlite" | "signature" | "manifest", string>>,
+  digests: StageFileRecord<string>,
+  sizes: StageFileRecord<number>,
   ownership: CompiledReleaseOwnership,
 ): CompiledRelease {
   compiledStates.set(compiled, {
@@ -60,6 +64,7 @@ export function registerCompiledRelease(
     paths: { ...compiled.paths },
     consumed: false,
     digests: { ...digests },
+    sizes: { ...sizes },
     ownership: {
       directory: { ...ownership.directory },
       sqlite: { ...ownership.sqlite },
@@ -163,9 +168,91 @@ export async function cleanupOwnedStage(
   await rmdir(paths.directory).catch(() => {});
 }
 
+async function hashOwnedStageFile(
+  path: string,
+  identity: PathIdentity,
+  expectedSize: number,
+  beforeOpen: () => void | Promise<void>,
+  beforeRead: () => void | Promise<void>,
+): Promise<string> {
+  if (!Number.isSafeInteger(expectedSize) || expectedSize < 0)
+    throw new Error("compiled release staged file size is invalid");
+  if (typeof constants.O_NOFOLLOW !== "number" || constants.O_NOFOLLOW === 0)
+    throw new Error("compiled release validation requires O_NOFOLLOW support");
+  await requireOwnedFile(path, identity, "compiled release staged file");
+  await beforeOpen();
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+  } catch {
+    throw new Error("compiled release staged file could not be opened safely");
+  }
+  try {
+    const before = await handle.stat({ bigint: true });
+    if (
+      !before.isFile() ||
+      before.nlink !== 1n ||
+      !sameIdentity(before, identity) ||
+      before.size !== BigInt(expectedSize)
+    )
+      throw new Error(
+        "compiled release staged content was modified or identity was lost",
+      );
+    await requireOwnedFile(path, identity, "compiled release staged file");
+    await beforeRead();
+
+    const digest = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, expectedSize) || 1);
+    let total = 0;
+    while (total < expectedSize) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        Math.min(buffer.byteLength, expectedSize - total),
+        null,
+      );
+      if (bytesRead === 0)
+        throw new Error(
+          "compiled release staged content was modified: early EOF",
+        );
+      digest.update(buffer.subarray(0, bytesRead));
+      total += bytesRead;
+    }
+    const growthProbe = new Uint8Array(1);
+    const { bytesRead: extraBytes } = await handle.read(
+      growthProbe,
+      0,
+      1,
+      null,
+    );
+    if (extraBytes !== 0)
+      throw new Error(
+        "compiled release staged content was modified: exceeds recorded size",
+      );
+    const after = await handle.stat({ bigint: true });
+    if (
+      !after.isFile() ||
+      after.nlink !== 1n ||
+      !sameIdentity(after, identity) ||
+      after.size !== BigInt(expectedSize)
+    )
+      throw new Error(
+        "compiled release staged content was modified or identity was lost",
+      );
+    await requireOwnedFile(path, identity, "compiled release staged file");
+    return digest.digest("hex");
+  } finally {
+    await handle.close();
+  }
+}
+
 async function validateStage(
   compiled: CompiledRelease,
   state: CompiledState,
+  checkpoint: Checkpoint,
 ): Promise<void> {
   const root = await realpath(state.outDir);
   if (compiled.paths.directory !== state.paths.directory)
@@ -187,9 +274,13 @@ async function validateStage(
       state.ownership[kind],
       "compiled release staged file",
     );
-    const digest = createHash("sha256")
-      .update(await readFile(path))
-      .digest("hex");
+    const digest = await hashOwnedStageFile(
+      path,
+      state.ownership[kind],
+      state.sizes[kind],
+      () => checkpoint(`before-${kind}-validation-open`),
+      () => checkpoint(`before-${kind}-validation-read`),
+    );
     await requireOwnedFile(
       path,
       state.ownership[kind],
@@ -277,6 +368,12 @@ async function requireLock(
 }
 
 export type PublishCheckpoint =
+  | "before-sqlite-validation-open"
+  | "before-signature-validation-open"
+  | "before-manifest-validation-open"
+  | "before-sqlite-validation-read"
+  | "before-signature-validation-read"
+  | "before-manifest-validation-read"
   | "payload-published"
   | "signature-published"
   | "manifest-published";
@@ -297,7 +394,7 @@ export async function publishReleaseWithCheckpoint(
   let targetDirectory: string | undefined;
   let targetDirectoryIdentity: PathIdentity | undefined;
   try {
-    await validateStage(compiled, state);
+    await validateStage(compiled, state, checkpoint);
     await mkdir(target.directory, { recursive: false }).catch((error) => {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     });

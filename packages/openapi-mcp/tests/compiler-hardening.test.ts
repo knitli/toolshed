@@ -130,6 +130,82 @@ function releaseOptions(root: string, specPath: string): CompileReleaseOptions {
 }
 
 describe("strict v4 loading", () => {
+  test("bounds permissions datasets at the effective source-byte limit", async () => {
+    const root = await temporaryRoot();
+    const specPath = await write(
+      root,
+      "permissions-boundary-spec.json",
+      JSON.stringify(minimalDocument()),
+    );
+    const maxSourceBytes = 4_096;
+    const dataset = JSON.stringify({ permissions: {} });
+    const exact = `${dataset}${" ".repeat(maxSourceBytes - Buffer.byteLength(dataset))}`;
+    const exactPath = await write(root, "permissions-exact.json", exact);
+    const accepted = await compileRelease({
+      ...releaseOptions(root, specPath),
+      permissionsPath: exactPath,
+      limits: limits({ maxSourceBytes }),
+    });
+    await discardCompiledRelease(accepted);
+
+    const oversizedPath = await write(
+      root,
+      "permissions-oversized.json",
+      `${exact} `,
+    );
+    await expect(
+      compileRelease({
+        ...releaseOptions(root, specPath),
+        releaseId: "release-oversized-permissions",
+        permissionsPath: oversizedPath,
+        limits: limits({ maxSourceBytes }),
+      }),
+    ).rejects.toThrow("permissions dataset exceeds byte limit");
+
+    const invalidUtf8Path = join(root, "permissions-invalid-utf8.json");
+    await writeFile(invalidUtf8Path, new Uint8Array([0x7b, 0x7d, 0xff]));
+    await expect(
+      compileRelease({
+        ...releaseOptions(root, specPath),
+        releaseId: "release-invalid-permissions-utf8",
+        permissionsPath: invalidUtf8Path,
+        limits: limits({ maxSourceBytes }),
+      }),
+    ).rejects.toThrow("permissions dataset is not valid UTF-8");
+  });
+
+  test("rejects a permissions FIFO without waiting for a writer", async () => {
+    const root = await temporaryRoot();
+    const specPath = await write(
+      root,
+      "permissions-fifo-spec.json",
+      JSON.stringify(minimalDocument()),
+    );
+    const fifo = join(root, "permissions.json");
+    const mkfifo = Bun.spawn(["mkfifo", fifo]);
+    expect(await mkfifo.exited).toBe(0);
+    const modulePath = fileURLToPath(
+      new URL("../src/compiler.ts", import.meta.url),
+    );
+    const options = {
+      ...releaseOptions(root, specPath),
+      permissionsPath: fifo,
+    };
+    const script = `
+      const compiler = await import(${JSON.stringify(modulePath)});
+      try {
+        await compiler.compileRelease(${JSON.stringify(options)});
+        process.exit(2);
+      } catch (error) {
+        process.exit(error instanceof Error && error.message === "permissions dataset could not be read" ? 0 : 3);
+      }
+    `;
+    expect(await runChildWithDeadline(script)).toEqual({
+      kind: "exit",
+      code: 0,
+    });
+  });
+
   test("bounds regular source reads before unbounded allocation", async () => {
     const root = await temporaryRoot();
     const regular = await write(root, "bounded.bin", "x".repeat(65));
