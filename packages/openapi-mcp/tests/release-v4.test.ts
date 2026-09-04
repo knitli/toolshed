@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createPublicKey } from "node:crypto";
 import {
+  appendFile,
   mkdir,
+  open,
   readdir,
   readFile,
   rename,
@@ -156,6 +158,45 @@ class MemoryGenerationStore implements GenerationStore {
 }
 
 describe("immutable v4 construction", () => {
+  test("bounds emitted SQLite reread when its inode grows after capped stat", async () => {
+    const root = await temporaryRoot();
+    const probePath = join(root, "file-handle-probe");
+    await writeFile(probePath, "probe");
+    const probe = await open(probePath, "r");
+    const prototype = Object.getPrototypeOf(probe) as {
+      readFile: (...args: unknown[]) => Promise<unknown>;
+    };
+    await probe.close();
+    const originalReadFile = prototype.readFile;
+    let unboundedReadFileCalls = 0;
+    prototype.readFile = function (...args: unknown[]): Promise<unknown> {
+      unboundedReadFileCalls += 1;
+      return Reflect.apply(originalReadFile, this, args) as Promise<unknown>;
+    };
+    const options = await constructionOptions(root);
+    let stage = "";
+    let error: unknown;
+    try {
+      error = await compileReleaseWithCheckpoint(
+        options,
+        async (checkpoint, paths) => {
+          if (checkpoint !== "before-sqlite-snapshot-read") return;
+          stage = paths.directory;
+          await appendFile(paths.sqlite, Buffer.alloc(1024 * 1024, 0x61));
+        },
+      ).catch((reason) => reason);
+    } finally {
+      prototype.readFile = originalReadFile;
+    }
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "emitted SQLite could not be reopened safely",
+    );
+    expect(unboundedReadFileCalls).toBe(0);
+    expect(stage).not.toBe("");
+    await expect(stat(stage)).rejects.toThrow();
+  });
+
   test("rejects emitted SQLite corruption before self-admission", async () => {
     const root = await temporaryRoot();
     const options = await constructionOptions(root);

@@ -136,6 +136,7 @@ export type ConstructionCheckpoint =
   | "before-manifest-created"
   | "after-sqlite-opened"
   | "after-sqlite-emitted"
+  | "before-sqlite-snapshot-read"
   | "after-signature-opened"
   | "after-manifest-opened";
 
@@ -1008,6 +1009,7 @@ async function readOwnedStageFileSnapshot(
   directoryIdentity: PathIdentity,
   fileIdentity: PathIdentity,
   maxBytes: number,
+  beforeRead: () => void | Promise<void> = () => {},
 ): Promise<Uint8Array> {
   await requireStageDirectory(directory, directoryIdentity);
   await requireStageFile(path, fileIdentity);
@@ -1024,7 +1026,30 @@ async function readOwnedStageFileSnapshot(
       throw new Error("emitted SQLite identity or size is invalid");
     await requireStageDirectory(directory, directoryIdentity);
     await requireStageFile(path, fileIdentity);
-    const bytes = new Uint8Array(await handle.readFile());
+    await beforeRead();
+    const expectedBytes = Number(before.size);
+    const bytes = new Uint8Array(expectedBytes);
+    let offset = 0;
+    while (offset < expectedBytes) {
+      const { bytesRead } = await handle.read(
+        bytes,
+        offset,
+        Math.min(64 * 1024, expectedBytes - offset),
+        null,
+      );
+      if (bytesRead === 0)
+        throw new Error("emitted SQLite ended before its captured size");
+      offset += bytesRead;
+    }
+    const growthProbe = new Uint8Array(1);
+    const { bytesRead: extraBytes } = await handle.read(
+      growthProbe,
+      0,
+      1,
+      null,
+    );
+    if (extraBytes !== 0)
+      throw new Error("emitted SQLite grew beyond its captured size");
     const after = await handle.stat({ bigint: true });
     if (
       !after.isFile() ||
@@ -1387,6 +1412,7 @@ export async function compileReleaseWithCheckpoint(
       stageOwnership.directory as PathIdentity,
       stageOwnership.sqlite as PathIdentity,
       sqliteBytes.byteLength,
+      () => checkpoint("before-sqlite-snapshot-read", paths),
     ).catch(() => {
       throw new Error("emitted SQLite could not be reopened safely");
     });
