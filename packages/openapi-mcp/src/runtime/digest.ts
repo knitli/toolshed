@@ -2,7 +2,8 @@ import { OpenApiMcpError } from "./errors.ts";
 import { canonicalJson } from "./strict-json.ts";
 import type { JsonValue, Sha256 } from "./types.ts";
 
-const base64urlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const base64urlAlphabet =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 function decodeBase64Url(value: string): Uint8Array | null {
   if (!/^[A-Za-z0-9_-]*$/.test(value) || value.length % 4 === 1) return null;
@@ -36,12 +37,15 @@ function encodeBase64Url(bytes: Uint8Array): string {
       encoded += base64urlAlphabet[(accumulator >> bits) & 0x3f];
     }
   }
-  if (bits > 0) encoded += base64urlAlphabet[(accumulator << (6 - bits)) & 0x3f];
+  if (bits > 0)
+    encoded += base64urlAlphabet[(accumulator << (6 - bits)) & 0x3f];
   return encoded;
 }
 
 function bytesFor(value: string | Uint8Array): Uint8Array | null {
-  return typeof value === "string" ? decodeBase64Url(value) : new Uint8Array(value);
+  return typeof value === "string"
+    ? decodeBase64Url(value)
+    : new Uint8Array(value);
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -51,13 +55,24 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 /** Hash domain-separated canonical JSON using portable Web Crypto. */
-export async function sha256(domain: string, value: JsonValue): Promise<Sha256> {
+export async function sha256(
+  domain: string,
+  value: JsonValue,
+): Promise<Sha256> {
   if (domain.length === 0 || domain.includes("\0")) {
-    throw new OpenApiMcpError("MANIFEST_INVALID", "Digest domain must be non-empty and NUL-free");
+    throw new OpenApiMcpError(
+      "MANIFEST_INVALID",
+      "Digest domain must be non-empty and NUL-free",
+    );
   }
   const bytes = new TextEncoder().encode(`${domain}\0${canonicalJson(value)}`);
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", toArrayBuffer(bytes));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("") as Sha256;
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    toArrayBuffer(bytes),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("") as Sha256;
 }
 
 /**
@@ -73,7 +88,10 @@ export async function verifyEd25519(
     const signatureBytes = bytesFor(signature);
     const keyBytes = bytesFor(key);
     if (signatureBytes === null || keyBytes === null) return false;
-    const payloadBytes = typeof payload === "string" ? new TextEncoder().encode(payload) : new Uint8Array(payload);
+    const payloadBytes =
+      typeof payload === "string"
+        ? new TextEncoder().encode(payload)
+        : new Uint8Array(payload);
     const publicKey = await globalThis.crypto.subtle.importKey(
       "spki",
       toArrayBuffer(keyBytes),
