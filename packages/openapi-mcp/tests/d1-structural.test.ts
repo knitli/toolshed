@@ -29,14 +29,28 @@ const itemSchema =
   "schema:conformance:#/components/schemas/Item" as TypedSchemaId;
 const userSchema =
   "schema:conformance:#/components/schemas/User" as TypedSchemaId;
+const encoder = new TextEncoder();
 
 const SQL = Object.freeze({
-  manifest: `SELECT manifest_json, signature_algorithm, signature_key_id, signature
+  manifest: `SELECT
+  CASE WHEN typeof(manifest_json) = 'text' AND length(CAST(manifest_json AS BLOB)) <= ? THEN manifest_json ELSE NULL END AS manifest_json,
+  length(CAST(manifest_json AS BLOB)) AS manifest_json_bytes,
+  CASE WHEN typeof(signature_algorithm) = 'text' AND length(CAST(signature_algorithm AS BLOB)) <= ? THEN signature_algorithm ELSE NULL END AS signature_algorithm,
+  length(CAST(signature_algorithm AS BLOB)) AS signature_algorithm_bytes,
+  CASE WHEN typeof(signature_key_id) = 'text' AND length(CAST(signature_key_id AS BLOB)) <= ? THEN signature_key_id ELSE NULL END AS signature_key_id,
+  length(CAST(signature_key_id AS BLOB)) AS signature_key_id_bytes,
+  CASE WHEN typeof(signature) = 'text' AND length(CAST(signature AS BLOB)) <= ? THEN signature ELSE NULL END AS signature,
+  length(CAST(signature AS BLOB)) AS signature_bytes
 FROM release_metadata
 WHERE catalog_id = ? AND release_id = ? AND format = 4 AND contract = 1
 LIMIT 2;`,
-  search: `SELECT o.catalog_id AS catalog_id, o.release_id AS release_id,
-       o.record_id AS record_id
+  search: `SELECT
+       CASE WHEN typeof(o.catalog_id) = 'text' AND length(CAST(o.catalog_id AS BLOB)) <= ? THEN o.catalog_id ELSE NULL END AS catalog_id,
+       length(CAST(o.catalog_id AS BLOB)) AS catalog_id_bytes,
+       CASE WHEN typeof(o.release_id) = 'text' AND length(CAST(o.release_id AS BLOB)) <= ? THEN o.release_id ELSE NULL END AS release_id,
+       length(CAST(o.release_id AS BLOB)) AS release_id_bytes,
+       CASE WHEN typeof(o.record_id) = 'text' AND length(CAST(o.record_id AS BLOB)) <= ? THEN o.record_id ELSE NULL END AS record_id,
+       length(CAST(o.record_id AS BLOB)) AS record_id_bytes
 FROM operations_fts
 JOIN operations AS o ON o.rowid = operations_fts.rowid
 JOIN release_metadata AS r
@@ -49,8 +63,13 @@ ORDER BY bm25(operations_fts),
          o.release_id COLLATE BINARY,
          o.record_id COLLATE BINARY
 LIMIT ?;`,
-  operation: `SELECT o.record_id AS record_id, o.logical_digest AS logical_digest,
-       o.record_json AS record_json
+  operation: `SELECT
+       CASE WHEN typeof(o.record_id) = 'text' AND length(CAST(o.record_id AS BLOB)) <= ? THEN o.record_id ELSE NULL END AS record_id,
+       length(CAST(o.record_id AS BLOB)) AS record_id_bytes,
+       CASE WHEN typeof(o.logical_digest) = 'text' AND length(CAST(o.logical_digest AS BLOB)) <= ? THEN o.logical_digest ELSE NULL END AS logical_digest,
+       length(CAST(o.logical_digest AS BLOB)) AS logical_digest_bytes,
+       CASE WHEN typeof(o.record_json) = 'text' AND length(CAST(o.record_json AS BLOB)) <= ? THEN o.record_json ELSE NULL END AS record_json,
+       length(CAST(o.record_json AS BLOB)) AS record_json_bytes
 FROM operations AS o
 JOIN release_metadata AS r
   ON r.catalog_id = o.catalog_id AND r.release_id = o.release_id
@@ -60,15 +79,21 @@ LIMIT 2;`,
   schemas: `WITH requested(record_id) AS (
   SELECT DISTINCT value FROM json_each(?) WHERE typeof(value) = 'text'
 )
-SELECT s.record_id AS record_id, s.logical_digest AS logical_digest,
-       s.record_json AS record_json
+SELECT
+       CASE WHEN typeof(s.record_id) = 'text' AND length(CAST(s.record_id AS BLOB)) <= ? THEN s.record_id ELSE NULL END AS record_id,
+       length(CAST(s.record_id AS BLOB)) AS record_id_bytes,
+       CASE WHEN typeof(s.logical_digest) = 'text' AND length(CAST(s.logical_digest AS BLOB)) <= ? THEN s.logical_digest ELSE NULL END AS logical_digest,
+       length(CAST(s.logical_digest AS BLOB)) AS logical_digest_bytes,
+       CASE WHEN typeof(s.record_json) = 'text' AND length(CAST(s.record_json AS BLOB)) <= ? THEN s.record_json ELSE NULL END AS record_json,
+       length(CAST(s.record_json AS BLOB)) AS record_json_bytes
 FROM requested
 JOIN schemas AS s ON s.record_id = requested.record_id
 JOIN release_metadata AS r
   ON r.catalog_id = s.catalog_id AND r.release_id = s.release_id
 WHERE s.catalog_id = ? AND s.release_id = ?
   AND r.format = 4 AND r.contract = 1
-ORDER BY s.record_id COLLATE BINARY;`,
+ORDER BY s.record_id COLLATE BINARY
+LIMIT ?;`,
 });
 
 type Sql = (typeof SQL)[keyof typeof SQL];
@@ -152,9 +177,13 @@ const manifestRow = (
   manifestJson: string = RUNTIME_CONFORMANCE_FIXTURE.envelopeA.manifestJson,
 ) => ({
   manifest_json: manifestJson,
+  manifest_json_bytes: encoder.encode(manifestJson).byteLength,
   signature_algorithm: "Ed25519",
+  signature_algorithm_bytes: 7,
   signature_key_id: "key-1",
+  signature_key_id_bytes: 5,
   signature: "signature",
+  signature_bytes: 9,
 });
 
 const conformanceAdapter: ConformanceTestAdapter = {
@@ -176,9 +205,13 @@ function manifestTransport(release: string) {
       : RUNTIME_CONFORMANCE_FIXTURE.envelopeB;
   return {
     manifest_json: envelope.manifestJson,
+    manifest_json_bytes: encoder.encode(envelope.manifestJson).byteLength,
     signature_algorithm: envelope.signature.algorithm,
+    signature_algorithm_bytes: 7,
     signature_key_id: envelope.signature.keyId,
+    signature_key_id_bytes: encoder.encode(envelope.signature.keyId).byteLength,
     signature: envelope.signature.signature,
+    signature_bytes: encoder.encode(envelope.signature.signature).byteLength,
   };
 }
 
@@ -189,8 +222,26 @@ function storedTransport(row: {
 }) {
   return {
     record_id: row.id,
+    record_id_bytes: encoder.encode(row.id).byteLength,
     logical_digest: row.logicalDigest,
+    logical_digest_bytes: encoder.encode(row.logicalDigest).byteLength,
     record_json: JSON.stringify(row.record),
+    record_json_bytes: encoder.encode(JSON.stringify(row.record)).byteLength,
+  };
+}
+
+function candidateTransport(
+  catalogId: string,
+  releaseId: string,
+  recordId: string,
+) {
+  return {
+    catalog_id: catalogId,
+    catalog_id_bytes: encoder.encode(catalogId).byteLength,
+    release_id: releaseId,
+    release_id_bytes: encoder.encode(releaseId).byteLength,
+    record_id: recordId,
+    record_id_bytes: encoder.encode(recordId).byteLength,
   };
 }
 
@@ -219,98 +270,186 @@ function conformanceD1Factory(
     d1.enqueueResult(SQL.operation, operationDriverFailure);
   if (schemasDriverFailure !== undefined)
     d1.enqueueResult(SQL.schemas, schemasDriverFailure);
-  d1.handle(SQL.manifest, ([boundCatalog, boundRelease]) => ({
-    success: true,
-    results:
-      boundCatalog === fixture.catalogId &&
-      (boundRelease === fixture.releaseA || boundRelease === fixture.releaseB)
-        ? Array.from(
-            { length: scenario?.fault === "duplicate-manifest" ? 2 : 1 },
-            () => manifestTransport(boundRelease),
-          )
-        : [],
-  }));
-  d1.handle(SQL.search, ([query, boundApi, _duplicateApi, rawLimit]) => {
-    if (query === '"')
-      return { success: false, results: [], error: "malformed FTS" };
-    const limit = typeof rawLimit === "number" ? rawLimit : 0;
-    const candidates = fixture.expectedCandidates
-      .filter(() => boundApi === null || boundApi === fixture.api)
-      .slice(0, limit);
-    if (scenario?.fault === "duplicate-candidates") {
+  d1.handle(
+    SQL.manifest,
+    ([
+      _manifestLimit,
+      _algorithmLimit,
+      _keyIdLimit,
+      _signatureLimit,
+      boundCatalog,
+      boundRelease,
+    ]) => ({
+      success: true,
+      results:
+        boundCatalog === fixture.catalogId &&
+        (boundRelease === fixture.releaseA || boundRelease === fixture.releaseB)
+          ? Array.from(
+              { length: scenario?.fault === "duplicate-manifest" ? 2 : 1 },
+              () => manifestTransport(boundRelease),
+            )
+          : [],
+    }),
+  );
+  d1.handle(
+    SQL.search,
+    ([
+      _catalogLimit,
+      _releaseLimit,
+      _recordLimit,
+      query,
+      boundApi,
+      _duplicateApi,
+      rawLimit,
+    ]) => {
+      if (query === '"')
+        return { success: false, results: [], error: "malformed FTS" };
+      const limit = typeof rawLimit === "number" ? rawLimit : 0;
+      const candidates = fixture.expectedCandidates
+        .filter(() => boundApi === null || boundApi === fixture.api)
+        .slice(0, limit);
+      if (scenario?.fault === "duplicate-candidates") {
+        const first = candidates[0];
+        return {
+          success: true,
+          results:
+            first === undefined || limit < 2
+              ? []
+              : [
+                  candidateTransport(
+                    first.catalogId,
+                    first.releaseId,
+                    first.operationId,
+                  ),
+                  candidateTransport(
+                    first.catalogId,
+                    first.releaseId,
+                    first.operationId,
+                  ),
+                ],
+        };
+      }
       const first = candidates[0];
+      if (
+        first !== undefined &&
+        scenario?.fault === "candidate-malformed-operation-id"
+      ) {
+        return {
+          success: true,
+          results: [
+            candidateTransport(
+              first.catalogId,
+              first.releaseId,
+              "not-a-typed-record-id",
+            ),
+          ],
+        };
+      }
+      if (
+        first !== undefined &&
+        scenario?.fault === "candidate-non-operation-id"
+      ) {
+        return {
+          success: true,
+          results: [
+            candidateTransport(
+              first.catalogId,
+              first.releaseId,
+              fixture.schemaIds[0] as string,
+            ),
+          ],
+        };
+      }
+      if (first !== undefined && scenario?.fault === "candidate-cross-api") {
+        return {
+          success: true,
+          results: [
+            candidateTransport(
+              first.catalogId,
+              first.releaseId,
+              "operation:other-api:get-item",
+            ),
+          ],
+        };
+      }
       return {
         success: true,
-        results:
-          first === undefined || limit < 2
-            ? []
-            : [
-                {
-                  catalog_id: first.catalogId,
-                  release_id: first.releaseId,
-                  record_id: first.operationId,
-                },
-                {
-                  catalog_id: first.catalogId,
-                  release_id: first.releaseId,
-                  record_id: first.operationId,
-                },
-              ],
-      };
-    }
-    return {
-      success: true,
-      results: candidates.map((candidate) => ({
-        catalog_id: candidate.catalogId,
-        release_id: candidate.releaseId,
-        record_id: candidate.operationId,
-      })),
-    };
-  });
-  d1.handle(SQL.operation, ([boundCatalog, boundRelease, boundOperation]) => {
-    if (
-      boundCatalog !== fixture.catalogId ||
-      boundOperation !== fixture.operationId
-    )
-      return { success: true, results: [] };
-    const row =
-      boundRelease === fixture.releaseA
-        ? fixture.operationA
-        : boundRelease === fixture.releaseB
-          ? fixture.operationB
-          : undefined;
-    return {
-      success: true,
-      results: row
-        ? Array.from(
-            { length: scenario?.fault === "duplicate-operation" ? 2 : 1 },
-            () => storedTransport(row),
-          )
-        : [],
-    };
-  });
-  d1.handle(SQL.schemas, ([rawIds, boundCatalog, boundRelease]) => {
-    if (typeof rawIds !== "string" || boundCatalog !== fixture.catalogId)
-      return { success: true, results: [] };
-    const requested = new Set(JSON.parse(rawIds) as string[]);
-    const rows =
-      boundRelease === fixture.releaseA
-        ? fixture.schemasA
-        : boundRelease === fixture.releaseB
-          ? fixture.schemasB
-          : [];
-    return {
-      success: true,
-      results: rows
-        .filter((row) => requested.has(row.id))
-        .flatMap((row) =>
-          Array.from(
-            { length: scenario?.fault === "duplicate-schemas" ? 2 : 1 },
-            () => storedTransport(row),
+        results: candidates.map((candidate) =>
+          candidateTransport(
+            candidate.catalogId,
+            candidate.releaseId,
+            candidate.operationId,
           ),
         ),
-    };
-  });
+      };
+    },
+  );
+  d1.handle(
+    SQL.operation,
+    ([
+      _idLimit,
+      _digestLimit,
+      _recordLimit,
+      boundCatalog,
+      boundRelease,
+      boundOperation,
+    ]) => {
+      if (
+        boundCatalog !== fixture.catalogId ||
+        boundOperation !== fixture.operationId
+      )
+        return { success: true, results: [] };
+      const row =
+        boundRelease === fixture.releaseA
+          ? fixture.operationA
+          : boundRelease === fixture.releaseB
+            ? fixture.operationB
+            : undefined;
+      return {
+        success: true,
+        results: row
+          ? Array.from(
+              { length: scenario?.fault === "duplicate-operation" ? 2 : 1 },
+              () => storedTransport(row),
+            )
+          : [],
+      };
+    },
+  );
+  d1.handle(
+    SQL.schemas,
+    ([
+      rawIds,
+      _idLimit,
+      _digestLimit,
+      _recordLimit,
+      boundCatalog,
+      boundRelease,
+      transportLimit,
+    ]) => {
+      if (typeof rawIds !== "string" || boundCatalog !== fixture.catalogId)
+        return { success: true, results: [] };
+      const requested = new Set(JSON.parse(rawIds) as string[]);
+      const rows =
+        boundRelease === fixture.releaseA
+          ? fixture.schemasA
+          : boundRelease === fixture.releaseB
+            ? fixture.schemasB
+            : [];
+      return {
+        success: true,
+        results: rows
+          .filter((row) => requested.has(row.id))
+          .flatMap((row) =>
+            Array.from(
+              { length: scenario?.fault === "duplicate-schemas" ? 2 : 1 },
+              () => storedTransport(row),
+            ),
+          )
+          .slice(0, Number(transportLimit)),
+      };
+    },
+  );
   return { store: createD1CatalogStore(d1), fixture };
 }
 
@@ -324,7 +463,7 @@ const searchRow = (
   id: string = operationId,
   catalogId: string = catalog,
   releaseId: string = release,
-) => ({ catalog_id: catalogId, release_id: releaseId, record_id: id });
+) => candidateTransport(catalogId, releaseId, id);
 
 const operationRecord = (id: string = operationId) => ({
   id,
@@ -345,11 +484,17 @@ const recordRow = (
   id: string,
   record: unknown,
   logicalDigest = "a".repeat(64),
-) => ({
-  record_id: id,
-  logical_digest: logicalDigest,
-  record_json: JSON.stringify(record),
-});
+) => {
+  const recordJson = JSON.stringify(record);
+  return {
+    record_id: id,
+    record_id_bytes: encoder.encode(id).byteLength,
+    logical_digest: logicalDigest,
+    logical_digest_bytes: encoder.encode(logicalDigest).byteLength,
+    record_json: recordJson,
+    record_json_bytes: encoder.encode(recordJson).byteLength,
+  };
+};
 
 const schemaRow = (id: string) =>
   recordRow(id, { id, schema: { type: "object" } }, "b".repeat(64));
@@ -402,25 +547,41 @@ describe("structural D1 CatalogStore", () => {
     expect(d1.calls).toEqual([
       {
         sql: SQL.manifest,
-        bindings: [catalog, release],
+        bindings: [8 * 1024 * 1024, 7, 128, 256, catalog, release],
         allCalls: 1,
         firstCalls: 0,
       },
       {
         sql: SQL.search,
-        bindings: [maliciousFts, "conformance", "conformance", 7],
+        bindings: [
+          128,
+          128,
+          651,
+          maliciousFts,
+          "conformance",
+          "conformance",
+          7,
+        ],
         allCalls: 1,
         firstCalls: 0,
       },
       {
         sql: SQL.operation,
-        bindings: [catalog, release, operationId],
+        bindings: [651, 64, 1024 * 1024, catalog, release, operationId],
         allCalls: 1,
         firstCalls: 0,
       },
       {
         sql: SQL.schemas,
-        bindings: [`["${itemSchema}"]`, catalog, release],
+        bindings: [
+          `["${itemSchema}"]`,
+          669,
+          64,
+          1024 * 1024,
+          catalog,
+          release,
+          2,
+        ],
         allCalls: 1,
         firstCalls: 0,
       },
@@ -545,7 +706,15 @@ describe("structural D1 CatalogStore", () => {
         { catalogId: catalog, releaseId: release, operationId },
       ]);
       expect(d1.calls).toHaveLength(1);
-      expect(d1.calls[0]?.bindings).toEqual([query, null, null, 1]);
+      expect(d1.calls[0]?.bindings).toEqual([
+        128,
+        128,
+        651,
+        query,
+        null,
+        null,
+        1,
+      ]);
     }
   });
 
@@ -776,6 +945,154 @@ describe("structural D1 CatalogStore", () => {
     }
   });
 
+  test("rejects short non-TEXT projection sentinels across bounded fields", async () => {
+    for (const field of [
+      "manifest_json",
+      "signature_algorithm",
+      "signature_key_id",
+      "signature",
+    ] as const) {
+      const d1 = new StrictD1();
+      d1.enqueue(SQL.manifest, [{ ...manifestRow(), [field]: null }]);
+      await expectPublicError(
+        () => createD1CatalogStore(d1).getManifest(catalog, release),
+        "MANIFEST_INVALID",
+        undefined,
+        CATALOG_STORE_PUBLIC_MESSAGES.manifestTransportRowInvalid,
+      );
+    }
+
+    for (const field of ["catalog_id", "release_id", "record_id"] as const) {
+      const d1 = new StrictD1();
+      d1.enqueue(SQL.search, [{ ...searchRow(), [field]: null }]);
+      await expectPublicError(
+        () =>
+          createD1CatalogStore(d1).searchCandidates({
+            query: "item",
+            limit: 1,
+          }),
+        "RECORD_DIGEST_MISMATCH",
+        undefined,
+        CATALOG_STORE_PUBLIC_MESSAGES.recordTransportRowInvalid,
+      );
+    }
+
+    for (const [sql, run, row] of [
+      [
+        SQL.operation,
+        (store: ReturnType<typeof createD1CatalogStore>) =>
+          store.getOperation(catalog, release, operationId),
+        recordRow(operationId, operationRecord()),
+      ],
+      [
+        SQL.schemas,
+        (store: ReturnType<typeof createD1CatalogStore>) =>
+          store.getSchemas(catalog, release, [itemSchema]),
+        schemaRow(itemSchema),
+      ],
+    ] as const) {
+      for (const field of [
+        "record_id",
+        "logical_digest",
+        "record_json",
+      ] as const) {
+        const d1 = new StrictD1();
+        d1.enqueue(sql, [{ ...row, [field]: null }]);
+        await expectPublicError(
+          () => run(createD1CatalogStore(d1)),
+          "RECORD_DIGEST_MISMATCH",
+          undefined,
+          CATALOG_STORE_PUBLIC_MESSAGES.recordTransportRowInvalid,
+        );
+      }
+    }
+  });
+
+  test("rejects oversized projected identifiers and digests from byte sentinels", async () => {
+    for (const [field, byteField, byteLength, message] of [
+      [
+        "catalog_id",
+        "catalog_id_bytes",
+        129,
+        CATALOG_STORE_PUBLIC_MESSAGES.storedCatalogIdentifierInvalid,
+      ],
+      [
+        "release_id",
+        "release_id_bytes",
+        129,
+        CATALOG_STORE_PUBLIC_MESSAGES.storedReleaseIdentifierInvalid,
+      ],
+      [
+        "record_id",
+        "record_id_bytes",
+        652,
+        CATALOG_STORE_PUBLIC_MESSAGES.storedOperationIdentifierInvalid,
+      ],
+    ] as const) {
+      const d1 = new StrictD1();
+      d1.enqueue(SQL.search, [
+        { ...searchRow(), [field]: null, [byteField]: byteLength },
+      ]);
+      await expectPublicError(
+        () =>
+          createD1CatalogStore(d1).searchCandidates({
+            query: "item",
+            limit: 1,
+          }),
+        "RECORD_DIGEST_MISMATCH",
+        undefined,
+        message,
+      );
+    }
+
+    for (const [sql, run, row, overflow] of [
+      [
+        SQL.operation,
+        (store: ReturnType<typeof createD1CatalogStore>) =>
+          store.getOperation(catalog, release, operationId),
+        recordRow(operationId, operationRecord()),
+        {
+          record_id: null,
+          record_id_bytes: 652,
+          message:
+            CATALOG_STORE_PUBLIC_MESSAGES.storedOperationIdentifierInvalid,
+        },
+      ],
+      [
+        SQL.schemas,
+        (store: ReturnType<typeof createD1CatalogStore>) =>
+          store.getSchemas(catalog, release, [itemSchema]),
+        schemaRow(itemSchema),
+        {
+          record_id: null,
+          record_id_bytes: 670,
+          message: CATALOG_STORE_PUBLIC_MESSAGES.storedSchemaIdentifierInvalid,
+        },
+      ],
+      [
+        SQL.operation,
+        (store: ReturnType<typeof createD1CatalogStore>) =>
+          store.getOperation(catalog, release, operationId),
+        recordRow(operationId, operationRecord()),
+        {
+          logical_digest: null,
+          logical_digest_bytes: 65,
+          message: CATALOG_STORE_PUBLIC_MESSAGES.recordDigestInvalid,
+        },
+      ],
+    ] as const) {
+      const { message, ...fields } = overflow;
+      const d1 = new StrictD1();
+      d1.enqueue(sql, [{ ...row, ...fields }]);
+      await expectPublicError(
+        () => run(createD1CatalogStore(d1)),
+        "RECORD_DIGEST_MISMATCH",
+        undefined,
+        message,
+      );
+    }
+  });
+
   test("requires exactly zero or one operation row before hydration", async () => {
     const empty = new StrictD1();
     empty.enqueue(SQL.operation, []);
@@ -850,6 +1167,45 @@ describe("structural D1 CatalogStore", () => {
     );
   });
 
+  test("caps poisoned D1 schema relations at requested count plus one", async () => {
+    const d1 = new StrictD1();
+    let transportedRows = 0;
+    let boundLimit: D1CatalogValue | undefined;
+    d1.handle(
+      SQL.schemas,
+      ([
+        _ids,
+        _idLimit,
+        _digestLimit,
+        _recordLimit,
+        _catalog,
+        _release,
+        transportLimit,
+      ]) => {
+        boundLimit = transportLimit;
+        const poisonedRelation = Array.from({ length: 10_000 }, () =>
+          schemaRow(itemSchema),
+        );
+        const results = poisonedRelation.slice(0, Number(transportLimit));
+        transportedRows = results.length;
+        return { success: true, results };
+      },
+    );
+
+    await expectPublicError(
+      () =>
+        createD1CatalogStore(d1).getSchemas(catalog, release, [
+          itemSchema,
+          itemSchema,
+        ]),
+      "RECORD_DIGEST_MISMATCH",
+      undefined,
+      CATALOG_STORE_PUBLIC_MESSAGES.schemaTransportTooManyRows,
+    );
+    expect(boundLimit).toBe(2);
+    expect(transportedRows).toBe(2);
+  });
+
   test("rejects incomplete schema rows before inspecting row values", async () => {
     let inspections = 0;
     const poison = new Proxy(
@@ -900,9 +1256,41 @@ describe("structural D1 CatalogStore", () => {
     expect(result.map(({ id }) => id)).toEqual([itemSchema, userSchema]);
     expect(d1.calls[0]?.bindings).toEqual([
       `["${itemSchema}","${userSchema}"]`,
+      669,
+      64,
+      1024 * 1024,
       catalog,
       release,
+      3,
     ]);
+  });
+
+  test("bounds cumulative schema ID bytes before request amplification", async () => {
+    const prefix = "schema:c:#/components/schemas/";
+    const exactId =
+      `${prefix}${"a".repeat(64 - prefix.length)}` as TypedSchemaId;
+    const overId =
+      `${prefix}${"a".repeat(65 - prefix.length)}` as TypedSchemaId;
+
+    const exact = new StrictD1();
+    exact.enqueue(SQL.schemas, [schemaRow(exactId)]);
+    await expect(
+      createD1CatalogStore(exact, {
+        maxSchemaClosureBytes: 64,
+      }).getSchemas(catalog, release, [exactId]),
+    ).resolves.toHaveLength(1);
+
+    const over = new StrictD1();
+    await expectPublicError(
+      () =>
+        createD1CatalogStore(over, {
+          maxSchemaClosureBytes: 64,
+        }).getSchemas(catalog, release, [overId]),
+      "INPUT_INVALID",
+      undefined,
+      CATALOG_STORE_PUBLIC_MESSAGES.schemaRequestLimitExceeded,
+    );
+    expect(over.calls).toEqual([]);
   });
 
   test("rejects incomplete, duplicate, extra, unordered, wrong-kind, and mismatched schema rows", async () => {
@@ -941,8 +1329,20 @@ describe("structural D1 CatalogStore", () => {
       [manifestRow(), manifestRow()],
       [{ ...manifestRow(), extra: "untrusted" }],
       [{ ...manifestRow(), signature_algorithm: "RS256" }],
-      [{ ...manifestRow(), manifest_json: "x".repeat(20) }],
-      [{ ...manifestRow(), manifest_json: "x".repeat(33) }],
+      [
+        {
+          ...manifestRow(),
+          manifest_json: "x".repeat(20),
+          manifest_json_bytes: 20,
+        },
+      ],
+      [
+        {
+          ...manifestRow(),
+          manifest_json: null,
+          manifest_json_bytes: 33,
+        },
+      ],
     ];
     for (const rows of cases) {
       const d1 = new StrictD1();
@@ -955,6 +1355,171 @@ describe("structural D1 CatalogStore", () => {
           ),
         "MANIFEST_INVALID",
       );
+    }
+  });
+
+  test("keeps bounded signature metadata outside the manifest byte budget", async () => {
+    const manifestJson = RUNTIME_CONFORMANCE_FIXTURE.envelopeA.manifestJson;
+    const maxManifestBytes = encoder.encode(manifestJson).byteLength;
+    const d1 = new StrictD1();
+    d1.enqueue(SQL.manifest, [
+      {
+        ...manifestRow(manifestJson),
+        signature_key_id: "k".repeat(128),
+        signature_key_id_bytes: 128,
+        signature: "s".repeat(256),
+        signature_bytes: 256,
+      },
+    ]);
+
+    await expect(
+      createD1CatalogStore(d1, { maxManifestBytes }).getManifest(
+        catalog,
+        release,
+      ),
+    ).resolves.toMatchObject({
+      manifestJson,
+      signature: {
+        algorithm: "Ed25519",
+        keyId: "k".repeat(128),
+        signature: "s".repeat(256),
+      },
+    });
+  });
+
+  test("rejects each signature metadata field over its independent bound", async () => {
+    const cases = [
+      {
+        signature_algorithm: null,
+        signature_algorithm_bytes: 8,
+      },
+      { signature_key_id: null, signature_key_id_bytes: 129 },
+      { signature: null, signature_bytes: 257 },
+      { signature_key_id: "bad key", signature_key_id_bytes: 7 },
+      { signature: "bad=signature", signature_bytes: 13 },
+    ] as const;
+    for (const overflow of cases) {
+      const d1 = new StrictD1();
+      d1.enqueue(SQL.manifest, [{ ...manifestRow(), ...overflow }]);
+      await expectPublicError(
+        () => createD1CatalogStore(d1).getManifest(catalog, release),
+        "MANIFEST_INVALID",
+        undefined,
+        CATALOG_STORE_PUBLIC_MESSAGES.manifestSignatureMetadataInvalid,
+      );
+    }
+  });
+
+  test("rejects oversized manifest transport without returning hostile text", async () => {
+    const d1 = new StrictD1();
+    let transportedBytes = -1;
+    d1.handle(
+      SQL.manifest,
+      ([manifestLimit, _algorithmLimit, _keyLimit, _signatureLimit]) => {
+        const hostileBytes = 16 * 1024 * 1024;
+        const transported = hostileBytes <= Number(manifestLimit) ? "x" : null;
+        transportedBytes = transported === null ? 0 : 1;
+        return {
+          success: true,
+          results: [
+            {
+              ...manifestRow(),
+              manifest_json: transported,
+              manifest_json_bytes: hostileBytes,
+            },
+          ],
+        };
+      },
+    );
+
+    await expectPublicError(
+      () => createD1CatalogStore(d1).getManifest(catalog, release),
+      "MANIFEST_INVALID",
+      undefined,
+      CATALOG_STORE_PUBLIC_MESSAGES.manifestTransportLimitExceeded,
+    );
+    expect(transportedBytes).toBe(0);
+  });
+
+  test("accepts exact record bytes and rejects one-over transport", async () => {
+    const record = operationRecord();
+    const recordJson = JSON.stringify(record);
+    const maxRecordBytes = encoder.encode(recordJson).byteLength;
+    const exact = new StrictD1();
+    exact.enqueue(SQL.operation, [recordRow(operationId, record)]);
+    await expect(
+      createD1CatalogStore(exact, { maxRecordBytes }).getOperation(
+        catalog,
+        release,
+        operationId,
+      ),
+    ).resolves.toMatchObject({ id: operationId, record });
+
+    const over = new StrictD1();
+    over.enqueue(SQL.operation, [
+      {
+        ...recordRow(operationId, record),
+        record_json: null,
+        record_json_bytes: maxRecordBytes + 1,
+      },
+    ]);
+    await expectPublicError(
+      () =>
+        createD1CatalogStore(over, { maxRecordBytes }).getOperation(
+          catalog,
+          release,
+          operationId,
+        ),
+      "RECORD_DIGEST_MISMATCH",
+      undefined,
+      CATALOG_STORE_PUBLIC_MESSAGES.recordJsonInvalid,
+    );
+  });
+
+  test("does not return huge operation or schema JSON through D1", async () => {
+    for (const [sql, run, id] of [
+      [
+        SQL.operation,
+        (store: ReturnType<typeof createD1CatalogStore>) =>
+          store.getOperation(catalog, release, operationId),
+        operationId,
+      ],
+      [
+        SQL.schemas,
+        (store: ReturnType<typeof createD1CatalogStore>) =>
+          store.getSchemas(catalog, release, [itemSchema]),
+        itemSchema,
+      ],
+    ] as const) {
+      const d1 = new StrictD1();
+      let transportedBytes = -1;
+      d1.handle(sql, (bindings) => {
+        const recordLimit = Number(bindings[sql === SQL.operation ? 2 : 3]);
+        const hostileBytes = 16 * 1024 * 1024;
+        const transported = hostileBytes <= recordLimit ? "x" : null;
+        transportedBytes = transported === null ? 0 : 1;
+        return {
+          success: true,
+          results: [
+            {
+              record_id: id,
+              record_id_bytes: encoder.encode(id).byteLength,
+              logical_digest: "a".repeat(64),
+              logical_digest_bytes: 64,
+              record_json: transported,
+              record_json_bytes: hostileBytes,
+            },
+          ],
+        };
+      });
+
+      await expectPublicError(
+        () => run(createD1CatalogStore(d1)),
+        "RECORD_DIGEST_MISMATCH",
+        undefined,
+        CATALOG_STORE_PUBLIC_MESSAGES.recordJsonInvalid,
+      );
+      expect(transportedBytes).toBe(0);
     }
   });
 

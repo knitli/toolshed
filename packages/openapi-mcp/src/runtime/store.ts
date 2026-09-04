@@ -20,13 +20,26 @@ import {
   resolveRuntimeLimits,
 } from "./versions.ts";
 
-const GET_MANIFEST_SQL = `SELECT manifest_json, signature_algorithm, signature_key_id, signature
+const GET_MANIFEST_SQL = `SELECT
+  CASE WHEN typeof(manifest_json) = 'text' AND length(CAST(manifest_json AS BLOB)) <= ? THEN manifest_json ELSE NULL END AS manifest_json,
+  length(CAST(manifest_json AS BLOB)) AS manifest_json_bytes,
+  CASE WHEN typeof(signature_algorithm) = 'text' AND length(CAST(signature_algorithm AS BLOB)) <= ? THEN signature_algorithm ELSE NULL END AS signature_algorithm,
+  length(CAST(signature_algorithm AS BLOB)) AS signature_algorithm_bytes,
+  CASE WHEN typeof(signature_key_id) = 'text' AND length(CAST(signature_key_id AS BLOB)) <= ? THEN signature_key_id ELSE NULL END AS signature_key_id,
+  length(CAST(signature_key_id AS BLOB)) AS signature_key_id_bytes,
+  CASE WHEN typeof(signature) = 'text' AND length(CAST(signature AS BLOB)) <= ? THEN signature ELSE NULL END AS signature,
+  length(CAST(signature AS BLOB)) AS signature_bytes
 FROM release_metadata
 WHERE catalog_id = ? AND release_id = ? AND format = 4 AND contract = 1
 LIMIT 2;`;
 
-const SEARCH_CANDIDATES_SQL = `SELECT o.catalog_id AS catalog_id, o.release_id AS release_id,
-       o.record_id AS record_id
+const SEARCH_CANDIDATES_SQL = `SELECT
+       CASE WHEN typeof(o.catalog_id) = 'text' AND length(CAST(o.catalog_id AS BLOB)) <= ? THEN o.catalog_id ELSE NULL END AS catalog_id,
+       length(CAST(o.catalog_id AS BLOB)) AS catalog_id_bytes,
+       CASE WHEN typeof(o.release_id) = 'text' AND length(CAST(o.release_id AS BLOB)) <= ? THEN o.release_id ELSE NULL END AS release_id,
+       length(CAST(o.release_id AS BLOB)) AS release_id_bytes,
+       CASE WHEN typeof(o.record_id) = 'text' AND length(CAST(o.record_id AS BLOB)) <= ? THEN o.record_id ELSE NULL END AS record_id,
+       length(CAST(o.record_id AS BLOB)) AS record_id_bytes
 FROM operations_fts
 JOIN operations AS o ON o.rowid = operations_fts.rowid
 JOIN release_metadata AS r
@@ -40,8 +53,13 @@ ORDER BY bm25(operations_fts),
          o.record_id COLLATE BINARY
 LIMIT ?;`;
 
-const GET_OPERATION_SQL = `SELECT o.record_id AS record_id, o.logical_digest AS logical_digest,
-       o.record_json AS record_json
+const GET_OPERATION_SQL = `SELECT
+       CASE WHEN typeof(o.record_id) = 'text' AND length(CAST(o.record_id AS BLOB)) <= ? THEN o.record_id ELSE NULL END AS record_id,
+       length(CAST(o.record_id AS BLOB)) AS record_id_bytes,
+       CASE WHEN typeof(o.logical_digest) = 'text' AND length(CAST(o.logical_digest AS BLOB)) <= ? THEN o.logical_digest ELSE NULL END AS logical_digest,
+       length(CAST(o.logical_digest AS BLOB)) AS logical_digest_bytes,
+       CASE WHEN typeof(o.record_json) = 'text' AND length(CAST(o.record_json AS BLOB)) <= ? THEN o.record_json ELSE NULL END AS record_json,
+       length(CAST(o.record_json AS BLOB)) AS record_json_bytes
 FROM operations AS o
 JOIN release_metadata AS r
   ON r.catalog_id = o.catalog_id AND r.release_id = o.release_id
@@ -52,19 +70,36 @@ LIMIT 2;`;
 const GET_SCHEMAS_SQL = `WITH requested(record_id) AS (
   SELECT DISTINCT value FROM json_each(?) WHERE typeof(value) = 'text'
 )
-SELECT s.record_id AS record_id, s.logical_digest AS logical_digest,
-       s.record_json AS record_json
+SELECT
+       CASE WHEN typeof(s.record_id) = 'text' AND length(CAST(s.record_id AS BLOB)) <= ? THEN s.record_id ELSE NULL END AS record_id,
+       length(CAST(s.record_id AS BLOB)) AS record_id_bytes,
+       CASE WHEN typeof(s.logical_digest) = 'text' AND length(CAST(s.logical_digest AS BLOB)) <= ? THEN s.logical_digest ELSE NULL END AS logical_digest,
+       length(CAST(s.logical_digest AS BLOB)) AS logical_digest_bytes,
+       CASE WHEN typeof(s.record_json) = 'text' AND length(CAST(s.record_json AS BLOB)) <= ? THEN s.record_json ELSE NULL END AS record_json,
+       length(CAST(s.record_json AS BLOB)) AS record_json_bytes
 FROM requested
 JOIN schemas AS s ON s.record_id = requested.record_id
 JOIN release_metadata AS r
   ON r.catalog_id = s.catalog_id AND r.release_id = s.release_id
 WHERE s.catalog_id = ? AND s.release_id = ?
   AND r.format = 4 AND r.contract = 1
-ORDER BY s.record_id COLLATE BINARY;`;
+ORDER BY s.record_id COLLATE BINARY
+LIMIT ?;`;
 
 type Row = Record<string, unknown>;
 type RowFailure = "MANIFEST_INVALID" | "RECORD_DIGEST_MISMATCH";
 const digestPattern = /^[0-9a-f]{64}$/;
+const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const signaturePattern = /^[A-Za-z0-9_-]+$/;
+const signatureAlgorithmBytes = 7;
+const signatureKeyIdBytes = 128;
+const signatureBytes = 256;
+const catalogIdBytes = 128;
+const releaseIdBytes = 128;
+const operationIdBytes = 651;
+const schemaIdBytes = 669;
+const digestBytes = 64;
+const textEncoder = new TextEncoder();
 
 /** Stable, redacted public errors required of every CatalogStore adapter. */
 export const CATALOG_STORE_PUBLIC_MESSAGES = Object.freeze({
@@ -168,6 +203,39 @@ function plainRow(
 function stringField(row: Row, key: string, code: RowFailure): string {
   const value = row[key];
   if (typeof value !== "string")
+    throw failure(
+      code,
+      code === "MANIFEST_INVALID"
+        ? CATALOG_STORE_PUBLIC_MESSAGES.manifestTransportRowInvalid
+        : CATALOG_STORE_PUBLIC_MESSAGES.recordTransportRowInvalid,
+    );
+  return value;
+}
+
+function boundedTextField(
+  row: Row,
+  key: string,
+  byteLengthKey: string,
+  maximumBytes: number,
+  code: RowFailure,
+  overflowMessage: string,
+): string {
+  const byteLength = row[byteLengthKey];
+  if (
+    typeof byteLength !== "number" ||
+    !Number.isSafeInteger(byteLength) ||
+    byteLength < 0
+  ) {
+    throw failure(
+      code,
+      code === "MANIFEST_INVALID"
+        ? CATALOG_STORE_PUBLIC_MESSAGES.manifestTransportRowInvalid
+        : CATALOG_STORE_PUBLIC_MESSAGES.recordTransportRowInvalid,
+    );
+  }
+  if (byteLength > maximumBytes) throw failure(code, overflowMessage);
+  const value = stringField(row, key, code);
+  if (textEncoder.encode(value).byteLength !== byteLength)
     throw failure(
       code,
       code === "MANIFEST_INVALID"
@@ -333,30 +401,57 @@ function decodeManifest(
     );
   const row = plainRow(
     rows[0],
-    ["manifest_json", "signature_algorithm", "signature_key_id", "signature"],
+    [
+      "manifest_json",
+      "manifest_json_bytes",
+      "signature_algorithm",
+      "signature_algorithm_bytes",
+      "signature_key_id",
+      "signature_key_id_bytes",
+      "signature",
+      "signature_bytes",
+    ],
     "MANIFEST_INVALID",
   );
-  const manifestJson = stringField(row, "manifest_json", "MANIFEST_INVALID");
+  const manifestJson = boundedTextField(
+    row,
+    "manifest_json",
+    "manifest_json_bytes",
+    limits.maxManifestBytes,
+    "MANIFEST_INVALID",
+    CATALOG_STORE_PUBLIC_MESSAGES.manifestTransportLimitExceeded,
+  );
+  const algorithm = boundedTextField(
+    row,
+    "signature_algorithm",
+    "signature_algorithm_bytes",
+    signatureAlgorithmBytes,
+    "MANIFEST_INVALID",
+    CATALOG_STORE_PUBLIC_MESSAGES.manifestSignatureMetadataInvalid,
+  );
+  const keyId = boundedTextField(
+    row,
+    "signature_key_id",
+    "signature_key_id_bytes",
+    signatureKeyIdBytes,
+    "MANIFEST_INVALID",
+    CATALOG_STORE_PUBLIC_MESSAGES.manifestSignatureMetadataInvalid,
+  );
+  const signature = boundedTextField(
+    row,
+    "signature",
+    "signature_bytes",
+    signatureBytes,
+    "MANIFEST_INVALID",
+    CATALOG_STORE_PUBLIC_MESSAGES.manifestSignatureMetadataInvalid,
+  );
   if (
-    new TextEncoder().encode(manifestJson).byteLength > limits.maxManifestBytes
+    algorithm !== "Ed25519" ||
+    !identifierPattern.test(keyId) ||
+    keyId === "." ||
+    keyId === ".." ||
+    !signaturePattern.test(signature)
   )
-    throw failure(
-      "MANIFEST_INVALID",
-      CATALOG_STORE_PUBLIC_MESSAGES.manifestTransportLimitExceeded,
-    );
-  const algorithm = stringField(row, "signature_algorithm", "MANIFEST_INVALID");
-  const keyId = stringField(row, "signature_key_id", "MANIFEST_INVALID");
-  const signature = stringField(row, "signature", "MANIFEST_INVALID");
-  if (
-    new TextEncoder().encode(
-      `${manifestJson}\0${algorithm}\0${keyId}\0${signature}`,
-    ).byteLength > limits.maxManifestBytes
-  )
-    throw failure(
-      "MANIFEST_INVALID",
-      CATALOG_STORE_PUBLIC_MESSAGES.manifestTransportLimitExceeded,
-    );
-  if (algorithm !== "Ed25519")
     throw failure(
       "MANIFEST_INVALID",
       CATALOG_STORE_PUBLIC_MESSAGES.manifestSignatureMetadataInvalid,
@@ -372,25 +467,51 @@ function decodeRecord(
 ): StoredRecord<OperationRecordV4 | SchemaRecordV4> {
   const row = plainRow(
     rowValue,
-    ["record_id", "logical_digest", "record_json"],
+    [
+      "record_id",
+      "record_id_bytes",
+      "logical_digest",
+      "logical_digest_bytes",
+      "record_json",
+      "record_json_bytes",
+    ],
     "RECORD_DIGEST_MISMATCH",
   );
-  const idValue = stringField(row, "record_id", "RECORD_DIGEST_MISMATCH");
+  const idValue = boundedTextField(
+    row,
+    "record_id",
+    "record_id_bytes",
+    kind === "operation" ? operationIdBytes : schemaIdBytes,
+    "RECORD_DIGEST_MISMATCH",
+    kind === "operation"
+      ? CATALOG_STORE_PUBLIC_MESSAGES.storedOperationIdentifierInvalid
+      : CATALOG_STORE_PUBLIC_MESSAGES.storedSchemaIdentifierInvalid,
+  );
   const id =
     kind === "operation"
       ? operationId(idValue, "RECORD_DIGEST_MISMATCH")
       : schemaId(idValue, "RECORD_DIGEST_MISMATCH");
-  const logicalDigest = stringField(
+  const logicalDigest = boundedTextField(
     row,
     "logical_digest",
+    "logical_digest_bytes",
+    digestBytes,
     "RECORD_DIGEST_MISMATCH",
+    CATALOG_STORE_PUBLIC_MESSAGES.recordDigestInvalid,
   );
   if (!digestPattern.test(logicalDigest))
     throw failure(
       "RECORD_DIGEST_MISMATCH",
       CATALOG_STORE_PUBLIC_MESSAGES.recordDigestInvalid,
     );
-  const recordJson = stringField(row, "record_json", "RECORD_DIGEST_MISMATCH");
+  const recordJson = boundedTextField(
+    row,
+    "record_json",
+    "record_json_bytes",
+    limits.maxRecordBytes,
+    "RECORD_DIGEST_MISMATCH",
+    CATALOG_STORE_PUBLIC_MESSAGES.recordJsonInvalid,
+  );
   try {
     const record = parseJsonStrict(recordJson, {
       maxBytes: limits.maxRecordBytes,
@@ -510,10 +631,15 @@ function snapshotSchemaIds(
     if (names.length !== length.value + 1 || !names.includes("length"))
       throw new Error();
     const ids: TypedSchemaId[] = [];
+    let totalBytes = 0;
     for (let index = 0; index < length.value; index += 1) {
       const id = Object.getOwnPropertyDescriptor(value, String(index));
       if (!id?.enumerable || !("value" in id)) throw new Error();
-      ids.push(requestedSchemaId(id.value));
+      const parsed = requestedSchemaId(id.value);
+      totalBytes += textEncoder.encode(parsed).byteLength;
+      if (totalBytes > limits.maxSchemaClosureBytes)
+        throw input(CATALOG_STORE_PUBLIC_MESSAGES.schemaRequestLimitExceeded);
+      ids.push(parsed);
     }
     return ids;
   } catch (error) {
@@ -573,7 +699,14 @@ class D1CatalogStore implements CatalogStore {
       await d1All(
         this.database,
         GET_MANIFEST_SQL,
-        [catalogIdValue, releaseIdValue],
+        [
+          this.limits.maxManifestBytes,
+          signatureAlgorithmBytes,
+          signatureKeyIdBytes,
+          signatureBytes,
+          catalogIdValue,
+          releaseIdValue,
+        ],
         "MANIFEST_INVALID",
       ),
       catalogIdValue,
@@ -587,7 +720,15 @@ class D1CatalogStore implements CatalogStore {
     const rows = await d1All(
       this.database,
       SEARCH_CANDIDATES_SQL,
-      [snapshot.query, snapshot.api, snapshot.api, snapshot.limit],
+      [
+        catalogIdBytes,
+        releaseIdBytes,
+        operationIdBytes,
+        snapshot.query,
+        snapshot.api,
+        snapshot.api,
+        snapshot.limit,
+      ],
       "INPUT_INVALID",
     );
     if (rows.length > snapshot.limit)
@@ -599,17 +740,45 @@ class D1CatalogStore implements CatalogStore {
     return rows.map((value) => {
       const row = plainRow(
         value,
-        ["catalog_id", "release_id", "record_id"],
+        [
+          "catalog_id",
+          "catalog_id_bytes",
+          "release_id",
+          "release_id_bytes",
+          "record_id",
+          "record_id_bytes",
+        ],
         "RECORD_DIGEST_MISMATCH",
       );
       const catalogIdValue = storedCatalogId(
-        stringField(row, "catalog_id", "RECORD_DIGEST_MISMATCH"),
+        boundedTextField(
+          row,
+          "catalog_id",
+          "catalog_id_bytes",
+          catalogIdBytes,
+          "RECORD_DIGEST_MISMATCH",
+          CATALOG_STORE_PUBLIC_MESSAGES.storedCatalogIdentifierInvalid,
+        ),
       );
       const releaseIdValue = storedReleaseId(
-        stringField(row, "release_id", "RECORD_DIGEST_MISMATCH"),
+        boundedTextField(
+          row,
+          "release_id",
+          "release_id_bytes",
+          releaseIdBytes,
+          "RECORD_DIGEST_MISMATCH",
+          CATALOG_STORE_PUBLIC_MESSAGES.storedReleaseIdentifierInvalid,
+        ),
       );
       const operationIdValue = operationId(
-        stringField(row, "record_id", "RECORD_DIGEST_MISMATCH"),
+        boundedTextField(
+          row,
+          "record_id",
+          "record_id_bytes",
+          operationIdBytes,
+          "RECORD_DIGEST_MISMATCH",
+          CATALOG_STORE_PUBLIC_MESSAGES.storedOperationIdentifierInvalid,
+        ),
         "RECORD_DIGEST_MISMATCH",
       );
       if (
@@ -644,7 +813,14 @@ class D1CatalogStore implements CatalogStore {
     const rows = await d1All(
       this.database,
       GET_OPERATION_SQL,
-      [catalogId(catalog), releaseId(release), requested],
+      [
+        operationIdBytes,
+        digestBytes,
+        this.limits.maxRecordBytes,
+        catalogId(catalog),
+        releaseId(release),
+        requested,
+      ],
       "RECORD_DIGEST_MISMATCH",
     );
     if (rows.length === 0) return null;
@@ -678,7 +854,15 @@ class D1CatalogStore implements CatalogStore {
     const rows = await d1All(
       this.database,
       GET_SCHEMAS_SQL,
-      [requestJson, catalogIdValue, releaseIdValue],
+      [
+        requestJson,
+        schemaIdBytes,
+        digestBytes,
+        this.limits.maxRecordBytes,
+        catalogIdValue,
+        releaseIdValue,
+        requested.size + 1,
+      ],
       "RECORD_DIGEST_MISMATCH",
     );
     if (rows.length > requested.size)

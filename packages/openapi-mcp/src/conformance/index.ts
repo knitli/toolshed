@@ -6,6 +6,7 @@ export {
   type CatalogStoreFactory,
   type CatalogStoreFactoryResult,
   type ConformanceTestAdapter,
+  type RuntimeConformanceCandidateFault,
   type RuntimeConformanceDriverFault,
   type RuntimeConformanceDuplicateFault,
   type RuntimeConformanceOptions,

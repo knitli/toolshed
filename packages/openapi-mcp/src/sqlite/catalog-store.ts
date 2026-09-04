@@ -22,23 +22,50 @@ import {
 } from "../runtime/index.ts";
 import { MAX_SEARCH_QUERY_BYTES } from "../runtime/versions.ts";
 
-const SCHEMA_PROBE = `SELECT name AS name, type AS type
+const SCHEMA_PROBE = `SELECT CASE
+  WHEN typeof(name) = 'text' AND name IN ('meta', 'release_metadata') THEN name
+  ELSE NULL
+END AS name,
+CASE
+  WHEN typeof(type) = 'text' AND type = 'table' THEN type
+  ELSE NULL
+END AS type
 FROM sqlite_schema
 WHERE name IN ('meta', 'release_metadata')
-ORDER BY name COLLATE BINARY;`;
-const V3_VERSION_PROBE =
-  "SELECT value AS value FROM meta WHERE key = ? LIMIT 2;";
-const V4_VERSION_PROBE = `SELECT DISTINCT format AS format, contract AS contract
+ORDER BY name COLLATE BINARY
+LIMIT 3;`;
+const V3_VERSION_PROBE = `SELECT CASE
+  WHEN typeof(value) = 'text' AND length(CAST(value AS BLOB)) <= 1 THEN value
+  ELSE NULL
+END AS value
+FROM meta
+WHERE key = ?
+LIMIT 2;`;
+const V4_VERSION_PROBE = `SELECT DISTINCT
+CASE
+  WHEN typeof(format) = 'integer' AND length(CAST(format AS BLOB)) <= 1 THEN format
+  ELSE NULL
+END AS format,
+CASE
+  WHEN typeof(contract) = 'integer' AND length(CAST(contract AS BLOB)) <= 1 THEN contract
+  ELSE NULL
+END AS contract
 FROM release_metadata
 ORDER BY format, contract
 LIMIT 2;`;
-const V3_SEARCH_SQL = `SELECT o.qualified_id AS qualified_id
+const V3_SEARCH_SQL = `SELECT CASE
+  WHEN typeof(o.qualified_id) = 'text'
+    AND length(CAST(o.qualified_id AS BLOB)) <= ?
+  THEN o.qualified_id
+  ELSE NULL
+END AS qualified_id
 FROM operations_fts
 JOIN operations AS o ON o.rowid = operations_fts.rowid
 WHERE operations_fts MATCH ?
   AND (? IS NULL OR o.api = ?)
 ORDER BY bm25(operations_fts), o.qualified_id COLLATE BINARY
 LIMIT ?;`;
+const legacyQualifiedIdBytes = 641;
 
 export interface LegacyV3CatalogIdentity {
   readonly catalogId: CatalogId;
@@ -361,6 +388,7 @@ export class SqliteCatalogStore implements CatalogStore {
     const snapshot = snapshotLegacySearchQuery(query, this.#limits);
     try {
       const rows = all(this.#database, V3_SEARCH_SQL, [
+        legacyQualifiedIdBytes,
         snapshot.query,
         snapshot.api,
         snapshot.api,

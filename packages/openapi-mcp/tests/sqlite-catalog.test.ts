@@ -219,6 +219,35 @@ function createConformanceV4Catalog(
   return artifact;
 }
 
+function poisonConformanceCandidate(
+  artifact: DiskFixture,
+  fault:
+    | "candidate-malformed-operation-id"
+    | "candidate-non-operation-id"
+    | "candidate-cross-api",
+): void {
+  const fixture = RUNTIME_CONFORMANCE_FIXTURE;
+  const poisonedId =
+    fault === "candidate-malformed-operation-id"
+      ? "not-a-typed-record-id"
+      : fault === "candidate-non-operation-id"
+        ? fixture.schemaIds[0]
+        : "operation:other-api:get-item";
+  if (poisonedId === undefined)
+    throw new Error("Conformance fixture has no schema ID");
+  const database = new DatabaseSync(artifact.path);
+  try {
+    database.exec("PRAGMA ignore_check_constraints = ON;");
+    database
+      .prepare(
+        "UPDATE operations SET record_id = ? WHERE catalog_id = ? AND release_id = ?",
+      )
+      .run(poisonedId, fixture.catalogId, fixture.releaseA);
+  } finally {
+    database.close();
+  }
+}
+
 function createDriverErrorCatalog(): DiskFixture {
   const artifact = temporaryArtifact("conformance-driver-error.sqlite");
   const database = new DatabaseSync(artifact.path);
@@ -567,6 +596,77 @@ test("v3 inventory rejects a cross-API qualified operation returned by FTS", asy
   } finally {
     store.close();
     rmSync(artifact.directory, { recursive: true, force: true });
+  }
+});
+
+test("v3 inventory suppresses oversized and non-TEXT qualified IDs before JavaScript hydration", async () => {
+  for (const value of [
+    "x".repeat(64 * 1024),
+    Buffer.from("tiny:operation"),
+    Buffer.alloc(64 * 1024),
+  ]) {
+    const artifact = copiedV3Catalog();
+    const database = new DatabaseSync(artifact.path);
+    database
+      .prepare("UPDATE operations SET qualified_id = ? WHERE qualified_id = ?")
+      .run(value, "tiny:widgets.widget.DeleteWidget");
+    database.close();
+
+    const originalGetBuiltinModule = process.getBuiltinModule;
+    const transported: unknown[] = [];
+    class InstrumentedDatabase {
+      readonly #database = new DatabaseSync(artifact.path, { readOnly: true });
+
+      prepare(sql: string) {
+        const statement = this.#database.prepare(sql);
+        return {
+          all: (...values: readonly unknown[]) => {
+            const rows = statement.all(...values) as Record<string, unknown>[];
+            if (sql.includes("FROM operations_fts")) {
+              for (const row of rows) transported.push(row.qualified_id);
+            }
+            return rows;
+          },
+          get: (...values: readonly unknown[]) => statement.get(...values),
+          finalize: () =>
+            (statement as unknown as { finalize?: () => void }).finalize?.(),
+        };
+      }
+
+      close() {
+        this.#database.close();
+      }
+    }
+    process.getBuiltinModule = ((id: string) =>
+      id === "bun:sqlite"
+        ? { Database: InstrumentedDatabase }
+        : originalGetBuiltinModule?.(id)) as typeof process.getBuiltinModule;
+    try {
+      const store = new SqliteCatalogStore(artifact.path, {
+        legacyIdentity: {
+          catalogId: "legacy-catalog" as CatalogId,
+          releaseId: "legacy-release" as ReleaseId,
+        },
+      });
+      try {
+        const error = await store
+          .searchCandidates({ query: "delete", limit: 1 })
+          .then(
+            () => undefined,
+            (failure: OpenApiMcpError) => failure,
+          );
+        expect(error?.code).toBe("INPUT_INVALID");
+        expect(error?.details).toEqual({});
+        expect(String(error?.message)).toBe("Search expression is invalid");
+        expect(error?.retryable).toBe(false);
+        expect(transported).toEqual([null]);
+      } finally {
+        store.close();
+      }
+    } finally {
+      process.getBuiltinModule = originalGetBuiltinModule;
+      rmSync(artifact.directory, { recursive: true, force: true });
+    }
   }
 });
 
@@ -932,6 +1032,178 @@ test("constructor rejects absent, unsupported, and ambiguous artifact formats", 
   }
 });
 
+test("constructor probe suppresses hostile metadata values before JavaScript hydration", () => {
+  const cases = [
+    {
+      name: "v3-large-text",
+      setup(database: DatabaseSync) {
+        database.exec("CREATE TABLE meta (key TEXT, value TEXT)");
+        database
+          .prepare("INSERT INTO meta VALUES (?, ?)")
+          .run("format_version", "x".repeat(64 * 1024));
+      },
+      expected: [null],
+    },
+    {
+      name: "v3-short-blob",
+      setup(database: DatabaseSync) {
+        database.exec("CREATE TABLE meta (key TEXT, value TEXT)");
+        database
+          .prepare("INSERT INTO meta VALUES (?, ?)")
+          .run("format_version", Buffer.from("3"));
+      },
+      expected: [null],
+    },
+    {
+      name: "v3-large-blob",
+      setup(database: DatabaseSync) {
+        database.exec("CREATE TABLE meta (key TEXT, value TEXT)");
+        database
+          .prepare("INSERT INTO meta VALUES (?, ?)")
+          .run("format_version", Buffer.alloc(64 * 1024));
+      },
+      expected: [null],
+    },
+    {
+      name: "v4-large-text",
+      setup(database: DatabaseSync) {
+        database.exec(
+          "CREATE TABLE release_metadata (format INTEGER, contract INTEGER)",
+        );
+        database
+          .prepare("INSERT INTO release_metadata VALUES (?, ?)")
+          .run("x".repeat(64 * 1024), 1);
+      },
+      expected: [null, 1],
+    },
+    {
+      name: "v4-short-blob",
+      setup(database: DatabaseSync) {
+        database.exec(
+          "CREATE TABLE release_metadata (format INTEGER, contract INTEGER)",
+        );
+        database
+          .prepare("INSERT INTO release_metadata VALUES (?, ?)")
+          .run(Buffer.from("4"), 1);
+      },
+      expected: [null, 1],
+    },
+    {
+      name: "v4-large-blob",
+      setup(database: DatabaseSync) {
+        database.exec(
+          "CREATE TABLE release_metadata (format INTEGER, contract INTEGER)",
+        );
+        database
+          .prepare("INSERT INTO release_metadata VALUES (?, ?)")
+          .run(Buffer.alloc(64 * 1024), 1);
+      },
+      expected: [null, 1],
+    },
+    {
+      name: "v4-hostile-contract",
+      setup(database: DatabaseSync) {
+        database.exec(
+          "CREATE TABLE release_metadata (format INTEGER, contract INTEGER)",
+        );
+        database
+          .prepare("INSERT INTO release_metadata VALUES (?, ?)")
+          .run(4, "x".repeat(64 * 1024));
+      },
+      expected: [4, null],
+    },
+  ] as const;
+
+  for (const scenario of cases) {
+    const artifact = temporaryArtifact(`${scenario.name}.sqlite`);
+    const database = new DatabaseSync(artifact.path);
+    scenario.setup(database);
+    database.close();
+
+    const originalGetBuiltinModule = process.getBuiltinModule;
+    const transported: unknown[] = [];
+    class InstrumentedDatabase {
+      readonly #database = new DatabaseSync(artifact.path, { readOnly: true });
+
+      prepare(sql: string) {
+        const statement = this.#database.prepare(sql);
+        return {
+          all: (...values: readonly unknown[]) => {
+            const rows = statement.all(...values) as Record<string, unknown>[];
+            if (
+              sql.includes("FROM meta") ||
+              sql.includes("FROM release_metadata")
+            ) {
+              for (const row of rows) transported.push(...Object.values(row));
+            }
+            return rows;
+          },
+          get: (...values: readonly unknown[]) => statement.get(...values),
+          finalize: () =>
+            (statement as unknown as { finalize?: () => void }).finalize?.(),
+        };
+      }
+
+      close() {
+        this.#database.close();
+      }
+    }
+    process.getBuiltinModule = ((id: string) =>
+      id === "bun:sqlite"
+        ? { Database: InstrumentedDatabase }
+        : originalGetBuiltinModule?.(id)) as typeof process.getBuiltinModule;
+    try {
+      expect(() => new SqliteCatalogStore(artifact.path)).toThrow(
+        expect.objectContaining(unsupported),
+      );
+      expect(transported).toEqual(scenario.expected);
+    } finally {
+      process.getBuiltinModule = originalGetBuiltinModule;
+      rmSync(artifact.directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("constructor schema probe projects only fixed table sentinels with a row cap", () => {
+  const originalGetBuiltinModule = process.getBuiltinModule;
+  let preparedSql: string | undefined;
+  class InstrumentedDatabase {
+    prepare(sql: string) {
+      preparedSql = sql;
+      return {
+        all: () => [],
+        get: () => undefined,
+        finalize: () => undefined,
+      };
+    }
+
+    close() {}
+  }
+  process.getBuiltinModule = ((id: string) =>
+    id === "bun:sqlite"
+      ? { Database: InstrumentedDatabase }
+      : originalGetBuiltinModule?.(id)) as typeof process.getBuiltinModule;
+  try {
+    expect(() => new SqliteCatalogStore("unused.sqlite")).toThrow(
+      expect.objectContaining(unsupported),
+    );
+    expect(preparedSql).toBe(`SELECT CASE
+  WHEN typeof(name) = 'text' AND name IN ('meta', 'release_metadata') THEN name
+  ELSE NULL
+END AS name,
+CASE
+  WHEN typeof(type) = 'text' AND type = 'table' THEN type
+  ELSE NULL
+END AS type
+FROM sqlite_schema
+WHERE name IN ('meta', 'release_metadata')
+ORDER BY name COLLATE BINARY
+LIMIT 3;`);
+  } finally {
+    process.getBuiltinModule = originalGetBuiltinModule;
+  }
+});
+
 test("Bun probe statements finalize before strict close on failure", () => {
   const originalGetBuiltinModule = process.getBuiltinModule;
   const events: string[] = [];
@@ -983,13 +1255,16 @@ test("Bun bridge statements finalize before strict close on successful v4 search
       prepared.push(entry);
       const rows = sql.includes("sqlite_schema")
         ? [{ name: "release_metadata", type: "table" }]
-        : sql.includes("DISTINCT format")
+        : sql.includes("FROM release_metadata")
           ? [{ format: 4, contract: 1 }]
           : [
               {
                 catalog_id: catalogId,
+                catalog_id_bytes: Buffer.byteLength(catalogId),
                 release_id: releaseA,
+                release_id_bytes: Buffer.byteLength(releaseA),
                 record_id: operationId,
+                record_id_bytes: Buffer.byteLength(operationId),
               },
             ];
       return {
@@ -1146,6 +1421,466 @@ test("constructor closes the database when its format probe fails", () => {
   }
 });
 
+test("v4 schema transport caps a malformed row-amplifying view at requested count plus one", async () => {
+  const artifact = createV4Catalog();
+  const database = new DatabaseSync(artifact.path);
+  try {
+    database.exec(`
+      ALTER TABLE schemas RENAME TO schema_rows;
+      CREATE VIEW schemas AS
+      WITH RECURSIVE copies(value) AS (
+        VALUES (1)
+        UNION ALL
+        SELECT value + 1 FROM copies WHERE value < 10000
+      )
+      SELECT schema_rows.* FROM schema_rows CROSS JOIN copies;
+    `);
+  } finally {
+    database.close();
+  }
+
+  const originalGetBuiltinModule = process.getBuiltinModule;
+  const schemaQueries: Array<{
+    readonly sql: string;
+    readonly values: readonly unknown[];
+  }> = [];
+  class InstrumentedDatabase {
+    readonly #database = new DatabaseSync(artifact.path, { readOnly: true });
+
+    prepare(sql: string) {
+      const statement = this.#database.prepare(sql);
+      return {
+        all: (...values: readonly unknown[]) => {
+          if (sql.includes("JOIN schemas AS s"))
+            schemaQueries.push({ sql, values });
+          return statement.all(...values);
+        },
+        get: (...values: readonly unknown[]) => statement.get(...values),
+        finalize: () =>
+          (statement as unknown as { finalize?: () => void }).finalize?.(),
+      };
+    }
+
+    close() {
+      this.#database.close();
+    }
+  }
+  process.getBuiltinModule = ((id: string) =>
+    id === "bun:sqlite"
+      ? { Database: InstrumentedDatabase }
+      : originalGetBuiltinModule?.(id)) as typeof process.getBuiltinModule;
+  try {
+    const store = new SqliteCatalogStore(artifact.path);
+    try {
+      await expect(
+        store.getSchemas(catalogId, releaseA, [schemaId]),
+      ).rejects.toMatchObject({
+        code: "RECORD_DIGEST_MISMATCH",
+        message: CATALOG_STORE_PUBLIC_MESSAGES.schemaTransportTooManyRows,
+      });
+      expect(schemaQueries).toHaveLength(1);
+      expect(schemaQueries[0]?.sql).toContain("LIMIT ?");
+      expect(schemaQueries[0]?.values.at(-1)).toBe(2);
+    } finally {
+      store.close();
+    }
+  } finally {
+    process.getBuiltinModule = originalGetBuiltinModule;
+    rmSync(artifact.directory, { recursive: true, force: true });
+  }
+});
+
+test("v4 SQLite bounds oversized manifest and record text before JavaScript hydration", async () => {
+  const artifact = createV4Catalog();
+  const database = new DatabaseSync(artifact.path);
+  try {
+    const oversized = "x".repeat(64 * 1024);
+    database
+      .prepare(
+        "UPDATE release_metadata SET manifest_json = ? WHERE catalog_id = ? AND release_id = ?",
+      )
+      .run(oversized, catalogId, releaseA);
+    database
+      .prepare(
+        "UPDATE operations SET record_json = ? WHERE catalog_id = ? AND release_id = ? AND record_id = ?",
+      )
+      .run(oversized, catalogId, releaseA, operationId);
+    database
+      .prepare(
+        "UPDATE schemas SET record_json = ? WHERE catalog_id = ? AND release_id = ? AND record_id = ?",
+      )
+      .run(oversized, catalogId, releaseA, schemaId);
+  } finally {
+    database.close();
+  }
+
+  const maxBytes = 256;
+  const originalGetBuiltinModule = process.getBuiltinModule;
+  let largestTransportedText = 0;
+  class InstrumentedDatabase {
+    readonly #database = new DatabaseSync(artifact.path, { readOnly: true });
+
+    prepare(sql: string) {
+      const statement = this.#database.prepare(sql);
+      return {
+        all: (...values: readonly unknown[]) => {
+          const rows = statement.all(...values);
+          for (const row of rows) {
+            for (const value of Object.values(row)) {
+              if (typeof value === "string")
+                largestTransportedText = Math.max(
+                  largestTransportedText,
+                  value.length,
+                );
+            }
+          }
+          return rows;
+        },
+        get: (...values: readonly unknown[]) => statement.get(...values),
+        finalize: () =>
+          (statement as unknown as { finalize?: () => void }).finalize?.(),
+      };
+    }
+
+    close() {
+      this.#database.close();
+    }
+  }
+  process.getBuiltinModule = ((id: string) =>
+    id === "bun:sqlite"
+      ? { Database: InstrumentedDatabase }
+      : originalGetBuiltinModule?.(id)) as typeof process.getBuiltinModule;
+  try {
+    const store = new SqliteCatalogStore(artifact.path, {
+      limits: { maxManifestBytes: maxBytes, maxRecordBytes: maxBytes },
+    });
+    try {
+      await expect(
+        store.getManifest(catalogId, releaseA),
+      ).rejects.toMatchObject({
+        code: "MANIFEST_INVALID",
+        message: CATALOG_STORE_PUBLIC_MESSAGES.manifestTransportLimitExceeded,
+      });
+      await expect(
+        store.getOperation(catalogId, releaseA, operationId),
+      ).rejects.toMatchObject({
+        code: "RECORD_DIGEST_MISMATCH",
+        message: CATALOG_STORE_PUBLIC_MESSAGES.recordJsonInvalid,
+      });
+      await expect(
+        store.getSchemas(catalogId, releaseA, [schemaId]),
+      ).rejects.toMatchObject({
+        code: "RECORD_DIGEST_MISMATCH",
+        message: CATALOG_STORE_PUBLIC_MESSAGES.recordJsonInvalid,
+      });
+      expect(largestTransportedText).toBeLessThanOrEqual(maxBytes);
+    } finally {
+      store.close();
+    }
+  } finally {
+    process.getBuiltinModule = originalGetBuiltinModule;
+    rmSync(artifact.directory, { recursive: true, force: true });
+  }
+});
+
+test("v4 SQLite suppresses short BLOBs and oversized candidate IDs before JavaScript hydration", async () => {
+  const cases = [
+    {
+      field: "manifest_json",
+      mutate: (database: DatabaseSync) =>
+        database
+          .prepare(
+            "UPDATE release_metadata SET manifest_json = CAST(? AS BLOB) WHERE catalog_id = ? AND release_id = ?",
+          )
+          .run("{}", catalogId, releaseA),
+      run: (store: SqliteCatalogStore) =>
+        store.getManifest(catalogId, releaseA),
+      code: "MANIFEST_INVALID",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.manifestTransportRowInvalid,
+    },
+    {
+      field: "signature_algorithm",
+      mutate: (database: DatabaseSync) => {
+        database.exec("PRAGMA ignore_check_constraints = ON;");
+        database
+          .prepare(
+            "UPDATE release_metadata SET signature_algorithm = CAST(? AS BLOB) WHERE catalog_id = ? AND release_id = ?",
+          )
+          .run("x", catalogId, releaseA);
+      },
+      run: (store: SqliteCatalogStore) =>
+        store.getManifest(catalogId, releaseA),
+      code: "MANIFEST_INVALID",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.manifestTransportRowInvalid,
+    },
+    {
+      field: "signature_key_id",
+      mutate: (database: DatabaseSync) => {
+        database.exec("PRAGMA ignore_check_constraints = ON;");
+        database
+          .prepare(
+            "UPDATE release_metadata SET signature_key_id = CAST(? AS BLOB) WHERE catalog_id = ? AND release_id = ?",
+          )
+          .run("x", catalogId, releaseA);
+      },
+      run: (store: SqliteCatalogStore) =>
+        store.getManifest(catalogId, releaseA),
+      code: "MANIFEST_INVALID",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.manifestTransportRowInvalid,
+    },
+    {
+      field: "signature",
+      mutate: (database: DatabaseSync) => {
+        database.exec("PRAGMA ignore_check_constraints = ON;");
+        database
+          .prepare(
+            "UPDATE release_metadata SET signature = CAST(? AS BLOB) WHERE catalog_id = ? AND release_id = ?",
+          )
+          .run("x", catalogId, releaseA);
+      },
+      run: (store: SqliteCatalogStore) =>
+        store.getManifest(catalogId, releaseA),
+      code: "MANIFEST_INVALID",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.manifestTransportRowInvalid,
+    },
+    {
+      field: "record_json",
+      mutate: (database: DatabaseSync) =>
+        database
+          .prepare(
+            "UPDATE operations SET record_json = CAST(? AS BLOB) WHERE catalog_id = ? AND release_id = ?",
+          )
+          .run("{}", catalogId, releaseA),
+      run: (store: SqliteCatalogStore) =>
+        store.getOperation(catalogId, releaseA, operationId),
+      code: "RECORD_DIGEST_MISMATCH",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.recordTransportRowInvalid,
+    },
+    {
+      field: "logical_digest",
+      mutate: (database: DatabaseSync) => {
+        database.exec("PRAGMA ignore_check_constraints = ON;");
+        database
+          .prepare(
+            "UPDATE operations SET logical_digest = CAST(? AS BLOB) WHERE catalog_id = ? AND release_id = ?",
+          )
+          .run("x", catalogId, releaseA);
+      },
+      run: (store: SqliteCatalogStore) =>
+        store.getOperation(catalogId, releaseA, operationId),
+      code: "RECORD_DIGEST_MISMATCH",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.recordTransportRowInvalid,
+    },
+    {
+      field: "logical_digest",
+      mutate: (database: DatabaseSync) => {
+        database.exec("PRAGMA ignore_check_constraints = ON;");
+        database
+          .prepare(
+            "UPDATE schemas SET logical_digest = CAST(? AS BLOB) WHERE catalog_id = ? AND release_id = ?",
+          )
+          .run("x", catalogId, releaseA);
+      },
+      run: (store: SqliteCatalogStore) =>
+        store.getSchemas(catalogId, releaseA, [schemaId]),
+      code: "RECORD_DIGEST_MISMATCH",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.recordTransportRowInvalid,
+    },
+    {
+      field: "logical_digest",
+      mutate: (database: DatabaseSync) => {
+        database.exec("PRAGMA ignore_check_constraints = ON;");
+        database
+          .prepare(
+            "UPDATE operations SET logical_digest = ? WHERE catalog_id = ? AND release_id = ?",
+          )
+          .run("x".repeat(64 * 1024), catalogId, releaseA);
+      },
+      run: (store: SqliteCatalogStore) =>
+        store.getOperation(catalogId, releaseA, operationId),
+      code: "RECORD_DIGEST_MISMATCH",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.recordDigestInvalid,
+    },
+    {
+      field: "record_json",
+      mutate: (database: DatabaseSync) =>
+        database
+          .prepare(
+            "UPDATE schemas SET record_json = CAST(? AS BLOB) WHERE catalog_id = ? AND release_id = ?",
+          )
+          .run("{}", catalogId, releaseA),
+      run: (store: SqliteCatalogStore) =>
+        store.getSchemas(catalogId, releaseA, [schemaId]),
+      code: "RECORD_DIGEST_MISMATCH",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.recordTransportRowInvalid,
+    },
+    {
+      field: "catalog_id",
+      mutate: (database: DatabaseSync) => {
+        database.exec(`
+          PRAGMA foreign_keys = OFF;
+          UPDATE operations SET catalog_id = CAST(catalog_id AS BLOB);
+          UPDATE release_metadata SET catalog_id = CAST(catalog_id AS BLOB);
+        `);
+      },
+      run: (store: SqliteCatalogStore) =>
+        store.searchCandidates({ query: "item", limit: 1 }),
+      code: "RECORD_DIGEST_MISMATCH",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.recordTransportRowInvalid,
+    },
+    {
+      field: "release_id",
+      mutate: (database: DatabaseSync) => {
+        database.exec(`
+          PRAGMA foreign_keys = OFF;
+          UPDATE operations SET release_id = CAST(release_id AS BLOB);
+          UPDATE release_metadata SET release_id = CAST(release_id AS BLOB);
+        `);
+      },
+      run: (store: SqliteCatalogStore) =>
+        store.searchCandidates({ query: "item", limit: 1 }),
+      code: "RECORD_DIGEST_MISMATCH",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.recordTransportRowInvalid,
+    },
+    {
+      field: "record_id",
+      mutate: (database: DatabaseSync) => {
+        database.exec("PRAGMA ignore_check_constraints = ON;");
+        database
+          .prepare("UPDATE operations SET record_id = CAST(record_id AS BLOB)")
+          .run();
+      },
+      run: (store: SqliteCatalogStore) =>
+        store.searchCandidates({ query: "item", limit: 1 }),
+      code: "RECORD_DIGEST_MISMATCH",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.recordTransportRowInvalid,
+    },
+    {
+      field: "record_id",
+      mutate: (database: DatabaseSync) => {
+        database.exec("PRAGMA ignore_check_constraints = ON;");
+        database
+          .prepare("UPDATE operations SET record_id = ?")
+          .run("x".repeat(64 * 1024));
+      },
+      run: (store: SqliteCatalogStore) =>
+        store.searchCandidates({ query: "item", limit: 1 }),
+      code: "RECORD_DIGEST_MISMATCH",
+      message: CATALOG_STORE_PUBLIC_MESSAGES.storedOperationIdentifierInvalid,
+    },
+  ] as const;
+
+  for (const scenario of cases) {
+    const artifact = createV4Catalog();
+    const database = new DatabaseSync(artifact.path);
+    try {
+      scenario.mutate(database);
+    } finally {
+      database.close();
+    }
+
+    const originalGetBuiltinModule = process.getBuiltinModule;
+    const transported: unknown[] = [];
+    class InstrumentedDatabase {
+      readonly #database = new DatabaseSync(artifact.path, { readOnly: true });
+
+      prepare(sql: string) {
+        const statement = this.#database.prepare(sql);
+        return {
+          all: (...values: readonly unknown[]) => {
+            const rows = statement.all(...values) as Record<string, unknown>[];
+            for (const row of rows) {
+              if (Object.hasOwn(row, scenario.field))
+                transported.push(row[scenario.field]);
+            }
+            return rows;
+          },
+          get: (...values: readonly unknown[]) => statement.get(...values),
+          finalize: () =>
+            (statement as unknown as { finalize?: () => void }).finalize?.(),
+        };
+      }
+
+      close() {
+        this.#database.close();
+      }
+    }
+    process.getBuiltinModule = ((id: string) =>
+      id === "bun:sqlite"
+        ? { Database: InstrumentedDatabase }
+        : originalGetBuiltinModule?.(id)) as typeof process.getBuiltinModule;
+    try {
+      const store = new SqliteCatalogStore(artifact.path);
+      try {
+        await expect(scenario.run(store)).rejects.toMatchObject({
+          code: scenario.code,
+          message: scenario.message,
+        });
+        expect(transported).toEqual([null]);
+      } finally {
+        store.close();
+      }
+    } finally {
+      process.getBuiltinModule = originalGetBuiltinModule;
+      rmSync(artifact.directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("v4 SQLite accepts UTF-8 manifest and schema text at the exact byte boundary", async () => {
+  const artifact = createV4Catalog();
+  const database = new DatabaseSync(artifact.path);
+  const manifestJson = JSON.stringify({
+    format: 4,
+    contract: 1,
+    catalogId,
+    releaseId: releaseA,
+    note: "é".repeat(32),
+  });
+  const manifestBytes = Buffer.byteLength(manifestJson);
+  const schemaJson = JSON.stringify({
+    id: schemaId,
+    schema: { type: "object", description: "é".repeat(32) },
+  });
+  const schemaBytes = Buffer.byteLength(schemaJson);
+  expect(manifestBytes).toBeGreaterThan(manifestJson.length);
+  expect(schemaBytes).toBeGreaterThan(schemaJson.length);
+  try {
+    database
+      .prepare(
+        "UPDATE release_metadata SET manifest_json = ? WHERE catalog_id = ? AND release_id = ?",
+      )
+      .run(manifestJson, catalogId, releaseA);
+    database
+      .prepare(
+        "UPDATE schemas SET record_json = ? WHERE catalog_id = ? AND release_id = ? AND record_id = ?",
+      )
+      .run(schemaJson, catalogId, releaseA, schemaId);
+  } finally {
+    database.close();
+  }
+
+  const store = new SqliteCatalogStore(artifact.path, {
+    limits: {
+      maxManifestBytes: manifestBytes,
+      maxRecordBytes: schemaBytes,
+    },
+  });
+  try {
+    await expect(store.getManifest(catalogId, releaseA)).resolves.toMatchObject(
+      {
+        manifestJson,
+      },
+    );
+    await expect(
+      store.getSchemas(catalogId, releaseA, [schemaId]),
+    ).resolves.toMatchObject([{ record: { id: schemaId } }]);
+  } finally {
+    store.close();
+    rmSync(artifact.directory, { recursive: true, force: true });
+  }
+});
+
 const conformanceAdapter: ConformanceTestAdapter = {
   test,
   equal: (actual, expected, message) =>
@@ -1166,6 +1901,13 @@ function conformanceSqliteFactory(
     : createConformanceV4Catalog(
         scenario?.fault.startsWith("duplicate-") ?? false,
       );
+  if (
+    scenario?.fault === "candidate-malformed-operation-id" ||
+    scenario?.fault === "candidate-non-operation-id" ||
+    scenario?.fault === "candidate-cross-api"
+  ) {
+    poisonConformanceCandidate(artifact, scenario.fault);
+  }
   const store = new SqliteCatalogStore(artifact.path);
   return {
     fixture: RUNTIME_CONFORMANCE_FIXTURE,

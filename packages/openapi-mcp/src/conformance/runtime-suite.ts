@@ -22,6 +22,10 @@ export type RuntimeConformanceDuplicateFault =
   | "duplicate-manifest"
   | "duplicate-operation"
   | "duplicate-schemas";
+export type RuntimeConformanceCandidateFault =
+  | "candidate-malformed-operation-id"
+  | "candidate-non-operation-id"
+  | "candidate-cross-api";
 export type RuntimeConformanceDriverFault =
   | "driver-candidates"
   | "driver-manifest"
@@ -29,6 +33,7 @@ export type RuntimeConformanceDriverFault =
   | "driver-schemas";
 export type RuntimeConformanceScenario =
   | { readonly fault: RuntimeConformanceDuplicateFault }
+  | { readonly fault: RuntimeConformanceCandidateFault }
   | {
       readonly fault: RuntimeConformanceDriverFault;
       readonly injectedDriverError: string;
@@ -183,6 +188,57 @@ export function runRuntimeConformanceSuite(
           }),
         "RECORD_DIGEST_MISMATCH",
         CATALOG_STORE_PUBLIC_MESSAGES.searchTransportDuplicateRows,
+      );
+    },
+  );
+  useFault(
+    "catalog rejects malformed candidate transport rows",
+    { fault: "candidate-malformed-operation-id" },
+    async ({ store, fixture }) => {
+      await assertPublicError(
+        adapter,
+        () =>
+          store.searchCandidates({
+            query: fixture.searchQuery,
+            api: fixture.api,
+            limit: 1,
+          }),
+        "RECORD_DIGEST_MISMATCH",
+        CATALOG_STORE_PUBLIC_MESSAGES.storedOperationIdentifierInvalid,
+      );
+    },
+  );
+  useFault(
+    "catalog rejects candidate transport rows with non-operation IDs",
+    { fault: "candidate-non-operation-id" },
+    async ({ store, fixture }) => {
+      await assertPublicError(
+        adapter,
+        () =>
+          store.searchCandidates({
+            query: fixture.searchQuery,
+            api: fixture.api,
+            limit: 1,
+          }),
+        "RECORD_DIGEST_MISMATCH",
+        CATALOG_STORE_PUBLIC_MESSAGES.storedOperationIdentifierInvalid,
+      );
+    },
+  );
+  useFault(
+    "catalog rejects cross-API candidate transport rows",
+    { fault: "candidate-cross-api" },
+    async ({ store, fixture }) => {
+      await assertPublicError(
+        adapter,
+        () =>
+          store.searchCandidates({
+            query: fixture.searchQuery,
+            api: fixture.api,
+            limit: 1,
+          }),
+        "RECORD_DIGEST_MISMATCH",
+        CATALOG_STORE_PUBLIC_MESSAGES.searchTransportOutsideRequestedApi,
       );
     },
   );

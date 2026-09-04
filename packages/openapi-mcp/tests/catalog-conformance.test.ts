@@ -33,6 +33,28 @@ test("the exported conformance fixture is deeply frozen", () => {
   expect(Object.isFrozen(fixture.schemasA[0]?.record.schema)).toBe(true);
 });
 
+test("the shared suite registers candidate transport poison scenarios", () => {
+  const registered: string[] = [];
+  const registrationAdapter: ConformanceTestAdapter = {
+    ...adapter,
+    test: (name) => {
+      registered.push(name);
+    },
+  };
+
+  runRuntimeConformanceSuite(inMemoryFactory, {
+    testAdapter: registrationAdapter,
+  });
+
+  expect(registered).toEqual(
+    expect.arrayContaining([
+      "catalog rejects malformed candidate transport rows",
+      "catalog rejects candidate transport rows with non-operation IDs",
+      "catalog rejects cross-API candidate transport rows",
+    ]),
+  );
+});
+
 function invalidIdentity(message: string): never {
   throw new OpenApiMcpError("INPUT_INVALID", message);
 }
@@ -243,6 +265,24 @@ function inMemoryFactory(
             CATALOG_STORE_PUBLIC_MESSAGES.searchTransportDuplicateRows,
           );
         }
+        if (scenario?.fault === "candidate-malformed-operation-id") {
+          throw new OpenApiMcpError(
+            "RECORD_DIGEST_MISMATCH",
+            CATALOG_STORE_PUBLIC_MESSAGES.storedOperationIdentifierInvalid,
+          );
+        }
+        if (scenario?.fault === "candidate-non-operation-id") {
+          throw new OpenApiMcpError(
+            "RECORD_DIGEST_MISMATCH",
+            CATALOG_STORE_PUBLIC_MESSAGES.storedOperationIdentifierInvalid,
+          );
+        }
+        if (scenario?.fault === "candidate-cross-api") {
+          throw new OpenApiMcpError(
+            "RECORD_DIGEST_MISMATCH",
+            CATALOG_STORE_PUBLIC_MESSAGES.searchTransportOutsideRequestedApi,
+          );
+        }
         return fixture.expectedCandidates
           .filter(
             () => snapshot.api === undefined || snapshot.api === fixture.api,
@@ -326,5 +366,51 @@ function inMemoryFactory(
     },
   };
 }
+
+test("the shared suite fails an adapter that accepts cross-API candidates", async () => {
+  let crossApiCheck: (() => void | Promise<void>) | undefined;
+  let observedApi: unknown;
+  const registrationAdapter: ConformanceTestAdapter = {
+    ...adapter,
+    test: (name, run) => {
+      if (name === "catalog rejects cross-API candidate transport rows") {
+        crossApiCheck = run;
+      }
+    },
+  };
+  const nonconformingFactory = (
+    scenario?: RuntimeConformanceScenario,
+  ): CatalogStoreFactoryResult => {
+    const value = inMemoryFactory();
+    if (scenario?.fault !== "candidate-cross-api") return value;
+    return {
+      ...value,
+      store: {
+        ...value.store,
+        async searchCandidates(query) {
+          observedApi = query.api;
+          return [
+            {
+              catalogId: fixture.catalogId,
+              releaseId: fixture.releaseA,
+              operationId:
+                "operation:other-api:get-item" as typeof fixture.operationId,
+            },
+          ];
+        },
+      },
+    };
+  };
+
+  runRuntimeConformanceSuite(nonconformingFactory, {
+    testAdapter: registrationAdapter,
+  });
+
+  const check = crossApiCheck;
+  if (check === undefined)
+    throw new Error("Cross-API conformance check missing");
+  await expect(Promise.resolve().then(check)).rejects.toThrow();
+  expect(observedApi).toBe(fixture.api);
+});
 
 runRuntimeConformanceSuite(inMemoryFactory, { testAdapter: adapter });
