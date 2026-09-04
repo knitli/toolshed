@@ -82,6 +82,7 @@ export type { RuntimeLimits } from "./versions.ts";
 export {
   ARTIFACT_FORMAT_VERSION,
   DEFAULT_RUNTIME_LIMITS,
+  MAX_SEARCH_QUERY_BYTES,
   PREPARED_CALL_VERSION,
   RUNTIME_CONTRACT_VERSION,
   resolveRuntimeLimits,

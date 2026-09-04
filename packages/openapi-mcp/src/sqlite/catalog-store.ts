@@ -20,6 +20,7 @@ import {
   type TypedOperationId,
   type TypedSchemaId,
 } from "../runtime/index.ts";
+import { MAX_SEARCH_QUERY_BYTES } from "../runtime/versions.ts";
 
 const SCHEMA_PROBE = `SELECT name AS name, type AS type
 FROM sqlite_schema
@@ -133,9 +134,13 @@ function snapshotLegacySearchQuery(
       (api !== undefined && (!api.enumerable || !("value" in api)))
     )
       throw new Error();
+    const queryValue = query.value;
     if (
-      typeof query.value !== "string" ||
-      query.value.length === 0 ||
+      typeof queryValue !== "string" ||
+      queryValue.length > MAX_SEARCH_QUERY_BYTES ||
+      new TextEncoder().encode(queryValue).byteLength >
+        MAX_SEARCH_QUERY_BYTES ||
+      queryValue.length === 0 ||
       !Number.isSafeInteger(limit.value) ||
       limit.value < 1 ||
       limit.value > limits.maxSearchResults
@@ -147,7 +152,7 @@ function snapshotLegacySearchQuery(
       apiValue = api.value as string;
     }
     return {
-      query: query.value,
+      query: queryValue,
       api: apiValue,
       limit: limit.value,
     };
@@ -163,6 +168,30 @@ function searchApi(value: unknown): void {
   } catch {
     throw new OpenApiMcpError("INPUT_INVALID", "Search API is invalid");
   }
+}
+
+function snapshotSqliteRuntimeLimits(
+  options: SqliteCatalogStoreOptions,
+): RuntimeLimits {
+  let overrides: Partial<RuntimeLimits> | undefined;
+  try {
+    if (
+      typeof options !== "object" ||
+      options === null ||
+      Array.isArray(options)
+    )
+      throw new Error();
+    const limits = Object.getOwnPropertyDescriptor(options, "limits");
+    if (limits !== undefined) {
+      if (!limits.enumerable || !("value" in limits)) throw new Error();
+      overrides = limits.value as Partial<RuntimeLimits> | undefined;
+    }
+  } catch {
+    throw new RangeError(
+      "Runtime limits overrides must be an exact plain data object",
+    );
+  }
+  return resolveRuntimeLimits(overrides);
 }
 function exactly(rows: unknown[], name: string): boolean {
   return (
@@ -278,9 +307,9 @@ export class SqliteCatalogStore implements CatalogStore {
   #limits: RuntimeLimits;
 
   constructor(path: string, options: SqliteCatalogStoreOptions = {}) {
+    this.#limits = snapshotSqliteRuntimeLimits(options);
     let database: SqliteDatabase | undefined;
     try {
-      this.#limits = resolveRuntimeLimits(options.limits);
       database = openReadOnlyDatabase(path);
       const tables = all(database, SCHEMA_PROBE);
       if (exactly(tables, "release_metadata")) {
@@ -345,6 +374,8 @@ export class SqliteCatalogStore implements CatalogStore {
             ? (row as Record<string, unknown>).qualified_id
             : undefined;
         if (typeof qualified !== "string") throw new Error();
+        if (snapshot.api !== null && !qualified.startsWith(`${snapshot.api}:`))
+          throw new Error();
         const parsed = parseTypedRecordId(`operation:${qualified}`);
         if (!parsed.startsWith("operation:") || seen.has(parsed))
           throw new Error();

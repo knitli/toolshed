@@ -535,6 +535,52 @@ describe("structural D1 CatalogStore", () => {
     expect(d1.calls).toEqual([]);
   });
 
+  test("accepts FTS queries at the 4 KiB UTF-8 boundary", async () => {
+    for (const query of ["a".repeat(4 * 1024), "\u{1F98D}".repeat(1024)]) {
+      const d1 = new StrictD1();
+      d1.enqueue(SQL.search, [searchRow()]);
+      await expect(
+        createD1CatalogStore(d1).searchCandidates({ query, limit: 1 }),
+      ).resolves.toEqual([
+        { catalogId: catalog, releaseId: release, operationId },
+      ]);
+      expect(d1.calls).toHaveLength(1);
+      expect(d1.calls[0]?.bindings).toEqual([query, null, null, 1]);
+    }
+  });
+
+  test("rejects FTS queries over 4 KiB before preparing D1", async () => {
+    for (const query of [
+      "a".repeat(4 * 1024 + 1),
+      `${"\u{1F98D}".repeat(1024)}a`,
+    ]) {
+      const d1 = new StrictD1();
+      await expectPublicError(
+        () => createD1CatalogStore(d1).searchCandidates({ query, limit: 1 }),
+        "INPUT_INVALID",
+        undefined,
+        CATALOG_STORE_PUBLIC_MESSAGES.searchQueryInvalid,
+      );
+      expect(d1.calls).toEqual([]);
+    }
+  });
+
+  test("resolves partial limits and rejects a search-limit relaxation", async () => {
+    const d1 = new StrictD1();
+    d1.enqueue(SQL.search, [searchRow()]);
+    await expect(
+      createD1CatalogStore(d1, { maxSearchResults: 1 }).searchCandidates({
+        query: "item",
+        limit: 1,
+      }),
+    ).resolves.toEqual([
+      { catalogId: catalog, releaseId: release, operationId },
+    ]);
+    expect(() =>
+      createD1CatalogStore(new StrictD1(), { maxSearchResults: 51 }),
+    ).toThrow(RangeError);
+  });
+
   test("rejects accessor-backed and non-exact search queries before D1 access", async () => {
     let accessorReads = 0;
     const accessorQuery = Object.defineProperties(

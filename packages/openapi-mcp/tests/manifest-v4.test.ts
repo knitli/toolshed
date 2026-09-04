@@ -21,6 +21,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   type CatalogId,
   canonicalJson,
+  DEFAULT_RUNTIME_LIMITS,
   type GenerationState,
   type GenerationStore,
   type GenerationTransition,
@@ -29,6 +30,7 @@ import {
   type OperationRecordV4,
   type ReleaseManifestV4,
   type RollbackAuthorization,
+  type RuntimeLimits,
   type Sha256,
   type StoredRecord,
   sha256,
@@ -518,7 +520,11 @@ test("enforces manifest bytes, record count, and nesting depth", async () => {
     admitManifest(envelope, trust, new MemoryGenerationStore(), {
       maxManifestRecords: 0,
     } as never),
-  ).rejects.toMatchObject({ code: "MANIFEST_INVALID" });
+  ).rejects.toThrow(
+    new RangeError(
+      "Runtime limit maxManifestRecords must only lower its default",
+    ),
+  );
   const deep = { ...value, source: { ...value.source, uri: "x" } };
   const manifestJson = canonicalJson(deep);
   const deepEnvelope = {
@@ -746,22 +752,86 @@ test("rollback exact shape rejects hidden properties", async () => {
 });
 
 test("configured manifest limits are honored through detachment before CAS", async () => {
-  const { release, trust, value } = await fixture();
-  const records: Record<string, Sha256> = Object.create(null);
-  for (let index = 0; index <= 100_000; index += 1) {
-    records[`operation:tiny:r${String(index).padStart(6, "0")}`] = digestA;
-  }
-  const large = { ...value, records } as ReleaseManifestV4;
-  const envelope = await signedEnvelope(large, release);
+  const { envelope, trust } = await fixture();
   const generations = new MemoryGenerationStore();
   const maxManifestBytes = encoder.encode(envelope.manifestJson).byteLength + 1;
   await expect(
     admitManifest(envelope, trust, generations, {
       maxManifestBytes,
-      maxManifestRecords: 100_001,
-    } as never),
+      maxManifestRecords: 1,
+    }),
   ).resolves.toMatchObject({ manifest: { generation: 7 } });
   expect(generations.accepts).toBe(1);
+});
+
+test("public manifest and record entry points resolve partial limits and reject invalid overrides", async () => {
+  const { envelope, trust } = await fixture();
+  const manifestOverrides = {
+    maxManifestBytes: DEFAULT_RUNTIME_LIMITS.maxManifestBytes,
+  } satisfies Partial<RuntimeLimits>;
+  await expect(
+    admitManifest(
+      envelope,
+      trust,
+      new MemoryGenerationStore(),
+      manifestOverrides,
+    ),
+  ).resolves.toMatchObject({ manifest: { generation: 7 } });
+  await expect(
+    admitManifest(envelope, trust, new MemoryGenerationStore(), {
+      maxManifestBytes: 0,
+    }),
+  ).rejects.toThrow(
+    new RangeError(
+      "Runtime limit maxManifestBytes must only lower its default",
+    ),
+  );
+
+  const admitted = await admitFixture();
+  const record = operation();
+  const row = {
+    id: record.id,
+    logicalDigest: await operationDigest(record),
+    record,
+  };
+  const recordOverrides = {
+    maxRecordBytes: DEFAULT_RUNTIME_LIMITS.maxRecordBytes,
+  } satisfies Partial<RuntimeLimits>;
+  await expect(
+    verifyStoredRecord(admitted, row, recordOverrides),
+  ).resolves.toEqual(record);
+  await expect(
+    verifyStoredRecord(admitted, row, { maxRecordBytes: 0 }),
+  ).rejects.toThrow(
+    new RangeError("Runtime limit maxRecordBytes must only lower its default"),
+  );
+});
+
+test("public manifest and record entry points normalize malformed limit containers", async () => {
+  const { envelope, trust } = await fixture();
+  const admitted = await admitFixture();
+  const record = operation();
+  const row = {
+    id: record.id,
+    logicalDigest: await operationDigest(record),
+    record,
+  };
+  const poisonedProxy = new Proxy(
+    {},
+    {
+      ownKeys: () => {
+        throw new Error("limits-entrypoint-secret");
+      },
+    },
+  );
+  const malformedMessage =
+    "Runtime limits overrides must be an exact plain data object";
+  await expect(
+    admitManifest(envelope, trust, new MemoryGenerationStore(), [] as never),
+  ).rejects.toThrow(new RangeError(malformedMessage));
+  await expect(
+    verifyStoredRecord(admitted, row, poisonedProxy as never),
+  ).rejects.toThrow(new RangeError(malformedMessage));
 });
 
 test("rollback rejects expiry, replay, binding mismatches, malformed signature, and ordinary release keys", async () => {

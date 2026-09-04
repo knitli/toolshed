@@ -29,7 +29,11 @@ import type {
   TypedOperationId,
   TypedSchemaId,
 } from "../src/runtime/index.ts";
-import { CATALOG_STORE_PUBLIC_MESSAGES } from "../src/runtime/index.ts";
+import {
+  CATALOG_STORE_PUBLIC_MESSAGES,
+  DEFAULT_RUNTIME_LIMITS,
+} from "../src/runtime/index.ts";
+import { MAX_SEARCH_QUERY_BYTES } from "../src/runtime/versions.ts";
 import { SqliteCatalogStore } from "../src/sqlite/index.ts";
 
 const catalogId = "catalog" as CatalogId;
@@ -322,6 +326,111 @@ test("closing a v4 store is idempotent and disables every catalog operation", as
   }
 });
 
+test("constructor resolves partial limits and preserves invalid limit errors before probing", async () => {
+  const artifact = createV4Catalog();
+  try {
+    const store = new SqliteCatalogStore(artifact.path, {
+      limits: { maxSearchResults: 1 },
+    });
+    try {
+      await expect(
+        store.searchCandidates({ query: "item", api: "api", limit: 1 }),
+      ).resolves.toEqual([{ catalogId, releaseId: releaseA, operationId }]);
+      await expect(
+        store.searchCandidates({ query: "item", api: "api", limit: 2 }),
+      ).rejects.toMatchObject({ code: "INPUT_INVALID" });
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(artifact.directory, { recursive: true, force: true });
+  }
+
+  const originalGetBuiltinModule = process.getBuiltinModule;
+  let opens = 0;
+  class ProbeMustNotOpen {
+    constructor() {
+      opens += 1;
+    }
+  }
+  process.getBuiltinModule = ((id: string) =>
+    id === "bun:sqlite"
+      ? { Database: ProbeMustNotOpen }
+      : originalGetBuiltinModule?.(id)) as typeof process.getBuiltinModule;
+  try {
+    for (const [limits, message] of [
+      [
+        { maxSearchResults: DEFAULT_RUNTIME_LIMITS.maxSearchResults + 1 },
+        "Runtime limit maxSearchResults must only lower its default",
+      ],
+      [
+        { unexpected: 1 },
+        "Runtime limits overrides must be an exact plain data object",
+      ],
+      [[], "Runtime limits overrides must be an exact plain data object"],
+    ] as const) {
+      expect(
+        () =>
+          new SqliteCatalogStore("unused.sqlite", { limits: limits as never }),
+      ).toThrow(new RangeError(message));
+    }
+    expect(opens).toBe(0);
+  } finally {
+    process.getBuiltinModule = originalGetBuiltinModule;
+  }
+});
+
+test("constructor redacts hostile outer limit options before probing", () => {
+  const originalGetBuiltinModule = process.getBuiltinModule;
+  let opens = 0;
+  class ProbeMustNotOpen {
+    constructor() {
+      opens += 1;
+    }
+  }
+  const secret = "outer-options-limit-secret";
+  const getterOptions = Object.defineProperty({}, "limits", {
+    enumerable: true,
+    get: () => {
+      throw new Error(secret);
+    },
+  });
+  const proxyOptions = new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error(secret);
+      },
+      getOwnPropertyDescriptor: () => {
+        throw new Error(secret);
+      },
+    },
+  );
+  process.getBuiltinModule = ((id: string) =>
+    id === "bun:sqlite"
+      ? { Database: ProbeMustNotOpen }
+      : originalGetBuiltinModule?.(id)) as typeof process.getBuiltinModule;
+  try {
+    for (const options of [getterOptions, proxyOptions]) {
+      let caught: unknown;
+      try {
+        new SqliteCatalogStore("unused.sqlite", options as never);
+      } catch (error) {
+        caught = error;
+      }
+      expect(opens).toBe(0);
+      expect(caught).toEqual(
+        new RangeError(
+          "Runtime limits overrides must be an exact plain data object",
+        ),
+      );
+      expect((caught as Error).message).not.toContain(secret);
+    }
+  } finally {
+    process.getBuiltinModule = originalGetBuiltinModule;
+  }
+});
+
 test("v4 ignores hostile legacy identity options without invoking accessors", async () => {
   const artifact = createV4Catalog();
   let accessorReads = 0;
@@ -430,6 +539,37 @@ test("copied frozen v3 catalog is inventory-only under an explicit legacy identi
   rmSync(artifact.directory, { recursive: true, force: true });
 });
 
+test("v3 inventory rejects a cross-API qualified operation returned by FTS", async () => {
+  const artifact = copiedV3Catalog();
+  const database = new DatabaseSync(artifact.path);
+  database
+    .prepare("UPDATE operations SET qualified_id = ? WHERE qualified_id = ?")
+    .run(
+      "foreign:widgets.widget.DeleteWidget",
+      "tiny:widgets.widget.DeleteWidget",
+    );
+  database.close();
+  const store = new SqliteCatalogStore(artifact.path, {
+    legacyIdentity: {
+      catalogId: "legacy-catalog" as CatalogId,
+      releaseId: "legacy-release" as ReleaseId,
+    },
+  });
+  try {
+    await expect(
+      store.searchCandidates({ query: "widget", api: "tiny", limit: 1 }),
+    ).rejects.toMatchObject({
+      code: "INPUT_INVALID",
+      details: {},
+      message: "Search expression is invalid",
+      retryable: false,
+    });
+  } finally {
+    store.close();
+    rmSync(artifact.directory, { recursive: true, force: true });
+  }
+});
+
 test("v3 inventory search fails closed without explicit legacy identity", async () => {
   const artifact = copiedV3Catalog();
   try {
@@ -478,6 +618,105 @@ test("v3 inventory search classifies malformed caller API filters as input", asy
   } finally {
     store.close();
     rmSync(artifact.directory, { recursive: true, force: true });
+  }
+});
+
+test("v3 inventory enforces the UTF-8 query limit before preparing FTS or encoding huge input", async () => {
+  const originalGetBuiltinModule = process.getBuiltinModule;
+  const prepared: string[] = [];
+  class InstrumentedDatabase {
+    prepare(sql: string) {
+      prepared.push(sql);
+      const rows = sql.includes("sqlite_schema")
+        ? [{ name: "meta", type: "table" }]
+        : sql.includes("FROM meta")
+          ? [{ value: "3" }]
+          : [];
+      return {
+        all() {
+          return rows;
+        },
+        get() {
+          return undefined;
+        },
+        finalize() {},
+      };
+    }
+
+    close() {}
+  }
+
+  process.getBuiltinModule = ((id: string) =>
+    id === "bun:sqlite"
+      ? { Database: InstrumentedDatabase }
+      : originalGetBuiltinModule?.(id)) as typeof process.getBuiltinModule;
+  try {
+    const store = new SqliteCatalogStore("unused.sqlite", {
+      legacyIdentity: { catalogId, releaseId: releaseA },
+    });
+    try {
+      await expect(
+        store.searchCandidates({
+          query: "x".repeat(MAX_SEARCH_QUERY_BYTES),
+          limit: 1,
+        }),
+      ).resolves.toEqual([]);
+      await expect(
+        store.searchCandidates({
+          query: "é".repeat(MAX_SEARCH_QUERY_BYTES / 2),
+          limit: 1,
+        }),
+      ).resolves.toEqual([]);
+      expect(
+        prepared.filter((sql) => sql.includes("FROM operations_fts")),
+      ).toHaveLength(2);
+      await expect(
+        store.searchCandidates({
+          query: "x".repeat(MAX_SEARCH_QUERY_BYTES + 1),
+          limit: 1,
+        }),
+      ).rejects.toMatchObject({
+        code: "INPUT_INVALID",
+        details: {},
+        message: "Search input is invalid",
+        retryable: false,
+      });
+      expect(
+        prepared.filter((sql) => sql.includes("FROM operations_fts")),
+      ).toHaveLength(2);
+      const NativeTextEncoder = globalThis.TextEncoder;
+      let encodes = 0;
+      class TrackingTextEncoder extends NativeTextEncoder {
+        override encode(input?: string): Uint8Array {
+          encodes += 1;
+          return super.encode(input);
+        }
+      }
+      globalThis.TextEncoder = TrackingTextEncoder;
+      try {
+        await expect(
+          store.searchCandidates({
+            query: "x".repeat(MAX_SEARCH_QUERY_BYTES * 1024),
+            limit: 1,
+          }),
+        ).rejects.toMatchObject({
+          code: "INPUT_INVALID",
+          details: {},
+          message: "Search input is invalid",
+          retryable: false,
+        });
+        expect(encodes).toBe(0);
+        expect(
+          prepared.filter((sql) => sql.includes("FROM operations_fts")),
+        ).toHaveLength(2);
+      } finally {
+        globalThis.TextEncoder = NativeTextEncoder;
+      }
+    } finally {
+      store.close();
+    }
+  } finally {
+    process.getBuiltinModule = originalGetBuiltinModule;
   }
 });
 

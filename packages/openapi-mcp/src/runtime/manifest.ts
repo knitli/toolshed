@@ -15,7 +15,7 @@ import type {
   Sha256,
   TypedRecordId,
 } from "./types.ts";
-import { DEFAULT_RUNTIME_LIMITS, type RuntimeLimits } from "./versions.ts";
+import { type RuntimeLimits, resolveRuntimeLimits } from "./versions.ts";
 
 const manifestSignatureDomain = "knitli.openapi-mcp.release-manifest.v4\0";
 const manifestDigestDomain = "knitli.openapi-mcp.release-manifest.v4";
@@ -550,12 +550,9 @@ export async function admitManifest(
   envelope: ManifestEnvelope,
   trust: ManifestTrust,
   generations: GenerationStore,
-  limitOverrides: RuntimeLimits = DEFAULT_RUNTIME_LIMITS,
+  limitOverrides?: Partial<RuntimeLimits>,
 ): Promise<AdmittedManifest> {
-  const limits = {
-    ...DEFAULT_RUNTIME_LIMITS,
-    ...limitOverrides,
-  } as RuntimeLimits;
+  const limits = resolveRuntimeLimits(limitOverrides);
   if (!isObject(envelope))
     throw manifestInvalid("manifest envelope must be an object");
   const envelopeKeys = Object.hasOwn(envelope, "rollback")

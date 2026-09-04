@@ -15,7 +15,7 @@ import type {
   TypedSchemaId,
 } from "./types.ts";
 import {
-  DEFAULT_RUNTIME_LIMITS,
+  MAX_SEARCH_QUERY_BYTES,
   type RuntimeLimits,
   resolveRuntimeLimits,
 } from "./versions.ts";
@@ -461,6 +461,11 @@ function snapshotSearchQuery(
     if (typeof query.value !== "string" || query.value.length === 0)
       throw input(CATALOG_STORE_PUBLIC_MESSAGES.searchQueryInvalid);
     if (
+      query.value.length > MAX_SEARCH_QUERY_BYTES ||
+      new TextEncoder().encode(query.value).byteLength > MAX_SEARCH_QUERY_BYTES
+    )
+      throw input(CATALOG_STORE_PUBLIC_MESSAGES.searchQueryInvalid);
+    if (
       !Number.isSafeInteger(limit.value) ||
       limit.value < 1 ||
       limit.value > limits.maxSearchResults
@@ -707,8 +712,5 @@ export function createD1CatalogStore(
   binding: D1CatalogDatabase,
   limits?: Partial<RuntimeLimits>,
 ): CatalogStore {
-  return new D1CatalogStore(
-    binding,
-    limits ? resolveRuntimeLimits(limits) : DEFAULT_RUNTIME_LIMITS,
-  );
+  return new D1CatalogStore(binding, resolveRuntimeLimits(limits));
 }

@@ -11,7 +11,7 @@ import type {
   StoredRecord,
   TypedRecordId,
 } from "./types.ts";
-import { DEFAULT_RUNTIME_LIMITS, type RuntimeLimits } from "./versions.ts";
+import { type RuntimeLimits, resolveRuntimeLimits } from "./versions.ts";
 
 const operationKeys = [
   "advisory",
@@ -522,12 +522,9 @@ export async function verifyStoredRecord<
 >(
   admitted: AdmittedManifest,
   rowValue: StoredRecord<T>,
-  limitOverrides: RuntimeLimits = DEFAULT_RUNTIME_LIMITS,
+  limitOverrides?: Partial<RuntimeLimits>,
 ): Promise<Readonly<T>> {
-  const limits = {
-    ...DEFAULT_RUNTIME_LIMITS,
-    ...limitOverrides,
-  } as RuntimeLimits;
+  const limits = resolveRuntimeLimits(limitOverrides);
   const row = extractStoredRecord(rowValue);
   let wrapperId: TypedRecordId;
   try {

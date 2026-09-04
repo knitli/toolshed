@@ -7,6 +7,9 @@ export const ARTIFACT_FORMAT_VERSION = 4 as const;
 /** Version of the credential-free prepared-call representation. */
 export const PREPARED_CALL_VERSION = 1 as const;
 
+/** Fixed UTF-8 envelope for a single catalog search query. */
+export const MAX_SEARCH_QUERY_BYTES = 4 * 1024;
+
 /** Application security and availability limits for every runtime adapter. */
 export interface RuntimeLimits {
   readonly maxManifestBytes: number;
@@ -25,7 +28,7 @@ export interface RuntimeLimits {
   readonly requestDeadlineMs: number;
 }
 
-export const DEFAULT_RUNTIME_LIMITS = {
+export const DEFAULT_RUNTIME_LIMITS = Object.freeze({
   maxManifestBytes: 8 * 1024 * 1024,
   maxManifestRecords: 100_000,
   maxRecordBytes: 1 * 1024 * 1024,
@@ -40,7 +43,14 @@ export const DEFAULT_RUNTIME_LIMITS = {
   maxPaginationBytes: 16 * 1024 * 1024,
   maxRedirects: 3,
   requestDeadlineMs: 30_000,
-} as const satisfies RuntimeLimits;
+} as const satisfies RuntimeLimits);
+
+const malformedOverridesMessage =
+  "Runtime limits overrides must be an exact plain data object";
+
+function malformedOverrides(): RangeError {
+  return new RangeError(malformedOverridesMessage);
+}
 
 /**
  * Apply operator limits without allowing a caller to relax the signed-runtime
@@ -54,10 +64,46 @@ export function resolveRuntimeLimits(
     ...DEFAULT_RUNTIME_LIMITS,
   };
 
-  for (const key of Object.keys(overrides) as (keyof RuntimeLimits)[]) {
-    const value = overrides[key];
+  let supplied: ReadonlyArray<readonly [keyof RuntimeLimits, unknown]>;
+  try {
+    if (
+      overrides === null ||
+      typeof overrides !== "object" ||
+      Array.isArray(overrides)
+    ) {
+      throw malformedOverrides();
+    }
+
+    const prototype = Object.getPrototypeOf(overrides);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw malformedOverrides();
+    }
+
+    supplied = Reflect.ownKeys(overrides).map((candidate) => {
+      if (
+        typeof candidate !== "string" ||
+        !Object.hasOwn(DEFAULT_RUNTIME_LIMITS, candidate)
+      ) {
+        throw malformedOverrides();
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(overrides, candidate);
+      if (
+        descriptor === undefined ||
+        !descriptor.enumerable ||
+        !("value" in descriptor)
+      ) {
+        throw malformedOverrides();
+      }
+      return [candidate as keyof RuntimeLimits, descriptor.value] as const;
+    });
+  } catch {
+    throw malformedOverrides();
+  }
+
+  for (const [key, value] of supplied) {
     if (
       value === undefined ||
+      typeof value !== "number" ||
       !Number.isSafeInteger(value) ||
       value < 1 ||
       value > DEFAULT_RUNTIME_LIMITS[key]
@@ -67,5 +113,5 @@ export function resolveRuntimeLimits(
     resolved[key] = value;
   }
 
-  return resolved;
+  return Object.freeze(resolved);
 }
