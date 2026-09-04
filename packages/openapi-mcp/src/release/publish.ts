@@ -40,6 +40,7 @@ interface CompiledState {
 export interface PathIdentity {
   readonly dev: bigint;
   readonly ino: bigint;
+  readonly birthtimeNs: bigint;
 }
 
 export interface CompiledReleaseOwnership {
@@ -82,15 +83,29 @@ function stateFor(compiled: CompiledRelease): CompiledState {
   return state;
 }
 
-function identityOf(stat: { dev: bigint; ino: bigint }): PathIdentity {
-  return { dev: stat.dev, ino: stat.ino };
+export function pathIdentityFromStats(stat: {
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly birthtimeNs: bigint;
+}): PathIdentity {
+  if (stat.birthtimeNs <= 0n)
+    throw new Error("path identity requires a nonzero birthtimeNs");
+  return {
+    dev: stat.dev,
+    ino: stat.ino,
+    birthtimeNs: stat.birthtimeNs,
+  };
 }
 
-function sameIdentity(
-  stat: { dev: bigint; ino: bigint },
-  identity: PathIdentity,
+export function samePathIdentity(
+  left: PathIdentity,
+  right: PathIdentity,
 ): boolean {
-  return stat.dev === identity.dev && stat.ino === identity.ino;
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.birthtimeNs === right.birthtimeNs
+  );
 }
 
 export async function capturePathIdentity(
@@ -104,7 +119,7 @@ export async function capturePathIdentity(
     throw new Error(`compiler-created ${kind} is unsafe`);
   if (kind === "file" && metadata.nlink !== 1n)
     throw new Error("compiler-created file must have one link");
-  return identityOf(metadata);
+  return pathIdentityFromStats(metadata);
 }
 
 async function ownedMetadata(
@@ -115,7 +130,9 @@ async function ownedMetadata(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   });
-  return metadata && sameIdentity(metadata, identity) ? metadata : null;
+  return metadata && samePathIdentity(pathIdentityFromStats(metadata), identity)
+    ? metadata
+    : null;
 }
 
 async function requireOwnedFile(
@@ -195,7 +212,7 @@ async function hashOwnedStageFile(
     if (
       !before.isFile() ||
       before.nlink !== 1n ||
-      !sameIdentity(before, identity) ||
+      !samePathIdentity(pathIdentityFromStats(before), identity) ||
       before.size !== BigInt(expectedSize)
     )
       throw new Error(
@@ -236,7 +253,7 @@ async function hashOwnedStageFile(
     if (
       !after.isFile() ||
       after.nlink !== 1n ||
-      !sameIdentity(after, identity) ||
+      !samePathIdentity(pathIdentityFromStats(after), identity) ||
       after.size !== BigInt(expectedSize)
     )
       throw new Error(
@@ -305,7 +322,10 @@ async function syncFile(path: string, identity: PathIdentity): Promise<void> {
   const handle = await open(path, "r");
   try {
     const metadata = await handle.stat({ bigint: true });
-    if (!metadata.isFile() || !sameIdentity(metadata, identity))
+    if (
+      !metadata.isFile() ||
+      !samePathIdentity(pathIdentityFromStats(metadata), identity)
+    )
       throw new Error("compiled release staged file identity was lost");
     await handle.sync();
   } finally {
@@ -325,7 +345,10 @@ async function syncOwnedDirectory(
   );
   try {
     const metadata = await handle.stat({ bigint: true });
-    if (!metadata.isDirectory() || !sameIdentity(metadata, identity))
+    if (
+      !metadata.isDirectory() ||
+      !samePathIdentity(pathIdentityFromStats(metadata), identity)
+    )
       throw new Error(
         "release target directory identity or ownership was lost",
       );
@@ -438,7 +461,7 @@ export async function publishReleaseWithCheckpoint(
       (lockStat.mode & 0o777n) !== 0o600n
     )
       throw new Error("release publication lock is unsafe");
-    lockIdentity = identityOf(lockStat);
+    lockIdentity = pathIdentityFromStats(lockStat);
     await requireLock(lockPath, lockIdentity);
 
     const targets = [
@@ -487,7 +510,7 @@ export async function publishReleaseWithCheckpoint(
       if (
         !destinationMetadata.isFile() ||
         destinationMetadata.isSymbolicLink() ||
-        !sameIdentity(destinationMetadata, identity)
+        !samePathIdentity(pathIdentityFromStats(destinationMetadata), identity)
       )
         throw new Error("published target identity is unsafe");
       createdTargets.set(destination, identity);

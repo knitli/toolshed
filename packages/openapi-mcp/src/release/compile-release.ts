@@ -68,7 +68,9 @@ import {
   capturePathIdentity,
   cleanupOwnedStage,
   type PathIdentity,
+  pathIdentityFromStats,
   registerCompiledRelease,
+  samePathIdentity,
 } from "./publish.ts";
 import {
   normalizeHttpsUri,
@@ -939,7 +941,7 @@ async function requireStageDirectory(
   const current = await capturePathIdentity(path, "directory").catch(
     () => null,
   );
-  if (!current || current.dev !== identity.dev || current.ino !== identity.ino)
+  if (!current || !samePathIdentity(current, identity))
     throw new Error("compiler stage directory identity was lost");
 }
 
@@ -948,7 +950,7 @@ async function requireStageFile(
   identity: PathIdentity,
 ): Promise<void> {
   const current = await capturePathIdentity(path, "file").catch(() => null);
-  if (!current || current.dev !== identity.dev || current.ino !== identity.ino)
+  if (!current || !samePathIdentity(current, identity))
     throw new Error("compiler stage file identity was lost");
 }
 
@@ -981,7 +983,7 @@ async function createOwnedStageFile(
     const metadata = await handle.stat({ bigint: true });
     if (!metadata.isFile() || metadata.nlink !== 1n)
       throw new Error("compiler-created stage file is unsafe");
-    const identity = { dev: metadata.dev, ino: metadata.ino };
+    const identity = pathIdentityFromStats(metadata);
     recordIdentity(identity);
     await afterOpen();
     await requireStageDirectory(directory, directoryIdentity);
@@ -992,8 +994,7 @@ async function createOwnedStageFile(
     if (
       !after.isFile() ||
       after.nlink !== 1n ||
-      after.dev !== identity.dev ||
-      after.ino !== identity.ino
+      !samePathIdentity(pathIdentityFromStats(after), identity)
     )
       throw new Error("compiler stage file identity was lost");
     await requireStageDirectory(directory, directoryIdentity);
@@ -1019,8 +1020,7 @@ async function readOwnedStageFileSnapshot(
     if (
       !before.isFile() ||
       before.nlink !== 1n ||
-      before.dev !== fileIdentity.dev ||
-      before.ino !== fileIdentity.ino ||
+      !samePathIdentity(pathIdentityFromStats(before), fileIdentity) ||
       before.size > BigInt(maxBytes)
     )
       throw new Error("emitted SQLite identity or size is invalid");
@@ -1054,8 +1054,7 @@ async function readOwnedStageFileSnapshot(
     if (
       !after.isFile() ||
       after.nlink !== 1n ||
-      after.dev !== fileIdentity.dev ||
-      after.ino !== fileIdentity.ino ||
+      !samePathIdentity(pathIdentityFromStats(after), fileIdentity) ||
       after.size !== before.size ||
       BigInt(bytes.byteLength) !== after.size
     )
@@ -1081,8 +1080,7 @@ async function syncOwnedStageDirectory(
     const metadata = await handle.stat({ bigint: true });
     if (
       !metadata.isDirectory() ||
-      metadata.dev !== identity.dev ||
-      metadata.ino !== identity.ino
+      !samePathIdentity(pathIdentityFromStats(metadata), identity)
     )
       throw new Error("compiler stage directory identity was lost");
     await handle.sync();

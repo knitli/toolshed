@@ -27,7 +27,11 @@ import {
   compileReleaseWithCheckpoint,
 } from "../src/release/compile-release.ts";
 import { buildManifestEnvelopeV4 } from "../src/release/manifest-builder.ts";
-import { publishReleaseWithCheckpoint } from "../src/release/publish.ts";
+import {
+  pathIdentityFromStats,
+  publishReleaseWithCheckpoint,
+  samePathIdentity,
+} from "../src/release/publish.ts";
 import type {
   CatalogId,
   GenerationState,
@@ -60,6 +64,17 @@ afterEach(async () =>
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   ),
 );
+
+test("path identity rejects inode reuse with a new birth time", () => {
+  const original = { dev: 17n, ino: 23n, birthtimeNs: 41n };
+  const replacement = { ...original, birthtimeNs: 43n };
+
+  expect(samePathIdentity(original, original)).toBe(true);
+  expect(samePathIdentity(original, replacement)).toBe(false);
+  expect(() => pathIdentityFromStats({ ...original, birthtimeNs: 0n })).toThrow(
+    "path identity requires a nonzero birthtimeNs",
+  );
+});
 
 async function runChildWithDeadline(
   script: string,

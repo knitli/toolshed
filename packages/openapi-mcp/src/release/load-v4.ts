@@ -4,6 +4,7 @@ import { extname } from "node:path";
 import { isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml";
 import type { OpenApiDoc } from "../load.ts";
 import { parseJsonStrict } from "../runtime/strict-json.ts";
+import { pathIdentityFromStats, samePathIdentity } from "./publish.ts";
 
 export interface CompilerLimits {
   readonly maxSourceBytes: number;
@@ -55,6 +56,7 @@ export async function readFileBoundedV4(
     throw new Error(`${label} is unsafe or not a single-link regular file`);
   if (expected.size > BigInt(maxBytes))
     throw new Error(`${label} exceeds byte limit`);
+  const expectedIdentity = pathIdentityFromStats(expected);
   let handle: Awaited<ReturnType<typeof open>>;
   try {
     handle = await open(
@@ -71,8 +73,7 @@ export async function readFileBoundedV4(
     if (
       !before.isFile() ||
       before.nlink !== 1n ||
-      before.dev !== expected.dev ||
-      before.ino !== expected.ino
+      !samePathIdentity(pathIdentityFromStats(before), expectedIdentity)
     )
       throw new Error(`${label} is unsafe or not a single-link file`);
     if (before.size > BigInt(maxBytes))
@@ -93,14 +94,21 @@ export async function readFileBoundedV4(
       chunks.push(Uint8Array.from(buffer.subarray(0, bytesRead)));
     }
     const after = await handle.stat({ bigint: true });
-    if (after.dev !== before.dev || after.ino !== before.ino)
+    if (
+      !samePathIdentity(
+        pathIdentityFromStats(after),
+        pathIdentityFromStats(before),
+      )
+    )
       throw new Error(`${label} identity changed while reading`);
     const current = await lstat(path, { bigint: true }).catch(() => null);
     if (
       !current ||
       current.isSymbolicLink() ||
-      current.dev !== before.dev ||
-      current.ino !== before.ino
+      !samePathIdentity(
+        pathIdentityFromStats(current),
+        pathIdentityFromStats(before),
+      )
     )
       throw new Error(`${label} pathname identity changed while reading`);
     const bytes = new Uint8Array(total);
