@@ -34,7 +34,7 @@ export class OpenApiMcpError extends Error {
 
   constructor(
     code: OpenApiMcpErrorCode,
-    message = code,
+    message: string = code,
     options: {
       retryable?: boolean;
       details?: Readonly<Record<string, OpenApiValue>>;

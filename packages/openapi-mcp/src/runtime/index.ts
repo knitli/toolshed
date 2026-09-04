@@ -1,5 +1,17 @@
 export type { OpenApiMcpErrorCode } from "./errors.ts";
 export { OpenApiMcpError } from "./errors.ts";
+export { sha256, verifyEd25519 } from "./digest.ts";
+export {
+  decodeOperationRef,
+  encodeOperationRef,
+  parseTypedRecordId,
+} from "./references.ts";
+export {
+  canonicalJson,
+  DEFAULT_STRICT_JSON_LIMITS,
+  parseJsonStrict,
+} from "./strict-json.ts";
+export type { StrictJsonLimits } from "./strict-json.ts";
 export type {
   ActionAuthorizer,
   ActionCardinality,
