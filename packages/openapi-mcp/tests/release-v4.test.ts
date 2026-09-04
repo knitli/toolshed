@@ -156,6 +156,28 @@ class MemoryGenerationStore implements GenerationStore {
 }
 
 describe("immutable v4 construction", () => {
+  test("rejects emitted SQLite corruption before self-admission", async () => {
+    const root = await temporaryRoot();
+    const options = await constructionOptions(root);
+    let stage = "";
+    await expect(
+      compileReleaseWithCheckpoint(options, async (checkpoint, paths) => {
+        if (checkpoint !== "after-sqlite-emitted") return;
+        stage = paths.directory;
+        const database = new DatabaseSync(paths.sqlite);
+        try {
+          database
+            .prepare("UPDATE operations SET record_json = '{' LIMIT 1")
+            .run();
+        } finally {
+          database.close();
+        }
+      }),
+    ).rejects.toThrow(/reread|digest|record/i);
+    expect(stage).not.toBe("");
+    await expect(stat(stage)).rejects.toThrow();
+  });
+
   test("fails closed when the stage parent is substituted before every leaf transition", async () => {
     for (const checkpoint of [
       "before-sqlite-created",

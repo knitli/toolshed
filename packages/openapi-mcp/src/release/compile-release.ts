@@ -135,6 +135,7 @@ export type ConstructionCheckpoint =
   | "before-signature-created"
   | "before-manifest-created"
   | "after-sqlite-opened"
+  | "after-sqlite-emitted"
   | "after-signature-opened"
   | "after-manifest-opened";
 
@@ -1001,6 +1002,47 @@ async function createOwnedStageFile(
   }
 }
 
+async function readOwnedStageFileSnapshot(
+  path: string,
+  directory: string,
+  directoryIdentity: PathIdentity,
+  fileIdentity: PathIdentity,
+  maxBytes: number,
+): Promise<Uint8Array> {
+  await requireStageDirectory(directory, directoryIdentity);
+  await requireStageFile(path, fileIdentity);
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = await handle.stat({ bigint: true });
+    if (
+      !before.isFile() ||
+      before.nlink !== 1n ||
+      before.dev !== fileIdentity.dev ||
+      before.ino !== fileIdentity.ino ||
+      before.size > BigInt(maxBytes)
+    )
+      throw new Error("emitted SQLite identity or size is invalid");
+    await requireStageDirectory(directory, directoryIdentity);
+    await requireStageFile(path, fileIdentity);
+    const bytes = new Uint8Array(await handle.readFile());
+    const after = await handle.stat({ bigint: true });
+    if (
+      !after.isFile() ||
+      after.nlink !== 1n ||
+      after.dev !== fileIdentity.dev ||
+      after.ino !== fileIdentity.ino ||
+      after.size !== before.size ||
+      BigInt(bytes.byteLength) !== after.size
+    )
+      throw new Error("emitted SQLite identity or size changed during reread");
+    await requireStageDirectory(directory, directoryIdentity);
+    await requireStageFile(path, fileIdentity);
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
+
 async function syncOwnedStageDirectory(
   path: string,
   identity: PathIdentity,
@@ -1241,7 +1283,6 @@ export async function compileReleaseWithCheckpoint(
       TypedRecordId,
       Sha256
     >;
-    const storedRows: StoredRecord<OperationRecordV4 | SchemaRecordV4>[] = [];
     for (const row of rows) {
       const id = parseTypedRecordId(row.record_id);
       const record = parseJsonStrict(row.record_json, {
@@ -1256,7 +1297,6 @@ export async function compileReleaseWithCheckpoint(
       if (digest !== row.logical_digest)
         throw new Error("reread logical record digest mismatch");
       manifestRecords[id] = digest;
-      storedRows.push({ id, logicalDigest: digest, record });
     }
     const manifest = buildReleaseManifestV4({
       ...ids,
@@ -1340,6 +1380,80 @@ export async function compileReleaseWithCheckpoint(
       },
       () => checkpoint("after-sqlite-opened", paths),
     );
+    await checkpoint("after-sqlite-emitted", paths);
+    const emittedBytes = await readOwnedStageFileSnapshot(
+      paths.sqlite,
+      paths.directory,
+      stageOwnership.directory as PathIdentity,
+      stageOwnership.sqlite as PathIdentity,
+      sqliteBytes.byteLength,
+    ).catch(() => {
+      throw new Error("emitted SQLite could not be reopened safely");
+    });
+    const emittedDatabase = new DatabaseSync(":memory:");
+    const emittedStoredRows: StoredRecord<
+      OperationRecordV4 | SchemaRecordV4
+    >[] = [];
+    try {
+      emittedDatabase.deserialize(emittedBytes);
+      emittedDatabase.exec("PRAGMA query_only = ON");
+      const emittedRows = emittedDatabase
+        .prepare(
+          "SELECT record_id, record_json, logical_digest FROM operations UNION ALL SELECT record_id, record_json, logical_digest FROM schemas ORDER BY record_id",
+        )
+        .all() as Array<{
+        record_id: string;
+        record_json: string;
+        logical_digest: string;
+      }>;
+      const emittedManifestRecords = Object.create(null) as Record<
+        TypedRecordId,
+        Sha256
+      >;
+      for (const row of emittedRows) {
+        const id = parseTypedRecordId(row.record_id);
+        let record: OperationRecordV4 | SchemaRecordV4;
+        try {
+          record = parseJsonStrict(row.record_json, {
+            maxBytes: limits.maxRecordBytes,
+            maxDepth: limits.maxJsonDepth,
+            maxKeys: limits.maxDocumentKeys,
+          }) as unknown as OperationRecordV4 | SchemaRecordV4;
+        } catch {
+          throw new Error("reread emitted record_json is invalid");
+        }
+        const domain = id.startsWith("operation:")
+          ? "knitli.openapi-mcp.operation-record.v4"
+          : "knitli.openapi-mcp.schema-record.v4";
+        const digest = await sha256(domain, record as unknown as JsonObject);
+        if (digest !== row.logical_digest)
+          throw new Error("reread emitted record digest mismatch");
+        emittedManifestRecords[id] = digest;
+        emittedStoredRows.push({ id, logicalDigest: digest, record });
+      }
+      if (
+        canonicalJson(emittedManifestRecords as unknown as JsonValue) !==
+        canonicalJson(manifest.records as unknown as JsonValue)
+      )
+        throw new Error("reread emitted manifest record map mismatch");
+      const emittedMetadata = emittedDatabase
+        .prepare(
+          "SELECT * FROM release_metadata WHERE catalog_id = ? AND release_id = ?",
+        )
+        .get(ids.catalogId, ids.releaseId) as
+        | Record<string, unknown>
+        | undefined;
+      if (!emittedMetadata)
+        throw new Error("reread emitted release metadata is absent");
+      for (const [key, expected] of Object.entries(expectedMetadata)) {
+        if (emittedMetadata[key] !== expected)
+          throw new Error(
+            `reread emitted release metadata field ${key} disagrees with the canonical manifest`,
+          );
+      }
+    } finally {
+      emittedDatabase.close();
+    }
     await checkpoint("before-signature-created", paths);
     await createOwnedStageFile(
       paths.signature,
@@ -1387,7 +1501,7 @@ export async function compileReleaseWithCheckpoint(
       envelope.manifestJson
     )
       throw new Error("self-admitted manifest is not byte-identical");
-    for (const row of storedRows)
+    for (const row of emittedStoredRows)
       await verifyStoredRecord(admitted, row as never);
 
     const compiled: CompiledRelease = Object.freeze({
@@ -1399,7 +1513,7 @@ export async function compileReleaseWithCheckpoint(
       paths: Object.freeze({ ...paths }),
     });
     const stageDigests = {
-      sqlite: createHash("sha256").update(sqliteBytes).digest("hex"),
+      sqlite: createHash("sha256").update(emittedBytes).digest("hex"),
       signature: createHash("sha256").update(signatureBytes).digest("hex"),
       manifest: createHash("sha256")
         .update(envelope.manifestJson)
