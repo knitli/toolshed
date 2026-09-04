@@ -1,29 +1,37 @@
 import { OpenApiMcpError } from "./errors.ts";
 import {
-  type AdmittedManifest,
   type AuthenticatedManifest,
-  admitAuthenticatedManifest,
   authenticateManifest,
+  commitAuthenticatedManifestAtState,
   type ManifestTrust,
 } from "./manifest.ts";
-import { encodeOperationRef } from "./references.ts";
+import { encodeOperationRef, parseTypedRecordId } from "./references.ts";
+import { collectReferences } from "./schema-resolver.ts";
 import { canonicalJson } from "./strict-json.ts";
 import type {
   ActionCardinality,
   ActionKind,
   CandidateRef,
   CatalogStore,
+  GenerationState,
   GenerationStore,
   JsonObject,
   OpenApiValue,
   OperationRecordV4,
+  SchemaRecordV4,
   SearchInput,
   SearchResult,
   SearchResultItem,
   SearchWarning,
+  TypedOperationId,
+  TypedSchemaId,
 } from "./types.ts";
 import { verifyStoredRecord } from "./verify-record.ts";
-import { type RuntimeLimits, resolveRuntimeLimits } from "./versions.ts";
+import {
+  DEFAULT_RUNTIME_LIMITS,
+  type RuntimeLimits,
+  resolveRuntimeLimits,
+} from "./versions.ts";
 
 export interface OpenApiRuntimeOptions {
   readonly store: CatalogStore;
@@ -42,6 +50,344 @@ function upstreamUnavailable(message: string): OpenApiMcpError {
 
 function manifestKey(catalogId: string, releaseId: string): string {
   return `${catalogId}\0${releaseId}`;
+}
+
+const maximumSearchReleases = 8;
+const maximumInventorySchemaBatch = 128;
+// State churn may require reproof, but one search may spend no more than the
+// same eight-release compatibility envelope used for manifest authentication.
+const maximumCompleteReleaseProofs = maximumSearchReleases;
+
+interface CompleteVerificationBudget {
+  proofsRemaining: number;
+  bytesRemaining: number;
+  workRemaining: number;
+  storeCallsRemaining: number;
+}
+
+function cappedProduct(left: number, right: number): number {
+  return Math.min(Number.MAX_SAFE_INTEGER, left * right);
+}
+
+function completeReleaseByteLimit(limits: RuntimeLimits): number {
+  return (
+    limits.maxReleaseInventoryBytes ??
+    DEFAULT_RUNTIME_LIMITS.maxReleaseInventoryBytes
+  );
+}
+
+function createCompleteVerificationBudget(
+  limits: RuntimeLimits,
+): CompleteVerificationBudget {
+  const perReleaseBytes = completeReleaseByteLimit(limits);
+  // Record verification, one schema-document traversal, references, and
+  // bounded closure visits are charged independently.
+  const perReleaseWork =
+    limits.maxManifestRecords * (limits.maxSchemaRefHops + 3);
+  return {
+    proofsRemaining: maximumCompleteReleaseProofs,
+    // All releases share one inventory envelope. Authentication may consider
+    // eight releases, but search never receives eight independent 128 MiB
+    // proof allocations.
+    bytesRemaining: perReleaseBytes,
+    workRemaining: cappedProduct(perReleaseWork, maximumSearchReleases),
+    storeCallsRemaining: cappedProduct(
+      limits.maxManifestRecords * 2,
+      maximumSearchReleases,
+    ),
+  };
+}
+
+function chargeCompleteVerification(
+  budget: CompleteVerificationBudget,
+  charge: {
+    readonly proofs?: number;
+    readonly bytes?: number;
+    readonly work?: number;
+    readonly storeCalls?: number;
+  },
+): void {
+  const proofs = charge.proofs ?? 0;
+  const bytes = charge.bytes ?? 0;
+  const work = charge.work ?? 0;
+  const storeCalls = charge.storeCalls ?? 0;
+  if (
+    proofs > budget.proofsRemaining ||
+    bytes > budget.bytesRemaining ||
+    work > budget.workRemaining ||
+    storeCalls > budget.storeCallsRemaining
+  ) {
+    throw new OpenApiMcpError(
+      "RECORD_NOT_ADMITTED",
+      "Search admission verification budget exhausted",
+    );
+  }
+  budget.proofsRemaining -= proofs;
+  budget.bytesRemaining -= bytes;
+  budget.workRemaining -= work;
+  budget.storeCallsRemaining -= storeCalls;
+}
+
+function sameGenerationState(
+  left: GenerationState | null,
+  right: GenerationState | null,
+): boolean {
+  return (
+    left === right ||
+    (left !== null &&
+      right !== null &&
+      left.revision === right.revision &&
+      left.highestGeneration === right.highestGeneration &&
+      left.highestManifestDigest === right.highestManifestDigest &&
+      left.activeGeneration === right.activeGeneration &&
+      left.activeManifestDigest === right.activeManifestDigest)
+  );
+}
+
+function snapshotRows(value: unknown, maximum: number): readonly unknown[] {
+  try {
+    if (!Array.isArray(value)) throw new Error();
+    const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+    if (
+      lengthDescriptor === undefined ||
+      !("value" in lengthDescriptor) ||
+      !Number.isSafeInteger(lengthDescriptor.value) ||
+      lengthDescriptor.value < 0 ||
+      lengthDescriptor.value > maximum
+    )
+      throw new Error();
+    const length = lengthDescriptor.value as number;
+    const keys = Reflect.ownKeys(value);
+    if (
+      keys.length !== length + 1 ||
+      keys.some(
+        (key) =>
+          typeof key !== "string" ||
+          (key !== "length" && !/^(0|[1-9][0-9]*)$/.test(key)),
+      )
+    )
+      throw new Error();
+    const snapshot: unknown[] = [];
+    for (let index = 0; index < length; index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (
+        descriptor === undefined ||
+        !("value" in descriptor) ||
+        !descriptor.enumerable
+      )
+        throw new Error();
+      snapshot.push(descriptor.value);
+    }
+    return snapshot;
+  } catch {
+    throw new OpenApiMcpError(
+      "RECORD_NOT_ADMITTED",
+      "Release inventory lookup result is invalid",
+    );
+  }
+}
+
+async function verifyCompleteRelease(
+  store: CatalogStore,
+  authenticated: AuthenticatedManifest,
+  limits: RuntimeLimits,
+  searchBudget: CompleteVerificationBudget,
+): Promise<void> {
+  chargeCompleteVerification(searchBudget, { proofs: 1 });
+  // CatalogStore addresses immutable release identities but has no snapshot
+  // handle. Verify the complete observed release view before admission; later
+  // use-time reads remain independently verified because availability can
+  // still change after this pass.
+  const operationIds: TypedOperationId[] = [];
+  const schemaIds: TypedSchemaId[] = [];
+  for (const id of Object.keys(authenticated.manifest.records).sort()) {
+    const parsed = parseTypedRecordId(id);
+    if (parsed.startsWith("operation:"))
+      operationIds.push(parsed as TypedOperationId);
+    else schemaIds.push(parsed as TypedSchemaId);
+  }
+
+  const encoder = new TextEncoder();
+  const maximumBytes = completeReleaseByteLimit(limits);
+  const maximumWork = limits.maxManifestRecords * (limits.maxSchemaRefHops + 2);
+  let aggregateBytes = 0;
+  let aggregateWork = 0;
+  const accountRecord = (record: JsonObject): number => {
+    const bytes = encoder.encode(canonicalJson(record)).byteLength;
+    chargeCompleteVerification(searchBudget, { bytes });
+    aggregateBytes += bytes;
+    aggregateWork += 1;
+    if (aggregateBytes > maximumBytes || aggregateWork > maximumWork) {
+      throw new OpenApiMcpError(
+        "RECORD_NOT_ADMITTED",
+        "Release inventory verification exceeds its aggregate limit",
+      );
+    }
+    return bytes;
+  };
+  const operationRoots: TypedSchemaId[][] = [];
+  for (const id of operationIds) {
+    chargeCompleteVerification(searchBudget, { work: 1, storeCalls: 1 });
+    const row = await store.getOperation(
+      authenticated.manifest.catalogId,
+      authenticated.manifest.releaseId,
+      id,
+    );
+    if (row === null) {
+      throw new OpenApiMcpError(
+        "RECORD_NOT_ADMITTED",
+        "Release inventory operation is missing",
+      );
+    }
+    const operation = await verifyStoredRecord(authenticated, row, limits);
+    if (!operation.id.startsWith("operation:") || operation.id !== id) {
+      throw new OpenApiMcpError(
+        "RECORD_DIGEST_MISMATCH",
+        "Release inventory operation identity does not match",
+      );
+    }
+    accountRecord(operation as unknown as JsonObject);
+    operationRoots.push(
+      [...new Set(operation.schemaIds)].sort() as TypedSchemaId[],
+    );
+  }
+
+  const schemaBatchSize = Math.max(
+    1,
+    Math.min(
+      maximumInventorySchemaBatch,
+      Math.floor(limits.maxSchemaClosureBytes / limits.maxRecordBytes),
+    ),
+  );
+  const schemas = new Map<
+    TypedSchemaId,
+    { readonly record: SchemaRecordV4; readonly bytes: number }
+  >();
+  let offset = 0;
+  while (offset < schemaIds.length) {
+    const ids: TypedSchemaId[] = [];
+    let requestBytes = 0;
+    while (offset < schemaIds.length && ids.length < schemaBatchSize) {
+      const id = schemaIds[offset];
+      const idBytes = encoder.encode(id).byteLength;
+      if (
+        idBytes > limits.maxSchemaClosureBytes ||
+        (ids.length > 0 &&
+          requestBytes + idBytes > limits.maxSchemaClosureBytes)
+      )
+        break;
+      ids.push(id);
+      requestBytes += idBytes;
+      offset += 1;
+    }
+    if (ids.length === 0) {
+      throw new OpenApiMcpError(
+        "RECORD_NOT_ADMITTED",
+        "Release inventory schema request exceeds its byte limit",
+      );
+    }
+    chargeCompleteVerification(searchBudget, {
+      work: ids.length,
+      storeCalls: 1,
+    });
+    const result = await store.getSchemas(
+      authenticated.manifest.catalogId,
+      authenticated.manifest.releaseId,
+      ids,
+    );
+    const rows = snapshotRows(result, ids.length);
+    const verified = await Promise.all(
+      rows.map((row) =>
+        verifyStoredRecord(authenticated, row as never, limits),
+      ),
+    );
+    const returned = new Set(verified.map((record) => record.id));
+    if (
+      returned.size !== ids.length ||
+      verified.length !== ids.length ||
+      ids.some((id) => !returned.has(id)) ||
+      verified.some((record) => !record.id.startsWith("schema:"))
+    ) {
+      throw new OpenApiMcpError(
+        "RECORD_NOT_ADMITTED",
+        "Release inventory schema is missing or ambiguous",
+      );
+    }
+    for (const record of verified) {
+      const schema = record as SchemaRecordV4;
+      schemas.set(schema.id, {
+        record: schema,
+        bytes: accountRecord(schema as unknown as JsonObject),
+      });
+    }
+  }
+
+  const schemaReferences = new Map<TypedSchemaId, readonly TypedSchemaId[]>();
+  for (const [id, { record }] of schemas) {
+    const references = collectReferences(record.schema);
+    chargeCompleteVerification(searchBudget, {
+      work: references.length + 1,
+    });
+    schemaReferences.set(id, references);
+    aggregateWork += references.length;
+    if (
+      aggregateWork > maximumWork ||
+      references.some((reference) => !schemas.has(reference))
+    ) {
+      throw new OpenApiMcpError(
+        "RECORD_NOT_ADMITTED",
+        "Release schema graph is incomplete or exceeds its work limit",
+      );
+    }
+  }
+
+  const verifiedClosures = new Set<string>();
+  for (const roots of operationRoots) {
+    const cacheKey = roots.join("\0");
+    if (verifiedClosures.has(cacheKey)) continue;
+    let frontier = roots;
+    const visited = new Set<TypedSchemaId>();
+    let closureBytes = 0;
+    let hop = 0;
+    while (frontier.length > 0) {
+      if (hop > limits.maxSchemaRefHops) {
+        throw new OpenApiMcpError(
+          "SCHEMA_RESOLUTION_LIMIT",
+          "Schema reference hop limit exceeded",
+        );
+      }
+      const next = new Set<TypedSchemaId>();
+      for (const id of frontier) {
+        if (visited.has(id)) continue;
+        const schema = schemas.get(id);
+        if (schema === undefined) {
+          throw new OpenApiMcpError(
+            "RECORD_NOT_ADMITTED",
+            "Operation schema root is not in the verified inventory",
+          );
+        }
+        visited.add(id);
+        closureBytes += schema.bytes;
+        aggregateWork += 1;
+        chargeCompleteVerification(searchBudget, { work: 1 });
+        if (
+          closureBytes > limits.maxSchemaClosureBytes ||
+          aggregateWork > maximumWork
+        ) {
+          throw new OpenApiMcpError(
+            "SCHEMA_RESOLUTION_LIMIT",
+            "Schema closure exceeds its aggregate limit",
+          );
+        }
+        for (const reference of schemaReferences.get(id) ?? []) {
+          if (!visited.has(reference)) next.add(reference);
+        }
+      }
+      frontier = [...next].sort();
+      hop += 1;
+    }
+    verifiedClosures.add(cacheKey);
+  }
 }
 
 const markdownCharacters = new Map([
@@ -354,6 +700,8 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
   return {
     async search(input: SearchInput): Promise<SearchResult> {
       const query = validateSearchInput(input, limits);
+      const completeVerificationBudget =
+        createCompleteVerificationBudget(limits);
       const emptyBytes = new TextEncoder().encode(
         canonicalJson({ operations: [], warnings: [] }),
       ).length;
@@ -377,6 +725,7 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
       const operations: Array<{
         readonly admission: {
           readonly catalogId: string;
+          readonly releaseId: string;
           readonly issuer: string;
           readonly generation: number;
           readonly digest: string;
@@ -389,17 +738,16 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
       const seen = new Set<string>();
       const manifests = new Map<
         string,
-        { authenticated: AuthenticatedManifest; admitted?: AdmittedManifest }
+        { authenticated: AuthenticatedManifest }
       >();
       const failedManifests = new Set<string>();
-      let admissionAttempts = 0;
+      let releaseAttempts = 0;
       const authenticateCandidateRelease = async (
         catalogId: CandidateRef["catalogId"],
         releaseId: CandidateRef["releaseId"],
       ): Promise<{
         authenticated: AuthenticatedManifest;
-        admitted?: AdmittedManifest;
-      }> => {
+      } | null> => {
         const key = manifestKey(catalogId, releaseId);
         const cached = manifests.get(key);
         if (cached !== undefined) return cached;
@@ -409,13 +757,10 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
             "Search candidate manifest was already rejected",
           );
         }
-        if (admissionAttempts >= 8) {
-          throw new OpenApiMcpError(
-            "RECORD_NOT_ADMITTED",
-            "Search release admission limit reached",
-          );
+        if (releaseAttempts >= maximumSearchReleases) {
+          return null;
         }
-        admissionAttempts += 1;
+        releaseAttempts += 1;
         try {
           const envelope = await options.store.getManifest(
             catalogId,
@@ -434,10 +779,6 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
               "RECORD_NOT_ADMITTED",
               "Search candidate release identity does not match its manifest",
             );
-          }
-          if (manifests.size >= 4) {
-            const oldest = manifests.keys().next().value;
-            if (oldest !== undefined) manifests.delete(oldest);
           }
           const entry = { authenticated };
           manifests.set(key, entry);
@@ -497,6 +838,10 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
             candidate.catalogId,
             candidate.releaseId,
           );
+          if (entry === null) {
+            admissionLimited = true;
+            continue;
+          }
           const row = await options.store.getOperation(
             candidate.catalogId,
             candidate.releaseId,
@@ -525,28 +870,14 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
               "Search candidate API does not match its filter",
             );
           }
-          let admitted = entry.admitted;
-          if (admitted === undefined) {
-            try {
-              admitted = await admitAuthenticatedManifest(
-                entry.authenticated,
-                options.trust,
-                options.generations,
-              );
-            } catch (error) {
-              failedManifests.add(key);
-              manifests.delete(key);
-              throw error;
-            }
-            entry.admitted = admitted;
-          }
           const runtimeClassification = classification(operation);
           const retained = {
             admission: {
-              catalogId: admitted.manifest.catalogId,
-              issuer: admitted.manifest.issuer,
-              generation: admitted.manifest.generation,
-              digest: admitted.manifestDigest,
+              catalogId: entry.authenticated.manifest.catalogId,
+              releaseId: entry.authenticated.manifest.releaseId,
+              issuer: entry.authenticated.manifest.issuer,
+              generation: entry.authenticated.manifest.generation,
+              digest: entry.authenticated.manifestDigest,
             },
             id: `${candidate.catalogId}\0${candidate.releaseId}\0${operation.id}`,
             rank,
@@ -555,7 +886,7 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
                 catalogId: candidate.catalogId,
                 releaseId: candidate.releaseId,
                 operationId: operation.id,
-                manifestDigest: admitted.manifestDigest,
+                manifestDigest: entry.authenticated.manifestDigest,
               }),
               summary: safeSummary(operation.summary),
               inputOutline: inputOutline(operation),
@@ -566,13 +897,6 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
           };
           operations.push(retained);
         } catch (error) {
-          if (
-            error instanceof OpenApiMcpError &&
-            error.message === "Search release admission limit reached"
-          ) {
-            admissionLimited = true;
-            break;
-          }
           if (!addWarning(warning(error))) responseLimited = true;
         }
       }
@@ -585,6 +909,197 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
           })
         )
           responseLimited = true;
+      }
+
+      const stagedOperations = operations.splice(0);
+      const warnedOperations = new Set<string>();
+      const warnOperations = (
+        candidates: typeof stagedOperations,
+        error: unknown,
+      ): void => {
+        for (const candidate of candidates) {
+          if (warnedOperations.has(candidate.id)) continue;
+          warnedOperations.add(candidate.id);
+          if (!addWarning(warning(error))) responseLimited = true;
+        }
+      };
+      const groups = new Map<string, typeof stagedOperations>();
+      for (const staged of stagedOperations) {
+        const groupKey = `${staged.admission.catalogId}\0${staged.admission.issuer}`;
+        const group = groups.get(groupKey);
+        if (group === undefined) groups.set(groupKey, [staged]);
+        else group.push(staged);
+      }
+
+      for (const group of groups.values()) {
+        const byGeneration = new Map<
+          number,
+          Map<string, typeof stagedOperations>
+        >();
+        for (const staged of group) {
+          let releases = byGeneration.get(staged.admission.generation);
+          if (releases === undefined) {
+            releases = new Map();
+            byGeneration.set(staged.admission.generation, releases);
+          }
+          const release = releases.get(staged.admission.digest);
+          if (release === undefined)
+            releases.set(staged.admission.digest, [staged]);
+          else release.push(staged);
+        }
+
+        let selected: typeof stagedOperations | undefined;
+        const generations = [...byGeneration.keys()].sort(
+          (left, right) => right - left,
+        );
+        let selectionSettled = false;
+        const initialTransitionKinds = new Map<string, "normal" | "rollback">();
+        for (
+          let selectionAttempt = 0;
+          selectionAttempt < 32;
+          selectionAttempt += 1
+        ) {
+          let capturedState: GenerationState | null;
+          try {
+            capturedState = await options.generations.get(
+              group[0].admission.catalogId as CandidateRef["catalogId"],
+              group[0].admission.issuer,
+            );
+          } catch {
+            throw upstreamUnavailable("Generation state is unavailable");
+          }
+          const attemptWarnings: Array<{
+            readonly candidates: typeof stagedOperations;
+            readonly error: unknown;
+          }> = [];
+          let restartSelection = false;
+          for (const generation of generations) {
+            const releases = byGeneration.get(generation);
+            if (releases === undefined) continue;
+            let alreadyActive = false;
+            let candidates: typeof stagedOperations | undefined;
+            if (releases.size !== 1) {
+              const activeDigest =
+                capturedState?.activeGeneration === generation
+                  ? capturedState.activeManifestDigest
+                  : undefined;
+              candidates =
+                activeDigest === undefined
+                  ? undefined
+                  : releases.get(activeDigest);
+              alreadyActive = candidates !== undefined;
+              if (candidates === undefined) {
+                for (const conflicting of releases.values())
+                  attemptWarnings.push({
+                    candidates: conflicting,
+                    error: new OpenApiMcpError("MANIFEST_GENERATION_CONFLICT"),
+                  });
+                continue;
+              }
+            } else {
+              candidates = releases.values().next().value;
+            }
+            if (candidates === undefined || candidates.length === 0) continue;
+            const admission = candidates[0].admission;
+            const key = manifestKey(admission.catalogId, admission.releaseId);
+            const entry = manifests.get(key);
+            if (entry === undefined) continue;
+            try {
+              if (alreadyActive) {
+                await verifyCompleteRelease(
+                  options.store,
+                  entry.authenticated,
+                  limits,
+                  completeVerificationBudget,
+                );
+                const currentState = await options.generations.get(
+                  admission.catalogId as CandidateRef["catalogId"],
+                  admission.issuer,
+                );
+                if (!sameGenerationState(capturedState, currentState)) {
+                  restartSelection = true;
+                  break;
+                }
+              } else {
+                await verifyCompleteRelease(
+                  options.store,
+                  entry.authenticated,
+                  limits,
+                  completeVerificationBudget,
+                );
+                const transitionKind =
+                  capturedState !== null &&
+                  admission.generation < capturedState.highestGeneration
+                    ? "rollback"
+                    : "normal";
+                const initialTransitionKind = initialTransitionKinds.get(
+                  admission.digest,
+                );
+                if (initialTransitionKind === undefined) {
+                  initialTransitionKinds.set(admission.digest, transitionKind);
+                } else if (initialTransitionKind !== transitionKind) {
+                  throw new OpenApiMcpError(
+                    "MANIFEST_GENERATION_CONFLICT",
+                    "Generation state changed the selected transition kind",
+                  );
+                }
+                const admitted = await commitAuthenticatedManifestAtState(
+                  entry.authenticated,
+                  options.trust,
+                  options.generations,
+                  capturedState,
+                );
+                if (admitted === null) {
+                  restartSelection = true;
+                  break;
+                }
+              }
+              selected = candidates;
+              operations.push(...candidates);
+              break;
+            } catch (error) {
+              failedManifests.add(key);
+              attemptWarnings.push({ candidates, error });
+            }
+          }
+
+          if (restartSelection) {
+            selected = undefined;
+            continue;
+          }
+          if (selected === undefined) {
+            let currentState: GenerationState | null;
+            try {
+              currentState = await options.generations.get(
+                group[0].admission.catalogId as CandidateRef["catalogId"],
+                group[0].admission.issuer,
+              );
+            } catch {
+              throw upstreamUnavailable("Generation state is unavailable");
+            }
+            if (!sameGenerationState(capturedState, currentState)) continue;
+          }
+          for (const pending of attemptWarnings)
+            warnOperations(pending.candidates, pending.error);
+          selectionSettled = true;
+          break;
+        }
+        if (!selectionSettled) {
+          warnOperations(
+            group,
+            new OpenApiMcpError(
+              "MANIFEST_GENERATION_CONFLICT",
+              "Generation state changed too many times; retry search",
+            ),
+          );
+        }
+
+        const selectedSet = new Set(selected ?? []);
+        for (const staged of group) {
+          if (selectedSet.has(staged) || warnedOperations.has(staged.id))
+            continue;
+          warnOperations([staged], new OpenApiMcpError("RECORD_NOT_ADMITTED"));
+        }
       }
 
       const finalStates = new Map<

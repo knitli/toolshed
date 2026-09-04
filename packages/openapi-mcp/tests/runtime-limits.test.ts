@@ -1,8 +1,26 @@
 import { expect, test } from "bun:test";
 import {
   DEFAULT_RUNTIME_LIMITS,
+  type RuntimeLimits,
   resolveRuntimeLimits,
 } from "../src/runtime/index.ts";
+
+const legacyRuntimeLimits: RuntimeLimits = {
+  maxManifestBytes: 8 * 1024 * 1024,
+  maxManifestRecords: 100_000,
+  maxRecordBytes: 1024 * 1024,
+  maxJsonDepth: 64,
+  maxSchemaClosureBytes: 4 * 1024 * 1024,
+  maxSchemaRefHops: 16,
+  maxSearchResults: 50,
+  defaultSearchResults: 10,
+  maxArgumentsBytes: 256 * 1024,
+  maxResponseBytes: 8 * 1024 * 1024,
+  maxPages: 10,
+  maxPaginationBytes: 16 * 1024 * 1024,
+  maxRedirects: 3,
+  requestDeadlineMs: 30_000,
+};
 
 const malformedLimitsMessage =
   "Runtime limits overrides must be an exact plain data object";
@@ -15,12 +33,39 @@ function expectMalformedLimits(value: unknown): void {
 
 test("resolves omitted and null-prototype partial runtime limits", () => {
   expect(resolveRuntimeLimits()).toEqual(DEFAULT_RUNTIME_LIMITS);
+  expect(DEFAULT_RUNTIME_LIMITS.maxReleaseInventoryBytes).toBe(
+    128 * 1024 * 1024,
+  );
   const overrides = Object.create(null) as { maxPages: number };
   overrides.maxPages = 1;
   expect(resolveRuntimeLimits(overrides)).toEqual({
     ...DEFAULT_RUNTIME_LIMITS,
     maxPages: 1,
   });
+});
+
+test("resolves legacy complete RuntimeLimits objects with the new default", () => {
+  const resolved = resolveRuntimeLimits(legacyRuntimeLimits);
+  expect(resolved.maxReleaseInventoryBytes).toBe(
+    DEFAULT_RUNTIME_LIMITS.maxReleaseInventoryBytes,
+  );
+});
+
+test("only permits lowering the release inventory byte ceiling", () => {
+  expect(
+    resolveRuntimeLimits({ maxReleaseInventoryBytes: 1024 })
+      .maxReleaseInventoryBytes,
+  ).toBe(1024);
+  expect(() =>
+    resolveRuntimeLimits({
+      maxReleaseInventoryBytes:
+        DEFAULT_RUNTIME_LIMITS.maxReleaseInventoryBytes + 1,
+    }),
+  ).toThrow(
+    new RangeError(
+      "Runtime limit maxReleaseInventoryBytes must only lower its default",
+    ),
+  );
 });
 
 test("rejects malformed runtime limit containers without invoking accessors", () => {

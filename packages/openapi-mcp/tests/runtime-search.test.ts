@@ -17,6 +17,7 @@ import {
   OpenApiMcpError,
   type OperationRecordV4,
   type ReleaseId,
+  type RollbackAuthorization,
   type RuntimeLimits,
   resolveSchemaClosure,
   type SchemaRecordV4,
@@ -60,19 +61,37 @@ async function signingFixture() {
     "sign",
     "verify",
   ]);
+  const rollbackPair = await crypto.subtle.generateKey(
+    { name: "Ed25519" },
+    true,
+    ["sign", "verify"],
+  );
   const publicKey = base64url(
     new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey)),
   );
+  const rollbackPublicKey = base64url(
+    new Uint8Array(
+      await crypto.subtle.exportKey("spki", rollbackPair.publicKey),
+    ),
+  );
   const trust: ManifestTrust = {
     releaseKeys: [{ issuer: "issuer.example", keyId: "key-1", publicKey }],
-    rollbackKeys: [],
+    rollbackKeys: [
+      {
+        issuer: "issuer.example",
+        keyId: "rollback-1",
+        publicKey: rollbackPublicKey,
+      },
+    ],
+    now: () => new Date("2026-09-04T12:00:00.000Z"),
   };
-  return { pair, trust };
+  return { pair, rollbackPair, trust };
 }
 
 async function envelope(
   manifest: AdmittedManifest["manifest"],
   privateKey: CryptoKey,
+  rollback?: RollbackAuthorization,
 ): Promise<ManifestEnvelope> {
   const manifestJson = canonicalJson(manifest);
   const signature = new Uint8Array(
@@ -89,7 +108,38 @@ async function envelope(
       keyId: "key-1",
       signature: base64url(signature),
     },
+    ...(rollback === undefined ? {} : { rollback }),
   };
+}
+
+async function rollbackAuthorization(
+  manifest: AdmittedManifest["manifest"],
+  targetManifestDigest: Sha256,
+  privateKey: CryptoKey,
+  currentHighestGeneration: number,
+): Promise<RollbackAuthorization> {
+  const unsigned = {
+    id: "rollback-search-race",
+    catalogId: manifest.catalogId,
+    issuer: manifest.issuer,
+    currentHighestGeneration,
+    targetGeneration: manifest.generation,
+    targetManifestDigest,
+    reason: "concurrent release proved bad",
+    expiresAt: "2026-09-05T00:00:00.000Z",
+    keyId: "rollback-1",
+    algorithm: "Ed25519" as const,
+  };
+  const signature = new Uint8Array(
+    await crypto.subtle.sign(
+      "Ed25519",
+      privateKey,
+      encoder.encode(
+        `knitli.openapi-mcp.rollback-authorization.v1\0${canonicalJson(unsigned)}`,
+      ),
+    ),
+  );
+  return { ...unsigned, signature: base64url(signature) };
 }
 
 function operation(
@@ -170,6 +220,12 @@ function admitted(
 
 async function searchFixture(values: readonly OperationRecordV4[]) {
   const rows = await Promise.all(values.map(storedOperation));
+  const schemaIds = [
+    ...new Set(values.flatMap((value) => [...value.schemaIds])),
+  ];
+  const schemaRows = await Promise.all(
+    schemaIds.map((id) => storedSchema(id, { type: "string" })),
+  );
   const candidates: CandidateRef[] = rows.map((row) => ({
     catalogId,
     releaseId,
@@ -177,7 +233,9 @@ async function searchFixture(values: readonly OperationRecordV4[]) {
   }));
   const calls: Array<{ query: string; api?: string; limit: number }> = [];
   const manifest = admitted(
-    Object.fromEntries(rows.map((row) => [row.id, row.logicalDigest])),
+    Object.fromEntries(
+      [...rows, ...schemaRows].map((row) => [row.id, row.logicalDigest]),
+    ),
   );
   const signing = await signingFixture();
   const signed = await envelope(manifest.manifest, signing.pair.privateKey);
@@ -192,8 +250,8 @@ async function searchFixture(values: readonly OperationRecordV4[]) {
     async getOperation(_catalog, _release, id) {
       return rows.find((row) => row.id === id) ?? null;
     },
-    async getSchemas() {
-      return [];
+    async getSchemas(_catalog, _release, ids) {
+      return schemaRows.filter((row) => ids.includes(row.id));
     },
   };
   const generations = new MemoryGenerationStore();
@@ -201,6 +259,7 @@ async function searchFixture(values: readonly OperationRecordV4[]) {
     calls,
     manifest,
     rows,
+    schemaRows,
     runtime: createOpenApiRuntime({
       store,
       trust: signing.trust,
@@ -209,6 +268,7 @@ async function searchFixture(values: readonly OperationRecordV4[]) {
     trust: signing.trust,
     generations,
     privateKey: signing.pair.privateKey,
+    rollbackPrivateKey: signing.rollbackPair.privateKey,
     signed,
     store,
   };
@@ -507,6 +567,160 @@ test("a failed release key is remembered without consuming another attempt", asy
   expect(manifestReads).toBe(1);
 });
 
+test("eight authenticated releases keep an earlier release reusable", async () => {
+  const fixture = await searchFixture([operation("one"), operation("two")]);
+  const signedByRelease = new Map<ReleaseId, ManifestEnvelope>([
+    [releaseId, fixture.signed],
+  ]);
+  for (let generation = 2; generation <= 8; generation += 1) {
+    const candidateRelease = `release-${generation}` as ReleaseId;
+    const manifest = admitted(fixture.manifest.manifest.records, {
+      releaseId: candidateRelease,
+      generation,
+    });
+    signedByRelease.set(
+      candidateRelease,
+      await envelope(manifest.manifest, fixture.privateKey),
+    );
+  }
+  let manifestReads = 0;
+  const fillerCandidates = Array.from({ length: 7 }, (_, index) => ({
+    catalogId,
+    releaseId: `release-${index + 2}` as ReleaseId,
+    operationId: fixture.rows[0].id,
+  }));
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return [
+          { catalogId, releaseId, operationId: fixture.rows[0].id },
+          ...fillerCandidates,
+          {
+            catalogId: "catalog-ninth" as CatalogId,
+            releaseId: "release-ninth" as ReleaseId,
+            operationId: fixture.rows[0].id,
+          },
+          { catalogId, releaseId, operationId: fixture.rows[1].id },
+        ];
+      },
+      async getManifest(_candidateCatalog, candidateRelease) {
+        manifestReads += 1;
+        const signed = signedByRelease.get(candidateRelease);
+        if (signed === undefined) throw new Error("manifest unavailable");
+        return signed;
+      },
+      async getOperation(_candidateCatalog, candidateRelease, id) {
+        if (candidateRelease !== releaseId) return null;
+        return fixture.rows.find((row) => row.id === id) ?? null;
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+  }).search({ query: "widgets" });
+  expect(manifestReads).toBe(8);
+  expect(
+    await Promise.all(
+      result.operations.map(
+        async (item) => (await decodeOperationRef(item.operation)).operationId,
+      ),
+    ),
+  ).toEqual(["operation:tiny:one", "operation:tiny:two"]);
+});
+
+test("the eighth distinct valid release is admitted and the ninth is unfetched", async () => {
+  const fixture = await searchFixture([operation("valid")]);
+  const candidates: CandidateRef[] = [];
+  const signedByCatalog = new Map<CatalogId, ManifestEnvelope>();
+  for (let index = 1; index <= 9; index += 1) {
+    const candidateCatalog = `catalog-${index}` as CatalogId;
+    const candidateRelease = `release-${index}` as ReleaseId;
+    const manifest = admitted(fixture.manifest.manifest.records, {
+      catalogId: candidateCatalog,
+      releaseId: candidateRelease,
+    });
+    candidates.push({
+      catalogId: candidateCatalog,
+      releaseId: candidateRelease,
+      operationId: fixture.rows[0].id,
+    });
+    signedByCatalog.set(
+      candidateCatalog,
+      await envelope(manifest.manifest, fixture.privateKey),
+    );
+  }
+  const manifestReads = new Map<CatalogId, number>();
+  const states = new Map<CatalogId, GenerationState>();
+  const generations: GenerationStore = {
+    async get(candidateCatalog) {
+      return states.get(candidateCatalog) ?? null;
+    },
+    async accept(candidateCatalog, _issuer, transition) {
+      const current = states.get(candidateCatalog) ?? null;
+      if ((current?.revision ?? null) !== transition.expectedRevision)
+        return null;
+      states.set(candidateCatalog, transition.next);
+      return transition.next;
+    },
+  };
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return candidates;
+      },
+      async getManifest(candidateCatalog) {
+        manifestReads.set(
+          candidateCatalog,
+          (manifestReads.get(candidateCatalog) ?? 0) + 1,
+        );
+        return signedByCatalog.get(candidateCatalog) ?? null;
+      },
+    },
+    trust: fixture.trust,
+    generations,
+  }).search({ query: "widgets" });
+
+  expect(result.operations).toHaveLength(8);
+  expect(states.size).toBe(8);
+  expect(manifestReads.get("catalog-8" as CatalogId)).toBe(1);
+  expect(manifestReads.has("catalog-9" as CatalogId)).toBe(false);
+});
+
+test("a store cannot spoof the release-budget control signal", async () => {
+  const fixture = await searchFixture([operation("valid")]);
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return [
+          {
+            catalogId: "spoof" as CatalogId,
+            releaseId: "spoof" as ReleaseId,
+            operationId: fixture.rows[0].id,
+          },
+          { catalogId, releaseId, operationId: fixture.rows[0].id },
+        ];
+      },
+      async getManifest(candidateCatalog) {
+        if (candidateCatalog === "spoof") {
+          throw new OpenApiMcpError(
+            "RECORD_NOT_ADMITTED",
+            "Search release admission limit reached",
+          );
+        }
+        return fixture.signed;
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+  }).search({ query: "widgets" });
+  expect(result.operations).toHaveLength(1);
+  expect(
+    (await decodeOperationRef(result.operations[0].operation)).operationId,
+  ).toBe("operation:tiny:valid");
+});
+
 test("search snapshots its exact input once and validates API identity grammar", async () => {
   const fixture = await searchFixture([operation("list")]);
   let getterReads = 0;
@@ -656,6 +870,336 @@ test("one search returns only the generation still active after all candidates a
   ).toBe("release-2");
 });
 
+test("a CAS race cannot reinterpret a normal advance as an authorized rollback", async () => {
+  const fixture = await searchFixture([operation("candidate")]);
+  await fixture.runtime.search({ query: "widgets" });
+  let state = fixture.generations.state as GenerationState;
+  const release2 = admitted(fixture.manifest.manifest.records, {
+    releaseId: "release-2" as ReleaseId,
+    generation: 2,
+  });
+  const manifestDigest = await sha256(
+    "knitli.openapi-mcp.release-manifest.v4",
+    release2.manifest as never,
+  );
+  const rollback = await rollbackAuthorization(
+    release2.manifest,
+    manifestDigest,
+    fixture.rollbackPrivateKey,
+    3,
+  );
+  const signed2 = await envelope(
+    release2.manifest,
+    fixture.privateKey,
+    rollback,
+  );
+  let accepts = 0;
+  let operationReads = 0;
+  const generations: GenerationStore = {
+    async get() {
+      return state;
+    },
+    async accept(_candidateCatalog, _issuer, transition) {
+      accepts += 1;
+      if (accepts === 1) {
+        state = {
+          ...state,
+          revision: state.revision + 1,
+          highestGeneration: 3,
+          highestManifestDigest: "c".repeat(64) as Sha256,
+          activeGeneration: 3,
+          activeManifestDigest: "c".repeat(64) as Sha256,
+        };
+        return null;
+      }
+      state = transition.next;
+      return state;
+    },
+  };
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return [
+          {
+            catalogId,
+            releaseId: release2.manifest.releaseId,
+            operationId: fixture.rows[0].id,
+          },
+        ];
+      },
+      async getManifest() {
+        return signed2;
+      },
+      async getOperation(...args) {
+        operationReads += 1;
+        return fixture.store.getOperation(...args);
+      },
+    },
+    trust: fixture.trust,
+    generations,
+  }).search({ query: "widgets" });
+  expect(operationReads).toBe(3);
+  expect(accepts).toBe(1);
+  expect(result.operations).toEqual([]);
+  expect(state).toMatchObject({
+    highestGeneration: 3,
+    activeGeneration: 3,
+    consumedRollbackAuthorizationIds: [],
+  });
+});
+
+test("repeated CAS misses exhaust one search-wide complete-proof budget", async () => {
+  const fixture = await searchFixture([operation("candidate")]);
+  const release2 = admitted(fixture.manifest.manifest.records, {
+    releaseId: "release-2" as ReleaseId,
+    generation: 2,
+  });
+  const signed2 = await envelope(release2.manifest, fixture.privateKey);
+  const state: GenerationState = {
+    revision: 0,
+    highestGeneration: 1,
+    highestManifestDigest: digestA,
+    activeGeneration: 1,
+    activeManifestDigest: digestA,
+    consumedRollbackAuthorizationIds: [],
+  };
+  let accepts = 0;
+  let operationReads = 0;
+  const attemptedRollbackIds: string[][] = [];
+  const generations: GenerationStore = {
+    async get() {
+      return state;
+    },
+    async accept(_catalog, _issuer, transition) {
+      accepts += 1;
+      attemptedRollbackIds.push([
+        ...transition.next.consumedRollbackAuthorizationIds,
+      ]);
+      return null;
+    },
+  };
+  const store: CatalogStore = {
+    ...fixture.store,
+    async searchCandidates() {
+      return [
+        {
+          catalogId,
+          releaseId: release2.manifest.releaseId,
+          operationId: fixture.rows[0].id,
+        },
+      ];
+    },
+    async getManifest() {
+      return signed2;
+    },
+    async getOperation(...args) {
+      operationReads += 1;
+      return fixture.store.getOperation(...args);
+    },
+  };
+
+  const result = await createOpenApiRuntime({
+    store,
+    trust: fixture.trust,
+    generations,
+  }).search({ query: "widgets" });
+
+  expect(result.operations).toEqual([]);
+  expect(result.warnings).toEqual([
+    expect.objectContaining({ code: "RECORD_NOT_ADMITTED" }),
+  ]);
+  expect(accepts).toBe(8);
+  expect(operationReads).toBe(9);
+  expect(attemptedRollbackIds).toEqual(Array.from({ length: 8 }, () => []));
+  expect(state).toEqual({
+    revision: 0,
+    highestGeneration: 1,
+    highestManifestDigest: digestA,
+    activeGeneration: 1,
+    activeManifestDigest: digestA,
+    consumedRollbackAuthorizationIds: [],
+  });
+});
+
+test("group selection restarts from conflicting higher releases after a fallback CAS miss", async () => {
+  const fixture = await searchFixture([
+    operation("higher-a"),
+    operation("higher-b"),
+    operation("fallback"),
+  ]);
+  const higherA = admitted(
+    { [fixture.rows[0].id]: fixture.rows[0].logicalDigest },
+    { releaseId: "release-3a" as ReleaseId, generation: 3 },
+  );
+  const higherB = admitted(
+    { [fixture.rows[1].id]: fixture.rows[1].logicalDigest },
+    { releaseId: "release-3b" as ReleaseId, generation: 3 },
+  );
+  const fallback = admitted(
+    { [fixture.rows[2].id]: fixture.rows[2].logicalDigest },
+    { releaseId: "release-2" as ReleaseId, generation: 2 },
+  );
+  const higherADigest = await sha256(
+    "knitli.openapi-mcp.release-manifest.v4",
+    higherA.manifest as never,
+  );
+  const fallbackDigest = await sha256(
+    "knitli.openapi-mcp.release-manifest.v4",
+    fallback.manifest as never,
+  );
+  const fallbackRollback = await rollbackAuthorization(
+    fallback.manifest,
+    fallbackDigest,
+    fixture.rollbackPrivateKey,
+    3,
+  );
+  const signedByRelease = new Map<ReleaseId, ManifestEnvelope>([
+    [
+      higherA.manifest.releaseId,
+      await envelope(higherA.manifest, fixture.privateKey),
+    ],
+    [
+      higherB.manifest.releaseId,
+      await envelope(higherB.manifest, fixture.privateKey),
+    ],
+    [
+      fallback.manifest.releaseId,
+      await envelope(fallback.manifest, fixture.privateKey, fallbackRollback),
+    ],
+  ]);
+  let state: GenerationState = {
+    revision: 0,
+    highestGeneration: 1,
+    highestManifestDigest: "d".repeat(64) as Sha256,
+    activeGeneration: 1,
+    activeManifestDigest: "d".repeat(64) as Sha256,
+    consumedRollbackAuthorizationIds: [],
+  };
+  let accepts = 0;
+  const generations: GenerationStore = {
+    async get() {
+      return state;
+    },
+    async accept() {
+      accepts += 1;
+      state = {
+        ...state,
+        revision: state.revision + 1,
+        highestGeneration: 3,
+        highestManifestDigest: higherADigest,
+        activeGeneration: 3,
+        activeManifestDigest: higherADigest,
+      };
+      return null;
+    },
+  };
+  const candidates = [higherA, higherB, fallback].map((release, index) => ({
+    catalogId,
+    releaseId: release.manifest.releaseId,
+    operationId: fixture.rows[index].id,
+  }));
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return candidates;
+      },
+      async getManifest(_candidateCatalog, candidateRelease) {
+        const signed = signedByRelease.get(candidateRelease);
+        if (signed === undefined) throw new Error("manifest unavailable");
+        return signed;
+      },
+    },
+    trust: fixture.trust,
+    generations,
+  }).search({ query: "widgets" });
+  expect(accepts).toBe(1);
+  expect(state).toMatchObject({
+    highestGeneration: 3,
+    activeGeneration: 3,
+    activeManifestDigest: higherADigest,
+    consumedRollbackAuthorizationIds: [],
+  });
+  expect(result.operations).toHaveLength(1);
+  expect(
+    await decodeOperationRef(result.operations[0].operation),
+  ).toMatchObject({
+    releaseId: higherA.manifest.releaseId,
+    operationId: fixture.rows[0].id,
+    manifestDigest: higherADigest,
+  });
+  expect(result.warnings).not.toContainEqual(
+    expect.objectContaining({ code: "MANIFEST_GENERATION_CONFLICT" }),
+  );
+});
+
+test("conflicting higher-generation candidates cannot suppress a valid release", async () => {
+  const fixture = await searchFixture([
+    operation("stable"),
+    operation("conflict-a"),
+    operation("conflict-b"),
+  ]);
+  const releases = [
+    admitted({ [fixture.rows[0].id]: fixture.rows[0].logicalDigest }),
+    admitted(
+      { [fixture.rows[1].id]: fixture.rows[1].logicalDigest },
+      { releaseId: "release-2a" as ReleaseId, generation: 2 },
+    ),
+    admitted(
+      { [fixture.rows[2].id]: fixture.rows[2].logicalDigest },
+      { releaseId: "release-2b" as ReleaseId, generation: 2 },
+    ),
+  ];
+  const signedByRelease = new Map<ReleaseId, ManifestEnvelope>();
+  for (const release of releases) {
+    signedByRelease.set(
+      release.manifest.releaseId,
+      await envelope(release.manifest, fixture.privateKey),
+    );
+  }
+  const candidates = releases.map((release, index) => ({
+    catalogId,
+    releaseId: release.manifest.releaseId,
+    operationId: fixture.rows[index].id,
+  }));
+
+  for (const orderedCandidates of [candidates, [...candidates].reverse()]) {
+    const generations = new MemoryGenerationStore();
+    const admittedGenerations: number[] = [];
+    const result = await createOpenApiRuntime({
+      store: {
+        ...fixture.store,
+        async searchCandidates() {
+          return orderedCandidates;
+        },
+        async getManifest(_candidateCatalog, candidateRelease) {
+          const signed = signedByRelease.get(candidateRelease);
+          if (signed === undefined) throw new Error("manifest unavailable");
+          return signed;
+        },
+      },
+      trust: fixture.trust,
+      generations: {
+        get: generations.get.bind(generations),
+        async accept(candidateCatalog, issuer, transition) {
+          admittedGenerations.push(transition.next.activeGeneration);
+          return generations.accept(candidateCatalog, issuer, transition);
+        },
+      },
+    }).search({ query: "widgets" });
+    expect(admittedGenerations).toEqual([1]);
+    expect(generations.state).toMatchObject({
+      highestGeneration: 1,
+      activeGeneration: 1,
+    });
+    expect(result.operations).toHaveLength(1);
+    expect(
+      (await decodeOperationRef(result.operations[0].operation)).operationId,
+    ).toBe("operation:tiny:stable");
+  }
+});
+
 test("search snapshots final generation state once per catalog and issuer", async () => {
   const fixture = await searchFixture([operation("one"), operation("two")]);
   let reads = 0;
@@ -678,6 +1222,7 @@ test("search snapshots final generation state once per catalog and issuer", asyn
     trust: fixture.trust,
     generations,
   }).search({ query: "widgets" });
+  expect(result.warnings).toEqual([]);
   expect(result.operations).toHaveLength(2);
   expect(reads).toBe(2);
 });
@@ -737,6 +1282,493 @@ test("a mismatched candidate catalog cannot advance persisted generation state",
   const result = await runtime.search({ query: "widgets" });
   expect(result.operations).toEqual([]);
   expect(fixture.generations.state).toBeNull();
+});
+
+test("a higher generation missing a noncandidate operation cannot advance state", async () => {
+  const fixture = await searchFixture([
+    operation("candidate"),
+    operation("noncandidate"),
+  ]);
+  await fixture.runtime.search({ query: "widgets" });
+  const previous = fixture.generations.state;
+  const release2 = admitted(fixture.manifest.manifest.records, {
+    releaseId: "release-2" as ReleaseId,
+    generation: 2,
+  });
+  const signed2 = await envelope(release2.manifest, fixture.privateKey);
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return [
+          {
+            catalogId,
+            releaseId: release2.manifest.releaseId,
+            operationId: fixture.rows[0].id,
+          },
+          { catalogId, releaseId, operationId: fixture.rows[0].id },
+        ];
+      },
+      async getManifest(_candidateCatalog, candidateRelease) {
+        return candidateRelease === releaseId ? fixture.signed : signed2;
+      },
+      async getOperation(_candidateCatalog, candidateRelease, id) {
+        if (
+          candidateRelease === release2.manifest.releaseId &&
+          id === fixture.rows[1].id
+        )
+          return null;
+        return fixture.rows.find((row) => row.id === id) ?? null;
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+  }).search({ query: "widgets" });
+  expect(result.operations).toHaveLength(1);
+  expect(
+    (await decodeOperationRef(result.operations[0].operation)).releaseId,
+  ).toBe(releaseId);
+  expect(fixture.generations.state).toEqual(previous);
+});
+
+test("a higher generation with a tampered noncandidate row cannot advance state", async () => {
+  const fixture = await searchFixture([
+    operation("candidate"),
+    operation("noncandidate"),
+  ]);
+  await fixture.runtime.search({ query: "widgets" });
+  const previous = fixture.generations.state;
+  const release2 = admitted(fixture.manifest.manifest.records, {
+    releaseId: "release-2" as ReleaseId,
+    generation: 2,
+  });
+  const signed2 = await envelope(release2.manifest, fixture.privateKey);
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return [
+          {
+            catalogId,
+            releaseId: release2.manifest.releaseId,
+            operationId: fixture.rows[0].id,
+          },
+        ];
+      },
+      async getManifest() {
+        return signed2;
+      },
+      async getOperation(_candidateCatalog, _candidateRelease, id) {
+        const row = fixture.rows.find((candidate) => candidate.id === id);
+        if (row === undefined) return null;
+        return id === fixture.rows[1].id
+          ? { ...row, logicalDigest: digestB }
+          : row;
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+  }).search({ query: "widgets" });
+  expect(result.operations).toEqual([]);
+  expect(fixture.generations.state).toEqual(previous);
+});
+
+test("a higher generation missing a required schema cannot advance state", async () => {
+  const schemaId = "schema:tiny:#/components/schemas/Required" as TypedSchemaId;
+  const candidate = operation("candidate", { schemaIds: [schemaId] });
+  const fixture = await searchFixture([operation("stable")]);
+  await fixture.runtime.search({ query: "widgets" });
+  const previous = fixture.generations.state;
+  const candidateRow = await storedOperation(candidate);
+  const schemaRow = await storedSchema(schemaId, { type: "object" });
+  const release2 = admitted(
+    {
+      [candidateRow.id]: candidateRow.logicalDigest,
+      [schemaRow.id]: schemaRow.logicalDigest,
+    },
+    { releaseId: "release-2" as ReleaseId, generation: 2 },
+  );
+  const signed2 = await envelope(release2.manifest, fixture.privateKey);
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return [
+          {
+            catalogId,
+            releaseId: release2.manifest.releaseId,
+            operationId: candidateRow.id,
+          },
+        ];
+      },
+      async getManifest() {
+        return signed2;
+      },
+      async getOperation() {
+        return candidateRow;
+      },
+      async getSchemas() {
+        return [];
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+  }).search({ query: "widgets" });
+  expect(result.operations).toEqual([]);
+  expect(fixture.generations.state).toEqual(previous);
+});
+
+test("a higher generation with a tampered noncandidate schema cannot advance state", async () => {
+  const schemaId = "schema:tiny:#/components/schemas/Unused" as TypedSchemaId;
+  const fixture = await searchFixture([operation("stable")]);
+  await fixture.runtime.search({ query: "widgets" });
+  const previous = fixture.generations.state;
+  const candidateRow = await storedOperation(operation("candidate"));
+  const schemaRow = await storedSchema(schemaId, { type: "string" });
+  const release2 = admitted(
+    {
+      [candidateRow.id]: candidateRow.logicalDigest,
+      [schemaRow.id]: schemaRow.logicalDigest,
+    },
+    { releaseId: "release-2" as ReleaseId, generation: 2 },
+  );
+  const signed2 = await envelope(release2.manifest, fixture.privateKey);
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return [
+          {
+            catalogId,
+            releaseId: release2.manifest.releaseId,
+            operationId: candidateRow.id,
+          },
+        ];
+      },
+      async getManifest() {
+        return signed2;
+      },
+      async getOperation() {
+        return candidateRow;
+      },
+      async getSchemas() {
+        return [{ ...schemaRow, logicalDigest: digestB }];
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+  }).search({ query: "widgets" });
+  expect(result.operations).toEqual([]);
+  expect(fixture.generations.state).toEqual(previous);
+});
+
+test("a higher generation with a dangling schema reference cannot advance state", async () => {
+  const root = "schema:tiny:#/components/schemas/Root" as TypedSchemaId;
+  const missing = "schema:tiny:#/components/schemas/Missing" as TypedSchemaId;
+  const fixture = await searchFixture([operation("stable")]);
+  await fixture.runtime.search({ query: "widgets" });
+  const previous = fixture.generations.state;
+  const candidateRow = await storedOperation(
+    operation("candidate", { schemaIds: [root] }),
+  );
+  const rootRow = await storedSchema(root, { $ref: missing });
+  const release2 = admitted(
+    {
+      [candidateRow.id]: candidateRow.logicalDigest,
+      [rootRow.id]: rootRow.logicalDigest,
+    },
+    { releaseId: "release-2" as ReleaseId, generation: 2 },
+  );
+  const signed2 = await envelope(release2.manifest, fixture.privateKey);
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return [
+          {
+            catalogId,
+            releaseId: release2.manifest.releaseId,
+            operationId: candidateRow.id,
+          },
+        ];
+      },
+      async getManifest() {
+        return signed2;
+      },
+      async getOperation() {
+        return candidateRow;
+      },
+      async getSchemas(_candidateCatalog, _candidateRelease, ids) {
+        return ids.includes(root) ? [rootRow] : [];
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+  }).search({ query: "widgets" });
+  expect(result.operations).toEqual([]);
+  expect(fixture.generations.state).toEqual(previous);
+});
+
+test("complete release verification caps schema batch cardinality under lowered record limits", async () => {
+  const fixture = await searchFixture([operation("candidate")]);
+  const schemaRows = await Promise.all(
+    Array.from({ length: 129 }, (_, index) =>
+      storedSchema(
+        `schema:tiny:#/components/schemas/S${String(index).padStart(3, "0")}` as TypedSchemaId,
+        { type: "string" },
+      ),
+    ),
+  );
+  const manifest = admitted(
+    Object.fromEntries(
+      [...fixture.rows, ...schemaRows].map((row) => [
+        row.id,
+        row.logicalDigest,
+      ]),
+    ),
+  );
+  const signed = await envelope(manifest.manifest, fixture.privateKey);
+  const batchSizes: number[] = [];
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async getManifest() {
+        return signed;
+      },
+      async getSchemas(_candidateCatalog, _candidateRelease, ids) {
+        batchSizes.push(ids.length);
+        return schemaRows.filter((row) => ids.includes(row.id));
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+    limits: { maxRecordBytes: 1024 },
+  }).search({ query: "widgets" });
+  expect(result.operations).toHaveLength(1);
+  expect(batchSizes).toEqual([128, 1]);
+});
+
+test("complete release verification loads a shared schema graph only once", async () => {
+  const schemaId = "schema:tiny:#/components/schemas/Shared" as TypedSchemaId;
+  const schemaUse = {
+    name: "q",
+    in: "query" as const,
+    required: false,
+    deprecated: false,
+    style: "form" as const,
+    explode: true,
+    allowReserved: false,
+    value: { kind: "schema" as const, schemaId },
+  };
+  const fixture = await searchFixture([
+    operation("one", { parameters: [schemaUse], schemaIds: [schemaId] }),
+    operation("two", { parameters: [schemaUse], schemaIds: [schemaId] }),
+  ]);
+  let schemaReads = 0;
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async getSchemas(...args) {
+        schemaReads += 1;
+        return fixture.store.getSchemas(...args);
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+  }).search({ query: "widgets" });
+  expect(result.warnings).toEqual([]);
+  expect(result.operations).toHaveLength(2);
+  expect(schemaReads).toBe(1);
+});
+
+test("release inventory bytes admit the exact limit and reject limit plus one", async () => {
+  const schemaId =
+    "schema:tiny:#/components/schemas/Candidate" as TypedSchemaId;
+  const fixture = await searchFixture([
+    operation("candidate", {
+      parameters: [
+        {
+          name: "q",
+          in: "query",
+          required: false,
+          deprecated: false,
+          style: "form",
+          explode: true,
+          allowReserved: false,
+          value: { kind: "schema", schemaId },
+        },
+      ],
+      schemaIds: [schemaId],
+    }),
+  ]);
+  const inventoryBytes = [...fixture.rows, ...fixture.schemaRows].reduce(
+    (total, row) =>
+      total + encoder.encode(canonicalJson(row.record)).byteLength,
+    0,
+  );
+  const exactGenerations = new MemoryGenerationStore();
+  const exact = await createOpenApiRuntime({
+    store: fixture.store,
+    trust: fixture.trust,
+    generations: exactGenerations,
+    limits: { maxReleaseInventoryBytes: inventoryBytes },
+  }).search({ query: "widgets" });
+  expect(exact.warnings).toEqual([]);
+  expect(exact.operations).toHaveLength(1);
+  expect(exactGenerations.state).not.toBeNull();
+
+  const overGenerations = new MemoryGenerationStore();
+  const over = await createOpenApiRuntime({
+    store: fixture.store,
+    trust: fixture.trust,
+    generations: overGenerations,
+    limits: { maxReleaseInventoryBytes: inventoryBytes - 1 },
+  }).search({ query: "widgets" });
+  expect(over.operations).toEqual([]);
+  expect(over.warnings).toEqual([
+    expect.objectContaining({ code: "RECORD_NOT_ADMITTED" }),
+  ]);
+  expect(overGenerations.state).toBeNull();
+});
+
+test("release inventory bytes share one search-wide budget across releases", async () => {
+  const fixture = await searchFixture([operation("candidate")]);
+  const catalogs = ["catalog-one", "catalog-two"] as const;
+  const releases = ["release-one", "release-two"] as const;
+  const signedByCatalog = new Map<CatalogId, ManifestEnvelope>();
+  const candidates: CandidateRef[] = [];
+  for (const [index, candidateCatalog] of catalogs.entries()) {
+    const candidateRelease = releases[index] as ReleaseId;
+    const manifest = admitted(fixture.manifest.manifest.records, {
+      catalogId: candidateCatalog as CatalogId,
+      releaseId: candidateRelease,
+    });
+    signedByCatalog.set(
+      candidateCatalog as CatalogId,
+      await envelope(manifest.manifest, fixture.privateKey),
+    );
+    candidates.push({
+      catalogId: candidateCatalog as CatalogId,
+      releaseId: candidateRelease,
+      operationId: fixture.rows[0].id,
+    });
+  }
+  const oneReleaseBytes = encoder.encode(
+    canonicalJson(fixture.rows[0].record),
+  ).byteLength;
+  const sharedBoundary = oneReleaseBytes * catalogs.length;
+
+  const runAtLimit = async (maxReleaseInventoryBytes: number) => {
+    const states = new Map<CatalogId, GenerationState>();
+    const generations: GenerationStore = {
+      async get(candidateCatalog) {
+        return states.get(candidateCatalog) ?? null;
+      },
+      async accept(candidateCatalog, _issuer, transition) {
+        const current = states.get(candidateCatalog) ?? null;
+        if ((current?.revision ?? null) !== transition.expectedRevision)
+          return null;
+        states.set(candidateCatalog, transition.next);
+        return transition.next;
+      },
+    };
+    const result = await createOpenApiRuntime({
+      store: {
+        ...fixture.store,
+        async searchCandidates() {
+          return candidates;
+        },
+        async getManifest(candidateCatalog) {
+          return signedByCatalog.get(candidateCatalog) ?? null;
+        },
+      },
+      trust: fixture.trust,
+      generations,
+      limits: { maxReleaseInventoryBytes },
+    }).search({ query: "widgets" });
+    return { result, states };
+  };
+
+  const exact = await runAtLimit(sharedBoundary);
+  expect(exact.result.operations).toHaveLength(2);
+  expect(exact.states.size).toBe(2);
+
+  const over = await runAtLimit(sharedBoundary - 1);
+  expect(over.result.operations).toHaveLength(1);
+  expect(over.result.warnings).toContainEqual(
+    expect.objectContaining({ code: "RECORD_NOT_ADMITTED" }),
+  );
+  expect(over.states.has(catalogs[0] as CatalogId)).toBe(true);
+  expect(over.states.has(catalogs[1] as CatalogId)).toBe(false);
+});
+
+test("CAS retries consume the same search-wide inventory byte budget", async () => {
+  const fixture = await searchFixture([operation("candidate")]);
+  const release2 = admitted(fixture.manifest.manifest.records, {
+    releaseId: "release-2" as ReleaseId,
+    generation: 2,
+  });
+  const signed2 = await envelope(release2.manifest, fixture.privateKey);
+  const state: GenerationState = {
+    revision: 0,
+    highestGeneration: 1,
+    highestManifestDigest: digestA,
+    activeGeneration: 1,
+    activeManifestDigest: digestA,
+    consumedRollbackAuthorizationIds: [],
+  };
+  const attemptedRollbackIds: string[][] = [];
+  let accepts = 0;
+  const generations: GenerationStore = {
+    async get() {
+      return state;
+    },
+    async accept(_catalog, _issuer, transition) {
+      accepts += 1;
+      attemptedRollbackIds.push([
+        ...transition.next.consumedRollbackAuthorizationIds,
+      ]);
+      return null;
+    },
+  };
+  const inventoryBytes = encoder.encode(
+    canonicalJson(fixture.rows[0].record),
+  ).byteLength;
+  const result = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return [
+          {
+            catalogId,
+            releaseId: release2.manifest.releaseId,
+            operationId: fixture.rows[0].id,
+          },
+        ];
+      },
+      async getManifest() {
+        return signed2;
+      },
+    },
+    trust: fixture.trust,
+    generations,
+    limits: { maxReleaseInventoryBytes: inventoryBytes * 2 - 1 },
+  }).search({ query: "widgets" });
+
+  expect(result.operations).toEqual([]);
+  expect(result.warnings).toContainEqual(
+    expect.objectContaining({ code: "RECORD_NOT_ADMITTED" }),
+  );
+  expect(accepts).toBe(1);
+  expect(attemptedRollbackIds).toEqual([[]]);
+  expect(state).toEqual({
+    revision: 0,
+    highestGeneration: 1,
+    highestManifestDigest: digestA,
+    activeGeneration: 1,
+    activeManifestDigest: digestA,
+    consumedRollbackAuthorizationIds: [],
+  });
 });
 
 test("a verified higher-generation candidate advances persisted state", async () => {

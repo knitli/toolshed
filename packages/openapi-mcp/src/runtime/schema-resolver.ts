@@ -41,7 +41,9 @@ function schemaReference(value: unknown): TypedSchemaId {
 }
 
 /** Collect references only from positions that JSON Schema defines as schemas. */
-function collectReferences(schema: JsonSchemaV4): readonly TypedSchemaId[] {
+export function collectReferences(
+  schema: JsonSchemaV4,
+): readonly TypedSchemaId[] {
   if (typeof schema === "boolean") return [];
   const found = new Set<TypedSchemaId>();
   const stack: JsonSchemaV4[] = [schema];
