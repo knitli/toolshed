@@ -612,6 +612,69 @@ export async function authenticateManifest(
 }
 
 /** Atomically commit the generation transition for an authenticated manifest. */
+/**
+ * Commit only the generation decision made against `state`.
+ * A null result is a CAS miss; callers must reread and re-plan rather than
+ * reinterpreting this manifest under a newer generation policy.
+ */
+export async function commitAuthenticatedManifestAtState(
+  authenticated: AuthenticatedManifest,
+  trust: ManifestTrust,
+  generations: GenerationStore,
+  state: GenerationState | null,
+): Promise<AdmittedManifest | null> {
+  const { manifest, manifestDigest, rollback, rollbackMalformed } =
+    authenticated;
+  const admitted: AdmittedManifest = { manifest, manifestDigest };
+  if (
+    state !== null &&
+    manifest.generation === state.activeGeneration &&
+    manifestDigest === state.activeManifestDigest
+  ) {
+    return admitted;
+  }
+  let next = nextNormalState(state, manifest, manifestDigest);
+  if (
+    state !== null &&
+    manifest.generation === state.highestGeneration &&
+    manifestDigest === state.highestManifestDigest &&
+    state.activeGeneration !== state.highestGeneration
+  ) {
+    throw rollbackRejected("Inactive high-water release cannot reactivate");
+  }
+  if (state !== null && manifest.generation < state.highestGeneration) {
+    if (rollbackMalformed)
+      throw rollbackRejected("Rollback authorization is malformed");
+    const rollbackId = await requireRollback(
+      manifest,
+      manifestDigest,
+      state,
+      rollback,
+      trust,
+    );
+    next = {
+      ...state,
+      revision: state.revision + 1,
+      activeGeneration: manifest.generation,
+      activeManifestDigest: manifestDigest,
+      consumedRollbackAuthorizationIds: [
+        ...state.consumedRollbackAuthorizationIds,
+        rollbackId,
+      ],
+    };
+  }
+  if (next === null) return admitted;
+  const accepted = await generations.accept(
+    manifest.catalogId,
+    manifest.issuer,
+    {
+      expectedRevision: state?.revision ?? null,
+      next,
+    },
+  );
+  return accepted === null ? null : admitted;
+}
+
 export async function admitAuthenticatedManifest(
   authenticated: AuthenticatedManifest,
   trust: ManifestTrust,
