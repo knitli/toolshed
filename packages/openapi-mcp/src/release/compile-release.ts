@@ -130,6 +130,19 @@ export type CompileReleaseOptions = Provenance & {
   readonly limits?: CompilerLimits;
 };
 
+export type ConstructionCheckpoint =
+  | "before-sqlite-created"
+  | "before-signature-created"
+  | "before-manifest-created"
+  | "after-sqlite-opened"
+  | "after-signature-opened"
+  | "after-manifest-opened";
+
+type ConstructionHook = (
+  checkpoint: ConstructionCheckpoint,
+  paths: CompiledReleasePaths,
+) => void | Promise<void>;
+
 interface AddressedValue {
   documentUri: string;
   pointer: string;
@@ -917,22 +930,43 @@ class EphemeralGenerationStore implements GenerationStore {
   }
 }
 
-async function syncPath(path: string): Promise<void> {
-  const handle = await open(path, "r");
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
+async function requireStageDirectory(
+  path: string,
+  identity: PathIdentity,
+): Promise<void> {
+  const current = await capturePathIdentity(path, "directory").catch(
+    () => null,
+  );
+  if (!current || current.dev !== identity.dev || current.ino !== identity.ino)
+    throw new Error("compiler stage directory identity was lost");
 }
 
+async function requireStageFile(
+  path: string,
+  identity: PathIdentity,
+): Promise<void> {
+  const current = await capturePathIdentity(path, "file").catch(() => null);
+  if (!current || current.dev !== identity.dev || current.ino !== identity.ino)
+    throw new Error("compiler stage file identity was lost");
+}
+
+/**
+ * Portable Node/Bun has no openat-style API. The compiler therefore assumes
+ * no hostile same-UID parent-namespace mutation before O_EXCL creates a leaf.
+ * Pre/post parent checks limit that residual to an empty entry: bytes are
+ * written only after the pinned handle and its pathname identity both match.
+ */
 async function createOwnedStageFile(
   path: string,
-  contents: string | undefined,
+  directory: string,
+  directoryIdentity: PathIdentity,
+  contents: string | Uint8Array,
   recordIdentity: (identity: PathIdentity) => void,
+  afterOpen: () => void | Promise<void> = () => {},
 ): Promise<void> {
   if (typeof constants.O_NOFOLLOW !== "number" || constants.O_NOFOLLOW === 0)
     throw new Error("compiler staging requires O_NOFOLLOW support");
+  await requireStageDirectory(directory, directoryIdentity);
   const handle = await open(
     path,
     constants.O_CREAT |
@@ -945,9 +979,47 @@ async function createOwnedStageFile(
     const metadata = await handle.stat({ bigint: true });
     if (!metadata.isFile() || metadata.nlink !== 1n)
       throw new Error("compiler-created stage file is unsafe");
-    recordIdentity({ dev: metadata.dev, ino: metadata.ino });
-    if (contents !== undefined) await handle.writeFile(contents);
+    const identity = { dev: metadata.dev, ino: metadata.ino };
+    recordIdentity(identity);
+    await afterOpen();
+    await requireStageDirectory(directory, directoryIdentity);
+    await requireStageFile(path, identity);
+    await handle.writeFile(contents);
     await handle.sync();
+    const after = await handle.stat({ bigint: true });
+    if (
+      !after.isFile() ||
+      after.nlink !== 1n ||
+      after.dev !== identity.dev ||
+      after.ino !== identity.ino
+    )
+      throw new Error("compiler stage file identity was lost");
+    await requireStageDirectory(directory, directoryIdentity);
+    await requireStageFile(path, identity);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function syncOwnedStageDirectory(
+  path: string,
+  identity: PathIdentity,
+): Promise<void> {
+  await requireStageDirectory(path, identity);
+  const handle = await open(
+    path,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
+  try {
+    const metadata = await handle.stat({ bigint: true });
+    if (
+      !metadata.isDirectory() ||
+      metadata.dev !== identity.dev ||
+      metadata.ino !== identity.ino
+    )
+      throw new Error("compiler stage directory identity was lost");
+    await handle.sync();
+    await requireStageDirectory(path, identity);
   } finally {
     await handle.close();
   }
@@ -984,8 +1056,9 @@ function assertIdentifiers(options: CompileReleaseOptions): {
   };
 }
 
-export async function compileRelease(
+export async function compileReleaseWithCheckpoint(
   options: CompileReleaseOptions,
+  checkpoint: ConstructionHook = () => {},
 ): Promise<CompiledRelease> {
   const sourceUri = sourceIdentity(options);
   const ids = assertIdentifiers(options);
@@ -999,6 +1072,7 @@ export async function compileRelease(
   }
   let stage: string | undefined;
   let stagePaths: CompiledReleasePaths | undefined;
+  let constructionDatabase: DatabaseSync | undefined;
   const stageOwnership: {
     -readonly [Kind in keyof CompiledReleaseOwnership]?: CompiledReleaseOwnership[Kind];
   } = {};
@@ -1007,16 +1081,13 @@ export async function compileRelease(
       options.specPath,
       limits.maxSourceBytes,
       "source document",
-      true,
     ).catch((error) => {
       if (
         error instanceof Error &&
         error.message.includes("exceeds byte limit")
       )
-        throw new Error("aggregate source bytes exceed limit", {
-          cause: error,
-        });
-      throw new Error("source document could not be read", { cause: error });
+        throw new Error("aggregate source bytes exceed limit");
+      throw new Error("source document could not be read");
     });
     const extension = extname(options.specPath).toLowerCase();
     const sourceMediaType =
@@ -1042,10 +1113,8 @@ export async function compileRelease(
       let permissionsText: string;
       try {
         permissionsText = await readFile(options.permissionsPath, "utf8");
-      } catch (error) {
-        throw new Error("permissions dataset could not be read", {
-          cause: error,
-        });
+      } catch {
+        throw new Error("permissions dataset could not be read");
       }
       const dataset = parseJsonStrict(permissionsText, {
         maxBytes: limits.maxSourceBytes,
@@ -1080,10 +1149,13 @@ export async function compileRelease(
     } as const;
     stagePaths = paths;
     const compiledAt = new Date().toISOString();
-    await createOwnedStageFile(paths.sqlite, undefined, (identity) => {
-      stageOwnership.sqlite = identity;
-    });
-    const database = new DatabaseSync(paths.sqlite);
+    await checkpoint("before-sqlite-created", paths);
+    await requireStageDirectory(
+      paths.directory,
+      stageOwnership.directory as PathIdentity,
+    );
+    const database = new DatabaseSync(":memory:");
+    constructionDatabase = database;
     try {
       database.exec("BEGIN IMMEDIATE");
       createReleaseSchemaV4(database);
@@ -1152,27 +1224,19 @@ export async function compileRelease(
         database.exec("ROLLBACK");
       } catch {}
       throw error;
-    } finally {
-      database.close();
     }
-    await syncPath(paths.sqlite);
-    await syncPath(stage);
 
-    const reread = new DatabaseSync(paths.sqlite, { readOnly: true });
+    const reread = database;
     let rows: Array<{
       record_id: string;
       record_json: string;
       logical_digest: string;
     }>;
-    try {
-      rows = reread
-        .prepare(
-          "SELECT record_id, record_json, logical_digest FROM operations UNION ALL SELECT record_id, record_json, logical_digest FROM schemas ORDER BY record_id",
-        )
-        .all() as typeof rows;
-    } finally {
-      reread.close();
-    }
+    rows = reread
+      .prepare(
+        "SELECT record_id, record_json, logical_digest FROM operations UNION ALL SELECT record_id, record_json, logical_digest FROM schemas ORDER BY record_id",
+      )
+      .all() as typeof rows;
     const manifestRecords = Object.create(null) as Record<
       TypedRecordId,
       Sha256
@@ -1210,82 +1274,98 @@ export async function compileRelease(
       records: manifestRecords,
     });
     const envelope = buildManifestEnvelopeV4(manifest, options.privateKeyPem);
-    const update = new DatabaseSync(paths.sqlite);
-    try {
-      update
-        .prepare(
-          `UPDATE release_metadata SET manifest_json = ?, signature_algorithm = ?, signature_key_id = ?, signature = ? WHERE catalog_id = ? AND release_id = ?`,
-        )
-        .run(
-          envelope.manifestJson,
-          envelope.signature.algorithm,
-          envelope.signature.keyId,
-          envelope.signature.signature,
-          ids.catalogId,
-          ids.releaseId,
+    const update = database;
+    update
+      .prepare(
+        `UPDATE release_metadata SET manifest_json = ?, signature_algorithm = ?, signature_key_id = ?, signature = ? WHERE catalog_id = ? AND release_id = ?`,
+      )
+      .run(
+        envelope.manifestJson,
+        envelope.signature.algorithm,
+        envelope.signature.keyId,
+        envelope.signature.signature,
+        ids.catalogId,
+        ids.releaseId,
+      );
+    const metadataDatabase = database;
+    const metadata = metadataDatabase
+      .prepare(
+        "SELECT * FROM release_metadata WHERE catalog_id = ? AND release_id = ?",
+      )
+      .get(ids.catalogId, ids.releaseId) as Record<string, unknown> | undefined;
+    if (!metadata)
+      throw new Error("release metadata is absent after construction");
+    const expectedMetadata: Record<string, unknown> = {
+      catalog_id: manifest.catalogId,
+      release_id: manifest.releaseId,
+      format: manifest.format,
+      contract: manifest.contract,
+      generation: manifest.generation,
+      issuer: manifest.issuer,
+      key_id: manifest.keyId,
+      policy_id: manifest.policyId,
+      allowed_origins_json: canonicalJson([
+        ...manifest.allowedOrigins,
+      ] as JsonValue),
+      compiled_at: manifest.compiledAt,
+      compiler_version: manifest.compilerVersion,
+      source_uri: manifest.source.uri,
+      source_revision: manifest.source.revision,
+      source_content_sha256: manifest.source.contentSha256,
+      reference_graph_digest: manifest.source.referenceGraphDigest,
+      manifest_json: envelope.manifestJson,
+      signature_algorithm: envelope.signature.algorithm,
+      signature_key_id: envelope.signature.keyId,
+      signature: envelope.signature.signature,
+    };
+    for (const [key, expected] of Object.entries(expectedMetadata)) {
+      if (metadata[key] !== expected)
+        throw new Error(
+          `release metadata field ${key} disagrees with the canonical manifest`,
         );
-    } finally {
-      update.close();
     }
-    const metadataDatabase = new DatabaseSync(paths.sqlite, { readOnly: true });
-    try {
-      const metadata = metadataDatabase
-        .prepare(
-          "SELECT * FROM release_metadata WHERE catalog_id = ? AND release_id = ?",
-        )
-        .get(ids.catalogId, ids.releaseId) as
-        | Record<string, unknown>
-        | undefined;
-      if (!metadata)
-        throw new Error("release metadata is absent after construction");
-      const expectedMetadata: Record<string, unknown> = {
-        catalog_id: manifest.catalogId,
-        release_id: manifest.releaseId,
-        format: manifest.format,
-        contract: manifest.contract,
-        generation: manifest.generation,
-        issuer: manifest.issuer,
-        key_id: manifest.keyId,
-        policy_id: manifest.policyId,
-        allowed_origins_json: canonicalJson([
-          ...manifest.allowedOrigins,
-        ] as JsonValue),
-        compiled_at: manifest.compiledAt,
-        compiler_version: manifest.compilerVersion,
-        source_uri: manifest.source.uri,
-        source_revision: manifest.source.revision,
-        source_content_sha256: manifest.source.contentSha256,
-        reference_graph_digest: manifest.source.referenceGraphDigest,
-        manifest_json: envelope.manifestJson,
-        signature_algorithm: envelope.signature.algorithm,
-        signature_key_id: envelope.signature.keyId,
-        signature: envelope.signature.signature,
-      };
-      for (const [key, expected] of Object.entries(expectedMetadata)) {
-        if (metadata[key] !== expected)
-          throw new Error(
-            `release metadata field ${key} disagrees with the canonical manifest`,
-          );
-      }
-    } finally {
-      metadataDatabase.close();
-    }
+    const sqliteBytes = database.serialize();
+    database.close();
+    constructionDatabase = undefined;
+    const signatureBytes = canonicalJson(
+      envelope.signature as unknown as JsonValue,
+    );
+    await createOwnedStageFile(
+      paths.sqlite,
+      paths.directory,
+      stageOwnership.directory as PathIdentity,
+      sqliteBytes,
+      (identity) => {
+        stageOwnership.sqlite = identity;
+      },
+      () => checkpoint("after-sqlite-opened", paths),
+    );
+    await checkpoint("before-signature-created", paths);
     await createOwnedStageFile(
       paths.signature,
-      canonicalJson(envelope.signature as unknown as JsonValue),
+      paths.directory,
+      stageOwnership.directory as PathIdentity,
+      signatureBytes,
       (identity) => {
         stageOwnership.signature = identity;
       },
+      () => checkpoint("after-signature-opened", paths),
     );
+    await checkpoint("before-manifest-created", paths);
     await createOwnedStageFile(
       paths.manifest,
+      paths.directory,
+      stageOwnership.directory as PathIdentity,
       envelope.manifestJson,
       (identity) => {
         stageOwnership.manifest = identity;
       },
+      () => checkpoint("after-manifest-opened", paths),
     );
-    for (const path of [paths.sqlite, paths.signature, paths.manifest, stage])
-      await syncPath(path);
+    await syncOwnedStageDirectory(
+      paths.directory,
+      stageOwnership.directory as PathIdentity,
+    );
 
     const admitted = await admitManifest(
       envelope,
@@ -1318,16 +1398,13 @@ export async function compileRelease(
       }),
       paths: Object.freeze({ ...paths }),
     });
-    const stageDigests = Object.fromEntries(
-      await Promise.all(
-        (["sqlite", "signature", "manifest"] as const).map(async (kind) => [
-          kind,
-          createHash("sha256")
-            .update(await readFile(paths[kind]))
-            .digest("hex"),
-        ]),
-      ),
-    ) as Record<"sqlite" | "signature" | "manifest", string>;
+    const stageDigests = {
+      sqlite: createHash("sha256").update(sqliteBytes).digest("hex"),
+      signature: createHash("sha256").update(signatureBytes).digest("hex"),
+      manifest: createHash("sha256")
+        .update(envelope.manifestJson)
+        .digest("hex"),
+    };
     return registerCompiledRelease(
       compiled,
       outDir,
@@ -1335,7 +1412,16 @@ export async function compileRelease(
       stageOwnership as CompiledReleaseOwnership,
     );
   } catch (error) {
+    try {
+      constructionDatabase?.close();
+    } catch {}
     if (stagePaths) await cleanupOwnedStage(stagePaths, stageOwnership);
     throw error;
   }
+}
+
+export async function compileRelease(
+  options: CompileReleaseOptions,
+): Promise<CompiledRelease> {
+  return compileReleaseWithCheckpoint(options);
 }

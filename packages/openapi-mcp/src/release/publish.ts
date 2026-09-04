@@ -223,13 +223,33 @@ async function syncFile(path: string, identity: PathIdentity): Promise<void> {
   await requireOwnedFile(path, identity, "compiled release staged file");
 }
 
-async function syncDirectory(path: string): Promise<void> {
-  const handle = await open(path, "r");
+async function syncOwnedDirectory(
+  path: string,
+  identity: PathIdentity,
+): Promise<void> {
+  await requireOwnedDirectory(path, identity, "release target directory");
+  const handle = await open(
+    path,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
   try {
+    const metadata = await handle.stat({ bigint: true });
+    if (!metadata.isDirectory() || !sameIdentity(metadata, identity))
+      throw new Error(
+        "release target directory identity or ownership was lost",
+      );
     await handle.sync();
   } finally {
     await handle.close();
   }
+  await requireOwnedDirectory(path, identity, "release target directory");
+}
+
+async function requirePromotedTargets(
+  targets: ReadonlyMap<string, PathIdentity>,
+): Promise<void> {
+  for (const [path, identity] of targets)
+    await requireOwnedFile(path, identity, "published target");
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -275,12 +295,22 @@ export async function publishReleaseWithCheckpoint(
   let lockIdentity: PathIdentity | undefined;
   let lockPath: string | undefined;
   let targetDirectory: string | undefined;
+  let targetDirectoryIdentity: PathIdentity | undefined;
   try {
     await validateStage(compiled, state);
     await mkdir(target.directory, { recursive: false }).catch((error) => {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     });
     targetDirectory = await realpath(target.directory);
+    targetDirectoryIdentity = await capturePathIdentity(
+      targetDirectory,
+      "directory",
+    );
+    await requireOwnedDirectory(
+      targetDirectory,
+      targetDirectoryIdentity,
+      "release target directory",
+    );
     lockPath = join(
       targetDirectory,
       `.${compiled.manifest.releaseId}.publish.lock`,
@@ -299,6 +329,11 @@ export async function publishReleaseWithCheckpoint(
         );
       throw error;
     });
+    await requireOwnedDirectory(
+      targetDirectory,
+      targetDirectoryIdentity,
+      "release target directory",
+    );
     const lockStat = await lockHandle.stat({ bigint: true });
     if (
       !lockStat.isFile() ||
@@ -337,7 +372,13 @@ export async function publishReleaseWithCheckpoint(
       const destination = targets[index] as string;
       const identity = identities[index] as PathIdentity;
       await requireLock(lockPath, lockIdentity);
+      await requireOwnedDirectory(
+        targetDirectory,
+        targetDirectoryIdentity,
+        "release target directory",
+      );
       await syncFile(source, identity);
+      await requirePromotedTargets(createdTargets);
       try {
         await link(source, destination);
       } catch (error) {
@@ -353,24 +394,58 @@ export async function publishReleaseWithCheckpoint(
       )
         throw new Error("published target identity is unsafe");
       createdTargets.set(destination, identity);
+      await requireOwnedDirectory(
+        targetDirectory,
+        targetDirectoryIdentity,
+        "release target directory",
+      );
       await requireLock(lockPath, lockIdentity);
       if (!(await removeOwnedFile(source, identity)))
         throw new Error("compiled release staged file identity was lost");
-      await syncDirectory(targetDirectory);
+      await syncOwnedDirectory(targetDirectory, targetDirectoryIdentity);
       await checkpoint(checkpoints[index]);
+      await requireOwnedDirectory(
+        targetDirectory,
+        targetDirectoryIdentity,
+        "release target directory",
+      );
+      await requirePromotedTargets(createdTargets);
       await requireLock(lockPath, lockIdentity);
     }
   } catch (error) {
-    for (const [path, identity] of [...createdTargets.entries()].reverse())
-      await removeOwnedFile(path, identity).catch(() => false);
-    if (createdTargets.size > 0 && targetDirectory)
-      await syncDirectory(targetDirectory).catch(() => {});
+    const targetDirectoryOwned =
+      targetDirectory && targetDirectoryIdentity
+        ? await ownedMetadata(targetDirectory, targetDirectoryIdentity).then(
+            (metadata) => metadata?.isDirectory() === true,
+            () => false,
+          )
+        : false;
+    if (targetDirectoryOwned) {
+      for (const [path, identity] of [...createdTargets.entries()].reverse())
+        await removeOwnedFile(path, identity).catch(() => false);
+      if (createdTargets.size > 0)
+        await syncOwnedDirectory(
+          targetDirectory as string,
+          targetDirectoryIdentity as PathIdentity,
+        ).catch(() => {});
+    }
     throw error;
   } finally {
     await lockHandle?.close().catch(() => {});
-    if (lockPath && lockIdentity) {
+    if (
+      lockPath &&
+      lockIdentity &&
+      targetDirectory &&
+      targetDirectoryIdentity &&
+      (await ownedMetadata(targetDirectory, targetDirectoryIdentity).then(
+        (metadata) => metadata?.isDirectory() === true,
+        () => false,
+      ))
+    ) {
       await removeOwnedFile(lockPath, lockIdentity).catch(() => false);
-      if (targetDirectory) await syncDirectory(targetDirectory).catch(() => {});
+      await syncOwnedDirectory(targetDirectory, targetDirectoryIdentity).catch(
+        () => {},
+      );
     }
     await cleanupOwnedStage(state.paths, state.ownership);
   }

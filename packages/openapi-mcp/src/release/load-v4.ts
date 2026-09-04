@@ -45,28 +45,37 @@ export async function readFileBoundedV4(
   path: string,
   maxBytes: number,
   label: string,
-  allowStreaming = false,
 ): Promise<Uint8Array> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 0)
     throw new Error(`${label} byte limit is invalid`);
   if (typeof constants.O_NOFOLLOW !== "number" || constants.O_NOFOLLOW === 0)
     throw new Error(`${label} requires O_NOFOLLOW support`);
+  const expected = await lstat(path, { bigint: true });
+  if (!expected.isFile() || expected.isSymbolicLink() || expected.nlink !== 1n)
+    throw new Error(`${label} is unsafe or not a single-link regular file`);
+  if (expected.size > BigInt(maxBytes))
+    throw new Error(`${label} exceeds byte limit`);
   let handle: Awaited<ReturnType<typeof open>>;
   try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ELOOP")
-      throw new Error(`${label} is unsafe or symbolic`, { cause: error });
+      throw new Error(`${label} is unsafe or symbolic`);
     throw error;
   }
   try {
     const before = await handle.stat({ bigint: true });
     if (
-      (!before.isFile() && !(allowStreaming && before.isFIFO())) ||
-      before.nlink !== 1n
+      !before.isFile() ||
+      before.nlink !== 1n ||
+      before.dev !== expected.dev ||
+      before.ino !== expected.ino
     )
-      throw new Error(`${label} is not a safe single-link file`);
-    if (before.isFile() && before.size > BigInt(maxBytes))
+      throw new Error(`${label} is unsafe or not a single-link file`);
+    if (before.size > BigInt(maxBytes))
       throw new Error(`${label} exceeds byte limit`);
     const chunks: Uint8Array[] = [];
     let total = 0;
@@ -306,12 +315,11 @@ export async function loadSpecV4(
       path,
       limits.maxSourceBytes,
       "source document",
-      true,
     );
   } catch (error) {
     if (error instanceof Error && error.message.includes("exceeds byte limit"))
-      throw new Error("source bytes exceed limit", { cause: error });
-    throw new Error(`source document could not be read`, { cause: error });
+      throw new Error("source bytes exceed limit");
+    throw new Error("source document could not be read");
   }
   return parseSpecBytesV4(bytes, mediaType, limits);
 }

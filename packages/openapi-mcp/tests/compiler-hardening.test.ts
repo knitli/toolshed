@@ -20,6 +20,7 @@ import {
   resolveLocalPointer,
 } from "../src/compiler.ts";
 import { readFileBoundedV4 } from "../src/release/load-v4.ts";
+import { loadReferenceMap } from "../src/release/reference-map.ts";
 import { parseTypedRecordId } from "../src/runtime/references.ts";
 import { generateKeypair } from "../src/sign.ts";
 
@@ -57,6 +58,47 @@ async function write(
   return path;
 }
 
+async function runChildWithDeadline(
+  script: string,
+  deadlineMs = 750,
+): Promise<{ kind: "exit"; code: number } | { kind: "timeout" }> {
+  const child = Bun.spawn([process.execPath, "-e", script], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const outcome = await Promise.race([
+    child.exited.then((code) => ({ kind: "exit" as const, code })),
+    Bun.sleep(deadlineMs).then(() => ({ kind: "timeout" as const })),
+  ]);
+  if (outcome.kind === "timeout") {
+    child.kill();
+    await child.exited;
+  }
+  return outcome;
+}
+
+function reachableErrorText(error: unknown): string {
+  const seen = new WeakSet<object>();
+  const texts: string[] = [];
+  const visit = (value: unknown): void => {
+    if (typeof value === "string") {
+      texts.push(value);
+      return;
+    }
+    if ((typeof value !== "object" && typeof value !== "function") || !value)
+      return;
+    if (seen.has(value)) return;
+    seen.add(value);
+    for (const key of Reflect.ownKeys(value)) {
+      texts.push(String(key));
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor && "value" in descriptor) visit(descriptor.value);
+    }
+  };
+  visit(error);
+  return texts.join("\n");
+}
+
 function minimalDocument(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -88,7 +130,7 @@ function releaseOptions(root: string, specPath: string): CompileReleaseOptions {
 }
 
 describe("strict v4 loading", () => {
-  test("bounds regular and streaming source reads before unbounded allocation", async () => {
+  test("bounds regular source reads before unbounded allocation", async () => {
     const root = await temporaryRoot();
     const regular = await write(root, "bounded.bin", "x".repeat(65));
     await expect(readFileBoundedV4(regular, 64, "test source")).rejects.toThrow(
@@ -103,31 +145,145 @@ describe("strict v4 loading", () => {
     await expect(
       readFileBoundedV4(symlinkPath, 65, "test source"),
     ).rejects.toThrow(/symbolic|no.?follow|unsafe/i);
+  });
 
-    const fifo = join(root, "bounded-fifo.bin");
-    const mkfifo = Bun.spawn(["mkfifo", fifo]);
-    expect(await mkfifo.exited).toBe(0);
-    const writer = Bun.spawn([
-      "/bin/sh",
-      "-c",
-      '{ printf %s "$2"; sleep 2; } > "$1"',
-      "writer",
-      fifo,
-      "x".repeat(65),
-    ]);
-    try {
-      const outcome = await Promise.race([
-        readFileBoundedV4(fifo, 64, "test source", true).then(
-          () => "resolved",
-          () => "rejected",
-        ),
-        Bun.sleep(500).then(() => "timeout"),
-      ]);
-      expect(outcome).toBe("rejected");
-    } finally {
-      writer.kill();
-      await writer.exited;
+  test("rejects root FIFOs without blocking for a writer or EOF", async () => {
+    const root = await temporaryRoot();
+    const modulePath = fileURLToPath(
+      new URL("../src/compiler.ts", import.meta.url),
+    );
+    for (const api of ["loadSpecV4", "compileRelease"] as const) {
+      for (const mode of ["no-writer", "writer-kept-open"] as const) {
+        const fifo = join(root, `${api}-${mode}.json`);
+        const mkfifo = Bun.spawn(["mkfifo", fifo]);
+        expect(await mkfifo.exited).toBe(0);
+        const writer =
+          mode === "writer-kept-open"
+            ? Bun.spawn([
+                "/bin/sh",
+                "-c",
+                '{ printf %s "$2"; sleep 10; } > "$1"',
+                "writer",
+                fifo,
+                JSON.stringify(minimalDocument()),
+              ])
+            : undefined;
+        try {
+          const compileOptions = releaseOptions(root, fifo);
+          const script = `
+          const compiler = await import(${JSON.stringify(modulePath)});
+          try {
+            if (${JSON.stringify(api)} === "loadSpecV4") {
+              await compiler.loadSpecV4(${JSON.stringify(fifo)});
+            } else {
+              await compiler.compileRelease(${JSON.stringify(compileOptions)});
+            }
+            process.exit(2);
+          } catch (error) {
+            process.exit(error instanceof Error && error.message === "source document could not be read" ? 0 : 3);
+          }
+        `;
+          expect(await runChildWithDeadline(script)).toEqual({
+            kind: "exit",
+            code: 0,
+          });
+        } finally {
+          writer?.kill();
+          if (writer) await writer.exited;
+        }
+      }
     }
+  });
+
+  test("public read errors recursively redact source and reference paths", async () => {
+    const root = await temporaryRoot();
+    const missingSpec = join(root, "private-spec-canary.json");
+    const missingMap = join(root, "private-map-canary.json");
+    const missingPermissions = join(root, "private-permissions-canary.json");
+    const readableSpec = await write(
+      root,
+      "readable-spec.json",
+      JSON.stringify(minimalDocument()),
+    );
+    const cases: Array<readonly [Promise<unknown>, string]> = [
+      [loadSpecV4(missingSpec), "source document could not be read"],
+      [
+        compileRelease(releaseOptions(root, missingSpec)),
+        "source document could not be read",
+      ],
+      [
+        loadReferenceMap(
+          missingMap,
+          "urn:openapi-source:test",
+          DEFAULT_COMPILER_LIMITS,
+        ),
+        "reference map could not be read",
+      ],
+      [
+        compileRelease({
+          ...releaseOptions(root, readableSpec),
+          permissionsPath: missingPermissions,
+        }),
+        "permissions dataset could not be read",
+      ],
+    ];
+    for (const [operation, message] of cases) {
+      const error = await operation.catch((reason) => reason);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe(message);
+      const reachable = reachableErrorText(error);
+      expect(reachable).not.toContain(root);
+      expect(reachable).not.toContain("private-spec-canary");
+      expect(reachable).not.toContain("private-map-canary");
+      expect(reachable).not.toContain("private-permissions-canary");
+    }
+
+    const referenced = JSON.stringify({ type: "string" });
+    const referencedTarget = await write(
+      root,
+      "private-reference-target-canary.json",
+      referenced,
+    );
+    const referencedLink = join(root, "private-reference-link-canary.json");
+    await symlink(referencedTarget, referencedLink);
+    const map = await write(
+      root,
+      "reference-map.json",
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            uri: "private.json",
+            file: "private-reference-link-canary.json",
+            sha256: new Bun.CryptoHasher("sha256")
+              .update(referenced)
+              .digest("hex"),
+          },
+        ],
+      }),
+    );
+    const spec = await write(
+      root,
+      "reference-spec.json",
+      JSON.stringify(
+        minimalDocument({
+          components: { schemas: { Private: { $ref: "private.json" } } },
+        }),
+      ),
+    );
+    const referenceError = await compileRelease({
+      ...releaseOptions(root, spec),
+      referenceMapPath: map,
+      referenceRoot: root,
+    }).catch((reason) => reason);
+    expect(referenceError).toBeInstanceOf(Error);
+    expect((referenceError as Error).message).toBe(
+      "referenced document could not be read",
+    );
+    const reachableReference = reachableErrorText(referenceError);
+    expect(reachableReference).not.toContain(root);
+    expect(reachableReference).not.toContain("private-reference-link-canary");
+    expect(reachableReference).not.toContain("private-reference-target-canary");
   });
 
   test("uses the exact frozen compiler defaults", () => {
@@ -294,9 +450,9 @@ describe("safe local pointers", () => {
 });
 
 describe("compiler contract limits and provenance", () => {
-  test("reads the root source once and binds records and provenance to those bytes", async () => {
+  test("reads a regular root source once and binds records and provenance to those bytes", async () => {
     const root = await temporaryRoot();
-    const fifo = join(root, "swapped.json");
+    const spec = join(root, "swapped.json");
     const makeDocument = (operationId: string) =>
       JSON.stringify(
         minimalDocument({
@@ -310,23 +466,55 @@ describe("compiler contract limits and provenance", () => {
           },
         }),
       );
-    const first = makeDocument("firstRead");
+    const external = JSON.stringify({ type: "string" });
+    const firstDocument = minimalDocument({
+      paths: {
+        "/probe": {
+          get: {
+            operationId: "firstRead",
+            responses: { "204": { description: "ok" } },
+          },
+        },
+      },
+      components: {
+        schemas: { External: { $ref: "other.json" } },
+      },
+    });
+    const first = JSON.stringify(firstDocument);
     const second = makeDocument("secondRead");
-    const mkfifo = Bun.spawn(["mkfifo", fifo]);
-    expect(await mkfifo.exited).toBe(0);
-    const writer = Bun.spawn([
-      "/bin/sh",
-      "-c",
-      'printf %s "$2" > "$1"; sleep 0.1; printf %s "$3" > "$1"',
-      "writer",
-      fifo,
-      first,
-      second,
-    ]);
+    await writeFile(spec, first);
+    const map = await write(
+      root,
+      "snapshot-map.json",
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            uri: "other.json",
+            file: "unused.json",
+            sha256: new Bun.CryptoHasher("sha256")
+              .update(external)
+              .digest("hex"),
+          },
+        ],
+      }),
+    );
 
     let compiled: Awaited<ReturnType<typeof compileRelease>> | undefined;
     try {
-      compiled = await compileRelease(releaseOptions(root, fifo));
+      compiled = await compileRelease({
+        ...releaseOptions(root, spec),
+        referenceMapPath: map,
+        referenceResolver: {
+          async resolve() {
+            await writeFile(spec, second);
+            return {
+              bytes: new TextEncoder().encode(external),
+              mediaType: "json",
+            };
+          },
+        },
+      });
       expect(compiled.manifest.source.contentSha256).toBe(
         new Bun.CryptoHasher("sha256").update(first).digest("hex"),
       );
@@ -338,8 +526,6 @@ describe("compiler contract limits and provenance", () => {
       );
     } finally {
       if (compiled) await discardCompiledRelease(compiled);
-      writer.kill();
-      await writer.exited;
     }
   });
 
@@ -660,7 +846,7 @@ describe("compiler contract limits and provenance", () => {
       }),
     );
     await expect(compileRelease(base)).rejects.toThrow(
-      /symbolic|no.?follow|single-link|unsafe/i,
+      /referenced document.*read/i,
     );
 
     await link(join(refs, "other.json"), join(refs, "hard-link.json"));
@@ -673,7 +859,9 @@ describe("compiler contract limits and provenance", () => {
         ],
       }),
     );
-    await expect(compileRelease(base)).rejects.toThrow(/single-link|unsafe/i);
+    await expect(compileRelease(base)).rejects.toThrow(
+      /referenced document.*read/i,
+    );
 
     const outside = await write(root, "outside.json", external);
     await symlink(outside, join(refs, "escape.json"));

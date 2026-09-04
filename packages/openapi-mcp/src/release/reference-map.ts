@@ -157,8 +157,8 @@ export async function loadReferenceMap(
       "reference map",
     );
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch (error) {
-    throw new Error("reference map could not be read", { cause: error });
+  } catch {
+    throw new Error("reference map could not be read");
   }
   const root = exactObject(
     parseJsonStrict(text, {
@@ -344,7 +344,7 @@ export class ReferenceGraphV4 {
             error.message.includes("exceeds byte limit")
           )
             throw new Error("aggregate source bytes exceed limit");
-          throw error;
+          throw new Error("referenced document could not be read");
         });
         const extension = extname(entry.file).toLowerCase();
         mediaType =

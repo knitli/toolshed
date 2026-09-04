@@ -7,10 +7,11 @@ import {
   rename,
   rm,
   stat,
+  symlink,
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
@@ -19,6 +20,10 @@ import {
   discardCompiledRelease,
   publishRelease,
 } from "../src/compiler.ts";
+import {
+  type ConstructionCheckpoint,
+  compileReleaseWithCheckpoint,
+} from "../src/release/compile-release.ts";
 import { buildManifestEnvelopeV4 } from "../src/release/manifest-builder.ts";
 import { publishReleaseWithCheckpoint } from "../src/release/publish.ts";
 import type {
@@ -111,6 +116,28 @@ async function fixture(root: string, releaseId = "release-1") {
   };
 }
 
+async function constructionOptions(
+  root: string,
+  releaseId = "release-1",
+): Promise<CompileReleaseOptions> {
+  const specPath = join(root, `${releaseId}.json`);
+  await writeFile(specPath, JSON.stringify(SPEC));
+  return {
+    specPath,
+    sourceLabel: "fixture-v1",
+    sourceRevision: "abc123",
+    catalogId: "tiny",
+    releaseId,
+    generation: 1,
+    issuer: "test-issuer",
+    keyId: "test-key",
+    policyId: "test-policy",
+    allowedOrigins: ["https://api.example.test"],
+    outDir: root,
+    privateKeyPem: generateKeypair().privateKeyPem,
+  };
+}
+
 class MemoryGenerationStore implements GenerationStore {
   state: GenerationState | null = null;
   async get(): Promise<GenerationState | null> {
@@ -129,6 +156,107 @@ class MemoryGenerationStore implements GenerationStore {
 }
 
 describe("immutable v4 construction", () => {
+  test("fails closed when the stage parent is substituted before every leaf transition", async () => {
+    for (const checkpoint of [
+      "before-sqlite-created",
+      "before-signature-created",
+      "before-manifest-created",
+    ] as const satisfies readonly ConstructionCheckpoint[]) {
+      const root = await temporaryRoot();
+      const options = await constructionOptions(root);
+      const attacker = join(root, `attacker-${checkpoint}`);
+      const sentinel = join(attacker, "sentinel.txt");
+      let ownedStage = "";
+      const error = await compileReleaseWithCheckpoint(
+        options,
+        async (current, paths) => {
+          if (current !== checkpoint) return;
+          ownedStage = `${paths.directory}.owned`;
+          await rename(paths.directory, ownedStage);
+          await mkdir(attacker);
+          await writeFile(sentinel, "preserve-me");
+          await symlink(attacker, paths.directory);
+        },
+      ).catch((reason) => reason);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/stage directory identity/i);
+      expect(await readFile(sentinel, "utf8")).toBe("preserve-me");
+      expect(await readdir(attacker)).toEqual(["sentinel.txt"]);
+      expect(ownedStage).not.toBe("");
+      expect((await stat(ownedStage)).isDirectory()).toBe(true);
+    }
+  });
+
+  test("compile-error cleanup preserves a substituted stage parent and sentinel", async () => {
+    const root = await temporaryRoot();
+    const options = await constructionOptions(root);
+    const attacker = join(root, "attacker-cleanup");
+    const sentinel = join(attacker, "sentinel.txt");
+    let ownedStage = "";
+    const error = await compileReleaseWithCheckpoint(
+      options,
+      async (checkpoint, paths) => {
+        if (checkpoint !== "before-sqlite-created") return;
+        ownedStage = `${paths.directory}.owned`;
+        await rename(paths.directory, ownedStage);
+        await mkdir(attacker);
+        await writeFile(sentinel, "preserve-me");
+        await symlink(attacker, paths.directory);
+        throw new Error("injected construction failure");
+      },
+    ).catch((reason) => reason);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("injected construction failure");
+    expect(await readFile(sentinel, "utf8")).toBe("preserve-me");
+    expect(await readdir(attacker)).toEqual(["sentinel.txt"]);
+    expect((await stat(ownedStage)).isDirectory()).toBe(true);
+  });
+
+  test("post-open parent and leaf substitution never receives release content", async () => {
+    const cases = [
+      ["after-sqlite-opened", "sqlite"],
+      ["after-signature-opened", "signature"],
+      ["after-manifest-opened", "manifest"],
+    ] as const satisfies ReadonlyArray<
+      readonly [ConstructionCheckpoint, "sqlite" | "signature" | "manifest"]
+    >;
+    for (const [checkpoint, kind] of cases) {
+      for (const substitution of ["parent", "leaf"] as const) {
+        const root = await temporaryRoot();
+        const options = await constructionOptions(root);
+        const attacker = join(root, `attacker-${checkpoint}-${substitution}`);
+        const sentinel = join(attacker, "sentinel.txt");
+        let replacement = "";
+        let openedLeaf = "";
+        const error = await compileReleaseWithCheckpoint(
+          options,
+          async (current, paths) => {
+            if (current !== checkpoint) return;
+            if (substitution === "parent") {
+              const ownedStage = `${paths.directory}.owned`;
+              await rename(paths.directory, ownedStage);
+              await mkdir(attacker);
+              await writeFile(sentinel, "preserve-parent");
+              await symlink(attacker, paths.directory);
+              replacement = sentinel;
+              openedLeaf = join(ownedStage, basename(paths[kind]));
+              return;
+            }
+            const leaf = paths[kind];
+            openedLeaf = `${leaf}.owned`;
+            await rename(leaf, openedLeaf);
+            await writeFile(leaf, "preserve-leaf");
+            replacement = leaf;
+          },
+        ).catch((reason) => reason);
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toMatch(/stage.*identity/i);
+        expect(await readFile(replacement, "utf8")).toMatch(/^preserve-/);
+        expect((await stat(openedLeaf)).size).toBe(0);
+      }
+    }
+  });
+
   test("emits the exact lower-case transport schema and canonical logical rows", async () => {
     const root = await temporaryRoot();
     const { compiled } = await fixture(root);
@@ -560,6 +688,56 @@ describe("manifest-last publication", () => {
     expect(
       await readFile(join(target, "release-2.manifest.json"), "utf8"),
     ).toBe(second.compiled.envelope.manifestJson);
+  });
+
+  test("rejects a payload replacement after signature before manifest visibility", async () => {
+    const root = await temporaryRoot();
+    const target = join(root, "published");
+    await mkdir(target);
+    const { compiled } = await fixture(root);
+    const payload = join(target, "release-1.sqlite");
+    const manifest = join(target, "release-1.manifest.json");
+    const sentinel = "replacement-payload-sentinel";
+    await expect(
+      publishReleaseWithCheckpoint(
+        compiled,
+        { directory: target },
+        async (checkpoint) => {
+          if (checkpoint !== "signature-published") return;
+          await unlink(payload);
+          await writeFile(payload, sentinel);
+        },
+      ),
+    ).rejects.toThrow(/published target.*identity|ownership/i);
+    expect(await readFile(payload, "utf8")).toBe(sentinel);
+    await expect(stat(manifest)).rejects.toThrow();
+  });
+
+  test("rejects target-directory replacement without writing into the substitute", async () => {
+    const root = await temporaryRoot();
+    const target = join(root, "published");
+    const ownedTarget = join(root, "published-owned");
+    await mkdir(target);
+    const { compiled } = await fixture(root);
+    const sentinel = join(target, "sentinel.txt");
+    await expect(
+      publishReleaseWithCheckpoint(
+        compiled,
+        { directory: target },
+        async (checkpoint) => {
+          if (checkpoint !== "payload-published") return;
+          await rename(target, ownedTarget);
+          await mkdir(target);
+          await writeFile(sentinel, "preserve-target");
+        },
+      ),
+    ).rejects.toThrow(/target directory.*identity|ownership/i);
+    expect(await readFile(sentinel, "utf8")).toBe("preserve-target");
+    expect(await readdir(target)).toEqual(["sentinel.txt"]);
+    expect(await stat(join(ownedTarget, "release-1.sqlite"))).toBeDefined();
+    await expect(
+      stat(join(ownedTarget, "release-1.manifest.json")),
+    ).rejects.toThrow();
   });
 
   test("cleanup preserves a substituted published target", async () => {
