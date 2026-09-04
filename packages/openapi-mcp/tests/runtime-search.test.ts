@@ -324,6 +324,28 @@ test("search enforces result bounds and defaults to ten", async () => {
   expect(calls.map((call) => call.limit)).toEqual([30, 150]);
 });
 
+test("search bounds its omitted result limit by the configured maximum", async () => {
+  const fixture = await searchFixture([operation("list")]);
+  const calls: Array<{ readonly limit: number }> = [];
+  const runtime = createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates(query) {
+        calls.push(query);
+        return fixture.store.searchCandidates(query);
+      },
+    },
+    trust: fixture.trust,
+    generations: fixture.generations,
+    limits: { maxSearchResults: 3 },
+  });
+
+  const result = await runtime.search({ query: "widgets" });
+
+  expect(result.operations).toHaveLength(1);
+  expect(calls).toEqual([{ api: undefined, query: "widgets", limit: 9 }]);
+});
+
 test("search drops poisoned candidates before returning any record field", async () => {
   const { rows, store, trust, generations } = await searchFixture([
     operation("delete"),
@@ -832,6 +854,91 @@ test("search normalizes final generation-state recheck failures", async () => {
       retryable: true,
     }),
   );
+  expect(JSON.stringify(error)).not.toMatch(/sk-secret|Users|state/);
+});
+
+test("search propagates generation accept failures as infrastructure errors", async () => {
+  const fixture = await searchFixture([operation("list")]);
+  const generations: GenerationStore = {
+    async get() {
+      return null;
+    },
+    async accept() {
+      throw new Error("Bearer sk-secret /Users/state.json");
+    },
+  };
+
+  const error = await createOpenApiRuntime({
+    store: fixture.store,
+    trust: fixture.trust,
+    generations,
+  })
+    .search({ query: "widgets" })
+    .catch((value) => value);
+
+  expect(error).toEqual(
+    new OpenApiMcpError("UPSTREAM_ERROR", "Generation state is unavailable", {
+      retryable: true,
+    }),
+  );
+  expect(JSON.stringify(error)).not.toMatch(/sk-secret|Users|state/);
+});
+
+test("search propagates post-proof generation reads as infrastructure errors", async () => {
+  const fixture = await searchFixture([
+    operation("active"),
+    operation("conflict"),
+  ]);
+  await fixture.runtime.search({ query: "widgets" });
+  const conflicting = admitted(
+    { [fixture.rows[1].id]: fixture.rows[1].logicalDigest },
+    { releaseId: "release-conflict" as ReleaseId },
+  );
+  const signedConflict = await envelope(
+    conflicting.manifest,
+    fixture.privateKey,
+  );
+  let reads = 0;
+  const generations: GenerationStore = {
+    async get(candidateCatalog, issuer) {
+      reads += 1;
+      if (reads === 2) throw new Error("Bearer sk-secret /Users/state.json");
+      return fixture.generations.get(candidateCatalog, issuer);
+    },
+    async accept(candidateCatalog, issuer, transition) {
+      return fixture.generations.accept(candidateCatalog, issuer, transition);
+    },
+  };
+
+  const error = await createOpenApiRuntime({
+    store: {
+      ...fixture.store,
+      async searchCandidates() {
+        return [
+          { catalogId, releaseId, operationId: fixture.rows[0].id },
+          {
+            catalogId,
+            releaseId: conflicting.manifest.releaseId,
+            operationId: fixture.rows[1].id,
+          },
+        ];
+      },
+      async getManifest(_candidateCatalog, candidateRelease) {
+        return candidateRelease === releaseId ? fixture.signed : signedConflict;
+      },
+    },
+    trust: fixture.trust,
+    generations,
+  })
+    .search({ query: "widgets" })
+    .catch((value) => value);
+
+  expect(error).toEqual(
+    new OpenApiMcpError("UPSTREAM_ERROR", "Generation state is unavailable", {
+      retryable: true,
+    }),
+  );
+  expect(reads).toBe(2);
   expect(JSON.stringify(error)).not.toMatch(/sk-secret|Users|state/);
 });
 
