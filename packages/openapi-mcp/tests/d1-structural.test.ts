@@ -477,6 +477,7 @@ const operationRecord = (id: string = operationId) => ({
   parameters: [],
   requestBody: null,
   schemaIds: [itemSchema],
+  tags: [],
   advisory: {},
 });
 

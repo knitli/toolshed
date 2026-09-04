@@ -94,6 +94,7 @@ function createV4Catalog(): DiskFixture {
       parameters: [],
       requestBody: null,
       schemaIds: [schemaId],
+      tags: [],
       advisory: {},
     });
     database

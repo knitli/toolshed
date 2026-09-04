@@ -443,10 +443,10 @@ export function runRuntimeConformanceSuite(
       adapter.ok(operationA);
       if (operationA === null)
         throw new Error("Conformance operation A is absent");
-      adapter.deepEqual(
-        await verifyStoredRecord(admittedA, operationA),
-        fixture.operationA.record,
-      );
+      adapter.deepEqual(await verifyStoredRecord(admittedA, operationA), {
+        ...fixture.operationA.record,
+        tags: [],
+      });
       const schemasA = await store.getSchemas(
         fixture.catalogId,
         fixture.releaseA,
@@ -474,10 +474,10 @@ export function runRuntimeConformanceSuite(
       adapter.ok(operationB);
       if (operationB === null)
         throw new Error("Conformance operation B is absent");
-      adapter.deepEqual(
-        await verifyStoredRecord(admittedB, operationB),
-        fixture.operationB.record,
-      );
+      adapter.deepEqual(await verifyStoredRecord(admittedB, operationB), {
+        ...fixture.operationB.record,
+        tags: [],
+      });
     },
   );
 

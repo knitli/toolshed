@@ -42,6 +42,11 @@ import {
 } from "../src/runtime/manifest.ts";
 import { canonicalJsonBounded } from "../src/runtime/strict-json.ts";
 import { verifyStoredRecord } from "../src/runtime/verify-record.ts";
+import {
+  MAX_OPERATION_TAG_BYTES,
+  MAX_OPERATION_TAG_BYTES_TOTAL,
+  MAX_OPERATION_TAGS,
+} from "../src/runtime/versions.ts";
 import { FileGenerationStore } from "../src/sqlite/generation-store.ts";
 
 const encoder = new TextEncoder();
@@ -100,6 +105,7 @@ function operation(
     parameters: [],
     requestBody: null,
     schemaIds: [],
+    tags: [],
     advisory: {},
     ...overrides,
   };
@@ -932,6 +938,102 @@ test("row digest and manifest membership are independently required", async () =
   ).rejects.toMatchObject({ code: "RECORD_NOT_ADMITTED" });
   await expect(
     verifyStoredRecord(admitted, { ...row, logicalDigest: digestA }),
+  ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+});
+
+test("authenticates legacy v4 operation records before normalizing missing tags", async () => {
+  const current = operation();
+  const { tags: _tags, ...legacyRecord } = current;
+  const legacyDigest = await sha256(
+    "knitli.openapi-mcp.operation-record.v4",
+    legacyRecord,
+  );
+  const { release, trust, value } = await fixture();
+  const admitted = await admitManifest(
+    await signedEnvelope(
+      { ...value, records: { [current.id]: legacyDigest } },
+      release,
+    ),
+    trust,
+    new MemoryGenerationStore(),
+  );
+
+  const verified = await verifyStoredRecord(admitted, {
+    id: current.id,
+    logicalDigest: legacyDigest,
+    record: legacyRecord,
+  } as never);
+
+  expect(verified).toEqual(current);
+  expect(Object.isFrozen(verified)).toBe(true);
+  expect(Object.isFrozen(verified.tags)).toBe(true);
+});
+
+test("requires bounded unique signed tags and binds them to the record digest", async () => {
+  const invalidTags: readonly unknown[] = [
+    ["duplicate", "duplicate"],
+    Array.from(
+      { length: MAX_OPERATION_TAGS + 1 },
+      (_, index) => `tag-${index}`,
+    ),
+    ["😀".repeat(Math.floor(MAX_OPERATION_TAG_BYTES / 4) + 1)],
+    [
+      ...Array.from(
+        { length: MAX_OPERATION_TAG_BYTES_TOTAL / MAX_OPERATION_TAG_BYTES },
+        (_, index) =>
+          `${index.toString().padStart(3, "0")}${"a".repeat(MAX_OPERATION_TAG_BYTES - 3)}`,
+      ),
+      "z",
+    ],
+  ];
+
+  for (const tags of invalidTags) {
+    const record = operation({ tags: tags as never });
+    const { release, trust, value } = await fixture();
+    const digest = await operationDigest(record);
+    const admitted = await admitManifest(
+      await signedEnvelope(
+        { ...value, records: { [record.id]: digest } },
+        release,
+      ),
+      trust,
+      new MemoryGenerationStore(),
+    );
+
+    await expect(
+      verifyStoredRecord(admitted, {
+        id: record.id,
+        logicalDigest: digest,
+        record,
+      }),
+    ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+  }
+
+  const record = operation({ tags: ["refund"] });
+  const { release, trust, value } = await fixture();
+  const digest = await operationDigest(record);
+  const admitted = await admitManifest(
+    await signedEnvelope(
+      { ...value, records: { [record.id]: digest } },
+      release,
+    ),
+    trust,
+    new MemoryGenerationStore(),
+  );
+
+  await expect(
+    verifyStoredRecord(admitted, {
+      id: record.id,
+      logicalDigest: digest,
+      record,
+    }),
+  ).resolves.toEqual(record);
+  await expect(
+    verifyStoredRecord(admitted, {
+      id: record.id,
+      logicalDigest: digest,
+      record: { ...record, tags: ["delete"] },
+    }),
   ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
 });
 
