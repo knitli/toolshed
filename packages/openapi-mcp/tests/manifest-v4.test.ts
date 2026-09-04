@@ -1,14 +1,18 @@
 import { afterEach, expect, test } from "bun:test";
+import type { BigIntStats, Stats } from "node:fs";
 import {
+  appendFile,
   chmod,
   link,
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   rename,
   rm,
   symlink,
+  truncate,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1167,7 +1171,7 @@ test("schema logical records use their own digest domain and are deeply frozen",
   expect(Object.isFrozen(verified.schema.properties.name)).toBe(true);
 });
 
-async function verifyAdmittedSchema(schema: JsonObject) {
+async function verifyAdmittedSchema(schema: JsonObject | boolean) {
   const id = "schema:tiny:#/components/schemas/VerifierFixture" as const;
   const record = { id, schema };
   const digest = await sha256("knitli.openapi-mcp.schema-record.v4", record);
@@ -1238,6 +1242,15 @@ test("stored schema records accept boolean subschemas in every container kind", 
   await expect(verifyAdmittedSchema(schema)).resolves.toMatchObject({ schema });
 });
 
+test("stored schema records accept boolean root schemas", async () => {
+  await expect(verifyAdmittedSchema(true)).resolves.toMatchObject({
+    schema: true,
+  });
+  await expect(verifyAdmittedSchema(false)).resolves.toMatchObject({
+    schema: false,
+  });
+});
+
 test("stored schema records preserve raw ref-shaped annotation data", async () => {
   const rawRef = { $ref: "#/components/schemas/Untyped" };
   const schema: JsonObject = {
@@ -1299,6 +1312,44 @@ async function tempStatePath(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "openapi-mcp-generation-"));
   temporaryDirectories.push(directory);
   return join(directory, "generations.json");
+}
+
+async function withStateMutationAfterHandleStat<T>(
+  path: string,
+  mutation: () => Promise<void>,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const expected = await lstat(path, { bigint: true });
+  const probe = await open(path, "r");
+  const prototype = Object.getPrototypeOf(probe) as {
+    stat: (...args: unknown[]) => Promise<BigIntStats | Stats>;
+  };
+  await probe.close();
+  const originalStat = prototype.stat;
+  let mutated = false;
+  prototype.stat = async function (
+    ...args: unknown[]
+  ): Promise<BigIntStats | Stats> {
+    const metadata = (await Reflect.apply(originalStat, this, args)) as
+      | BigIntStats
+      | Stats;
+    if (
+      !mutated &&
+      typeof metadata.dev === "bigint" &&
+      metadata.dev === expected.dev &&
+      metadata.ino === expected.ino
+    ) {
+      mutated = true;
+      await mutation();
+    }
+    return metadata;
+  };
+  try {
+    return await operation();
+  } finally {
+    prototype.stat = originalStat;
+    expect(mutated).toBe(true);
+  }
 }
 
 function mutexPath(statePath: string): string {
@@ -1815,6 +1866,84 @@ test("FileGenerationStore rejects symlink, non-regular, permissive, and corrupt 
   await expect(
     new FileGenerationStore(corrupt).get(catalogId, "issuer.example"),
   ).rejects.toThrow();
+});
+
+test("FileGenerationStore rejects state growth after validating the open handle", async () => {
+  const path = await tempStatePath();
+  const payload = '{"entries":[],"version":1}';
+  await writeFile(path, payload, { mode: 0o600 });
+  await expect(
+    withStateMutationAfterHandleStat(
+      path,
+      () => appendFile(path, " "),
+      () => new FileGenerationStore(path).get(catalogId, "issuer.example"),
+    ),
+  ).rejects.toThrow(/changed|large|read/i);
+});
+
+test("FileGenerationStore rejects state truncation after validating the open handle", async () => {
+  const path = await tempStatePath();
+  const payload = '{"entries":[],"version":1}';
+  await writeFile(path, payload, { mode: 0o600 });
+  await expect(
+    withStateMutationAfterHandleStat(
+      path,
+      () => truncate(path, Buffer.byteLength(payload) - 1),
+      () => new FileGenerationStore(path).get(catalogId, "issuer.example"),
+    ),
+  ).rejects.toThrow(/changed|corrupt|read/i);
+});
+
+test("FileGenerationStore rejects pathname substitution after validating the open handle", async () => {
+  const path = await tempStatePath();
+  const payload = '{"entries":[],"version":1}';
+  await writeFile(path, payload, { mode: 0o600 });
+  await expect(
+    withStateMutationAfterHandleStat(
+      path,
+      async () => {
+        await rename(path, `${path}.original`);
+        await writeFile(path, payload, { mode: 0o600 });
+      },
+      () => new FileGenerationStore(path).get(catalogId, "issuer.example"),
+    ),
+  ).rejects.toThrow(/changed|identity|read/i);
+});
+
+test("FileGenerationStore rejects a same-size rewrite after validating the open handle", async () => {
+  const path = await tempStatePath();
+  const durable = (value: GenerationState) =>
+    canonicalJson({
+      entries: [{ catalogId, issuer: "issuer.example", state: value }],
+      version: 1,
+    });
+  const original = durable({ ...state(1, digestA), revision: 0 });
+  const replacement = durable({ ...state(2, digestB), revision: 0 });
+  expect(Buffer.byteLength(replacement)).toBe(Buffer.byteLength(original));
+  await writeFile(path, original, { mode: 0o600 });
+  await expect(
+    withStateMutationAfterHandleStat(
+      path,
+      () => writeFile(path, replacement, { mode: 0o600 }),
+      () => new FileGenerationStore(path).get(catalogId, "issuer.example"),
+    ),
+  ).rejects.toThrow(/changed|read/i);
+});
+
+test("FileGenerationStore accepts a valid state file at the exact byte limit", async () => {
+  const path = await tempStatePath();
+  const limit = 16 * 1024 * 1024;
+  const payload = '{"entries":[],"version":1}';
+  await writeFile(
+    path,
+    payload + " ".repeat(limit - Buffer.byteLength(payload)),
+    {
+      mode: 0o600,
+    },
+  );
+  await expect(
+    new FileGenerationStore(path).get(catalogId, "issuer.example"),
+  ).resolves.toBeNull();
 });
 
 test("FileGenerationStore rejects a state file not owned by the effective user", async () => {

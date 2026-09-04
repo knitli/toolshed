@@ -1,4 +1,4 @@
-import { constants, type Stats } from "node:fs";
+import { type BigIntStats, constants, type Stats } from "node:fs";
 import {
   type FileHandle,
   link,
@@ -294,6 +294,50 @@ function assertPrivateRegular(
 
 function sameFile(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
+}
+
+function assertPrivateStateFile(metadata: BigIntStats): void {
+  if (!metadata.isFile() || metadata.isSymbolicLink())
+    throw failure("file must be a regular non-symlink file");
+  if (
+    typeof process.getuid === "function" &&
+    metadata.uid !== BigInt(process.getuid())
+  )
+    throw failure("file has wrong owner");
+  if ((metadata.mode & 0o077n) !== 0n)
+    throw failure("file must not be group or world accessible");
+}
+
+function sameStateSnapshot(left: BigIntStats, right: BigIntStats): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+async function readStateBytes(
+  handle: FileHandle,
+  expectedSize: number,
+): Promise<string> {
+  const bytes = Buffer.allocUnsafe(expectedSize || 1);
+  let total = 0;
+  while (total < expectedSize) {
+    const { bytesRead } = await handle.read(
+      bytes,
+      total,
+      Math.min(64 * 1024, expectedSize - total),
+      null,
+    );
+    if (bytesRead === 0) throw failure("file changed while reading");
+    total += bytesRead;
+  }
+  const probe = new Uint8Array(1);
+  const { bytesRead: trailingBytes } = await handle.read(probe, 0, 1, null);
+  if (trailingBytes !== 0) throw failure("file changed while reading");
+  return bytes.subarray(0, expectedSize).toString("utf8");
 }
 
 function sqliteRows(database: DatabaseSync, sql: string): unknown[] {
@@ -716,26 +760,38 @@ export class FileGenerationStore implements GenerationStore {
   }
 
   async #read(target: string): Promise<StateEntry[]> {
-    let metadata: Stats;
+    let metadata: BigIntStats;
     try {
-      metadata = await lstat(target);
+      metadata = await lstat(target, { bigint: true });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw failure("cannot be read", error);
     }
-    assertPrivateRegular(metadata, "file");
-    if (metadata.size > maximumStateBytes) throw failure("file is too large");
+    assertPrivateStateFile(metadata);
+    if (metadata.size > BigInt(maximumStateBytes))
+      throw failure("file is too large");
     let handle: FileHandle | undefined;
     try {
       handle = await open(
         target,
-        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+        constants.O_RDONLY |
+          (constants.O_NOFOLLOW ?? 0) |
+          (constants.O_NONBLOCK ?? 0),
       );
-      const opened = await handle.stat();
-      assertPrivateRegular(opened, "file");
-      if (!sameFile(opened, metadata))
+      const opened = await handle.stat({ bigint: true });
+      assertPrivateStateFile(opened);
+      if (!sameStateSnapshot(opened, metadata))
         throw failure("file changed while opening");
-      return decodeFile(await handle.readFile("utf8"));
+      const text = await readStateBytes(handle, Number(metadata.size));
+      const after = await handle.stat({ bigint: true });
+      assertPrivateStateFile(after);
+      if (!sameStateSnapshot(after, opened))
+        throw failure("file changed while reading");
+      const current = await lstat(target, { bigint: true });
+      assertPrivateStateFile(current);
+      if (!sameStateSnapshot(current, opened))
+        throw failure("file pathname changed while reading");
+      return decodeFile(text);
     } catch (error) {
       if ((error as Error).message?.startsWith("Generation state")) throw error;
       throw failure("cannot be read", error);

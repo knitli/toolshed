@@ -32,6 +32,7 @@ import type {
   GenerationStore,
   HttpMethod,
   JsonObject,
+  JsonSchemaV4,
   JsonValue,
   MediaEncodingV4,
   OperationRecordV4,
@@ -501,7 +502,7 @@ class SchemaMaterializer {
       throw new Error("Schemas exceed maxSchemas limit");
     this.#addresses.set(id, identity);
     this.records.set(id, { id, schema: Object.create(null) as JsonObject });
-    const schema = await this.#rewriteSchema(
+    const schema = await this.#rewriteSubschema(
       address.value,
       address,
       0,
@@ -514,6 +515,7 @@ class SchemaMaterializer {
   }
 
   async materializeUse(address: AddressedValue): Promise<TypedSchemaId> {
+    if (typeof address.value === "boolean") return this.materialize(address);
     const object = exactObject(address.value, "schema use");
     if (Object.keys(object).length === 1 && typeof object.$ref === "string") {
       return this.materialize(
@@ -896,7 +898,7 @@ class SchemaMaterializer {
     address: AddressedValue,
     depth: number,
     referenceDepth: number,
-  ): Promise<JsonValue> {
+  ): Promise<JsonSchemaV4> {
     if (typeof value === "boolean") return value;
     return this.#rewriteSchema(value, address, depth, referenceDepth);
   }
@@ -929,6 +931,66 @@ async function resolveObject(
       throw new Error("reference depth exceeds limit");
   }
   return { object, address: current };
+}
+
+interface ResolvedPathItem {
+  readonly object: Record<string, unknown>;
+  readonly address: AddressedValue;
+  readonly fieldOrigins: ReadonlyMap<string, AddressedValue>;
+}
+
+/**
+ * Resolves a Path Item reference without silently discarding adjacent fields.
+ * OpenAPI leaves duplicate fields undefined, so this compiler rejects them;
+ * disjoint fields retain the document address that defined each one.
+ */
+async function resolvePathItem(
+  value: unknown,
+  address: AddressedValue,
+  materializer: SchemaMaterializer,
+  depth = 0,
+  seen = new Set<string>(),
+): Promise<ResolvedPathItem> {
+  const object = exactObject(value, "Path Item");
+  if (Object.hasOwn(object, "$ref") && typeof object.$ref !== "string")
+    throw new Error("Path Item $ref must be a string");
+  if (typeof object.$ref !== "string") {
+    return {
+      object,
+      address,
+      fieldOrigins: new Map(Object.keys(object).map((key) => [key, address])),
+    };
+  }
+  const target = await materializer.resolveReference(
+    object.$ref,
+    address,
+    depth + 1,
+    false,
+  );
+  const identity = `${target.documentUri}\0${target.pointer}`;
+  if (seen.has(identity))
+    throw new Error("Path Item reference cycle is unsupported");
+  seen.add(identity);
+  const referenced = await resolvePathItem(
+    target.value,
+    target,
+    materializer,
+    depth + 1,
+    seen,
+  );
+  const merged = Object.assign(
+    Object.create(null),
+    referenced.object,
+  ) as Record<string, unknown>;
+  const fieldOrigins = new Map(referenced.fieldOrigins);
+  for (const [key, field] of Object.entries(object)) {
+    if (key === "$ref") continue;
+    if (Object.hasOwn(merged, key))
+      throw new Error(`Path Item $ref has a conflicting sibling "${key}"`);
+    merged[key] = field;
+    fieldOrigins.set(key, address);
+  }
+  return { object: merged, address, fieldOrigins };
 }
 
 function schemaUseAddress(
@@ -1116,7 +1178,7 @@ async function collectOpenApiSchemaRoots(
       pointer: `#/paths/${encodePointerToken(path)}`,
       value: rawPathItem,
     };
-    const resolvedPathItem = await resolveObject(
+    const resolvedPathItem = await resolvePathItem(
       rawPathItem,
       pathAddress,
       materializer,
@@ -1124,7 +1186,8 @@ async function collectOpenApiSchemaRoots(
     const pathItem = resolvedPathItem.object;
     await collectParameterSchemaRoots(
       pathItem.parameters,
-      resolvedPathItem.address,
+      resolvedPathItem.fieldOrigins.get("parameters") ??
+        resolvedPathItem.address,
       materializer,
       roots,
     );
@@ -1134,9 +1197,11 @@ async function collectOpenApiSchemaRoots(
         pathItem[method],
         `${method.toUpperCase()} ${path}`,
       );
+      const operationOrigin =
+        resolvedPathItem.fieldOrigins.get(method) ?? resolvedPathItem.address;
       const operationAddress = {
-        ...resolvedPathItem.address,
-        pointer: `${resolvedPathItem.address.pointer}/${method}`,
+        ...operationOrigin,
+        pointer: `${operationOrigin.pointer}/${method}`,
         value: operation,
       };
       await collectParameterSchemaRoots(
@@ -1216,9 +1281,9 @@ async function normalizeParameters(
   path: string,
   pathItem: Record<string, unknown>,
   operation: Record<string, unknown>,
-  baseAddress: AddressedValue,
+  pathItemAddress: AddressedValue,
+  operationAddress: AddressedValue,
   materializer: SchemaMaterializer,
-  operationPointer: string,
 ): Promise<ParameterRecordV4[]> {
   const merged = new Map<string, ParameterRecordV4>();
   for (const [scope, rawList] of [
@@ -1235,8 +1300,8 @@ async function normalizeParameters(
       const parameter = await normalizeParameter(
         rawList[index],
         {
-          ...baseAddress,
-          pointer: `${scope === "path" ? baseAddress.pointer : operationPointer}/parameters/${index}`,
+          ...(scope === "path" ? pathItemAddress : operationAddress),
+          pointer: `${scope === "path" ? pathItemAddress.pointer : operationAddress.pointer}/parameters/${index}`,
           value: rawList[index],
         },
         materializer,
@@ -1490,7 +1555,7 @@ async function extractLogicalRecords(
   if (!allowedOrigins.includes(documentOrigin))
     throw new Error("document origin is absent from allowedOrigins");
   for (const [path, rawPathItem] of paths) {
-    const resolvedPathItem = await resolveObject(
+    const resolvedPathItem = await resolvePathItem(
       rawPathItem,
       {
         documentUri: sourceUri,
@@ -1526,21 +1591,29 @@ async function extractLogicalRecords(
         throw new Error("operation identifier is invalid");
       if (seen.has(id)) throw new Error("duplicate operationId");
       seen.add(id);
-      const baseAddress = resolvedPathItem.address;
-      const operationPointer = `${baseAddress.pointer}/${method}`;
+      const pathItemAddress =
+        resolvedPathItem.fieldOrigins.get("parameters") ??
+        resolvedPathItem.address;
+      const operationOrigin =
+        resolvedPathItem.fieldOrigins.get(method) ?? resolvedPathItem.address;
+      const operationAddress = {
+        ...operationOrigin,
+        pointer: `${operationOrigin.pointer}/${method}`,
+        value: operation,
+      };
       const parameters = await normalizeParameters(
         path,
         pathItem,
         operation,
-        baseAddress,
+        pathItemAddress,
+        operationAddress,
         materializer,
-        operationPointer,
       );
       const requestBody = await normalizeRequestBody(
         operation.requestBody,
         {
-          ...baseAddress,
-          pointer: `${baseAddress.pointer}/${method}/requestBody`,
+          ...operationAddress,
+          pointer: `${operationAddress.pointer}/requestBody`,
           value: operation.requestBody,
         },
         materializer,

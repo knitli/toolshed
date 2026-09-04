@@ -16,6 +16,7 @@ export type OpenApiValue =
   | { [key: string]: OpenApiValue };
 export type JsonValue = OpenApiValue;
 export type JsonObject = { [key: string]: JsonValue };
+export type JsonSchemaV4 = JsonObject | boolean;
 
 export interface OpenApiArguments {
   path?: Readonly<Record<string, string | number | boolean>>;
@@ -166,7 +167,7 @@ export interface OperationRecordV4 {
 /** Logical schema data admitted through a signed v4 manifest. */
 export interface SchemaRecordV4 {
   id: TypedSchemaId;
-  schema: JsonObject;
+  schema: JsonSchemaV4;
 }
 
 export interface SearchQuery {

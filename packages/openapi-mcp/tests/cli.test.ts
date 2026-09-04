@@ -303,6 +303,71 @@ describe("cli", () => {
     expect(result.stderr).not.toContain(CLI);
   });
 
+  test("compile-release visibly escapes terminal controls in rejected media types", async () => {
+    const { args, root } = v4Fixture();
+    const hostileMediaType = "bad\u001b]52;c;clipboard\u0007\u202E.txt";
+    writeFileSync(
+      join(root, "spec.json"),
+      JSON.stringify({
+        openapi: "3.1.0",
+        info: { title: "CLI", version: "1" },
+        servers: [{ url: "https://api.example.test" }],
+        paths: {
+          "/items": {
+            post: {
+              operationId: "createItem",
+              requestBody: {
+                content: { [hostileMediaType]: { schema: { type: "object" } } },
+              },
+              responses: { "204": { description: "Created" } },
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await run(args);
+    const diagnostic = result.stderr.trimEnd();
+
+    expect(result.code).toBe(1);
+    expect(diagnostic).toContain("error: media type");
+    expect(diagnostic).toContain("bad\\u001B]52;c;clipboard\\u0007\\u202E.txt");
+    for (const unsafe of ["\u001b", "\u0007", "\u202e"])
+      expect(diagnostic).not.toContain(unsafe);
+  });
+
+  test("compile-release diagnostics escape line, C1, and invisible controls in member text", async () => {
+    const { args, root } = v4Fixture();
+    const hostileMediaType = "bad\n\u0085\u200B\u2066member";
+    writeFileSync(
+      join(root, "spec.json"),
+      JSON.stringify({
+        openapi: "3.1.0",
+        info: { title: "CLI", version: "1" },
+        servers: [{ url: "https://api.example.test" }],
+        paths: {
+          "/items": {
+            post: {
+              operationId: "createItem",
+              requestBody: {
+                content: { [hostileMediaType]: { schema: { type: "object" } } },
+              },
+              responses: { "204": { description: "Created" } },
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await run(args);
+    const diagnostic = result.stderr.trimEnd();
+
+    expect(result.code).toBe(1);
+    expect(diagnostic).toContain("bad\\u000A\\u0085\\u200B\\u2066member");
+    for (const unsafe of ["\n", "\u0085", "\u200b", "\u2066"])
+      expect(diagnostic).not.toContain(unsafe);
+  });
+
   test("compile-release emits real artifacts and refuses an existing release", async () => {
     const { args, root, release } = v4Fixture();
     const first = await run(args);

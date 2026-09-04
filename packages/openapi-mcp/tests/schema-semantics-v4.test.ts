@@ -108,6 +108,73 @@ function digest(value: string): string {
 }
 
 describe("OpenAPI 3.1 schema resource semantics", () => {
+  test("materializes boolean component, parameter, and request-body root schemas", async () => {
+    const root = await temporaryRoot();
+    const compiled = await compileDocument(root, "boolean-schema-roots", {
+      ...documentWithSchemas({
+        AllowsEverything: true,
+        RejectsEverything: false,
+      }),
+      paths: {
+        "/boolean": {
+          get: {
+            operationId: "getBoolean",
+            parameters: [{ name: "allowed", in: "query", schema: true }],
+            responses: { "200": { description: "ok" } },
+          },
+          post: {
+            operationId: "postBoolean",
+            requestBody: {
+              content: { "application/json": { schema: false } },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    });
+
+    const records = readSchemaRecords(compiled.paths.sqlite);
+    expect(
+      record(records, "schema:tiny:#/components/schemas/AllowsEverything")
+        .schema,
+    ).toBe(true);
+    expect(
+      record(records, "schema:tiny:#/components/schemas/RejectsEverything")
+        .schema,
+    ).toBe(false);
+    const database = new DatabaseSync(compiled.paths.sqlite, {
+      readOnly: true,
+    });
+    try {
+      const getOperation = JSON.parse(
+        (
+          database
+            .prepare(
+              "SELECT record_json FROM operations WHERE operation_id = ?",
+            )
+            .get("getBoolean") as { record_json: string }
+        ).record_json,
+      ) as { parameters: Array<{ value: { schemaId: string } }> };
+      const postOperation = JSON.parse(
+        (
+          database
+            .prepare(
+              "SELECT record_json FROM operations WHERE operation_id = ?",
+            )
+            .get("postBoolean") as { record_json: string }
+        ).record_json,
+      ) as { requestBody: { content: Array<{ schemaId: string }> } };
+      expect(
+        record(records, getOperation.parameters[0].value.schemaId).schema,
+      ).toBe(true);
+      expect(
+        record(records, postOperation.requestBody.content[0].schemaId).schema,
+      ).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
   test("resolves a local fragment from the active $id resource root", async () => {
     const root = await temporaryRoot();
     const compiled = await compileDocument(root, "local-id-fragment", {

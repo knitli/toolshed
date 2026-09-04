@@ -364,6 +364,7 @@ function validateRequestBody(value: unknown): string[] {
 }
 
 function validateSchemaReferences(value: unknown): void {
+  if (typeof value === "boolean") return;
   const stack: Array<{ readonly label: string; readonly value: unknown }> = [
     { label: "schema", value },
   ];
@@ -477,11 +478,10 @@ function validateRecord(
       throw mismatch("Operation schema IDs do not equal direct schema uses");
     }
   } else if (
-    !(
-      typeof object.schema === "object" &&
-      object.schema !== null &&
-      !Array.isArray(object.schema)
-    )
+    typeof object.schema !== "boolean" &&
+    (typeof object.schema !== "object" ||
+      object.schema === null ||
+      Array.isArray(object.schema))
   ) {
     throw mismatch("Schema record is invalid");
   } else {

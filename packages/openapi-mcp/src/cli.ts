@@ -18,11 +18,23 @@ const USAGE = `openapi-mcp — compile OpenAPI documents into signed MCP artifac
   keygen [--out <dir>]
 `;
 
+const DIAGNOSTIC_UNSAFE_CHARACTERS =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: diagnostics must visibly encode terminal controls.
+  /[\u0000-\u001F\u007F-\u009F\u2028\u2029\p{Cf}]/gu;
+
+function renderDiagnostic(message: string): string {
+  return message.replace(DIAGNOSTIC_UNSAFE_CHARACTERS, (character) => {
+    const codePoint = character.codePointAt(0);
+    if (codePoint === undefined) return "�";
+    return `\\u${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
+  });
+}
+
 function fail(message: string, opts: { usage?: boolean } = {}): never {
   console.error(
     opts.usage === false
-      ? `error: ${message}`
-      : `error: ${message}\n\n${USAGE}`,
+      ? `error: ${renderDiagnostic(message)}`
+      : `error: ${renderDiagnostic(message)}\n\n${USAGE}`,
   );
   process.exit(1);
 }

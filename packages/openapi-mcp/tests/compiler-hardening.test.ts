@@ -9,6 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
   type CompileReleaseOptions,
@@ -840,6 +841,225 @@ describe("compiler contract limits and provenance", () => {
     } finally {
       await discardCompiledRelease(compiled);
     }
+  });
+
+  test("merges nonconflicting Path Item reference siblings for schema roots and operations", async () => {
+    const root = await temporaryRoot();
+    const targetUri = "https://schemas.example.test/path-item-sibling.json";
+    const spec = await write(
+      root,
+      "path-item-siblings.json",
+      JSON.stringify(
+        minimalDocument({
+          paths: {
+            "/widgets": {
+              $ref: "#/components/pathItems/SharedParameters",
+              get: {
+                operationId: "listWidgetsWithSibling",
+                parameters: [
+                  {
+                    name: "limit",
+                    in: "query",
+                    schema: { $id: targetUri, type: "integer" },
+                  },
+                ],
+                responses: { "200": { description: "ok" } },
+              },
+            },
+          },
+          components: {
+            schemas: { Consumer: { $ref: targetUri } },
+            pathItems: {
+              SharedParameters: {
+                parameters: [
+                  {
+                    name: "tenant",
+                    in: "query",
+                    schema: { type: "string" },
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      ),
+    );
+
+    const compiled = await compileRelease(releaseOptions(root, spec));
+    try {
+      const recordIds = Object.keys(compiled.manifest.records);
+      expect(recordIds).toContain("operation:tiny:listWidgetsWithSibling");
+      expect(recordIds.some((id) => id.includes("__openapi_mcp_v4_"))).toBe(
+        true,
+      );
+      const database = new DatabaseSync(compiled.paths.sqlite, {
+        readOnly: true,
+      });
+      try {
+        const operation = JSON.parse(
+          (
+            database
+              .prepare(
+                "SELECT record_json FROM operations WHERE operation_id = ?",
+              )
+              .get("listWidgetsWithSibling") as { record_json: string }
+          ).record_json,
+        ) as { parameters: Array<{ name: string }> };
+        expect(operation.parameters.map((parameter) => parameter.name)).toEqual(
+          ["limit", "tenant"],
+        );
+      } finally {
+        database.close();
+      }
+    } finally {
+      await discardCompiledRelease(compiled);
+    }
+  });
+
+  test("rejects conflicting Path Item reference siblings", async () => {
+    const root = await temporaryRoot();
+    const spec = await write(
+      root,
+      "path-item-sibling-conflict.json",
+      JSON.stringify(
+        minimalDocument({
+          paths: {
+            "/widgets": {
+              $ref: "#/components/pathItems/SharedOperation",
+              get: {
+                operationId: "localWidgets",
+                responses: { "200": { description: "ok" } },
+              },
+            },
+          },
+          components: {
+            pathItems: {
+              SharedOperation: {
+                get: {
+                  operationId: "referencedWidgets",
+                  responses: { "200": { description: "ok" } },
+                },
+              },
+            },
+          },
+        }),
+      ),
+    );
+
+    await expect(compileRelease(releaseOptions(root, spec))).rejects.toThrow(
+      'Path Item $ref has a conflicting sibling "get"',
+    );
+  });
+
+  test("keeps external Path Item operations and local sibling parameters in their defining documents", async () => {
+    const root = await temporaryRoot();
+    const pathItemDocument = JSON.stringify({
+      items: {
+        post: {
+          operationId: "postExternalWithLocalParameter",
+          requestBody: {
+            content: {
+              "application/json": { schema: { $ref: "#/schemas/Body" } },
+            },
+          },
+          responses: { "200": { description: "ok" } },
+        },
+      },
+      schemas: { Body: { type: "string" } },
+    });
+    await write(root, "path-item-with-body.json", pathItemDocument);
+    const map = await write(
+      root,
+      "path-item-with-body-map.json",
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            uri: "path-item-with-body.json",
+            file: "path-item-with-body.json",
+            sha256: new Bun.CryptoHasher("sha256")
+              .update(pathItemDocument)
+              .digest("hex"),
+          },
+        ],
+      }),
+    );
+    const spec = await write(
+      root,
+      "mixed-origin-path-item.json",
+      JSON.stringify(
+        minimalDocument({
+          paths: {
+            "/widgets": {
+              $ref: "path-item-with-body.json#/items",
+              parameters: [
+                {
+                  name: "limit",
+                  in: "query",
+                  schema: { $ref: "#/components/schemas/Local" },
+                },
+              ],
+            },
+          },
+          components: { schemas: { Local: { type: "integer" } } },
+        }),
+      ),
+    );
+
+    const compiled = await compileRelease({
+      ...releaseOptions(root, spec),
+      referenceRoot: root,
+      referenceMapPath: map,
+    });
+    try {
+      const database = new DatabaseSync(compiled.paths.sqlite, {
+        readOnly: true,
+      });
+      try {
+        const operation = JSON.parse(
+          (
+            database
+              .prepare(
+                "SELECT record_json FROM operations WHERE operation_id = ?",
+              )
+              .get("postExternalWithLocalParameter") as { record_json: string }
+          ).record_json,
+        ) as {
+          parameters: Array<{ value: { schemaId: string } }>;
+          requestBody: { content: Array<{ schemaId: string }> };
+        };
+        const schemas = new Map(
+          (
+            database
+              .prepare("SELECT record_id, record_json FROM schemas")
+              .all() as Array<{ record_id: string; record_json: string }>
+          ).map((row) => [row.record_id, JSON.parse(row.record_json)]),
+        );
+        expect(
+          schemas.get(operation.parameters[0].value.schemaId).schema.type,
+        ).toBe("integer");
+        expect(
+          schemas.get(operation.requestBody.content[0].schemaId).schema.type,
+        ).toBe("string");
+      } finally {
+        database.close();
+      }
+    } finally {
+      await discardCompiledRelease(compiled);
+    }
+  });
+
+  test("rejects a non-string Path Item reference", async () => {
+    const root = await temporaryRoot();
+    const spec = await write(
+      root,
+      "invalid-path-item-reference.json",
+      JSON.stringify(minimalDocument({ paths: { "/widgets": { $ref: 1 } } })),
+    );
+
+    await expect(compileRelease(releaseOptions(root, spec))).rejects.toThrow(
+      "Path Item $ref must be a string",
+    );
   });
 
   test("uses the resolved Path Item document for path parameters", async () => {
