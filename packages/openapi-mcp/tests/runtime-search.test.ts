@@ -2087,8 +2087,8 @@ test("search emits opaque digest-bound refs, bounded display data, and runtime c
   });
   expect(item).toMatchObject({
     safety: "action",
-    actionKind: "unknown",
-    cardinality: { kind: "unknown" },
+    actionKind: "create",
+    cardinality: { kind: "single" },
   });
   expect(JSON.stringify(item)).not.toContain("https://api.example.test");
 });

@@ -25,6 +25,7 @@ async function call(
     operationId: "operation:tiny:createWidget",
     operationDigest: digest,
     manifestDigest: "b".repeat(64) as PreparedCall["manifestDigest"],
+    reservedSlotsDigest: "c".repeat(64) as PreparedCall["reservedSlotsDigest"],
     method: "POST",
     origin: "https://api.example.test",
     relativeUrl: "/widgets?view=full",
@@ -92,6 +93,11 @@ test("rejects mutations of every integrity-bound public field", async () => {
     { operationId: "operation:tiny:other" },
     { operationDigest: "c".repeat(64) as PreparedCall["operationDigest"] },
     { manifestDigest: "d".repeat(64) as PreparedCall["manifestDigest"] },
+    {
+      reservedSlotsDigest: "e".repeat(
+        64,
+      ) as PreparedCall["reservedSlotsDigest"],
+    },
     { method: "PUT" },
     { origin: "https://other.example.test" },
     { relativeUrl: "/other" },
@@ -242,6 +248,7 @@ test("accepts ordinary declared token-like headers from serialization through ve
     operationId: operation.id,
     operationDigest: digest,
     manifestDigest: "b".repeat(64) as PreparedCall["manifestDigest"],
+    reservedSlotsDigest: "c".repeat(64) as PreparedCall["reservedSlotsDigest"],
     method: operation.method,
     origin: operation.origin,
     relativeUrl: serialized.relativeUrl,
@@ -317,11 +324,14 @@ test.each([
   "x-original-forwarded-for",
   "sec-fetch-site",
   "proxy-connection",
-])("rejects forbidden transport or provider-identity header %s", async (name) => {
-  await expect(call({ headers: { [name]: "value" } })).rejects.toMatchObject({
-    code: "INPUT_INVALID",
-  });
-});
+])(
+  "rejects forbidden transport or provider-identity header %s",
+  async (name) => {
+    await expect(call({ headers: { [name]: "value" } })).rejects.toMatchObject({
+      code: "INPUT_INVALID",
+    });
+  },
+);
 
 test("does not reject an ordinary declared non-credential header by name heuristics", async () => {
   const prepared = await call({ headers: { "x-workflow-tokenizer": "v1" } });

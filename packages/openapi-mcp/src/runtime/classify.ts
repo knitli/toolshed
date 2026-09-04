@@ -36,6 +36,7 @@ const communicationTokens = new Set([
 ]);
 const authorityTokens = new Set([
   "access",
+  "authority",
   "grant",
   "membership",
   "member",
@@ -49,6 +50,7 @@ const transactionTokens = new Set([
   "payment",
   "purchase",
   "refund",
+  "transaction",
   "transfer",
 ]);
 const executeTokens = new Set([
@@ -112,7 +114,19 @@ function normalizedTokens(operation: OperationRecordV4): TokenEvidence {
 }
 
 function hasAny(tokens: readonly string[], candidates: ReadonlySet<string>) {
-  return tokens.some((token) => candidates.has(token));
+  return tokens.some(
+    (token) =>
+      candidates.has(token) ||
+      (token.length > 4 &&
+        token.endsWith("ies") &&
+        candidates.has(`${token.slice(0, -3)}y`)) ||
+      (token.length > 4 &&
+        token.endsWith("es") &&
+        candidates.has(token.slice(0, -2))) ||
+      (token.length > 3 &&
+        token.endsWith("s") &&
+        candidates.has(token.slice(0, -1))),
+  );
 }
 
 function hasBatchSemantics(
@@ -132,18 +146,25 @@ function actionKindFor(
 ): ActionKind {
   if (operation.method === "DELETE") return "delete";
   if (evidence.truncated) return "unknown";
-  const matches: ActionKind[] = [];
+  const dangerousMatches: ActionKind[] = [];
   for (const [kind, candidates] of [
     ["communicate", communicationTokens],
     ["authority", authorityTokens],
     ["transaction", transactionTokens],
     ["execute", executeTokens],
+  ] as const) {
+    if (hasAny(evidence.tokens, candidates)) dangerousMatches.push(kind);
+  }
+  if (dangerousMatches.length > 0)
+    return dangerousMatches.length === 1 ? dangerousMatches[0] : "unknown";
+  const routineMatches: ActionKind[] = [];
+  for (const [kind, candidates] of [
     ["create", createTokens],
     ["update", updateTokens],
   ] as const) {
-    if (hasAny(evidence.tokens, candidates)) matches.push(kind);
+    if (hasAny(evidence.tokens, candidates)) routineMatches.push(kind);
   }
-  return matches.length === 1 ? matches[0] : "unknown";
+  return routineMatches.length === 1 ? routineMatches[0] : "unknown";
 }
 
 function isVerifiedArrayBound(schema: JsonSchemaV4): number | null {
@@ -242,11 +263,15 @@ function boundedCardinality(
   };
 }
 
-function hasRequiredResourceIdentifier(operation: OperationRecordV4): boolean {
+function hasTerminalRequiredResourceIdentifier(
+  operation: OperationRecordV4,
+): boolean {
+  const terminalSegment = operation.path.split("/").at(-1);
   return operation.parameters.some(
     (parameter) =>
       parameter.in === "path" &&
       parameter.required &&
+      terminalSegment === `{${parameter.name}}` &&
       /^(?:[iI][dD]|[A-Za-z0-9]+(?:Id|ID)|[A-Za-z0-9]+[-_.][iI][dD])$/.test(
         parameter.name,
       ),
@@ -265,7 +290,8 @@ function cardinalityFor(
   const bounded = boundedCardinality(operation, schemas, normalizedArguments);
   if (bounded.unprovenArray) return { kind: "unknown" };
   if (bounded.cardinality !== null) return bounded.cardinality;
-  if (hasRequiredResourceIdentifier(operation)) return { kind: "single" };
+  if (hasTerminalRequiredResourceIdentifier(operation))
+    return { kind: "single" };
   return { kind: "unknown" };
 }
 

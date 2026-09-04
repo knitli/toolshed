@@ -272,7 +272,9 @@ export interface OpenApiArguments {
 
 The runtime resolves only the requested operation's schema closure breadth-first, in batched store reads, with cycle, hop, and byte bounds. It validates path, query, non-sensitive header parameters declared by the operation, and body inputs; applies OpenAPI style/explode serialization; rejects unknown or duplicate parameters; and refuses unsupported polymorphism rather than guessing. Cookie parameters are refused in v1 because the dispatch boundary never carries caller/model cookies. The model never supplies an HTTP method, URL, arbitrary header, origin, authentication value, or credential.
 
-`digestPreparedCall` computes the versioned domain-separated digest. `verifyPreparedCall` verifies the self-digest and structural invariants without consulting storage. `OpenApiRuntime.revalidate` first calls `verifyPreparedCall`, then re-reads and re-verifies the manifest, operation, and schema closure and returns a freshly prepared call only when its digest is unchanged. These exact names are part of the Phase 3 contract.
+Before serialization, the host returns a bounded list of credential injection slots, each containing only a `header` or `query` placement and a name. The runtime validates those slots, rejects collisions with model-supplied parameters, sorts them deterministically, and commits the canonical list with `sha256("knitli.openapi-mcp.credential-slots.v1", slots)`. Only the digest, `reservedSlotsDigest`, enters `PreparedCall`; neither credentials nor credential values do. Later credential injection is valid only when its freshly resolved canonical slot commitment equals this digest.
+
+`digestPreparedCall` computes the versioned domain-separated digest and includes `reservedSlotsDigest` with every other public field except the self-digest. `verifyPreparedCall` verifies the self-digest and structural invariants without consulting storage. `OpenApiRuntime.revalidate` first calls `verifyPreparedCall`, then re-reads and re-verifies the active manifest, operation, and schema closure, reruns destination and credential-slot policy, and returns a freshly prepared call only when its operation, manifest, input, reserved-slot, and complete prepared-call digests are unchanged. These exact names are part of the Phase 3 contract.
 
 `prepareRead` accepts only recomputed reads. `prepareAction` accepts only recomputed mutations. A mismatch fails with a stable error naming the correct tool.
 
@@ -288,6 +290,8 @@ export interface PreparedCall {
   operationId: TypedOperationId;
   operationDigest: Sha256;
   manifestDigest: Sha256;
+  /** Commitment to host-selected injection locations, never credential values. */
+  reservedSlotsDigest: Sha256;
   method: HttpMethod;
   origin: string;
   relativeUrl: string;
@@ -302,7 +306,7 @@ export interface PreparedCall {
 }
 ```
 
-`headers` may contain only runtime-generated representation headers such as `accept` and `content-type` plus validated, operation-declared non-credential header parameters. It never contains authentication, cookies, forwarding headers, or arbitrary caller-supplied transport headers. The digest binds every field except itself using a domain-separated canonical encoding, with `body` represented by its SHA-256 digest.
+`headers` may contain only runtime-generated representation headers such as `accept` and `content-type` plus validated, operation-declared non-credential header parameters. It never contains authentication, cookies, forwarding headers, or arbitrary caller-supplied transport headers. The digest binds every field except itself using a domain-separated canonical encoding, with `body` represented by its SHA-256 digest and `reservedSlotsDigest` binding the separately domain-separated canonical credential-slot list.
 
 ```ts
 export type ActionKind =
@@ -319,6 +323,8 @@ export type ActionCardinality =
 Classification is conservative. `DELETE` is `delete`; messaging/sharing/invitation is `communicate`; role/grant/permission/membership changes are `authority`; payment/transfer/refund is `transaction`; run/deploy/invoke is `execute`; clear create/update evidence maps those kinds; everything else is `unknown`. A concrete required resource identifier yields `single`; an input array with a verified `maxItems` yields `bounded`; explicit bulk/all semantics yield `unbounded`; absence of proof yields `unknown`.
 
 Every action requires an `ActionAuthorizer` decision in v1. Per-call confirmation is the default; an exact constrained operator policy is treated as the operator's standing out-of-band confirmation. Only create/update actions with single or bounded cardinality and a finite `maxAffected` may use that standing confirmation. `unknown`, high-risk, `delete`, `communicate`, `authority`, `transaction`, `execute`, and unknown/unbounded cardinality always require fresh per-call confirmation and can never be policy-auto-approved.
+
+Sensitive action-token matching includes bounded plural normalization; dangerous families take precedence over routine create/update evidence. For cardinality, a concrete required resource identifier means the exact required target placeholder is the terminal path segment. A parent-resource identifier before a collection does not prove `single`; absent another verified finite bound, that action remains `unknown` cardinality and high-risk.
 
 ## 11. Engine-owned action authorization
 
