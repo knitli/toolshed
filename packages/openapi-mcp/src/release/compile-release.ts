@@ -99,6 +99,11 @@ const HTTP_METHODS = [
   "options",
   "trace",
 ] as const;
+
+function pathItemEntries(paths: OpenApiDoc["paths"]): [string, unknown][] {
+  return Object.entries(paths).filter(([path]) => !path.startsWith("x-"));
+}
+
 const PARAMETER_LOCATIONS: ParameterLocationV4[] = [
   "path",
   "query",
@@ -1172,7 +1177,7 @@ async function collectOpenApiSchemaRoots(
       value: schema,
     });
 
-  for (const [path, rawPathItem] of Object.entries(document.paths)) {
+  for (const [path, rawPathItem] of pathItemEntries(document.paths)) {
     const pathAddress = {
       ...sourceAddress,
       pointer: `#/paths/${encodePointerToken(path)}`,
@@ -1527,7 +1532,7 @@ async function extractLogicalRecords(
   );
   if (Object.keys(componentSchemas).length > limits.maxSchemas)
     throw new Error("Schemas exceed maxSchemas limit");
-  const paths = Object.entries(document.paths);
+  const paths = pathItemEntries(document.paths);
   if (paths.length > limits.maxPaths)
     throw new Error("Paths exceed maxPaths limit");
   await materializer.preIndexResources(

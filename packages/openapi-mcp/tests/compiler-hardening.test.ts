@@ -693,6 +693,73 @@ describe("compiler contract limits and provenance", () => {
     }
   });
 
+  test("ignores Paths Object specification extensions before limits and reference resolution", async () => {
+    const root = await temporaryRoot();
+    const spec = await write(
+      root,
+      "paths-extensions.json",
+      JSON.stringify(
+        minimalDocument({
+          paths: {
+            "x-owner": "platform-team",
+            "x-path-item-template": { $ref: "unused-path-item.json" },
+            "/widgets": {
+              get: {
+                operationId: "listWidgets",
+                responses: { "200": { description: "ok" } },
+              },
+            },
+          },
+        }),
+      ),
+    );
+    const unusedPathItem = JSON.stringify({
+      get: {
+        operationId: "mustNotResolve",
+        responses: { "200": { description: "ok" } },
+      },
+    });
+    const referenceMapPath = await write(
+      root,
+      "paths-extensions-map.json",
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            uri: "unused-path-item.json",
+            file: "unused-path-item.json",
+            sha256: new Bun.CryptoHasher("sha256")
+              .update(unusedPathItem)
+              .digest("hex"),
+          },
+        ],
+      }),
+    );
+    let referenceFetches = 0;
+    const compiled = await compileRelease({
+      ...releaseOptions(root, spec),
+      limits: limits({ maxPaths: 1 }),
+      referenceMapPath,
+      referenceResolver: {
+        async resolve() {
+          referenceFetches += 1;
+          throw new Error("Paths Object extension must not be resolved");
+        },
+      },
+    });
+    try {
+      expect(referenceFetches).toBe(0);
+      expect(Object.keys(compiled.manifest.records)).toContain(
+        "operation:tiny:listWidgets",
+      );
+      expect(Object.keys(compiled.manifest.records)).not.toContain(
+        "operation:tiny:mustNotResolve",
+      );
+    } finally {
+      await discardCompiledRelease(compiled);
+    }
+  });
+
   test("enforces exact and one-over structural operation/schema limits", async () => {
     const root = await temporaryRoot();
     const operation = {
