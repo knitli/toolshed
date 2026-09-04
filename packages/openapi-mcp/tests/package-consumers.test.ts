@@ -17,3 +17,26 @@ test("runtime bundles for a Worker target without Node shims", async () => {
   expect(result.success).toBe(true);
   expect(result.logs.map(String).join("\n")).not.toMatch(/node:|bun:/);
 });
+
+test("Worker consumer type-checks the portable contract", () => {
+  const result = Bun.spawnSync({
+    cmd: [
+      `${import.meta.dir}/../node_modules/.bin/tsc`,
+      "--noEmit",
+      "--ignoreConfig",
+      "--target",
+      "esnext",
+      "--module",
+      "nodenext",
+      "--moduleResolution",
+      "nodenext",
+      "--allowImportingTsExtensions",
+      "--strict",
+      "--skipLibCheck",
+      `${import.meta.dir}/../test-consumers/worker.ts`,
+    ],
+    stderr: "pipe",
+  });
+
+  expect(result.exitCode).toBe(0);
+});

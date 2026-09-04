@@ -1,3 +1,5 @@
+import type { OpenApiMcpErrorCode } from "./errors.ts";
+
 export type Sha256 = string & { readonly __sha256: unique symbol };
 export type CatalogId = string & { readonly __catalogId: unique symbol };
 export type ReleaseId = string & { readonly __releaseId: unique symbol };
@@ -31,14 +33,6 @@ export type HttpMethod =
   | "DELETE"
   | "OPTIONS"
   | "TRACE";
-
-export interface ReferenceMapEntryV1 {
-  uri: string;
-  contentSha256: Sha256;
-}
-
-/** A canonical URI-to-content-digest reference graph. */
-export type ReferenceMapV1 = readonly ReferenceMapEntryV1[];
 
 export interface ReleaseManifestV4 {
   format: 4;
@@ -174,7 +168,7 @@ export interface OperationRefPayload {
   catalogId: CatalogId;
   releaseId: ReleaseId;
   operationId: TypedOperationId;
-  operationDigest: Sha256;
+  manifestDigest: Sha256;
 }
 
 /** Opaque `opref.v1.*` wire representation. */
@@ -189,6 +183,7 @@ export interface SearchInput {
 export interface SearchResultItem {
   operation: OperationRef;
   summary: string | null;
+  inputOutline: JsonObject;
   safety: "read" | "action";
   actionKind: ActionKind | null;
   cardinality: ActionCardinality | null;
@@ -196,8 +191,16 @@ export interface SearchResultItem {
   advisory: JsonObject;
 }
 
+/** A bounded, already-redacted warning emitted while searching candidates. */
+export interface SearchWarning {
+  code: OpenApiMcpErrorCode;
+  message: string;
+  details?: Readonly<Record<string, OpenApiValue>>;
+}
+
 export interface SearchResult {
-  results: readonly SearchResultItem[];
+  operations: readonly SearchResultItem[];
+  warnings: readonly SearchWarning[];
 }
 
 export interface PrepareInput {
@@ -333,6 +336,7 @@ export interface PaginationTokenState {
   manifestDigest: Sha256;
   operationId: TypedOperationId;
   inputDigest: Sha256;
+  origin: string;
   nextRelativeUrl: string;
   expiresAt: string;
   pageCount: number;
@@ -347,14 +351,14 @@ export interface PaginationTokenCodec {
 
 export type CallOutcome =
   | {
-      status: "success";
+      kind: "success";
       statusCode: number;
       headers: Readonly<Record<string, string>>;
       body: Uint8Array;
       pageToken?: string;
     }
-  | { status: "redirect-blocked"; location: string | null }
-  | { status: "not-modified" };
+  | { kind: "redirect-blocked"; location: string | null }
+  | { kind: "not-modified" };
 
 export interface AuthorizedTransport {
   dispatch(call: PreparedCall, credential: Credential): Promise<CallOutcome>;
