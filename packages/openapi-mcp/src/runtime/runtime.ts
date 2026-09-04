@@ -48,6 +48,14 @@ function upstreamUnavailable(message: string): OpenApiMcpError {
   return new OpenApiMcpError("UPSTREAM_ERROR", message, { retryable: true });
 }
 
+class GenerationStoreUnavailable extends OpenApiMcpError {
+  constructor() {
+    super("UPSTREAM_ERROR", "Generation state is unavailable", {
+      retryable: true,
+    });
+  }
+}
+
 function manifestKey(catalogId: string, releaseId: string): string {
   return `${catalogId}\0${releaseId}`;
 }
@@ -680,7 +688,9 @@ function validateSearchInput(value: unknown, limits: RuntimeLimits) {
       !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(input.api))
   )
     throw inputInvalid("Search input is invalid");
-  const limit = input.limit ?? limits.defaultSearchResults;
+  const limit =
+    input.limit ??
+    Math.min(limits.defaultSearchResults, limits.maxSearchResults);
   if (
     !Number.isSafeInteger(limit) ||
     limit < 1 ||
@@ -696,6 +706,18 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
   search(input: SearchInput): Promise<SearchResult>;
 } {
   const limits = resolveRuntimeLimits(options.limits);
+  const committingGenerations: GenerationStore = {
+    get(catalogId, issuer) {
+      return options.generations.get(catalogId, issuer);
+    },
+    async accept(catalogId, issuer, transition) {
+      try {
+        return await options.generations.accept(catalogId, issuer, transition);
+      } catch {
+        throw new GenerationStoreUnavailable();
+      }
+    },
+  };
 
   return {
     async search(input: SearchInput): Promise<SearchResult> {
@@ -1012,10 +1034,15 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
                   limits,
                   completeVerificationBudget,
                 );
-                const currentState = await options.generations.get(
-                  admission.catalogId as CandidateRef["catalogId"],
-                  admission.issuer,
-                );
+                let currentState: GenerationState | null;
+                try {
+                  currentState = await options.generations.get(
+                    admission.catalogId as CandidateRef["catalogId"],
+                    admission.issuer,
+                  );
+                } catch {
+                  throw new GenerationStoreUnavailable();
+                }
                 if (!sameGenerationState(capturedState, currentState)) {
                   restartSelection = true;
                   break;
@@ -1046,7 +1073,7 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
                 const admitted = await commitAuthenticatedManifestAtState(
                   entry.authenticated,
                   options.trust,
-                  options.generations,
+                  committingGenerations,
                   capturedState,
                 );
                 if (admitted === null) {
@@ -1058,6 +1085,7 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
               operations.push(...candidates);
               break;
             } catch (error) {
+              if (error instanceof GenerationStoreUnavailable) throw error;
               failedManifests.add(key);
               attemptWarnings.push({ candidates, error });
             }
