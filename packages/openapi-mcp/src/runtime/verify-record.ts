@@ -144,10 +144,7 @@ function validateRecord(
   return object as unknown as OperationRecordV4 | SchemaRecordV4;
 }
 
-function detached<T extends OperationRecordV4 | SchemaRecordV4>(
-  record: T,
-  limits: RuntimeLimits,
-): T {
+function detached(record: unknown, limits: RuntimeLimits): unknown {
   let json: string;
   try {
     json = canonicalJsonBounded(record as unknown as JsonObject, {
@@ -162,7 +159,7 @@ function detached<T extends OperationRecordV4 | SchemaRecordV4>(
     maxBytes: limits.maxRecordBytes,
     maxDepth: limits.maxJsonDepth,
     maxKeys: limits.maxManifestRecords,
-  }) as unknown as T;
+  });
 }
 
 function deepFreeze<T>(value: T): T {
@@ -204,10 +201,9 @@ export async function verifyStoredRecord<
     !digestPattern.test(row.logicalDigest)
   )
     throw mismatch("Stored row digest is invalid");
-  const logical = validateRecord(row.record, wrapperId) as T;
   let copy: T;
   try {
-    copy = detached(logical, limits);
+    copy = validateRecord(detached(row.record, limits), wrapperId) as T;
   } catch (error) {
     if (
       error instanceof OpenApiMcpError &&

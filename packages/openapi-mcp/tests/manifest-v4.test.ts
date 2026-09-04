@@ -915,6 +915,59 @@ test("unadmitted wrapper ID is rejected before hostile record traversal", async 
   expect(traversed).toBe(false);
 });
 
+test("record bounds run before schema ID iteration on admitted rows", async () => {
+  const admitted = await admitFixture();
+  let iterated = false;
+  const schemaIds = new Proxy([], {
+    get(target, property, receiver) {
+      if (property === Symbol.iterator) {
+        iterated = true;
+        throw new Error("schemaIds iterator must not run before bounds");
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const record = { ...operation(), schemaIds };
+  await expect(
+    verifyStoredRecord(
+      admitted,
+      { id: record.id, logicalDigest: digestA, record },
+      { maxRecordBytes: 1 } as never,
+    ),
+  ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+  expect(iterated).toBe(false);
+});
+
+test("record reflection traps remain in the record error domain", async () => {
+  const admitted = await admitFixture();
+  const records = [
+    new Proxy(operation(), {
+      getPrototypeOf() {
+        throw new Error("hostile prototype trap");
+      },
+    }),
+    new Proxy(operation(), {
+      ownKeys() {
+        throw new Error("hostile ownKeys trap");
+      },
+    }),
+    new Proxy(operation(), {
+      getOwnPropertyDescriptor() {
+        throw new Error("hostile descriptor trap");
+      },
+    }),
+  ];
+  for (const record of records) {
+    await expect(
+      verifyStoredRecord(admitted, {
+        id: operationId,
+        logicalDigest: digestA,
+        record,
+      } as never),
+    ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+  }
+});
+
 test("record byte bound aborts traversal before later poisoned values", async () => {
   const { release, trust, value } = await fixture();
   const admitted = await admitManifest(
@@ -1468,28 +1521,99 @@ test("FileGenerationStore recovers a dead lock but never reclaims a live lock by
   expect((await lstat(liveLock)).isFile()).toBe(true);
 });
 
-test("FileGenerationStore clears a crashed dead-owner recovery hard link safely", async () => {
-  const path = await tempStatePath();
-  const lock = join(dirname(path), `.${path.split("/").at(-1)}.lock`);
-  const recovery = `${lock}.recovery`;
-  await writeFile(
-    lock,
-    JSON.stringify({
+test("FileGenerationStore recovery admits exactly one child across repeated dead-lock races", async () => {
+  const harnessDirectory = await mkdtemp(
+    join(tmpdir(), "openapi-mcp-generation-recovery-child-"),
+  );
+  temporaryDirectories.push(harnessDirectory);
+  const helper = await writeChildAcceptHelper(harnessDirectory);
+  for (let round = 0; round < 8; round += 1) {
+    const path = await tempStatePath();
+    const lock = join(dirname(path), `.${path.split("/").at(-1)}.lock`);
+    const recovery = `${lock}.recovery`;
+    await writeFile(
+      lock,
+      JSON.stringify({
+        version: 1,
+        pid: 2_147_483_647,
+        createdAtEpochMs: 0,
+        token: `00000000-0000-4000-8000-${String(round).padStart(12, "0")}`,
+      }),
+      { mode: 0o600 },
+    );
+    const barrier = join(harnessDirectory, `start-${round}`);
+    const transitions = Array.from({ length: 32 }, (_, index) => index + 1).map(
+      (generation): GenerationTransition => ({
+        expectedRevision: null,
+        next: {
+          ...state(generation, generation % 2 === 0 ? digestB : digestA),
+          revision: 0,
+        },
+      }),
+    );
+    const attempts = transitions.map((transition) =>
+      childAccept(helper, dirname(path), path, transition, barrier),
+    );
+    await Bun.sleep(25);
+    await writeFile(barrier, "go");
+    const results = await Promise.all(attempts);
+    const accepted = results.filter(
+      (result): result is GenerationState => result !== null,
+    );
+    expect(accepted).toHaveLength(1);
+    expect(
+      await new FileGenerationStore(path).get(catalogId, "issuer.example"),
+    ).toEqual(accepted[0]);
+    await expect(lstat(lock)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(recovery)).rejects.toMatchObject({ code: "ENOENT" });
+  }
+}, 20_000);
+
+test("FileGenerationStore clears crashed recovery markers before and after lock replacement", async () => {
+  for (const crashPoint of [
+    "before-replacement",
+    "after-replacement",
+  ] as const) {
+    const path = await tempStatePath();
+    const lock = join(dirname(path), `.${path.split("/").at(-1)}.lock`);
+    const recovery = `${lock}.recovery`;
+    const crashedClaim = `${recovery}.dead-claim`;
+    const dead = JSON.stringify({
       version: 1,
       pid: 2_147_483_647,
       createdAtEpochMs: 0,
-      token: "00000000-0000-4000-8000-000000000003",
-    }),
-    { mode: 0o600 },
-  );
-  await link(lock, recovery);
-  const created = { ...state(1, digestA), revision: 0 };
-  await expect(
-    new FileGenerationStore(path).accept(catalogId, "issuer.example", {
-      expectedRevision: null,
-      next: created,
-    }),
-  ).resolves.toEqual(created);
+      token:
+        crashPoint === "before-replacement"
+          ? "00000000-0000-4000-8000-000000000003"
+          : "00000000-0000-4000-8000-000000000004",
+    });
+    await writeFile(crashedClaim, dead, { mode: 0o600 });
+    if (crashPoint === "before-replacement") {
+      await writeFile(
+        lock,
+        JSON.stringify({
+          version: 1,
+          pid: 2_147_483_647,
+          createdAtEpochMs: 0,
+          token: "00000000-0000-4000-8000-000000000005",
+        }),
+        { mode: 0o600 },
+      );
+    } else {
+      await link(crashedClaim, lock);
+    }
+    await link(crashedClaim, recovery);
+
+    const created = { ...state(1, digestA), revision: 0 };
+    await expect(
+      new FileGenerationStore(path).accept(catalogId, "issuer.example", {
+        expectedRevision: null,
+        next: created,
+      }),
+    ).resolves.toEqual(created);
+    await expect(lstat(lock)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(recovery)).rejects.toMatchObject({ code: "ENOENT" });
+  }
 });
 
 test("FileGenerationStore rejects identities its durable decoder cannot reload", async () => {

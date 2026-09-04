@@ -66,6 +66,12 @@ const lockTimeoutMs = 2_000;
 const deadLockMinimumAgeMs = 100;
 const lockPollMs = 10;
 
+class LockChangedError extends Error {
+  constructor() {
+    super("Generation state lock changed while opening");
+  }
+}
+
 function failure(message: string, cause?: unknown): Error {
   return new Error(`Generation state ${message}`, { cause });
 }
@@ -323,7 +329,7 @@ async function readLock(path: string): Promise<{
     const stats = await handle.stat();
     assertPrivateRegular(stats, "lock");
     if (stats.dev !== before.dev || stats.ino !== before.ino)
-      throw failure("lock changed while opening");
+      throw new LockChangedError();
     return { metadata: decodeLock(await handle.readFile("utf8")), stats };
   } finally {
     await handle.close();
@@ -407,6 +413,7 @@ async function clearStaleRecovery(location: StoreLocation): Promise<void> {
     observed = await readLock(location.recovery);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if (error instanceof LockChangedError) return;
     throw error;
   }
   if (
@@ -419,12 +426,25 @@ async function clearStaleRecovery(location: StoreLocation): Promise<void> {
     current = await readLock(location.recovery);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if (error instanceof LockChangedError) return;
     throw error;
   }
   if (!sameLock(current, observed) || processIsAlive(current.metadata.pid))
     return;
   try {
     await unlink(location.recovery);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+async function removeOwnedRecoveryMarker(
+  location: StoreLocation,
+  claimOwner: Awaited<ReturnType<typeof readLock>>,
+): Promise<void> {
+  try {
+    const recoveryOwner = await readLock(location.recovery);
+    if (sameLock(recoveryOwner, claimOwner)) await unlink(location.recovery);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
@@ -445,6 +465,7 @@ async function tryRecoverDeadLock(
     observed = await readLock(location.lock);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if (error instanceof LockChangedError) return false;
     throw error;
   }
   if (
@@ -452,63 +473,51 @@ async function tryRecoverDeadLock(
     Date.now() - observed.metadata.createdAtEpochMs < deadLockMinimumAgeMs
   )
     return false;
+  const claimOwner = await readLock(claim);
   try {
-    await link(location.lock, location.recovery);
+    await link(claim, location.recovery);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
     throw failure("dead lock cannot be claimed for recovery", error);
   }
   try {
-    const [current, recovery] = await Promise.all([
-      readLock(location.lock),
-      readLock(location.recovery),
-    ]);
+    const recoveryOwner = await readLock(location.recovery);
+    if (!sameLock(recoveryOwner, claimOwner))
+      throw failure("recovery marker ownership is invalid");
+
+    const deadBeforeUnlink = await readLock(location.lock);
     if (
-      !sameLock(current, observed) ||
-      !sameLock(recovery, observed) ||
-      processIsAlive(current.metadata.pid)
+      !sameLock(deadBeforeUnlink, observed) ||
+      processIsAlive(deadBeforeUnlink.metadata.pid) ||
+      Date.now() - deadBeforeUnlink.metadata.createdAtEpochMs <
+        deadLockMinimumAgeMs
     )
       return false;
-    const recoveryHandle = await open(
-      location.recovery,
-      constants.O_WRONLY | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0),
-    );
-    try {
-      const opened = await recoveryHandle.stat();
-      assertPrivateRegular(opened, "recovery lock");
-      if (
-        opened.dev !== recovery.stats.dev ||
-        opened.ino !== recovery.stats.ino
-      )
-        throw failure("recovery lock changed while opening");
-      const claimMetadata = await readLock(claim);
-      await recoveryHandle.writeFile(
-        `${canonicalJson(claimMetadata.metadata as unknown as JsonObject)}\n`,
-      );
-      await recoveryHandle.sync();
-      const adopted = await readLock(location.lock);
-      if (
-        adopted.stats.dev !== opened.dev ||
-        adopted.stats.ino !== opened.ino ||
-        adopted.metadata.token !== claimMetadata.metadata.token ||
-        adopted.metadata.pid !== claimMetadata.metadata.pid
-      )
-        throw failure("dead lock ownership changed during recovery");
-    } finally {
-      await recoveryHandle.close();
-    }
+
+    const recoveryImmediatelyBeforeUnlink = await readLock(location.recovery);
+    const lockImmediatelyBeforeUnlink = await readLock(location.lock);
+    if (
+      !sameLock(recoveryImmediatelyBeforeUnlink, claimOwner) ||
+      !sameLock(lockImmediatelyBeforeUnlink, observed) ||
+      processIsAlive(lockImmediatelyBeforeUnlink.metadata.pid) ||
+      Date.now() - lockImmediatelyBeforeUnlink.metadata.createdAtEpochMs <
+        deadLockMinimumAgeMs
+    )
+      return false;
+
     await unlink(location.lock);
     try {
       await link(claim, location.lock);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-      throw error;
+      throw failure("recovered lock cannot be installed", error);
     }
+    const installed = await readLock(location.lock);
+    if (!sameLock(installed, claimOwner))
+      throw failure("recovered lock ownership is invalid");
     return true;
   } finally {
-    try {
-      await unlink(location.recovery);
-    } catch {}
+    await removeOwnedRecoveryMarker(location, claimOwner);
   }
 }
 
@@ -537,18 +546,23 @@ async function acquireLock(location: StoreLocation): Promise<LockLease> {
   }
 }
 
+async function requireLeaseOwnership(lease: LockLease): Promise<void> {
+  const [lock, claim] = await Promise.all([
+    readLock(lease.location.lock),
+    lease.handle.stat(),
+  ]);
+  if (
+    lock.stats.dev !== claim.dev ||
+    lock.stats.ino !== claim.ino ||
+    lock.metadata.token !== lease.metadata.token ||
+    lock.metadata.pid !== lease.metadata.pid
+  )
+    throw failure("lock ownership changed during admission");
+}
+
 async function releaseLock(lease: LockLease): Promise<void> {
   try {
-    const [lock, claim] = await Promise.all([
-      readLock(lease.location.lock),
-      lease.handle.stat(),
-    ]);
-    if (
-      lock.stats.dev !== claim.dev ||
-      lock.stats.ino !== claim.ino ||
-      lock.metadata.token !== lease.metadata.token
-    )
-      throw failure("lock ownership changed before release");
+    await requireLeaseOwnership(lease);
     await unlink(lease.location.lock);
     const parent = await open(lease.location.parent, constants.O_RDONLY);
     try {
@@ -616,6 +630,7 @@ export class FileGenerationStore implements GenerationStore {
             `${right.catalogId}\0${right.issuer}`,
           ),
         );
+        await requireLeaseOwnership(lease);
         await this.#persist(location, entries);
         return cloneState(next);
       } finally {
