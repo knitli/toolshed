@@ -49,7 +49,8 @@ export type HttpMethod =
   | "TRACE";
 
 export interface ReleaseManifestV4 {
-  format: 4;
+  /** v4 records omit operation tags; v5 records require signed tags. */
+  format: 4 | 5;
   contract: 1;
   catalogId: CatalogId;
   releaseId: ReleaseId;
@@ -101,7 +102,7 @@ export interface StoredRecord<TRecord> {
   record: TRecord;
 }
 
-/** Logical operation data admitted through a signed v4 manifest. */
+/** Logical operation data normalized from v4 or admitted through signed v5. */
 export type ParameterLocationV4 = "path" | "query" | "header" | "cookie";
 
 export type ParameterStyleV4 =
@@ -178,7 +179,7 @@ export interface OperationRecordV4 {
   advisory: JsonObject;
 }
 
-/** Logical schema data admitted through a signed v4 manifest. */
+/** Logical schema data admitted through a signed v4/v5 manifest. */
 export interface SchemaRecordV4 {
   id: TypedSchemaId;
   schema: JsonSchemaV4;

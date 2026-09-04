@@ -69,7 +69,7 @@ async function stored(record: OperationRecordV4) {
   return {
     id: record.id,
     logicalDigest: await sha256(
-      "knitli.openapi-mcp.operation-record.v4",
+      "knitli.openapi-mcp.operation-record.v5",
       record,
     ),
     record,
@@ -97,7 +97,7 @@ async function fixture() {
     await stored(operation("createWidget", "POST")),
   ];
   const manifest: ReleaseManifestV4 = {
-    format: 4,
+    format: 5,
     contract: 1,
     catalogId,
     releaseId,
@@ -123,7 +123,7 @@ async function fixture() {
     await crypto.subtle.sign(
       "Ed25519",
       pair.privateKey,
-      encoder.encode(`knitli.openapi-mcp.release-manifest.v4\0${manifestJson}`),
+      encoder.encode(`knitli.openapi-mcp.release-manifest.v5\0${manifestJson}`),
     ),
   );
   const envelope: ManifestEnvelope = {
@@ -135,7 +135,7 @@ async function fixture() {
     },
   };
   const manifestDigest = await sha256(
-    "knitli.openapi-mcp.release-manifest.v4",
+    "knitli.openapi-mcp.release-manifest.v5",
     manifest as never,
   );
   const generations = new MemoryGenerations();

@@ -43,7 +43,7 @@ The package exposes focused subpaths:
 
 | Export | Environment | Responsibility |
 |---|---|---|
-| `@knitli/openapi-mcp/compiler` | Node/Bun | OpenAPI ingestion and immutable v4 release production |
+| `@knitli/openapi-mcp/compiler` | Node/Bun | OpenAPI ingestion and immutable v5 release production |
 | `@knitli/openapi-mcp/runtime` | Web/Worker/Node/Bun | contracts, canonicalization, verification, search, resolution, preparation, revalidation, errors |
 | `@knitli/openapi-mcp/sqlite` | Node | local SQLite store, generation state, guarded HTTP, local auth |
 | `@knitli/openapi-mcp/stdio` | Node | modern/legacy-compatible MCP stdio server and CLI |
@@ -58,13 +58,13 @@ Phase 3 depends on a published, pinned package version rather than a production 
 
 ```ts
 export const RUNTIME_CONTRACT_VERSION = 1 as const;
-export const ARTIFACT_FORMAT_VERSION = 4 as const;
+export const ARTIFACT_FORMAT_VERSION = 5 as const;
 export const PREPARED_CALL_VERSION = 1 as const;
 ```
 
 Semver covers TypeScript/API compatibility. The three explicit versions cover wire and stored representations independently. The stable contract includes:
 
-- v4 manifest fields, canonical JSON, hashing, signature, generation, and rollback rules;
+- v5 manifest fields, canonical JSON, hashing, signature, generation, and rollback rules, plus strict read compatibility for historical tagless v4 logical records;
 - semantic `CatalogStore`, `GenerationStore`, `DestinationPolicy`, `CredentialProvider`, `ActionAuthorizer`, and `AuthorizedTransport` ports;
 - operation-reference and `PreparedCall` encodings;
 - stable machine-readable error codes;
@@ -72,7 +72,7 @@ Semver covers TypeScript/API compatibility. The three explicit versions cover wi
 
 Cloudflare-specific storage, identity, grants, approvals, observations, secrets, and deployment configuration remain Phase 3 concerns.
 
-## 5. Artifact v4: signed logical records
+## 5. Artifact v5: signed logical records
 
 ### 5.1 Release files
 
@@ -84,13 +84,14 @@ A release is immutable and consists of:
 <release>.manifest.sig
 ```
 
-The SQLite file is a transport and query index. Its rows, metadata, FTS index, and stored digests are untrusted. The security root is one bounded canonical manifest signed with Ed25519. Exact-file signing from v3 remains available as `signArtifact`/`verifyArtifact` for legacy transport checks, but it is not v4 record admission and is never described as equivalent.
+The SQLite file is a transport and query index. Its rows, metadata, FTS index, and stored digests are untrusted. The security root is one bounded canonical manifest signed with Ed25519. Exact-file signing from v3 remains available as `signArtifact`/`verifyArtifact` for legacy transport checks, but it is not v5 record admission and is never described as equivalent.
 
 The canonical manifest shape is:
 
 ```ts
 export interface ReleaseManifestV4 {
-  format: 4;
+  /** Compatibility-era name; v4 is read-only legacy and v5 is current. */
+  format: 4 | 5;
   contract: 1;
   catalogId: CatalogId;
   releaseId: ReleaseId;
@@ -114,13 +115,13 @@ export type TypedRecordId = `operation:${string}` | `schema:${string}`;
 
 `records` is one flat typed ID-to-digest map. Operation IDs are `operation:<api>:<operationId>`; schema IDs are `schema:<api>:#/components/schemas/<escaped-name>`. `catalogId`, `releaseId`, API names, operation IDs, and schema IDs follow an ASCII grammar and length bounds. Ambiguous separators, control characters, Unicode confusables, `.`/`..`, and empty segments are rejected.
 
-The signature file is a small JSON envelope containing `algorithm: "Ed25519"`, `keyId`, and a base64url signature over `domainSeparator || canonicalUtf8(manifest)`. Domain separation is `knitli.openapi-mcp.release-manifest.v4\0`.
+The signature file is a small JSON envelope containing `algorithm: "Ed25519"`, `keyId`, and a base64url signature over `domainSeparator || canonicalUtf8(manifest)`. Current manifests use `knitli.openapi-mcp.release-manifest.v5\0`; historical v4 manifests are verified only under `knitli.openapi-mcp.release-manifest.v4\0`.
 
 ### 5.2 Canonicalization and parsing
 
 All signed and hashed logical JSON uses RFC 8785-style deterministic canonical JSON: UTF-8, lexicographically sorted object keys, JSON number rules, and no insignificant whitespace. Parsing rejects duplicate object keys, `__proto__`, `prototype`, and `constructor` keys, non-finite numbers, unpaired surrogates, excessive nesting, and any input beyond the application limits below. Lookups use own properties only.
 
-Operation and schema record digests are SHA-256 over a record-specific domain separator plus canonical JSON. A D1 import or SQLite rebuild may change page layout and exact file bytes without changing these logical digests.
+Operation and schema record digests are SHA-256 over a record-specific domain separator plus canonical JSON. Current releases use `knitli.openapi-mcp.operation-record.v5` and `knitli.openapi-mcp.schema-record.v5`. Historical v4 operation records must have the exact original key set without `tags` and are normalized to `tags: []` only after verification under the corresponding v4 domain; v5 operation records require bounded, unique, signed `tags`. A D1 import or SQLite rebuild may change page layout and exact file bytes without changing these logical digests.
 
 ### 5.3 Admission and use-time verification
 
@@ -149,7 +150,7 @@ For local stdio, generation state is an atomically replaced user-only file (`060
 
 Production compilation never appends into a published database. It builds a new release under temporary names, closes and syncs it, verifies every logical digest, renames the SQLite payload, then publishes the signature and manifest with the manifest renamed last. Consumers admit only a complete manifest-last release.
 
-The local reader recognizes v3 and v4 during migration. A v3 artifact is inventory/search-only; strong execution requires v4 because v3 lacks the signed logical record map and generation binding. Existing `compile --append` remains a clearly labeled legacy v3 command until removal under a semver-major change. New `compile-release` produces v4 immutable releases. D1 adapters implement v4 only.
+The local reader recognizes v3, v4, and v5 during migration. A v3 artifact is inventory/search-only because it lacks a signed logical record map and generation binding. Historical v4 releases remain executable only with their exact tagless logical-record shape and v4 domains. New `compile-release` produces immutable v5 releases, and SQLite/D1 adapters read exactly v4 or v5 with runtime contract 1. Existing `compile --append` remains a clearly labeled legacy v3 command until removal under a semver-major change.
 
 ## 6. Application-owned limits
 
@@ -196,7 +197,7 @@ Every adapter receives validated limits from the application; stores cannot sile
 
 ## 7. Compiler hardening
 
-The v4 compiler enforces `DEFAULT_COMPILER_LIMITS` before and during traversal. JSON uses the strict duplicate-key-rejecting parser. YAML uses the existing `yaml` dependency's document API with unique-key errors enabled, bounded alias expansion, and an explicit node/depth/count walk before conversion to plain null-prototype data. It rejects unsupported OpenAPI versions and structural ambiguity rather than coercing it. The legacy v3 loader remains unchanged until the legacy command is removed.
+The v5 compiler enforces `DEFAULT_COMPILER_LIMITS` before and during traversal. JSON uses the strict duplicate-key-rejecting parser. YAML uses the existing `yaml` dependency's document API with unique-key errors enabled, bounded alias expansion, and an explicit node/depth/count walk before conversion to plain null-prototype data. It rejects unsupported OpenAPI versions and structural ambiguity rather than coercing it. The legacy v3 loader remains unchanged until the legacy command is removed.
 
 Local JSON Pointer resolution decodes `~1` and `~0` exactly once, rejects invalid escapes, traverses own properties only, and blocks prototype keys. Array indices are canonical decimal indices.
 
@@ -324,6 +325,8 @@ Classification is conservative. `DELETE` is `delete`; messaging/sharing/invitati
 
 Every action requires an `ActionAuthorizer` decision in v1. Per-call confirmation is the default; an exact constrained operator policy is treated as the operator's standing out-of-band confirmation. Only create/update actions with single or bounded cardinality and a finite `maxAffected` may use that standing confirmation. `unknown`, high-risk, `delete`, `communicate`, `authority`, `transaction`, `execute`, and unknown/unbounded cardinality always require fresh per-call confirmation and can never be policy-auto-approved.
 
+Exact-policy authorization is release-exact in v1. Every rule binds `catalogId`, `releaseId`, `manifestDigest`, `operationId`, `operationDigest`, action kind, an explicit argument constraint set, cardinality, finite `maxAffected`, and expiry. A missing constraint is never a wildcard, and neither a generation range nor a familiar release name authorizes an unseen manifest or schema closure. A new release or manifest requires a new reviewed rule.
+
 Sensitive action-token matching includes bounded plural normalization; dangerous families take precedence over routine create/update evidence. For cardinality, a concrete required resource identifier means the exact required target placeholder is the terminal path segment. A parent-resource identifier before a collection does not prove `single`; absent another verified finite bound, that action remains `unknown` cardinality and high-risk.
 
 ## 11. Engine-owned action authorization
@@ -333,17 +336,26 @@ An MCP client's remembered permission for the global `action` tool is insufficie
 ```ts
 export interface ActionAuthorizer {
   authorize(call: PreparedCall, context: AuthorizationContext): Promise<AuthorizationDecision>;
+  /** Atomically validates and consumes one decision immediately before dispatch. */
+  consume(decision: AuthorizedActionDecision, call: PreparedCall): Promise<void>;
+}
+
+export interface AuthorizedActionDecision {
+  status: "authorized";
+  callDigest: Sha256;
+  path: "per-call" | "exact-policy";
+  authorizationId: string;
 }
 
 export type AuthorizationDecision =
-  | { status: "authorized"; callDigest: Sha256; path: "per-call" | "exact-policy" }
+  | AuthorizedActionDecision
   | { status: "confirmation-required"; presentation: SafeApprovalPresentation }
   | { status: "denied"; reason: string };
 ```
 
 Default is deny. The stdio server ships a client-mediated per-call authorizer using the modern MCP SDK's `input_required` elicitation flow. The confirmation presentation contains escaped, length-bounded trusted labels and clearly quoted untrusted values: exact API/release/operation, method, origin and relative path, action kind/cardinality, normalized argument summary, and prepared-call digest. A model-callable `confirm` argument does not exist.
 
-The MCP response and `requestState` are untrusted. `acceptedContent` validates the confirmation schema. After acceptance, the server re-prepares the call, checks the digest, and only then mints an HMAC-SHA256 `requestState` receipt containing that digest and a short expiry. The process secret is at least 32 random bytes. On the following entry the SDK verifies the state, the engine revalidates again, and dispatch occurs only when all digests agree. Unsupported elicitation, decline, expiry, retry with changed arguments, or missing state denies. stdio owns stdin/stdout; all status and diagnostic output goes to stderr.
+The MCP response and `requestState` are untrusted. `acceptedContent` validates the confirmation schema. After acceptance, the server re-prepares the call and checks the digest. It then generates a cryptographically random `authorizationId`, records an unused `{ authorizationId, callDigest, expiresAt, path }` tuple in a bounded process-local ledger, and mints HMAC-SHA256 `requestState` containing the same tuple. The process secret is at least 32 random bytes. On the following entry the SDK verifies the state and the engine revalidates again, but verification alone does not spend the receipt. After credential and destination-slot resolution, `ActionAuthorizer.consume` atomically validates and removes the matching unused authorization immediately before the one permitted dispatch. Reuse, concurrent double-consume, missing ledger state, digest/path mismatch, expiry, or capacity exhaustion denies. Unsupported elicitation, decline, retry with changed arguments, or missing state also denies. stdio owns stdin/stdout; all status and diagnostic output goes to stderr.
 
 This trusts the locally configured MCP client to present its dedicated elicitation UI to the human; the protocol cannot cryptographically prove a human clicked. Operators who do not accept that local client boundary must configure an external `ActionAuthorizer` that verifies an out-of-band signed decision. The public interface supports it without weakening the default.
 
@@ -385,6 +397,8 @@ export interface AuthorizedTransport {
 }
 ```
 
+Immediately before secret injection, the transport derives the canonical credential-slot list from the actual credential it received and recomputes the same `knitli.openapi-mcp.credential-slots.v1` commitment used during preparation. A mismatch with `PreparedCall.reservedSlotsDigest` fails before any network I/O or secret-bearing request object is created. For actions, the stdio execution path performs fresh runtime revalidation, resolves the credential and destination, atomically consumes the single-use authorization, and then invokes exactly one transport dispatch with that freshly revalidated call; no alternate action-dispatch path may skip this ordering.
+
 The Node local implementation defaults to public HTTPS. Each profile has a mandatory exact-origin destination policy. Before connecting, it resolves every A/AAAA address, rejects loopback, private, link-local, multicast, documentation, benchmarking, reserved, IPv4-mapped-private, and metadata destinations, and pins the approved address for the connection so DNS rebinding cannot swap it after validation.
 
 Fetch uses `redirect: "manual"`, a maximum of three redirects, destination and DNS revalidation on every hop, and an origin comparison. Credentials and bodies are stripped before any cross-origin follow. Authorization, proxy authorization, cookies, `Host`, connection/transfer/upgrade headers, forwarding headers, and provider identity headers are denied from model/runtime inputs. Cross-origin redirects requiring authentication are returned as bounded redirect outcomes, not followed with credentials.
@@ -403,7 +417,7 @@ action({ operation, arguments })
 
 - `search` performs bounded cross-catalog search and returns operation refs, summaries, input outlines, recomputed safety/action metadata, deprecation, and advisory permission information.
 - `read` prepares, revalidates, authenticates, and dispatches a read. Continuations use opaque page tokens.
-- `action` prepares an action, runs engine-owned authorization, revalidates, then authenticates and dispatches once.
+- `action` prepares an action, runs engine-owned authorization, freshly revalidates, resolves credentials and their slot commitment, atomically consumes the single-use authorization, and dispatches exactly once.
 
 Tool schemas contain no URL, method, arbitrary transport header, authorization, credential, API token, client ID, confirmation flag, action classification, cardinality, digest override, or risk override field. Structured `arguments.headers` accepts only values for non-credential header parameters declared by the selected operation. Catalog/profile configuration is operator-owned startup configuration.
 
@@ -450,6 +464,6 @@ Publishing is observed, not inferred: a clean packed tarball must pass consumer 
 
 ## 17. Rollback and operational recovery
 
-Code rollback means installing the prior known-good package version. Data rollback is not file replacement alone: it requires the signed rollback authorization in §5.4 or publication of a corrected higher generation. If a v4 rollout fails, operators keep the previous immutable release and generation state, disable the new catalog profile, and restore the prior package. Credentials remain process-local and vanish on process exit.
+Code rollback means installing the prior known-good package version. Data rollback is not file replacement alone: it requires the signed rollback authorization in §5.4 or publication of a corrected higher generation. If a v5 rollout fails, operators keep the previous immutable release and generation state, disable the new catalog profile, and restore the prior package. Credentials remain process-local and vanish on process exit.
 
-Phase 2 is complete when a fresh public install can configure a signed provider-neutral v4 release—self-contained or resolved through the bounded reference-map contract—discover it through only three tools, execute reads with explicit user credentials, require exact engine-owned authorization for every action, and pass the same portable runtime contracts that Phase 3 will implement against D1.
+Phase 2 is complete when a fresh public install can configure a signed provider-neutral v5 release—self-contained or resolved through the bounded reference-map contract—discover it through only three tools, execute reads with explicit user credentials, require exact engine-owned authorization for every action, and pass the same portable runtime contracts that Phase 3 will implement against D1. Historical tagless v4 releases remain a read-compatibility path, not the production compiler target.

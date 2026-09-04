@@ -42,7 +42,7 @@ const SQL = Object.freeze({
   CASE WHEN typeof(signature) = 'text' AND length(CAST(signature AS BLOB)) <= ? THEN signature ELSE NULL END AS signature,
   length(CAST(signature AS BLOB)) AS signature_bytes
 FROM release_metadata
-WHERE catalog_id = ? AND release_id = ? AND format = 4 AND contract = 1
+WHERE catalog_id = ? AND release_id = ? AND format IN (4, 5) AND contract = 1
 LIMIT 2;`,
   search: `SELECT
        CASE WHEN typeof(o.catalog_id) = 'text' AND length(CAST(o.catalog_id AS BLOB)) <= ? THEN o.catalog_id ELSE NULL END AS catalog_id,
@@ -57,7 +57,7 @@ JOIN release_metadata AS r
   ON r.catalog_id = o.catalog_id AND r.release_id = o.release_id
 WHERE operations_fts MATCH ?
   AND (? IS NULL OR o.api = ?)
-  AND r.format = 4 AND r.contract = 1
+  AND r.format IN (4, 5) AND r.contract = 1
 ORDER BY bm25(operations_fts),
          o.catalog_id COLLATE BINARY,
          o.release_id COLLATE BINARY,
@@ -74,7 +74,7 @@ FROM operations AS o
 JOIN release_metadata AS r
   ON r.catalog_id = o.catalog_id AND r.release_id = o.release_id
 WHERE o.catalog_id = ? AND o.release_id = ? AND o.record_id = ?
-  AND r.format = 4 AND r.contract = 1
+  AND r.format IN (4, 5) AND r.contract = 1
 LIMIT 2;`,
   schemas: `WITH requested(record_id) AS (
   SELECT DISTINCT value FROM json_each(?) WHERE typeof(value) = 'text'
@@ -91,7 +91,7 @@ JOIN schemas AS s ON s.record_id = requested.record_id
 JOIN release_metadata AS r
   ON r.catalog_id = s.catalog_id AND r.release_id = s.release_id
 WHERE s.catalog_id = ? AND s.release_id = ?
-  AND r.format = 4 AND r.contract = 1
+  AND r.format IN (4, 5) AND r.contract = 1
 ORDER BY s.record_id COLLATE BINARY
 LIMIT ?;`,
 });

@@ -91,6 +91,8 @@ const forbiddenHeaderNames = new Set([
 const maximumCredentialSlots = 64;
 const maximumCredentialSlotNameBytes = 256;
 const maximumSerializerOptionsBytes = 32 * 1024;
+// Finite IEEE-754 values stringify within exponents -324 through 308.
+const maximumFiniteDecimalExponent = 400;
 const supportedSchemaKeys = new Set([
   "$anchor",
   "$comment",
@@ -225,6 +227,45 @@ function finiteKeyword(schema: JsonObject, key: string): number | undefined {
   const value = schema[key];
   if (typeof value !== "number" || !Number.isFinite(value)) schemaFailure();
   return value;
+}
+
+interface FiniteDecimal {
+  readonly coefficient: bigint;
+  readonly exponent: number;
+}
+
+function finiteDecimal(value: number): FiniteDecimal {
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/.exec(
+    value.toString(),
+  );
+  if (match === null) schemaFailure();
+  const fraction = match[3] ?? "";
+  const coefficient = BigInt(`${match[1] ?? ""}${match[2]}${fraction}`);
+  const exponent = Number(match[4] ?? "0") - fraction.length;
+  if (
+    !Number.isSafeInteger(exponent) ||
+    Math.abs(exponent) > maximumFiniteDecimalExponent
+  )
+    schemaFailure();
+  return { coefficient, exponent };
+}
+
+function isExactDecimalMultiple(value: number, multiple: number): boolean {
+  const candidate = finiteDecimal(value);
+  const divisor = finiteDecimal(multiple);
+  const exponentDifference = candidate.exponent - divisor.exponent;
+  if (exponentDifference >= 0) {
+    return (
+      (candidate.coefficient * 10n ** BigInt(exponentDifference)) %
+        divisor.coefficient ===
+      0n
+    );
+  }
+  return (
+    candidate.coefficient %
+      (divisor.coefficient * 10n ** BigInt(-exponentDifference)) ===
+    0n
+  );
 }
 
 function nonNegativeIntegerKeyword(
@@ -505,8 +546,7 @@ function validateSchema(
     const multiple = finiteKeyword(schema, "multipleOf");
     if (multiple !== undefined) {
       if (multiple <= 0) schemaFailure();
-      const quotient = value / multiple;
-      if (Math.abs(quotient - Math.round(quotient)) > 1e-10) schemaFailure();
+      if (!isExactDecimalMultiple(value, multiple)) schemaFailure();
     }
   }
 
@@ -669,7 +709,11 @@ function headerValue(
 ): string {
   if (parameter.style !== "simple" || typeof value !== "string")
     schemaFailure();
-  if (/\r|\n/.test(value)) throw invalid("Header arguments are invalid");
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if ((code <= 0x1f && code !== 0x09) || code === 0x7f)
+      throw invalid("Header arguments are invalid");
+  }
   return value;
 }
 

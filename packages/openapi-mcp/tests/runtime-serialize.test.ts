@@ -202,6 +202,39 @@ test("validates schemas, refs, bounds, enums, nullability, and composition", () 
   ).toThrow(expect.objectContaining({ code: "INPUT_INVALID" }));
 });
 
+test("validates multipleOf using exact finite-number decimal semantics", () => {
+  const integerStep = schema("integer-step", { type: "number", multipleOf: 1 });
+  const decimalStep = schema("decimal-step", {
+    type: "number",
+    multipleOf: 0.1,
+  });
+  const op = operation({
+    path: "/validate",
+    parameters: [
+      parameter("integer", "query", integerStep.id),
+      parameter("decimal", "query", decimalStep.id),
+    ],
+    schemaIds: [decimalStep.id, integerStep.id],
+  });
+  const closure = schemas(integerStep, decimalStep);
+
+  expect(
+    serializeArguments(op, closure, {
+      query: { integer: 2, decimal: 0.3 },
+    }).relativeUrl,
+  ).toBe("/validate?integer=2&decimal=0.3");
+  expect(() =>
+    serializeArguments(op, closure, {
+      query: { integer: 1.00000000001, decimal: 0.3 },
+    }),
+  ).toThrow(expect.objectContaining({ code: "INPUT_INVALID" }));
+  expect(() =>
+    serializeArguments(op, closure, {
+      query: { integer: 2, decimal: 0.30000000000000004 },
+    }),
+  ).toThrow(expect.objectContaining({ code: "INPUT_INVALID" }));
+});
+
 test("validates finite inputs through recursive schema references", () => {
   const node = schema("node", {
     anyOf: [
@@ -417,6 +450,43 @@ test("rejects unknown, missing, cookie, credential, transport, and CRLF inputs",
       expect.objectContaining({ code: "INPUT_INVALID" }),
     );
   }
+});
+
+test.each(
+  [...Array.from({ length: 32 }, (_, code) => code), 0x7f]
+    .filter((code) => code !== 0x09)
+    .map((code) => [code.toString(16).padStart(4, "0"), code] as const),
+)(
+  "rejects HTTP header control U+%s before emitting the serialized value",
+  (_label, code) => {
+    const text = schema("controlled-header", { type: "string" });
+    const op = operation({
+      path: "/fixed",
+      parameters: [parameter("X-Safe", "header", text.id)],
+      schemaIds: [text.id],
+    });
+
+    expect(() =>
+      serializeArguments(op, schemas(text), {
+        headers: { "X-Safe": `before${String.fromCharCode(code)}after` },
+      }),
+    ).toThrow(expect.objectContaining({ code: "INPUT_INVALID" }));
+  },
+);
+
+test("allows horizontal tab and ordinary field content in serialized headers", () => {
+  const text = schema("allowed-header-content", { type: "string" });
+  const result = serializeArguments(
+    operation({
+      path: "/fixed",
+      parameters: [parameter("X-Safe", "header", text.id)],
+      schemaIds: [text.id],
+    }),
+    schemas(text),
+    { headers: { "X-Safe": "one\ttwo !~" } },
+  );
+
+  expect(result.headers["x-safe"]).toBe("one\ttwo !~");
 });
 
 test.each([

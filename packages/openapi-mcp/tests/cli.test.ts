@@ -373,7 +373,7 @@ describe("cli", () => {
     const first = await run(args);
     expect(first.code).toBe(0);
     expect(first.stdout.trim()).toBe(
-      `compiled immutable v4 release ${release}`,
+      `compiled immutable v5 release ${release}`,
     );
     expect(readdirSync(root).sort()).toEqual(
       [

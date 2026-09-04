@@ -98,7 +98,7 @@ async function envelope(
     await crypto.subtle.sign(
       "Ed25519",
       privateKey,
-      encoder.encode(`knitli.openapi-mcp.release-manifest.v4\0${manifestJson}`),
+      encoder.encode(`knitli.openapi-mcp.release-manifest.v5\0${manifestJson}`),
     ),
   );
   return {
@@ -170,7 +170,7 @@ async function storedOperation(
   return {
     id: value.id,
     logicalDigest: await sha256(
-      "knitli.openapi-mcp.operation-record.v4",
+      "knitli.openapi-mcp.operation-record.v5",
       value,
     ),
     record: value,
@@ -184,7 +184,7 @@ async function storedSchema(
   const record: SchemaRecordV4 = { id, schema };
   return {
     id,
-    logicalDigest: await sha256("knitli.openapi-mcp.schema-record.v4", record),
+    logicalDigest: await sha256("knitli.openapi-mcp.schema-record.v5", record),
     record,
   };
 }
@@ -196,7 +196,7 @@ function admitted(
   return {
     manifestDigest: digestA,
     manifest: {
-      format: 4,
+      format: 5,
       contract: 1,
       catalogId,
       releaseId,
@@ -987,7 +987,7 @@ test("a CAS race cannot reinterpret a normal advance as an authorized rollback",
     generation: 2,
   });
   const manifestDigest = await sha256(
-    "knitli.openapi-mcp.release-manifest.v4",
+    "knitli.openapi-mcp.release-manifest.v5",
     release2.manifest as never,
   );
   const rollback = await rollbackAuthorization(
@@ -1149,11 +1149,11 @@ test("group selection restarts from conflicting higher releases after a fallback
     { releaseId: "release-2" as ReleaseId, generation: 2 },
   );
   const higherADigest = await sha256(
-    "knitli.openapi-mcp.release-manifest.v4",
+    "knitli.openapi-mcp.release-manifest.v5",
     higherA.manifest as never,
   );
   const fallbackDigest = await sha256(
-    "knitli.openapi-mcp.release-manifest.v4",
+    "knitli.openapi-mcp.release-manifest.v5",
     fallback.manifest as never,
   );
   const fallbackRollback = await rollbackAuthorization(
