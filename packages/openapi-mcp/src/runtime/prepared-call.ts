@@ -21,6 +21,7 @@ const preparedCallKeys = [
   "body",
   "cardinality",
   "catalogId",
+  "reservedSlotsDigest",
   "headers",
   "inputDigest",
   "manifestDigest",
@@ -134,6 +135,7 @@ interface ParsedPreparedCall {
   readonly operationId: TypedOperationId;
   readonly operationDigest: Sha256;
   readonly manifestDigest: Sha256;
+  readonly reservedSlotsDigest: Sha256;
   readonly method: HttpMethod;
   readonly origin: string;
   readonly relativeUrl: string;
@@ -450,6 +452,7 @@ function parseUntrustedPreparedCall(value: unknown): ParsedPreparedCall {
     operationId: parsedOperationId,
     operationDigest: digest(ownValue(source, "operationDigest")),
     manifestDigest: digest(ownValue(source, "manifestDigest")),
+    reservedSlotsDigest: digest(ownValue(source, "reservedSlotsDigest")),
     method: method as HttpMethod,
     origin: parsedOrigin,
     relativeUrl: relativeUrl(ownValue(source, "relativeUrl"), parsedOrigin),
@@ -489,6 +492,7 @@ function canonicalPayload(
     operationId: call.operationId,
     operationDigest: call.operationDigest,
     manifestDigest: call.manifestDigest,
+    reservedSlotsDigest: call.reservedSlotsDigest,
     method: call.method,
     origin: call.origin,
     relativeUrl: call.relativeUrl,
@@ -536,7 +540,9 @@ export async function digestPreparedCall(call: PreparedCall): Promise<Sha256> {
 }
 
 /** Verify a prepared call locally; storage admission is rechecked separately. */
-export async function verifyPreparedCall(call: PreparedCall): Promise<void> {
+export async function verifyAndSnapshotPreparedCall(
+  call: PreparedCall,
+): Promise<Readonly<ParsedPreparedCall>> {
   const parsed = parsePreparedCall(call);
   const expectedInput = await digestNormalizedArguments(
     parsed.normalizedArguments,
@@ -554,6 +560,12 @@ export async function verifyPreparedCall(call: PreparedCall): Promise<void> {
   ) {
     throw integrityFailure();
   }
+  return parsed;
+}
+
+/** Verify a prepared call locally; storage admission is rechecked separately. */
+export async function verifyPreparedCall(call: PreparedCall): Promise<void> {
+  await verifyAndSnapshotPreparedCall(call);
 }
 
 /** Build an owned, detached prepared call and bind all fields to its digests. */

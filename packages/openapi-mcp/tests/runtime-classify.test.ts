@@ -77,16 +77,76 @@ describe("classifyOperation", () => {
     ["refundPayment", "POST", "/payments/{widgetId}/refund", "transaction"],
     ["runJob", "POST", "/jobs/{widgetId}/run", "execute"],
     ["inspectWidget", "OPTIONS", "/widgets/{widgetId}/inspect", "unknown"],
-  ] as const)("classifies %s as %s from verified method and bounded operation tokens", (operationId, method, path, actionKind) => {
+  ] as const)(
+    "classifies %s as %s from verified method and bounded operation tokens",
+    (operationId, method, path, actionKind) => {
+      const result = classifyOperation(
+        operation(operationId, {
+          method,
+          path,
+          parameters: [requiredId()],
+        }),
+      );
+      expect(result.safety).toBe("action");
+      expect(result.actionKind).toBe(actionKind);
+    },
+  );
+
+  test.each([
+    ["updateRoles", "/orgs/{orgId}/roles", "authority"],
+    ["setPermissions", "/orgs/{orgId}/permissions", "authority"],
+    ["addMembers", "/orgs/{orgId}/members", "authority"],
+    ["updateAccesses", "/orgs/{orgId}/accesses", "authority"],
+    ["updateAuthorities", "/orgs/{orgId}/authorities", "authority"],
+    ["createPayments", "/accounts/{accountId}/payments", "transaction"],
+    ["updateRefunds", "/accounts/{accountId}/refunds", "transaction"],
+    ["createTransfers", "/accounts/{accountId}/transfers", "transaction"],
+    ["createTransactions", "/accounts/{accountId}/transactions", "transaction"],
+  ] as const)(
+    "normalizes plural sensitive tokens in %s to dangerous %s actions",
+    (operationId, path, actionKind) => {
+      const parameterName = path.includes("orgId") ? "orgId" : "accountId";
+      const result = classifyOperation(
+        operation(operationId, {
+          method: "PATCH",
+          path,
+          parameters: [requiredId(parameterName)],
+        }),
+      );
+      expect(result.actionKind).toBe(actionKind);
+      expect(result.dangerous).toBe(true);
+      expect(result.highRisk).toBe(true);
+    },
+  );
+
+  test.each([
+    ["updateRoles", "/orgs/{orgId}/members", "orgId"],
+    ["setPermissions", "/teams/{teamId}/roles", "teamId"],
+    ["updatePayments", "/accounts/{accountId}/payments", "accountId"],
+  ] as const)(
+    "does not treat parent identifier in collection mutation %s as single",
+    (operationId, path, parameterName) => {
+      const result = classifyOperation(
+        operation(operationId, {
+          method: "PATCH",
+          path,
+          parameters: [requiredId(parameterName)],
+        }),
+      );
+      expect(result.cardinality).toEqual({ kind: "unknown" });
+      expect(result.highRisk).toBe(true);
+    },
+  );
+
+  test("retains single cardinality for a terminal required item identifier", () => {
     const result = classifyOperation(
-      operation(operationId, {
-        method,
-        path,
+      operation("updateWidget", {
+        method: "PATCH",
+        path: "/widgets/{widgetId}",
         parameters: [requiredId()],
       }),
     );
-    expect(result.safety).toBe("action");
-    expect(result.actionKind).toBe(actionKind);
+    expect(result.cardinality).toEqual({ kind: "single" });
   });
 
   test("keeps non-batch GET and HEAD operations read regardless of name", () => {
@@ -335,16 +395,19 @@ describe("classifyOperation", () => {
         ],
       },
     ],
-  ] as const)("treats a supplied root-array body %s as unproven", (_label, requestBody) => {
-    const ids = "schema:tiny:#/components/schemas/Ids" as TypedSchemaId;
-    const result = classifyOperation(
-      operation("updateWidgets", { method: "PATCH", requestBody }),
-      [{ id: ids, schema: { type: "array", maxItems: 2 } }],
-      { body: ["widget-1"] },
-    );
-    expect(result.cardinality).toEqual({ kind: "unknown" });
-    expect(result.highRisk).toBe(true);
-  });
+  ] as const)(
+    "treats a supplied root-array body %s as unproven",
+    (_label, requestBody) => {
+      const ids = "schema:tiny:#/components/schemas/Ids" as TypedSchemaId;
+      const result = classifyOperation(
+        operation("updateWidgets", { method: "PATCH", requestBody }),
+        [{ id: ids, schema: { type: "array", maxItems: 2 } }],
+        { body: ["widget-1"] },
+      );
+      expect(result.cardinality).toEqual({ kind: "unknown" });
+      expect(result.highRisk).toBe(true);
+    },
+  );
 
   test("treats duplicate schema records for a present array selector as ambiguous", () => {
     const ids = "schema:tiny:#/components/schemas/Ids" as TypedSchemaId;
@@ -407,6 +470,7 @@ describe("classifyOperation", () => {
     const result = classifyOperation(
       operation("inspectWidget", {
         method: "POST",
+        path: "/widgets/{widgetId}",
         tags: [tag],
         parameters: [requiredId()],
       }),
@@ -424,6 +488,7 @@ describe("classifyOperation", () => {
     const result = classifyOperation(
       operation("createWidget", {
         method: "POST",
+        path: "/widgets/{widgetId}",
         tags: ["refund", "run"],
         parameters: [requiredId()],
       }),

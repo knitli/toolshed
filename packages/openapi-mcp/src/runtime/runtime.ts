@@ -1,3 +1,5 @@
+import { classifyOperation } from "./classify.ts";
+import { sha256 } from "./digest.ts";
 import { OpenApiMcpError } from "./errors.ts";
 import {
   type AuthenticatedManifest,
@@ -5,30 +7,47 @@ import {
   commitAuthenticatedManifestAtState,
   type ManifestTrust,
 } from "./manifest.ts";
-import { encodeOperationRef, parseTypedRecordId } from "./references.ts";
-import { collectReferences } from "./schema-resolver.ts";
+import {
+  createPreparedCall,
+  verifyAndSnapshotPreparedCall,
+} from "./prepared-call.ts";
+import {
+  decodeOperationRef,
+  encodeOperationRef,
+  parseTypedRecordId,
+} from "./references.ts";
+import { collectReferences, resolveSchemaClosure } from "./schema-resolver.ts";
+import { serializeArguments } from "./serialize.ts";
 import { canonicalJson } from "./strict-json.ts";
 import type {
-  ActionCardinality,
-  ActionKind,
   CandidateRef,
   CatalogStore,
+  CredentialSlot,
+  CredentialSlotContext,
+  CredentialSlotResolver,
+  DestinationPolicy,
   GenerationState,
   GenerationStore,
   JsonObject,
+  ManifestEnvelope,
+  OpenApiRuntime,
   OpenApiValue,
   OperationRecordV4,
+  PreparedCall,
+  PrepareInput,
   SchemaRecordV4,
   SearchInput,
   SearchResult,
   SearchResultItem,
   SearchWarning,
+  StoredRecord,
   TypedOperationId,
   TypedSchemaId,
 } from "./types.ts";
 import { verifyStoredRecord } from "./verify-record.ts";
 import {
   DEFAULT_RUNTIME_LIMITS,
+  PREPARED_CALL_VERSION,
   type RuntimeLimits,
   resolveRuntimeLimits,
 } from "./versions.ts";
@@ -37,6 +56,10 @@ export interface OpenApiRuntimeOptions {
   readonly store: CatalogStore;
   readonly trust: ManifestTrust;
   readonly generations: GenerationStore;
+  /** Required by preparation; search-only runtimes may omit this port. */
+  readonly destinationPolicy?: DestinationPolicy;
+  /** Required by preparation; search-only runtimes may omit this port. */
+  readonly credentialSlots?: CredentialSlotResolver;
   readonly limits?: Partial<RuntimeLimits>;
 }
 
@@ -453,24 +476,6 @@ function inputOutline(operation: OperationRecordV4): JsonObject {
   return outline as JsonObject;
 }
 
-function classification(operation: OperationRecordV4): {
-  safety: "read" | "action";
-  actionKind: ActionKind | null;
-  cardinality: ActionCardinality | null;
-} {
-  const batch =
-    operation.path.toLowerCase().includes("$batch") ||
-    /(?:^|[._-])batch(?:$|[._-])/i.test(operation.operationId);
-  if ((operation.method === "GET" || operation.method === "HEAD") && !batch) {
-    return { safety: "read", actionKind: null, cardinality: null };
-  }
-  return {
-    safety: "action",
-    actionKind: "unknown",
-    cardinality: { kind: "unknown" },
-  };
-}
-
 function safeJsonValue(
   value: OpenApiValue,
   state: { nodes: number },
@@ -701,10 +706,148 @@ function validateSearchInput(value: unknown, limits: RuntimeLimits) {
   return { api: input.api, limit, query: input.query };
 }
 
-/** Construct the portable verified-search portion of the runtime. */
-export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
-  search(input: SearchInput): Promise<SearchResult>;
+function snapshotPrepareInput(value: unknown): {
+  readonly operation: string;
+  readonly arguments: unknown;
 } {
+  try {
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+      throw new Error();
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== null && prototype !== Object.prototype) throw new Error();
+    const keys = Reflect.ownKeys(value).sort();
+    const expected = Object.hasOwn(value, "pageToken")
+      ? ["arguments", "operation", "pageToken"]
+      : ["arguments", "operation"];
+    if (
+      keys.length !== expected.length ||
+      keys.some((key, index) => key !== expected[index])
+    )
+      throw new Error();
+    const snapshot: Record<string, unknown> = Object.create(null);
+    for (const key of expected) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (
+        descriptor === undefined ||
+        !("value" in descriptor) ||
+        !descriptor.enumerable
+      )
+        throw new Error();
+      snapshot[key] = descriptor.value;
+    }
+    if (Object.hasOwn(snapshot, "pageToken")) {
+      throw inputInvalid("Pagination tokens are not supported");
+    }
+    if (typeof snapshot.operation !== "string") throw new Error();
+    return Object.freeze({
+      operation: snapshot.operation,
+      arguments: snapshot.arguments,
+    });
+  } catch (error) {
+    if (error instanceof OpenApiMcpError) throw error;
+    throw inputInvalid("Prepare input is invalid");
+  }
+}
+
+function snapshotCredentialSlots(value: unknown): readonly CredentialSlot[] {
+  try {
+    if (!Array.isArray(value) || value.length > 64) throw new Error();
+    const keys = Reflect.ownKeys(value);
+    if (
+      keys.length !== value.length + 1 ||
+      keys.some(
+        (key) =>
+          key !== "length" &&
+          (typeof key !== "string" || !/^(?:0|[1-9][0-9]*)$/.test(key)),
+      )
+    )
+      throw new Error();
+    const slots: CredentialSlot[] = [];
+    for (let index = 0; index < value.length; index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (
+        descriptor === undefined ||
+        !("value" in descriptor) ||
+        !descriptor.enumerable
+      )
+        throw new Error();
+      const raw = descriptor.value;
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw))
+        throw new Error();
+      const prototype = Object.getPrototypeOf(raw);
+      if (prototype !== null && prototype !== Object.prototype)
+        throw new Error();
+      const slotKeys = Reflect.ownKeys(raw).sort();
+      if (
+        slotKeys.length !== 2 ||
+        slotKeys[0] !== "name" ||
+        slotKeys[1] !== "placement"
+      )
+        throw new Error();
+      const nameDescriptor = Object.getOwnPropertyDescriptor(raw, "name");
+      const placementDescriptor = Object.getOwnPropertyDescriptor(
+        raw,
+        "placement",
+      );
+      if (
+        nameDescriptor === undefined ||
+        !("value" in nameDescriptor) ||
+        !nameDescriptor.enumerable ||
+        typeof nameDescriptor.value !== "string" ||
+        nameDescriptor.value.length === 0 ||
+        nameDescriptor.value.length > 256 ||
+        new TextEncoder().encode(nameDescriptor.value).length > 256 ||
+        placementDescriptor === undefined ||
+        !("value" in placementDescriptor) ||
+        !placementDescriptor.enumerable ||
+        (placementDescriptor.value !== "header" &&
+          placementDescriptor.value !== "query")
+      )
+        throw new Error();
+      slots.push(
+        Object.freeze({
+          name: nameDescriptor.value,
+          placement: placementDescriptor.value,
+        }),
+      );
+    }
+    slots.sort((left, right) => {
+      const leftKey = `${left.placement}\0${
+        left.placement === "header" ? left.name.toLowerCase() : left.name
+      }`;
+      const rightKey = `${right.placement}\0${
+        right.placement === "header" ? right.name.toLowerCase() : right.name
+      }`;
+      return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+    });
+    return Object.freeze(slots);
+  } catch {
+    throw new OpenApiMcpError(
+      "AUTH_PROFILE_INVALID",
+      "Credential slot policy is invalid",
+    );
+  }
+}
+
+function destinationDenied(): OpenApiMcpError {
+  return new OpenApiMcpError(
+    "DESTINATION_DENIED",
+    "Operation destination is denied",
+  );
+}
+
+function timingSafeEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1)
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  return difference === 0;
+}
+
+/** Construct the portable verified runtime. */
+export function createOpenApiRuntime(
+  options: OpenApiRuntimeOptions,
+): OpenApiRuntime {
   const limits = resolveRuntimeLimits(options.limits);
   const committingGenerations: GenerationStore = {
     get(catalogId, issuer) {
@@ -719,7 +862,185 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
     },
   };
 
-  return {
+  const requireActiveManifest = async (
+    authenticated: AuthenticatedManifest,
+  ): Promise<void> => {
+    let activeState: {
+      readonly generation: unknown;
+      readonly digest: unknown;
+    } | null;
+    try {
+      const state = await options.generations.get(
+        authenticated.manifest.catalogId,
+        authenticated.manifest.issuer,
+      );
+      activeState =
+        state === null
+          ? null
+          : {
+              generation: state.activeGeneration,
+              digest: state.activeManifestDigest,
+            };
+    } catch {
+      throw upstreamUnavailable("Generation state is unavailable");
+    }
+    if (
+      activeState === null ||
+      activeState.generation !== authenticated.manifest.generation ||
+      !timingSafeEqual(
+        typeof activeState.digest === "string" ? activeState.digest : "",
+        authenticated.manifestDigest,
+      )
+    )
+      throw new OpenApiMcpError(
+        "RECORD_NOT_ADMITTED",
+        "Prepared call release is not active",
+      );
+  };
+
+  const prepare = async (
+    inputValue: PrepareInput,
+    expectedSafety: "read" | "action",
+  ): Promise<PreparedCall> => {
+    const input = snapshotPrepareInput(inputValue);
+    const reference = decodeOperationRef(input.operation);
+    let envelope: ManifestEnvelope;
+    try {
+      envelope = await options.store.getManifest(
+        reference.catalogId,
+        reference.releaseId,
+      );
+    } catch {
+      throw upstreamUnavailable("Manifest lookup is unavailable");
+    }
+    const authenticated = await authenticateManifest(
+      envelope,
+      options.trust,
+      limits,
+    );
+    if (
+      authenticated.manifest.catalogId !== reference.catalogId ||
+      authenticated.manifest.releaseId !== reference.releaseId ||
+      !timingSafeEqual(authenticated.manifestDigest, reference.manifestDigest)
+    )
+      throw new OpenApiMcpError(
+        "RECORD_NOT_ADMITTED",
+        "Operation reference release is not admitted",
+      );
+    await requireActiveManifest(authenticated);
+    const destinationPolicy = options.destinationPolicy;
+    if (destinationPolicy === undefined) throw destinationDenied();
+    const credentialSlotResolver = options.credentialSlots;
+    if (credentialSlotResolver === undefined)
+      throw new OpenApiMcpError(
+        "AUTH_PROFILE_INVALID",
+        "Credential slot policy is unavailable",
+      );
+
+    let storedOperation: StoredRecord<OperationRecordV4> | null;
+    try {
+      storedOperation = await options.store.getOperation(
+        reference.catalogId,
+        reference.releaseId,
+        reference.operationId,
+      );
+    } catch {
+      throw upstreamUnavailable("Operation lookup is unavailable");
+    }
+    if (storedOperation === null)
+      throw new OpenApiMcpError(
+        "OPERATION_NOT_FOUND",
+        "Referenced operation was not found",
+      );
+    const operation = await verifyStoredRecord(
+      authenticated,
+      storedOperation,
+      limits,
+    );
+    if (operation.id !== reference.operationId)
+      throw new OpenApiMcpError(
+        "RECORD_DIGEST_MISMATCH",
+        "Operation identity does not match its reference",
+      );
+    const operationDigest = authenticated.manifest.records[operation.id];
+
+    const schemas = await resolveSchemaClosure(
+      options.store,
+      authenticated,
+      operation.schemaIds,
+      limits,
+    );
+    let allowed: unknown = false;
+    try {
+      allowed = await destinationPolicy.allows(operation.origin);
+    } catch {
+      throw destinationDenied();
+    }
+    if (allowed !== true) throw destinationDenied();
+
+    const slotContext: Readonly<CredentialSlotContext> = Object.freeze({
+      catalogId: reference.catalogId,
+      releaseId: reference.releaseId,
+      operationId: operation.id,
+      operationDigest,
+      manifestDigest: authenticated.manifestDigest,
+      method: operation.method,
+      origin: operation.origin,
+    });
+    let slotResult: unknown;
+    try {
+      slotResult = await credentialSlotResolver.resolve(slotContext);
+    } catch {
+      throw new OpenApiMcpError(
+        "AUTH_PROFILE_INVALID",
+        "Credential slot policy failed",
+      );
+    }
+    const credentialSlots = snapshotCredentialSlots(slotResult);
+    const serialized = serializeArguments(operation, schemas, input.arguments, {
+      limits,
+      reservedCredentialSlots: credentialSlots,
+    });
+    const operationClassification = classifyOperation(
+      operation,
+      [...schemas.values()],
+      serialized.normalizedArguments,
+    );
+    if (operationClassification.safety !== expectedSafety)
+      throw new OpenApiMcpError(
+        "TOOL_SAFETY_MISMATCH",
+        expectedSafety === "read"
+          ? "Operation requires the action tool"
+          : "Operation requires the read tool",
+      );
+    const reservedSlotsDigest = await sha256(
+      "knitli.openapi-mcp.credential-slots.v1",
+      credentialSlots as unknown as OpenApiValue,
+    );
+
+    const prepared = await createPreparedCall({
+      version: PREPARED_CALL_VERSION,
+      catalogId: reference.catalogId,
+      releaseId: reference.releaseId,
+      operationId: operation.id,
+      operationDigest,
+      manifestDigest: authenticated.manifestDigest,
+      reservedSlotsDigest,
+      method: operation.method,
+      origin: operation.origin,
+      relativeUrl: serialized.relativeUrl,
+      headers: serialized.headers,
+      body: serialized.body,
+      normalizedArguments: serialized.normalizedArguments,
+      safety: operationClassification.safety,
+      actionKind: operationClassification.actionKind,
+      cardinality: operationClassification.cardinality,
+    });
+    await requireActiveManifest(authenticated);
+    return prepared;
+  };
+
+  const runtime: OpenApiRuntime = {
     async search(input: SearchInput): Promise<SearchResult> {
       const query = validateSearchInput(input, limits);
       const completeVerificationBudget =
@@ -892,7 +1213,7 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
               "Search candidate API does not match its filter",
             );
           }
-          const runtimeClassification = classification(operation);
+          const runtimeClassification = classifyOperation(operation);
           const retained = {
             admission: {
               catalogId: entry.authenticated.manifest.catalogId,
@@ -1212,5 +1533,43 @@ export function createOpenApiRuntime(options: OpenApiRuntimeOptions): {
         warnings,
       };
     },
+    async prepareRead(input: PrepareInput): Promise<PreparedCall> {
+      return await prepare(input, "read");
+    },
+    async prepareAction(input: PrepareInput): Promise<PreparedCall> {
+      return await prepare(input, "action");
+    },
+    async revalidate(call: PreparedCall): Promise<PreparedCall> {
+      const snapshot = await verifyAndSnapshotPreparedCall(call);
+      const operation = encodeOperationRef({
+        catalogId: snapshot.catalogId,
+        releaseId: snapshot.releaseId,
+        operationId: snapshot.operationId,
+        manifestDigest: snapshot.manifestDigest,
+      });
+      const fresh = await prepare(
+        Object.freeze({
+          operation,
+          arguments: snapshot.normalizedArguments,
+        }),
+        snapshot.safety,
+      );
+      if (
+        !timingSafeEqual(fresh.operationDigest, snapshot.operationDigest) ||
+        !timingSafeEqual(fresh.manifestDigest, snapshot.manifestDigest) ||
+        !timingSafeEqual(
+          fresh.reservedSlotsDigest,
+          snapshot.reservedSlotsDigest,
+        ) ||
+        !timingSafeEqual(fresh.inputDigest, snapshot.inputDigest) ||
+        !timingSafeEqual(fresh.preparedCallDigest, snapshot.preparedCallDigest)
+      )
+        throw new OpenApiMcpError(
+          "RECORD_NOT_ADMITTED",
+          "Prepared call no longer matches current policy and records",
+        );
+      return fresh;
+    },
   };
+  return runtime;
 }

@@ -307,6 +307,8 @@ export interface PreparedCall {
   operationId: TypedOperationId;
   operationDigest: Sha256;
   manifestDigest: Sha256;
+  /** Binds the host-selected credential injection locations, never secrets. */
+  reservedSlotsDigest: Sha256;
   method: HttpMethod;
   origin: string;
   relativeUrl: string;
@@ -403,6 +405,27 @@ export interface CredentialProvider {
 
 export interface DestinationPolicy {
   allows(origin: string): Promise<boolean>;
+}
+
+/** Exact verified operation identity exposed to host credential-slot policy. */
+export interface CredentialSlotContext {
+  readonly catalogId: CatalogId;
+  readonly releaseId: ReleaseId;
+  readonly operationId: TypedOperationId;
+  readonly operationDigest: Sha256;
+  readonly manifestDigest: Sha256;
+  readonly method: HttpMethod;
+  readonly origin: string;
+}
+
+/**
+ * Host-owned policy for reserving later credential injection locations.
+ * Implementations return names only; credentials never enter preparation.
+ */
+export interface CredentialSlotResolver {
+  resolve(
+    context: Readonly<CredentialSlotContext>,
+  ): Promise<readonly CredentialSlot[]>;
 }
 
 export interface PaginationTokenState {

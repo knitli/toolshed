@@ -695,6 +695,7 @@ test("prepared calls contain no credentials and bind every input", async () => {
   });
   expect(call.origin).toBe("https://api.example.test");
   expect(call.relativeUrl).toBe("/widgets");
+  expect(call.reservedSlotsDigest).toMatch(/^[0-9a-f]{64}$/);
   expect(JSON.stringify(call)).not.toMatch(/authorization|token|credential/i);
   expect(await digestPreparedCall({ ...call, normalizedArguments: { body: { name: "Grace" } } }))
     .not.toBe(call.preparedCallDigest);
@@ -706,7 +707,7 @@ test("action cannot be called through read", async () => {
 });
 ```
 
-Add a table covering all eight `ActionKind` values and all four cardinality shapes, runtime override of poisoned compiler hints, unknown fields, required fields, path escaping, query arrays, style/explode forms, safe declared headers, rejected cookie parameters, content type, request bodies, oneOf discriminator refusal, max argument bytes, origin mismatch, and record mutation between prepare/revalidate.
+Add a table covering all eight `ActionKind` values and all four cardinality shapes, runtime override of poisoned compiler hints, unknown fields, required fields, path escaping, query arrays, style/explode forms, safe declared headers, rejected cookie parameters, content type, request bodies, oneOf discriminator refusal, max argument bytes, origin mismatch, and record mutation between prepare/revalidate. Cover bounded host credential-slot validation, header-case/query-case collision rules, model-input collisions, deterministic slot ordering, direct `reservedSlotsDigest` mutation, changed slot policy at revalidation, and prove that no secret or credential value enters the call.
 
 - [ ] **Step 2: Run the test and record the red result**
 
@@ -717,9 +718,11 @@ Expected: FAIL because classification, serialization, and preparation are absent
 
 Pin GET/HEAD to read except batch; pin mutating methods to action unless the verified runtime override table explicitly names the API and operation. Derive action kind from method plus bounded normalized tokens in operation ID/path/tags. Derive cardinality only from a concrete required resource ID, verified array `maxItems`, or explicit bulk semantics; otherwise use `unknown`. Mark dangerous kinds and unknown/unbounded cardinality high-risk independently of advisory permissions.
 
+Normalize bounded plural forms for sensitive action tokens and give dangerous families precedence over routine create/update evidence. Treat a required path ID as `single` only when its exact placeholder is the terminal target segment; a parent ID before a collection remains unknown cardinality and high-risk. Add regressions for plural authority/transaction terms, parent-ID collection paths, and a true terminal item ID.
+
 - [ ] **Step 4: Implement validation and OpenAPI serialization**
 
-Validate the exact public `OpenApiArguments` envelope and JSON Schema types, required/properties/additionalProperties, bounds, enums, arrays, nullable, and supported composition. Resolve discriminators only when one branch is uniquely selected. Serialize path/query and declared non-credential headers according to OpenAPI style/explode rules; runtime creates representation headers. Reject cookie parameters in v1 and reject transport/auth header names even if a source schema declares them.
+Validate the exact public `OpenApiArguments` envelope and JSON Schema types, required/properties/additionalProperties, bounds, enums, arrays, nullable, and supported composition. Resolve discriminators only when one branch is uniquely selected. Serialize path/query and declared non-credential headers according to OpenAPI style/explode rules; runtime creates representation headers. Reject cookie parameters in v1 and reject transport/auth header names even if a source schema declares them. Resolve the host policy's bounded credential-slot names before serialization, reserve those destinations against model input, canonicalize their deterministic ordering, and compute `reservedSlotsDigest` under the `knitli.openapi-mcp.credential-slots.v1` domain. The input is names and placements only, never credential values.
 
 - [ ] **Step 5: Implement prepared-call digest and structural verification**
 
@@ -740,11 +743,11 @@ export async function verifyPreparedCall(call: PreparedCall): Promise<void> {
 }
 ```
 
-Omit the self-digest key entirely from canonical input rather than serializing `undefined`.
+The spread includes the required `reservedSlotsDigest`; omit the self-digest key entirely from canonical input rather than serializing `undefined`. Mutation coverage must include the slot commitment with every other integrity-bound public field.
 
 - [ ] **Step 6: Implement revalidation as fresh preparation**
 
-`revalidate` calls `verifyPreparedCall`, reloads the admitted manifest and operation/schema records, prepares from `normalizedArguments`, and compares operation, manifest, input, and call digests with timing-safe byte comparison. Any release/store/policy change denies rather than updating the authorized call.
+`revalidate` calls `verifyPreparedCall`, reloads the active manifest and operation/schema records, prepares from `normalizedArguments`, reruns destination and credential-slot policy, and compares operation, manifest, input, reserved-slot, and call digests with timing-safe byte comparison. Any release/store/policy change denies rather than updating the authorized call. Preparation and revalidation never advance generation state; the exact manifest must already be active before and after preparation work.
 
 - [ ] **Step 7: Run focused tests and mutation check**
 
