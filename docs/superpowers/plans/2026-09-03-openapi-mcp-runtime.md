@@ -210,7 +210,7 @@ Copy every `PreparedCall`, action, manifest, auth, and port field exactly from t
 
 - [ ] **Step 4: Add explicit subpath exports without breaking the existing root**
 
-Set `src/compiler.ts` to re-export the current compiler/file-signing surface. Keep `src/index.ts` as a compatibility re-export of `./compiler.ts`. Add export map entries for `./compiler`, `./runtime`, `./sqlite`, `./stdio`, and `./conformance`, with types/default paths under `dist`. Rename the current schema constant to `LEGACY_FORMAT_VERSION = 3` and update current compiler/tests to import that name; v4 uses only `ARTIFACT_FORMAT_VERSION`.
+Set `src/compiler.ts` to re-export the current compiler/file-signing surface. Keep `src/index.ts` as a compatibility re-export of `./compiler.ts`. Add export map entries for the implemented `./compiler` and `./runtime` entry points, with types/default paths under `dist`. Do not advertise a subpath until its real source entry point exists: Task 3 adds `./sqlite`, Task 5 adds `./conformance`, and Task 11 adds `./stdio`. Add a consumer regression that maps every advertised JavaScript/declaration target back to an emit-capable source entry point. Rename the current schema constant to `LEGACY_FORMAT_VERSION = 3` and update current compiler/tests to import that name; v4 uses only `ARTIFACT_FORMAT_VERSION`.
 
 - [ ] **Step 5: Make the focused tests pass**
 
@@ -323,6 +323,8 @@ git commit -m "feat(openapi-mcp): add canonical signed-data primitives"
 - Create: `packages/openapi-mcp/src/runtime/manifest.ts`
 - Create: `packages/openapi-mcp/src/runtime/verify-record.ts`
 - Create: `packages/openapi-mcp/src/sqlite/generation-store.ts`
+- Create: `packages/openapi-mcp/src/sqlite/index.ts`
+- Modify: `packages/openapi-mcp/package.json`
 - Create: `packages/openapi-mcp/tests/manifest-v4.test.ts`
 
 **Interfaces:**
@@ -524,10 +526,11 @@ git commit -m "feat(openapi-mcp): compile immutable signed v4 releases"
 **Files:**
 - Create: `packages/openapi-mcp/src/runtime/store.ts`
 - Create: `packages/openapi-mcp/src/sqlite/catalog-store.ts`
-- Create: `packages/openapi-mcp/src/sqlite/index.ts`
+- Modify: `packages/openapi-mcp/src/sqlite/index.ts`
 - Create: `packages/openapi-mcp/src/conformance/fixtures.ts`
 - Create: `packages/openapi-mcp/src/conformance/runtime-suite.ts`
 - Create: `packages/openapi-mcp/src/conformance/index.ts`
+- Modify: `packages/openapi-mcp/package.json`
 - Create: `packages/openapi-mcp/tests/catalog-conformance.test.ts`
 - Create: `packages/openapi-mcp/tests/sqlite-catalog.test.ts`
 - Create: `packages/openapi-mcp/tests/d1-structural.test.ts`

@@ -1,4 +1,34 @@
 import { expect, test } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
+interface PackageExportTarget {
+  readonly default: string;
+  readonly types: string;
+}
+
+function sourceEntrypointFor(target: string): string {
+  return join(
+    import.meta.dir,
+    "..",
+    target.replace(/^\.\/dist\//, "src/").replace(/(?:\.d)?\.ts$|\.js$/, ".ts"),
+  );
+}
+
+test("every advertised package export has an emit-capable source entrypoint", () => {
+  const packageJson = JSON.parse(
+    readFileSync(join(import.meta.dir, "..", "package.json"), "utf8"),
+  ) as { readonly exports: Readonly<Record<string, PackageExportTarget>> };
+
+  for (const [subpath, entrypoint] of Object.entries(packageJson.exports)) {
+    expect(sourceEntrypointFor(entrypoint.default), subpath).toSatisfy(
+      existsSync,
+    );
+    expect(sourceEntrypointFor(entrypoint.types), subpath).toSatisfy(
+      existsSync,
+    );
+  }
+});
 
 test("runtime exposes the Phase 2 contract versions", async () => {
   const runtime = await import("../src/runtime/index.ts");

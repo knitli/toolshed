@@ -800,6 +800,99 @@ describe("compiler contract limits and provenance", () => {
     }
   });
 
+  test("extracts operations from a local Path Item reference", async () => {
+    const root = await temporaryRoot();
+    const spec = await write(
+      root,
+      "local-path-item.json",
+      JSON.stringify(
+        minimalDocument({
+          paths: {
+            "/widgets": {
+              $ref: "#/components/pathItems/Widgets",
+            },
+          },
+          components: {
+            pathItems: {
+              Widgets: {
+                get: {
+                  operationId: "listWidgets",
+                  responses: { "200": { description: "ok" } },
+                },
+              },
+            },
+          },
+        }),
+      ),
+    );
+    const compiled = await compileRelease(releaseOptions(root, spec));
+    try {
+      expect(Object.keys(compiled.manifest.records)).toContain(
+        "operation:tiny:listWidgets",
+      );
+    } finally {
+      await discardCompiledRelease(compiled);
+    }
+  });
+
+  test("uses the resolved Path Item document for path parameters", async () => {
+    const root = await temporaryRoot();
+    const pathItemDocument = JSON.stringify({
+      items: {
+        parameters: [{ $ref: "#/parameters/tenant" }],
+        get: {
+          operationId: "listExternalWidgets",
+          responses: { "200": { description: "ok" } },
+        },
+      },
+      parameters: {
+        tenant: {
+          name: "tenant",
+          in: "query",
+          schema: { type: "string" },
+        },
+      },
+    });
+    await write(root, "path-items.json", pathItemDocument);
+    const spec = await write(
+      root,
+      "mapped-path-item.json",
+      JSON.stringify(
+        minimalDocument({
+          paths: { "/widgets": { $ref: "path-items.json#/items" } },
+        }),
+      ),
+    );
+    const map = await write(
+      root,
+      "path-items-map.json",
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            uri: "path-items.json",
+            file: "path-items.json",
+            sha256: new Bun.CryptoHasher("sha256")
+              .update(pathItemDocument)
+              .digest("hex"),
+          },
+        ],
+      }),
+    );
+    const compiled = await compileRelease({
+      ...releaseOptions(root, spec),
+      referenceRoot: root,
+      referenceMapPath: map,
+    });
+    try {
+      expect(Object.keys(compiled.manifest.records)).toContain(
+        "operation:tiny:listExternalWidgets",
+      );
+    } finally {
+      await discardCompiledRelease(compiled);
+    }
+  });
+
   test("requires mapped, digest-bound, contained references and permits safe cycles", async () => {
     const root = await temporaryRoot();
     const refs = join(root, "refs");
@@ -1008,6 +1101,44 @@ describe("compiler contract limits and provenance", () => {
         ...releaseOptions(root, spec),
         referenceRoot: refs,
         referenceMapPath: map,
+      }),
+    ).rejects.toThrow(/reference depth/i);
+  });
+
+  test("accepts local reference depth 64 and rejects depth 65", async () => {
+    const root = await temporaryRoot();
+    const documentWithReferenceHops = (
+      hops: number,
+    ): Record<string, unknown> => {
+      const schemas: Record<string, unknown> = {};
+      for (let index = 0; index <= hops; index += 1) {
+        schemas[`S${index}`] =
+          index === hops
+            ? { type: "string" }
+            : { $ref: `#/components/schemas/S${index + 1}` };
+      }
+      return minimalDocument({ components: { schemas } });
+    };
+    const exactSpec = await write(
+      root,
+      "local-depth-64.json",
+      JSON.stringify(documentWithReferenceHops(64)),
+    );
+    const exact = await compileRelease({
+      ...releaseOptions(root, exactSpec),
+      limits: limits({ maxJsonDepth: 64 }),
+    });
+    await discardCompiledRelease(exact);
+
+    const overSpec = await write(
+      root,
+      "local-depth-65.json",
+      JSON.stringify(documentWithReferenceHops(65)),
+    );
+    await expect(
+      compileRelease({
+        ...releaseOptions(root, overSpec),
+        limits: limits({ maxJsonDepth: 64 }),
       }),
     ).rejects.toThrow(/reference depth/i);
   });

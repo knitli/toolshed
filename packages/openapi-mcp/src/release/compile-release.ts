@@ -231,6 +231,8 @@ class SchemaMaterializer {
   ): Promise<AddressedValue> {
     if (Buffer.byteLength(rawRef) > this.limits.maxRefLength)
       throw new Error("reference exceeds ref length limit");
+    if (depth > this.limits.maxJsonDepth)
+      throw new Error("reference depth exceeds limit");
     const hash = rawRef.indexOf("#");
     const documentPart = hash < 0 ? rawRef : rawRef.slice(0, hash);
     const pointer = hash < 0 ? "#" : `#${rawRef.slice(hash + 1)}`;
@@ -809,7 +811,17 @@ async function extractLogicalRecords(
   if (!allowedOrigins.includes(documentOrigin))
     throw new Error("document origin is absent from allowedOrigins");
   for (const [path, rawPathItem] of paths) {
-    const pathItem = exactObject(rawPathItem, "path item");
+    const resolvedPathItem = await resolveObject(
+      rawPathItem,
+      {
+        documentUri: sourceUri,
+        document: root,
+        pointer: `#/paths/${encodePointerToken(path)}`,
+        value: rawPathItem,
+      },
+      materializer,
+    );
+    const pathItem = resolvedPathItem.object;
     if (pathItem.servers !== undefined)
       throw new Error(`${path}: path-item server override is unsupported`);
     for (const method of HTTP_METHODS) {
@@ -831,12 +843,7 @@ async function extractLogicalRecords(
         throw new Error("operation identifier is invalid");
       if (seen.has(id)) throw new Error("duplicate operationId");
       seen.add(id);
-      const baseAddress: AddressedValue = {
-        documentUri: sourceUri,
-        document: root,
-        pointer: `#/paths/${encodePointerToken(path)}`,
-        value: pathItem,
-      };
+      const baseAddress = resolvedPathItem.address;
       const operationPointer = `${baseAddress.pointer}/${method}`;
       const parameters = await normalizeParameters(
         path,
