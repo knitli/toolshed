@@ -1,10 +1,14 @@
 import { constants } from "node:fs";
-import { lstat, open } from "node:fs/promises";
+import { type FileHandle, lstat, open } from "node:fs/promises";
 import { extname } from "node:path";
 import { isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml";
 import type { OpenApiDoc } from "../load.ts";
 import { parseJsonStrict } from "../runtime/strict-json.ts";
-import { pathIdentityFromStats, samePathIdentity } from "./publish.ts";
+import {
+  type PathIdentity,
+  pathIdentityFromStats,
+  samePathIdentity,
+} from "./publish.ts";
 
 export interface CompilerLimits {
   readonly maxSourceBytes: number;
@@ -41,6 +45,57 @@ export const DEFAULT_COMPILER_LIMITS: CompilerLimits = Object.freeze({
 });
 
 const forbiddenKeys = new Set(["__proto__", "prototype", "constructor"]);
+
+/** Package-internal descriptor reader for callers that already pinned a path identity. */
+export async function requireOpenedFileV4(
+  handle: FileHandle,
+  expected: PathIdentity,
+  label: string,
+): Promise<bigint> {
+  const metadata = await handle.stat({ bigint: true });
+  if (
+    !metadata.isFile() ||
+    metadata.isSymbolicLink() ||
+    metadata.nlink !== 1n ||
+    !samePathIdentity(pathIdentityFromStats(metadata), expected)
+  )
+    throw new Error(`${label} descriptor identity is invalid`);
+  return metadata.size;
+}
+
+/** Package-internal bounded read that consumes only an already-verified descriptor. */
+export async function readOpenedFileBoundedV4(
+  handle: FileHandle,
+  expected: PathIdentity,
+  maxBytes: number,
+  label: string,
+): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0)
+    throw new Error(`${label} byte limit invalid`);
+  const beforeSize = await requireOpenedFileV4(handle, expected, label);
+  if (beforeSize > BigInt(maxBytes))
+    throw new Error(`${label} exceeds byte limit`);
+  const expectedBytes = Number(beforeSize);
+  const bytes = new Uint8Array(expectedBytes);
+  let offset = 0;
+  while (offset < expectedBytes) {
+    const { bytesRead } = await handle.read(
+      bytes,
+      offset,
+      Math.min(64 * 1024, expectedBytes - offset),
+      null,
+    );
+    if (bytesRead === 0) throw new Error(`${label} size changed while reading`);
+    offset += bytesRead;
+  }
+  const growthProbe = new Uint8Array(1);
+  if ((await handle.read(growthProbe, 0, 1, null)).bytesRead !== 0)
+    throw new Error(`${label} size changed while reading`);
+  const afterSize = await requireOpenedFileV4(handle, expected, label);
+  if (afterSize !== beforeSize)
+    throw new Error(`${label} size changed while reading`);
+  return bytes;
+}
 
 export async function readFileBoundedV4(
   path: string,

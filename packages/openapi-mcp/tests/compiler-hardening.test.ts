@@ -4,6 +4,7 @@ import {
   mkdir,
   readFile,
   realpath,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -21,7 +22,10 @@ import {
   resolveLocalPointer,
 } from "../src/compiler.ts";
 import { readFileBoundedV4 } from "../src/release/load-v4.ts";
-import { loadReferenceMap } from "../src/release/reference-map.ts";
+import {
+  loadReferenceMap,
+  ReferenceGraphV4,
+} from "../src/release/reference-map.ts";
 import { parseTypedRecordId } from "../src/runtime/references.ts";
 import { generateKeypair } from "../src/sign.ts";
 
@@ -1184,6 +1188,283 @@ describe("compiler contract limits and provenance", () => {
       );
     } finally {
       await discardCompiledRelease(compiled);
+    }
+  });
+
+  test("binds reference reads to the selected reference-root identity", async () => {
+    const root = await temporaryRoot();
+    const referenceRoot = join(root, "references");
+    await mkdir(referenceRoot);
+    const reference = JSON.stringify({ type: "string" });
+    await write(referenceRoot, "shared.json", reference);
+    const mapPath = await write(
+      root,
+      "reference-map.json",
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            uri: "shared.json",
+            file: "shared.json",
+            sha256: new Bun.CryptoHasher("sha256")
+              .update(reference)
+              .digest("hex"),
+          },
+        ],
+      }),
+    );
+    const graph = await ReferenceGraphV4.create({
+      sourceUri: "urn:openapi-source:identity-test",
+      mapPath,
+      referenceRoot,
+      limits: DEFAULT_COMPILER_LIMITS,
+      rootBytes: 0,
+    });
+
+    await rename(referenceRoot, join(root, "replaced-references"));
+    await mkdir(referenceRoot);
+    await write(referenceRoot, "shared.json", reference);
+
+    await expect(
+      graph.resolve("shared.json", "urn:openapi-source:identity-test", 1),
+    ).rejects.toThrow(/reference root.*identity/i);
+  });
+
+  test("rejects a nested component swap before reading the external sentinel", async () => {
+    const root = await temporaryRoot();
+    const referenceRoot = join(root, "references");
+    const nested = join(referenceRoot, "nested");
+    const outside = join(root, "outside");
+    await mkdir(nested, { recursive: true });
+    await mkdir(outside);
+    const reference = JSON.stringify({ type: "string" });
+    await write(nested, "shared.json", reference);
+    await write(outside, "shared.json", JSON.stringify({ type: "number" }));
+    const mapPath = await write(
+      root,
+      "reference-map.json",
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            uri: "shared.json",
+            file: "nested/shared.json",
+            sha256: new Bun.CryptoHasher("sha256")
+              .update(reference)
+              .digest("hex"),
+          },
+        ],
+      }),
+    );
+    const graph = await ReferenceGraphV4.create({
+      sourceUri: "urn:openapi-source:component-race-test",
+      mapPath,
+      referenceRoot,
+      limits: DEFAULT_COMPILER_LIMITS,
+      rootBytes: 0,
+    });
+    let externalSentinelRead = false;
+    const testing = ReferenceGraphV4 as unknown as {
+      setReferenceReadCheckpointForTesting(
+        checkpoint:
+          | {
+              beforeOpen(): Promise<void>;
+              onRead(): void;
+            }
+          | undefined,
+      ): void;
+    };
+
+    testing.setReferenceReadCheckpointForTesting({
+      async beforeOpen() {
+        await rename(nested, join(referenceRoot, "nested-original"));
+        await symlink(outside, nested, "dir");
+      },
+      onRead() {
+        externalSentinelRead = true;
+      },
+    });
+    try {
+      await expect(
+        graph.resolve(
+          "shared.json",
+          "urn:openapi-source:component-race-test",
+          1,
+        ),
+      ).rejects.toThrow(/directory|identity/i);
+      expect(externalSentinelRead).toBe(false);
+    } finally {
+      testing.setReferenceReadCheckpointForTesting(undefined);
+    }
+  });
+
+  test("rechecks root, component, and leaf identities at the actual-read boundary", async () => {
+    const testing = ReferenceGraphV4 as unknown as {
+      setReferenceReadCheckpointForTesting(
+        checkpoint:
+          | {
+              beforeOpen(): Promise<void>;
+              onRead(): void;
+            }
+          | undefined,
+      ): void;
+    };
+    for (const replacement of ["root", "component", "leaf"] as const) {
+      const root = await temporaryRoot();
+      const referenceRoot = join(root, "references");
+      const nested = join(referenceRoot, "nested");
+      const referencePath = join(nested, "shared.json");
+      const outside = join(root, "outside");
+      await mkdir(nested, { recursive: true });
+      await mkdir(outside);
+      await mkdir(join(outside, "nested"));
+      const reference = JSON.stringify({ type: "string" });
+      await writeFile(referencePath, reference);
+      await writeFile(
+        join(outside, "nested", "shared.json"),
+        JSON.stringify({ type: "number" }),
+      );
+      const externalSentinel = await write(
+        outside,
+        "shared.json",
+        JSON.stringify({ type: "number" }),
+      );
+      const mapPath = await write(
+        root,
+        "reference-map.json",
+        JSON.stringify({
+          version: 1,
+          entries: [
+            {
+              uri: "shared.json",
+              file: "nested/shared.json",
+              sha256: new Bun.CryptoHasher("sha256")
+                .update(reference)
+                .digest("hex"),
+            },
+          ],
+        }),
+      );
+      const graph = await ReferenceGraphV4.create({
+        sourceUri: `urn:openapi-source:${replacement}-race-test`,
+        mapPath,
+        referenceRoot,
+        limits: DEFAULT_COMPILER_LIMITS,
+        rootBytes: 0,
+      });
+      let externalSentinelRead = false;
+      testing.setReferenceReadCheckpointForTesting({
+        async beforeOpen() {
+          if (replacement === "root") {
+            await rename(referenceRoot, join(root, "references-original"));
+            await symlink(outside, referenceRoot, "dir");
+          } else if (replacement === "component") {
+            await rename(nested, join(referenceRoot, "nested-original"));
+            await symlink(outside, nested, "dir");
+          } else {
+            await rename(referencePath, join(nested, "shared-original.json"));
+            await rename(externalSentinel, referencePath);
+          }
+        },
+        onRead() {
+          externalSentinelRead = true;
+        },
+      });
+      try {
+        await expect(
+          graph.resolve(
+            "shared.json",
+            `urn:openapi-source:${replacement}-race-test`,
+            1,
+          ),
+        ).rejects.toThrow(/identity/i);
+        expect(externalSentinelRead).toBe(false);
+      } finally {
+        testing.setReferenceReadCheckpointForTesting(undefined);
+      }
+    }
+  });
+
+  test("rejects a final-gap FIFO without blocking before byte reads", async () => {
+    const root = await temporaryRoot();
+    const referenceRoot = join(root, "references");
+    const nested = join(referenceRoot, "nested");
+    const referencePath = join(nested, "shared.json");
+    await mkdir(nested, { recursive: true });
+    const reference = JSON.stringify({ type: "string" });
+    await writeFile(referencePath, reference);
+    const mapPath = await write(
+      root,
+      "reference-map.json",
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            uri: "shared.json",
+            file: "nested/shared.json",
+            sha256: new Bun.CryptoHasher("sha256")
+              .update(reference)
+              .digest("hex"),
+          },
+        ],
+      }),
+    );
+    const graph = await ReferenceGraphV4.create({
+      sourceUri: "urn:openapi-source:fifo-race-test",
+      mapPath,
+      referenceRoot,
+      limits: DEFAULT_COMPILER_LIMITS,
+      rootBytes: 0,
+    });
+    let byteReadAttempted = false;
+    const testing = ReferenceGraphV4 as unknown as {
+      setReferenceReadCheckpointForTesting(
+        checkpoint:
+          | {
+              beforeOpen(): Promise<void>;
+              onRead(): void;
+            }
+          | undefined,
+      ): void;
+    };
+    testing.setReferenceReadCheckpointForTesting({
+      async beforeOpen() {
+        await rename(referencePath, join(nested, "shared-original.json"));
+        const fifo = Bun.spawn(["mkfifo", referencePath]);
+        expect(await fifo.exited).toBe(0);
+      },
+      onRead() {
+        byteReadAttempted = true;
+      },
+    });
+    const attempt = graph.resolve(
+      "shared.json",
+      "urn:openapi-source:fifo-race-test",
+      1,
+    );
+    const outcome = await Promise.race([
+      attempt.then(
+        () => ({ kind: "resolved" as const }),
+        (error) => ({ kind: "rejected" as const, error }),
+      ),
+      Bun.sleep(750).then(() => ({ kind: "timeout" as const })),
+    ]);
+    try {
+      expect(outcome.kind).toBe("rejected");
+      if (outcome.kind === "rejected")
+        expect(outcome.error).toBeInstanceOf(Error);
+      expect(byteReadAttempted).toBe(false);
+    } finally {
+      testing.setReferenceReadCheckpointForTesting(undefined);
+      if (outcome.kind === "timeout") {
+        const writer = Bun.spawn([
+          "/bin/sh",
+          "-c",
+          `printf x > ${JSON.stringify(referencePath)}`,
+        ]);
+        await writer.exited;
+        await attempt.catch(() => undefined);
+      }
     }
   });
 

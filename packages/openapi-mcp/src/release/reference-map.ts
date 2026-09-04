@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, realpath } from "node:fs/promises";
 import { extname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { sha256 } from "../runtime/digest.ts";
 import { parseJsonStrict } from "../runtime/strict-json.ts";
@@ -9,7 +10,14 @@ import {
   DEFAULT_COMPILER_LIMITS,
   parseDocumentBytesV4,
   readFileBoundedV4,
+  readOpenedFileBoundedV4,
+  requireOpenedFileV4,
 } from "./load-v4.ts";
+import {
+  capturePathIdentity,
+  type PathIdentity,
+  samePathIdentity,
+} from "./publish.ts";
 
 export interface ReferenceMapEntryV1 {
   readonly uri: string;
@@ -223,24 +231,187 @@ export async function referenceGraphDigest(
   );
 }
 
+async function requireReferenceRoot(
+  root: string,
+  identity: PathIdentity,
+): Promise<void> {
+  const current = await capturePathIdentity(root, "directory").catch(
+    () => null,
+  );
+  if (!current || !samePathIdentity(current, identity))
+    throw new Error("reference root identity was lost");
+}
+
+function requireContainedReference(root: string, actual: string): void {
+  const relation = relative(root, actual);
+  if (
+    relation === "" ||
+    relation === ".." ||
+    relation.startsWith(`..${sep}`) ||
+    isAbsolute(relation)
+  )
+    throw new Error("reference-map file escapes reference root");
+}
+
+interface ReferenceDirectory {
+  readonly path: string;
+  readonly identity: PathIdentity;
+}
+
+interface ReferencePath {
+  readonly directories: readonly ReferenceDirectory[];
+  readonly leaf: PathIdentity;
+}
+
+async function captureReferenceDirectories(
+  root: string,
+  path: string,
+): Promise<readonly ReferenceDirectory[]> {
+  const relation = relative(root, path);
+  const directories: ReferenceDirectory[] = [];
+  let current = root;
+  for (const component of relation.split(sep).slice(0, -1)) {
+    current = resolve(current, component);
+    const identity = await capturePathIdentity(current, "directory").catch(
+      () => {
+        throw new Error("referenced document directory identity was lost");
+      },
+    );
+    directories.push({ path: current, identity });
+  }
+  return directories;
+}
+
+async function requireReferenceDirectories(
+  directories: readonly ReferenceDirectory[],
+): Promise<void> {
+  for (const directory of directories) {
+    const current = await capturePathIdentity(
+      directory.path,
+      "directory",
+    ).catch(() => null);
+    if (!current || !samePathIdentity(current, directory.identity))
+      throw new Error("referenced document directory identity was lost");
+  }
+}
+
+async function captureReferencePath(
+  root: string,
+  path: string,
+): Promise<ReferencePath> {
+  const directories = await captureReferenceDirectories(root, path);
+  const leaf = await capturePathIdentity(path, "file").catch(() => {
+    throw new Error("referenced document could not be read");
+  });
+  return { directories, leaf };
+}
+
+async function requireReferencePath(
+  path: string,
+  expected: ReferencePath,
+): Promise<void> {
+  await requireReferenceDirectories(expected.directories);
+  const current = await capturePathIdentity(path, "file").catch(() => null);
+  if (!current || !samePathIdentity(current, expected.leaf))
+    throw new Error("referenced document identity was lost");
+}
+
+interface ReferenceReadTestCheckpoint {
+  beforeOpen(): void | Promise<void>;
+  onRead(): void;
+}
+
+let referenceReadTestCheckpoint: ReferenceReadTestCheckpoint | undefined;
+
+async function readContainedReference(
+  root: string,
+  rootIdentity: PathIdentity,
+  candidate: string,
+  maxBytes: number,
+): Promise<Uint8Array> {
+  await requireReferenceRoot(root, rootIdentity);
+  const actual = await realpath(candidate).catch(() => {
+    throw new Error("reference-map file is unavailable");
+  });
+  requireContainedReference(root, actual);
+  const candidatePath = await captureReferencePath(root, candidate);
+  const actualPath = await captureReferencePath(root, actual);
+  if (!samePathIdentity(candidatePath.leaf, actualPath.leaf))
+    throw new Error("referenced document path identity was lost");
+  await requireReferenceRoot(root, rootIdentity);
+  await requireReferencePath(candidate, candidatePath);
+  await requireReferencePath(actual, actualPath);
+  await referenceReadTestCheckpoint?.beforeOpen();
+  if (typeof constants.O_NOFOLLOW !== "number" || constants.O_NOFOLLOW === 0)
+    throw new Error("referenced document requires O_NOFOLLOW support");
+  const handle = await open(
+    actual,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
+  try {
+    await requireOpenedFileV4(
+      handle,
+      actualPath.leaf,
+      "referenced document",
+    ).catch(() => {
+      throw new Error("referenced document descriptor identity was lost");
+    });
+    await requireReferenceRoot(root, rootIdentity);
+    await requireReferencePath(candidate, candidatePath);
+    await requireReferencePath(actual, actualPath);
+    referenceReadTestCheckpoint?.onRead();
+    const bytes = await readOpenedFileBoundedV4(
+      handle,
+      actualPath.leaf,
+      maxBytes,
+      "referenced document",
+    );
+    await requireReferenceRoot(root, rootIdentity);
+    await requireReferencePath(candidate, candidatePath);
+    const currentActual = await realpath(candidate).catch(() => {
+      throw new Error("referenced document identity was lost");
+    });
+    if (currentActual !== actual)
+      throw new Error("referenced document path identity was lost");
+    requireContainedReference(root, currentActual);
+    await requireReferencePath(actual, actualPath);
+    await requireReferenceRoot(root, rootIdentity);
+    await requireReferencePath(candidate, candidatePath);
+    await requireReferencePath(actual, actualPath);
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
+
 export class ReferenceGraphV4 {
   readonly #entries: Map<string, ReferenceMapEntryV1>;
   readonly #cache = new Map<string, ResolvedDocumentV4>();
   readonly #root: string | null;
+  readonly #rootIdentity: PathIdentity | null;
   readonly #resolver?: ReferenceResolver;
   readonly #limits: CompilerLimits;
   #bytesUsed: number;
+
+  /** @internal Test-only hook; this module is not exported by the package. */
+  static setReferenceReadCheckpointForTesting(
+    checkpoint: ReferenceReadTestCheckpoint | undefined,
+  ): void {
+    referenceReadTestCheckpoint = checkpoint;
+  }
 
   private constructor(
     readonly sourceUri: string,
     readonly map: ReferenceMapV1,
     root: string | null,
+    rootIdentity: PathIdentity | null,
     resolver: ReferenceResolver | undefined,
     limits: CompilerLimits,
     rootBytes: number,
   ) {
     this.#entries = new Map(map.entries.map((entry) => [entry.uri, entry]));
     this.#root = root;
+    this.#rootIdentity = rootIdentity;
     this.#resolver = resolver;
     this.#limits = limits;
     this.#bytesUsed = rootBytes;
@@ -273,10 +444,16 @@ export class ReferenceGraphV4 {
           throw new Error("reference root is invalid");
         })
       : null;
+    const rootIdentity = root
+      ? await capturePathIdentity(root, "directory").catch(() => {
+          throw new Error("reference root is invalid");
+        })
+      : null;
     return new ReferenceGraphV4(
       options.sourceUri,
       map,
       root,
+      rootIdentity,
       options.resolver,
       options.limits,
       options.rootBytes,
@@ -321,29 +498,31 @@ export class ReferenceGraphV4 {
         bytes = new Uint8Array(result.bytes);
         mediaType = result.mediaType;
       } else {
-        if (!this.#root) throw new Error("reference root is required");
+        if (!this.#root || !this.#rootIdentity)
+          throw new Error("reference root is required");
         const candidate = resolve(this.#root, ...entry.file.split("/"));
-        const actual = await realpath(candidate).catch(() => {
-          throw new Error("reference-map file is unavailable");
-        });
-        const relation = relative(this.#root, actual);
-        if (
-          relation === "" ||
-          relation === ".." ||
-          relation.startsWith(`..${sep}`) ||
-          isAbsolute(relation)
-        )
-          throw new Error("reference-map file escapes reference root");
-        bytes = await readFileBoundedV4(
+        bytes = await readContainedReference(
+          this.#root,
+          this.#rootIdentity,
           candidate,
           this.#limits.maxSourceBytes - this.#bytesUsed,
-          "referenced document",
         ).catch((error) => {
           if (
             error instanceof Error &&
             error.message.includes("exceeds byte limit")
           )
             throw new Error("aggregate source bytes exceed limit");
+          if (
+            error instanceof Error &&
+            (/^reference root identity was lost$/.test(error.message) ||
+              /^reference-map file escapes reference root$/.test(
+                error.message,
+              ) ||
+              /^referenced document (path |directory |descriptor )?identity was lost$/.test(
+                error.message,
+              ))
+          )
+            throw error;
           throw new Error("referenced document could not be read");
         });
         const extension = extname(entry.file).toLowerCase();
