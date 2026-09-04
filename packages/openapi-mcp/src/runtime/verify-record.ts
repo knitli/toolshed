@@ -2,6 +2,7 @@ import { sha256 } from "./digest.ts";
 import { OpenApiMcpError } from "./errors.ts";
 import type { AdmittedManifest } from "./manifest.ts";
 import { parseTypedRecordId } from "./references.ts";
+import { schemaChildKind } from "./schema-keywords.ts";
 import { canonicalJsonBounded, parseJsonStrict } from "./strict-json.ts";
 import type {
   JsonObject,
@@ -363,15 +364,25 @@ function validateRequestBody(value: unknown): string[] {
 }
 
 function validateSchemaReferences(value: unknown): void {
-  const stack: unknown[] = [value];
+  const stack: Array<{ readonly label: string; readonly value: unknown }> = [
+    { label: "schema", value },
+  ];
+  const pushSubschema = (child: unknown, label: string): void => {
+    if (typeof child === "boolean") return;
+    if (typeof child !== "object" || child === null || Array.isArray(child))
+      throw mismatch(`${label} must be a boolean or object schema`);
+    stack.push({ label, value: child });
+  };
   while (stack.length > 0) {
     const current = stack.pop();
-    if (Array.isArray(current)) {
-      stack.push(...current);
-      continue;
-    }
-    if (typeof current !== "object" || current === null) continue;
-    for (const [key, child] of Object.entries(current)) {
+    if (!current) continue;
+    if (
+      typeof current.value !== "object" ||
+      current.value === null ||
+      Array.isArray(current.value)
+    )
+      throw mismatch(`${current.label} must be an object schema`);
+    for (const [key, child] of Object.entries(current.value)) {
       if (
         ["$dynamicRef", "$recursiveRef", "$anchor", "$dynamicAnchor"].includes(
           key,
@@ -379,7 +390,20 @@ function validateSchemaReferences(value: unknown): void {
       )
         throw mismatch(`${key} is unsupported in a schema record`);
       if (key === "$ref") schemaId(child, "schema $ref");
-      else stack.push(child);
+      else if (schemaChildKind(key) === "single")
+        pushSubschema(child, `schema ${key}`);
+      else if (schemaChildKind(key) === "array") {
+        if (!Array.isArray(child))
+          throw mismatch(`schema ${key} must be an array`);
+        child.forEach((entry, index) => {
+          pushSubschema(entry, `schema ${key}[${index}]`);
+        });
+      } else if (schemaChildKind(key) === "map") {
+        if (typeof child !== "object" || child === null || Array.isArray(child))
+          throw mismatch(`schema ${key} must be an object`);
+        for (const [name, entry] of Object.entries(child))
+          pushSubschema(entry, `schema ${key}.${name}`);
+      }
     }
   }
 }

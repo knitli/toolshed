@@ -192,6 +192,191 @@ class MemoryGenerationStore implements GenerationStore {
 }
 
 describe("immutable v4 construction", () => {
+  test("resolves nested schema refs against a physical document's declared $id base", async () => {
+    const root = await temporaryRoot();
+    const options = await constructionOptions(root, "scoped-id");
+    const specPath = join(root, "scoped-id.json");
+    const physical = JSON.stringify({
+      Thing: {
+        $id: "declared/base.json",
+        type: "object",
+        properties: { child: { $ref: "child.json" } },
+      },
+    });
+    const child = JSON.stringify({ type: "integer" });
+    await writeFile(
+      specPath,
+      JSON.stringify({
+        ...SPEC,
+        paths: {
+          "/scoped": {
+            get: {
+              operationId: "getScoped",
+              parameters: [
+                {
+                  name: "value",
+                  in: "query",
+                  schema: { $ref: "#/components/schemas/FromPhysical" },
+                },
+              ],
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+        components: {
+          schemas: { FromPhysical: { $ref: "physical.json#/Thing" } },
+        },
+      }),
+    );
+    await writeFile(join(root, "physical.json"), physical);
+    await writeFile(join(root, "child.json"), child);
+    const mapPath = join(root, "references.json");
+    await writeFile(
+      mapPath,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            uri: "physical.json",
+            file: "physical.json",
+            sha256: new Bun.CryptoHasher("sha256")
+              .update(physical)
+              .digest("hex"),
+          },
+          {
+            uri: "declared/child.json",
+            file: "child.json",
+            sha256: new Bun.CryptoHasher("sha256").update(child).digest("hex"),
+          },
+        ],
+      }),
+    );
+
+    const compiled = await compileRelease({
+      ...options,
+      specPath,
+      referenceRoot: root,
+      referenceMapPath: mapPath,
+    });
+    const database = new DatabaseSync(compiled.paths.sqlite, {
+      readOnly: true,
+    });
+    try {
+      const rows = database
+        .prepare("SELECT record_id, record_json FROM schemas")
+        .all() as Array<{ record_id: string; record_json: string }>;
+      const fromPhysical = JSON.parse(
+        rows.find(
+          (row) =>
+            row.record_id === "schema:tiny:#/components/schemas/FromPhysical",
+        )?.record_json ?? "null",
+      ) as { schema: { $ref: string } };
+      const physicalSchema = JSON.parse(
+        rows.find((row) => row.record_id === fromPhysical.schema.$ref)
+          ?.record_json ?? "null",
+      ) as { schema: { properties: { child: { $ref: string } } } };
+      const childSchema = JSON.parse(
+        rows.find(
+          (row) =>
+            row.record_id === physicalSchema.schema.properties.child.$ref,
+        )?.record_json ?? "null",
+      ) as { schema: { type: string } };
+
+      expect(childSchema.schema.type).toBe("integer");
+      expect(
+        compiled.manifest.records[physicalSchema.schema.properties.child.$ref],
+      ).toBeDefined();
+    } finally {
+      database.close();
+    }
+    await discardCompiledRelease(compiled);
+  });
+
+  test("preserves JSON annotations as data while rewriting real child schemas", async () => {
+    const root = await temporaryRoot();
+    const options = await constructionOptions(root, "annotations");
+    await writeFile(
+      options.specPath,
+      JSON.stringify({
+        ...SPEC,
+        components: {
+          schemas: {
+            Annotated: {
+              type: "object",
+              default: { $ref: "literal-default" },
+              examples: [{ $ref: "literal-example" }],
+              const: { $ref: "literal-const" },
+              enum: [{ $ref: "literal-enum" }],
+              properties: { real: { $ref: "#/components/schemas/Child" } },
+            },
+            Child: { type: "integer" },
+            Thing: { type: "string" },
+          },
+        },
+      }),
+    );
+
+    const compiled = await compileRelease(options);
+    const database = new DatabaseSync(compiled.paths.sqlite, {
+      readOnly: true,
+    });
+    try {
+      const row = database
+        .prepare("SELECT record_json FROM schemas WHERE record_id = ?")
+        .get("schema:tiny:#/components/schemas/Annotated") as {
+        record_json: string;
+      };
+      const schema = JSON.parse(row.record_json).schema as Record<
+        string,
+        unknown
+      >;
+      expect(schema.default).toEqual({ $ref: "literal-default" });
+      expect(schema.examples).toEqual([{ $ref: "literal-example" }]);
+      expect(schema.const).toEqual({ $ref: "literal-const" });
+      expect(schema.enum).toEqual([{ $ref: "literal-enum" }]);
+      expect((schema.properties as { real: { $ref: string } }).real.$ref).toBe(
+        "schema:tiny:#/components/schemas/Child",
+      );
+    } finally {
+      database.close();
+    }
+    await discardCompiledRelease(compiled);
+  });
+
+  test("truncates operation summaries without splitting an astral character", async () => {
+    const root = await temporaryRoot();
+    const options = await constructionOptions(root, "astral-summary");
+    await writeFile(
+      options.specPath,
+      JSON.stringify({
+        ...SPEC,
+        paths: {
+          "/summary": {
+            get: {
+              operationId: "getSummary",
+              summary: `${"a".repeat(599)}😀tail`,
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+      }),
+    );
+    const compiled = await compileRelease(options);
+    const database = new DatabaseSync(compiled.paths.sqlite, {
+      readOnly: true,
+    });
+    try {
+      const row = database
+        .prepare("SELECT summary FROM operations WHERE operation_id = ?")
+        .get("getSummary") as { summary: string };
+      expect(row.summary).toBe("a".repeat(599));
+      expect(row.summary.length).toBeLessThanOrEqual(600);
+    } finally {
+      database.close();
+    }
+    await discardCompiledRelease(compiled);
+  });
+
   test("bounds emitted SQLite reread when its inode grows after capped stat", async () => {
     const root = await temporaryRoot();
     const probePath = join(root, "file-handle-probe");

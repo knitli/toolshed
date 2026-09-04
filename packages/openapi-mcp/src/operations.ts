@@ -47,10 +47,15 @@ const FORBIDDEN_POINTER_KEYS = new Set([
   "constructor",
 ]);
 
-/** Resolve a URI-decoded, one-pass RFC 6901 fragment through own properties only. */
-export function resolveLocalPointer(doc: unknown, ref: string): unknown {
-  if (ref === "#" || ref === "") return doc;
-  if (!ref.startsWith("#/"))
+/**
+ * Canonicalize the URI-fragment representation of an RFC 6901 pointer.
+ *
+ * The returned value is an internal, already URI-decoded physical address. It
+ * must not be fed through URI decoding a second time.
+ */
+export function canonicalLocalPointer(ref: string): string {
+  if (ref === "") return "#";
+  if (!ref.startsWith("#"))
     throw new Error("local reference must be a JSON Pointer fragment");
   let pointer: string;
   try {
@@ -58,8 +63,30 @@ export function resolveLocalPointer(doc: unknown, ref: string): unknown {
   } catch {
     throw new Error("JSON Pointer contains an invalid URI escape");
   }
+  if (pointer === "") return "#";
+  if (!pointer.startsWith("/"))
+    throw new Error("local reference must be a JSON Pointer fragment");
+  const tokens = pointer.slice(1).split("/");
+  for (const rawToken of tokens) {
+    if (/(?:~(?:[^01]|$))/.test(rawToken))
+      throw new Error("JSON Pointer contains an invalid ~ escape");
+    const token = rawToken.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (FORBIDDEN_POINTER_KEYS.has(token))
+      throw new Error("JSON Pointer contains a forbidden prototype key");
+  }
+  return `#/${tokens.join("/")}`;
+}
+
+/** Resolve an already canonicalized physical JSON Pointer address. */
+export function resolveCanonicalPointer(
+  doc: unknown,
+  pointer: string,
+): unknown {
+  if (pointer === "#") return doc;
+  if (!pointer.startsWith("#/"))
+    throw new Error("canonical pointer must be a JSON Pointer fragment");
   let node: unknown = doc;
-  for (const rawToken of pointer.slice(1).split("/")) {
+  for (const rawToken of pointer.slice(2).split("/")) {
     if (/(?:~(?:[^01]|$))/.test(rawToken)) {
       throw new Error("JSON Pointer contains an invalid ~ escape");
     }
@@ -96,6 +123,11 @@ export function resolveLocalPointer(doc: unknown, ref: string): unknown {
     node = descriptor.value;
   }
   return node;
+}
+
+/** Resolve a URI-decoded, one-pass RFC 6901 fragment through own properties only. */
+export function resolveLocalPointer(doc: unknown, ref: string): unknown {
+  return resolveCanonicalPointer(doc, canonicalLocalPointer(ref));
 }
 
 function collectParams(

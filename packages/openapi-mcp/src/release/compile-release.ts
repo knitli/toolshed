@@ -4,7 +4,11 @@ import { mkdir, mkdtemp, open } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { OpenApiDoc } from "../load.ts";
-import { resolveLocalPointer, splitWords } from "../operations.ts";
+import {
+  canonicalLocalPointer,
+  resolveCanonicalPointer,
+  splitWords,
+} from "../operations.ts";
 import {
   buildPermissionIndex,
   lookupPermissions,
@@ -14,6 +18,7 @@ import {
 import { sha256 } from "../runtime/digest.ts";
 import { admitManifest } from "../runtime/manifest.ts";
 import { parseTypedRecordId } from "../runtime/references.ts";
+import { schemaChildKind } from "../runtime/schema-keywords.ts";
 import {
   canonicalJson,
   canonicalJsonBounded,
@@ -73,6 +78,7 @@ import {
   samePathIdentity,
 } from "./publish.ts";
 import {
+  normalizeGraphUri,
   normalizeHttpsUri,
   ReferenceGraphV4,
   type ReferenceResolver,
@@ -148,14 +154,57 @@ type ConstructionHook = (
 ) => void | Promise<void>;
 
 interface AddressedValue {
+  declaredResource?: true;
   documentUri: string;
+  referenceBaseUri: string;
+  resourceUri: string;
+  resourcePointer: string;
+  resourceValue: unknown;
   pointer: string;
   document: Record<string, unknown>;
   value: unknown;
 }
 
+interface SchemaReferenceWork {
+  readonly rawRef: string;
+  readonly from: AddressedValue;
+  readonly referenceDepth: number;
+  readonly resourceUri?: string;
+}
+
 function encodePointerToken(value: string): string {
   return value.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+function decodePointerToken(value: string): string {
+  return value.replace(/~1/g, "/").replace(/~0/g, "~");
+}
+
+function isSchemaDescendantPath(tokens: readonly string[]): boolean {
+  let index = 0;
+  while (index < tokens.length) {
+    const kind = schemaChildKind(decodePointerToken(tokens[index]));
+    if (kind === "single") {
+      index += 1;
+      continue;
+    }
+    if (kind === "map") {
+      if (index + 1 >= tokens.length) return false;
+      index += 2;
+      continue;
+    }
+    if (kind === "array") {
+      if (
+        index + 1 >= tokens.length ||
+        !/^(?:0|[1-9][0-9]*)$/.test(decodePointerToken(tokens[index + 1]))
+      )
+        return false;
+      index += 2;
+      continue;
+    }
+    return false;
+  }
+  return true;
 }
 
 function exactObject(value: unknown, label: string): Record<string, unknown> {
@@ -191,6 +240,15 @@ function canonicalOrigin(value: unknown): string {
   return url.origin;
 }
 
+function truncateSummary(value: string, maximum = 600): string {
+  let end = 0;
+  for (const character of value) {
+    if (end + character.length > maximum) break;
+    end += character.length;
+  }
+  return value.slice(0, end);
+}
+
 function checkedRecordJson(record: JsonValue, limits: CompilerLimits): string {
   try {
     return canonicalJsonBounded(record, {
@@ -215,6 +273,14 @@ function stableSort<T>(values: T[], key: (value: T) => string): T[] {
 class SchemaMaterializer {
   readonly records = new Map<TypedSchemaId, SchemaRecordV4>();
   readonly #addresses = new Map<TypedSchemaId, string>();
+  readonly #resources = new Map<string, AddressedValue>();
+  readonly #resourcesByDocument = new Map<
+    string,
+    Map<string, AddressedValue>
+  >();
+  readonly #resourceRegistrations: string[] = [];
+  readonly #maxSchemaReferenceWork: number;
+  #schemaReferenceWork = 0;
 
   constructor(
     readonly api: string,
@@ -222,12 +288,116 @@ class SchemaMaterializer {
     readonly rootDocument: Record<string, unknown>,
     readonly graph: ReferenceGraphV4,
     readonly limits: CompilerLimits,
-  ) {}
+  ) {
+    const proportionalLimit =
+      limits.maxSchemas >
+      Math.floor(Number.MAX_SAFE_INTEGER / limits.maxJsonDepth)
+        ? Number.MAX_SAFE_INTEGER
+        : limits.maxSchemas * limits.maxJsonDepth;
+    this.#maxSchemaReferenceWork = Math.min(
+      limits.maxDocumentNodes,
+      proportionalLimit,
+    );
+    this.#registerResource({
+      documentUri: sourceUri,
+      referenceBaseUri: sourceUri,
+      resourceUri: sourceUri,
+      resourcePointer: "#",
+      resourceValue: rootDocument,
+      pointer: "#",
+      document: rootDocument,
+      value: rootDocument,
+    });
+  }
+
+  #registerResource(resource: AddressedValue): void {
+    if (!this.#resources.has(resource.resourceUri))
+      this.#resourceRegistrations.push(resource.resourceUri);
+    this.#resources.set(resource.resourceUri, resource);
+    let documentResources = this.#resourcesByDocument.get(resource.documentUri);
+    if (!documentResources) {
+      documentResources = new Map();
+      this.#resourcesByDocument.set(resource.documentUri, documentResources);
+    }
+    documentResources.set(resource.resourcePointer, resource);
+  }
+
+  #scopeTarget(target: AddressedValue): AddressedValue {
+    let nearest = target;
+    const documentResources = this.#resourcesByDocument.get(target.documentUri);
+    if (!documentResources) return nearest;
+    let pointer = target.pointer;
+    while (true) {
+      const resource = documentResources.get(pointer);
+      if (
+        resource &&
+        resource.resourcePointer.length > nearest.resourcePointer.length
+      ) {
+        nearest = {
+          ...resource,
+          pointer: target.pointer,
+          value: target.value,
+        };
+      }
+      if (pointer === "#") break;
+      const separator = pointer.lastIndexOf("/");
+      pointer = separator <= 1 ? "#" : pointer.slice(0, separator);
+    }
+    return nearest;
+  }
+
+  #indexEnclosingResources(target: AddressedValue): void {
+    const tokens =
+      target.pointer === "#" ? [] : target.pointer.slice(2).split("/");
+    if (tokens.length > this.limits.maxJsonDepth)
+      throw new Error("schema depth exceeds limit");
+    for (let length = 0; length <= tokens.length; length += 1) {
+      if (!isSchemaDescendantPath(tokens.slice(length))) continue;
+      const pointer =
+        length === 0 ? "#" : `#/${tokens.slice(0, length).join("/")}`;
+      const value = resolveCanonicalPointer(target.document, pointer);
+      if (
+        typeof value !== "object" ||
+        value === null ||
+        Array.isArray(value) ||
+        !Object.hasOwn(value, "$id")
+      )
+        continue;
+      const candidate = this.#scopeTarget({
+        documentUri: target.documentUri,
+        referenceBaseUri: target.documentUri,
+        resourceUri: target.documentUri,
+        resourcePointer: "#",
+        resourceValue: target.document,
+        pointer,
+        document: target.document,
+        value,
+      });
+      this.schemaAddress(value as Record<string, unknown>, candidate);
+    }
+  }
+
+  #fromResource(
+    resource: AddressedValue,
+    fragment: string,
+    schemaContext: boolean,
+  ): AddressedValue {
+    const canonical = canonicalLocalPointer(fragment);
+    const pointer = `${resource.resourcePointer}${canonical.slice(1)}`;
+    const target = {
+      ...resource,
+      pointer,
+      value: resolveCanonicalPointer(resource.resourceValue, canonical),
+    };
+    if (schemaContext) this.#indexEnclosingResources(target);
+    return schemaContext ? this.#scopeTarget(target) : target;
+  }
 
   async resolveReference(
     rawRef: string,
     from: AddressedValue,
     depth: number,
+    schemaContext: boolean,
   ): Promise<AddressedValue> {
     if (Buffer.byteLength(rawRef) > this.limits.maxRefLength)
       throw new Error("reference exceeds ref length limit");
@@ -235,22 +405,48 @@ class SchemaMaterializer {
       throw new Error("reference depth exceeds limit");
     const hash = rawRef.indexOf("#");
     const documentPart = hash < 0 ? rawRef : rawRef.slice(0, hash);
-    const pointer = hash < 0 ? "#" : `#${rawRef.slice(hash + 1)}`;
+    const rawPointer = hash < 0 ? "#" : `#${rawRef.slice(hash + 1)}`;
+    const pointer = canonicalLocalPointer(rawPointer);
     if (documentPart === "") {
-      return {
-        documentUri: from.documentUri,
-        pointer,
-        document: from.document,
-        value: resolveLocalPointer(from.document, pointer),
-      };
+      return this.#fromResource(from, rawPointer, schemaContext);
     }
-    const external = await this.graph.resolve(rawRef, from.documentUri, depth);
-    return {
+    const resourceUri = normalizeGraphUri(documentPart, from.referenceBaseUri);
+    const resource = this.#resources.get(resourceUri);
+    if (resource && (schemaContext || !resource.declaredResource))
+      return this.#fromResource(resource, rawPointer, schemaContext);
+    const external = await this.graph.resolve(
+      rawRef,
+      from.referenceBaseUri,
+      depth,
+    );
+    const existing = this.#resources.get(external.uri);
+    if (existing && existing.document !== external.document)
+      throw new Error(
+        "embedded resource URI has conflicting physical identity",
+      );
+    if (!existing)
+      this.#registerResource({
+        documentUri: external.uri,
+        referenceBaseUri: external.uri,
+        resourceUri: external.uri,
+        resourcePointer: "#",
+        resourceValue: external.document,
+        pointer: "#",
+        document: external.document,
+        value: external.document,
+      });
+    const target = {
       documentUri: external.uri,
-      pointer: external.pointer,
+      referenceBaseUri: external.uri,
+      resourceUri: external.uri,
+      resourcePointer: "#",
+      resourceValue: external.document,
+      pointer,
       document: external.document,
-      value: resolveLocalPointer(external.document, external.pointer),
+      value: resolveCanonicalPointer(external.document, pointer),
     };
+    if (schemaContext) this.#indexEnclosingResources(target);
+    return schemaContext ? this.#scopeTarget(target) : target;
   }
 
   #rootComponentName(address: AddressedValue): string | null {
@@ -294,6 +490,7 @@ class SchemaMaterializer {
     authoredName?: string,
     referenceDepth = 0,
   ): Promise<TypedSchemaId> {
+    this.indexResources(address.value, address);
     const id = await this.#idFor(address, authoredName);
     const identity = `${address.documentUri}\0${address.pointer}`;
     const prior = this.#addresses.get(id);
@@ -320,12 +517,282 @@ class SchemaMaterializer {
     const object = exactObject(address.value, "schema use");
     if (Object.keys(object).length === 1 && typeof object.$ref === "string") {
       return this.materialize(
-        await this.resolveReference(object.$ref, address, 1),
+        await this.resolveReference(object.$ref, address, 1, true),
         undefined,
         1,
       );
     }
     return this.materialize(address);
+  }
+
+  schemaAddress(
+    schema: Record<string, unknown>,
+    address: AddressedValue,
+  ): AddressedValue {
+    if (schema.$id === undefined) return address;
+    if (
+      address.declaredResource &&
+      address.resourcePointer === address.pointer &&
+      address.resourceValue === schema
+    )
+      return address;
+    if (typeof schema.$id !== "string")
+      throw new Error("schema $id must be a string");
+    const resourceUri = normalizeGraphUri(schema.$id, address.referenceBaseUri);
+    const resource = {
+      ...address,
+      referenceBaseUri: resourceUri,
+      resourceUri,
+      resourcePointer: address.pointer,
+      resourceValue: schema,
+      declaredResource: true as const,
+    };
+    const prior = this.#resources.get(resourceUri);
+    if (
+      prior &&
+      (prior.documentUri !== address.documentUri ||
+        prior.pointer !== address.pointer)
+    )
+      throw new Error("schema $id duplicates an embedded resource URI");
+    this.#registerResource(resource);
+    return resource;
+  }
+
+  indexResources(value: unknown, address: AddressedValue, depth = 0): void {
+    if (depth > this.limits.maxJsonDepth)
+      throw new Error("schema depth exceeds limit");
+    if (typeof value === "boolean") return;
+    const schema = exactObject(value, "schema");
+    const scoped = this.schemaAddress(schema, address);
+    for (const [key, child] of Object.entries(schema)) {
+      const kind = schemaChildKind(key);
+      if (kind === "single")
+        this.indexResources(
+          child,
+          {
+            ...scoped,
+            pointer: `${address.pointer}/${encodePointerToken(key)}`,
+            value: child,
+          },
+          depth + 1,
+        );
+      else if (
+        kind === "map" &&
+        typeof child === "object" &&
+        child !== null &&
+        !Array.isArray(child)
+      )
+        for (const [name, nested] of Object.entries(child))
+          this.indexResources(
+            nested,
+            {
+              ...scoped,
+              pointer: `${address.pointer}/${encodePointerToken(key)}/${encodePointerToken(name)}`,
+              value: nested,
+            },
+            depth + 1,
+          );
+      else if (kind === "array" && Array.isArray(child))
+        child.forEach((nested, index) => {
+          this.indexResources(
+            nested,
+            {
+              ...scoped,
+              pointer: `${address.pointer}/${encodePointerToken(key)}/${index}`,
+              value: nested,
+            },
+            depth + 1,
+          );
+        });
+    }
+  }
+
+  #collectSchemaReferences(
+    value: unknown,
+    address: AddressedValue,
+    referenceDepth: number,
+    output: SchemaReferenceWork[],
+    depth = 0,
+  ): void {
+    if (depth > this.limits.maxJsonDepth)
+      throw new Error("schema depth exceeds limit");
+    if (typeof value === "boolean") return;
+    const schema = exactObject(value, "schema");
+    const scoped = this.schemaAddress(schema, address);
+    if (Object.hasOwn(schema, "$ref")) {
+      if (typeof schema.$ref !== "string")
+        throw new Error("schema $ref must be a string");
+      const hash = schema.$ref.indexOf("#");
+      const documentPart = hash < 0 ? schema.$ref : schema.$ref.slice(0, hash);
+      if (this.#schemaReferenceWork >= this.#maxSchemaReferenceWork)
+        throw new Error("schema reference work exceeds limit");
+      this.#schemaReferenceWork += 1;
+      output.push({
+        rawRef: schema.$ref,
+        from: scoped,
+        referenceDepth: referenceDepth + 1,
+        resourceUri:
+          documentPart === ""
+            ? undefined
+            : normalizeGraphUri(documentPart, scoped.referenceBaseUri),
+      });
+    }
+    for (const [key, child] of Object.entries(schema)) {
+      const kind = schemaChildKind(key);
+      const childAddress = {
+        ...scoped,
+        pointer: `${address.pointer}/${encodePointerToken(key)}`,
+        value: child,
+      };
+      if (kind === "single") {
+        this.#collectSchemaReferences(
+          child,
+          childAddress,
+          referenceDepth,
+          output,
+          depth + 1,
+        );
+      } else if (
+        kind === "map" &&
+        typeof child === "object" &&
+        child !== null &&
+        !Array.isArray(child)
+      ) {
+        for (const [name, nested] of Object.entries(child))
+          this.#collectSchemaReferences(
+            nested,
+            {
+              ...childAddress,
+              pointer: `${childAddress.pointer}/${encodePointerToken(name)}`,
+              value: nested,
+            },
+            referenceDepth,
+            output,
+            depth + 1,
+          );
+      } else if (kind === "array" && Array.isArray(child)) {
+        child.forEach((nested, index) => {
+          this.#collectSchemaReferences(
+            nested,
+            {
+              ...childAddress,
+              pointer: `${childAddress.pointer}/${index}`,
+              value: nested,
+            },
+            referenceDepth,
+            output,
+            depth + 1,
+          );
+        });
+      }
+    }
+  }
+
+  async preIndexResources(roots: readonly AddressedValue[]): Promise<void> {
+    const work: SchemaReferenceWork[] = [];
+    const seenEdges = new Set<string>();
+    const seenTargets = new Set<string>();
+    const waitingByResource = new Map<string, SchemaReferenceWork[]>();
+    let workIndex = 0;
+    let registrationIndex = 0;
+    const enqueue = (references: readonly SchemaReferenceWork[]): void => {
+      for (const reference of references) {
+        const identity = `${reference.from.documentUri}\0${reference.from.pointer}\0${reference.from.referenceBaseUri}\0${reference.rawRef}`;
+        if (seenEdges.has(identity)) continue;
+        seenEdges.add(identity);
+        work.push(reference);
+      }
+    };
+    const wakeRegisteredResources = (): void => {
+      while (registrationIndex < this.#resourceRegistrations.length) {
+        const uri = this.#resourceRegistrations[registrationIndex++];
+        const waiting = waitingByResource.get(uri);
+        if (!waiting) continue;
+        waitingByResource.delete(uri);
+        work.push(...waiting);
+      }
+    };
+    for (const root of roots) {
+      const discovered: SchemaReferenceWork[] = [];
+      this.indexResources(root.value, root);
+      this.#collectSchemaReferences(root.value, root, 0, discovered);
+      enqueue(discovered);
+      seenTargets.add(
+        `${root.documentUri}\0${root.pointer}\0${root.referenceBaseUri}`,
+      );
+    }
+    wakeRegisteredResources();
+
+    while (workIndex < work.length) {
+      const reference = work[workIndex++];
+      let target: AddressedValue;
+      try {
+        target = await this.resolveReference(
+          reference.rawRef,
+          reference.from,
+          reference.referenceDepth,
+          true,
+        );
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message ===
+            "external reference is absent from the reference map" &&
+          reference.resourceUri !== undefined
+        ) {
+          const waiting = waitingByResource.get(reference.resourceUri);
+          if (waiting) waiting.push(reference);
+          else waitingByResource.set(reference.resourceUri, [reference]);
+          continue;
+        }
+        throw error;
+      }
+      wakeRegisteredResources();
+      const identity = `${target.documentUri}\0${target.pointer}\0${target.referenceBaseUri}`;
+      if (seenTargets.has(identity)) continue;
+      seenTargets.add(identity);
+      this.indexResources(target.value, target);
+      wakeRegisteredResources();
+      const discovered: SchemaReferenceWork[] = [];
+      this.#collectSchemaReferences(
+        target.value,
+        target,
+        reference.referenceDepth,
+        discovered,
+      );
+      enqueue(discovered);
+    }
+
+    const unresolved = waitingByResource.values().next().value?.[0];
+    if (unresolved) {
+      await this.resolveReference(
+        unresolved.rawRef,
+        unresolved.from,
+        unresolved.referenceDepth,
+        true,
+      );
+      throw new Error("unreachable reference pre-index state");
+    }
+  }
+
+  #opaqueJson(value: unknown): JsonValue {
+    let canonical: string;
+    try {
+      canonical = canonicalJsonBounded(value as JsonValue, {
+        maxBytes: this.limits.maxRecordBytes,
+        maxDepth: this.limits.maxJsonDepth,
+        maxNodes: this.limits.maxDocumentNodes,
+      });
+    } catch (error) {
+      throw new Error("schema annotation cannot be canonicalized", {
+        cause: error,
+      });
+    }
+    return parseJsonStrict(canonical, {
+      maxBytes: this.limits.maxRecordBytes,
+      maxDepth: this.limits.maxJsonDepth,
+      maxKeys: this.limits.maxDocumentKeys,
+    });
   }
 
   async #rewriteSchema(
@@ -337,6 +804,7 @@ class SchemaMaterializer {
     if (depth > this.limits.maxJsonDepth)
       throw new Error("schema depth exceeds limit");
     const object = exactObject(value, "schema");
+    const scopedAddress = this.schemaAddress(object, address);
     for (const keyword of [
       "$dynamicRef",
       "$recursiveRef",
@@ -361,8 +829,9 @@ class SchemaMaterializer {
           throw new Error("schema $ref must be a string");
         const target = await this.resolveReference(
           child,
-          address,
+          scopedAddress,
           referenceDepth + 1,
+          true,
         );
         output.$ref = await this.materialize(
           target,
@@ -371,51 +840,64 @@ class SchemaMaterializer {
         );
         continue;
       }
-      output[key] = await this.#rewriteJson(
-        child,
-        {
-          ...address,
-          pointer: `${address.pointer}/${encodePointerToken(key)}`,
-          value: child,
-        },
-        depth + 1,
-        referenceDepth,
-      );
+      const kind = schemaChildKind(key);
+      const childAddress = {
+        ...scopedAddress,
+        pointer: `${address.pointer}/${encodePointerToken(key)}`,
+        value: child,
+      };
+      if (kind === "single") {
+        output[key] = await this.#rewriteSubschema(
+          child,
+          childAddress,
+          depth + 1,
+          referenceDepth,
+        );
+      } else if (kind === "map") {
+        const rewritten = Object.create(null) as JsonObject;
+        for (const [name, schema] of Object.entries(
+          exactObject(child, `schema ${key}`),
+        ))
+          rewritten[name] = await this.#rewriteSubschema(
+            schema,
+            {
+              ...childAddress,
+              pointer: `${childAddress.pointer}/${encodePointerToken(name)}`,
+              value: schema,
+            },
+            depth + 1,
+            referenceDepth,
+          );
+        output[key] = rewritten;
+      } else if (kind === "array") {
+        if (!Array.isArray(child))
+          throw new Error(`schema ${key} must be an array`);
+        output[key] = await Promise.all(
+          child.map((schema, index) =>
+            this.#rewriteSubschema(
+              schema,
+              {
+                ...childAddress,
+                pointer: `${childAddress.pointer}/${index}`,
+                value: schema,
+              },
+              depth + 1,
+              referenceDepth,
+            ),
+          ),
+        );
+      } else output[key] = this.#opaqueJson(child);
     }
     return output;
   }
 
-  async #rewriteJson(
+  async #rewriteSubschema(
     value: unknown,
     address: AddressedValue,
     depth: number,
     referenceDepth: number,
   ): Promise<JsonValue> {
-    if (depth > this.limits.maxJsonDepth)
-      throw new Error("schema depth exceeds limit");
-    if (
-      value === null ||
-      typeof value === "string" ||
-      typeof value === "boolean" ||
-      typeof value === "number"
-    )
-      return value;
-    if (Array.isArray(value)) {
-      return Promise.all(
-        value.map((entry, index) =>
-          this.#rewriteJson(
-            entry,
-            {
-              ...address,
-              pointer: `${address.pointer}/${index}`,
-              value: entry,
-            },
-            depth + 1,
-            referenceDepth,
-          ),
-        ),
-      );
-    }
+    if (typeof value === "boolean") return value;
     return this.#rewriteSchema(value, address, depth, referenceDepth);
   }
 }
@@ -434,6 +916,7 @@ async function resolveObject(
       object.$ref,
       current,
       depth + 1,
+      false,
     );
     const identity = `${target.documentUri}\0${target.pointer}`;
     if (seen.has(identity))
@@ -448,11 +931,16 @@ async function resolveObject(
   return { object, address: current };
 }
 
-async function schemaUse(
+function schemaUseAddress(
   owner: Record<string, unknown>,
   address: AddressedValue,
-  materializer: SchemaMaterializer,
-): Promise<SchemaUseV4> {
+):
+  | { readonly kind: "schema"; readonly address: AddressedValue }
+  | {
+      readonly kind: "content";
+      readonly mediaType: CanonicalMediaTypeV4;
+      readonly address: AddressedValue;
+    } {
   const hasSchema = Object.hasOwn(owner, "schema");
   const hasContent = Object.hasOwn(owner, "content");
   if (hasSchema === hasContent)
@@ -460,14 +948,13 @@ async function schemaUse(
       "parameter/header must declare exactly one of schema or content",
     );
   if (hasSchema) {
-    const schemaAddress = {
-      ...address,
-      pointer: `${address.pointer}/schema`,
-      value: owner.schema,
-    };
     return {
       kind: "schema",
-      schemaId: await materializer.materializeUse(schemaAddress),
+      address: {
+        ...address,
+        pointer: `${address.pointer}/schema`,
+        value: owner.schema,
+      },
     };
   }
   const entries = Object.entries(
@@ -482,12 +969,195 @@ async function schemaUse(
   return {
     kind: "content",
     mediaType: canonicalMediaType(rawMediaType),
-    schemaId: await materializer.materializeUse({
+    address: {
       ...address,
       pointer: `${address.pointer}/content/${encodePointerToken(rawMediaType)}/schema`,
       value: mediaObject.schema,
-    }),
+    },
   };
+}
+
+async function schemaUse(
+  owner: Record<string, unknown>,
+  address: AddressedValue,
+  materializer: SchemaMaterializer,
+): Promise<SchemaUseV4> {
+  const located = schemaUseAddress(owner, address);
+  const schemaId = await materializer.materializeUse(located.address);
+  return located.kind === "schema"
+    ? { kind: "schema", schemaId }
+    : { kind: "content", mediaType: located.mediaType, schemaId };
+}
+
+async function collectParameterSchemaRoots(
+  rawList: unknown,
+  address: AddressedValue,
+  materializer: SchemaMaterializer,
+  roots: AddressedValue[],
+): Promise<void> {
+  if (rawList === undefined) return;
+  if (!Array.isArray(rawList)) throw new Error("parameters must be an array");
+  if (rawList.length > materializer.limits.maxParametersPerOperation)
+    throw new Error("Parameters exceed maxParametersPerOperation limit");
+  for (const [index, raw] of rawList.entries()) {
+    const resolved = await resolveObject(
+      raw,
+      {
+        ...address,
+        pointer: `${address.pointer}/parameters/${index}`,
+        value: raw,
+      },
+      materializer,
+    );
+    roots.push(schemaUseAddress(resolved.object, resolved.address).address);
+  }
+}
+
+async function collectEncodingHeaderSchemaRoots(
+  headers: unknown,
+  address: AddressedValue,
+  materializer: SchemaMaterializer,
+  roots: AddressedValue[],
+): Promise<void> {
+  if (headers === undefined) return;
+  for (const [rawName, rawHeader] of Object.entries(
+    exactObject(headers, "encoding headers"),
+  )) {
+    const resolved = await resolveObject(
+      rawHeader,
+      {
+        ...address,
+        pointer: `${address.pointer}/${encodePointerToken(rawName)}`,
+        value: rawHeader,
+      },
+      materializer,
+    );
+    roots.push(schemaUseAddress(resolved.object, resolved.address).address);
+  }
+}
+
+async function collectRequestBodySchemaRoots(
+  raw: unknown,
+  address: AddressedValue,
+  materializer: SchemaMaterializer,
+  roots: AddressedValue[],
+): Promise<void> {
+  if (raw === undefined) return;
+  const resolved = await resolveObject(raw, address, materializer);
+  const alternatives = Object.entries(
+    exactObject(resolved.object.content, "request body content"),
+  );
+  if (alternatives.length === 0)
+    throw new Error("request body content must be nonempty");
+  for (const [rawMediaType, rawMedia] of alternatives) {
+    const media = exactObject(rawMedia, "request body media entry");
+    if (!Object.hasOwn(media, "schema"))
+      throw new Error("request body media entry missing schema");
+    const mediaAddress = {
+      ...resolved.address,
+      pointer: `${resolved.address.pointer}/content/${encodePointerToken(rawMediaType)}`,
+      value: media,
+    };
+    roots.push({
+      ...mediaAddress,
+      pointer: `${mediaAddress.pointer}/schema`,
+      value: media.schema,
+    });
+    if (media.encoding === undefined) continue;
+    for (const [property, rawEncoding] of Object.entries(
+      exactObject(media.encoding, "request body encoding"),
+    )) {
+      const encoding = exactObject(rawEncoding, "encoding entry");
+      await collectEncodingHeaderSchemaRoots(
+        encoding.headers,
+        {
+          ...mediaAddress,
+          pointer: `${mediaAddress.pointer}/encoding/${encodePointerToken(property)}/headers`,
+          value: encoding.headers,
+        },
+        materializer,
+        roots,
+      );
+    }
+  }
+}
+
+async function collectOpenApiSchemaRoots(
+  document: OpenApiDoc,
+  sourceUri: string,
+  materializer: SchemaMaterializer,
+): Promise<AddressedValue[]> {
+  const root = document as unknown as Record<string, unknown>;
+  const sourceAddress: AddressedValue = {
+    documentUri: sourceUri,
+    referenceBaseUri: sourceUri,
+    resourceUri: sourceUri,
+    resourcePointer: "#",
+    resourceValue: root,
+    pointer: "#",
+    document: root,
+    value: root,
+  };
+  const roots: AddressedValue[] = [];
+  const componentSchemas = exactObject(
+    document.components?.schemas ?? Object.create(null),
+    "component schemas",
+  );
+  for (const [name, schema] of Object.entries(componentSchemas))
+    roots.push({
+      ...sourceAddress,
+      pointer: `#/components/schemas/${encodePointerToken(name)}`,
+      value: schema,
+    });
+
+  for (const [path, rawPathItem] of Object.entries(document.paths)) {
+    const pathAddress = {
+      ...sourceAddress,
+      pointer: `#/paths/${encodePointerToken(path)}`,
+      value: rawPathItem,
+    };
+    const resolvedPathItem = await resolveObject(
+      rawPathItem,
+      pathAddress,
+      materializer,
+    );
+    const pathItem = resolvedPathItem.object;
+    await collectParameterSchemaRoots(
+      pathItem.parameters,
+      resolvedPathItem.address,
+      materializer,
+      roots,
+    );
+    for (const method of HTTP_METHODS) {
+      if (!Object.hasOwn(pathItem, method)) continue;
+      const operation = exactObject(
+        pathItem[method],
+        `${method.toUpperCase()} ${path}`,
+      );
+      const operationAddress = {
+        ...resolvedPathItem.address,
+        pointer: `${resolvedPathItem.address.pointer}/${method}`,
+        value: operation,
+      };
+      await collectParameterSchemaRoots(
+        operation.parameters,
+        operationAddress,
+        materializer,
+        roots,
+      );
+      await collectRequestBodySchemaRoots(
+        operation.requestBody,
+        {
+          ...operationAddress,
+          pointer: `${operationAddress.pointer}/requestBody`,
+          value: operation.requestBody,
+        },
+        materializer,
+        roots,
+      );
+    }
+  }
+  return roots;
 }
 
 function defaultStyle(location: ParameterLocationV4): ParameterStyleV4 {
@@ -681,10 +1351,12 @@ async function normalizeRequestBody(
       );
       const visited = new Set<string>();
       while (typeof schemaObject.$ref === "string") {
+        schemaAddress = materializer.schemaAddress(schemaObject, schemaAddress);
         schemaAddress = await materializer.resolveReference(
           schemaObject.$ref,
           schemaAddress,
           visited.size + 1,
+          true,
         );
         const identity = `${schemaAddress.documentUri}\0${schemaAddress.pointer}`;
         if (visited.has(identity))
@@ -790,10 +1462,20 @@ async function extractLogicalRecords(
   );
   if (Object.keys(componentSchemas).length > limits.maxSchemas)
     throw new Error("Schemas exceed maxSchemas limit");
+  const paths = Object.entries(document.paths);
+  if (paths.length > limits.maxPaths)
+    throw new Error("Paths exceed maxPaths limit");
+  await materializer.preIndexResources(
+    await collectOpenApiSchemaRoots(document, sourceUri, materializer),
+  );
   for (const [name, schema] of Object.entries(componentSchemas)) {
     await materializer.materialize(
       {
         documentUri: sourceUri,
+        referenceBaseUri: sourceUri,
+        resourceUri: sourceUri,
+        resourcePointer: "#",
+        resourceValue: root,
         pointer: `#/components/schemas/${encodePointerToken(name)}`,
         document: root,
         value: schema,
@@ -802,9 +1484,6 @@ async function extractLogicalRecords(
     );
   }
 
-  const paths = Object.entries(document.paths);
-  if (paths.length > limits.maxPaths)
-    throw new Error("Paths exceed maxPaths limit");
   const operations: OperationRecordV4[] = [];
   const seen = new Set<string>();
   const documentOrigin = canonicalOrigin(document.servers?.[0]?.url);
@@ -815,6 +1494,10 @@ async function extractLogicalRecords(
       rawPathItem,
       {
         documentUri: sourceUri,
+        referenceBaseUri: sourceUri,
+        resourceUri: sourceUri,
+        resourcePointer: "#",
+        resourceValue: root,
         document: root,
         pointer: `#/paths/${encodePointerToken(path)}`,
         value: rawPathItem,
@@ -889,9 +1572,9 @@ async function extractLogicalRecords(
         origin: documentOrigin,
         summary:
           typeof operation.summary === "string"
-            ? operation.summary.slice(0, 600)
+            ? truncateSummary(operation.summary)
             : typeof operation.description === "string"
-              ? operation.description.slice(0, 600)
+              ? truncateSummary(operation.description)
               : null,
         deprecated: operation.deprecated === true,
         parameters,

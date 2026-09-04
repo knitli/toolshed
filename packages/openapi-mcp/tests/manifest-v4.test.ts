@@ -20,6 +20,7 @@ import {
   type GenerationState,
   type GenerationStore,
   type GenerationTransition,
+  type JsonObject,
   type ManifestEnvelope,
   type OperationRecordV4,
   type ReleaseManifestV4,
@@ -1164,6 +1165,92 @@ test("schema logical records use their own digest domain and are deeply frozen",
     record: schema,
   });
   expect(Object.isFrozen(verified.schema.properties.name)).toBe(true);
+});
+
+async function verifyAdmittedSchema(schema: JsonObject) {
+  const id = "schema:tiny:#/components/schemas/VerifierFixture" as const;
+  const record = { id, schema };
+  const digest = await sha256("knitli.openapi-mcp.schema-record.v4", record);
+  const { release, trust, value } = await fixture();
+  const admitted = await admitManifest(
+    await signedEnvelope({ ...value, records: { [id]: digest } }, release),
+    trust,
+    new MemoryGenerationStore(),
+  );
+  return verifyStoredRecord(admitted, { id, logicalDigest: digest, record });
+}
+
+test("stored schema records reject raw refs in schema-bearing children", async () => {
+  const rawRef = { $ref: "#/components/schemas/Untyped" };
+  const thenSchema: JsonObject = Object.create(null);
+  Reflect.set(thenSchema, "then", rawRef);
+  const cases: readonly [string, JsonObject][] = [
+    ["single", { additionalProperties: rawRef }],
+    ["contains", { contains: rawRef }],
+    ["contentSchema", { contentSchema: rawRef }],
+    ["else", { else: rawRef }],
+    ["if", { if: rawRef }],
+    ["items", { items: rawRef }],
+    ["not", { not: rawRef }],
+    ["propertyNames", { propertyNames: rawRef }],
+    ["then", thenSchema],
+    ["unevaluatedItems", { unevaluatedItems: rawRef }],
+    ["unevaluatedProperties", { unevaluatedProperties: rawRef }],
+    ["properties", { properties: { value: rawRef } }],
+    ["$defs", { $defs: { value: rawRef } }],
+    ["definitions", { definitions: { value: rawRef } }],
+    ["dependentSchemas", { dependentSchemas: { value: rawRef } }],
+    ["patternProperties", { patternProperties: { value: rawRef } }],
+    ["prefixItems", { prefixItems: [rawRef] }],
+    ["allOf", { allOf: [rawRef] }],
+    ["anyOf", { anyOf: [rawRef] }],
+    ["oneOf", { oneOf: [rawRef] }],
+  ];
+  for (const [location, schema] of cases) {
+    await expect(verifyAdmittedSchema(schema), location).rejects.toMatchObject({
+      code: "RECORD_DIGEST_MISMATCH",
+    });
+  }
+});
+
+test("stored schema records reject malformed schema-bearing containers", async () => {
+  const cases: readonly [string, JsonObject][] = [
+    ["array keyword with an object", { allOf: { type: "string" } }],
+    ["map keyword with an array", { properties: [{ type: "string" }] }],
+    ["single keyword with an array", { not: [{ type: "string" }] }],
+    ["array keyword with a non-schema entry", { anyOf: [null] }],
+    ["map keyword with a non-schema entry", { $defs: { value: 1 } }],
+    ["single keyword with a non-schema value", { items: "string" }],
+  ];
+  for (const [location, schema] of cases) {
+    await expect(verifyAdmittedSchema(schema), location).rejects.toMatchObject({
+      code: "RECORD_DIGEST_MISMATCH",
+    });
+  }
+});
+
+test("stored schema records accept boolean subschemas in every container kind", async () => {
+  const schema: JsonObject = {
+    not: false,
+    properties: { allowed: true },
+    allOf: [true, false],
+  };
+  await expect(verifyAdmittedSchema(schema)).resolves.toMatchObject({ schema });
+});
+
+test("stored schema records preserve raw ref-shaped annotation data", async () => {
+  const rawRef = { $ref: "#/components/schemas/Untyped" };
+  const schema: JsonObject = {
+    example: rawRef,
+    default: rawRef,
+    const: rawRef,
+    enum: [rawRef],
+    examples: [rawRef],
+    discriminator: rawRef,
+    "x-ref-shaped-data": rawRef,
+  };
+  const verified = await verifyAdmittedSchema(schema);
+  expect(verified.schema).toEqual(schema);
 });
 
 test("verified logical records are detached and deeply frozen", async () => {

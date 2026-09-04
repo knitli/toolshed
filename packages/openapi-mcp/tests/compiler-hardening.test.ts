@@ -500,18 +500,25 @@ describe("safe local pointers", () => {
 
   test("decodes URI and RFC6901 escapes once and never traverses a prototype", () => {
     const doc = Object.assign(Object.create(null), {
+      $defs: { Foo: { type: "integer" } },
       components: { schemas: { "a/b~c": { type: "string" }, "%2F": 2 } },
     });
     expect(resolveLocalPointer(doc, "#/components/schemas/a~1b~0c")).toEqual({
       type: "string",
     });
     expect(resolveLocalPointer(doc, "#/components/schemas/%252F")).toBe(2);
+    for (const alias of ["#/$defs/Foo", "#/%24defs/%46oo", "#%2F%24defs%2FFoo"])
+      expect(resolveLocalPointer(doc, alias)).toEqual({ type: "integer" });
     expect(() => resolveLocalPointer(doc, "#/constructor/prototype")).toThrow(
       /forbidden/i,
     );
     expect(() => resolveLocalPointer(doc, "#/components/~2bad")).toThrow(
       /escape/i,
     );
+    for (const invalid of ["#named-anchor", "#%66oo", "#/%", "#/%7E2"])
+      expect(() => resolveLocalPointer(doc, invalid)).toThrow(
+        /fragment|escape/i,
+      );
   });
 
   test("requires canonical array indices", () => {
