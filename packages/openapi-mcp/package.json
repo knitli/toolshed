@@ -111,6 +111,16 @@
               "release": "patch"
             },
             {
+              "scope": "!@(openapi-mcp)",
+              "release": false
+            },
+            {
+              "scope": null,
+              "release": false
+            },
+            {
+              "scope": "openapi-mcp",
+              "type": "!@(feat|fix|perf)",
               "release": false
             }
           ]
