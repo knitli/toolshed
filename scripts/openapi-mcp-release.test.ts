@@ -488,6 +488,123 @@ test("OIDC-only workflow rejects manual releases and gates publication and verif
   await f.adapter.verifyConditions({}, f.context);
 });
 
+test("public verification waits before install and stops installation when readiness fails", async () => {
+  const workflow = Bun.YAML.parse(
+    await readFile(
+      new URL("../.github/workflows/release.yml", import.meta.url),
+      "utf8",
+    ),
+  ) as {
+    jobs: Record<string, { steps: { name?: string; run?: string }[] }>;
+  };
+  const script = workflow.jobs["release-openapi-mcp"].steps.find(
+    (step) =>
+      step.name === "Verify fresh public install and registry attestations",
+  )?.run;
+  if (!script) throw new Error("Missing public verification step");
+  const withoutReadiness = script
+    .split("\n")
+    .filter((line) => !line.includes(" wait-for-version "))
+    .join("\n");
+  const commands = `
+node() {
+  if [ "$1" = "-p" ]; then printf '1.2.3\\n'; return; fi
+  case "$2" in
+    wait-for-version)
+      test "$3" = "1.2.3"
+      printf 'wait 1.2.3\\n' >> "$TRACE"
+      if [ "$FAIL_READINESS" = "true" ]; then return 41; fi
+      touch "$READY"
+      ;;
+    verify-audit)
+      test "$5" = "1.2.3"
+      printf 'verify-audit\\n' >> "$TRACE"
+      printf '{}\\n'
+      ;;
+    *)
+      test "$1" = "node.mts"
+      printf 'consumer\\n' >> "$TRACE"
+      printf '{}\\n'
+      ;;
+  esac
+}
+npm() {
+  case "$1" in
+    init) printf 'init\\n' >> "$TRACE" ;;
+    install)
+      if [ ! -f "$READY" ]; then printf 'install-before-readiness\\n' >> "$TRACE"; return 42; fi
+      test "$*" = 'install --ignore-scripts --save-exact --registry=https://registry.npmjs.org/ @knitli/openapi-mcp@1.2.3'
+      printf 'install 1.2.3\\n' >> "$TRACE"
+      ;;
+    audit)
+      test "$*" = 'audit signatures --json --include-attestations'
+      printf 'audit\\n' >> "$TRACE"
+      printf '{}\\n'
+      ;;
+    *) return 43 ;;
+  esac
+}
+sha256sum() { printf 'checksum\\n' >> "$TRACE"; printf 'fixture-checksum\\n'; }
+`;
+  for (const scenario of [
+    {
+      script,
+      failure: "false",
+      exit: 0,
+      effects:
+        "init\nwait 1.2.3\ninstall 1.2.3\naudit\nverify-audit\nconsumer\nchecksum\n",
+    },
+    { script, failure: "true", exit: 41, effects: "init\nwait 1.2.3\n" },
+    {
+      script: withoutReadiness,
+      failure: "false",
+      exit: 42,
+      effects: "init\ninstall-before-readiness\n",
+    },
+  ]) {
+    const root = await mkdtemp(join(tmpdir(), "openapi-verification-step-"));
+    await mkdir(join(root, "openapi-mcp-release"));
+    await writeFile(
+      join(root, "openapi-mcp-release/tested-artifact.json"),
+      '{"version":"1.2.3"}',
+    );
+    await mkdir(join(root, "packages/openapi-mcp/test-consumers"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(root, "packages/openapi-mcp/test-consumers/node.mts"),
+      "// fixture consumer\n",
+    );
+    const trace = join(root, "trace");
+    const child = Bun.spawn(
+      [
+        "/bin/bash",
+        "--noprofile",
+        "--norc",
+        "-e",
+        "-o",
+        "pipefail",
+        "-c",
+        commands + scenario.script,
+      ],
+      {
+        env: {
+          PATH: "/usr/bin:/bin",
+          RUNNER_TEMP: root,
+          GITHUB_WORKSPACE: root,
+          TRACE: trace,
+          READY: join(root, "ready"),
+          FAIL_READINESS: scenario.failure,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    expect(await child.exited).toBe(scenario.exit);
+    expect(await readFile(trace, "utf8")).toBe(scenario.effects);
+  }
+});
+
 test("release rejects token authentication, bootstrap version, wrong package and wrong workflow context", async () => {
   for (const change of [
     (f: Awaited<ReturnType<typeof fixture>>) => {
