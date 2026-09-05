@@ -858,6 +858,34 @@ Generate authorization IDs from at least 128 random bits with collision-safe ins
 
 - [ ] **Step 7: Run focused tests**
 
+Task 8 implementation boundary: the authorizer returns the internal
+`{ status: "input-required", presentation, requestState }` decision. The Task 11
+MCP handler maps that decision into the complete SDK `inputRequired` result
+described above; the portable runtime does not import SDK response helpers.
+Receipt authority includes the authorizer-registered opaque `authorizationId`
+and its exact tuple. Built-in authorizers additionally register the immutable
+decision container by identity. Broker integration must preserve that stronger
+identity check while ensuring that mutable external decisions cannot change
+their validated fields across an asynchronous boundary.
+
+The built-in implementation uses a maximum of 256 pending confirmations, 1024
+unused receipts, and 256 policy activations. Pending confirmations and receipts
+expire after 120 seconds; activations expire after at most 15 minutes and never
+outlive their template. Test seams may lower, but never raise, these capacities.
+Exact-policy receipt expiry is the minimum of its receipt TTL, template expiry,
+and activation expiry, including when authorization happens immediately before
+either governing boundary. Consumption at that boundary must fail.
+First-use policy approval must show that future matching calls can be approved
+without another prompt, the complete canonical constraints, and the expiry.
+Its accepted content requires both `confirm: true` and `activatePolicy: true`;
+`confirm: true` alone cannot activate a policy. Ordinary per-call acceptance
+remains the closed `{ confirm: true }` shape. The Task 11 handler selects the
+corresponding elicitation schema from `presentation.policyActivation`.
+
+Policy templates are limited to 64 KiB, depth 32, and 4096 nodes; string sets
+contain at most 256 unique values, and array and affected-item bounds are at
+most 10,000. These are rejection limits, not truncation rules.
+
 Run: `mise exec -- bun test packages/openapi-mcp/tests/action-authorizer.test.ts`
 Expected: PASS, including changed-input/credential/state-tamper denial, isolated new-manifest denial, accepted-response replay denial, exact-policy single-use receipt, and one-success concurrent permit consumption.
 

@@ -49,6 +49,17 @@ test("runtime bundles for a Worker target without Node shims", async () => {
   expect(result.logs.map(String).join("\n")).not.toMatch(/node:|bun:/);
 });
 
+test("runtime keeps action authorization and permit issuance private", async () => {
+  const runtime = await import("../src/runtime/index.ts");
+  for (const name of [
+    "createActionAuthorizationBoundary",
+    "ActionDispatchPermit",
+    "createVerifiedRequestStateCodec",
+  ]) {
+    expect(Object.hasOwn(runtime, name), name).toBe(false);
+  }
+});
+
 test("Worker consumer type-checks the portable contract", () => {
   const result = Bun.spawnSync({
     cmd: [

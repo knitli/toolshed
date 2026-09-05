@@ -1,3 +1,4 @@
+export type { ActionDispatchPermit } from "./action-permit.ts";
 export {
   classifyOperation,
   type OperationClassification,
@@ -46,6 +47,8 @@ export type {
   ActionKind,
   AuthorizationContext,
   AuthorizationDecision,
+  AuthorizationId,
+  AuthorizedActionDecision,
   AuthorizedTransport,
   AuthProfile,
   CallOutcome,
@@ -53,6 +56,7 @@ export type {
   CatalogId,
   CatalogStore,
   Credential,
+  CredentialAuthorizationBinding,
   CredentialBindingResolver,
   CredentialProfileBinding,
   CredentialProvider,
@@ -94,6 +98,7 @@ export type {
   TypedOperationId,
   TypedRecordId,
   TypedSchemaId,
+  VerifiedActionRequestState,
 } from "./types.ts";
 export { verifyStoredRecord } from "./verify-record.ts";
 export type { RuntimeLimits } from "./versions.ts";

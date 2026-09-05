@@ -334,12 +334,43 @@ export interface OpenApiRuntime {
   revalidate(call: PreparedCall): Promise<PreparedCall>;
 }
 
-export interface AuthorizationContext {
-  now: Date;
-  requestState?: string;
+export type VerifiedActionRequestState = object & {
+  readonly __verifiedActionRequestState: unique symbol;
+};
+
+/** Identity is owned and validated by the configured authorizer. */
+export type AuthorizationId = object & {
+  readonly __authorizationId: unique symbol;
+};
+
+export type AuthorizationContext =
+  | { readonly kind: "initial" }
+  | {
+      readonly kind: "resume";
+      readonly requestState: VerifiedActionRequestState;
+      readonly inputResponses: unknown;
+    };
+
+export interface CredentialAuthorizationBinding {
+  readonly profileId: string;
+  readonly profileDigest: Sha256;
+  readonly grantId: string;
+  readonly audience?: string;
+  readonly scopes: readonly string[];
+  readonly slotsDigest: Sha256;
+  readonly bindingDigest: Sha256;
 }
 
 export interface SafeApprovalPresentation {
+  message: string;
+  credentialProfile: string;
+  audience: string;
+  scopes: readonly string[];
+  credentialBindingDigest: Sha256;
+  policyActivation?: {
+    readonly policyDigest: Sha256;
+    readonly expiresAt: number;
+  };
   catalogId: string;
   releaseId: string;
   operationId: string;
@@ -355,17 +386,32 @@ export interface SafeApprovalPresentation {
 export interface ActionAuthorizer {
   authorize(
     call: PreparedCall,
+    credential: CredentialAuthorizationBinding,
     context: AuthorizationContext,
   ): Promise<AuthorizationDecision>;
+  consume(
+    decision: AuthorizedActionDecision,
+    call: PreparedCall,
+    credential: CredentialAuthorizationBinding,
+  ): Promise<void>;
+}
+
+export interface AuthorizedActionDecision {
+  readonly status: "authorized";
+  readonly callDigest: Sha256;
+  readonly credentialBindingDigest: Sha256;
+  readonly path: "per-call" | "exact-policy";
+  readonly authorizationId: AuthorizationId;
+  readonly policyDigest?: Sha256;
 }
 
 export type AuthorizationDecision =
+  | AuthorizedActionDecision
   | {
-      status: "authorized";
-      callDigest: Sha256;
-      path: "per-call" | "exact-policy";
+      status: "input-required";
+      presentation: SafeApprovalPresentation;
+      requestState: string;
     }
-  | { status: "confirmation-required"; presentation: SafeApprovalPresentation }
   | { status: "denied"; reason: string };
 
 export type AuthProfile =
