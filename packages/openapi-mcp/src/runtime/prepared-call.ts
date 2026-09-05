@@ -9,12 +9,17 @@ import type {
   HttpMethod,
   JsonObject,
   JsonValue,
+  PaginationTokenState,
   PreparedCall,
   ReleaseId,
   Sha256,
   TypedOperationId,
 } from "./types.ts";
-import { DEFAULT_RUNTIME_LIMITS, PREPARED_CALL_VERSION } from "./versions.ts";
+import {
+  DEFAULT_RUNTIME_LIMITS,
+  PREPARED_CALL_VERSION,
+  type RuntimeLimits,
+} from "./versions.ts";
 
 const preparedCallKeys = [
   "actionKind",
@@ -32,6 +37,7 @@ const preparedCallKeys = [
   "operationDigest",
   "operationId",
   "origin",
+  "pageToken",
   "preparedCallDigest",
   "relativeUrl",
   "releaseId",
@@ -143,6 +149,7 @@ interface ParsedPreparedCall {
   readonly method: HttpMethod;
   readonly origin: string;
   readonly relativeUrl: string;
+  readonly pageToken: string | null;
   readonly headers: Readonly<Record<string, string>>;
   readonly body: Uint8Array | null;
   readonly normalizedArguments: JsonObject;
@@ -422,6 +429,7 @@ function parseUntrustedPreparedCall(value: unknown): ParsedPreparedCall {
   const method = ownValue(source, "method");
   const parsedOrigin = origin(ownValue(source, "origin"));
   const safety = ownValue(source, "safety");
+  const pageToken = ownValue(source, "pageToken");
   const actionKind = ownValue(source, "actionKind");
   const parsedCardinality = cardinality(ownValue(source, "cardinality"));
   if (
@@ -431,6 +439,12 @@ function parseUntrustedPreparedCall(value: unknown): ParsedPreparedCall {
     typeof method !== "string" ||
     !methods.has(method as HttpMethod) ||
     (safety !== "read" && safety !== "action") ||
+    (pageToken !== null &&
+      (typeof pageToken !== "string" ||
+        pageToken.length === 0 ||
+        pageToken.length > 512 ||
+        hasControlCharacter(pageToken) ||
+        safety !== "read")) ||
     (actionKind !== null &&
       (typeof actionKind !== "string" ||
         !actionKinds.has(actionKind as ActionKind))) ||
@@ -474,6 +488,7 @@ function parseUntrustedPreparedCall(value: unknown): ParsedPreparedCall {
     method: method as HttpMethod,
     origin: parsedOrigin,
     relativeUrl: relativeUrl(ownValue(source, "relativeUrl"), parsedOrigin),
+    pageToken: pageToken as string | null,
     headers: cloneHeaders(ownValue(source, "headers")),
     body: cloneBody(ownValue(source, "body")),
     normalizedArguments: normalized,
@@ -516,6 +531,7 @@ function canonicalPayload(
     method: call.method,
     origin: call.origin,
     relativeUrl: call.relativeUrl,
+    pageToken: call.pageToken,
     headers: call.headers as JsonObject,
     body: bodyDigest,
     normalizedArguments: call.normalizedArguments,
@@ -524,6 +540,64 @@ function canonicalPayload(
     cardinality: call.cardinality,
     inputDigest: call.inputDigest,
   };
+}
+
+/** Package-private defensive snapshot shared by the runtime and local codec. */
+export function snapshotPaginationTokenState(
+  value: unknown,
+  limits: RuntimeLimits,
+  now = Date.now(),
+): Readonly<PaginationTokenState> {
+  const data = ownDataObject(value, [
+    "catalogId",
+    "releaseId",
+    "manifestDigest",
+    "operationId",
+    "inputDigest",
+    "origin",
+    "nextRelativeUrl",
+    "expiresAt",
+    "pageCount",
+    "cumulativeBytes",
+  ]);
+  const parsedOrigin = origin(data.origin);
+  const next = relativeUrl(data.nextRelativeUrl, parsedOrigin);
+  const url = new URL(next, parsedOrigin);
+  const expiresAt =
+    typeof data.expiresAt === "string" ? Date.parse(data.expiresAt) : NaN;
+  if (
+    !validShortId(data.catalogId) ||
+    !validShortId(data.releaseId) ||
+    !Number.isFinite(now) ||
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= now ||
+    expiresAt > now + 120_000 ||
+    new Date(expiresAt).toISOString() !== data.expiresAt ||
+    `${url.pathname}${url.search}` !== next ||
+    !Number.isSafeInteger(data.pageCount) ||
+    Number(data.pageCount) < 1 ||
+    !Number.isSafeInteger(data.cumulativeBytes) ||
+    Number(data.cumulativeBytes) < 0
+  )
+    throw invalid();
+  const state = {
+    catalogId: data.catalogId as CatalogId,
+    releaseId: data.releaseId as ReleaseId,
+    operationId: operationId(data.operationId),
+    manifestDigest: digest(data.manifestDigest),
+    inputDigest: digest(data.inputDigest),
+    origin: parsedOrigin,
+    nextRelativeUrl: next,
+    expiresAt: data.expiresAt as string,
+    pageCount: data.pageCount as number,
+    cumulativeBytes: data.cumulativeBytes as number,
+  };
+  if (
+    state.pageCount >= limits.maxPages ||
+    state.cumulativeBytes >= limits.maxPaginationBytes
+  )
+    throw new OpenApiMcpError("PAGINATION_LIMIT_EXCEEDED");
+  return Object.freeze(state);
 }
 
 function timingSafeEqual(left: string, right: string): boolean {

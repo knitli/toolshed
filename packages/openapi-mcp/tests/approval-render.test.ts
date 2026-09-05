@@ -18,6 +18,7 @@ async function preparedCall(
 ): Promise<PreparedCall> {
   return await createPreparedCall({
     version: 2,
+    pageToken: null,
     catalogId: "catalog" as PreparedCall["catalogId"],
     releaseId: "release-1" as PreparedCall["releaseId"],
     operationId: "operation:catalog:createWidget",

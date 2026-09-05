@@ -972,6 +972,10 @@ git commit -m "feat(openapi-mcp): add explicit local authentication profiles"
 - Modify: `packages/openapi-mcp/src/sqlite/index.ts`
 - Modify: `packages/openapi-mcp/package.json`
 - Create: `packages/openapi-mcp/tests/guarded-fetch.test.ts`
+- Create: `packages/openapi-mcp/tests/guarded-fetch.node.ts` and shared dispatch test fixtures
+- Modify: runtime `types.ts`, `index.ts`, `runtime.ts`, and `prepared-call.ts`; directly affected prepared-call construction fixtures; `runtime-prepare.test.ts`; `bun.lock`
+
+**Binding integration amendments:** use the public paired `createLocalDispatchBoundary(authorizer, options)` factory with private permit consumption and raw HTTP. Require a detached trusted `LocalAuthProfile` and `allowsManifestOrigin({ catalogId, releaseId, manifestDigest, origin })`, supplied from verified manifest/current catalog policy and returning literal true. Recheck this callback at preflight and every redirect/continuation before DNS; a call's own digest is not signed-manifest authority. Expose local `close()` for shutdown, abort pending policy/DNS and HTTP work, invalidate unused plans/tokens, and retain the portable transport interface unchanged. Plans have a 30-second maximum TTL; tokens use random opaque IDs plus process HMAC, a 1024-entry registry, and 120-second TTL, all reduction-only. Amend unpublished prepared-call v2 with nullable digest-bound pageToken and use the same prepareRead/revalidate path. Pagination extraction is Link rel=next only; no provider JSON guesses. All action redirects are blocked; only reads follow up to three same-origin HTTPS redirects. HEAD length is hypothetical; GET/HEAD request bodies fail preflight explicitly. See design §13 for precise authority, lifecycle, and compatibility constraints.
 
 **Interfaces:**
 - Consumes: `PreparedCall`, `CredentialSnapshot`, `ActionDispatchPermit`, exact destination policy, canonical credential-profile/slot commitments, and runtime limits.
@@ -1017,7 +1021,7 @@ Expected: FAIL because local destination and transport enforcement are absent.
 
 - [ ] **Step 3: Pin the tested HTTP implementation dependency**
 
-Run: `mise exec -- bun add --exact --cwd packages/openapi-mcp undici`
+Run: `mise exec -- bun add --exact --cwd packages/openapi-mcp undici@8.10.2`
 Expected: `package.json` and `bun.lock` record one exact tested version. Inspect its license and Node 24 compatibility before continuing; fail the task if either is incompatible.
 
 - [ ] **Step 4: Implement DNS-aware destination authorization**
@@ -1030,7 +1034,7 @@ Normalize exact configured origins, resolve all A/AAAA records with `dns.promise
 
 `dispatchRead(plan)` accepts only a registered read plan. `dispatchAction(plan, permit)` accepts only a registered action plan and runtime-authenticated permit bound to the same call and credential digests; it synchronously deletes the permit and marks the plan single-use before its first `await`. Both methods recheck plan expiry and immutable bindings. The package exports no raw action HTTP primitive and rejects bare calls, forged/copies/reused plans or permits, and safety confusion before request construction, secret injection, or upstream I/O.
 
-Only after those gates does dispatch start from `PreparedCall.origin + relativeUrl`, inject credentials, enforce the header denylist, use manual redirects, and strip credential/body on a cross-origin redirect. Count decompressed stream bytes. Return opaque HMAC continuation tokens binding catalog/release/operation/origin/next URL/expiry; validate them before preparing the next read.
+Only after those gates does dispatch start from `PreparedCall.origin + relativeUrl`, inject credentials, enforce the header denylist, and use manual redirects. Cross-origin redirects return a sanitized blocked outcome without any second request or credential/body injection; all action redirects are blocked. Count decompressed stream bytes. Return random opaque ID plus HMAC continuation tokens binding every PaginationTokenState field; validate them through the existing runtime path before preparing and revalidating the next read.
 
 - [ ] **Step 6: Encode retry and outcome rules**
 
@@ -1040,6 +1044,8 @@ Reads retry only 429/502/503/504 or pre-connect failures, within the original de
 
 Run: `mise exec -- bun test packages/openapi-mcp/tests/guarded-fetch.test.ts packages/openapi-mcp/tests/runtime-prepare.test.ts packages/openapi-mcp/tests/auth.test.ts`
 Expected: PASS.
+
+Also run `mise exec -- node --experimental-transform-types --test packages/openapi-mcp/tests/guarded-fetch.node.ts` (or package `test:node-transport`) under managed Node 24. This must exercise actual TLS hostname/certificate verification, pinned lookup invocation, one-request action counts, redirects, decoding and deadlines with isolated loopback fixtures. Bun-only mocks do not establish Node transport behavior. The local adapter is Node-only; the public runtime stays Worker-safe.
 
 - [ ] **Step 8: Prove egress and no-retry gates with mutation checks**
 

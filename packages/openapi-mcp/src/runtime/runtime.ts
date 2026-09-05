@@ -9,6 +9,7 @@ import {
 } from "./manifest.ts";
 import {
   createPreparedCall,
+  snapshotPaginationTokenState,
   verifyAndSnapshotPreparedCall,
 } from "./prepared-call.ts";
 import {
@@ -54,6 +55,7 @@ import {
 } from "./versions.ts";
 
 export interface OpenApiRuntimeOptions {
+  readonly paginationTokenCodec?: import("./types.ts").PaginationTokenCodec;
   readonly store: CatalogStore;
   readonly trust: ManifestTrust;
   readonly generations: GenerationStore;
@@ -710,6 +712,7 @@ function validateSearchInput(value: unknown, limits: RuntimeLimits) {
 function snapshotPrepareInput(value: unknown): {
   readonly operation: string;
   readonly arguments: unknown;
+  readonly pageToken: string | null;
 } {
   try {
     if (typeof value !== "object" || value === null || Array.isArray(value))
@@ -736,13 +739,23 @@ function snapshotPrepareInput(value: unknown): {
         throw new Error();
       snapshot[key] = descriptor.value;
     }
-    if (Object.hasOwn(snapshot, "pageToken")) {
-      throw inputInvalid("Pagination tokens are not supported");
-    }
+    if (
+      Object.hasOwn(snapshot, "pageToken") &&
+      (typeof snapshot.pageToken !== "string" ||
+        snapshot.pageToken.length === 0 ||
+        snapshot.pageToken.length > 512 ||
+        Array.from(snapshot.pageToken).some(
+          (character) =>
+            character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127,
+        ))
+    )
+      throw inputInvalid("Pagination token is invalid");
     if (typeof snapshot.operation !== "string") throw new Error();
     return Object.freeze({
       operation: snapshot.operation,
       arguments: snapshot.arguments,
+      pageToken:
+        typeof snapshot.pageToken === "string" ? snapshot.pageToken : null,
     });
   } catch (error) {
     if (error instanceof OpenApiMcpError) throw error;
@@ -965,6 +978,11 @@ export function createOpenApiRuntime(
     expectedSafety: "read" | "action",
   ): Promise<PreparedCall> => {
     const input = snapshotPrepareInput(inputValue);
+    if (
+      input.pageToken !== null &&
+      (expectedSafety !== "read" || !options.paginationTokenCodec)
+    )
+      throw inputInvalid("Pagination token is not permitted");
     const reference = decodeOperationRef(input.operation);
     let envelope: ManifestEnvelope;
     try {
@@ -1081,7 +1099,7 @@ export function createOpenApiRuntime(
       credentialSlots as unknown as OpenApiValue,
     );
 
-    const prepared = await createPreparedCall({
+    let prepared = await createPreparedCall({
       version: PREPARED_CALL_VERSION,
       catalogId: reference.catalogId,
       releaseId: reference.releaseId,
@@ -1094,6 +1112,7 @@ export function createOpenApiRuntime(
       method: operation.method,
       origin: operation.origin,
       relativeUrl: serialized.relativeUrl,
+      pageToken: null,
       headers: serialized.headers,
       body: serialized.body,
       normalizedArguments: serialized.normalizedArguments,
@@ -1101,6 +1120,55 @@ export function createOpenApiRuntime(
       actionKind: operationClassification.actionKind,
       cardinality: operationClassification.cardinality,
     });
+    if (input.pageToken !== null) {
+      let token: ReturnType<typeof snapshotPaginationTokenState>;
+      try {
+        if (!options.paginationTokenCodec)
+          throw inputInvalid("Pagination codec is unavailable");
+        token = snapshotPaginationTokenState(
+          await options.paginationTokenCodec.decode(input.pageToken),
+          limits,
+        );
+      } catch (error) {
+        if (
+          error instanceof OpenApiMcpError &&
+          error.code === "PAGINATION_LIMIT_EXCEEDED"
+        )
+          throw error;
+        throw inputInvalid("Pagination token is invalid");
+      }
+      if (
+        token.catalogId !== prepared.catalogId ||
+        token.releaseId !== prepared.releaseId ||
+        token.operationId !== prepared.operationId ||
+        token.origin !== prepared.origin ||
+        !timingSafeEqual(token.manifestDigest, prepared.manifestDigest) ||
+        !timingSafeEqual(token.inputDigest, prepared.inputDigest)
+      )
+        throw inputInvalid("Pagination token does not match the call");
+      const nextUrl = new URL(token.nextRelativeUrl, prepared.origin);
+      for (const slot of credentialSlots) {
+        if (
+          slot.placement === "query" &&
+          [...nextUrl.searchParams.keys()].some(
+            (key) => key.toLowerCase() === slot.name.toLowerCase(),
+          )
+        )
+          throw inputInvalid(
+            "Continuation URL contains a reserved credential slot",
+          );
+      }
+      const {
+        inputDigest: _inputDigest,
+        preparedCallDigest: _preparedCallDigest,
+        ...payload
+      } = prepared;
+      prepared = await createPreparedCall({
+        ...payload,
+        relativeUrl: token.nextRelativeUrl,
+        pageToken: input.pageToken,
+      });
+    }
     await requireActiveManifest(authenticated);
     return prepared;
   };
@@ -1616,6 +1684,9 @@ export function createOpenApiRuntime(
         Object.freeze({
           operation,
           arguments: snapshot.normalizedArguments,
+          ...(snapshot.pageToken === null
+            ? {}
+            : { pageToken: snapshot.pageToken }),
         }),
         snapshot.safety,
       );

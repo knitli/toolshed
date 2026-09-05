@@ -59,10 +59,12 @@
     "build": "tsc",
     "prepublishOnly": "bun run build",
     "test": "bun test",
+    "test:node-transport": "node --experimental-transform-types --test tests/guarded-fetch.node.ts",
     "check": "bunx biome check ."
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
+    "undici": "8.10.2",
     "yaml": "^2.9.0",
     "zod": "4.5.4"
   },

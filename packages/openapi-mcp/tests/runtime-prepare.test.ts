@@ -20,6 +20,11 @@ import {
   sha256,
   verifyPreparedCall,
 } from "../src/runtime/index.ts";
+import { createPreparedCall } from "../src/runtime/prepared-call.ts";
+import type {
+  PaginationTokenCodec,
+  PaginationTokenState,
+} from "../src/runtime/types.ts";
 
 const catalogId = "tiny" as CatalogId;
 const releaseId = "release-1" as ReleaseId;
@@ -81,7 +86,7 @@ function base64url(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64url");
 }
 
-async function fixture() {
+async function fixture(paginationTokenCodec?: PaginationTokenCodec) {
   const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
     "sign",
     "verify",
@@ -180,6 +185,7 @@ async function fixture() {
     store,
     trust,
     generations,
+    paginationTokenCodec,
     destinationPolicy: {
       async allows(origin) {
         policyReads += 1;
@@ -259,6 +265,130 @@ test("exports complete preparation surface", async () => {
     expect(typeof module[name as keyof typeof module]).toBe("function");
 });
 
+test("continued read binds opaque token and URL while retaining canonical arguments and revalidating proof", async () => {
+  let state: PaginationTokenState;
+  let decodes = 0;
+  const codec = {
+    async encode() {
+      return "opaque-proof";
+    },
+    async decode(token: string) {
+      decodes++;
+      if (token !== "opaque-proof") throw new Error();
+      return state;
+    },
+  };
+  const value = await fixture(codec);
+  const input = {
+    operation: value.reference("operation:tiny:listWidgets"),
+    arguments: {},
+  };
+  const base = await value.runtime.prepareRead(input);
+  state = {
+    catalogId: base.catalogId,
+    releaseId: base.releaseId,
+    manifestDigest: base.manifestDigest,
+    operationId: base.operationId,
+    inputDigest: base.inputDigest,
+    origin: base.origin,
+    nextRelativeUrl: "/widgets?page=2",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    pageCount: 1,
+    cumulativeBytes: 100,
+  };
+  const next = await value.runtime.prepareRead({
+    ...input,
+    pageToken: "opaque-proof",
+  });
+  expect(next.relativeUrl).toBe("/widgets?page=2");
+  expect(next.pageToken).toBe("opaque-proof");
+  expect(next.inputDigest).toBe(base.inputDigest);
+  expect(next.normalizedArguments).toEqual(base.normalizedArguments);
+  expect(next.preparedCallDigest).not.toBe(base.preparedCallDigest);
+  await expect(value.runtime.revalidate(next)).resolves.toMatchObject({
+    preparedCallDigest: next.preparedCallDigest,
+  });
+  expect(decodes).toBe(2);
+  const { inputDigest: _input, preparedCallDigest: _digest, ...payload } = next;
+  const altered = await createPreparedCall({
+    ...payload,
+    relativeUrl: "/attacker",
+  });
+  await expect(value.runtime.revalidate(altered)).rejects.toMatchObject({
+    code: "RECORD_NOT_ADMITTED",
+  });
+  state = { ...state, expiresAt: new Date(Date.now() - 1).toISOString() };
+  await expect(value.runtime.revalidate(next)).rejects.toMatchObject({
+    code: "INPUT_INVALID",
+  });
+});
+
+test("continued reads reject token tuple substitutions, unsafe URLs, bounds and credential slots", async () => {
+  let state: PaginationTokenState;
+  const value = await fixture({
+    async encode() {
+      return "proof";
+    },
+    async decode() {
+      return state;
+    },
+  });
+  const input = {
+    operation: value.reference("operation:tiny:listWidgets"),
+    arguments: {},
+  };
+  const base = await value.runtime.prepareRead(input);
+  const good = {
+    catalogId: base.catalogId,
+    releaseId: base.releaseId,
+    manifestDigest: base.manifestDigest,
+    operationId: base.operationId,
+    inputDigest: base.inputDigest,
+    origin: base.origin,
+    nextRelativeUrl: "/widgets?page=2",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    pageCount: 1,
+    cumulativeBytes: 100,
+  };
+  for (const patch of [
+    { catalogId: "other" },
+    { releaseId: "other" },
+    { manifestDigest: digestB },
+    { operationId: "operation:tiny:createWidget" },
+    { inputDigest: digestB },
+    { origin: "https://other.test" },
+    { nextRelativeUrl: "//evil.test/x" },
+    { nextRelativeUrl: "/x#fragment" },
+    { extra: "bad" },
+  ]) {
+    state = { ...good, ...patch } as PaginationTokenState;
+    await expect(
+      value.runtime.prepareRead({ ...input, pageToken: "proof" }),
+    ).rejects.toMatchObject({ code: "INPUT_INVALID" });
+  }
+  for (const patch of [
+    { pageCount: 10 },
+    { cumulativeBytes: 16 * 1024 * 1024 },
+  ]) {
+    state = { ...good, ...patch };
+    await expect(
+      value.runtime.prepareRead({ ...input, pageToken: "proof" }),
+    ).rejects.toMatchObject({ code: "PAGINATION_LIMIT_EXCEEDED" });
+  }
+  state = { ...good, nextRelativeUrl: "/widgets?api_key=prepopulated" };
+  value.setSlots([{ placement: "query", name: "api_key" }]);
+  await expect(
+    value.runtime.prepareRead({ ...input, pageToken: "proof" }),
+  ).rejects.toMatchObject({ code: "INPUT_INVALID" });
+  await expect(
+    value.runtime.prepareAction({
+      operation: value.reference("operation:tiny:createWidget"),
+      arguments: {},
+      pageToken: "proof",
+    }),
+  ).rejects.toMatchObject({ code: "INPUT_INVALID" });
+});
+
 test("prepares credential-free read and action calls through the correct tool", async () => {
   const value = await fixture();
   const read = await value.runtime.prepareRead({
@@ -268,7 +398,7 @@ test("prepares credential-free read and action calls through the correct tool", 
   expect(read.safety).toBe("read");
   expect(read.actionKind).toBeNull();
   expect(JSON.stringify(read)).not.toMatch(
-    /authorization|token|secret|grant|subject/i,
+    /authorization|"token"|secret|grant|subject/i,
   );
   await verifyPreparedCall(read);
   const action = await value.runtime.prepareAction({
