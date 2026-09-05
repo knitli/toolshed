@@ -3,6 +3,10 @@ export {
   classifyOperation,
   type OperationClassification,
 } from "./classify.ts";
+export {
+  digestCredentialAuthorizationBinding,
+  snapshotCredentialAuthorizationBinding,
+} from "./credential-binding.ts";
 export { sha256, verifyEd25519 } from "./digest.ts";
 export type { OpenApiMcpErrorCode } from "./errors.ts";
 export { OpenApiMcpError } from "./errors.ts";
@@ -63,6 +67,7 @@ export type {
   CredentialResolution,
   CredentialSlot,
   CredentialSlotContext,
+  CredentialSnapshot,
   DestinationPolicy,
   GenerationState,
   GenerationStore,
@@ -70,6 +75,7 @@ export type {
   HttpMethod,
   JsonObject,
   JsonValue,
+  LocalAuthProfile,
   ManifestEnvelope,
   ManifestSignature,
   OpenApiArguments,

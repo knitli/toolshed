@@ -431,6 +431,17 @@ export type AuthProfile =
       resource?: string;
     };
 
+/** Complete trusted, non-secret configuration for one local upstream identity. */
+export interface LocalAuthProfile {
+  readonly profileId: string;
+  readonly revision: number;
+  readonly allowedOrigins: readonly string[];
+  readonly auth: AuthProfile;
+  readonly audience?: string;
+  /** Environment-profile scopes only; OAuth scopes are declared by auth.scopes. */
+  readonly scopes?: readonly string[];
+}
+
 export interface SecretStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
@@ -446,8 +457,14 @@ export type Credential =
       value: string;
     };
 
+/** Host-internal only. This secret-bearing value must never enter MCP output. */
+export interface CredentialSnapshot {
+  readonly credential: Credential;
+  readonly binding: CredentialAuthorizationBinding;
+}
+
 export type CredentialResolution =
-  | { status: "ready"; credential: Credential }
+  | { status: "ready"; snapshot: CredentialSnapshot }
   | { status: "auth-required"; authorizationUrl: string; expiresAt: string };
 
 export interface CredentialProvider {
