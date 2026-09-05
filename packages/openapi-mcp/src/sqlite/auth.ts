@@ -39,6 +39,7 @@ const PROFILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ENV_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 const FORBIDDEN_API_KEY_HEADERS = new Set([
+  "accept",
   "authorization",
   "connection",
   "cookie",
@@ -796,8 +797,23 @@ function createOAuthProvider(
 
   const deleteTokens = async (ownedGeneration: number): Promise<void> => {
     const keys = tokenKeys(ownedGeneration);
-    await safeDelete(keys.access);
-    await safeDelete(keys.refresh);
+    let deletionFailed = false;
+    try {
+      await safeDelete(keys.access);
+    } catch {
+      deletionFailed = true;
+    }
+    try {
+      await safeDelete(keys.refresh);
+    } catch {
+      deletionFailed = true;
+    }
+    if (deletionFailed) {
+      throw new OpenApiMcpError(
+        "AUTH_REQUIRED",
+        "Credential storage is unavailable",
+      );
+    }
   };
 
   const commitToken = async (
@@ -805,23 +821,35 @@ function createOAuthProvider(
     expectedGeneration: number,
     refreshFallback?: string,
   ): Promise<boolean> => {
-    if (generation !== expectedGeneration || closed) return false;
-    const keys = tokenKeys(expectedGeneration);
-    await safeSet(keys.access, token.accessToken);
-    if (generation !== expectedGeneration || closed) {
-      await deleteTokens(expectedGeneration);
-      return false;
+    try {
+      if (generation !== expectedGeneration || closed) return false;
+      const keys = tokenKeys(expectedGeneration);
+      await safeSet(keys.access, token.accessToken);
+      if (generation !== expectedGeneration || closed) {
+        await deleteTokens(expectedGeneration);
+        return false;
+      }
+      const nextRefresh = token.refreshToken ?? refreshFallback;
+      if (nextRefresh === undefined) await safeDelete(keys.refresh);
+      else await safeSet(keys.refresh, nextRefresh);
+      if (generation !== expectedGeneration || closed) {
+        await deleteTokens(expectedGeneration);
+        return false;
+      }
+      expiresAt = token.expiresAt;
+      liveScopes = token.scopes;
+      return true;
+    } catch {
+      try {
+        await deleteTokens(expectedGeneration);
+      } catch {
+        // Best effort: an unreliable SecretStore may retain physical bytes.
+      }
+      throw new OpenApiMcpError(
+        "AUTH_REQUIRED",
+        "Credential storage is unavailable",
+      );
     }
-    const nextRefresh = token.refreshToken ?? refreshFallback;
-    if (nextRefresh === undefined) await safeDelete(keys.refresh);
-    else await safeSet(keys.refresh, nextRefresh);
-    if (generation !== expectedGeneration || closed) {
-      await deleteTokens(expectedGeneration);
-      return false;
-    }
-    expiresAt = token.expiresAt;
-    liveScopes = token.scopes;
-    return true;
   };
 
   const exchange = async (

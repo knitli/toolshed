@@ -244,6 +244,25 @@ describe("local authentication", () => {
     }
   });
 
+  test("rejects a header API key that reserves the runtime Accept header", async () => {
+    await expect(
+      createCredentialProvider(
+        bearerProfile({
+          auth: {
+            type: "api-key-env",
+            env: "API_KEY",
+            placement: "header",
+            name: "aCcEpT",
+          },
+        }),
+        { manifestOrigins: [origin] },
+      ),
+    ).rejects.toMatchObject({
+      code: "AUTH_PROFILE_INVALID",
+      message: "Authentication profile is invalid",
+    });
+  });
+
   test("rejects malformed profiles, unsafe headers, and empty origin intersections", async () => {
     const invalid: LocalAuthProfile[] = [
       bearerProfile({ profileId: "../tiny" }),
@@ -650,6 +669,121 @@ describe("local authentication", () => {
       expect(values.size).toBe(0);
       if (lifecycle === "forget") await provider.close();
     }
+  });
+
+  test("rolls back both owned token keys when storing a refresh token fails", async () => {
+    const values = new Map<string, string>([
+      ["other-provider:7:access", "other-access"],
+      ["other-provider:7:refresh", "other-refresh"],
+    ]);
+    const deleteAttempts: string[] = [];
+    let otherGenerationAccessKey = "";
+    const provider = await createCredentialProvider(oauthProfile(), {
+      manifestOrigins: [origin],
+      randomBytes: deterministicRandom(),
+      secretStore: {
+        async get(key) {
+          return values.get(key) ?? null;
+        },
+        async set(key, value) {
+          if (key.endsWith(":refresh"))
+            throw new Error("refresh-set-provider-secret");
+          otherGenerationAccessKey = key.replace(/:0:access$/, ":99:access");
+          values.set(otherGenerationAccessKey, "other-generation-access");
+          values.set(key, value);
+        },
+        async delete(key) {
+          deleteAttempts.push(key);
+          values.delete(key);
+        },
+      },
+      fetch: async () =>
+        Response.json({
+          access_token: "partial-access-secret",
+          refresh_token: "partial-refresh-secret",
+          token_type: "Bearer",
+        }),
+    });
+    const required = await provider.resolve();
+    if (required.status !== "auth-required")
+      throw new Error("authorization not required");
+    const authorization = new URL(required.authorizationUrl);
+    const result = await callbackRequest(
+      `${requiredQuery(authorization, "redirect_uri")}?state=${authorization.searchParams.get("state")}&code=callback-secret`,
+    );
+
+    expect(result).toEqual({ status: 502, body: "Authorization failed" });
+    expect(JSON.stringify(result)).not.toContain("provider-secret");
+    expect(values.get("other-provider:7:access")).toBe("other-access");
+    expect(values.get("other-provider:7:refresh")).toBe("other-refresh");
+    expect(values.get(otherGenerationAccessKey)).toBe(
+      "other-generation-access",
+    );
+    expect([...values.values()]).not.toContain("partial-access-secret");
+    expect(
+      deleteAttempts.filter((key) => key.endsWith(":access")),
+    ).toHaveLength(1);
+    expect(
+      deleteAttempts.filter((key) => key.endsWith(":refresh")),
+    ).toHaveLength(1);
+    expect((await provider.resolve()).status).toBe("auth-required");
+    await provider.close();
+  });
+
+  test("attempts both owned-key rollbacks when deleting an absent refresh token fails", async () => {
+    const values = new Map<string, string>([
+      ["other-provider:8:access", "other-access"],
+      ["other-provider:8:refresh", "other-refresh"],
+    ]);
+    const deleteAttempts: string[] = [];
+    let rejectFirstOwnedRefreshDelete = true;
+    const provider = await createCredentialProvider(oauthProfile(), {
+      manifestOrigins: [origin],
+      randomBytes: deterministicRandom(),
+      secretStore: {
+        async get(key) {
+          return values.get(key) ?? null;
+        },
+        async set(key, value) {
+          values.set(key, value);
+        },
+        async delete(key) {
+          deleteAttempts.push(key);
+          if (key.endsWith(":refresh") && rejectFirstOwnedRefreshDelete) {
+            rejectFirstOwnedRefreshDelete = false;
+            throw new Error("refresh-delete-provider-secret");
+          }
+          values.delete(key);
+        },
+      },
+      fetch: async () =>
+        Response.json({
+          access_token: "partial-access-secret",
+          token_type: "Bearer",
+        }),
+    });
+    const required = await provider.resolve();
+    if (required.status !== "auth-required")
+      throw new Error("authorization not required");
+    const authorization = new URL(required.authorizationUrl);
+    const result = await callbackRequest(
+      `${requiredQuery(authorization, "redirect_uri")}?state=${authorization.searchParams.get("state")}&code=callback-secret`,
+    );
+
+    expect(result).toEqual({ status: 502, body: "Authorization failed" });
+    expect(JSON.stringify(result)).not.toContain("provider-secret");
+    expect([...values.entries()]).toEqual([
+      ["other-provider:8:access", "other-access"],
+      ["other-provider:8:refresh", "other-refresh"],
+    ]);
+    expect(
+      deleteAttempts.filter((key) => key.endsWith(":access")),
+    ).toHaveLength(1);
+    expect(
+      deleteAttempts.filter((key) => key.endsWith(":refresh")),
+    ).toHaveLength(2);
+    expect((await provider.resolve()).status).toBe("auth-required");
+    await provider.close();
   });
 
   test("obsolete refresh cleanup cannot reset completed replacement grant metadata", async () => {
