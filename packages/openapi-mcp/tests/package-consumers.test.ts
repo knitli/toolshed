@@ -34,7 +34,7 @@ test("runtime exposes the Phase 2 contract versions", async () => {
   const runtime = await import("../src/runtime/index.ts");
   expect(runtime.ARTIFACT_FORMAT_VERSION).toBe(5);
   expect(runtime.RUNTIME_CONTRACT_VERSION).toBe(1);
-  expect(runtime.PREPARED_CALL_VERSION).toBe(1);
+  expect(runtime.PREPARED_CALL_VERSION).toBe(2);
   expect(runtime.MAX_SEARCH_QUERY_BYTES).toBe(4 * 1024);
 });
 

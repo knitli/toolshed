@@ -302,12 +302,16 @@ export type ActionCardinality =
   | { kind: "unknown" };
 
 export interface PreparedCall {
-  version: 1;
+  version: 2;
   catalogId: CatalogId;
   releaseId: ReleaseId;
   operationId: TypedOperationId;
   operationDigest: Sha256;
   manifestDigest: Sha256;
+  /** Stable operator-selected profile identifier; never a user or token identifier. */
+  credentialProfileId: string;
+  /** Commits the selected profile's complete non-secret configuration. */
+  credentialProfileDigest: Sha256;
   /** Binds the host-selected credential injection locations, never secrets. */
   reservedSlotsDigest: Sha256;
   method: HttpMethod;
@@ -420,13 +424,20 @@ export interface CredentialSlotContext {
 }
 
 /**
- * Host-owned policy for reserving later credential injection locations.
- * Implementations return names only; credentials never enter preparation.
+ * Host-owned policy for selecting a non-secret credential profile commitment.
+ * Implementations return a profile ID, profile digest, and injection slots;
+ * credentials never enter preparation.
  */
-export interface CredentialSlotResolver {
+export interface CredentialProfileBinding {
+  readonly profileId: string;
+  readonly profileDigest: Sha256;
+  readonly slots: readonly CredentialSlot[];
+}
+
+export interface CredentialBindingResolver {
   resolve(
     context: Readonly<CredentialSlotContext>,
-  ): Promise<readonly CredentialSlot[]>;
+  ): Promise<CredentialProfileBinding>;
 }
 
 export interface PaginationTokenState {

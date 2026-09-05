@@ -19,12 +19,16 @@ async function call(
   overrides: Partial<PreparedCall> = {},
 ): Promise<PreparedCall> {
   return await createPreparedCall({
-    version: 1,
+    version: 2,
     catalogId: "tiny" as PreparedCall["catalogId"],
     releaseId: "release-1" as PreparedCall["releaseId"],
     operationId: "operation:tiny:createWidget",
     operationDigest: digest,
     manifestDigest: "b".repeat(64) as PreparedCall["manifestDigest"],
+    credentialProfileId: "tiny-user",
+    credentialProfileDigest: "d".repeat(
+      64,
+    ) as PreparedCall["credentialProfileDigest"],
     reservedSlotsDigest: "c".repeat(64) as PreparedCall["reservedSlotsDigest"],
     method: "POST",
     origin: "https://api.example.test",
@@ -59,7 +63,7 @@ test("creates a frozen credential-free call whose digest binds body and inputs",
   exposedBody[0] = 9;
   expect([...(prepared.body ?? [])]).toEqual([1, 2, 3]);
   expect(JSON.stringify(prepared)).not.toMatch(
-    /authorization|token|credential/i,
+    /authorization|token|secret|grant|subject/i,
   );
   await expect(verifyPreparedCall(prepared)).resolves.toBeUndefined();
 
@@ -88,11 +92,18 @@ test("omits the self digest from canonical preparation input", async () => {
 test("rejects mutations of every integrity-bound public field", async () => {
   const prepared = await call();
   const mutations: readonly Partial<PreparedCall>[] = [
+    { version: 1 as never },
     { catalogId: "other" as PreparedCall["catalogId"] },
     { releaseId: "release-2" as PreparedCall["releaseId"] },
     { operationId: "operation:tiny:other" },
     { operationDigest: "c".repeat(64) as PreparedCall["operationDigest"] },
     { manifestDigest: "d".repeat(64) as PreparedCall["manifestDigest"] },
+    { credentialProfileId: "other-profile" },
+    {
+      credentialProfileDigest: "f".repeat(
+        64,
+      ) as PreparedCall["credentialProfileDigest"],
+    },
     {
       reservedSlotsDigest: "e".repeat(
         64,
@@ -139,6 +150,8 @@ test("rejects hostile shape and transport values", async () => {
   const cases: readonly unknown[] = [
     { ...prepared, extra: true },
     accessor,
+    { ...prepared, credentialProfileId: "unstable/profile" },
+    { ...prepared, credentialProfileDigest: "A".repeat(64) },
     { ...prepared, origin: "http://api.example.test" },
     { ...prepared, origin: "https://user@api.example.test" },
     { ...prepared, relativeUrl: "//attacker.example/path" },
@@ -154,6 +167,37 @@ test("rejects hostile shape and transport values", async () => {
     ).rejects.toMatchObject({
       code: "INPUT_INVALID",
     });
+  }
+});
+
+test("accepts HTAB in a header field value", async () => {
+  const prepared = await call({ headers: { "x-trace": "part-one\tpart-two" } });
+
+  expect(prepared.headers["x-trace"]).toBe("part-one\tpart-two");
+  await expect(verifyPreparedCall({ ...prepared })).resolves.toBeUndefined();
+});
+
+test("rejects every other C0 control and DEL in a header field value", async () => {
+  const prepared = await call();
+  const forbiddenCodePoints = [
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0a, 0x0b, 0x0c,
+    0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+    0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x7f,
+  ] as const;
+
+  for (const codePoint of forbiddenCodePoints) {
+    const headers = {
+      "x-trace": `before${String.fromCharCode(codePoint)}after`,
+    };
+    await expect(call({ headers })).rejects.toMatchObject({
+      code: "INPUT_INVALID",
+    });
+    await expect(
+      verifyPreparedCall({
+        ...prepared,
+        headers,
+      }),
+    ).rejects.toMatchObject({ code: "INPUT_INVALID" });
   }
 });
 
@@ -242,12 +286,16 @@ test("accepts ordinary declared token-like headers from serialization through ve
     },
   );
   const prepared = await createPreparedCall({
-    version: 1,
+    version: 2,
     catalogId: "tiny" as PreparedCall["catalogId"],
     releaseId: "release-1" as PreparedCall["releaseId"],
     operationId: operation.id,
     operationDigest: digest,
     manifestDigest: "b".repeat(64) as PreparedCall["manifestDigest"],
+    credentialProfileId: "tiny-user",
+    credentialProfileDigest: "d".repeat(
+      64,
+    ) as PreparedCall["credentialProfileDigest"],
     reservedSlotsDigest: "c".repeat(64) as PreparedCall["reservedSlotsDigest"],
     method: operation.method,
     origin: operation.origin,
