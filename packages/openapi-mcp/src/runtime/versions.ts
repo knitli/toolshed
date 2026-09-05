@@ -5,7 +5,7 @@ export const RUNTIME_CONTRACT_VERSION = 1 as const;
 export const ARTIFACT_FORMAT_VERSION = 5 as const;
 
 /** Version of the credential-free prepared-call representation. */
-export const PREPARED_CALL_VERSION = 1 as const;
+export const PREPARED_CALL_VERSION = 2 as const;
 
 /** Fixed UTF-8 envelope for a single catalog search query. */
 export const MAX_SEARCH_QUERY_BYTES = 4 * 1024;

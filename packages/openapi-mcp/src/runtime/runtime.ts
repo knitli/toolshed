@@ -22,9 +22,9 @@ import { canonicalJson } from "./strict-json.ts";
 import type {
   CandidateRef,
   CatalogStore,
+  CredentialBindingResolver,
   CredentialSlot,
   CredentialSlotContext,
-  CredentialSlotResolver,
   DestinationPolicy,
   GenerationState,
   GenerationStore,
@@ -40,6 +40,7 @@ import type {
   SearchResult,
   SearchResultItem,
   SearchWarning,
+  Sha256,
   StoredRecord,
   TypedOperationId,
   TypedSchemaId,
@@ -59,7 +60,7 @@ export interface OpenApiRuntimeOptions {
   /** Required by preparation; search-only runtimes may omit this port. */
   readonly destinationPolicy?: DestinationPolicy;
   /** Required by preparation; search-only runtimes may omit this port. */
-  readonly credentialSlots?: CredentialSlotResolver;
+  readonly credentialBinding?: CredentialBindingResolver;
   readonly limits?: Partial<RuntimeLimits>;
 }
 
@@ -829,6 +830,67 @@ function snapshotCredentialSlots(value: unknown): readonly CredentialSlot[] {
   }
 }
 
+interface CredentialProfileBindingSnapshot {
+  readonly profileId: string;
+  readonly profileDigest: Sha256;
+  readonly slots: readonly CredentialSlot[];
+}
+
+function snapshotCredentialProfileBinding(
+  value: unknown,
+): CredentialProfileBindingSnapshot {
+  try {
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+      throw new Error();
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== null && prototype !== Object.prototype) throw new Error();
+    const keys = Reflect.ownKeys(value).sort();
+    if (
+      keys.length !== 3 ||
+      keys[0] !== "profileDigest" ||
+      keys[1] !== "profileId" ||
+      keys[2] !== "slots"
+    )
+      throw new Error();
+    const profileId = Object.getOwnPropertyDescriptor(value, "profileId");
+    const profileDigest = Object.getOwnPropertyDescriptor(
+      value,
+      "profileDigest",
+    );
+    const slots = Object.getOwnPropertyDescriptor(value, "slots");
+    if (
+      profileId === undefined ||
+      !("value" in profileId) ||
+      !profileId.enumerable ||
+      typeof profileId.value !== "string" ||
+      profileId.value.length === 0 ||
+      profileId.value.length > 128 ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(profileId.value) ||
+      profileId.value === "." ||
+      profileId.value === ".." ||
+      profileDigest === undefined ||
+      !("value" in profileDigest) ||
+      !profileDigest.enumerable ||
+      typeof profileDigest.value !== "string" ||
+      !/^[0-9a-f]{64}$/.test(profileDigest.value) ||
+      slots === undefined ||
+      !("value" in slots) ||
+      !slots.enumerable
+    )
+      throw new Error();
+    return Object.freeze({
+      profileId: profileId.value,
+      profileDigest: profileDigest.value as Sha256,
+      slots: snapshotCredentialSlots(slots.value),
+    });
+  } catch {
+    throw new OpenApiMcpError(
+      "AUTH_PROFILE_INVALID",
+      "Credential binding policy is invalid",
+    );
+  }
+}
+
 function destinationDenied(): OpenApiMcpError {
   return new OpenApiMcpError(
     "DESTINATION_DENIED",
@@ -930,11 +992,11 @@ export function createOpenApiRuntime(
     await requireActiveManifest(authenticated);
     const destinationPolicy = options.destinationPolicy;
     if (destinationPolicy === undefined) throw destinationDenied();
-    const credentialSlotResolver = options.credentialSlots;
-    if (credentialSlotResolver === undefined)
+    const credentialBindingResolver = options.credentialBinding;
+    if (credentialBindingResolver === undefined)
       throw new OpenApiMcpError(
         "AUTH_PROFILE_INVALID",
-        "Credential slot policy is unavailable",
+        "Credential binding policy is unavailable",
       );
 
     let storedOperation: StoredRecord<OperationRecordV4> | null;
@@ -987,16 +1049,17 @@ export function createOpenApiRuntime(
       method: operation.method,
       origin: operation.origin,
     });
-    let slotResult: unknown;
+    let bindingResult: unknown;
     try {
-      slotResult = await credentialSlotResolver.resolve(slotContext);
+      bindingResult = await credentialBindingResolver.resolve(slotContext);
     } catch {
       throw new OpenApiMcpError(
         "AUTH_PROFILE_INVALID",
-        "Credential slot policy failed",
+        "Credential binding policy failed",
       );
     }
-    const credentialSlots = snapshotCredentialSlots(slotResult);
+    const credentialBinding = snapshotCredentialProfileBinding(bindingResult);
+    const credentialSlots = credentialBinding.slots;
     const serialized = serializeArguments(operation, schemas, input.arguments, {
       limits,
       reservedCredentialSlots: credentialSlots,
@@ -1025,6 +1088,8 @@ export function createOpenApiRuntime(
       operationId: operation.id,
       operationDigest,
       manifestDigest: authenticated.manifestDigest,
+      credentialProfileId: credentialBinding.profileId,
+      credentialProfileDigest: credentialBinding.profileDigest,
       reservedSlotsDigest,
       method: operation.method,
       origin: operation.origin,
@@ -1557,6 +1622,11 @@ export function createOpenApiRuntime(
       if (
         !timingSafeEqual(fresh.operationDigest, snapshot.operationDigest) ||
         !timingSafeEqual(fresh.manifestDigest, snapshot.manifestDigest) ||
+        fresh.credentialProfileId !== snapshot.credentialProfileId ||
+        !timingSafeEqual(
+          fresh.credentialProfileDigest,
+          snapshot.credentialProfileDigest,
+        ) ||
         !timingSafeEqual(
           fresh.reservedSlotsDigest,
           snapshot.reservedSlotsDigest,

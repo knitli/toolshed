@@ -21,6 +21,8 @@ const preparedCallKeys = [
   "body",
   "cardinality",
   "catalogId",
+  "credentialProfileDigest",
+  "credentialProfileId",
   "reservedSlotsDigest",
   "headers",
   "inputDigest",
@@ -129,12 +131,14 @@ export type PreparedCallInput = Omit<
 >;
 
 interface ParsedPreparedCall {
-  readonly version: 1;
+  readonly version: 2;
   readonly catalogId: CatalogId;
   readonly releaseId: ReleaseId;
   readonly operationId: TypedOperationId;
   readonly operationDigest: Sha256;
   readonly manifestDigest: Sha256;
+  readonly credentialProfileId: string;
+  readonly credentialProfileDigest: Sha256;
   readonly reservedSlotsDigest: Sha256;
   readonly method: HttpMethod;
   readonly origin: string;
@@ -169,6 +173,14 @@ function hasControlCharacter(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
     if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function hasForbiddenHeaderValueCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if ((code <= 0x1f && code !== 0x09) || code === 0x7f) return true;
   }
   return false;
 }
@@ -297,7 +309,7 @@ function cloneHeaders(value: unknown): Readonly<Record<string, string>> {
       forbiddenHeader(key) ||
       typeof headerValue !== "string" ||
       headerValue.length > maxHeaderValueLength ||
-      hasControlCharacter(headerValue)
+      hasForbiddenHeaderValueCharacter(headerValue)
     ) {
       throw invalid();
     }
@@ -445,6 +457,8 @@ function parseUntrustedPreparedCall(value: unknown): ParsedPreparedCall {
     maxDepth: DEFAULT_RUNTIME_LIMITS.maxJsonDepth,
     maxNodes: DEFAULT_RUNTIME_LIMITS.maxManifestRecords,
   });
+  const credentialProfileId = ownValue(source, "credentialProfileId");
+  if (!validShortId(credentialProfileId)) throw invalid();
   return {
     version,
     catalogId: catalogId as CatalogId,
@@ -452,6 +466,10 @@ function parseUntrustedPreparedCall(value: unknown): ParsedPreparedCall {
     operationId: parsedOperationId,
     operationDigest: digest(ownValue(source, "operationDigest")),
     manifestDigest: digest(ownValue(source, "manifestDigest")),
+    credentialProfileId,
+    credentialProfileDigest: digest(
+      ownValue(source, "credentialProfileDigest"),
+    ),
     reservedSlotsDigest: digest(ownValue(source, "reservedSlotsDigest")),
     method: method as HttpMethod,
     origin: parsedOrigin,
@@ -492,6 +510,8 @@ function canonicalPayload(
     operationId: call.operationId,
     operationDigest: call.operationDigest,
     manifestDigest: call.manifestDigest,
+    credentialProfileId: call.credentialProfileId,
+    credentialProfileDigest: call.credentialProfileDigest,
     reservedSlotsDigest: call.reservedSlotsDigest,
     method: call.method,
     origin: call.origin,
@@ -531,7 +551,7 @@ export async function digestBytes(value: Uint8Array): Promise<Sha256> {
 export async function digestPreparedCall(call: PreparedCall): Promise<Sha256> {
   const parsed = parsePreparedCall(call);
   return await sha256(
-    "knitli.openapi-mcp.prepared-call.v1",
+    "knitli.openapi-mcp.prepared-call.v2",
     canonicalPayload(
       parsed,
       parsed.body === null ? null : await digestBytes(parsed.body),
@@ -548,7 +568,7 @@ export async function verifyAndSnapshotPreparedCall(
     parsed.normalizedArguments,
   );
   const expectedCall = await sha256(
-    "knitli.openapi-mcp.prepared-call.v1",
+    "knitli.openapi-mcp.prepared-call.v2",
     canonicalPayload(
       parsed,
       parsed.body === null ? null : await digestBytes(parsed.body),
@@ -587,7 +607,7 @@ export async function createPreparedCall(
     );
     const withInput = { ...parsed, inputDigest };
     const preparedCallDigest = await sha256(
-      "knitli.openapi-mcp.prepared-call.v1",
+      "knitli.openapi-mcp.prepared-call.v2",
       canonicalPayload(
         withInput,
         parsed.body === null ? null : await digestBytes(parsed.body),

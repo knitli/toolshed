@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   type CatalogId,
   type CatalogStore,
+  type CredentialProfileBinding,
   canonicalJson,
   createOpenApiRuntime,
   encodeOperationRef,
@@ -154,7 +155,10 @@ async function fixture() {
   let allowed = true;
   let policyError = false;
   let onPolicy: (() => void) | undefined;
+  let profileId = "tiny-user";
+  let profileDigest = digestA;
   let slots: readonly { placement: "header" | "query"; name: string }[] = [];
+  let bindingOverride: unknown;
   let slotError = false;
   const store: CatalogStore = {
     async getManifest() {
@@ -185,13 +189,17 @@ async function fixture() {
         return allowed;
       },
     },
-    credentialSlots: {
+    credentialBinding: {
       async resolve(context) {
         slotReads += 1;
         expect(Object.isFrozen(context)).toBe(true);
         expect(JSON.stringify(context)).not.toMatch(/token|secret|credential/i);
         if (slotError) throw new Error("secret slot detail");
-        return slots;
+        return (bindingOverride ?? {
+          profileId,
+          profileDigest,
+          slots,
+        }) as CredentialProfileBinding;
       },
     },
   });
@@ -227,6 +235,13 @@ async function fixture() {
     setSlots(value: typeof slots) {
       slots = value;
     },
+    setProfile(value: { profileId: string; profileDigest: Sha256 }) {
+      profileId = value.profileId;
+      profileDigest = value.profileDigest;
+    },
+    setBindingResult(value: unknown) {
+      bindingOverride = value;
+    },
     setSlotError(value: boolean) {
       slotError = value;
     },
@@ -252,7 +267,9 @@ test("prepares credential-free read and action calls through the correct tool", 
   });
   expect(read.safety).toBe("read");
   expect(read.actionKind).toBeNull();
-  expect(JSON.stringify(read)).not.toMatch(/authorization|token|credential/i);
+  expect(JSON.stringify(read)).not.toMatch(
+    /authorization|token|secret|grant|subject/i,
+  );
   await verifyPreparedCall(read);
   const action = await value.runtime.prepareAction({
     operation: value.reference("operation:tiny:createWidget"),
@@ -370,6 +387,52 @@ test("never mutates admission when preparation policy or safety fails", async ()
   expect(value.generations.accepts).toBe(0);
 });
 
+test("credential binding result is an exact bounded own-data snapshot", async () => {
+  const invalidResults: readonly unknown[] = [
+    { profileId: "", profileDigest: digestA, slots: [] },
+    { profileId: "a".repeat(129), profileDigest: digestA, slots: [] },
+    { profileId: "unstable/profile", profileDigest: digestA, slots: [] },
+    { profileId: "tiny-user", profileDigest: "A".repeat(64), slots: [] },
+    { profileId: "tiny-user", profileDigest: digestA, slots: [], grantId: "g" },
+    {
+      profileId: "tiny-user",
+      profileDigest: digestA,
+      slots: [],
+      tokenHash: digestB,
+    },
+  ];
+
+  for (const result of invalidResults) {
+    const value = await fixture();
+    value.setBindingResult(result);
+    await expect(
+      value.runtime.prepareRead({
+        operation: value.reference("operation:tiny:listWidgets"),
+        arguments: {},
+      }),
+    ).rejects.toMatchObject({ code: "AUTH_PROFILE_INVALID" });
+  }
+
+  const value = await fixture();
+  let touched = 0;
+  value.setBindingResult(
+    Object.defineProperty({ profileDigest: digestA, slots: [] }, "profileId", {
+      enumerable: true,
+      get: () => {
+        touched += 1;
+        return "tiny-user";
+      },
+    }),
+  );
+  await expect(
+    value.runtime.prepareRead({
+      operation: value.reference("operation:tiny:listWidgets"),
+      arguments: {},
+    }),
+  ).rejects.toMatchObject({ code: "AUTH_PROFILE_INVALID" });
+  expect(touched).toBe(0);
+});
+
 test("normalizes active-generation failures without leaking provider details", async () => {
   const value = await fixture();
   value.generations.throwOnGet = true;
@@ -434,6 +497,33 @@ test("revalidation is fresh, digest bound, and denies policy or slot changes", a
   });
   value.setAllowed(true);
   value.setSlots([{ placement: "query", name: "api_key" }]);
+  await expect(value.runtime.revalidate(call)).rejects.toMatchObject({
+    code: "RECORD_NOT_ADMITTED",
+  });
+});
+
+test("revalidation denies same-slot credential profile substitution or revision", async () => {
+  const value = await fixture();
+  const call = await value.runtime.prepareRead({
+    operation: value.reference("operation:tiny:listWidgets"),
+    arguments: {},
+  });
+
+  expect(call).toMatchObject({
+    version: 2,
+    credentialProfileId: "tiny-user",
+    credentialProfileDigest: digestA,
+  });
+
+  value.setProfile({ profileId: "other-user", profileDigest: digestA });
+  await expect(value.runtime.revalidate(call)).rejects.toMatchObject({
+    code: "RECORD_NOT_ADMITTED",
+  });
+
+  value.setProfile({
+    profileId: "tiny-user",
+    profileDigest: "f".repeat(64) as Sha256,
+  });
   await expect(value.runtime.revalidate(call)).rejects.toMatchObject({
     code: "RECORD_NOT_ADMITTED",
   });
