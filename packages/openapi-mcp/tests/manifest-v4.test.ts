@@ -42,6 +42,11 @@ import {
 } from "../src/runtime/manifest.ts";
 import { canonicalJsonBounded } from "../src/runtime/strict-json.ts";
 import { verifyStoredRecord } from "../src/runtime/verify-record.ts";
+import {
+  MAX_OPERATION_TAG_BYTES,
+  MAX_OPERATION_TAG_BYTES_TOTAL,
+  MAX_OPERATION_TAGS,
+} from "../src/runtime/versions.ts";
 import { FileGenerationStore } from "../src/sqlite/generation-store.ts";
 
 const encoder = new TextEncoder();
@@ -50,7 +55,8 @@ const digestB = "b".repeat(64) as Sha256;
 const catalogId = "tiny" as CatalogId;
 const operationId = "operation:tiny:users.list" as const;
 const rollbackDomain = "knitli.openapi-mcp.rollback-authorization.v1\0";
-const manifestDomain = "knitli.openapi-mcp.release-manifest.v4\0";
+const manifestDomain = (format: 4 | 5) =>
+  `knitli.openapi-mcp.release-manifest.v${format}\0`;
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -100,20 +106,24 @@ function operation(
     parameters: [],
     requestBody: null,
     schemaIds: [],
+    tags: [],
     advisory: {},
     ...overrides,
   };
 }
 
-async function operationDigest(value = operation()): Promise<Sha256> {
-  return sha256("knitli.openapi-mcp.operation-record.v4", value);
+async function operationDigest(
+  value = operation(),
+  format: 4 | 5 = 5,
+): Promise<Sha256> {
+  return sha256(`knitli.openapi-mcp.operation-record.v${format}`, value);
 }
 
 async function manifest(
   overrides: Partial<ReleaseManifestV4> = {},
 ): Promise<ReleaseManifestV4> {
   return {
-    format: 4,
+    format: 5,
     contract: 1,
     catalogId,
     releaseId: "release-7" as never,
@@ -147,7 +157,7 @@ async function signedEnvelope(
       keyId: release.keyId,
       signature: await sign(
         release.privateKey,
-        `${manifestDomain}${manifestJson}`,
+        `${manifestDomain(value.format)}${manifestJson}`,
       ),
     },
   };
@@ -325,7 +335,7 @@ test("signature verification canonicalizes harmless raw JSON whitespace and key 
       keyId: release.keyId,
       signature: await sign(
         release.privateKey,
-        `${manifestDomain}${canonical}`,
+        `${manifestDomain(value.format)}${canonical}`,
       ),
     },
   };
@@ -640,7 +650,7 @@ test("higher generations advance both high-water and active release", async () =
 test("signed rollback changes active state, preserves high-water, and consumes its identity", async () => {
   const { envelope, trust, rollback, value } = await fixture();
   const manifestDigest = await sha256(
-    "knitli.openapi-mcp.release-manifest.v4",
+    "knitli.openapi-mcp.release-manifest.v5",
     value,
   );
   envelope.rollback = await rollbackAuthorization(
@@ -665,7 +675,7 @@ test("persisted rollback target is restart-idempotent without replaying authoriz
   const originalStore = new FileGenerationStore(path);
   const { envelope, trust, value } = await fixture();
   const targetDigest = await sha256(
-    "knitli.openapi-mcp.release-manifest.v4",
+    "knitli.openapi-mcp.release-manifest.v5",
     value,
   );
   const initial = { ...state(8, digestA), revision: 0 };
@@ -701,7 +711,7 @@ test("inactive high-water release cannot reactivate without a strictly higher ge
     releaseId: "release-8" as never,
   });
   const highDigest = await sha256(
-    "knitli.openapi-mcp.release-manifest.v4",
+    "knitli.openapi-mcp.release-manifest.v5",
     highManifest,
   );
   const highEnvelope = await signedEnvelope(highManifest, release);
@@ -733,7 +743,7 @@ test("inactive high-water release cannot reactivate without a strictly higher ge
 test("rollback exact shape rejects hidden properties", async () => {
   const { envelope, trust, rollback, value } = await fixture();
   const targetDigest = await sha256(
-    "knitli.openapi-mcp.release-manifest.v4",
+    "knitli.openapi-mcp.release-manifest.v5",
     value,
   );
   const authorization = await rollbackAuthorization(
@@ -837,7 +847,7 @@ test("public manifest and record entry points normalize malformed limit containe
 test("rollback rejects expiry, replay, binding mismatches, malformed signature, and ordinary release keys", async () => {
   const { release, rollback, trust, value, envelope } = await fixture();
   const manifestDigest = await sha256(
-    "knitli.openapi-mcp.release-manifest.v4",
+    "knitli.openapi-mcp.release-manifest.v5",
     value,
   );
   const cases: Array<
@@ -932,6 +942,150 @@ test("row digest and manifest membership are independently required", async () =
   ).rejects.toMatchObject({ code: "RECORD_NOT_ADMITTED" });
   await expect(
     verifyStoredRecord(admitted, { ...row, logicalDigest: digestA }),
+  ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+});
+
+test("authenticates legacy v4 operation records before normalizing missing tags", async () => {
+  const current = operation();
+  const { tags: _tags, ...legacyRecord } = current;
+  const legacyDigest = await sha256(
+    "knitli.openapi-mcp.operation-record.v4",
+    legacyRecord,
+  );
+  const { release, trust, value } = await fixture();
+  const admitted = await admitManifest(
+    await signedEnvelope(
+      { ...value, format: 4, records: { [current.id]: legacyDigest } },
+      release,
+    ),
+    trust,
+    new MemoryGenerationStore(),
+  );
+
+  const verified = await verifyStoredRecord(admitted, {
+    id: current.id,
+    logicalDigest: legacyDigest,
+    record: legacyRecord,
+  } as never);
+
+  expect(verified).toEqual(current);
+  expect(Object.isFrozen(verified)).toBe(true);
+  expect(Object.isFrozen(verified.tags)).toBe(true);
+});
+
+test("keeps v4 exact-key records separate from v5 signed-tag records", async () => {
+  const tagged = operation({ tags: ["refund"] });
+  const { release, trust, value } = await fixture();
+  const v4Digest = await sha256(
+    "knitli.openapi-mcp.operation-record.v4",
+    tagged,
+  );
+  const admittedV4 = await admitManifest(
+    await signedEnvelope(
+      { ...value, format: 4, records: { [tagged.id]: v4Digest } },
+      release,
+    ),
+    trust,
+    new MemoryGenerationStore(),
+  );
+
+  await expect(
+    verifyStoredRecord(admittedV4, {
+      id: tagged.id,
+      logicalDigest: v4Digest,
+      record: tagged,
+    }),
+  ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+
+  const v5Digest = await sha256(
+    "knitli.openapi-mcp.operation-record.v5",
+    tagged,
+  );
+  const v5Manifest = {
+    ...value,
+    format: 5,
+    records: { [tagged.id]: v5Digest },
+  } as unknown as ReleaseManifestV4;
+  const admittedV5 = await admitManifest(
+    await signedEnvelope(v5Manifest, release),
+    trust,
+    new MemoryGenerationStore(),
+  );
+
+  await expect(
+    verifyStoredRecord(admittedV5, {
+      id: tagged.id,
+      logicalDigest: v5Digest,
+      record: tagged,
+    }),
+  ).resolves.toEqual(tagged);
+});
+
+test("requires bounded unique signed tags and binds them to the record digest", async () => {
+  const invalidTags: readonly unknown[] = [
+    ["duplicate", "duplicate"],
+    Array.from(
+      { length: MAX_OPERATION_TAGS + 1 },
+      (_, index) => `tag-${index}`,
+    ),
+    ["😀".repeat(Math.floor(MAX_OPERATION_TAG_BYTES / 4) + 1)],
+    [
+      ...Array.from(
+        { length: MAX_OPERATION_TAG_BYTES_TOTAL / MAX_OPERATION_TAG_BYTES },
+        (_, index) =>
+          `${index.toString().padStart(3, "0")}${"a".repeat(MAX_OPERATION_TAG_BYTES - 3)}`,
+      ),
+      "z",
+    ],
+  ];
+
+  for (const tags of invalidTags) {
+    const record = operation({ tags: tags as never });
+    const { release, trust, value } = await fixture();
+    const digest = await operationDigest(record, 5);
+    const admitted = await admitManifest(
+      await signedEnvelope(
+        { ...value, format: 5, records: { [record.id]: digest } },
+        release,
+      ),
+      trust,
+      new MemoryGenerationStore(),
+    );
+
+    await expect(
+      verifyStoredRecord(admitted, {
+        id: record.id,
+        logicalDigest: digest,
+        record,
+      }),
+    ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
+  }
+
+  const record = operation({ tags: ["refund"] });
+  const { release, trust, value } = await fixture();
+  const digest = await operationDigest(record, 5);
+  const admitted = await admitManifest(
+    await signedEnvelope(
+      { ...value, format: 5, records: { [record.id]: digest } },
+      release,
+    ),
+    trust,
+    new MemoryGenerationStore(),
+  );
+
+  await expect(
+    verifyStoredRecord(admitted, {
+      id: record.id,
+      logicalDigest: digest,
+      record,
+    }),
+  ).resolves.toEqual(record);
+  await expect(
+    verifyStoredRecord(admitted, {
+      id: record.id,
+      logicalDigest: digest,
+      record: { ...record, tags: ["delete"] },
+    }),
   ).rejects.toMatchObject({ code: "RECORD_DIGEST_MISMATCH" });
 });
 
@@ -1222,7 +1376,7 @@ test("schema logical records use their own digest domain and are deeply frozen",
     id: "schema:tiny:#/components/schemas/User" as const,
     schema: { type: "object", properties: { name: { type: "string" } } },
   };
-  const digest = await sha256("knitli.openapi-mcp.schema-record.v4", schema);
+  const digest = await sha256("knitli.openapi-mcp.schema-record.v5", schema);
   const { release, trust, value } = await fixture();
   const envelope = await signedEnvelope(
     { ...value, records: { [schema.id]: digest } },
@@ -1244,7 +1398,7 @@ test("schema logical records use their own digest domain and are deeply frozen",
 async function verifyAdmittedSchema(schema: JsonObject | boolean) {
   const id = "schema:tiny:#/components/schemas/VerifierFixture" as const;
   const record = { id, schema };
-  const digest = await sha256("knitli.openapi-mcp.schema-record.v4", record);
+  const digest = await sha256("knitli.openapi-mcp.schema-record.v5", record);
   const { release, trust, value } = await fixture();
   const admitted = await admitManifest(
     await signedEnvelope({ ...value, records: { [id]: digest } }, release),
@@ -1838,7 +1992,7 @@ test("FileGenerationStore reconciles concurrent rollback retry without consuming
   ).toEqual(initial);
   const { envelope, trust, rollback, value } = await fixture();
   const manifestDigest = await sha256(
-    "knitli.openapi-mcp.release-manifest.v4",
+    "knitli.openapi-mcp.release-manifest.v5",
     value,
   );
   envelope.rollback = await rollbackAuthorization(

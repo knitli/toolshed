@@ -11,7 +11,13 @@ import type {
   StoredRecord,
   TypedRecordId,
 } from "./types.ts";
-import { type RuntimeLimits, resolveRuntimeLimits } from "./versions.ts";
+import {
+  MAX_OPERATION_TAG_BYTES,
+  MAX_OPERATION_TAG_BYTES_TOTAL,
+  MAX_OPERATION_TAGS,
+  type RuntimeLimits,
+  resolveRuntimeLimits,
+} from "./versions.ts";
 
 const operationKeys = [
   "advisory",
@@ -26,7 +32,9 @@ const operationKeys = [
   "requestBody",
   "schemaIds",
   "summary",
+  "tags",
 ];
+const legacyOperationKeys = operationKeys.filter((key) => key !== "tags");
 const schemaKeys = ["id", "schema"];
 const wrapperKeys = ["id", "logicalDigest", "record"];
 const parameterKeys = [
@@ -151,6 +159,30 @@ function schemaId(value: unknown, label: string): string {
     return value;
   } catch {
     throw mismatch(`${label} is not a typed schema ID`);
+  }
+}
+
+function validateOperationTags(value: unknown): void {
+  if (!Array.isArray(value) || value.length > MAX_OPERATION_TAGS)
+    throw mismatch("Operation record tags are invalid");
+  const seen = new Set<string>();
+  let totalBytes = 0;
+  for (const tag of value) {
+    if (
+      typeof tag !== "string" ||
+      tag.length === 0 ||
+      tag.length > MAX_OPERATION_TAG_BYTES
+    )
+      throw mismatch("Operation record tags are invalid");
+    const tagBytes = new TextEncoder().encode(tag).byteLength;
+    if (
+      tagBytes > MAX_OPERATION_TAG_BYTES ||
+      totalBytes + tagBytes > MAX_OPERATION_TAG_BYTES_TOTAL ||
+      seen.has(tag)
+    )
+      throw mismatch("Operation record tags are invalid");
+    seen.add(tag);
+    totalBytes += tagBytes;
   }
 }
 
@@ -412,6 +444,7 @@ function validateSchemaReferences(value: unknown): void {
 function validateRecord(
   record: unknown,
   wrapperId: unknown,
+  format: 4 | 5,
 ): OperationRecordV4 | SchemaRecordV4 {
   let id: TypedRecordId;
   try {
@@ -420,14 +453,19 @@ function validateRecord(
   } catch {
     throw mismatch("Stored row ID is malformed");
   }
+  const isOperation = id.startsWith("operation:");
   const object = exactObject(
     record,
-    id.startsWith("operation:") ? operationKeys : schemaKeys,
+    isOperation
+      ? format === 5
+        ? operationKeys
+        : legacyOperationKeys
+      : schemaKeys,
     "logical record",
   );
   if (object.id !== id)
     throw mismatch("Stored row and logical record IDs disagree");
-  if (id.startsWith("operation:")) {
+  if (isOperation) {
     if (
       typeof object.api !== "string" ||
       typeof object.operationId !== "string" ||
@@ -453,6 +491,8 @@ function validateRecord(
       )
     )
       throw mismatch("Operation record fields are invalid");
+    const tags = format === 5 ? object.tags : [];
+    validateOperationTags(tags);
     if (`operation:${object.api}:${object.operationId}` !== id) {
       throw mismatch(
         "Operation record ID does not match its API and operation ID",
@@ -477,6 +517,9 @@ function validateRecord(
     ) {
       throw mismatch("Operation schema IDs do not equal direct schema uses");
     }
+    return (format === 5
+      ? object
+      : { ...object, tags }) as unknown as OperationRecordV4;
   } else if (
     typeof object.schema !== "boolean" &&
     (typeof object.schema !== "object" ||
@@ -487,7 +530,7 @@ function validateRecord(
   } else {
     validateSchemaReferences(object.schema);
   }
-  return object as unknown as OperationRecordV4 | SchemaRecordV4;
+  return object as unknown as SchemaRecordV4;
 }
 
 function detached(record: unknown, limits: RuntimeLimits): unknown {
@@ -544,9 +587,15 @@ export async function verifyStoredRecord<
     !digestPattern.test(row.logicalDigest)
   )
     throw mismatch("Stored row digest is invalid");
+  let digestInput: unknown;
   let copy: T;
   try {
-    copy = validateRecord(detached(row.record, limits), wrapperId) as T;
+    digestInput = detached(row.record, limits);
+    copy = validateRecord(
+      digestInput,
+      wrapperId,
+      admitted.manifest.format,
+    ) as T;
   } catch (error) {
     if (
       error instanceof OpenApiMcpError &&
@@ -555,10 +604,9 @@ export async function verifyStoredRecord<
       throw error;
     throw mismatch("Logical record cannot be canonicalized");
   }
-  const domain = copy.id.startsWith("operation:")
-    ? "knitli.openapi-mcp.operation-record.v4"
-    : "knitli.openapi-mcp.schema-record.v4";
-  const digest = await sha256(domain, copy as unknown as JsonObject);
+  const recordKind = copy.id.startsWith("operation:") ? "operation" : "schema";
+  const domain = `knitli.openapi-mcp.${recordKind}-record.v${admitted.manifest.format}`;
+  const digest = await sha256(domain, digestInput as JsonObject);
   if (digest !== row.logicalDigest)
     throw mismatch("Stored logical digest does not match the row");
   if (admitted.manifest.records[copy.id] !== digest) {

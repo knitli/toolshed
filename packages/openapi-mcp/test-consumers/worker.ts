@@ -4,12 +4,17 @@ import {
   RUNTIME_CONFORMANCE_FIXTURE,
 } from "../src/conformance/index.ts";
 import type {
+  ActionDispatchPermit,
+  AuthorizationContext,
+  AuthorizationId,
   CallOutcome,
+  CredentialAuthorizationBinding,
   OperationRefPayload,
   PaginationTokenState,
   SearchResult,
   SearchResultItem,
   SearchWarning,
+  VerifiedActionRequestState,
 } from "../src/runtime/index.ts";
 import {
   ARTIFACT_FORMAT_VERSION,
@@ -25,6 +30,31 @@ type Equal<Actual, Expected> =
     ? true
     : false;
 type Assert<Condition extends true> = Condition;
+
+type _actionPermitCannotBeForged = Assert<
+  Equal<object extends ActionDispatchPermit ? true : false, false>
+>;
+type _authorizationIdCannotBeForged = Assert<
+  Equal<object extends AuthorizationId ? true : false, false>
+>;
+type _requestStateCannotBeForged = Assert<
+  Equal<object extends VerifiedActionRequestState ? true : false, false>
+>;
+type _authorizationContextIsExplicit = Assert<
+  Equal<AuthorizationContext["kind"], "initial" | "resume">
+>;
+type _resumeRequiresVerifiedState = Assert<
+  Equal<
+    Extract<AuthorizationContext, { kind: "resume" }>["requestState"],
+    VerifiedActionRequestState
+  >
+>;
+type _credentialBindingUsesPortableScopes = Assert<
+  Equal<CredentialAuthorizationBinding["scopes"], readonly string[]>
+>;
+type _actionAuthorizationBoundaryIsPrivate =
+  // @ts-expect-error Authorization boundary creation is engine-private.
+  typeof import("../src/runtime/index.ts").createActionAuthorizationBoundary;
 
 type _operationRefPayloadIsManifestBound = Assert<
   Equal<

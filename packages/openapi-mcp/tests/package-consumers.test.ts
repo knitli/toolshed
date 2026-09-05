@@ -32,9 +32,9 @@ test("every advertised package export has an emit-capable source entrypoint", ()
 
 test("runtime exposes the Phase 2 contract versions", async () => {
   const runtime = await import("../src/runtime/index.ts");
-  expect(runtime.ARTIFACT_FORMAT_VERSION).toBe(4);
+  expect(runtime.ARTIFACT_FORMAT_VERSION).toBe(5);
   expect(runtime.RUNTIME_CONTRACT_VERSION).toBe(1);
-  expect(runtime.PREPARED_CALL_VERSION).toBe(1);
+  expect(runtime.PREPARED_CALL_VERSION).toBe(2);
   expect(runtime.MAX_SEARCH_QUERY_BYTES).toBe(4 * 1024);
 });
 
@@ -47,6 +47,17 @@ test("runtime bundles for a Worker target without Node shims", async () => {
 
   expect(result.success).toBe(true);
   expect(result.logs.map(String).join("\n")).not.toMatch(/node:|bun:/);
+});
+
+test("runtime keeps action authorization and permit issuance private", async () => {
+  const runtime = await import("../src/runtime/index.ts");
+  for (const name of [
+    "createActionAuthorizationBoundary",
+    "ActionDispatchPermit",
+    "createVerifiedRequestStateCodec",
+  ]) {
+    expect(Object.hasOwn(runtime, name), name).toBe(false);
+  }
 });
 
 test("Worker consumer type-checks the portable contract", () => {
