@@ -1,0 +1,26 @@
+{
+  "profiles": [
+    {
+      "profileId": "example-api",
+      "revision": 1,
+      "allowedOrigins": ["https://api.example.test"],
+      "auth": { "type": "bearer-env", "env": "EXAMPLE_API_TOKEN" },
+      "audience": "https://api.example.test",
+      "scopes": ["widgets.read"]
+    },
+    {
+      "profileId": "example-oauth",
+      "revision": 1,
+      "allowedOrigins": ["https://api.example.test"],
+      "auth": {
+        "type": "oauth2-pkce",
+        "authorizationEndpoint": "https://identity.example.test/authorize",
+        "tokenEndpoint": "https://identity.example.test/token",
+        "clientId": "public-client",
+        "scopes": ["widgets.read"],
+        "resource": "urn:example:widgets"
+      },
+      "audience": "widgets-api-v2"
+    }
+  ]
+}
