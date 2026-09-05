@@ -3,7 +3,7 @@
   "private": false,
   "version": "0.0.0",
   "type": "module",
-  "description": "Wraps any openapi schema of any size into an MCP-servable sqlite database for 'code mode' style deployments.",
+  "description": "Compile signed OpenAPI catalogs and serve verified search and authorized API calls over MCP.",
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
@@ -41,37 +41,43 @@
     "./conformance": {
       "types": "./dist/conformance/index.d.ts",
       "default": "./dist/conformance/index.js"
+    },
+    "./stdio": {
+      "types": "./dist/stdio/index.d.ts",
+      "default": "./dist/stdio/index.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
   ],
   "engines": {
     "node": ">=24.16.0 <25",
-    "bun": "catalog:"
+    "bun": ">=1.4.0"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public",
-    "tag": "latest"
+    "tag": "latest",
+    "provenance": true
   },
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "bun run build",
     "test": "bun test",
+    "test:node-transport": "node --experimental-transform-types --test tests/guarded-fetch.node.ts",
+    "test:node-stdio": "node --experimental-transform-types --test tests/stdio-server.node.ts",
     "check": "bunx biome check ."
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
+    "undici": "8.10.2",
     "yaml": "^2.9.0",
     "zod": "4.5.4"
   },
   "devDependencies": {
     "typescript": "catalog:typing"
-  },
-  "devEngines": {
-    "node": "catalog:",
-    "bun": "catalog:"
   },
   "release": {
     "branches": [

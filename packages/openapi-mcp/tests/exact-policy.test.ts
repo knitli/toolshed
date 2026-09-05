@@ -58,6 +58,7 @@ function template(
 function call(overrides: Partial<PreparedCall> = {}): PreparedCall {
   return {
     version: 2,
+    pageToken: null,
     catalogId: "catalog" as CatalogId,
     releaseId: "release" as ReleaseId,
     operationId: "operation:api:createWidget" as TypedOperationId,

@@ -20,6 +20,7 @@ const digest = (character: string) => character.repeat(64) as Sha256;
 async function call(): Promise<PreparedCall> {
   return await createPreparedCall({
     version: 2,
+    pageToken: null,
     catalogId: "tiny" as PreparedCall["catalogId"],
     releaseId: "release-1" as PreparedCall["releaseId"],
     operationId: "operation:tiny:deletePet",

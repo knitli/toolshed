@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { OpenApiDoc } from "../src/load.ts";
 import { loadSpec } from "../src/load.ts";
-import { extractOperations, MAX_SUMMARY, splitWords } from "../src/operations.ts";
+import {
+  extractOperations,
+  MAX_SUMMARY,
+  splitWords,
+} from "../src/operations.ts";
 
 const FIXTURE = `${import.meta.dir}/../fixtures/tiny-api.yaml`;
 const load = async () => extractOperations(await loadSpec(FIXTURE), "tiny");
@@ -35,7 +39,9 @@ describe("extractOperations", () => {
   });
 
   test("detects deprecated", async () => {
-    expect((await byId("tiny:widgets.widget.DeleteWidget")).deprecated).toBe(true);
+    expect((await byId("tiny:widgets.widget.DeleteWidget")).deprecated).toBe(
+      true,
+    );
     expect((await byId("tiny:widgets.ListWidgets")).deprecated).toBe(false);
   });
 
@@ -72,7 +78,10 @@ describe("extractOperations", () => {
 
   test("collects path parameters", async () => {
     const op = await byId("tiny:widgets.widget.GetWidget");
-    const params = JSON.parse(op.paramsJson) as Array<{ name: string; required: boolean }>;
+    const params = JSON.parse(op.paramsJson) as Array<{
+      name: string;
+      required: boolean;
+    }>;
     expect(params).toHaveLength(1);
     expect(params[0].name).toBe("widget-id");
     expect(params[0].required).toBe(true);
@@ -88,12 +97,22 @@ describe("extractOperations", () => {
       paths: {
         "/widgets/{widget-id}/parts": {
           parameters: [
-            { name: "widget-id", in: "path", required: true, schema: { type: "string" } },
+            {
+              name: "widget-id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
           ],
           get: {
             operationId: "widgets.widget.ListParts",
             parameters: [
-              { name: "limit", in: "query", required: false, schema: { type: "integer" } },
+              {
+                name: "limit",
+                in: "query",
+                required: false,
+                schema: { type: "integer" },
+              },
             ],
             responses: { "200": { description: "ok" } },
           },
@@ -218,7 +237,9 @@ describe("request body capture", () => {
       synthetic({
         requestBody: {
           content: {
-            "application/json": { schema: { $ref: "#/components/schemas/Widget" } },
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Widget" },
+            },
           },
         },
       }),
@@ -230,7 +251,9 @@ describe("request body capture", () => {
   test("stores an inline schema rather than dropping the body contract", () => {
     const schema = { type: "object", properties: { id: { type: "string" } } };
     const op = only(
-      synthetic({ requestBody: { content: { "application/json": { schema } } } }),
+      synthetic({
+        requestBody: { content: { "application/json": { schema } } },
+      }),
     );
     expect(op?.bodyRef).toBeNull();
     expect(JSON.parse(op?.bodySchemaJson ?? "null")).toEqual(schema);
@@ -260,7 +283,9 @@ describe("request body capture", () => {
       }),
     );
     expect(op?.bodyMediaType).toBe("application/json");
-    expect(JSON.parse(op?.bodySchemaJson ?? "null")).toEqual({ type: "object" });
+    expect(JSON.parse(op?.bodySchemaJson ?? "null")).toEqual({
+      type: "object",
+    });
   });
 
   test("an operation with no request body carries no contract", () => {
@@ -272,7 +297,10 @@ describe("request body capture", () => {
 });
 
 describe("parameter precedence", () => {
-  const withParams = (pathLevel: unknown[], opLevel: unknown[]): OpenApiDoc => ({
+  const withParams = (
+    pathLevel: unknown[],
+    opLevel: unknown[],
+  ): OpenApiDoc => ({
     openapi: "3.0.4",
     servers: [{ url: "https://synthetic.example.com" }],
     paths: {
@@ -286,8 +314,22 @@ describe("parameter precedence", () => {
   test("an operation parameter overrides the path item's, not duplicates it", () => {
     const op = only(
       withParams(
-        [{ name: "id", in: "path", required: false, schema: { type: "string" } }],
-        [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+        [
+          {
+            name: "id",
+            in: "path",
+            required: false,
+            schema: { type: "string" },
+          },
+        ],
+        [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "integer" },
+          },
+        ],
       ),
     );
     const params = JSON.parse(op?.paramsJson ?? "[]") as Array<{
@@ -303,8 +345,22 @@ describe("parameter precedence", () => {
   test("same name in a different location stays a separate parameter", () => {
     const op = only(
       withParams(
-        [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
-        [{ name: "id", in: "query", required: false, schema: { type: "string" } }],
+        [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+          },
+        ],
+        [
+          {
+            name: "id",
+            in: "query",
+            required: false,
+            schema: { type: "string" },
+          },
+        ],
       ),
     );
     const params = JSON.parse(op?.paramsJson ?? "[]") as Array<{ in: string }>;

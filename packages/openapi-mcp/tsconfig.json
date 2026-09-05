@@ -5,6 +5,7 @@
     "rewriteRelativeImportExtensions": true,
     "allowImportingTsExtensions": true,
     "declaration": true,
+    "noEmitOnError": true,
     "outDir": "dist",
     "rootDir": "src",
     "types": ["node", "bun"]

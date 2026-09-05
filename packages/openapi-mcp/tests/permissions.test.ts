@@ -107,7 +107,9 @@ describe("applyPermissions", () => {
     expect(list?.privilegeLevel).toBe(2);
     expect(list?.risk).toBe("routine");
 
-    const create = ops.find((o) => o.qualifiedId === "tiny:widgets.CreateWidget");
+    const create = ops.find(
+      (o) => o.qualifiedId === "tiny:widgets.CreateWidget",
+    );
     expect(create?.privilegeLevel).toBe(5);
     expect(create?.risk).toBe("high");
 

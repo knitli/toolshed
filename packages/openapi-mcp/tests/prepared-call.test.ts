@@ -20,6 +20,7 @@ async function call(
 ): Promise<PreparedCall> {
   return await createPreparedCall({
     version: 2,
+    pageToken: null,
     catalogId: "tiny" as PreparedCall["catalogId"],
     releaseId: "release-1" as PreparedCall["releaseId"],
     operationId: "operation:tiny:createWidget",
@@ -63,7 +64,7 @@ test("creates a frozen credential-free call whose digest binds body and inputs",
   exposedBody[0] = 9;
   expect([...(prepared.body ?? [])]).toEqual([1, 2, 3]);
   expect(JSON.stringify(prepared)).not.toMatch(
-    /authorization|token|secret|grant|subject/i,
+    /authorization|"token"|secret|grant|subject/i,
   );
   await expect(verifyPreparedCall(prepared)).resolves.toBeUndefined();
 
@@ -287,6 +288,7 @@ test("accepts ordinary declared token-like headers from serialization through ve
   );
   const prepared = await createPreparedCall({
     version: 2,
+    pageToken: null,
     catalogId: "tiny" as PreparedCall["catalogId"],
     releaseId: "release-1" as PreparedCall["releaseId"],
     operationId: operation.id,

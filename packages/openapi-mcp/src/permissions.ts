@@ -25,7 +25,10 @@ export interface PermissionIndex {
 
 /** Parameter names differ between the two Microsoft datasets; erase them. */
 function normalise(path: string): string {
-  return path.replace(/\{[^}]*\}/g, "{}").replace(/\/+$/, "").toLowerCase();
+  return path
+    .replace(/\{[^}]*\}/g, "{}")
+    .replace(/\/+$/, "")
+    .toLowerCase();
 }
 
 const ODATA_SUFFIX = /\/(\$count|\$ref|\$value|microsoft\.graph\.[a-z0-9.]+)$/;

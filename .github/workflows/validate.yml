@@ -16,6 +16,10 @@ jobs:
         with:
           bun-version: latest
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.19.0
+
       - run: bun i --frozen-lockfile
 
       - name: Test packages

@@ -32,6 +32,7 @@ import type {
   SecretStore,
   Sha256,
 } from "../runtime/types.ts";
+import { isOAuthResource } from "./oauth-resource.ts";
 
 const PROFILE_DIGEST_DOMAIN = "knitli.openapi-mcp.credential-profile.v1";
 const SLOT_DIGEST_DOMAIN = "knitli.openapi-mcp.credential-slots.v1";
@@ -227,15 +228,9 @@ function validateOptionalText(value: unknown): string | undefined {
 }
 
 function validateResource(value: unknown): string | undefined {
-  const resource = validateOptionalText(value);
-  if (resource === undefined) return undefined;
-  try {
-    const parsed = new URL(resource);
-    if (parsed.hash !== "") throw invalidProfile();
-    return resource;
-  } catch {
-    throw invalidProfile();
-  }
+  if (value === undefined) return undefined;
+  if (!isOAuthResource(value)) throw invalidProfile();
+  return value;
 }
 
 function validateEndpoint(value: unknown): string {
@@ -433,16 +428,25 @@ async function digestSlots(slots: readonly CredentialSlot[]): Promise<Sha256> {
   return sha256(SLOT_DIGEST_DOMAIN, canonicalSlots);
 }
 
+/** Validate local profile semantics without resolving credentials or performing I/O. */
+export function validateLocalAuthProfile(
+  profile: LocalAuthProfile,
+): LocalAuthProfile {
+  const snapshot = snapshotObject(profile);
+  if (!Array.isArray(snapshot.allowedOrigins)) throw invalidProfile();
+  return validateProfile(
+    snapshot as unknown as LocalAuthProfile,
+    snapshot.allowedOrigins as string[],
+  ).value;
+}
+
 export async function digestCredentialProfile(
   profile: LocalAuthProfile,
 ): Promise<Sha256> {
-  const snapshot = snapshotObject(profile);
-  if (!Array.isArray(snapshot.allowedOrigins)) throw invalidProfile();
-  const normalized = validateProfile(
-    snapshot as unknown as LocalAuthProfile,
-    snapshot.allowedOrigins as string[],
+  return sha256(
+    PROFILE_DIGEST_DOMAIN,
+    snapshotObject(validateLocalAuthProfile(profile)),
   );
-  return sha256(PROFILE_DIGEST_DOMAIN, snapshotObject(normalized.value));
 }
 
 async function createBinding(

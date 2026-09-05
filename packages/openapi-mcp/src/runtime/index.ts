@@ -87,6 +87,7 @@ export type {
   PaginationTokenCodec,
   PaginationTokenState,
   PreparedCall,
+  PreparedDispatch,
   PrepareInput,
   ReleaseId,
   ReleaseManifestV4,

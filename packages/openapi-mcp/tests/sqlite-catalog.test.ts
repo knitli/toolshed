@@ -7,6 +7,7 @@ import {
   readFileSync,
   readlinkSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -335,7 +336,7 @@ test("v4 on-disk catalog serves manifest, search, operation, and schemas without
   rmSync(artifact.directory, { recursive: true, force: true });
 });
 
-test("mixed v4 and v5 releases remain readable through one SQLite catalog", async () => {
+test("mixed SQLite retains v4 compatibility and gates v5 on matching sidecars", async () => {
   const artifact = createV4Catalog();
   const database = new DatabaseSync(artifact.path);
   database
@@ -366,6 +367,27 @@ test("mixed v4 and v5 releases remain readable through one SQLite catalog", asyn
       {
         manifestJson: expect.stringContaining('"format":4'),
       },
+    );
+    await expect(store.getManifest(catalogId, releaseB)).rejects.toMatchObject({
+      code: "MANIFEST_INVALID",
+    });
+    const stem = artifact.path.slice(0, -".sqlite".length);
+    writeFileSync(
+      `${stem}.manifest.json`,
+      JSON.stringify({
+        format: 5,
+        contract: 1,
+        catalogId,
+        releaseId: releaseB,
+      }),
+    );
+    writeFileSync(
+      `${stem}.manifest.sig`,
+      JSON.stringify({
+        algorithm: "Ed25519",
+        keyId: "key",
+        signature: `signature-${releaseB}`,
+      }),
     );
     await expect(store.getManifest(catalogId, releaseB)).resolves.toMatchObject(
       {

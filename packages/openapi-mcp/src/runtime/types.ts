@@ -1,3 +1,4 @@
+import type { ActionDispatchPermit } from "./action-permit.ts";
 import type { OpenApiMcpErrorCode } from "./errors.ts";
 import type { RuntimeLimits } from "./versions.ts";
 
@@ -317,6 +318,8 @@ export interface PreparedCall {
   method: HttpMethod;
   origin: string;
   relativeUrl: string;
+  /** Opaque continuation proof, bound together with relativeUrl by the call digest. */
+  pageToken: string | null;
   headers: Readonly<Record<string, string>>;
   body: Uint8Array | null;
   normalizedArguments: JsonObject;
@@ -516,7 +519,7 @@ export interface PaginationTokenState {
   cumulativeBytes: number;
 }
 
-/** Host-owned opaque continuation token codec; implementations must bind every field. */
+/** Host-owned codec; decode must authenticate every field and reject expired tokens. */
 export interface PaginationTokenCodec {
   encode(state: PaginationTokenState): Promise<string>;
   decode(token: string): Promise<PaginationTokenState>;
@@ -533,6 +536,23 @@ export type CallOutcome =
   | { kind: "redirect-blocked"; location: string | null }
   | { kind: "not-modified" };
 
+export type PreparedDispatch = object & {
+  readonly __preparedDispatch: unique symbol;
+};
+
 export interface AuthorizedTransport {
-  dispatch(call: PreparedCall, credential: Credential): Promise<CallOutcome>;
+  prepareDispatch(
+    call: PreparedCall,
+    credential: CredentialSnapshot,
+  ): Promise<PreparedDispatch>;
+  verifyPlan(
+    plan: PreparedDispatch,
+    call: PreparedCall,
+    credential: CredentialAuthorizationBinding,
+  ): void;
+  dispatchRead(plan: PreparedDispatch): Promise<CallOutcome>;
+  dispatchAction(
+    plan: PreparedDispatch,
+    permit: ActionDispatchPermit,
+  ): Promise<CallOutcome>;
 }
