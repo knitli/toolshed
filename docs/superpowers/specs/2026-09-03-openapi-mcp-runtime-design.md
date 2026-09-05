@@ -124,7 +124,13 @@ Operation and schema record digests are SHA-256 over a record-specific domain se
 
 ### 5.3 Admission and use-time verification
 
-Manifest verification proves the signature, trusted issuer/key relationship, compatibility versions, bounds, IDs, origins, and generation policy before a release becomes visible. Verification does not bless SQLite rows. At every `search` result hydration, `prepareRead`, `prepareAction`, schema lookup, and revalidation, the runtime:
+Manifest verification proves the signature, trusted issuer/key relationship, compatibility versions, bounds, IDs, origins, and generation policy before a release becomes visible. Verification does not bless SQLite rows. Search admission is stronger than candidate hydration: before it mutates generation state or returns any operation from a selected release, it proves the complete manifested release inventory observed through the store. Every manifested operation is retrieved and every requested schema response must be exact; each member passes typed-ID and digest verification and fits the release inventory budget. Every schema reference must remain inside that verified inventory, and every operation-root closure must fit the closure/hop limits. A missing, duplicate, substituted, extra-reference, malformed, or over-budget member rejects that release as a whole.
+
+Search applies one shared proof envelope to the whole request: at most eight candidate releases and eight complete-release proofs, with one aggregate `maxReleaseInventoryBytes` budget rather than one 128 MiB allowance per candidate, plus bounded verification work and store calls. It groups verified candidates by `(catalogId, issuer)` and exposes operations only from the one generation/digest that is active after admission. It may fall back from a rejected higher candidate to an otherwise valid lower candidate, but only under the ordinary generation/rollback rule; conflicting digests at one generation are not interchangeable. Admission proves a complete release before its compare-and-swap generation transition. On a CAS miss, it rereads generation state, reselects the generation/digest, and reproves the selected release under the remaining search-wide budget; it never reuses a proof made for an abandoned state snapshot. A candidate first interpreted as a normal advance cannot be reinterpreted as a rollback after state churn, and rollback authorization is consumed only by the successful state transition, never by an abandoned attempt.
+
+Search reports individual rejected candidates as bounded safe warnings and omits them; candidate lookup or generation-state availability failure is the retryable `UPSTREAM_ERROR`. Reaching the release-admission/proof budget produces a bounded admission warning. Response sizing may remove otherwise verified ranked items and adds `RESPONSE_LIMIT_EXCEEDED`; if even the empty response cannot fit, search fails with that error. Verification does not create a durable store snapshot: after admission, every result is checked again against final active generation state, and every later read/prepare/revalidation independently verifies the identity and logical record at use time. An immutable release identity narrows substitution; it cannot make a record that disappears or changes after the observed proof available.
+
+At every `search` result hydration, `prepareRead`, `prepareAction`, schema lookup, and revalidation, the runtime:
 
 1. reconstructs the logical record from the store result;
 2. canonicalizes and hashes it;
@@ -135,7 +141,7 @@ FTS is candidate generation only. A poisoned FTS table can reduce availability o
 
 ### 5.4 Generation and rollback
 
-`GenerationStore` records `{ highestGeneration, highestManifestDigest }` per `(catalogId, issuer)`. A normally signed release at a lower generation is rejected. An equal generation is idempotent only when its canonical manifest digest equals `highestManifestDigest`; a different digest fails with `MANIFEST_GENERATION_CONFLICT`. Rolling back requires a second `RollbackAuthorization` signed by a separately configured rollback key and binding the catalog, issuer, current highest generation, target generation, target manifest digest, reason, and expiry. Rollback authorizations are single-use and replay-protected. After an authorized rollback, the accepted-generation state records the event rather than forgetting history.
+`GenerationStore` records `{ highestGeneration, highestManifestDigest }` and the active generation/digest per `(catalogId, issuer)`. A normally signed release at a lower generation is rejected. An equal generation is idempotent only when its canonical manifest digest equals `highestManifestDigest`; a different digest fails with `MANIFEST_GENERATION_CONFLICT`. Rolling back requires a second `RollbackAuthorization` signed by a separately configured rollback key and binding the catalog, issuer, current highest generation, target generation, target manifest digest, reason, and expiry. Rollback authorizations are single-use and replay-protected, but are consumed only with a successful conditional state transition. After an authorized rollback, the accepted-generation state records the event rather than forgetting history.
 
 For local stdio, generation state is an atomically replaced user-only file (`0600`) outside the artifact directory. A host may provide a stronger implementation. Failure to read or persist generation state fails closed.
 
@@ -154,6 +160,10 @@ export const DEFAULT_RUNTIME_LIMITS = {
   maxManifestBytes: 8 * 1024 * 1024,
   maxManifestRecords: 100_000,
   maxRecordBytes: 1 * 1024 * 1024,
+  // Aggregate verified operation and schema inventory per release and search.
+  // This matches the compiler's maximum aggregate source input while avoiding
+  // a separate 128 MiB allocation for every authenticated release.
+  maxReleaseInventoryBytes: 128 * 1024 * 1024,
   maxJsonDepth: 64,
   maxSchemaClosureBytes: 4 * 1024 * 1024,
   maxSchemaRefHops: 16,

@@ -12,6 +12,12 @@ export const MAX_SEARCH_QUERY_BYTES = 4 * 1024;
 
 /** Application security and availability limits for every runtime adapter. */
 export interface RuntimeLimits {
+  /**
+   * Combined canonical operation/schema bytes admitted per release and search.
+   * Optional so complete RuntimeLimits objects written before this limit was
+   * introduced remain source-compatible.
+   */
+  readonly maxReleaseInventoryBytes?: number;
   readonly maxManifestBytes: number;
   readonly maxManifestRecords: number;
   readonly maxRecordBytes: number;
@@ -28,10 +34,16 @@ export interface RuntimeLimits {
   readonly requestDeadlineMs: number;
 }
 
+/** Fully defaulted limits used by runtime internals. */
+interface ResolvedRuntimeLimits extends RuntimeLimits {
+  readonly maxReleaseInventoryBytes: number;
+}
+
 export const DEFAULT_RUNTIME_LIMITS = Object.freeze({
   maxManifestBytes: 8 * 1024 * 1024,
   maxManifestRecords: 100_000,
   maxRecordBytes: 1 * 1024 * 1024,
+  maxReleaseInventoryBytes: 128 * 1024 * 1024,
   maxJsonDepth: 64,
   maxSchemaClosureBytes: 4 * 1024 * 1024,
   maxSchemaRefHops: 16,
@@ -43,7 +55,7 @@ export const DEFAULT_RUNTIME_LIMITS = Object.freeze({
   maxPaginationBytes: 16 * 1024 * 1024,
   maxRedirects: 3,
   requestDeadlineMs: 30_000,
-} as const satisfies RuntimeLimits);
+} as const satisfies ResolvedRuntimeLimits);
 
 const malformedOverridesMessage =
   "Runtime limits overrides must be an exact plain data object";
@@ -59,12 +71,12 @@ function malformedOverrides(): RangeError {
  */
 export function resolveRuntimeLimits(
   overrides: Partial<RuntimeLimits> = {},
-): RuntimeLimits {
-  const resolved: Record<keyof RuntimeLimits, number> = {
+): ResolvedRuntimeLimits {
+  const resolved: Record<keyof ResolvedRuntimeLimits, number> = {
     ...DEFAULT_RUNTIME_LIMITS,
   };
 
-  let supplied: ReadonlyArray<readonly [keyof RuntimeLimits, unknown]>;
+  let supplied: ReadonlyArray<readonly [keyof ResolvedRuntimeLimits, unknown]>;
   try {
     if (
       overrides === null ||
@@ -94,24 +106,28 @@ export function resolveRuntimeLimits(
       ) {
         throw malformedOverrides();
       }
-      return [candidate as keyof RuntimeLimits, descriptor.value] as const;
+      return [
+        candidate as keyof ResolvedRuntimeLimits,
+        descriptor.value,
+      ] as const;
     });
   } catch {
     throw malformedOverrides();
   }
 
   for (const [key, value] of supplied) {
+    const maximum = DEFAULT_RUNTIME_LIMITS[key];
     if (
       value === undefined ||
       typeof value !== "number" ||
       !Number.isSafeInteger(value) ||
       value < 1 ||
-      value > DEFAULT_RUNTIME_LIMITS[key]
+      value > maximum
     ) {
       throw new RangeError(`Runtime limit ${key} must only lower its default`);
     }
     resolved[key] = value;
   }
 
-  return Object.freeze(resolved);
+  return Object.freeze(resolved) as ResolvedRuntimeLimits;
 }

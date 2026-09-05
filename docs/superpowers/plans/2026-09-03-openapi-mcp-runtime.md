@@ -23,7 +23,7 @@
 - Runtime classification is authoritative. Compiler safety/risk/action/cardinality and permission mappings are advisory.
 - The concrete v1 secret store is process-memory-only. Environment credentials are read at dispatch; OAuth refresh tokens are not persisted.
 - Public HTTPS, an exact-origin policy, DNS-aware local enforcement, manual redirects, bounded response/pagination/deadline behavior, and no automatic action retry are mandatory.
-- Application limits are the exact `DEFAULT_RUNTIME_LIMITS` values in the spec; Cloudflare plan quotas do not define runtime behavior.
+- Application limits are the exact reduction-only `DEFAULT_RUNTIME_LIMITS` values in the spec, including the 128 MiB aggregate release-inventory/search-proof ceiling; Cloudflare plan quotas do not define runtime behavior.
 - Compiler limits are the exact `DEFAULT_COMPILER_LIMITS` values in the spec, including 128 MiB source, 100,000 paths/operations, 50,000 schemas, depth 64, and 1 MiB logical records.
 - Every non-fragment `$ref` must resolve through an explicit URI-to-local-file-and-SHA-256 reference map beneath one approved realpath root. The compiler never performs ambient or credentialed network fetches.
 - Run repository commands through `mise exec --`. A trust/setup failure is environment evidence, not a test result.
@@ -637,7 +637,7 @@ test("schema resolution batches each breadth-first hop", async () => {
 });
 ```
 
-Also cover blank/overlong query, limit 0/51, default 10, deprecated demotion, stable tie ordering, opaque ref output, cycles, missing schemas, hop 16/17, byte boundary, oversized single schema, and manifest mismatch.
+Also cover blank/overlong query, limit 0/51, default 10, deprecated demotion, stable tie ordering, opaque ref output, cycles, missing schemas, hop 16/17, schema byte boundary, oversized single schema, exact/+1 aggregate release-inventory bytes, and manifest mismatch. Add whole-release admission fixtures: an otherwise matching operation must not become visible or mutate generation state until every manifested operation/schema and its closed schema graph verify. Cover duplicate/missing/substituted inventory rows, shared-schema reuse, the eight-release/shared-proof-byte budget, final active-state filtering, multi-generation fallback, same-generation digest conflicts, and response-warning/redaction behavior.
 
 - [ ] **Step 2: Run the test and record the red result**
 
@@ -646,7 +646,7 @@ Expected: FAIL because the runtime and resolver are absent.
 
 - [ ] **Step 3: Implement bounded verified search**
 
-Ask stores for at most `min(limit * 3, 150)` candidates, hydrate and verify each candidate, recompute classification, demote deprecated results, sort deterministically, and stop at the requested bound. Return safe truncated summaries and input outlines plus encoded digest-bound operation refs. Do not return raw record JSON or origins outside the safe display fields.
+Ask stores for at most `min(limit * 3, 150)` candidates, hydrate and verify each candidate, and recompute classification. Before accepting a release, enumerate its complete manifest record map, retrieve every manifested operation, require exact schema batch results, prove schema-reference and operation-root closure completeness, and charge the one search-wide proof/byte/work/store-call envelope. Do this before generation-state mutation. Group candidates by `(catalogId, issuer)` and select only one active generation/digest per group; a rejected higher candidate may fall back only through ordinary generation/rollback admission, never by mixing releases or accepting conflicting same-generation digests. Commit against the captured generation state. On a CAS miss, discard the selection, reread state, reselect, and reprove under the remaining shared budget; never reinterpret an abandoned normal transition as rollback or consume its rollback authorization. Final-recheck active state before returning, then demote deprecated results, sort deterministically, and stop at the requested bound. Return safe truncated summaries and input outlines plus encoded digest-bound operation refs. Rejected candidates become bounded safe warnings; unavailable candidate/state services fail retryably, and response-budget truncation adds its bounded warning. Do not return raw record JSON or origins outside the safe display fields.
 
 - [ ] **Step 4: Implement breadth-first batched schema resolution**
 
