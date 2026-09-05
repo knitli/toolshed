@@ -14,9 +14,7 @@
     },
     "Widget.ReadWrite.Own": {
       "schemes": { "DelegatedWork": { "privilegeLevel": 1 } },
-      "pathSets": [
-        { "methods": ["DELETE"], "paths": { "/widgets/{id}": {} } }
-      ]
+      "pathSets": [{ "methods": ["DELETE"], "paths": { "/widgets/{id}": {} } }]
     }
   }
 }

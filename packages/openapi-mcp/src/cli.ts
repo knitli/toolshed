@@ -16,6 +16,7 @@ const USAGE = `openapi-mcp — compile OpenAPI documents into signed MCP artifac
     [--permissions <path>] [--reference-root <path> --reference-map <path>]
   verify --artifact <path> --sig <path> --pub <path>  (legacy v3 exact-file signature)
   keygen [--out <dir>]
+  serve --config <absolute-config-path>
 `;
 
 const DIAGNOSTIC_UNSAFE_CHARACTERS =
@@ -49,6 +50,25 @@ function parseOrFail<T extends ParseArgsConfig>(config: T) {
 }
 
 const [command, ...rest] = process.argv.slice(2);
+
+if (command === "serve") {
+  const { values } = parseOrFail({
+    args: rest,
+    options: { config: { type: "string" } },
+    strict: true,
+  });
+  if (!values.config) fail("--config is required");
+  try {
+    const { parseOpenApiStdioConfig, serveOpenApiStdio } = await import(
+      "./stdio/index.ts"
+    );
+    await serveOpenApiStdio(
+      parseOpenApiStdioConfig(await readFile(values.config, "utf8")),
+    );
+  } catch {
+    fail("OpenAPI stdio startup failed", { usage: false });
+  }
+}
 
 if (command === "keygen") {
   const { values } = parseOrFail({
@@ -196,48 +216,50 @@ if (command === "compile-release") {
   process.exit(0);
 }
 
-if (command !== "compile") {
-  fail(command ? `unknown command "${command}"` : "no command given");
-}
+if (command !== "serve") {
+  if (command !== "compile") {
+    fail(command ? `unknown command "${command}"` : "no command given");
+  }
 
-const { values } = parseOrFail({
-  args: rest,
-  options: {
-    spec: { type: "string" },
-    api: { type: "string" },
-    out: { type: "string" },
-    append: { type: "boolean" },
-    permissions: { type: "string" },
-    "sign-key": { type: "string" },
-  },
-  strict: true,
-});
-
-if (!values.spec) fail("--spec is required");
-if (!values.api) fail("--api is required");
-if (!values.out) fail("--out is required");
-
-const started = Date.now();
-try {
-  const result = await compile({
-    specPath: values.spec,
-    api: values.api,
-    outPath: values.out,
-    append: values.append === true,
-    permissionsPath: values.permissions,
+  const { values } = parseOrFail({
+    args: rest,
+    options: {
+      spec: { type: "string" },
+      api: { type: "string" },
+      out: { type: "string" },
+      append: { type: "boolean" },
+      permissions: { type: "string" },
+      "sign-key": { type: "string" },
+    },
+    strict: true,
   });
 
-  console.log(
-    `compiled ${result.operations} operations, ${result.schemas} schemas ` +
-      `(${result.mapped} permission-mapped) in ${Date.now() - started} ms -> ${values.out}`,
-  );
+  if (!values.spec) fail("--spec is required");
+  if (!values.api) fail("--api is required");
+  if (!values.out) fail("--out is required");
 
-  if (values["sign-key"]) {
-    const privateKeyPem = await readFile(values["sign-key"], "utf8");
-    const sig = await signArtifact(values.out, privateKeyPem);
-    await writeFile(`${values.out}.sig`, sig);
-    console.log(`signed -> ${values.out}.sig`);
+  const started = Date.now();
+  try {
+    const result = await compile({
+      specPath: values.spec,
+      api: values.api,
+      outPath: values.out,
+      append: values.append === true,
+      permissionsPath: values.permissions,
+    });
+
+    console.log(
+      `compiled ${result.operations} operations, ${result.schemas} schemas ` +
+        `(${result.mapped} permission-mapped) in ${Date.now() - started} ms -> ${values.out}`,
+    );
+
+    if (values["sign-key"]) {
+      const privateKeyPem = await readFile(values["sign-key"], "utf8");
+      const sig = await signArtifact(values.out, privateKeyPem);
+      await writeFile(`${values.out}.sig`, sig);
+      console.log(`signed -> ${values.out}.sig`);
+    }
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err), { usage: false });
   }
-} catch (err) {
-  fail(err instanceof Error ? err.message : String(err), { usage: false });
 }

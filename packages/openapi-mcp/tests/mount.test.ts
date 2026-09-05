@@ -8,20 +8,31 @@ const TINY = `${import.meta.dir}/../fixtures/tiny-api.yaml`;
 const OTHER = `${import.meta.dir}/../fixtures/other-api.yaml`;
 
 afterEach(() => {
-  try { unlinkSync(OUT); } catch { /* already gone */ }
+  try {
+    unlinkSync(OUT);
+  } catch {
+    /* already gone */
+  }
 });
 
 describe("mounting a second api", () => {
   test("appending keeps the first api's rows", async () => {
     await compile({ specPath: TINY, api: "tiny", outPath: OUT });
-    await compile({ specPath: OTHER, api: "other", outPath: OUT, append: true });
+    await compile({
+      specPath: OTHER,
+      api: "other",
+      outPath: OUT,
+      append: true,
+    });
 
     const db = new Database(OUT, { readonly: true });
     expect(
       db.query<{ n: number }, []>("SELECT COUNT(*) n FROM operations").get()?.n,
     ).toBe(9);
     const apis = db
-      .query<{ api: string }, []>("SELECT DISTINCT api FROM operations ORDER BY api")
+      .query<{ api: string }, []>(
+        "SELECT DISTINCT api FROM operations ORDER BY api",
+      )
       .all()
       .map((r) => r.api);
     expect(apis).toEqual(["other", "tiny"]);
@@ -30,7 +41,12 @@ describe("mounting a second api", () => {
 
   test("appending keeps the fts external-content index consistent", async () => {
     await compile({ specPath: TINY, api: "tiny", outPath: OUT });
-    await compile({ specPath: OTHER, api: "other", outPath: OUT, append: true });
+    await compile({
+      specPath: OTHER,
+      api: "other",
+      outPath: OUT,
+      append: true,
+    });
 
     // Not readonly: fts5's integrity-check command runs as a write statement
     // even though it only verifies. A mismatch between operations_fts and its
@@ -38,14 +54,21 @@ describe("mounting a second api", () => {
     // makes this throw.
     const db = new Database(OUT);
     expect(() =>
-      db.run("INSERT INTO operations_fts(operations_fts) VALUES('integrity-check')"),
+      db.run(
+        "INSERT INTO operations_fts(operations_fts) VALUES('integrity-check')",
+      ),
     ).not.toThrow();
     db.close();
   });
 
   test("word-split search_text finds a camelCase operation by its split words", async () => {
     await compile({ specPath: TINY, api: "tiny", outPath: OUT });
-    await compile({ specPath: OTHER, api: "other", outPath: OUT, append: true });
+    await compile({
+      specPath: OTHER,
+      api: "other",
+      outPath: OUT,
+      append: true,
+    });
 
     const db = new Database(OUT, { readonly: true });
     const hits = db
@@ -61,11 +84,19 @@ describe("mounting a second api", () => {
 
   test("records both apis in meta", async () => {
     await compile({ specPath: TINY, api: "tiny", outPath: OUT });
-    await compile({ specPath: OTHER, api: "other", outPath: OUT, append: true });
+    await compile({
+      specPath: OTHER,
+      api: "other",
+      outPath: OUT,
+      append: true,
+    });
 
     const db = new Database(OUT, { readonly: true });
     const meta = Object.fromEntries(
-      db.query<{ key: string; value: string }, []>("SELECT key, value FROM meta")
+      db
+        .query<{ key: string; value: string }, []>(
+          "SELECT key, value FROM meta",
+        )
         .all()
         .map((r) => [r.key, r.value]),
     );
@@ -77,7 +108,12 @@ describe("mounting a second api", () => {
 
   test("search can be scoped to one api", async () => {
     await compile({ specPath: TINY, api: "tiny", outPath: OUT });
-    await compile({ specPath: OTHER, api: "other", outPath: OUT, append: true });
+    await compile({
+      specPath: OTHER,
+      api: "other",
+      outPath: OUT,
+      append: true,
+    });
 
     const db = new Database(OUT, { readonly: true });
     const hits = db
@@ -108,7 +144,9 @@ describe("mounting a second api", () => {
       .map((r) => r.api);
     expect(apis).toEqual(["tiny"]);
     const meta = db
-      .query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
+      .query<{ value: string }, [string]>(
+        "SELECT value FROM meta WHERE key = ?",
+      )
       .get("apis")?.value;
     expect(JSON.parse(meta ?? "[]")).toEqual(["tiny"]);
     db.close();
@@ -125,7 +163,9 @@ describe("mounting a second api", () => {
 
     const readback = new Database(OUT, { readonly: true });
     expect(
-      readback.query<{ n: number }, []>("SELECT COUNT(*) n FROM operations").get()?.n,
+      readback
+        .query<{ n: number }, []>("SELECT COUNT(*) n FROM operations")
+        .get()?.n,
     ).toBe(6);
     const apis = readback
       .query<{ api: string }, []>("SELECT DISTINCT api FROM operations")

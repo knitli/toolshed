@@ -2,6 +2,7 @@ import { classifyOperation } from "./classify.ts";
 import { sha256 } from "./digest.ts";
 import { OpenApiMcpError } from "./errors.ts";
 import {
+  type AdmittedManifest,
   type AuthenticatedManifest,
   authenticateManifest,
   commitAuthenticatedManifestAtState,
@@ -38,6 +39,7 @@ import type {
   PrepareInput,
   SchemaRecordV4,
   SearchInput,
+  SearchQuery,
   SearchResult,
   SearchResultItem,
   SearchWarning,
@@ -919,9 +921,97 @@ function timingSafeEqual(left: string, right: string): boolean {
   return difference === 0;
 }
 
+/** Internal host preflight. Proves all members without admitting any generation. */
+export async function verifyExecutableRelease(
+  options: OpenApiRuntimeOptions,
+  catalogId: CandidateRef["catalogId"],
+  releaseId: CandidateRef["releaseId"],
+): Promise<AuthenticatedManifest> {
+  const limits = resolveRuntimeLimits(options.limits);
+  const authenticated = await authenticateManifest(
+    await options.store.getManifest(catalogId, releaseId),
+    options.trust,
+    limits,
+  );
+  if (
+    authenticated.manifest.catalogId !== catalogId ||
+    authenticated.manifest.releaseId !== releaseId
+  )
+    throw new OpenApiMcpError("RECORD_NOT_ADMITTED");
+  await verifyCompleteRelease(
+    options.store,
+    authenticated,
+    limits,
+    createCompleteVerificationBudget(limits),
+  );
+  return authenticated;
+}
+
+/** Internal executable ingress; manifest-only admission retains its public contract. */
+export async function admitExecutableRelease(
+  options: OpenApiRuntimeOptions,
+  preflight: AuthenticatedManifest,
+): Promise<AdmittedManifest> {
+  const limits = resolveRuntimeLimits(options.limits);
+  const budget = createCompleteVerificationBudget(limits);
+  const { catalogId, releaseId, issuer, generation } = preflight.manifest;
+  let initialTransition: "normal" | "rollback" | undefined;
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const state = await options.generations.get(catalogId, issuer);
+    const transition =
+      state !== null && generation < state.highestGeneration
+        ? "rollback"
+        : "normal";
+    if (initialTransition !== undefined && initialTransition !== transition)
+      throw new OpenApiMcpError("MANIFEST_GENERATION_CONFLICT");
+    initialTransition ??= transition;
+    const current = await authenticateManifest(
+      await options.store.getManifest(catalogId, releaseId),
+      options.trust,
+      limits,
+    );
+    if (current.manifestDigest !== preflight.manifestDigest)
+      throw new OpenApiMcpError("MANIFEST_GENERATION_CONFLICT");
+    await verifyCompleteRelease(options.store, current, limits, budget);
+    if (
+      !sameGenerationState(
+        state,
+        await options.generations.get(catalogId, issuer),
+      )
+    )
+      continue;
+    const admitted = await commitAuthenticatedManifestAtState(
+      current,
+      options.trust,
+      options.generations,
+      state,
+    );
+    if (admitted !== null) return admitted;
+  }
+  throw new OpenApiMcpError("MANIFEST_GENERATION_CONFLICT");
+}
+
 /** Construct the portable verified runtime. */
 export function createOpenApiRuntime(
   options: OpenApiRuntimeOptions,
+): OpenApiRuntime {
+  return createRuntime(options);
+}
+
+/** Internal adapter seam. Source calls draw from the same budget as record proof. */
+export function createRuntimeWithCandidateLookup(
+  options: OpenApiRuntimeOptions,
+  lookup: (
+    query: SearchQuery,
+    tryChargeSource: () => boolean,
+  ) => Promise<{ candidates: readonly CandidateRef[]; limited: boolean }>,
+): OpenApiRuntime {
+  return createRuntime(options, lookup);
+}
+
+function createRuntime(
+  options: OpenApiRuntimeOptions,
+  lookup?: Parameters<typeof createRuntimeWithCandidateLookup>[1],
 ): OpenApiRuntime {
   const limits = resolveRuntimeLimits(options.limits);
   const committingGenerations: GenerationStore = {
@@ -1189,11 +1279,30 @@ export function createOpenApiRuntime(
       }
       const candidateLimit = Math.min(query.limit * 3, 150);
       let candidateResult: unknown;
+      let candidateLookupLimited = false;
       try {
-        candidateResult = await options.store.searchCandidates({
-          ...query,
-          limit: candidateLimit,
-        });
+        const input = { ...query, limit: candidateLimit };
+        if (lookup) {
+          const found = await lookup(input, () => {
+            try {
+              chargeCompleteVerification(completeVerificationBudget, {
+                storeCalls: 1,
+                work: 1,
+              });
+              return true;
+            } catch {
+              return false;
+            }
+          });
+          candidateResult = found.candidates;
+          candidateLookupLimited = found.limited;
+        } else {
+          chargeCompleteVerification(completeVerificationBudget, {
+            storeCalls: 1,
+            work: 1,
+          });
+          candidateResult = await options.store.searchCandidates(input);
+        }
       } catch {
         throw upstreamUnavailable("Search candidate lookup is unavailable");
       }
@@ -1285,7 +1394,7 @@ export function createOpenApiRuntime(
         return true;
       };
       let responseLimited = false;
-      let admissionLimited = false;
+      let admissionLimited = candidateLookupLimited;
 
       for (const [rank, rawCandidate] of candidates.entries()) {
         let candidate: CandidateRef;

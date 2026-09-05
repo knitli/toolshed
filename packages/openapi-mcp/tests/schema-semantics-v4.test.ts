@@ -620,28 +620,31 @@ describe("OpenAPI 3.1 schema resource semantics", () => {
   test.each([
     [64, true],
     [65, false],
-  ] as const)("bounds retained schema reference work at the derived limit: %i refs", async (referenceCount, accepted) => {
-    const root = await temporaryRoot();
-    const result = compileDocument(
-      root,
-      `reference-work-${referenceCount}`,
-      documentWithSchemas({
-        Fanout: {
-          allOf: Array.from({ length: referenceCount }, () => ({
-            $ref: "#/components/schemas/Fanout",
-          })),
+  ] as const)(
+    "bounds retained schema reference work at the derived limit: %i refs",
+    async (referenceCount, accepted) => {
+      const root = await temporaryRoot();
+      const result = compileDocument(
+        root,
+        `reference-work-${referenceCount}`,
+        documentWithSchemas({
+          Fanout: {
+            allOf: Array.from({ length: referenceCount }, () => ({
+              $ref: "#/components/schemas/Fanout",
+            })),
+          },
+        }),
+        {
+          limits: { ...DEFAULT_COMPILER_LIMITS, maxSchemas: 1 },
         },
-      }),
-      {
-        limits: { ...DEFAULT_COMPILER_LIMITS, maxSchemas: 1 },
-      },
-    );
-    if (accepted) await expect(result).resolves.toBeDefined();
-    else
-      await expect(result).rejects.toThrow(
-        "schema reference work exceeds limit",
       );
-  });
+      if (accepted) await expect(result).resolves.toBeDefined();
+      else
+        await expect(result).rejects.toThrow(
+          "schema reference work exceeds limit",
+        );
+    },
+  );
 
   test("canonicalizes URI-fragment aliases to one physical materialization", async () => {
     const root = await temporaryRoot();

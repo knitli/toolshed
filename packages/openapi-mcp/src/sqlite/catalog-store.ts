@@ -1,3 +1,4 @@
+import type { BigIntStats } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import {
   type CatalogId,
@@ -20,7 +21,12 @@ import {
   type TypedOperationId,
   type TypedSchemaId,
 } from "../runtime/index.ts";
+import { parseJsonStrict } from "../runtime/strict-json.ts";
 import { MAX_SEARCH_QUERY_BYTES } from "../runtime/versions.ts";
+import {
+  releaseFileIdentity,
+  verifyReleaseCompletion,
+} from "./release-completion.ts";
 
 const SCHEMA_PROBE = `SELECT CASE
   WHEN typeof(name) = 'text' AND name IN ('meta', 'release_metadata') THEN name
@@ -337,8 +343,11 @@ export class SqliteCatalogStore implements CatalogStore {
   #v4: CatalogStore | undefined;
   #legacyIdentity: LegacyV3CatalogIdentity | undefined;
   #limits: RuntimeLimits;
+  #path: string;
+  #payloadIdentity: BigIntStats | undefined;
 
   constructor(path: string, options: SqliteCatalogStoreOptions = {}) {
+    this.#path = path;
     this.#limits = snapshotSqliteRuntimeLimits(options);
     let database: SqliteDatabase | undefined;
     try {
@@ -382,7 +391,26 @@ export class SqliteCatalogStore implements CatalogStore {
     catalog: CatalogId,
     release: ReleaseId,
   ): Promise<ManifestEnvelope> {
-    return await this.#v4Store().getManifest(catalog, release);
+    const envelope = await this.#v4Store().getManifest(catalog, release);
+    // The signed envelope's format controls completion, never unsigned SQL metadata.
+    if (
+      (
+        parseJsonStrict(envelope.manifestJson, {
+          maxBytes: this.#limits.maxManifestBytes,
+          maxDepth: this.#limits.maxJsonDepth,
+          maxKeys: this.#limits.maxManifestRecords + 100,
+        }) as { format?: unknown }
+      ).format === 5
+    ) {
+      this.#payloadIdentity ??= releaseFileIdentity(this.#path);
+      verifyReleaseCompletion(
+        this.#path,
+        this.#payloadIdentity,
+        envelope,
+        this.#limits,
+      );
+    }
+    return envelope;
   }
   async searchCandidates(query: SearchQuery) {
     if (!this.legacyInventoryOnly)

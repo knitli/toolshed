@@ -4,7 +4,11 @@ import { generateKeypair, signArtifact, verifyArtifact } from "../src/sign.ts";
 
 const FILE = `${import.meta.dir}/tmp-sign.bin`;
 afterEach(() => {
-  try { unlinkSync(FILE); } catch { /* already gone */ }
+  try {
+    unlinkSync(FILE);
+  } catch {
+    /* already gone */
+  }
 });
 
 describe("artifact signing", () => {
@@ -34,6 +38,8 @@ describe("artifact signing", () => {
   test("a malformed signature returns false rather than throwing", async () => {
     const { publicKeyPem } = generateKeypair();
     await Bun.write(FILE, "artifact bytes");
-    expect(await verifyArtifact(FILE, "not-base64!!", publicKeyPem)).toBe(false);
+    expect(await verifyArtifact(FILE, "not-base64!!", publicKeyPem)).toBe(
+      false,
+    );
   });
 });

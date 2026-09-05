@@ -25,9 +25,11 @@ describe.skipIf(!SPEC)("Microsoft Graph invariants", () => {
 
     // Every operationId is unique, so no row was silently dropped.
     expect(
-      db.query<{ n: number }, []>(
-        "SELECT COUNT(DISTINCT operation_id) n FROM operations",
-      ).get()?.n,
+      db
+        .query<{ n: number }, []>(
+          "SELECT COUNT(DISTINCT operation_id) n FROM operations",
+        )
+        .get()?.n,
     ).toBe(17777);
 
     // Safety invariant: no mutating method may be stored as a read unless an
@@ -36,19 +38,23 @@ describe.skipIf(!SPEC)("Microsoft Graph invariants", () => {
     // override list is not allowed to touch — kept for that narrower check,
     // but the override's actual effect is asserted below.
     expect(
-      db.query<{ n: number }, []>(
-        `SELECT COUNT(*) n FROM operations
+      db
+        .query<{ n: number }, []>(
+          `SELECT COUNT(*) n FROM operations
          WHERE safety = 'read' AND method NOT IN ('GET','HEAD','POST')`,
-      ).get()?.n,
+        )
+        .get()?.n,
     ).toBe(0);
 
     // The override list (READ_OVERRIDE_SUFFIXES) applies only to POST:
     // assert its real effect rather than a query that excludes every POST
     // it could touch. Count measured 2026-09-01 against the real spec.
     expect(
-      db.query<{ n: number }, []>(
-        "SELECT COUNT(*) n FROM operations WHERE safety = 'read' AND method = 'POST'",
-      ).get()?.n,
+      db
+        .query<{ n: number }, []>(
+          "SELECT COUNT(*) n FROM operations WHERE safety = 'read' AND method = 'POST'",
+        )
+        .get()?.n,
     ).toBe(101);
 
     // Graph v1.0's OpenAPI document declares no `/$batch` path (batch is
@@ -63,19 +69,25 @@ describe.skipIf(!SPEC)("Microsoft Graph invariants", () => {
       .all();
     expect(batch.length).toBe(0);
     if (batch.length > 0) {
-      expect(batch.every((b) => b.safety === "write" && b.risk === "high")).toBe(true);
+      expect(
+        batch.every((b) => b.safety === "write" && b.risk === "high"),
+      ).toBe(true);
     }
 
     // Pageable and deprecated counts measured on the same revision.
     expect(
-      db.query<{ n: number }, []>(
-        "SELECT COUNT(*) n FROM operations WHERE pageable = 1",
-      ).get()?.n,
+      db
+        .query<{ n: number }, []>(
+          "SELECT COUNT(*) n FROM operations WHERE pageable = 1",
+        )
+        .get()?.n,
     ).toBe(2760);
     expect(
-      db.query<{ n: number }, []>(
-        "SELECT COUNT(*) n FROM operations WHERE deprecated = 1",
-      ).get()?.n,
+      db
+        .query<{ n: number }, []>(
+          "SELECT COUNT(*) n FROM operations WHERE deprecated = 1",
+        )
+        .get()?.n,
     ).toBe(85);
 
     // Search must actually find something for a plain-language query.

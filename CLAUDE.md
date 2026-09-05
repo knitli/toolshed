@@ -12,11 +12,24 @@ Toolshed is a Claude Code plugin marketplace monorepo (`knitli/toolshed`). It pa
 bun run validate          # Run marketplace validation (structure, JSON, version sync)
 ```
 
-There is no build step, no test suite, and no linter beyond commitlint on PRs.
+`packages/openapi-mcp` is a compiled TypeScript package with Bun tests, Node
+transport/stdio tests, and Biome checks. Its build and package-consumer checks are:
+
+```bash
+bun run --cwd packages/openapi-mcp build
+bun test packages/openapi-mcp
+bun run --cwd packages/openapi-mcp test:node-transport
+bun run --cwd packages/openapi-mcp test:node-stdio
+bun scripts/generate.mts --check
+```
 
 ## Architecture
 
-All plugin logic is **markdown prompts** interpreted by Claude Code at runtime. There is no compiled code.
+Plugin logic is **markdown prompts** interpreted by Claude Code at runtime.
+The separate `packages/openapi-mcp` package compiles OpenAPI catalogs and serves
+MCP through a local Node adapter; it has portable runtime/conformance exports and
+Node compiler/SQLite/stdio exports. See its README for artifact format 5,
+runtime contract 1, prepared-call format 2, and pending publication/D1 gates.
 
 ### Version sync
 

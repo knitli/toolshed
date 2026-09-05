@@ -32,6 +32,7 @@ import type {
   SecretStore,
   Sha256,
 } from "../runtime/types.ts";
+import { isOAuthResource } from "./oauth-resource.ts";
 
 const PROFILE_DIGEST_DOMAIN = "knitli.openapi-mcp.credential-profile.v1";
 const SLOT_DIGEST_DOMAIN = "knitli.openapi-mcp.credential-slots.v1";
@@ -227,15 +228,9 @@ function validateOptionalText(value: unknown): string | undefined {
 }
 
 function validateResource(value: unknown): string | undefined {
-  const resource = validateOptionalText(value);
-  if (resource === undefined) return undefined;
-  try {
-    const parsed = new URL(resource);
-    if (parsed.hash !== "") throw invalidProfile();
-    return resource;
-  } catch {
-    throw invalidProfile();
-  }
+  if (value === undefined) return undefined;
+  if (!isOAuthResource(value)) throw invalidProfile();
+  return value;
 }
 
 function validateEndpoint(value: unknown): string {
