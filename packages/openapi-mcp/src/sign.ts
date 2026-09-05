@@ -13,7 +13,9 @@ import type {
   ReleaseManifestV4,
 } from "./runtime/types.ts";
 
-const MANIFEST_SIGNATURE_DOMAIN = "knitli.openapi-mcp.release-manifest.v4\0";
+function manifestSignatureDomain(format: 4 | 5): string {
+  return `knitli.openapi-mcp.release-manifest.v${format}\0`;
+}
 
 /** Ed25519 keypair, PEM encoded. The public key ships in plugin source. */
 export function generateKeypair(): {
@@ -57,7 +59,7 @@ export async function verifyArtifact(
   }
 }
 
-/** Sign canonical v4 manifest JSON under its distinct domain separator. */
+/** Sign canonical v4/v5 manifest JSON under its versioned domain separator. */
 export function signReleaseManifestV4(
   manifest: ReleaseManifestV4,
   keyId: string,
@@ -65,7 +67,7 @@ export function signReleaseManifestV4(
 ): { manifestJson: string; signature: ManifestSignature } {
   const manifestJson = canonicalJson(manifest as unknown as JsonValue);
   const payload = Buffer.concat([
-    Buffer.from(MANIFEST_SIGNATURE_DOMAIN, "utf8"),
+    Buffer.from(manifestSignatureDomain(manifest.format), "utf8"),
     Buffer.from(manifestJson, "utf8"),
   ]);
   const signature = sign(

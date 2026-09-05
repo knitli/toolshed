@@ -90,7 +90,7 @@ function operation(
       },
       schemaIds: [itemSchemaId],
       advisory: {},
-    },
+    } as unknown as OperationRecordV4,
   };
 }
 

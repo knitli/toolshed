@@ -17,8 +17,13 @@ import type {
 } from "./types.ts";
 import { type RuntimeLimits, resolveRuntimeLimits } from "./versions.ts";
 
-const manifestSignatureDomain = "knitli.openapi-mcp.release-manifest.v4\0";
-const manifestDigestDomain = "knitli.openapi-mcp.release-manifest.v4";
+function manifestSignatureDomain(format: 4 | 5): string {
+  return `knitli.openapi-mcp.release-manifest.v${format}\0`;
+}
+
+function manifestDigestDomain(format: 4 | 5): string {
+  return `knitli.openapi-mcp.release-manifest.v${format}`;
+}
 const rollbackSignatureDomain =
   "knitli.openapi-mcp.rollback-authorization.v1\0";
 const digestPattern = /^[0-9a-f]{64}$/;
@@ -218,7 +223,8 @@ function parseManifest(text: string, limits: RuntimeLimits): ReleaseManifestV4 {
     maxKeys: limits.maxManifestRecords + 32,
   });
   const value = requireExactShape(parsed, manifestKeys, "manifest");
-  if (ownData(value, "format") !== 4 || ownData(value, "contract") !== 1) {
+  const format = ownData(value, "format");
+  if ((format !== 4 && format !== 5) || ownData(value, "contract") !== 1) {
     throw manifestInvalid("manifest versions are unsupported");
   }
   const catalogId = requireIdentifier(
@@ -298,7 +304,7 @@ function parseManifest(text: string, limits: RuntimeLimits): ReleaseManifestV4 {
   }
 
   return {
-    format: 4,
+    format,
     contract: 1,
     catalogId,
     releaseId,
@@ -366,7 +372,7 @@ async function requireReleaseSignature(
   if (
     key === null ||
     !(await verifyEd25519(
-      `${manifestSignatureDomain}${canonical}`,
+      `${manifestSignatureDomain(manifest.format)}${canonical}`,
       signature.signature,
       key.publicKey,
     ))
@@ -555,7 +561,7 @@ function detachedManifest(
   );
 }
 
-/** Authenticate a v4 manifest without reading or mutating generation state. */
+/** Authenticate a v4/v5 manifest without reading or mutating generation state. */
 export async function authenticateManifest(
   envelope: ManifestEnvelope,
   trust: ManifestTrust,
@@ -590,7 +596,7 @@ export async function authenticateManifest(
   const canonical = canonicalJson(manifest as unknown as JsonObject);
   await requireReleaseSignature(manifest, canonical, signature, trust);
   const manifestDigest = await sha256(
-    manifestDigestDomain,
+    manifestDigestDomain(manifest.format),
     manifest as unknown as JsonObject,
   );
   let rollback: RollbackAuthorization | undefined;
@@ -739,7 +745,7 @@ export async function admitAuthenticatedManifest(
   );
 }
 
-/** Verify a v4 manifest and atomically admit its generation policy transition. */
+/** Verify a v4/v5 manifest and atomically admit its generation transition. */
 export async function admitManifest(
   envelope: ManifestEnvelope,
   trust: ManifestTrust,

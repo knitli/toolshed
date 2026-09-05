@@ -1,3 +1,7 @@
+export {
+  classifyOperation,
+  type OperationClassification,
+} from "./classify.ts";
 export { sha256, verifyEd25519 } from "./digest.ts";
 export type { OpenApiMcpErrorCode } from "./errors.ts";
 export { OpenApiMcpError } from "./errors.ts";
@@ -8,12 +12,20 @@ export type {
 } from "./manifest.ts";
 export { admitManifest } from "./manifest.ts";
 export {
+  createPreparedCall,
+  digestBytes,
+  digestPreparedCall,
+  type PreparedCallInput,
+  verifyPreparedCall,
+} from "./prepared-call.ts";
+export {
   decodeOperationRef,
   encodeOperationRef,
   parseTypedRecordId,
 } from "./references.ts";
 export { createOpenApiRuntime, type OpenApiRuntimeOptions } from "./runtime.ts";
 export { resolveSchemaClosure } from "./schema-resolver.ts";
+export { type SerializedArguments, serializeArguments } from "./serialize.ts";
 export {
   CATALOG_STORE_PUBLIC_MESSAGES,
   createD1CatalogStore,
@@ -41,8 +53,12 @@ export type {
   CatalogId,
   CatalogStore,
   Credential,
+  CredentialBindingResolver,
+  CredentialProfileBinding,
   CredentialProvider,
   CredentialResolution,
+  CredentialSlot,
+  CredentialSlotContext,
   DestinationPolicy,
   GenerationState,
   GenerationStore,
