@@ -16,10 +16,14 @@ established; use Node for `serve`. `/runtime` and `/conformance` pass an isolate
 WebWorker-only declaration check and browser bundle. This is not evidence of an
 actual Cloudflare D1 deployment or D1 conformance.
 
-The source version is `0.0.0`. Registry publication, trusted publishing, and
-registry provenance verification remain release gates, not claims made by this
-README. For a locally built and tested tarball, install its absolute path from a
-clean consumer directory:
+The source version is `0.0.0`. That version was published under the `bootstrap`
+dist-tag on 2026-09-05; its public installation, signatures, provenance, and
+installed consumer were verified. See the [bootstrap release record](../../docs/superpowers/reviews/2026-09-05-openapi-mcp-bootstrap.md)
+for the exact artifact and workflow binding. This is not a stable `latest`
+release or evidence of a successful trusted-publishing release.
+
+For a locally built and tested tarball, install its absolute path from a clean
+consumer directory:
 
 ```sh
 npm install --ignore-scripts /absolute/path/to/openapi-mcp.tgz
@@ -28,8 +32,8 @@ node --version
 
 After a real stable version is observed in npm, pin that exact verified version
 with `npm install --save-exact @knitli/openapi-mcp@<verified-version>`. A bootstrap
-`0.0.0` publication, if needed, uses the `bootstrap` dist-tag and is not a stable
-release. The CLI examples below use the consumer's `node_modules/.bin` binary.
+`0.0.0` publication uses the `bootstrap` dist-tag and is not a stable release.
+The CLI examples below use the consumer's `node_modules/.bin` binary.
 
 ## Generate a signing key and compile a release
 
@@ -341,14 +345,21 @@ external setup and bootstrap-cleanup gates. Until then, build/test/validation
 still run and publication is explicitly reported as pending. A real build,
 publication, or audit failure continues to fail the job and its dependents.
 
-If the package does not yet exist, bootstrap is a separate exception requiring
-recorded named owner approval and protected-environment approval. It publishes
-only `0.0.0`, with `--access public --tag bootstrap --provenance`; it does not run
-semantic-release or create a Git tag/release. A short-lived granular token may be
-injected only into that protected job, never into local files, logs, commits, or
-artifacts. After bootstrap, configure the exact trusted publisher, remove token
-variables and the GitHub secret, revoke the token, and commit the OIDC-only
-workflow before allowing the first real `latest` release.
+The one-time `0.0.0` bootstrap is complete. Its manual dispatch and token-backed
+jobs have been removed; do not rerun publication of that version. The adapter
+still rejects token environment mappings, including mappings in disabled jobs.
+The [bootstrap release record](../../docs/superpowers/reviews/2026-09-05-openapi-mcp-bootstrap.md)
+separates verified publication and secret removal from owner-reported npm setup
+and the remaining first-`latest` gate.
+
+After publication, the verification step waits for the exact version to appear
+in the public package listing before attempting a fresh installation. Only a
+missing package or missing version is retried: at most six requests, each with
+a ten-second timeout, separated by ten-second waits. Invalid metadata and other
+errors fail the check. This readiness probe cannot guarantee every registry
+replica or tarball URL is ready. Installation, cryptographic verification, and
+consumer checks remain mandatory; publication itself is never retried by this
+probe.
 
 For bootstrap and every stable release, retain a fresh public install's
 `npm audit signatures --json --include-attestations` output in the protected job
