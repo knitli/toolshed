@@ -111,7 +111,7 @@
               "release": "patch"
             },
             {
-              "scope": "!(openapi-mcp)",
+              "scope": "!@(openapi-mcp)",
               "release": false
             },
             {
@@ -120,7 +120,7 @@
             },
             {
               "scope": "openapi-mcp",
-              "type": "!(feat|fix|perf)",
+              "type": "!@(feat|fix|perf)",
               "release": false
             }
           ]
