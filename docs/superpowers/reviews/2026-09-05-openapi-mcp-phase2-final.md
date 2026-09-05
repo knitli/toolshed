@@ -1,5 +1,11 @@
 # OpenAPI MCP Phase 2 final review record — 2026-09-05
 
+## External PR feedback closure checkpoint
+
+Three subsequent PR #23 findings are addressed in reviewed implementation snapshot `c7413d88d28c3a0365183e2605b346a331026319`: every exact policy is compiled before any generation admission; parser/provider profile validation shares a side-effect-free validator; credential redaction sanitizes untrusted response values before serialization while preserving protocol metadata and continuation tokens. Independent scoped review found no new fix-diff defect. Historical RED runs are implementer-reported because raw output was not retained; fresh controller GREEN logs and regression source were independently inspected.
+
+Fresh full-repository results: **997 passed, one known skip, zero failures; 4,823 assertions across 40 files**. Actual Node transport20/20, stdio/TLS1/1, four installed consumers, build, root/generated validation and whitespace passed. Full-package Biome passed with **18 warnings and two infos**, superseding earlier diagnostic counts. Tested tarball SHA256: `5a08830a006091bc0d4c371ab9530b91c0c506cf811a37a5b23f48cb6a93bca5`. Supporting scoped verdict: retained local `/private/tmp/toolshed-pr23-feedback-fix-verdict.md`; logs `/private/tmp/toolshed-pr23-feedback-controller-{suite,node_transport,node_stdio,validate,biome}.log`. These local results do not substitute for corrected-head hosted CI or publication.
+
 ## Subsequent delivery and CI checkpoint
 
 [PR #23](https://github.com/knitli/toolshed/pull/23) is open; this supersedes the pre-submission checkpoint wording below. The first hosted validation used ambient Node 22.23.2, outside the declared Node 24.16–24.x support range, and failed the installed Node consumer on SQLite serialization. A separately reviewed, four-line workflow correction selects Node 24.19.0, matching the release jobs; compiler code and test assertions remain unchanged.

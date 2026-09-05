@@ -85,16 +85,16 @@ export async function serveOpenApiStdio(
         throw new Error("Catalog identity mismatch");
       admitted.push({ config: entry, store, verified });
     }
-    // Reject an invalid configured release before advancing any other catalog.
+    const templates = await Promise.all(
+      (config.exactPolicies ?? []).map((entry) => compileExactPolicy(entry)),
+    );
+    // Reject invalid releases and policies before advancing any catalog.
     // GenerationStore provides per-catalog CAS, not a cross-catalog transaction.
     for (const entry of admitted)
       await admitExecutableRelease(
         { store: entry.store, trust: config.trust, generations, limits },
         entry.verified,
       );
-    const templates = await Promise.all(
-      (config.exactPolicies ?? []).map((entry) => compileExactPolicy(entry)),
-    );
     const authorizer = createStdioActionAuthorizer(templates);
     const routes: OpenApiServerRoute[] = [];
     for (const profile of config.profiles) {

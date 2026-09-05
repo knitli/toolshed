@@ -428,16 +428,25 @@ async function digestSlots(slots: readonly CredentialSlot[]): Promise<Sha256> {
   return sha256(SLOT_DIGEST_DOMAIN, canonicalSlots);
 }
 
+/** Validate local profile semantics without resolving credentials or performing I/O. */
+export function validateLocalAuthProfile(
+  profile: LocalAuthProfile,
+): LocalAuthProfile {
+  const snapshot = snapshotObject(profile);
+  if (!Array.isArray(snapshot.allowedOrigins)) throw invalidProfile();
+  return validateProfile(
+    snapshot as unknown as LocalAuthProfile,
+    snapshot.allowedOrigins as string[],
+  ).value;
+}
+
 export async function digestCredentialProfile(
   profile: LocalAuthProfile,
 ): Promise<Sha256> {
-  const snapshot = snapshotObject(profile);
-  if (!Array.isArray(snapshot.allowedOrigins)) throw invalidProfile();
-  const normalized = validateProfile(
-    snapshot as unknown as LocalAuthProfile,
-    snapshot.allowedOrigins as string[],
+  return sha256(
+    PROFILE_DIGEST_DOMAIN,
+    snapshotObject(validateLocalAuthProfile(profile)),
   );
-  return sha256(PROFILE_DIGEST_DOMAIN, snapshotObject(normalized.value));
 }
 
 async function createBinding(

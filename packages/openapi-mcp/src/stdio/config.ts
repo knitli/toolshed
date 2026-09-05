@@ -5,6 +5,7 @@ import {
   DEFAULT_RUNTIME_LIMITS,
   resolveRuntimeLimits,
 } from "../runtime/versions.ts";
+import { validateLocalAuthProfile } from "../sqlite/auth.ts";
 import { isOAuthResource } from "../sqlite/oauth-resource.ts";
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
@@ -140,6 +141,7 @@ export function parseOpenApiStdioConfig(input: unknown): OpenApiStdioConfig {
           })
         : input;
     const config = schema.parse(value);
+    for (const entry of config.profiles) validateLocalAuthProfile(entry);
     const profileIds = new Set(config.profiles.map((entry) => entry.profileId));
     if (
       profileIds.size !== config.profiles.length ||

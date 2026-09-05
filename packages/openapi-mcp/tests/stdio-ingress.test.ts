@@ -329,6 +329,64 @@ for (const corruption of ["malformed", "missing", "digest"] as const) {
   });
 }
 
+for (const invalid of ["single-bound", "inverted-number"] as const) {
+  test(`startup rejects ${invalid} policy before advancing any catalog`, async () => {
+    const f = await fixture();
+    const prior = await Promise.all([
+      f.release("alpha", "prior", 1),
+      f.release("beta", "prior", 1),
+    ]);
+    const retained = prior.map((entry) => f.store(entry.paths.sqlite));
+    for (const store of retained)
+      await f.runtime(store).search({ query: "widgets" });
+    const before = await Promise.all(
+      ["alpha", "beta"].map((id) =>
+        f.generations.get(id as CatalogId, "fixture"),
+      ),
+    );
+    const next = await Promise.all([
+      f.release("alpha", "next", 2),
+      f.release("beta", "next", 2),
+    ]);
+    const policy = {
+      version: 1 as const,
+      catalogId: "alpha",
+      releaseId: "next",
+      manifestDigest: "a".repeat(64),
+      operationId: "operation:alpha:create",
+      operationDigest: "b".repeat(64),
+      credentialProfileDigest: "c".repeat(64),
+      actionKind: "create" as const,
+      cardinality: "single" as const,
+      maxAffected: 1,
+      expiresAt: Date.now() + 60_000,
+      arguments: { kind: "number", min: 0, max: 1 },
+    };
+    await expect(
+      serveOpenApiStdio({
+        ...f.config(next),
+        exactPolicies: [
+          policy,
+          {
+            ...policy,
+            ...(invalid === "single-bound"
+              ? { maxAffected: 2 }
+              : { arguments: { kind: "number", min: 2, max: 1 } }),
+          },
+        ],
+      }),
+    ).rejects.toThrow();
+    expect(
+      await Promise.all(
+        ["alpha", "beta"].map((id) =>
+          f.generations.get(id as CatalogId, "fixture"),
+        ),
+      ),
+    ).toEqual(before);
+    for (const store of retained) await publicRead(f, store);
+  });
+}
+
 test("manifest-only admission remains a signed-envelope API", async () => {
   const f = await fixture();
   const release = await f.release("alpha", "next", 2);
