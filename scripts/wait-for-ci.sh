@@ -4,7 +4,7 @@
 #
 # SPDX-License-Identifier: MIT OR Apache-2.0
 
-# scripts/wait-for-ci.sh — Poll for the "CI" workflow's run on a commit and
+# scripts/wait-for-ci.sh — Poll for the "Validate" workflow's run on a commit and
 # report its conclusion.
 #
 # Used by .github/workflows/knitli-agents.yml's `wait-for-ci` job to gate the
@@ -22,7 +22,7 @@
 # The caller reads the `conclusion` GITHUB_OUTPUT instead:
 #   success   — CI's latest run for $SHA completed successfully; review.
 #   failure / cancelled / etc. — CI's own conclusion string; skip review.
-#   not_found — no "CI" run ever appeared for $SHA within the wait budget.
+#   not_found — no matching workflow run appeared for $SHA within the wait budget.
 #   timeout   — a run was seen but never reached `status: completed`.
 #   draft     — CI succeeded, but the PR is (now) a draft; skip review.
 #
@@ -31,7 +31,7 @@
 #   github.event.pull_request.updated_at; the caller passes a no-op
 #   (epoch) value for event types that never produce a fresh ci.yml run
 #   for an unchanged SHA — see EVENT_TIME note below)
-# Optional env: WORKFLOW_NAME (default "CI"), POLL_INTERVAL_SECONDS (default
+# Optional env: WORKFLOW_NAME (default "Validate"), POLL_INTERVAL_SECONDS (default
 #   20), MAX_WAIT_SECONDS (default 3300 — 55 min, leaves margin under the
 #   caller job's 60-minute timeout so a real timeout is reported as
 #   `conclusion=timeout` rather than the job being killed mid-poll with no
@@ -76,7 +76,7 @@ set -euo pipefail
 : "${EVENT_TIME:?EVENT_TIME required}"
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT required}"
 
-WORKFLOW_NAME="${WORKFLOW_NAME:-VALIDATE}"
+WORKFLOW_NAME="${WORKFLOW_NAME:-Validate}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-20}"
 MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-3300}"
 
