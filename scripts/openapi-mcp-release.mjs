@@ -12,6 +12,68 @@ const { parse: parseYaml } = createRequire(
 )("yaml");
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
+/** Wait only for packument visibility; installation and verification can still fail. */
+export async function waitForRegistryVersion(version, dependencies = {}) {
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version))
+    throw new Error("Registry readiness requires an exact stable version");
+  const fetchRegistry = dependencies.fetch ?? fetch;
+  const sleep =
+    dependencies.sleep ?? ((ms) => new Promise((done) => setTimeout(done, ms)));
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const signal = AbortSignal.timeout(10000);
+    let onAbort;
+    let response;
+    let metadata;
+    try {
+      [response, metadata] = await Promise.race([
+        (async () => {
+          const result = await fetchRegistry(
+            `${registry}@knitli%2fopenapi-mcp`,
+            {
+              headers: { Accept: "application/vnd.npm.install-v1+json" },
+              signal,
+            },
+          );
+          return [
+            result,
+            result.status === 200 ? await result.json() : undefined,
+          ];
+        })(),
+        new Promise((_, reject) => {
+          onAbort = () => reject(signal.reason);
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) onAbort();
+        }),
+      ]);
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+    }
+    if (response.status === 200) {
+      if (
+        !metadata ||
+        metadata.name !== packageName ||
+        !metadata.versions ||
+        typeof metadata.versions !== "object" ||
+        Array.isArray(metadata.versions)
+      )
+        throw new Error("Malformed or mismatched registry packument");
+      if (Object.hasOwn(metadata.versions, version)) {
+        const entry = metadata.versions[version];
+        if (!entry || entry.name !== packageName || entry.version !== version)
+          throw new Error(
+            "Registry entry does not match the exact package version",
+          );
+        return;
+      }
+    } else if (response.status !== 404)
+      throw new Error(`Registry request failed with HTTP ${response.status}`);
+    if (attempt < 5) await sleep(10000);
+  }
+  throw new Error(
+    `Registry version ${version} was not visible after 6 attempts`,
+  );
+}
+
 /** Bind npm's successfully verified audit output to this exact release.
  * This is not a cryptographic verifier: the caller MUST first require npm audit
  * signatures --json --include-attestations to exit zero on a fresh public install.
@@ -100,7 +162,7 @@ function releaseVersion(context) {
 
 async function checkContext(context) {
   const env = context.env;
-  if (env.NPM_TOKEN || env.NODE_AUTH_TOKEN)
+  if (Object.hasOwn(env, "NPM_TOKEN") || Object.hasOwn(env, "NODE_AUTH_TOKEN"))
     throw new Error(
       "Steady-state release must use OIDC without token environment variables",
     );
@@ -333,6 +395,12 @@ if (
   console.log(
     JSON.stringify({ ...verified, auditSha256: hash(auditBytes) }, null, 2),
   );
+} else if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url) &&
+  process.argv[2] === "wait-for-version"
+) {
+  await waitForRegistryVersion(process.argv[3]);
 } else if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)

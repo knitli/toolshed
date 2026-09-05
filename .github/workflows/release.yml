@@ -3,20 +3,6 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
-    inputs:
-      bootstrap:
-        description: Explicit one-time openapi-mcp 0.0.0 bootstrap exception
-        type: boolean
-        default: false
-      approved_owner:
-        description: Named approving owner (must equal authenticated actor and configured owner)
-        type: string
-        required: true
-      approval_evidence:
-        description: GitHub URL recording owner approval and bootstrap scope
-        type: string
-        required: true
 permissions:
   contents: write
   issues: write
@@ -106,6 +92,7 @@ jobs:
           consumer=$(mktemp -d "$RUNNER_TEMP/openapi-public-XXXXXX")
           cd "$consumer"
           npm init -y
+          node "$GITHUB_WORKSPACE/scripts/openapi-mcp-release.mjs" wait-for-version "$version"
           npm install --ignore-scripts --save-exact --registry=https://registry.npmjs.org/ "@knitli/openapi-mcp@$version"
           npm audit signatures --json --include-attestations > "$evidence/npm-audit-signatures.json"
           node "$GITHUB_WORKSPACE/scripts/openapi-mcp-release.mjs" verify-audit "$evidence/npm-audit-signatures.json" "$tarball" "$version" > "$evidence/verified-provenance.json"
@@ -119,121 +106,6 @@ jobs:
           path: ${{ runner.temp }}/openapi-mcp-release/
           if-no-files-found: ignore
 
-  # This exception is disabled unless the named owner explicitly configures and
-  # dispatches it. Remove its token wiring/secret and revoke the token after use;
-  # the steady-state adapter refuses publication while that wiring remains.
-  bootstrap-openapi-mcp-pack:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.bootstrap && vars.OPENAPI_MCP_BOOTSTRAP_ENABLED == 'true' && inputs.approved_owner == vars.OPENAPI_MCP_BOOTSTRAP_OWNER && github.actor == vars.OPENAPI_MCP_BOOTSTRAP_OWNER
-    runs-on: ubuntu-latest
-    environment: npmrelease
-    permissions:
-      contents: read
-    outputs:
-      sha256: ${{ steps.pack.outputs.sha256 }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24.19.0
-      - name: Record named owner approval
-        env:
-          APPROVED_OWNER: ${{ inputs.approved_owner }}
-          APPROVAL_EVIDENCE: ${{ inputs.approval_evidence }}
-        run: |
-          test "$APPROVED_OWNER" = "$GITHUB_ACTOR"
-          case "$APPROVAL_EVIDENCE" in https://github.com/knitli/toolshed/*) ;; *) exit 1 ;; esac
-          mkdir -p "$RUNNER_TEMP/openapi-mcp-bootstrap"
-          node --input-type=module -e 'import {writeFileSync} from "node:fs"; writeFileSync(process.env.RUNNER_TEMP + "/openapi-mcp-bootstrap/approval.json", JSON.stringify({owner:process.env.APPROVED_OWNER,evidence:process.env.APPROVAL_EVIDENCE,sourceCommit:process.env.GITHUB_SHA,runId:process.env.GITHUB_RUN_ID},null,2));'
-      - run: bun i --frozen-lockfile
-      - name: Build and test bootstrap source
-        run: |
-          node -e 'const p=require("./packages/openapi-mcp/package.json"); if(p.name!=="@knitli/openapi-mcp" || p.version!=="0.0.0" || p.private!==false) process.exit(1);'
-          bun scripts/generate.mts --check
-          bun test scripts/openapi-mcp-release.test.ts
-          bun test packages/openapi-mcp
-          bun run --cwd packages/openapi-mcp test:node-transport
-          bun run --cwd packages/openapi-mcp test:node-stdio
-          bun run --cwd packages/openapi-mcp build
-          bun run validate
-      - name: Pack and exercise the exact bootstrap artifact
-        id: pack
-        shell: bash
-        run: |
-          tarball="$RUNNER_TEMP/openapi-mcp-bootstrap/knitli-openapi-mcp-0.0.0.tgz"
-          (cd packages/openapi-mcp && bun pm pack --filename "$tarball" --quiet)
-          OPENAPI_MCP_TARBALL="$tarball" bun test packages/openapi-mcp/tests/package-consumers.test.ts
-          cd "$RUNNER_TEMP/openapi-mcp-bootstrap"
-          sha256sum knitli-openapi-mcp-0.0.0.tgz > SHA256SUMS
-          printf 'sha256=%s\n' "$(cut -d ' ' -f1 SHA256SUMS)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: openapi-mcp-bootstrap-tested-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/openapi-mcp-bootstrap/
-          if-no-files-found: error
-
-  bootstrap-openapi-mcp-publish:
-    needs: bootstrap-openapi-mcp-pack
-    if: github.event_name == 'workflow_dispatch' && inputs.bootstrap
-    runs-on: ubuntu-latest
-    environment: npmrelease
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24.19.0
-          registry-url: https://registry.npmjs.org
-      - run: bun i --frozen-lockfile
-      - uses: actions/download-artifact@v4
-        with:
-          name: openapi-mcp-bootstrap-tested-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/openapi-mcp-bootstrap/
-      - name: Rehash downloaded tested artifact and publish only bootstrap
-        env:
-          EXPECTED_SHA256: ${{ needs.bootstrap-openapi-mcp-pack.outputs.sha256 }}
-          NODE_AUTH_TOKEN: ${{ secrets.OPENAPI_MCP_BOOTSTRAP_TOKEN }}
-        shell: bash
-        run: |
-          test -n "$NODE_AUTH_TOKEN"
-          cd "$RUNNER_TEMP/openapi-mcp-bootstrap"
-          sha256sum --check SHA256SUMS
-          actual=$(sha256sum knitli-openapi-mcp-0.0.0.tgz | cut -d ' ' -f1)
-          test "$actual" = "$EXPECTED_SHA256"
-          tarball="$RUNNER_TEMP/openapi-mcp-bootstrap/knitli-openapi-mcp-0.0.0.tgz"
-          publish_dir=$(mktemp -d "$RUNNER_TEMP/openapi-bootstrap-publish-XXXXXX")
-          cd "$publish_dir"
-          npm publish "$tarball" --access public --tag bootstrap --provenance --registry=https://registry.npmjs.org/
-          test "$(sha256sum "$tarball" | cut -d ' ' -f1)" = "$EXPECTED_SHA256"
-      - name: Verify bootstrap public install and cryptographic provenance
-        env:
-          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/openapi-public-empty-user.npmrc
-          NPM_CONFIG_GLOBALCONFIG: ${{ runner.temp }}/openapi-public-empty-global.npmrc
-        shell: bash
-        run: |
-          evidence="$RUNNER_TEMP/openapi-mcp-bootstrap"
-          consumer=$(mktemp -d "$RUNNER_TEMP/openapi-bootstrap-public-XXXXXX")
-          cd "$consumer"
-          npm init -y
-          npm install --ignore-scripts --save-exact --registry=https://registry.npmjs.org/ @knitli/openapi-mcp@0.0.0
-          npm audit signatures --json --include-attestations > "$evidence/npm-audit-signatures.json"
-          node "$GITHUB_WORKSPACE/scripts/openapi-mcp-release.mjs" verify-audit "$evidence/npm-audit-signatures.json" "$evidence/knitli-openapi-mcp-0.0.0.tgz" 0.0.0 > "$evidence/verified-provenance.json"
-          cp "$GITHUB_WORKSPACE/packages/openapi-mcp/test-consumers/node.mts" "$consumer/node.mts"
-          node node.mts > "$evidence/public-consumer.json"
-          sha256sum "$evidence/npm-audit-signatures.json" > "$evidence/npm-audit-signatures.sha256"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: openapi-mcp-bootstrap-registry-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/openapi-mcp-bootstrap/
-          if-no-files-found: error
   release-marketplace:
     if: github.event_name == 'push'
     needs:
