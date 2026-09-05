@@ -4,11 +4,102 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { analyzeCommits } from "@semantic-release/commit-analyzer";
+import manifest from "../packages/openapi-mcp/package.json";
 import * as release from "./openapi-mcp-release.mjs";
 import {
   createReleaseAdapter,
   verifyAuditBinding,
 } from "./openapi-mcp-release.mjs";
+
+const analyzerConfig = manifest.release.plugins.find(
+  (plugin) =>
+    Array.isArray(plugin) && plugin[0] === "@semantic-release/commit-analyzer",
+)?.[1];
+
+async function analyzeRelease(messages: string[]) {
+  expect(analyzerConfig).toBeDefined();
+  return analyzeCommits(analyzerConfig, {
+    cwd: fileURLToPath(new URL("../packages/openapi-mcp", import.meta.url)),
+    commits: messages.map((message, index) => ({
+      hash: String(index),
+      message,
+    })),
+    logger: { log() {} },
+  });
+}
+
+// These fixtures catch suppressed package releases and accidental default-rule fallbacks.
+test.each([
+  ["feat(openapi-mcp): add search", "minor"],
+  ["fix(openapi-mcp): repair search", "patch"],
+  ["perf(openapi-mcp): speed up search", "patch"],
+  ["feat(openapi-mcp)!: replace search", "major"],
+  [
+    "fix(openapi-mcp): replace search\n\nBREAKING CHANGE: remove old search",
+    "major",
+  ],
+  ["docs(openapi-mcp)!: redefine contract", "major"],
+  [
+    "docs(openapi-mcp): redefine contract\n\nBREAKING CHANGE: remove old contract",
+    "major",
+  ],
+  ["docs(openapi-mcp): explain search", null],
+  ["chore(openapi-mcp): clean up tooling", null],
+  ["test(openapi-mcp): cover search", null],
+  [
+    "revert(openapi-mcp): undo change\n\nThis reverts commit abcdef1234567890.",
+    null,
+  ],
+  ["feat(other): add feature", null],
+  ["fix(other): repair feature", null],
+  ["perf(other): speed up feature", null],
+  ["feat(other)!: replace feature", null],
+  ["docs(other): redefine contract\n\nBREAKING CHANGE: remove contract", null],
+  ["feat: add feature", null],
+  ["fix: repair feature", null],
+  ["perf: speed up feature", null],
+  ["feat!: replace feature", null],
+  ["docs: redefine contract\n\nBREAKING CHANGE: remove contract", null],
+  ["revert: undo change\n\nThis reverts commit abcdef1234567890.", null],
+  ["feat(openapi-mcp-extra): add feature", null],
+  ["fix(prefix-openapi-mcp): repair feature", null],
+  ["feat(openapi-mcp-extra)!: replace feature", null],
+  ["feat(OPENAPI-MCP): add feature", null],
+  ["feat(openapi-mcp,other): add feature", null],
+  ["Merge pull request #123 from feature", null],
+])("package release policy for %s returns %s", async (message, expected) => {
+  expect(await analyzeRelease([message])).toBe(expected);
+});
+
+test.each([
+  [
+    ["fix(openapi-mcp): repair search", "feat(other)!: replace feature"],
+    "patch",
+  ],
+  [
+    [
+      "fix(openapi-mcp): repair search",
+      "feat(openapi-mcp): add search",
+      "docs(openapi-mcp): explain search",
+    ],
+    "minor",
+  ],
+  [
+    [
+      "feat(openapi-mcp): add search",
+      "docs(openapi-mcp)!: redefine contract",
+      "perf(openapi-mcp): speed up search",
+    ],
+    "major",
+  ],
+])(
+  "package release takes maximum eligible severity for %j",
+  async (messages, expected) => {
+    expect(await analyzeRelease(messages)).toBe(expected);
+    expect(await analyzeRelease([...messages].reverse())).toBe(expected);
+  },
+);
 
 test("release CLI initializes its configured adapter through the installed plugin loader", () => {
   const result = spawnSync(

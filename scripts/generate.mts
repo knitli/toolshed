@@ -87,7 +87,19 @@ function buildPluginReleaseConfig(
   const scopes = [canonical, ...aliases];
   const releaseRules = [
     ...scopes.flatMap(releaseRulesForScope),
-    { release: false },
+    // A catchall suppresses eligible minor/patch rules as well. Keep the
+    // OpenAPI package exclusions disjoint from its release-bearing commits.
+    ...(canonical === "openapi-mcp"
+      ? [
+          { scope: `!(${scopes.join("|")})`, release: false },
+          { scope: null, release: false },
+          ...scopes.map((scope) => ({
+            scope,
+            type: "!(feat|fix|perf)",
+            release: false,
+          })),
+        ]
+      : [{ release: false }]),
   ];
   const tagPrefix = npmScope ? `@${npmScope}/` : "";
   return {
