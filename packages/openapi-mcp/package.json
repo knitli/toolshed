@@ -1,7 +1,7 @@
 {
   "name": "@knitli/openapi-mcp",
   "private": false,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Compile signed OpenAPI catalogs and serve verified search and authorized API calls over MCP.",
   "license": "MIT OR Apache-2.0",
