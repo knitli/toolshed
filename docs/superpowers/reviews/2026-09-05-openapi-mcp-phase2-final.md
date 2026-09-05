@@ -1,5 +1,11 @@
 # OpenAPI MCP Phase 2 final review record — 2026-09-05
 
+## Subsequent delivery and CI checkpoint
+
+[PR #23](https://github.com/knitli/toolshed/pull/23) is open; this supersedes the pre-submission checkpoint wording below. The first hosted validation used ambient Node 22.23.2, outside the declared Node 24.16–24.x support range, and failed the installed Node consumer on SQLite serialization. A separately reviewed, four-line workflow correction selects Node 24.19.0, matching the release jobs; compiler code and test assertions remain unchanged.
+
+The exact repository-wide `bun test` command independently passed on Node 24.19.0: **986 passed, one known skip, zero failures; 4,729 assertions across 40 files**. Its tested tarball hash matches the final package evidence below. Hosted checks for the corrected commit must be read from the PR; local success is not a claim that hosted CI passed. No publication or deployment is implied.
+
 ## Verified disposition and delivery status
 
 All five original Important findings (I1–I5) and the subsequent Important FIFO-race finding (R1) are addressed. No Critical finding was confirmed. This records local implementation and review acceptance; remaining delivery and external gates are pending.
