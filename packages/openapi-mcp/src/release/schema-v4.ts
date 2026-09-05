@@ -1,13 +1,13 @@
 import type { DatabaseSync } from "node:sqlite";
 
-/** Exact immutable v4 transport schema consumed by SQLite and D1 adapters. */
+/** Compatibility-era schema name for immutable v4/v5 SQLite and D1 transport. */
 export const RELEASE_SCHEMA_V4 = `
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE release_metadata (
   catalog_id TEXT NOT NULL COLLATE BINARY,
   release_id TEXT NOT NULL COLLATE BINARY,
-  format INTEGER NOT NULL CHECK (format = 4),
+  format INTEGER NOT NULL CHECK (format IN (4, 5)),
   contract INTEGER NOT NULL CHECK (contract = 1),
   generation INTEGER NOT NULL CHECK (generation >= 0),
   issuer TEXT NOT NULL COLLATE BINARY,

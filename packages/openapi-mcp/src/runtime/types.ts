@@ -1,4 +1,5 @@
 import type { OpenApiMcpErrorCode } from "./errors.ts";
+import type { RuntimeLimits } from "./versions.ts";
 
 export type Sha256 = string & { readonly __sha256: unique symbol };
 export type CatalogId = string & { readonly __catalogId: unique symbol };
@@ -25,6 +26,18 @@ export interface OpenApiArguments {
   body?: OpenApiValue;
 }
 
+/** A host-owned transport location reserved for later credential injection. */
+export interface CredentialSlot {
+  readonly placement: "header" | "query";
+  readonly name: string;
+}
+
+/** Host-only serializer policy. This is deliberately outside OpenApiArguments. */
+export interface SerializeArgumentsOptions {
+  readonly limits?: Readonly<Partial<RuntimeLimits>>;
+  readonly reservedCredentialSlots?: readonly CredentialSlot[];
+}
+
 export type HttpMethod =
   | "GET"
   | "HEAD"
@@ -36,7 +49,8 @@ export type HttpMethod =
   | "TRACE";
 
 export interface ReleaseManifestV4 {
-  format: 4;
+  /** v4 records omit operation tags; v5 records require signed tags. */
+  format: 4 | 5;
   contract: 1;
   catalogId: CatalogId;
   releaseId: ReleaseId;
@@ -88,7 +102,7 @@ export interface StoredRecord<TRecord> {
   record: TRecord;
 }
 
-/** Logical operation data admitted through a signed v4 manifest. */
+/** Logical operation data normalized from v4 or admitted through signed v5. */
 export type ParameterLocationV4 = "path" | "query" | "header" | "cookie";
 
 export type ParameterStyleV4 =
@@ -157,6 +171,7 @@ export interface OperationRecordV4 {
   path: string;
   origin: string;
   summary: string | null;
+  tags: readonly string[];
   deprecated: boolean;
   parameters: readonly ParameterRecordV4[];
   requestBody: RequestBodyRecordV4 | null;
@@ -164,7 +179,7 @@ export interface OperationRecordV4 {
   advisory: JsonObject;
 }
 
-/** Logical schema data admitted through a signed v4 manifest. */
+/** Logical schema data admitted through a signed v4/v5 manifest. */
 export interface SchemaRecordV4 {
   id: TypedSchemaId;
   schema: JsonSchemaV4;
@@ -287,12 +302,18 @@ export type ActionCardinality =
   | { kind: "unknown" };
 
 export interface PreparedCall {
-  version: 1;
+  version: 2;
   catalogId: CatalogId;
   releaseId: ReleaseId;
   operationId: TypedOperationId;
   operationDigest: Sha256;
   manifestDigest: Sha256;
+  /** Stable operator-selected profile identifier; never a user or token identifier. */
+  credentialProfileId: string;
+  /** Commits the selected profile's complete non-secret configuration. */
+  credentialProfileDigest: Sha256;
+  /** Binds the host-selected credential injection locations, never secrets. */
+  reservedSlotsDigest: Sha256;
   method: HttpMethod;
   origin: string;
   relativeUrl: string;
@@ -313,12 +334,43 @@ export interface OpenApiRuntime {
   revalidate(call: PreparedCall): Promise<PreparedCall>;
 }
 
-export interface AuthorizationContext {
-  now: Date;
-  requestState?: string;
+export type VerifiedActionRequestState = object & {
+  readonly __verifiedActionRequestState: unique symbol;
+};
+
+/** Identity is owned and validated by the configured authorizer. */
+export type AuthorizationId = object & {
+  readonly __authorizationId: unique symbol;
+};
+
+export type AuthorizationContext =
+  | { readonly kind: "initial" }
+  | {
+      readonly kind: "resume";
+      readonly requestState: VerifiedActionRequestState;
+      readonly inputResponses: unknown;
+    };
+
+export interface CredentialAuthorizationBinding {
+  readonly profileId: string;
+  readonly profileDigest: Sha256;
+  readonly grantId: string;
+  readonly audience?: string;
+  readonly scopes: readonly string[];
+  readonly slotsDigest: Sha256;
+  readonly bindingDigest: Sha256;
 }
 
 export interface SafeApprovalPresentation {
+  message: string;
+  credentialProfile: string;
+  audience: string;
+  scopes: readonly string[];
+  credentialBindingDigest: Sha256;
+  policyActivation?: {
+    readonly policyDigest: Sha256;
+    readonly expiresAt: number;
+  };
   catalogId: string;
   releaseId: string;
   operationId: string;
@@ -334,17 +386,32 @@ export interface SafeApprovalPresentation {
 export interface ActionAuthorizer {
   authorize(
     call: PreparedCall,
+    credential: CredentialAuthorizationBinding,
     context: AuthorizationContext,
   ): Promise<AuthorizationDecision>;
+  consume(
+    decision: AuthorizedActionDecision,
+    call: PreparedCall,
+    credential: CredentialAuthorizationBinding,
+  ): Promise<void>;
+}
+
+export interface AuthorizedActionDecision {
+  readonly status: "authorized";
+  readonly callDigest: Sha256;
+  readonly credentialBindingDigest: Sha256;
+  readonly path: "per-call" | "exact-policy";
+  readonly authorizationId: AuthorizationId;
+  readonly policyDigest?: Sha256;
 }
 
 export type AuthorizationDecision =
+  | AuthorizedActionDecision
   | {
-      status: "authorized";
-      callDigest: Sha256;
-      path: "per-call" | "exact-policy";
+      status: "input-required";
+      presentation: SafeApprovalPresentation;
+      requestState: string;
     }
-  | { status: "confirmation-required"; presentation: SafeApprovalPresentation }
   | { status: "denied"; reason: string };
 
 export type AuthProfile =
@@ -364,6 +431,17 @@ export type AuthProfile =
       resource?: string;
     };
 
+/** Complete trusted, non-secret configuration for one local upstream identity. */
+export interface LocalAuthProfile {
+  readonly profileId: string;
+  readonly revision: number;
+  readonly allowedOrigins: readonly string[];
+  readonly auth: AuthProfile;
+  readonly audience?: string;
+  /** Environment-profile scopes only; OAuth scopes are declared by auth.scopes. */
+  readonly scopes?: readonly string[];
+}
+
 export interface SecretStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
@@ -379,8 +457,14 @@ export type Credential =
       value: string;
     };
 
+/** Host-internal only. This secret-bearing value must never enter MCP output. */
+export interface CredentialSnapshot {
+  readonly credential: Credential;
+  readonly binding: CredentialAuthorizationBinding;
+}
+
 export type CredentialResolution =
-  | { status: "ready"; credential: Credential }
+  | { status: "ready"; snapshot: CredentialSnapshot }
   | { status: "auth-required"; authorizationUrl: string; expiresAt: string };
 
 export interface CredentialProvider {
@@ -389,6 +473,34 @@ export interface CredentialProvider {
 
 export interface DestinationPolicy {
   allows(origin: string): Promise<boolean>;
+}
+
+/** Exact verified operation identity exposed to host credential-slot policy. */
+export interface CredentialSlotContext {
+  readonly catalogId: CatalogId;
+  readonly releaseId: ReleaseId;
+  readonly operationId: TypedOperationId;
+  readonly operationDigest: Sha256;
+  readonly manifestDigest: Sha256;
+  readonly method: HttpMethod;
+  readonly origin: string;
+}
+
+/**
+ * Host-owned policy for selecting a non-secret credential profile commitment.
+ * Implementations return a profile ID, profile digest, and injection slots;
+ * credentials never enter preparation.
+ */
+export interface CredentialProfileBinding {
+  readonly profileId: string;
+  readonly profileDigest: Sha256;
+  readonly slots: readonly CredentialSlot[];
+}
+
+export interface CredentialBindingResolver {
+  resolve(
+    context: Readonly<CredentialSlotContext>,
+  ): Promise<CredentialProfileBinding>;
 }
 
 export interface PaginationTokenState {

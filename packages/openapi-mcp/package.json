@@ -62,7 +62,9 @@
     "check": "bunx biome check ."
   },
   "dependencies": {
-    "yaml": "^2.9.0"
+    "@modelcontextprotocol/server": "2.0.0",
+    "yaml": "^2.9.0",
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "typescript": "catalog:typing"

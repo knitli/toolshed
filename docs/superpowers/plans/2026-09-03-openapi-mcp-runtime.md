@@ -4,7 +4,7 @@
 
 **Goal:** Ship a public local stdio MCP server for provider-neutral signed OpenAPI releases, including bounded digest-pinned multi-document schemas, exposing only `search`, `read`, and `action`, plus a host-neutral runtime contract that a later Cloudflare OS Gatekeeper can consume.
 
-**Architecture:** The existing compiler remains available while a new immutable v4 release format signs canonical logical records rather than SQLite file layout. A Web/Worker-safe runtime verifies every hydrated record, prepares credential-free digest-bound calls, and delegates secrets, authorization, and transport to host ports; Node-only adapters provide SQLite, local auth, guarded HTTP, and stdio MCP.
+**Architecture:** The existing compiler remains available while a new immutable v5 release format signs canonical logical records rather than SQLite file layout. A Web/Worker-safe runtime verifies every hydrated record, prepares credential-free digest-bound calls, and delegates secrets, authorization, and transport to host ports; Node-only adapters provide SQLite, local auth, guarded HTTP, and stdio MCP. The runtime dual-reads exact historical tagless v4 records under their v4 domains; new compilation targets v5.
 
 **Tech Stack:** TypeScript strict, Node 24, current mise-managed Bun, Web Crypto, `node:sqlite`, `@modelcontextprotocol/server@2.0.0`, Zod 4 selected and pinned by the implementation lockfile, Bun test, Biome.
 
@@ -15,15 +15,15 @@
 - Phase 2 is public/local stdio plus a host-neutral Web/Worker-safe runtime; it contains no hosted HTTP MCP, Cloudflare OS, Gatekeeper, Cap'n Web, Durable Object, Access, or Cloudflare binding types.
 - The only model-visible tool names are exactly `search`, `read`, and `action`.
 - Tool arguments contain no URL, HTTP method, arbitrary transport header, auth value, credential, confirmation flag, risk override, digest override, or action-classification override. Structured operation arguments may supply only non-credential header parameters declared by the selected operation.
-- `ARTIFACT_FORMAT_VERSION` is exactly `4`; v4 execution requires a verified Ed25519 manifest and use-time logical record membership/digest checks.
-- Production v4 releases are immutable and manifest-last. Existing v3 append/file-signing APIs remain explicitly legacy; v3 is inventory/search-only in the new runtime.
+- `ARTIFACT_FORMAT_VERSION` is exactly `5`; v5 execution requires a verified Ed25519 manifest and use-time logical record membership/digest checks.
+- Production v5 releases are immutable and manifest-last. Existing v3 append/file-signing APIs remain explicitly legacy and inventory/search-only; historical v4 releases remain executable only with the original exact tagless operation-record shape and v4 domains.
 - The runtime contract exports the exact names `CatalogStore`, `OpenApiRuntime`, `PreparedCall`, `verifyPreparedCall`, `digestPreparedCall`, and `runRuntimeConformanceSuite`.
 - `@knitli/openapi-mcp/runtime` and `/conformance` import only Web Platform APIs and Worker-safe sibling files. Node, Bun, MCP SDK, SQLite, Cloudflare, and Cap'n Web imports stay outside those graphs.
 - Every action passes `ActionAuthorizer`; default is deny. Authorization binds the exact `PreparedCall.preparedCallDigest`, then the call is revalidated before credentials are injected.
 - Runtime classification is authoritative. Compiler safety/risk/action/cardinality and permission mappings are advisory.
 - The concrete v1 secret store is process-memory-only. Environment credentials are read at dispatch; OAuth refresh tokens are not persisted.
 - Public HTTPS, an exact-origin policy, DNS-aware local enforcement, manual redirects, bounded response/pagination/deadline behavior, and no automatic action retry are mandatory.
-- Application limits are the exact `DEFAULT_RUNTIME_LIMITS` values in the spec; Cloudflare plan quotas do not define runtime behavior.
+- Application limits are the exact reduction-only `DEFAULT_RUNTIME_LIMITS` values in the spec, including the 128 MiB aggregate release-inventory/search-proof ceiling; Cloudflare plan quotas do not define runtime behavior.
 - Compiler limits are the exact `DEFAULT_COMPILER_LIMITS` values in the spec, including 128 MiB source, 100,000 paths/operations, 50,000 schemas, depth 64, and 1 MiB logical records.
 - Every non-fragment `$ref` must resolve through an explicit URI-to-local-file-and-SHA-256 reference map beneath one approved realpath root. The compiler never performs ambient or credentialed network fetches.
 - Run repository commands through `mise exec --`. A trust/setup failure is environment evidence, not a test result.
@@ -35,7 +35,7 @@
 
 ## File Structure
 
-Existing compiler modules stay in place to avoid a high-risk move while the v4 boundary is introduced.
+Existing compiler modules stay in place to avoid a high-risk move while the signed-release boundary is introduced.
 
 ```text
 packages/openapi-mcp/
@@ -64,8 +64,8 @@ packages/openapi-mcp/
       prepared-call.ts               NEW — prepare/digest/verify/revalidate
       runtime.ts                     NEW — OpenApiRuntime implementation and bounded search
     release/
-      load-v4.ts                       NEW — bounded duplicate-key-safe JSON/YAML loading
-      schema-v4.ts                   NEW — v4 SQLite transport schema
+      load-v4.ts                       NEW — compatibility-era name; bounded duplicate-key-safe JSON/YAML loading
+      schema-v4.ts                   NEW — compatibility-era name; v4/v5 SQLite transport schema
       manifest-builder.ts            NEW — canonical record construction and manifest signing
       compile-release.ts             NEW — bounded compiler orchestration
       publish.ts                     NEW — immutable manifest-last publication
@@ -136,9 +136,9 @@ import { expect, test } from "bun:test";
 
 test("runtime exposes the Phase 3 contract versions", async () => {
   const runtime = await import("../src/runtime/index.ts");
-  expect(runtime.ARTIFACT_FORMAT_VERSION).toBe(4);
+  expect(runtime.ARTIFACT_FORMAT_VERSION).toBe(5);
   expect(runtime.RUNTIME_CONTRACT_VERSION).toBe(1);
-  expect(runtime.PREPARED_CALL_VERSION).toBe(1);
+  expect(runtime.PREPARED_CALL_VERSION).toBe(2);
 });
 
 test("runtime bundles for a Worker target without Node shims", async () => {
@@ -210,7 +210,7 @@ Copy every `PreparedCall`, action, manifest, auth, and port field exactly from t
 
 - [ ] **Step 4: Add explicit subpath exports without breaking the existing root**
 
-Set `src/compiler.ts` to re-export the current compiler/file-signing surface. Keep `src/index.ts` as a compatibility re-export of `./compiler.ts`. Add export map entries for the implemented `./compiler` and `./runtime` entry points, with types/default paths under `dist`. Do not advertise a subpath until its real source entry point exists: Task 3 adds `./sqlite`, Task 5 adds `./conformance`, and Task 11 adds `./stdio`. Add a consumer regression that maps every advertised JavaScript/declaration target back to an emit-capable source entry point. Rename the current schema constant to `LEGACY_FORMAT_VERSION = 3` and update current compiler/tests to import that name; v4 uses only `ARTIFACT_FORMAT_VERSION`.
+Set `src/compiler.ts` to re-export the current compiler/file-signing surface. Keep `src/index.ts` as a compatibility re-export of `./compiler.ts`. Add export map entries for the implemented `./compiler` and `./runtime` entry points, with types/default paths under `dist`. Do not advertise a subpath until its real source entry point exists: Task 3 adds `./sqlite`, Task 5 adds `./conformance`, and Task 11 adds `./stdio`. Add a consumer regression that maps every advertised JavaScript/declaration target back to an emit-capable source entry point. Rename the current schema constant to `LEGACY_FORMAT_VERSION = 3` and update current compiler/tests to import that name; immutable signed logical releases use only `ARTIFACT_FORMAT_VERSION`.
 
 - [ ] **Step 5: Make the focused tests pass**
 
@@ -352,7 +352,7 @@ test("a normally signed lower generation is rejected", async () => {
 });
 ```
 
-Also test wrong issuer/key, wrong `keyId`, missing record, excess record count, origin normalization, manifest byte limit, malformed base64url, equal-generation/same-digest idempotence, equal-generation/different-digest `MANIFEST_GENERATION_CONFLICT`, expired or replayed rollback authorization, wrong current/target generation, and a rollback signature from the ordinary release key.
+Also test wrong issuer/key, wrong `keyId`, missing record, excess record count, origin normalization, manifest byte limit, malformed base64url, equal-generation/same-digest idempotence, equal-generation/different-digest `MANIFEST_GENERATION_CONFLICT`, expired or replayed rollback authorization, wrong current/target generation, and a rollback signature from the ordinary release key. Add version-boundary cases: v4 accepts only the exact historical tagless operation-record key set under v4 manifest/record domains and normalizes `tags: []` after verification; v5 requires bounded, unique, signed tags under v5 domains; cross-version domains and shapes fail closed.
 
 - [ ] **Step 2: Run the test and record the red result**
 
@@ -397,7 +397,7 @@ Update generation state only after the whole manifest passes. Preserve the high-
 
 - [ ] **Step 4: Implement use-time record verification**
 
-Reconstruct the logical record without transport-only row IDs or FTS fields, enforce its typed ID, recompute its domain-separated SHA-256, compare the row's stored logical digest for diagnostics, then compare the manifest map. Return a deeply frozen verified record; no caller receives the unverified row.
+Reconstruct the logical record without transport-only row IDs or FTS fields, enforce its typed ID, select the manifest-version-specific domain, require the exact versioned record shape, and recompute its domain-separated SHA-256, compare the row's stored logical digest for diagnostics, then compare the manifest map. Normalize verified historical-v4 operations to `tags: []`, then return a deeply frozen verified record; no caller receives the unverified row.
 
 - [ ] **Step 5: Run focused tests and mutation checks**
 
@@ -408,12 +408,12 @@ Expected: PASS. Then temporarily invert the generation comparison, confirm the d
 
 ```bash
 git add packages/openapi-mcp/src/runtime packages/openapi-mcp/src/sqlite/generation-store.ts packages/openapi-mcp/tests/manifest-v4.test.ts
-git commit -m "feat(openapi-mcp): verify v4 manifests and logical records"
+git commit -m "feat(openapi-mcp): verify versioned manifests and logical records"
 ```
 
 ---
 
-### Task 4: Harden OpenAPI ingestion and compile immutable v4 releases
+### Task 4: Harden OpenAPI ingestion and compile immutable v5 releases
 
 **Files:**
 - Modify: `packages/openapi-mcp/src/load.ts`
@@ -434,7 +434,7 @@ git commit -m "feat(openapi-mcp): verify v4 manifests and logical records"
 - Create: `packages/openapi-mcp/tests/fixtures/v3.sqlite`
 
 **Interfaces:**
-- Consumes: v4 types, canonical logical digests, ID parser, manifest signing, compiler v3 extraction.
+- Consumes: v5 types, canonical logical digests, ID parser, manifest signing, compiler v3 extraction, and the exact historical v4 tagless-record contract for dual-read compatibility.
 - Produces: `compileRelease(options): Promise<CompiledRelease>`, `publishRelease(compiled, target)`, CLI `compile-release`, and frozen v3 migration fixture.
 
 - [ ] **Step 1: Write failing compiler-hardening tests**
@@ -461,12 +461,12 @@ Add exact-limit cases for source bytes, paths, operations, schemas, parameters, 
 
 - [ ] **Step 2: Write failing immutable-release tests**
 
-Assert v4 tables include `record_id`, `record_json`, and `logical_digest`; every manifest digest matches canonical row content; FTS fields are outside the digest; rebuilding D1-shaped rows preserves logical digests; `compile-release` refuses an existing release ID; a simulated failure retains the previous release; and directory enumeration cannot see the new manifest before payload/signature are complete.
+Assert v5 tables include `record_id`, `record_json`, and `logical_digest`; every manifest digest matches canonical row content; FTS fields are outside the digest; rebuilding D1-shaped rows preserves logical digests; `compile-release` refuses an existing release ID; a simulated failure retains the previous release; and directory enumeration cannot see the new manifest before payload/signature are complete.
 
 - [ ] **Step 3: Run both files and record the red result**
 
 Run: `mise exec -- bun test packages/openapi-mcp/tests/compiler-hardening.test.ts packages/openapi-mcp/tests/release-v4.test.ts`
-Expected: FAIL because bounded loading and v4 release compilation are absent.
+Expected: FAIL because bounded loading and v5 release compilation are absent.
 
 - [ ] **Step 4: Harden loading and pointer traversal**
 
@@ -474,7 +474,7 @@ Add `CompilerLimits` with the exact `DEFAULT_COMPILER_LIMITS` values in spec §6
 
 Implement `ReferenceMapV1` and a bounded `ReferenceResolver` port. The CLI accepts `--reference-root` and `--reference-map`; both are required when the graph contains a non-fragment `$ref`. Map entries bind a normalized URI to a relative file and expected SHA-256. Resolve every file through `realpath`, require it remain under the selected root, read it once within aggregate limits, verify the digest before parsing, then resolve its fragment with the same strict pointer logic. Reject ambient HTTP fetching. Compute the canonical sorted `referenceGraphDigest` and bind it into manifest source metadata.
 
-- [ ] **Step 5: Define v4 transport tables and logical records**
+- [ ] **Step 5: Define v5 transport tables and logical records**
 
 Use ordinary SQLite tables for operations, schemas, release metadata, and lower-case `fts5`. Store one canonical `record_json` and its `logical_digest`; project indexed columns from the same validated record at compile time. Add SQL constraints for typed ID uniqueness and digest length. Permission and compiler classifications remain inside the signed record as advisory fields.
 
@@ -501,7 +501,7 @@ export interface CompileReleaseOptions {
 }
 ```
 
-Build into a fresh `mkdtemp` directory under `outDir`, close and sync SQLite, reread every record through the v4 parser, create one flat record map, canonicalize/sign the manifest, and verify the result with the derived public key before publication.
+Build into a fresh `mkdtemp` directory under `outDir`, close and sync SQLite, reread every record through the strict logical-record parser, create one flat record map, canonicalize/sign the v5 manifest, and verify the result with the derived public key before publication.
 
 - [ ] **Step 7: Publish manifest last and preserve v3 explicitly**
 
@@ -510,13 +510,13 @@ Rename the immutable SQLite payload first, signature second, and manifest last. 
 - [ ] **Step 8: Freeze the v3 reader fixture and run tests**
 
 Generate `tests/fixtures/v3.sqlite` once from `tiny-api.yaml` using the existing compiler before changing its version symbol. Run: `mise exec -- bun test packages/openapi-mcp/tests/compiler-hardening.test.ts packages/openapi-mcp/tests/release-v4.test.ts packages/openapi-mcp/tests/compile.test.ts packages/openapi-mcp/tests/cli.test.ts`
-Expected: PASS; v3 tests retain old behavior and v4 tests prove immutable publication.
+Expected: PASS; v3 tests retain old behavior and the compatibility-era `*-v4.test.ts` suites prove immutable v5 publication plus strict historical-v4 reads.
 
 - [ ] **Step 9: Commit**
 
 ```bash
 git add packages/openapi-mcp
-git commit -m "feat(openapi-mcp): compile immutable signed v4 releases"
+git commit -m "feat(openapi-mcp): compile immutable signed v5 releases"
 ```
 
 ---
@@ -637,7 +637,7 @@ test("schema resolution batches each breadth-first hop", async () => {
 });
 ```
 
-Also cover blank/overlong query, limit 0/51, default 10, deprecated demotion, stable tie ordering, opaque ref output, cycles, missing schemas, hop 16/17, byte boundary, oversized single schema, and manifest mismatch.
+Also cover blank/overlong query, limit 0/51, default 10, deprecated demotion, stable tie ordering, opaque ref output, cycles, missing schemas, hop 16/17, schema byte boundary, oversized single schema, exact/+1 aggregate release-inventory bytes, and manifest mismatch. Add whole-release admission fixtures: an otherwise matching operation must not become visible or mutate generation state until every manifested operation/schema and its closed schema graph verify. Cover duplicate/missing/substituted inventory rows, shared-schema reuse, the eight-release/shared-proof-byte budget, final active-state filtering, multi-generation fallback, same-generation digest conflicts, and response-warning/redaction behavior.
 
 - [ ] **Step 2: Run the test and record the red result**
 
@@ -646,7 +646,7 @@ Expected: FAIL because the runtime and resolver are absent.
 
 - [ ] **Step 3: Implement bounded verified search**
 
-Ask stores for at most `min(limit * 3, 150)` candidates, hydrate and verify each candidate, recompute classification, demote deprecated results, sort deterministically, and stop at the requested bound. Return safe truncated summaries and input outlines plus encoded digest-bound operation refs. Do not return raw record JSON or origins outside the safe display fields.
+Ask stores for at most `min(limit * 3, 150)` candidates, hydrate and verify each candidate, and recompute classification. Before accepting a release, enumerate its complete manifest record map, retrieve every manifested operation, require exact schema batch results, prove schema-reference and operation-root closure completeness, and charge the one search-wide proof/byte/work/store-call envelope. Do this before generation-state mutation. Group candidates by `(catalogId, issuer)` and select only one active generation/digest per group; a rejected higher candidate may fall back only through ordinary generation/rollback admission, never by mixing releases or accepting conflicting same-generation digests. Commit against the captured generation state. On a CAS miss, discard the selection, reread state, reselect, and reprove under the remaining shared budget; never reinterpret an abandoned normal transition as rollback or consume its rollback authorization. Final-recheck active state before returning, then demote deprecated results, sort deterministically, and stop at the requested bound. Return safe truncated summaries and input outlines plus encoded digest-bound operation refs. Rejected candidates become bounded safe warnings; unavailable candidate/state services fail retryably, and response-budget truncation adds its bounded warning. Do not return raw record JSON or origins outside the safe display fields.
 
 - [ ] **Step 4: Implement breadth-first batched schema resolution**
 
@@ -673,6 +673,7 @@ git commit -m "feat(openapi-mcp): add verified search and schema resolution"
 - Create: `packages/openapi-mcp/src/runtime/serialize.ts`
 - Create: `packages/openapi-mcp/src/runtime/prepared-call.ts`
 - Modify: `packages/openapi-mcp/src/runtime/runtime.ts`
+- Modify: `packages/openapi-mcp/tests/prepared-call.test.ts`
 - Create: `packages/openapi-mcp/tests/runtime-prepare.test.ts`
 
 **Interfaces:**
@@ -695,7 +696,11 @@ test("prepared calls contain no credentials and bind every input", async () => {
   });
   expect(call.origin).toBe("https://api.example.test");
   expect(call.relativeUrl).toBe("/widgets");
-  expect(JSON.stringify(call)).not.toMatch(/authorization|token|credential/i);
+  expect(call.version).toBe(2);
+  expect(call.credentialProfileId).toBe("tiny-user");
+  expect(call.credentialProfileDigest).toMatch(/^[0-9a-f]{64}$/);
+  expect(call.reservedSlotsDigest).toMatch(/^[0-9a-f]{64}$/);
+  expect(JSON.stringify(call)).not.toMatch(/authorization|token|secret|grant|subject/i);
   expect(await digestPreparedCall({ ...call, normalizedArguments: { body: { name: "Grace" } } }))
     .not.toBe(call.preparedCallDigest);
 });
@@ -706,26 +711,34 @@ test("action cannot be called through read", async () => {
 });
 ```
 
-Add a table covering all eight `ActionKind` values and all four cardinality shapes, runtime override of poisoned compiler hints, unknown fields, required fields, path escaping, query arrays, style/explode forms, safe declared headers, rejected cookie parameters, content type, request bodies, oneOf discriminator refusal, max argument bytes, origin mismatch, and record mutation between prepare/revalidate.
+Add a table covering all eight `ActionKind` values and all four cardinality shapes, runtime override of poisoned compiler hints, unknown fields, required fields, path escaping, query arrays, style/explode forms, safe declared headers, rejected cookie parameters, content type, request bodies, oneOf discriminator refusal, max argument bytes, origin mismatch, and record mutation between prepare/revalidate. Cover bounded host credential-slot validation, header-case/query-case collision rules, model-input collisions, deterministic slot ordering, direct `reservedSlotsDigest` mutation, changed slot policy at revalidation, and prove that no secret or credential value enters the call.
+
+Also cover bounded credential-profile binding validation: missing/invalid profile ID or digest, deterministic profile/slot commitments, direct mutation of either commitment, same-slot profile substitution, changed profile revision during revalidation, and proof that no credential, token hash, grant ID, OAuth subject, or other secret-derived value enters `PreparedCall`.
 
 - [ ] **Step 2: Run the test and record the red result**
 
-Run: `mise exec -- bun test packages/openapi-mcp/tests/runtime-prepare.test.ts`
+Run: `mise exec -- bun test packages/openapi-mcp/tests/prepared-call.test.ts packages/openapi-mcp/tests/runtime-prepare.test.ts`
 Expected: FAIL because classification, serialization, and preparation are absent.
 
 - [ ] **Step 3: Implement conservative runtime classification**
 
-Pin GET/HEAD to read except batch; pin mutating methods to action unless the verified runtime override table explicitly names the API and operation. Derive action kind from method plus bounded normalized tokens in operation ID/path/tags. Derive cardinality only from a concrete required resource ID, verified array `maxItems`, or explicit bulk semantics; otherwise use `unknown`. Mark dangerous kinds and unknown/unbounded cardinality high-risk independently of advisory permissions.
+Pin GET/HEAD to read except batch; pin mutating methods to action unless the verified runtime override table explicitly names the API and operation. Derive action kind from method plus bounded normalized tokens in operation ID/path/tags. Derive cardinality only from a concrete required resource ID, verified array `maxItems`, or explicit bulk semantics; otherwise use `unknown`. Mark dangerous kinds and unknown/unbounded cardinality high-risk independently of advisory permissions. Because tags become security-relevant signed classification input, increment the production artifact format to 5 and use v5 manifest/operation/schema domains. Keep strict dual-read support for historical v4: reject `tags` in its exact signed operation shape, verify with v4 domains, and normalize to `tags: []` only afterward.
+
+Normalize bounded plural forms for sensitive action tokens and give dangerous families precedence over routine create/update evidence. Treat a required path ID as `single` only when its exact placeholder is the terminal target segment; a parent ID before a collection remains unknown cardinality and high-risk. Add regressions for plural authority/transaction terms, parent-ID collection paths, and a true terminal item ID.
 
 - [ ] **Step 4: Implement validation and OpenAPI serialization**
 
-Validate the exact public `OpenApiArguments` envelope and JSON Schema types, required/properties/additionalProperties, bounds, enums, arrays, nullable, and supported composition. Resolve discriminators only when one branch is uniquely selected. Serialize path/query and declared non-credential headers according to OpenAPI style/explode rules; runtime creates representation headers. Reject cookie parameters in v1 and reject transport/auth header names even if a source schema declares them.
+Validate the exact public `OpenApiArguments` envelope and JSON Schema types, required/properties/additionalProperties, bounds, enums, arrays, nullable, and supported composition. Resolve discriminators only when one branch is uniquely selected. Serialize path/query and declared non-credential headers according to OpenAPI style/explode rules; runtime creates representation headers. Reject cookie parameters in v1 and reject transport/auth header names even if a source schema declares them. Resolve the host policy's bounded credential-slot names before serialization, reserve those destinations against model input, canonicalize their deterministic ordering, and compute `reservedSlotsDigest` under the `knitli.openapi-mcp.credential-slots.v1` domain. The input is names and placements only, never credential values.
+
+Prepared-call header validation preserves U+0009 HTAB in a serialized legal field value while rejecting every other C0 control and DEL; test the complete rejected code-point set through `createPreparedCall` and `verifyPreparedCall`.
+
+Replace the slot-only resolver with required `CredentialBindingResolver`, returning `{ profileId, profileDigest, slots }`. Validate a bounded stable profile ID and SHA-256 profile digest, but never derive that digest from a token or provider subject. Preparation remains credential-free; Task 9 owns the canonical non-secret profile digest helper and live grant binding.
 
 - [ ] **Step 5: Implement prepared-call digest and structural verification**
 
 ```ts
 export async function digestPreparedCall(call: PreparedCall): Promise<Sha256> {
-  return sha256("knitli.openapi-mcp.prepared-call.v1", {
+  return sha256("knitli.openapi-mcp.prepared-call.v2", {
     ...call,
     body: call.body === null ? null : await digestBytes(call.body),
     preparedCallDigest: undefined,
@@ -740,21 +753,21 @@ export async function verifyPreparedCall(call: PreparedCall): Promise<void> {
 }
 ```
 
-Omit the self-digest key entirely from canonical input rather than serializing `undefined`.
+Use `PREPARED_CALL_VERSION = 2`. The spread includes required `credentialProfileId`, `credentialProfileDigest`, and `reservedSlotsDigest`; omit the self-digest key entirely from canonical input rather than serializing `undefined`. Mutation coverage must include each profile/slot commitment with every other integrity-bound public field. There is no v1 prepared-call compatibility requirement because prepared calls are process-local, non-persistent, and the package has not been published.
 
 - [ ] **Step 6: Implement revalidation as fresh preparation**
 
-`revalidate` calls `verifyPreparedCall`, reloads the admitted manifest and operation/schema records, prepares from `normalizedArguments`, and compares operation, manifest, input, and call digests with timing-safe byte comparison. Any release/store/policy change denies rather than updating the authorized call.
+`revalidate` calls `verifyPreparedCall`, reloads the active manifest and operation/schema records, prepares from `normalizedArguments`, reruns destination and credential-binding policy, and compares operation, manifest, input, credential-profile, reserved-slot, and call digests with timing-safe byte comparison. Any release/store/policy change denies rather than updating the authorized call. Preparation and revalidation never advance generation state; the exact manifest must already be active before and after preparation work.
 
 - [ ] **Step 7: Run focused tests and mutation check**
 
-Run: `mise exec -- bun test packages/openapi-mcp/tests/runtime-prepare.test.ts`
+Run: `mise exec -- bun test packages/openapi-mcp/tests/prepared-call.test.ts packages/openapi-mcp/tests/runtime-prepare.test.ts`
 Expected: PASS. Temporarily trust stored `safety`, verify the poisoned-hint test fails, restore runtime classification, and rerun to PASS.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add packages/openapi-mcp/src/runtime packages/openapi-mcp/tests/runtime-prepare.test.ts
+git add packages/openapi-mcp/src/runtime packages/openapi-mcp/tests/prepared-call.test.ts packages/openapi-mcp/tests/runtime-prepare.test.ts
 git commit -m "feat(openapi-mcp): prepare and revalidate exact API calls"
 ```
 
@@ -763,15 +776,22 @@ git commit -m "feat(openapi-mcp): prepare and revalidate exact API calls"
 ### Task 8: Add exact-call action authorization and safe approval rendering
 
 **Files:**
+- Modify: `packages/openapi-mcp/src/runtime/types.ts`
+- Modify: `packages/openapi-mcp/src/runtime/index.ts`
+- Create: `packages/openapi-mcp/src/runtime/action-permit.ts`
+- Create: `packages/openapi-mcp/src/stdio/action-broker.ts`
 - Create: `packages/openapi-mcp/src/stdio/authorizer.ts`
 - Create: `packages/openapi-mcp/src/stdio/render.ts`
 - Modify: `packages/openapi-mcp/package.json`
 - Modify: `bun.lock`
 - Create: `packages/openapi-mcp/tests/action-authorizer.test.ts`
+- Modify: `packages/openapi-mcp/tests/package-consumers.test.ts`
 
 **Interfaces:**
 - Consumes: `ActionAuthorizer`, `PreparedCall`, classification, `verifyPreparedCall`, safe errors.
-- Produces: `DenyActionAuthorizer`, `ExactPolicyActionAuthorizer`, `ClientElicitationActionAuthorizer`, `renderApproval`, and authorization receipt state.
+- Produces: `DenyActionAuthorizer`, `ExactPolicyActionAuthorizer`, `ClientElicitationActionAuthorizer`, `renderApproval`, authorizer-owned verified request-state capabilities, a bounded single-use pending/receipt/activation ledger, atomic `ActionAuthorizer.consume`, and an unexported engine broker that alone converts successful consumption into a runtime-authenticated one-use `ActionDispatchPermit`.
+
+Task 8 replaces the provisional Task 1 authorization types before implementing adapters. `AuthorizationContext` is a closed union: `{ kind: "initial" }` or `{ kind: "resume"; requestState: VerifiedActionRequestState; inputResponses: unknown }`. The resume state is both branded and registered in authorizer-private runtime state; raw strings and decoded lookalikes are invalid. `AuthorizationDecision` is exactly authorized, denied, or `{ status: "input-required"; presentation; requestState: string }`. `ActionAuthorizer.consume` returns `Promise<void>`; only the package-private broker can mint the permit after consume succeeds. The bare `AuthorizedTransport.dispatch(call, credential)` remains provisional until Task 10 replaces it with opaque plan/read/action methods, and Task 11 exposes only the engine-owned route.
 
 - [ ] **Step 1: Write failing authorization matrix tests**
 
@@ -779,21 +799,34 @@ git commit -m "feat(openapi-mcp): prepare and revalidate exact API calls"
 test.each(["delete", "communicate", "authority", "transaction", "execute", "unknown"])(
   "%s can never be policy-auto-approved",
   async (actionKind) => {
-    const decision = await policyAuthorizer.authorize(call({ actionKind }), context);
+    const decision = await policyAuthorizer.authorize(
+      call({ actionKind }),
+      credentialBinding,
+      context,
+    );
     expect(decision.status).not.toBe("authorized");
   },
 );
 
 test("authorization is invalid after any argument change", async () => {
   const first = call({ normalizedArguments: { id: "1" } });
-  const decision = await authorizer.authorize(first, contextWithAcceptedConfirmation());
+  const decision = await authorizer.authorize(
+    first,
+    credentialBinding,
+    contextWithAcceptedConfirmation(),
+  );
   expect(decision).toMatchObject({ status: "authorized", callDigest: first.preparedCallDigest });
-  expect(() => requireDecisionForCall(decision, call({ normalizedArguments: { id: "2" } })))
-    .toThrow(/digest/i);
+  await expect(
+    authorizer.consume(
+      decision,
+      call({ normalizedArguments: { id: "2" } }),
+      credentialBinding,
+    ),
+  ).rejects.toThrow(/digest/i);
 });
 ```
 
-Cover default deny, bounded create/update exact constraints, maxAffected, unknown/unbounded, high risk, missing elicitation capability, decline/cancel, malformed input response, expired/tampered HMAC state, state minted before acceptance, changed args across rounds, and Markdown/control-character injection in approval values.
+Cover default deny, bounded create/update closed-world constraints, `maxAffected`, every forbidden action kind/cardinality, isolated manifest-only change, missing-constraint denial, changed credential profile/grant/audience/scope, inactive-template first-use confirmation, activated-template single-use receipts, restart/environment-secret-rotation/OAuth-relogin/account-switch invalidation, missing elicitation capability, decline/cancel, malformed input response, expired/tampered HMAC state, caller-clock spoofing, opaque-state forgery, state minted before acceptance, changed arguments or credentials across entries, replay of accepted confirmation, receipt replay and concurrent double-consume, distinct IDs for repeated approvals, bounded-ledger capacity/expiry pruning without live eviction, forged/reused permit rejection, and Markdown/control-character injection in approval values.
 
 - [ ] **Step 2: Run the test and record the red result**
 
@@ -802,34 +835,68 @@ Expected: FAIL because authorizers and rendering are absent.
 
 - [ ] **Step 3: Install and pin the modern split MCP server SDK**
 
-Run: `mise exec -- bun add --exact --cwd packages/openapi-mcp @modelcontextprotocol/server@2.0.0 zod`
-Expected: `@modelcontextprotocol/server` is exactly `2.0.0`; Bun selects one exact Zod 4 version in `package.json` and `bun.lock`. Verify compatible licenses and confirm `@modelcontextprotocol/sdk` is not a direct dependency with `mise exec -- bun pm ls --all`.
+Run: `mise exec -- bun add --exact --cwd packages/openapi-mcp @modelcontextprotocol/server@2.0.0 zod@4.5.4`
+Expected: `@modelcontextprotocol/server` is exactly `2.0.0` and direct `zod` is exactly `4.5.4` in `package.json` and `bun.lock`; the server package's `zod: ^4.2.0` dependency resolves compatibly. Verify both MIT licenses and confirm `@modelcontextprotocol/sdk` is not a direct dependency with `mise exec -- bun pm ls --all`.
 
 - [ ] **Step 4: Implement deny and exact constrained policy authorizers**
 
-Policy rules bind catalog ID, release ID or allowed generation range, exact operation ID/digest, action kind, allowed argument keys/values or numeric/string bounds, cardinality, maxAffected, and expiry. Match all constraints; a missing constraint is not a wildcard. Refuse policy authorization unless kind is create/update, risk is routine, and cardinality is single or finite bounded.
+Startup policy templates are release-exact in v1: bind catalog ID, release ID, manifest digest, exact operation ID and operation digest, prepared credential-profile digest, action kind, versioned argument-constraint tree, cardinality, finite `maxAffected`, and expiry. The v1 tree permits only exact JSON leaves, closed allowed-string sets, finite numeric bounds, exact-key recursive objects, and finite recursively constrained arrays. Match every normalized argument leaf; a missing property/constraint or unknown node is denial, never a wildcard. Do not permit regexes, callbacks, schema references, implicit additional properties, generation ranges, or unseen manifests. Refuse policy authorization unless the kind is create/update, risk is routine, and cardinality is single or finite bounded. Canonicalize the complete template into `policyDigest`.
+
+A startup template is inactive for a new process/live grant. Its first matching call goes through the same fresh per-call confirmation; acceptance stores a bounded activation binding `policyDigest`, current `credentialBindingDigest`, and expiry, while minting the current call's single-use receipt. Restart, environment-secret rotation, OAuth relogin/account switch, profile change, or expiry invalidates activation and requires fresh confirmation. Every later successful activated-policy match still generates a fresh random `authorizationId`, registers an unused bounded receipt containing call, credential, path, policy digest, and expiry, and returns that receipt-backed decision. The activation can match repeatedly, but each decision cannot dispatch repeatedly or bypass `consume`.
 
 - [ ] **Step 5: Implement safe approval rendering**
 
-Render trusted field labels separately from values. Replace controls, defuse Markdown fence/heading/link syntax, cap each value and the whole prompt, summarize bodies structurally, and include the exact call digest. Unit tests use malicious summaries and arguments such as `````\n# APPROVED`` and verify they remain quoted data.
+Render trusted field labels separately from values. Replace controls, defuse Markdown fence/heading/link syntax, cap each value and the whole prompt, summarize bodies structurally, and include exact call and credential-binding digests plus a sanitized profile label, audience, and scopes. Unit tests use malicious summaries, profile labels, and arguments such as `````\n# APPROVED`` and verify they remain quoted data.
 
-- [ ] **Step 6: Implement the three-round input-required receipt flow**
+- [ ] **Step 6: Implement the two-entry input-required receipt flow**
 
-Round 1 returns one `inputRequired.elicit` confirmation. Round 2 reads `acceptedContent` through a Zod schema; after acceptance, it re-prepares and digest-checks, then returns `inputRequired({ requestState: await codec.mint({ confirmedDigest, expiresAt }) })`. Round 3 receives only SDK-verified request state, revalidates again, and returns an authorized decision when the digest still matches. Configure `createRequestStateCodec` with 32 random process bytes and a 120-second TTL. Never mint proof before acceptance and never accept a model tool argument as confirmation.
+The authorizer owns `createRequestStateCodec` with at least 32 random process bytes, a 120-second TTL, strict versioned payload decoding, and an injected internal test clock. Expose its verifier to `McpServer`; the verifier returns an opaque registered state capability, and `authorize` rejects raw or structurally forged decoded state. Public `AuthorizationContext` has no caller-controlled `now`.
+
+Entry 1 records a bounded unused pending-confirmation tuple bound to call and credential digests, then returns one complete `inputRequired({ inputRequests: { confirm: inputRequired.elicit(...) }, requestState })` result. Entry 2 requires the opaque verified state, uses `inputResponse` to distinguish decline/cancel/missing input, validates acceptance with `acceptedContent`, and receives a freshly re-prepared/revalidated call and credential binding. It atomically consumes the pending tuple and mints one unused authorization receipt, then returns the authorized decision directly. Do not return a state-only `input_required` result or require a third round: that has no portable automatic-client trigger. Replaying the accepted response must not mint another receipt.
+
+Generate authorization IDs from at least 128 random bits with collision-safe insert-if-absent. Per-call and activated-policy receipts use the same bounded map and bind complete call/credential/path/policy/expiry tuples. Prune expired entries under bounded work before capacity checks; reject exhaustion rather than evicting a live receipt. `ActionAuthorizer.consume` performs complete lookup, tuple comparison, expiry validation, and deletion synchronously with no intervening `await`, then resolves without issuing a permit. The unexported engine broker verifies the tuple, awaits that atomic consume, and synchronously registers the opaque call/credential-bound permit. External authorizers implement decision and consume only; they never receive the private permit issuer. Never mint a dispatch receipt before acceptance, never trust SDK verification alone, and never accept a model tool argument as confirmation.
 
 - [ ] **Step 7: Run focused tests**
 
+Task 8 implementation boundary: the authorizer returns the internal
+`{ status: "input-required", presentation, requestState }` decision. The Task 11
+MCP handler maps that decision into the complete SDK `inputRequired` result
+described above; the portable runtime does not import SDK response helpers.
+Receipt authority includes the authorizer-registered opaque `authorizationId`
+and its exact tuple. Built-in authorizers additionally register the immutable
+decision container by identity. Broker integration must preserve that stronger
+identity check while ensuring that mutable external decisions cannot change
+their validated fields across an asynchronous boundary.
+
+The built-in implementation uses a maximum of 256 pending confirmations, 1024
+unused receipts, and 256 policy activations. Pending confirmations and receipts
+expire after 120 seconds; activations expire after at most 15 minutes and never
+outlive their template. Test seams may lower, but never raise, these capacities.
+Exact-policy receipt expiry is the minimum of its receipt TTL, template expiry,
+and activation expiry, including when authorization happens immediately before
+either governing boundary. Consumption at that boundary must fail.
+First-use policy approval must show that future matching calls can be approved
+without another prompt, the complete canonical constraints, and the expiry.
+Its accepted content requires both `confirm: true` and `activatePolicy: true`;
+`confirm: true` alone cannot activate a policy. Ordinary per-call acceptance
+remains the closed `{ confirm: true }` shape. The Task 11 handler selects the
+corresponding elicitation schema from `presentation.policyActivation`.
+
+Policy templates are limited to 64 KiB, depth 32, and 4096 nodes; string sets
+contain at most 256 unique values, and array and affected-item bounds are at
+most 10,000. These are rejection limits, not truncation rules.
+
 Run: `mise exec -- bun test packages/openapi-mcp/tests/action-authorizer.test.ts`
-Expected: PASS, including changed-input and state-tamper denial.
+Expected: PASS, including changed-input/credential/state-tamper denial, isolated new-manifest denial, accepted-response replay denial, exact-policy single-use receipt, and one-success concurrent permit consumption.
 
-- [ ] **Step 8: Prove the receipt gate with a mutation check**
+- [ ] **Step 8: Prove the receipt gate with mutation checks**
 
-Temporarily make `requireDecisionForCall` accept a mismatched call digest. Run `mise exec -- bun test packages/openapi-mcp/tests/action-authorizer.test.ts` and require the changed-input or tampered-state case to fail. Restore the exact digest comparison and rerun to PASS.
+First, temporarily let `consume` accept a mismatched call or credential digest and confirm the changed-input/credential tests fail. Restore it. Temporarily allow accepted pending state to mint twice and confirm accepted-response replay fails. Restore it. Temporarily let the engine broker accept a structural external decision without calling its configured authorizer's consume and confirm broker-bypass tests fail. Restore it. Then stop the ledger from deleting a consumed per-call or activated-policy receipt and confirm replay/concurrent-consume tests fail. Finally, make the broker return an unregistered structural permit and confirm forged-permit tests fail. Restore atomic consumption/permit registration and rerun `mise exec -- bun test packages/openapi-mcp/tests/action-authorizer.test.ts` to PASS.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add packages/openapi-mcp/src/stdio packages/openapi-mcp/tests/action-authorizer.test.ts packages/openapi-mcp/package.json bun.lock
+git add packages/openapi-mcp/src/runtime/action-permit.ts packages/openapi-mcp/src/runtime/types.ts packages/openapi-mcp/src/runtime/index.ts packages/openapi-mcp/src/stdio packages/openapi-mcp/tests/action-authorizer.test.ts packages/openapi-mcp/tests/package-consumers.test.ts packages/openapi-mcp/package.json bun.lock
 git commit -m "feat(openapi-mcp): authorize exact action digests"
 ```
 
@@ -843,8 +910,8 @@ git commit -m "feat(openapi-mcp): authorize exact action digests"
 - Create: `packages/openapi-mcp/tests/fixtures/strict-config.json`
 
 **Interfaces:**
-- Consumes: `AuthProfile`, `SecretStore`, `CredentialProvider`, destination policy, safe errors.
-- Produces: `MemorySecretStore`, `createCredentialProvider(profile, options)`, PKCE loopback flow, and credential revocation.
+- Consumes: `AuthProfile`, `SecretStore`, `CredentialProvider`, credential-profile commitment contract, destination policy, safe errors.
+- Produces: `MemorySecretStore`, canonical non-secret profile/binding digest helpers, immutable `CredentialSnapshot`, `createCredentialProvider(profile, options)`, PKCE loopback flow, grant rotation, and credential revocation.
 
 - [ ] **Step 1: Write failing auth and redaction tests**
 
@@ -864,7 +931,7 @@ test("PKCE callback rejects wrong state without leaking code", async () => {
 });
 ```
 
-Cover missing env variables, header/query API key placement, forbidden header names, fixed endpoints, HTTPS endpoints, S256 challenge, random state, exact redirect, one-use callback, deadline, token error redaction, refresh, revocation, resource/scope binding, listener only on `127.0.0.1`, and tokens absent from MCP-facing errors.
+Cover missing env variables, header/query API key placement, forbidden header names, fixed endpoints, HTTPS endpoints, S256 challenge, random state, exact redirect, one-use callback, deadline, token error redaction, refresh, revocation, resource/scope binding, listener only on `127.0.0.1`, and tokens absent from MCP-facing errors. Also prove deterministic non-secret `profileDigest`, random process-local `grantId`, immutable snapshot/binding digest, environment-secret change and new OAuth login rotating the grant, ordinary OAuth refresh retaining it, and no credential/token hash/provider subject entering any digest or model-visible value.
 
 - [ ] **Step 2: Run the test and record the red result**
 
@@ -873,11 +940,11 @@ Expected: FAIL because auth adapters do not exist.
 
 - [ ] **Step 3: Implement environment credential profiles**
 
-Validate profile configuration at startup and require its exact origins to intersect the signed manifest origins. Read the named environment variable only when `credential()` is invoked, return an opaque credential object, and redact both configured names and resolved values from errors. Reject API-key placement in authorization/cookie/forwarding headers; only the transport turns the credential into a header or query value.
+Validate profile configuration at startup and require its exact origins to intersect the signed manifest origins. Canonicalize stable profile ID, non-secret auth kind/revision/configuration, audience/scopes, and slots into the profile commitment used by preparation. Read the named environment variable only when `credential()` is invoked, compare only inside the provider to detect rotation, and return an immutable `CredentialSnapshot` with a random process-local grant ID and domain-separated binding digest. Never publish a token hash or provider subject. Redact configured names and resolved values from errors. Reject API-key placement in authorization/cookie/forwarding headers; only the transport turns the credential into a header or query value.
 
 - [ ] **Step 4: Implement MemorySecretStore and PKCE**
 
-Use `crypto.getRandomValues`, SHA-256 S256 challenge, an ephemeral `node:http` listener on `127.0.0.1`, constant-time state comparison, one callback, and `AbortSignal.timeout`. Validate token JSON with the strict parser and store access/refresh tokens only in the provided `SecretStore`. Default construction always supplies a new `MemorySecretStore`.
+Use `crypto.getRandomValues`, SHA-256 S256 challenge, an ephemeral `node:http` listener on `127.0.0.1`, constant-time state comparison, one callback, and `AbortSignal.timeout`. Validate token JSON with the strict parser and store access/refresh tokens only in the provided `SecretStore`. Default construction always supplies a new `MemorySecretStore`. Mint a new random grant ID only after a successful new authorization grant; keep it across ordinary access-token refresh, rotate it on reconnect/account replacement, and clear it on forget/revocation.
 
 - [ ] **Step 5: Expose in-process login and forget behavior**
 
@@ -907,8 +974,8 @@ git commit -m "feat(openapi-mcp): add explicit local authentication profiles"
 - Create: `packages/openapi-mcp/tests/guarded-fetch.test.ts`
 
 **Interfaces:**
-- Consumes: `PreparedCall`, exact destination policy, credentials, runtime limits.
-- Produces: `NodeDestinationGuard`, `GuardedFetchTransport implements AuthorizedTransport`, bounded `CallOutcome`, and opaque pagination-token codec.
+- Consumes: `PreparedCall`, `CredentialSnapshot`, `ActionDispatchPermit`, exact destination policy, canonical credential-profile/slot commitments, and runtime limits.
+- Produces: `NodeDestinationGuard`, `GuardedFetchTransport implements AuthorizedTransport`, opaque short-lived `PreparedDispatch`, separate read/action dispatch methods with runtime permit enforcement, bounded `CallOutcome`, and opaque pagination-token codec.
 
 - [ ] **Step 1: Write failing SSRF, redirect, and uncertainty tests**
 
@@ -922,20 +989,26 @@ test.each(["127.0.0.1", "10.1.2.3", "169.254.169.254", "::1", "fc00::1"])(
 );
 
 test("cross-origin redirect strips credential and body", async () => {
-  const outcome = await transport.dispatch(actionCall, bearer("secret"));
+  const plan = await transport.prepareDispatch(readCall, credentialSnapshot("secret"));
+  const outcome = await transport.dispatchRead(plan);
   expect(secondHop.headers.authorization).toBeUndefined();
   expect(secondHop.bodyBytes).toBe(0);
   expect(outcome.kind).toBe("redirect-blocked");
 });
 
 test("action timeout after request write is outcome unknown and is not retried", async () => {
-  await expect(transport.dispatch(actionCall, bearer("secret")))
+  const snapshot = credentialSnapshot("secret");
+  const decision = await authorizeAction(actionCall, snapshot.binding);
+  const plan = await transport.prepareDispatch(actionCall, snapshot);
+  transport.verifyPlan(plan, actionCall, snapshot.binding);
+  const permit = await actionBroker.consume(decision, actionCall, snapshot.binding);
+  await expect(transport.dispatchAction(plan, permit))
     .rejects.toMatchObject({ code: "UPSTREAM_OUTCOME_UNKNOWN" });
   expect(upstream.requestCount).toBe(1);
 });
 ```
 
-Cover every private/reserved IPv4/IPv6 range including mapped IPv4, mixed DNS answers, DNS rebind attempt, HTTPS default, origin mismatch, redirect 3/4, downgrade to HTTP, same-origin auth retention, header denylist, response `Content-Length`, streamed decompressed bytes, deadline, pagination page/byte limits, opaque token tamper, read retry eligibility, and action no-retry.
+Cover every private/reserved IPv4/IPv6 range including mapped IPv4, mixed DNS answers, DNS rebind attempt, HTTPS default, origin mismatch, redirect 3/4, downgrade to HTTP, same-origin auth retention, header denylist, response `Content-Length`, streamed decompressed bytes, deadline, pagination page/byte limits, opaque token tamper, read retry eligibility, and action no-retry. Add profile-config and grant substitution with unchanged slots, forged credential binding, changed placement/name, expired/tampered dispatch plan, direct action dispatch without a plan, structural/copied/reused/wrong-call permit, read/action plan confusion, and concurrent permit reuse. Assert all mismatches fail before request construction, secret injection, or upstream network I/O.
 
 - [ ] **Step 2: Run the test and record the red result**
 
@@ -951,9 +1024,13 @@ Expected: `package.json` and `bun.lock` record one exact tested version. Inspect
 
 Normalize exact configured origins, resolve all A/AAAA records with `dns.promises.lookup({ all: true, verbatim: true })`, reject the destination if any answer is non-public, and return an expiring approved-address set. Configure Undici's lookup hook to choose only from that set while preserving hostname/SNI; re-run resolution and policy for every redirect.
 
-- [ ] **Step 5: Implement bounded manual fetch and credential injection**
+- [ ] **Step 5: Implement opaque preflight plans and capability-gated dispatch**
 
-Start from `PreparedCall.origin + relativeUrl`, add credentials inside the transport, enforce the header denylist, use manual redirects, and strip credential/body on cross-origin redirect. Count decompressed stream bytes. Return opaque HMAC continuation tokens binding catalog/release/operation/origin/next URL/expiry; validate them before preparing the next read.
+`prepareDispatch(call, snapshot)` derives the actual profile, grant, audience, scopes, and canonical injection-slot commitments from one immutable `CredentialSnapshot`. It timing-safely matches profile ID/digest and slot digest to `PreparedCall`, stores the snapshot's live binding digest in private plan state, validates destination/origin, resolves and pins allowed addresses, and returns an opaque, immutable, short-lived `PreparedDispatch` registered in module-private state. It sends no upstream bytes and constructs no secret-bearing request. `verifyPlan(plan, call, binding)` synchronously verifies plan ownership/expiry plus exact call and live-binding digests before receipt consumption. A failed preflight or plan verification therefore leaves an authorization receipt unused until expiry.
+
+`dispatchRead(plan)` accepts only a registered read plan. `dispatchAction(plan, permit)` accepts only a registered action plan and runtime-authenticated permit bound to the same call and credential digests; it synchronously deletes the permit and marks the plan single-use before its first `await`. Both methods recheck plan expiry and immutable bindings. The package exports no raw action HTTP primitive and rejects bare calls, forged/copies/reused plans or permits, and safety confusion before request construction, secret injection, or upstream I/O.
+
+Only after those gates does dispatch start from `PreparedCall.origin + relativeUrl`, inject credentials, enforce the header denylist, use manual redirects, and strip credential/body on a cross-origin redirect. Count decompressed stream bytes. Return opaque HMAC continuation tokens binding catalog/release/operation/origin/next URL/expiry; validate them before preparing the next read.
 
 - [ ] **Step 6: Encode retry and outcome rules**
 
@@ -966,7 +1043,7 @@ Expected: PASS.
 
 - [ ] **Step 8: Prove egress and no-retry gates with mutation checks**
 
-Temporarily allow one private-address fixture and require its SSRF case to fail; restore the address policy and rerun to PASS. Then temporarily allow one automatic action retry, require the action request-count case to fail, restore no-retry behavior, and rerun to PASS.
+Temporarily allow one private-address fixture and require its SSRF case to fail; restore the address policy and rerun to PASS. Temporarily make `dispatchAction` accept a structural or reused permit and require the zero-network forged/replay cases to fail; restore runtime permit authentication. Temporarily skip the live grant/profile comparison while keeping identical slots and require the authority-substitution case to fail; restore it. Then temporarily allow one automatic action retry, require the action request-count case to fail, restore no-retry behavior, and rerun to PASS.
 
 - [ ] **Step 9: Commit**
 
@@ -988,7 +1065,7 @@ git commit -m "feat(openapi-mcp): guard local upstream dispatch"
 - Create: `packages/openapi-mcp/tests/stdio-server.test.ts`
 
 **Interfaces:**
-- Consumes: runtime, catalog profiles, credential providers, transport, action authorizer, renderer.
+- Consumes: runtime, catalog profiles, credential providers, transport, action authorizer, engine-owned authorization broker, and renderer.
 - Produces: `createOpenApiMcpServer(options): McpServer`, `serveOpenApiStdio(config)`, and CLI `serve --config <path>`.
 
 - [ ] **Step 1: Write failing surface and protocol tests**
@@ -1015,7 +1092,7 @@ test("tool schemas expose no transport auth or confirmation controls", async () 
 });
 ```
 
-Cover search/read/action routing, qualified refs, declared non-credential `arguments.headers`, rejection of credential/hop-by-hop header names and cookie parameters, action decline, accepted three-round confirmation, exact policy, changed args, unsupported elicitation, OAuth URL elicitation, stable errors, modern 2026-07-28, legacy shim, SIGTERM cleanup, and a subprocess assertion that stdout contains only protocol frames while logs use stderr.
+Cover search/read/action routing, qualified refs, declared non-credential `arguments.headers`, rejection of credential/hop-by-hop header names and cookie parameters, action decline, accepted two-entry confirmation, exact-policy receipt mint/consume, changed args or credential grant, unsupported elicitation, OAuth URL elicitation, stable errors, modern 2026-07-28, legacy shim, SIGTERM cleanup, and a subprocess assertion that stdout contains only protocol frames while logs use stderr. Include replayed/concurrently reused pending states, authorization IDs, plans, and permits; policy-manifest/profile/grant substitution; skipped-revalidation attempts; preflight failure without receipt consumption; action failure with permanent consumption; and proof that every denied path performs zero action dispatches.
 
 - [ ] **Step 2: Run the tests and record the red result**
 
@@ -1025,7 +1102,7 @@ Expected: FAIL because the server and SDK dependencies are absent.
 - [ ] **Step 3: Verify the MCP dependency boundary established by Task 8**
 
 Run: `mise exec -- bun pm ls --all`
-Expected: `@modelcontextprotocol/server@2.0.0` and one exact Zod 4 version are present; `@modelcontextprotocol/sdk` is not a direct dependency and neither package is reachable from the `/runtime` browser bundle.
+Expected: `@modelcontextprotocol/server@2.0.0` and direct `zod@4.5.4` are present; `@modelcontextprotocol/sdk` is not a direct dependency and neither MCP nor Zod is reachable from the `/runtime` browser bundle.
 
 - [ ] **Step 4: Parse strict operator configuration**
 
@@ -1041,11 +1118,17 @@ server.registerTool("read", { inputSchema: ReadToolInput }, handleRead);
 server.registerTool("action", { inputSchema: ActionToolInput }, handleAction);
 ```
 
-`handleRead` prepares, revalidates, obtains a credential, and dispatches. `handleAction` prepares, runs the three-round authorizer or exact policy, checks the decision digest, revalidates, obtains a credential, and dispatches exactly once. Map `OpenApiMcpError` to bounded safe MCP results.
+`serveOpenApiStdio` must pass a fresh-server factory to the SDK entry point:
+
+```ts
+await serveStdio(() => createOpenApiMcpServer(serverOptions));
+```
+
+Do not pass a prebuilt server or instantiate `StdioServerTransport`; the SDK owns framing and connection lifecycle. `handleRead` prepares and revalidates, resolves one immutable credential snapshot, obtains an opaque transport preflight plan, revalidates at the last practical point, and calls `dispatchRead(plan)`. `handleAction` prepares and revalidates, resolves and binds one immutable credential snapshot, completes the two-entry client authorizer or exact-policy receipt mint, obtains an opaque no-upstream-bytes dispatch plan, freshly revalidates again, calls `verifyPlan(plan, call, binding)`, asks the engine-owned broker to verify the authorized-decision/call/binding tuple and atomically consume the authorizer receipt, receives the broker-minted `ActionDispatchPermit`, and immediately calls `dispatchAction(plan, permit)` exactly once. Put this ordering in one engine-owned helper used by the only action handler; no exported transport method accepts a bare action call and no alternate path may obtain or reuse a permit. A preflight, plan-verification, or final revalidation failure does not consume the receipt; any failure after consume leaves it permanently spent. Map `OpenApiMcpError` to bounded safe MCP results.
 
 - [ ] **Step 6: Protect request state and stdio**
 
-Construct `createRequestStateCodec` with 32 random bytes and 120-second TTL; pass `verify` in `McpServer` options. Leave the SDK legacy input-required shim enabled. Never call `console.log`; the CLI banner and audit sink write to stderr. Zero in-memory secret buffers where APIs permit and close databases/listeners on termination.
+Obtain the authorizer-owned request-state verifier and pass it in `McpServer` options; the same verifier must create an opaque state capability consumed by `ActionAuthorizer`, not hand a trusted plain object to the handler. Leave the SDK legacy input-required shim enabled. Never call `console.log`; the CLI banner and audit sink write to stderr. Zero in-memory secret buffers where APIs permit and close databases/listeners on termination.
 
 - [ ] **Step 7: Run modern, legacy, and full package tests**
 
@@ -1054,9 +1137,9 @@ Expected: PASS in both protocol eras.
 Run: `mise exec -- bun test packages/openapi-mcp`
 Expected: all package tests PASS.
 
-- [ ] **Step 8: Prove the surface and stdout gates with mutation checks**
+- [ ] **Step 8: Prove the surface, stdout, revalidation, and single-use dispatch gates with mutation checks**
 
-Temporarily register a fourth tool and require the exact-discovery assertion to fail; restore the three-tool registration and rerun to PASS. Then temporarily write one banner to stdout, require the subprocess protocol-frame assertion to fail, restore stderr-only diagnostics, and rerun to PASS.
+Temporarily register a fourth tool and require the exact-discovery assertion to fail; restore the three-tool registration and rerun to PASS. Then temporarily write one banner to stdout, require the subprocess protocol-frame assertion to fail, restore stderr-only diagnostics, and rerun to PASS. Temporarily bypass fresh action revalidation and require the changed-manifest test to fail; restore it. Temporarily resolve a same-slot higher-authority grant after approval and require the binding-substitution/zero-dispatch test to fail; restore immutable snapshots. Temporarily consume before preflight and require the preflight-failure receipt-survival ordering test to fail; restore preflight-before-consume. Finally, bypass atomic receipt or runtime permit consumption and require pending-state, receipt, and plan/permit replay/concurrency tests to fail; restore the engine-owned dispatch helper and rerun all stdio tests to PASS.
 
 - [ ] **Step 9: Commit**
 
@@ -1098,7 +1181,7 @@ import { SqliteCatalogStore } from "@knitli/openapi-mcp/sqlite";
 import { createOpenApiMcpServer } from "@knitli/openapi-mcp/stdio";
 import { runRuntimeConformanceSuite } from "@knitli/openapi-mcp/conformance";
 
-if (ARTIFACT_FORMAT_VERSION !== 4) throw new Error("wrong artifact format");
+if (ARTIFACT_FORMAT_VERSION !== 5) throw new Error("wrong artifact format");
 void [digestPreparedCall, compileRelease, SqliteCatalogStore, createOpenApiMcpServer, runRuntimeConformanceSuite];
 ```
 
@@ -1117,7 +1200,7 @@ Normalize registry-facing metadata before invoking npm tooling: published `engin
 
 - [ ] **Step 4: Rewrite public README around executable user tasks**
 
-Document installation, key generation, `compile-release`, strict config with environment variable names only, OAuth PKCE behavior, `serve`, MCP-client configuration, three tool examples, action confirmation, memory-only token lifetime, revocation, artifact/key rotation, signed rollback, v3 inventory-only migration, error troubleshooting, and the Phase 3 contract boundary. Clearly distinguish legacy exact-file signing from v4 manifest trust.
+Document installation, key generation, `compile-release`, strict config with environment variable names only, OAuth PKCE behavior, `serve`, MCP-client configuration, three tool examples, action confirmation, memory-only token lifetime, revocation, artifact/key rotation, signed rollback, v3 inventory-only migration, error troubleshooting, and the Phase 3 contract boundary. Clearly distinguish legacy v3 exact-file signing, strict historical-v4 tagless read compatibility, and current v5 manifest trust.
 
 - [ ] **Step 5: Correct stale repository guidance**
 

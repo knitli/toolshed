@@ -52,7 +52,7 @@ CASE
 END AS contract
 FROM release_metadata
 ORDER BY format, contract
-LIMIT 2;`;
+LIMIT 3;`;
 const V3_SEARCH_SQL = `SELECT CASE
   WHEN typeof(o.qualified_id) = 'text'
     AND length(CAST(o.qualified_id AS BLOB)) <= ?
@@ -230,13 +230,18 @@ function exactly(rows: unknown[], name: string): boolean {
   );
 }
 
-function isV4(rows: unknown[]): boolean {
+function isExecutableArtifact(rows: unknown[]): boolean {
   return (
-    rows.length === 1 &&
-    typeof rows[0] === "object" &&
-    rows[0] !== null &&
-    (rows[0] as Record<string, unknown>).format === 4 &&
-    (rows[0] as Record<string, unknown>).contract === 1
+    rows.length > 0 &&
+    rows.length <= 2 &&
+    rows.every(
+      (row) =>
+        typeof row === "object" &&
+        row !== null &&
+        ((row as Record<string, unknown>).format === 4 ||
+          (row as Record<string, unknown>).format === 5) &&
+        (row as Record<string, unknown>).contract === 1,
+    )
   );
 }
 
@@ -325,7 +330,7 @@ function bridge(database: SqliteDatabase): D1CatalogDatabase {
   };
 }
 
-/** Read-only v4 store with an explicit inventory-only v3 migration mode. */
+/** Read-only v4/v5 store with an explicit inventory-only v3 migration mode. */
 export class SqliteCatalogStore implements CatalogStore {
   readonly legacyInventoryOnly: boolean;
   #database: SqliteDatabase | undefined;
@@ -341,7 +346,8 @@ export class SqliteCatalogStore implements CatalogStore {
       const tables = all(database, SCHEMA_PROBE);
       if (exactly(tables, "release_metadata")) {
         const versions = all(database, V4_VERSION_PROBE);
-        if (!isV4(versions)) throw unsupported("Artifact format unsupported");
+        if (!isExecutableArtifact(versions))
+          throw unsupported("Artifact format unsupported");
         this.legacyInventoryOnly = false;
         this.#v4 = createD1CatalogStore(bridge(database), this.#limits);
       } else if (exactly(tables, "meta")) {

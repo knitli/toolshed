@@ -189,7 +189,7 @@ if (command === "compile-release") {
       referenceMapPath: values["reference-map"],
     });
     await publishRelease(compiled, { directory: values.out as string });
-    console.log(`compiled immutable v4 release ${values.release}`);
+    console.log(`compiled immutable v5 release ${values.release}`);
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err), { usage: false });
   }
