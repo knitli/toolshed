@@ -27,12 +27,14 @@ const communicationTokens = new Set([
   "communicate",
   "email",
   "invite",
+  "invitation",
   "mail",
   "message",
   "notify",
   "notification",
   "send",
   "share",
+  "sharing",
 ]);
 const authorityTokens = new Set([
   "access",
@@ -217,8 +219,25 @@ function boundedCardinality(
   let maximum = 0;
   let found = false;
   let unprovenArray = false;
+  const containsArray = (value: unknown): boolean => {
+    if (Array.isArray(value)) return true;
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      Object.values(value).some(containsArray)
+    );
+  };
   const addBound = (schemaId: TypedSchemaId, selector: unknown) => {
-    if (!Array.isArray(selector)) return;
+    if (!Array.isArray(selector)) {
+      unprovenArray ||= containsArray(selector);
+      return;
+    }
+    // Independent selectors may multiply effects. A single array bound also
+    // does not bound nested arrays, so neither shape proves a routine limit.
+    if (found || selector.some(containsArray)) {
+      unprovenArray = true;
+      return;
+    }
     if (ambiguousSchemaIds.has(schemaId)) {
       unprovenArray = true;
       return;
@@ -233,11 +252,7 @@ function boundedCardinality(
       unprovenArray = true;
       return;
     }
-    if (maximum > Number.MAX_SAFE_INTEGER - maxItems) {
-      unprovenArray = true;
-      return;
-    }
-    maximum += maxItems;
+    maximum = maxItems;
     found = true;
   };
   for (const parameter of operation.parameters) {
@@ -253,6 +268,8 @@ function boundedCardinality(
     } else {
       addBound(requestBody.content[0].schemaId, normalizedArguments.body);
     }
+  } else if (containsArray(normalizedArguments.body)) {
+    unprovenArray = true;
   }
   return {
     cardinality:

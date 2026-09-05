@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { classifyOperation } from "../src/runtime/classify.ts";
 import type {
+  JsonObject,
   OperationRecordV4,
   SchemaRecordV4,
   TypedSchemaId,
@@ -50,6 +51,75 @@ function requiredId(
 }
 
 describe("classifyOperation", () => {
+  test.each([
+    ["two query selectors", { query: { ids: ["a"], targets: ["b"] } }],
+    ["query and body selectors", { query: { ids: ["a"] }, body: ["b"] }],
+    ["nested body selectors", { body: { ids: ["a"], targets: ["b"] } }],
+    [
+      "query and nested body selectors",
+      { query: { ids: ["a"] }, body: { targets: ["b"] } },
+    ],
+    ["nested array items", { body: [["a"]] }],
+    ["arrays in body items", { body: [{ targets: ["b"] }] }],
+    ["nested query selector", { query: { ids: { targets: ["b"] } } }],
+  ] satisfies [string, JsonObject][])(
+    "fails closed for %s",
+    (_label, arguments_) => {
+      const ids = "schema:tiny:#/components/schemas/Ids" as TypedSchemaId;
+      const result = classifyOperation(
+        operation("updateWidget", {
+          path: "/widgets/{widgetId}",
+          parameters: [
+            requiredId(),
+            ...["ids", "targets"].map((name) => ({
+              ...requiredId(name),
+              in: "query" as const,
+              value: { kind: "schema" as const, schemaId: ids },
+            })),
+          ],
+          requestBody: {
+            required: true,
+            content: [
+              {
+                mediaType: "application/json" as never,
+                schemaId: ids,
+                encoding: [],
+              },
+            ],
+          },
+        }),
+        [{ id: ids, schema: { type: "array", maxItems: 10 } }],
+        arguments_,
+      );
+      expect(result.cardinality).toEqual({ kind: "unknown" });
+      expect(result.highRisk).toBe(true);
+    },
+  );
+
+  test.each(["createInvitation", "createInvitations", "createSharingLink"])(
+    "requires fresh confirmation for %s",
+    (operationId) => {
+      const result = classifyOperation(
+        operation(operationId, {
+          path: "/widgets/{widgetId}",
+          parameters: [requiredId()],
+        }),
+      );
+      expect(result.actionKind).toBe("communicate");
+      expect(result.dangerous).toBe(true);
+      expect(result.highRisk).toBe(true);
+    },
+  );
+
+  test.each(["createInventory", "createShareholder"])(
+    "does not stem unrelated words in %s",
+    (operationId) => {
+      expect(classifyOperation(operation(operationId)).actionKind).toBe(
+        "create",
+      );
+    },
+  );
+
   test("does not trust poisoned compiler advisory hints", () => {
     expect(
       classifyOperation(
