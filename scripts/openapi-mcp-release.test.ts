@@ -1,12 +1,34 @@
 import { expect, spyOn, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import * as release from "./openapi-mcp-release.mjs";
 import {
   createReleaseAdapter,
   verifyAuditBinding,
 } from "./openapi-mcp-release.mjs";
+
+test("release CLI initializes its configured adapter through the installed plugin loader", () => {
+  const result = spawnSync(
+    "node",
+    [
+      "--import",
+      fileURLToPath(
+        new URL("./openapi-mcp-release-startup.fixture.mjs", import.meta.url),
+      ),
+      fileURLToPath(new URL("./openapi-mcp-release.mjs", import.meta.url)),
+    ],
+    { encoding: "utf8", timeout: 15_000, env: { PATH: process.env.PATH } },
+  );
+  expect(result.error).toBeUndefined();
+  expect(result.stderr).toBe("");
+  expect(result.status).toBe(0);
+  expect(result.stdout.trim()).toBe(
+    "adapter guards reached: verifyConditions, prepare, publish",
+  );
+});
 
 test("registry readiness retries packument visibility and accepts only the exact release", async () => {
   expect(typeof release.waitForRegistryVersion).toBe("function");

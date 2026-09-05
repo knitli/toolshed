@@ -413,7 +413,7 @@ if (
   );
   const plugins = manifest.release.plugins.map((entry) =>
     Array.isArray(entry) && entry[0] === "@semantic-release/npm"
-      ? [fileURLToPath(import.meta.url), entry[1]]
+      ? [adapter, entry[1]]
       : entry,
   );
   const { default: semanticRelease } = await import("semantic-release");
