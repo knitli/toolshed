@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.0.0...@knitli/openapi-mcp-v1.1.0) (2026-09-06)
+
+
+### Features
+
+* **openapi-mcp:** expose complete catalog release admission ([933a843](https://github.com/knitli/toolshed/commit/933a84368286b9b4ee0480ff9f4af0ae20fc6d91))
+
 # 1.0.0 (2026-09-05)
 
 
