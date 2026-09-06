@@ -19,6 +19,7 @@ import type {
 } from "@knitli/openapi-mcp/runtime";
 import {
   ARTIFACT_FORMAT_VERSION,
+  admitCatalogRelease,
   createD1CatalogStore,
   PREPARED_CALL_VERSION,
   RUNTIME_CONTRACT_VERSION,
@@ -100,6 +101,7 @@ type _workerConformanceAdapter = Assert<
 >;
 
 export const portableContract = [
+  admitCatalogRelease,
   ARTIFACT_FORMAT_VERSION,
   PREPARED_CALL_VERSION,
   RUNTIME_CONTRACT_VERSION,

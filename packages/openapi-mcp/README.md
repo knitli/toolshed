@@ -217,6 +217,17 @@ restart with the remaining valid catalogs. Config requires at least one catalog;
 leave the server stopped if disabling the last one. Removing a file while the
 process is using it is not a reliable disable procedure.
 
+## Complete release admission
+
+`admitCatalogRelease(options, catalogId, releaseId)` from
+`@knitli/openapi-mcp/runtime` verifies every signed inventory operation and
+schema before admitting the generation through the configured `GenerationStore`.
+It revalidates the manifest and inventory around generation CAS retries. Use
+this supported portable API when activating an executable catalog; `admitManifest`
+retains its signed-envelope-only contract. Storage must preserve immutable release
+identities. Admission does not guarantee future availability, so runtime reads
+continue verifying records at use time.
+
 ## Recover from a bad release
 
 Before release, record the prior **observed package version**, its tarball digest,

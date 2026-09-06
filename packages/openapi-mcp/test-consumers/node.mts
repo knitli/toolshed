@@ -8,6 +8,7 @@ import { runRuntimeConformanceSuite } from "@knitli/openapi-mcp/conformance";
 import {
   ARTIFACT_FORMAT_VERSION,
   type AuthorizedTransport,
+  admitCatalogRelease,
   admitManifest,
   type CredentialSnapshot,
   canonicalJson,
@@ -146,7 +147,11 @@ try {
   );
   assert.ok(envelope);
   assert.ok(nextEnvelope);
-  const admitted = await admitManifest(envelope, trust, generations);
+  const admitted = await admitCatalogRelease(
+    { store, trust, generations },
+    prior.manifest.catalogId,
+    prior.manifest.releaseId,
+  );
   const runtime = createOpenApiRuntime({
     store,
     trust,

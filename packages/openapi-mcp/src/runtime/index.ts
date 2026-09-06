@@ -1,4 +1,5 @@
 export type { ActionDispatchPermit } from "./action-permit.ts";
+export { admitCatalogRelease } from "./admission.ts";
 export {
   classifyOperation,
   type OperationClassification,
