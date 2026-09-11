@@ -75,6 +75,48 @@ base64url SPKI public key for the config with:
 node --input-type=module -e 'import {readFileSync} from "node:fs"; import {createPublicKey} from "node:crypto"; console.log(createPublicKey(readFileSync("operator/keys/openapi-mcp.pub")).export({type:"spki",format:"der"}).toString("base64url"))'
 ```
 
+### Slice a large document down to one deployment's catalog
+
+`compile-release` enforces `maxDocumentKeys` (default 250,000) and
+`maxDocumentNodes` (default 1,000,000) on the whole spec. A document like
+Microsoft Graph's full v1.0 (over 1M nodes, served from a single `/v1.0`) will
+never fit, no matter how few operations one deployment actually exposes. `slice`
+filters an OpenAPI document down to the operations you select by `--tag` and/or
+`--operation`, prunes every `components` entry nothing kept still references,
+and rewrites `servers` to the bare origin `compile-release` requires (it rejects
+any `servers[0].url` with a path component):
+
+```sh
+./node_modules/.bin/openapi-mcp slice \
+  --spec ./graph-v1.0.yaml --out ./sliced/mail.json \
+  --tag me.message --operation me.sendMail \
+  --max-document-keys 5000000 --max-document-nodes 20000000
+./node_modules/.bin/openapi-mcp compile-release \
+  --spec ./sliced/mail.json --source-label graph-mail --source-revision revision-1 \
+  --catalog mail --release mail-1 --generation 1 \
+  --issuer example-operator --key-id signing-1 --policy-id local-policy-1 \
+  --allowed-origin https://graph.microsoft.com \
+  --out ./operator/releases --sign-key ./operator/keys/openapi-mcp.key
+```
+
+`--max-document-keys` and `--max-document-nodes` only raise the limits `slice`
+itself loads the source document under (`loadSpecV4`'s `CompilerLimits`); they
+have no effect on the sliced output's own size, which is whatever fits under
+`compile-release`'s (unraised) defaults. On success `slice` prints a summary
+line, for example:
+
+```
+paths=23 operations=33 schemas=30 keys=3027 (maxDocumentKeys 250000)
+```
+
+`keys=` is the sliced document's own key count, counted the same way the
+compiler counts `maxDocumentKeys`; the number in parentheses is
+`compile-release`'s own (unraised) default, so you can tell before running it
+whether the selection is small enough. An `--operation` or `--tag` that matched
+nothing is an error, not a silently smaller release — fix the typo it names.
+OpenAPI 3.1 `webhooks` are not part of `paths` and are left untouched, dangling
+refs and all; Graph's v1.0 document (3.0) has none.
+
 ## Configure and start the local MCP server
 
 Save this as `operator/config.json`, substituting absolute paths, the public key,
