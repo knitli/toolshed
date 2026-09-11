@@ -18,10 +18,11 @@ const SPEC = `${import.meta.dir}/../fixtures/tiny-api.yaml`;
 const PUB = `${import.meta.dir}/openapi-mcp.pub`;
 const KEY = `${import.meta.dir}/openapi-mcp.key`;
 const SIG = `${import.meta.dir}/tmp-cli.sig`;
+const SLICED = `${import.meta.dir}/tmp-cli-sliced.json`;
 const V4_ROOTS: string[] = [];
 
 afterEach(() => {
-  for (const f of [OUT, `${OUT}.sig`, PUB, KEY, SIG]) {
+  for (const f of [OUT, `${OUT}.sig`, PUB, KEY, SIG, SLICED]) {
     try {
       unlinkSync(f);
     } catch {
@@ -388,5 +389,44 @@ describe("cli", () => {
     const second = await run(args);
     expect(second.code).toBe(1);
     expect(second.stderr).toContain("release target already exists");
+  });
+});
+
+describe("slice --max-document-nodes", () => {
+  // Any real document has far more than 5 AST nodes, and far fewer than 10,000 — this proves
+  // the flag actually reaches `loadSpecV4`'s limit in both directions, the way Microsoft Graph's
+  // 1,060,518-node v1.0 document tripped the *default* (1,000,000) that `slice` used to leave
+  // unraised.
+  test("fails when --max-document-nodes is set below the document's node count", async () => {
+    const r = await run([
+      "slice",
+      "--spec",
+      SPEC,
+      "--out",
+      SLICED,
+      "--tag",
+      "widgets",
+      "--max-document-nodes",
+      "5",
+    ]);
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toMatch(/node limit/);
+  });
+
+  test("succeeds once --max-document-nodes is raised above the document's node count", async () => {
+    const r = await run([
+      "slice",
+      "--spec",
+      SPEC,
+      "--out",
+      SLICED,
+      "--tag",
+      "widgets",
+      "--max-document-nodes",
+      "10000",
+    ]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("paths=");
+    expect(await Bun.file(SLICED).exists()).toBe(true);
   });
 });

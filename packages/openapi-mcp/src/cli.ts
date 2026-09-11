@@ -7,7 +7,7 @@ import { compileRelease } from "./release/compile-release.ts";
 import { loadSpecV4 } from "./release/load-v4.ts";
 import { publishRelease } from "./release/publish.ts";
 import { generateKeypair, signArtifact, verifyArtifact } from "./sign.ts";
-import { countKeys, sliceSpec } from "./slice.ts";
+import { countKeys, HTTP_METHODS, sliceSpec } from "./slice.ts";
 
 const USAGE = `openapi-mcp — compile OpenAPI documents into signed MCP artifacts
 
@@ -16,7 +16,7 @@ const USAGE = `openapi-mcp — compile OpenAPI documents into signed MCP artifac
     --catalog <id> --release <id> --generation <n> --issuer <id> --key-id <id>
     --policy-id <id> --allowed-origin <https-origin> --out <directory> --sign-key <path>
     [--permissions <path>] [--reference-root <path> --reference-map <path>]
-  slice --spec <openapi.yaml|json> --out <sliced.json> [--tag <tag>]... [--operation <operationId>]... [--max-document-keys <n>]
+  slice --spec <openapi.yaml|json> --out <sliced.json> [--tag <tag>]... [--operation <operationId>]... [--max-document-keys <n>] [--max-document-nodes <n>]
   verify --artifact <path> --sig <path> --pub <path>  (legacy v3 exact-file signature)
   keygen [--out <dir>]
   serve --config <absolute-config-path>
@@ -228,6 +228,7 @@ if (command === "slice") {
       tag: { type: "string", multiple: true },
       operation: { type: "string", multiple: true },
       "max-document-keys": { type: "string" },
+      "max-document-nodes": { type: "string" },
     },
     strict: true,
   });
@@ -236,6 +237,7 @@ if (command === "slice") {
   try {
     const document = (await loadSpecV4(values.spec as string, {
       maxDocumentKeys: Number(values["max-document-keys"] ?? 5_000_000),
+      maxDocumentNodes: Number(values["max-document-nodes"] ?? 20_000_000),
     })) as unknown as Record<string, unknown>;
     const sliced = sliceSpec(document, {
       tags: values.tag ?? [],
@@ -248,7 +250,10 @@ if (command === "slice") {
     const paths = sliced.paths as Record<string, Record<string, unknown>>;
     const operationCount = Object.values(paths).reduce(
       (n, item) =>
-        n + Object.keys(item).filter((k) => k !== "parameters").length,
+        n +
+        Object.keys(item).filter((k) =>
+          (HTTP_METHODS as readonly string[]).includes(k),
+        ).length,
       0,
     );
     const schemaCount = Object.keys(
