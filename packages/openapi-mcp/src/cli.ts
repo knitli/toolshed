@@ -7,7 +7,7 @@ import { compileRelease } from "./release/compile-release.ts";
 import { DEFAULT_COMPILER_LIMITS, loadSpecV4 } from "./release/load-v4.ts";
 import { publishRelease } from "./release/publish.ts";
 import { generateKeypair, signArtifact, verifyArtifact } from "./sign.ts";
-import { countKeys, HTTP_METHODS, sliceSpec } from "./slice.ts";
+import { countKeys, HTTP_METHODS, keyBudgetNote, sliceSpec } from "./slice.ts";
 
 const USAGE = `openapi-mcp — compile OpenAPI documents into signed MCP artifacts
 
@@ -259,9 +259,10 @@ if (command === "slice") {
     const schemaCount = Object.keys(
       ((sliced.components as Record<string, unknown>).schemas ?? {}) as object,
     ).length;
+    const keys = countKeys(sliced);
     console.log(
       `paths=${Object.keys(paths).length} operations=${operationCount} schemas=${schemaCount} ` +
-        `keys=${countKeys(sliced)} (fits compile-release's default maxDocumentKeys=${DEFAULT_COMPILER_LIMITS.maxDocumentKeys})`,
+        `keys=${keys} (${keyBudgetNote(keys, DEFAULT_COMPILER_LIMITS.maxDocumentKeys)})`,
     );
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err), { usage: false });

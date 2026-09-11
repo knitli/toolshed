@@ -38,6 +38,13 @@ export function countKeys(value: unknown): number {
   return 0;
 }
 
+/** Describes a key count against compile-release's default `maxDocumentKeys`, and what to do if it doesn't fit. */
+export function keyBudgetNote(keys: number, limit: number): string {
+  return keys <= limit
+    ? `fits compile-release's default maxDocumentKeys=${limit}`
+    : `exceeds compile-release's default maxDocumentKeys=${limit}; pass --max-document-keys to compile-release`;
+}
+
 function collectRefs(value: unknown, into: Set<string>): void {
   if (Array.isArray(value)) {
     for (const item of value) collectRefs(item, into);
