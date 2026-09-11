@@ -106,7 +106,7 @@ have no effect on the sliced output's own size, which is whatever fits under
 line, for example:
 
 ```
-paths=23 operations=33 schemas=30 keys=3027 (maxDocumentKeys 250000)
+paths=23 operations=33 schemas=30 keys=3027 (fits compile-release's default maxDocumentKeys=250000)
 ```
 
 `keys=` is the sliced document's own key count, counted the same way the

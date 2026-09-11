@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { type ParseArgsConfig, parseArgs } from "node:util";
 import { compile } from "./compile.ts";
 import { compileRelease } from "./release/compile-release.ts";
-import { loadSpecV4 } from "./release/load-v4.ts";
+import { DEFAULT_COMPILER_LIMITS, loadSpecV4 } from "./release/load-v4.ts";
 import { publishRelease } from "./release/publish.ts";
 import { generateKeypair, signArtifact, verifyArtifact } from "./sign.ts";
 import { countKeys, HTTP_METHODS, sliceSpec } from "./slice.ts";
@@ -261,7 +261,7 @@ if (command === "slice") {
     ).length;
     console.log(
       `paths=${Object.keys(paths).length} operations=${operationCount} schemas=${schemaCount} ` +
-        `keys=${countKeys(sliced)} (maxDocumentKeys 250000)`,
+        `keys=${countKeys(sliced)} (fits compile-release's default maxDocumentKeys=${DEFAULT_COMPILER_LIMITS.maxDocumentKeys})`,
     );
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err), { usage: false });

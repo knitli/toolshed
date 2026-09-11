@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_COMPILER_LIMITS } from "../src/release/load-v4.ts";
 import { generateKeypair, signArtifact } from "../src/sign.ts";
 
 const CLI = `${import.meta.dir}/../src/cli.ts`;
@@ -429,4 +430,20 @@ describe("slice --max-document-nodes", () => {
     expect(r.stdout).toContain("paths=");
     expect(await Bun.file(SLICED).exists()).toBe(true);
   });
+});
+
+test("slice reports the real compile-release maxDocumentKeys default, not a duplicated literal", async () => {
+  const r = await run([
+    "slice",
+    "--spec",
+    SPEC,
+    "--out",
+    SLICED,
+    "--tag",
+    "widgets",
+  ]);
+  expect(r.code).toBe(0);
+  expect(r.stdout).toContain(
+    `maxDocumentKeys=${DEFAULT_COMPILER_LIMITS.maxDocumentKeys}`,
+  );
 });

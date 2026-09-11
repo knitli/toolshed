@@ -223,6 +223,34 @@ test("keeps security schemes referenced by root or operation security requiremen
   expect(Object.keys(sliced.components.securitySchemes)).toEqual(["apiKey"]);
 });
 
+test("keeps security schemes referenced by a kept operation's own security override, and prunes the rest", () => {
+  const withOperationSecurity = {
+    ...spec,
+    components: {
+      ...spec.components,
+      securitySchemes: {
+        bearer: { type: "http", scheme: "bearer" },
+        unused: { type: "apiKey", name: "unused", in: "header" },
+      },
+    },
+    paths: {
+      ...spec.paths,
+      "/me/sendMail": {
+        ...spec.paths["/me/sendMail"],
+        post: {
+          ...spec.paths["/me/sendMail"].post,
+          security: [{ bearer: [] }],
+        },
+      },
+    },
+  };
+  const sliced = sliceSpec(withOperationSecurity, {
+    tags: [],
+    operations: ["me.sendMail"],
+  }) as { components: { securitySchemes: Record<string, unknown> } };
+  expect(Object.keys(sliced.components.securitySchemes)).toEqual(["bearer"]);
+});
+
 test("prunes discriminator.mapping entries whose target is outside the kept closure", () => {
   const sliced = sliceSpec(spec, {
     tags: ["me.message"],
