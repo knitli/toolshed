@@ -458,9 +458,11 @@ function validateSchema(
       .filter((index) => index >= 0);
     if (matches.length !== 1 || (selected !== null && matches[0] !== selected))
       schemaFailure();
-  } else if (Object.hasOwn(schema, "discriminator")) {
-    schemaFailure();
   }
+  // A `discriminator` with no `oneOf`/`anyOf` alongside it is OpenAPI 3.0's inheritance form
+  // (OpenAPI 3.0.3 §4.7.24.2, Discriminator Object, "composition and inheritance"): it names the
+  // property a *consumer* would branch on, but the schema itself is a plain `type: object`
+  // (optionally under `allOf`) with no selection for us to perform. Ignore it rather than reject.
 
   if (Object.hasOwn(schema, "nullable")) {
     if (typeof schema.nullable !== "boolean") schemaFailure();

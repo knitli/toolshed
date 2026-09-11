@@ -400,6 +400,88 @@ test("rejects ambiguous oneOf and unsupported discriminators", () => {
   }
 });
 
+test("ignores an inheritance-style discriminator with no oneOf/anyOf, as OpenAPI 3.0 allows", () => {
+  // Mirrors Microsoft Graph's OpenAPI document: a base schema (microsoft.graph.entity) carries a
+  // top-level `discriminator` with no `oneOf`/`anyOf`, and a derived schema references it via
+  // `allOf`. Neither schema requires the discriminant property on request bodies.
+  const base = schema("graph-entity", {
+    type: "object",
+    discriminator: {
+      propertyName: "@odata.type",
+      mapping: { "#microsoft.graph.message": "schema:tiny:graph-message" },
+    },
+    properties: { id: { type: "string" } },
+  });
+  const message = schema("graph-message", {
+    allOf: [
+      { $ref: base.id },
+      {
+        type: "object",
+        discriminator: { propertyName: "@odata.type", mapping: {} },
+        properties: { subject: { type: "string" } },
+      },
+    ],
+  });
+  const op = operation({
+    method: "POST",
+    path: "/nodes",
+    requestBody: {
+      required: true,
+      content: [
+        {
+          mediaType: "application/json" as never,
+          schemaId: message.id,
+          encoding: [],
+        },
+      ],
+    },
+    schemaIds: [message.id, base.id],
+  });
+  const closure = schemas(message, base);
+
+  expect(
+    decoder.decode(
+      serializeArguments(op, closure, {
+        body: { id: "1", subject: "hi" },
+      }).body ?? encoder.encode("missing"),
+    ),
+  ).toBe('{"id":"1","subject":"hi"}');
+});
+
+test("rejects a value that matches a different branch than a oneOf discriminator selects", () => {
+  const branchA = schema("mismatch-branch-a", {
+    type: "object",
+    properties: { value: { type: "string" } },
+    required: ["value"],
+  });
+  const branchB = schema("mismatch-branch-b", {
+    type: "object",
+    properties: { value: { type: "number" } },
+    required: ["value"],
+  });
+  const root = schema("mismatch-root", {
+    oneOf: [{ $ref: branchA.id }, { $ref: branchB.id }],
+    discriminator: {
+      propertyName: "kind",
+      mapping: { a: branchA.id, b: branchB.id },
+    },
+  });
+  const op = operation({
+    path: "/validate",
+    parameters: [parameter("choice", "query", root.id)],
+    schemaIds: [root.id],
+  });
+  const closure = schemas(root, branchA, branchB);
+
+  // The discriminator names branch A ("kind": "a"), but the payload's shape (a numeric `value`)
+  // structurally matches branch B instead — a real mismatch, not just an invalid value.
+  expect(() =>
+    serializeArguments(op, closure, {
+      query: { choice: { kind: "a", value: 5 } },
+    }),
+  ).toThrow(expect.objectContaining({ code: "INPUT_INVALID" }));
+});
+
 test("rejects unknown, missing, cookie, credential, transport, and CRLF inputs", () => {
   const text = schema("text", { type: "string" });
   const cases: Array<readonly [OperationRecordV4, unknown]> = [
