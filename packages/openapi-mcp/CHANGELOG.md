@@ -1,3 +1,17 @@
+# [1.2.0](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.1.0...@knitli/openapi-mcp-v1.2.0) (2026-09-11)
+
+
+### Bug Fixes
+
+* **openapi-mcp:** honor slice's node limit, selectors, and ref closure ([97215cc](https://github.com/knitli/toolshed/commit/97215cca36f0502b6c1991237e72085653cc3d64)), closes [#28](https://github.com/knitli/toolshed/issues/28) [#28](https://github.com/knitli/toolshed/issues/28)
+* **openapi-mcp:** make slice's keys= budget note conditional, pin operations= to HTTP methods ([aeed8c8](https://github.com/knitli/toolshed/commit/aeed8c84bb1175e96d7912050678b6660a26b09a))
+* **openapi-mcp:** print slice's real compile-release maxDocumentKeys default ([99c616c](https://github.com/knitli/toolshed/commit/99c616c2fc8dd796bc7e09543ac0c60e7887b8a6))
+
+
+### Features
+
+* **openapi-mcp:** slice command selects operations by tag or id and prunes components ([e48fb7b](https://github.com/knitli/toolshed/commit/e48fb7bae2ac08bec7bbb4f19c23d441a893b770))
+
 # [1.1.0](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.0.0...@knitli/openapi-mcp-v1.1.0) (2026-09-06)
 
 
