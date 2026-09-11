@@ -118,9 +118,9 @@ OpenAPI 3.1 `webhooks` are not part of `paths` and are left untouched, dangling
 refs and all; Graph's v1.0 document (3.0) has none.
 
 `--optional <propertyName>` (repeatable) removes that property from every
-`required` array in the sliced output — component schemas and inline
-requestBody/parameter schemas alike — dropping `required` entirely where that
-empties it. Graph's OpenAPI document marks `@odata.type` `required` on nearly
+`required` array anywhere in the sliced output — component schemas and inline
+request, parameter and response schemas alike — dropping `required` entirely
+where that empties it. Graph's OpenAPI document marks `@odata.type` `required` on nearly
 every schema, but the Graph service itself never requires it on request
 bodies, so pass `--optional '@odata.type'` when slicing Graph specs.
 

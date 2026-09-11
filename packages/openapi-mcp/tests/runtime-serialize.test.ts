@@ -482,6 +482,61 @@ test("rejects a value that matches a different branch than a oneOf discriminator
   ).toThrow(expect.objectContaining({ code: "INPUT_INVALID" }));
 });
 
+test("an anyOf discriminator is enforced like a oneOf one", () => {
+  const branchA = schema("anyof-branch-a", {
+    type: "object",
+    properties: { value: { type: "string" } },
+    required: ["value"],
+  });
+  const branchB = schema("anyof-branch-b", {
+    type: "object",
+    properties: { value: { type: "number" } },
+    required: ["value"],
+  });
+  const root = schema("anyof-root", {
+    anyOf: [{ $ref: branchA.id }, { $ref: branchB.id }],
+    discriminator: {
+      propertyName: "kind",
+      mapping: { a: branchA.id, b: branchB.id },
+    },
+  });
+  const op = operation({
+    path: "/validate",
+    parameters: [parameter("choice", "query", root.id)],
+    schemaIds: [root.id],
+  });
+  const closure = schemas(root, branchA, branchB);
+
+  // Matches branch B structurally while the discriminant names A.
+  expect(() =>
+    serializeArguments(op, closure, {
+      query: { choice: { kind: "a", value: 5 } },
+    }),
+  ).toThrow(expect.objectContaining({ code: "INPUT_INVALID" }));
+  // Discriminant and shape agree.
+  expect(() =>
+    serializeArguments(op, closure, {
+      query: { choice: { kind: "b", value: 5 } },
+    }),
+  ).not.toThrow();
+});
+
+test("a bare discriminator must still be an object", () => {
+  const bad = schema("bad-discriminator", {
+    type: "object",
+    discriminator: "garbage",
+    properties: { id: { type: "string" } },
+  });
+  const op = operation({
+    path: "/validate",
+    parameters: [parameter("choice", "query", bad.id)],
+    schemaIds: [bad.id],
+  });
+  expect(() =>
+    serializeArguments(op, schemas(bad), { query: { choice: { id: "1" } } }),
+  ).toThrow(expect.objectContaining({ code: "INPUT_INVALID" }));
+});
+
 test("rejects unknown, missing, cookie, credential, transport, and CRLF inputs", () => {
   const text = schema("text", { type: "string" });
   const cases: Array<readonly [OperationRecordV4, unknown]> = [
