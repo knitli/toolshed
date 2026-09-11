@@ -10,7 +10,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_COMPILER_LIMITS } from "../src/release/load-v4.ts";
 import { generateKeypair, signArtifact } from "../src/sign.ts";
+import { keyBudgetNote } from "../src/slice.ts";
 
 const CLI = `${import.meta.dir}/../src/cli.ts`;
 const OUT = `${import.meta.dir}/tmp-cli.sqlite`;
@@ -18,10 +20,12 @@ const SPEC = `${import.meta.dir}/../fixtures/tiny-api.yaml`;
 const PUB = `${import.meta.dir}/openapi-mcp.pub`;
 const KEY = `${import.meta.dir}/openapi-mcp.key`;
 const SIG = `${import.meta.dir}/tmp-cli.sig`;
+const SLICED = `${import.meta.dir}/tmp-cli-sliced.json`;
+const EXTRAS_SPEC = `${import.meta.dir}/tmp-cli-extras-spec.json`;
 const V4_ROOTS: string[] = [];
 
 afterEach(() => {
-  for (const f of [OUT, `${OUT}.sig`, PUB, KEY, SIG]) {
+  for (const f of [OUT, `${OUT}.sig`, PUB, KEY, SIG, SLICED, EXTRAS_SPEC]) {
     try {
       unlinkSync(f);
     } catch {
@@ -389,4 +393,114 @@ describe("cli", () => {
     expect(second.code).toBe(1);
     expect(second.stderr).toContain("release target already exists");
   });
+});
+
+describe("slice --max-document-nodes", () => {
+  // Any real document has far more than 5 AST nodes, and far fewer than 10,000 — this proves
+  // the flag actually reaches `loadSpecV4`'s limit in both directions, the way Microsoft Graph's
+  // 1,060,518-node v1.0 document tripped the *default* (1,000,000) that `slice` used to leave
+  // unraised.
+  test("fails when --max-document-nodes is set below the document's node count", async () => {
+    const r = await run([
+      "slice",
+      "--spec",
+      SPEC,
+      "--out",
+      SLICED,
+      "--tag",
+      "widgets",
+      "--max-document-nodes",
+      "5",
+    ]);
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toMatch(/node limit/);
+  });
+
+  test("succeeds once --max-document-nodes is raised above the document's node count", async () => {
+    const r = await run([
+      "slice",
+      "--spec",
+      SPEC,
+      "--out",
+      SLICED,
+      "--tag",
+      "widgets",
+      "--max-document-nodes",
+      "10000",
+    ]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("paths=");
+    expect(await Bun.file(SLICED).exists()).toBe(true);
+  });
+});
+
+test("slice reports the real compile-release maxDocumentKeys default, not a duplicated literal", async () => {
+  const r = await run([
+    "slice",
+    "--spec",
+    SPEC,
+    "--out",
+    SLICED,
+    "--tag",
+    "widgets",
+  ]);
+  expect(r.code).toBe(0);
+  expect(r.stdout).toContain(
+    `maxDocumentKeys=${DEFAULT_COMPILER_LIMITS.maxDocumentKeys}`,
+  );
+});
+
+test("keyBudgetNote reports fit or overflow against compile-release's default, with a remedy when it doesn't fit", () => {
+  const limit = DEFAULT_COMPILER_LIMITS.maxDocumentKeys;
+  expect(keyBudgetNote(limit, limit)).toBe(
+    `fits compile-release's default maxDocumentKeys=${limit}`,
+  );
+  expect(keyBudgetNote(limit + 1, limit)).toBe(
+    `exceeds compile-release's default maxDocumentKeys=${limit}; pass --max-document-keys to compile-release`,
+  );
+});
+
+test("slice's operations= count only counts HTTP methods, not path-item extras like summary/servers/parameters", async () => {
+  writeFileSync(
+    EXTRAS_SPEC,
+    JSON.stringify({
+      openapi: "3.0.1",
+      info: { title: "Extras", version: "1" },
+      servers: [{ url: "https://api.example.com" }],
+      paths: {
+        "/widgets": {
+          summary: "Widget collection",
+          servers: [{ url: "https://api.example.com/v2" }],
+          parameters: [
+            { name: "$top", in: "query", schema: { type: "integer" } },
+          ],
+          get: {
+            operationId: "widgets.list",
+            tags: ["widgets"],
+            responses: { "200": { description: "ok" } },
+          },
+          post: {
+            operationId: "widgets.create",
+            tags: ["widgets"],
+            responses: { "201": { description: "created" } },
+          },
+        },
+      },
+    }),
+  );
+
+  const r = await run([
+    "slice",
+    "--spec",
+    EXTRAS_SPEC,
+    "--out",
+    SLICED,
+    "--tag",
+    "widgets",
+  ]);
+  expect(r.code).toBe(0);
+  // The path item has 5 keys (summary, servers, parameters, get, post); only
+  // the 2 HTTP methods should count as operations -- pre-HTTP_METHODS-fix
+  // counted every non-"parameters" key and printed operations=4.
+  expect(r.stdout).toContain("operations=2");
 });
