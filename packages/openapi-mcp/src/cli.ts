@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { type ParseArgsConfig, parseArgs } from "node:util";
 import { compile } from "./compile.ts";
 import { compileRelease } from "./release/compile-release.ts";
+import { loadSpecV4 } from "./release/load-v4.ts";
 import { publishRelease } from "./release/publish.ts";
 import { generateKeypair, signArtifact, verifyArtifact } from "./sign.ts";
+import { countKeys, sliceSpec } from "./slice.ts";
 
 const USAGE = `openapi-mcp — compile OpenAPI documents into signed MCP artifacts
 
@@ -14,6 +16,7 @@ const USAGE = `openapi-mcp — compile OpenAPI documents into signed MCP artifac
     --catalog <id> --release <id> --generation <n> --issuer <id> --key-id <id>
     --policy-id <id> --allowed-origin <https-origin> --out <directory> --sign-key <path>
     [--permissions <path>] [--reference-root <path> --reference-map <path>]
+  slice --spec <openapi.yaml|json> --out <sliced.json> [--tag <tag>]... [--operation <operationId>]... [--max-document-keys <n>]
   verify --artifact <path> --sig <path> --pub <path>  (legacy v3 exact-file signature)
   keygen [--out <dir>]
   serve --config <absolute-config-path>
@@ -210,6 +213,51 @@ if (command === "compile-release") {
     });
     await publishRelease(compiled, { directory: values.out as string });
     console.log(`compiled immutable v5 release ${values.release}`);
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err), { usage: false });
+  }
+  process.exit(0);
+}
+
+if (command === "slice") {
+  const { values } = parseOrFail({
+    args: rest,
+    options: {
+      spec: { type: "string" },
+      out: { type: "string" },
+      tag: { type: "string", multiple: true },
+      operation: { type: "string", multiple: true },
+      "max-document-keys": { type: "string" },
+    },
+    strict: true,
+  });
+  if (!values.spec) fail("--spec is required");
+  if (!values.out) fail("--out is required");
+  try {
+    const document = (await loadSpecV4(values.spec as string, {
+      maxDocumentKeys: Number(values["max-document-keys"] ?? 5_000_000),
+    })) as unknown as Record<string, unknown>;
+    const sliced = sliceSpec(document, {
+      tags: values.tag ?? [],
+      operations: values.operation ?? [],
+    });
+    await writeFile(
+      values.out as string,
+      `${JSON.stringify(sliced, null, 2)}\n`,
+    );
+    const paths = sliced.paths as Record<string, Record<string, unknown>>;
+    const operationCount = Object.values(paths).reduce(
+      (n, item) =>
+        n + Object.keys(item).filter((k) => k !== "parameters").length,
+      0,
+    );
+    const schemaCount = Object.keys(
+      ((sliced.components as Record<string, unknown>).schemas ?? {}) as object,
+    ).length;
+    console.log(
+      `paths=${Object.keys(paths).length} operations=${operationCount} schemas=${schemaCount} ` +
+        `keys=${countKeys(sliced)} (maxDocumentKeys 250000)`,
+    );
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err), { usage: false });
   }
