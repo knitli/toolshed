@@ -1,3 +1,12 @@
+## [1.2.1](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.2.0...@knitli/openapi-mcp-v1.2.1) (2026-09-12)
+
+
+### Bug Fixes
+
+* **openapi-mcp:** add slice --optional to relax always-required Graph properties ([3075f73](https://github.com/knitli/toolshed/commit/3075f7382beda338f2e4eecf5f16b3a456d8fdc1))
+* **openapi-mcp:** enforce anyOf discriminators and keep the bare-discriminator shape check ([61857f5](https://github.com/knitli/toolshed/commit/61857f587100d25f43426f9309ebf5fcf9ed1c1b))
+* **openapi-mcp:** treat an inheritance-style discriminator as informational ([0dbb326](https://github.com/knitli/toolshed/commit/0dbb326a2e4b0e1efb331ef0c8c3f18714681290))
+
 # [1.2.0](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.1.0...@knitli/openapi-mcp-v1.2.0) (2026-09-11)
 
 
