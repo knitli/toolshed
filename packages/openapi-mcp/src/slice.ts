@@ -19,10 +19,37 @@ export const HTTP_METHODS = [
 ] as const;
 type Json = Record<string, unknown>;
 
-/** Which operations survive: any of these tags, or any of these operation ids. */
+/** Which operations survive: any of these tags, or any of these operation ids. `optional` names
+ * properties to drop from every `required` array in the sliced output — see `dropRequired`. */
 export interface SliceSelection {
   readonly tags: readonly string[];
   readonly operations: readonly string[];
+  readonly optional?: readonly string[];
+}
+
+/** Returns a new value with every `name` in `names` removed from every `required` array found
+ * anywhere in `document` — component schemas and inline schemas (paths, requestBodies,
+ * parameters) alike — deleting the `required` key entirely if that empties it. Does not mutate
+ * `document`. Graph's OpenAPI document marks `@odata.type` `required` on nearly every schema,
+ * but the service itself never requires it on request bodies. */
+export function dropRequired(document: Json, names: ReadonlySet<string>): Json {
+  function walk(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(walk);
+    if (!value || typeof value !== "object") return value;
+    const result: Json = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (key === "required" && Array.isArray(item)) {
+        const kept = item.filter(
+          (name) => typeof name !== "string" || !names.has(name),
+        );
+        if (kept.length > 0) result[key] = kept;
+        continue;
+      }
+      result[key] = walk(item);
+    }
+    return result;
+  }
+  return walk(document) as Json;
 }
 
 /** Number of object keys in a JSON value; compare with the compiler's `maxDocumentKeys` (250,000). */
@@ -224,12 +251,14 @@ export function sliceSpec(document: Json, selection: SliceSelection): Json {
 
   const server = (document.servers as { url: string }[] | undefined)?.[0]?.url;
   if (!server) throw new Error("The document names no server.");
-  return {
+  const sliced: Json = {
     ...document,
     servers: [{ url: new URL(server).origin }],
     paths,
     components: prunedComponents,
   };
+  const optional = selection.optional ?? [];
+  return optional.length > 0 ? dropRequired(sliced, new Set(optional)) : sliced;
 }
 
 /** Drops `discriminator.mapping` entries whose target is not in the kept closure, on a shallow

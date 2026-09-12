@@ -388,6 +388,27 @@ function validateDiscriminator(
   return selected[0];
 }
 
+/** Indices of the `anyOf`/`oneOf` branches the value validates against. When the schema also
+ * carries a discriminator, the branch it selects must be among them. */
+function matchingBranches(
+  schema: JsonObject,
+  raw: JsonValue | undefined,
+  value: JsonValue,
+  closure: ReadonlyMap<TypedSchemaId, Readonly<SchemaRecordV4>>,
+  depth: number,
+  context: ValidationContext,
+): number[] {
+  const branches = schemaArray(raw);
+  const selected = validateDiscriminator(schema, branches, value);
+  const matches = branches
+    .map((branch, index) =>
+      validates(branch, value, closure, depth + 1, context) ? index : -1,
+    )
+    .filter((index) => index >= 0);
+  if (selected !== null && !matches.includes(selected)) schemaFailure();
+  return matches;
+}
+
 function validateReference(
   id: TypedSchemaId,
   schema: JsonSchemaV4,
@@ -443,24 +464,20 @@ function validateSchema(
       validateSchema(branch, value, closure, depth + 1, context);
   }
   if (Object.hasOwn(schema, "anyOf")) {
-    const matches = schemaArray(schema.anyOf).filter((branch) =>
-      validates(branch, value, closure, depth + 1, context),
-    );
+    const matches = matchingBranches(schema, schema.anyOf, value, closure, depth, context);
     if (matches.length === 0) schemaFailure();
   }
   if (Object.hasOwn(schema, "oneOf")) {
-    const branches = schemaArray(schema.oneOf);
-    const selected = validateDiscriminator(schema, branches, value);
-    const matches = branches
-      .map((branch, index) =>
-        validates(branch, value, closure, depth + 1, context) ? index : -1,
-      )
-      .filter((index) => index >= 0);
-    if (matches.length !== 1 || (selected !== null && matches[0] !== selected))
-      schemaFailure();
-  } else if (Object.hasOwn(schema, "discriminator")) {
-    schemaFailure();
+    const matches = matchingBranches(schema, schema.oneOf, value, closure, depth, context);
+    if (matches.length !== 1) schemaFailure();
   }
+  // A `discriminator` with no `oneOf`/`anyOf` alongside it is OpenAPI 3.0's inheritance form
+  // (OpenAPI 3.0.3 §4.7.24.2, Discriminator Object, "composition and inheritance"): it names the
+  // property a *consumer* would branch on, but the schema itself is a plain `type: object`
+  // (optionally under `allOf`) with no selection for us to perform. Ignore it rather than reject,
+  // but keep the same shape check every other supported key gets.
+  else if (Object.hasOwn(schema, "discriminator") && !isObject(schema.discriminator))
+    schemaFailure();
 
   if (Object.hasOwn(schema, "nullable")) {
     if (typeof schema.nullable !== "boolean") schemaFailure();

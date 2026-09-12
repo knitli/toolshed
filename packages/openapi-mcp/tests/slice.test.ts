@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { countKeys, sliceSpec } from "../src/slice.ts";
+import { countKeys, dropRequired, sliceSpec } from "../src/slice.ts";
 
 const spec = {
   openapi: "3.0.1",
@@ -264,4 +264,95 @@ test("prunes discriminator.mapping entries whose target is outside the kept clos
   };
   // `drive` is pruned (not `$ref`-reachable), so the mapping entry pointing at it goes too.
   expect(sliced.components.schemas.entity.discriminator.mapping).toEqual({});
+});
+
+const withRequired = {
+  ...spec,
+  paths: {
+    ...spec.paths,
+    "/me/sendMail": {
+      post: {
+        ...spec.paths["/me/sendMail"].post,
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["@odata.type", "message"],
+                properties: {
+                  message: { $ref: "#/components/schemas/message" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    ...spec.components,
+    schemas: {
+      ...spec.components.schemas,
+      entity: {
+        ...spec.components.schemas.entity,
+        required: ["id", "@odata.type"],
+      },
+      message: {
+        allOf: [
+          { $ref: "#/components/schemas/entity" },
+          {
+            type: "object",
+            required: ["@odata.type"],
+            properties: { body: { $ref: "#/components/schemas/itemBody" } },
+          },
+        ],
+      },
+    },
+  },
+};
+
+test("--optional (via sliceSpec's `optional`) removes the named property from every required array, deleting it once empty", () => {
+  const sliced = sliceSpec(withRequired, {
+    tags: [],
+    operations: ["me.sendMail"],
+    optional: ["@odata.type"],
+  }) as {
+    components: { schemas: Record<string, Record<string, unknown>> };
+    paths: Record<string, Record<string, Record<string, unknown>>>;
+  };
+
+  // Component schema: another required name survives.
+  expect(sliced.components.schemas.entity.required).toEqual(["id"]);
+  // Component schema whose *only* required name was dropped: `required` disappears entirely.
+  const messageBranch = (
+    sliced.components.schemas.message.allOf as Record<string, unknown>[]
+  )[1];
+  expect("required" in messageBranch).toBe(false);
+  // Inline requestBody schema: another required name survives, `@odata.type` is gone.
+  const requestSchema = sliced.paths["/me/sendMail"].post.requestBody as {
+    content: { "application/json": { schema: { required: string[] } } };
+  };
+  expect(requestSchema.content["application/json"].schema.required).toEqual([
+    "message",
+  ]);
+});
+
+test("without `optional`, required arrays are left untouched", () => {
+  const sliced = sliceSpec(withRequired, {
+    tags: [],
+    operations: ["me.sendMail"],
+  }) as {
+    components: { schemas: Record<string, Record<string, unknown>> };
+  };
+  expect(sliced.components.schemas.entity.required).toEqual([
+    "id",
+    "@odata.type",
+  ]);
+});
+
+test("dropRequired does not mutate its input", () => {
+  const input = { required: ["a", "b"], nested: { required: ["a"] } };
+  const snapshot = JSON.parse(JSON.stringify(input));
+  dropRequired(input, new Set(["a"]));
+  expect(input).toEqual(snapshot);
 });

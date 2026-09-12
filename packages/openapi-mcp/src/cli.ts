@@ -16,7 +16,7 @@ const USAGE = `openapi-mcp — compile OpenAPI documents into signed MCP artifac
     --catalog <id> --release <id> --generation <n> --issuer <id> --key-id <id>
     --policy-id <id> --allowed-origin <https-origin> --out <directory> --sign-key <path>
     [--permissions <path>] [--reference-root <path> --reference-map <path>]
-  slice --spec <openapi.yaml|json> --out <sliced.json> [--tag <tag>]... [--operation <operationId>]... [--max-document-keys <n>] [--max-document-nodes <n>]
+  slice --spec <openapi.yaml|json> --out <sliced.json> [--tag <tag>]... [--operation <operationId>]... [--optional <propertyName>]... [--max-document-keys <n>] [--max-document-nodes <n>]
   verify --artifact <path> --sig <path> --pub <path>  (legacy v3 exact-file signature)
   keygen [--out <dir>]
   serve --config <absolute-config-path>
@@ -227,6 +227,7 @@ if (command === "slice") {
       out: { type: "string" },
       tag: { type: "string", multiple: true },
       operation: { type: "string", multiple: true },
+      optional: { type: "string", multiple: true },
       "max-document-keys": { type: "string" },
       "max-document-nodes": { type: "string" },
     },
@@ -242,6 +243,7 @@ if (command === "slice") {
     const sliced = sliceSpec(document, {
       tags: values.tag ?? [],
       operations: values.operation ?? [],
+      optional: values.optional ?? [],
     });
     await writeFile(
       values.out as string,

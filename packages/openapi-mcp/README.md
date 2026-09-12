@@ -117,6 +117,13 @@ nothing is an error, not a silently smaller release — fix the typo it names.
 OpenAPI 3.1 `webhooks` are not part of `paths` and are left untouched, dangling
 refs and all; Graph's v1.0 document (3.0) has none.
 
+`--optional <propertyName>` (repeatable) removes that property from every
+`required` array anywhere in the sliced output — component schemas and inline
+request, parameter and response schemas alike — dropping `required` entirely
+where that empties it. Graph's OpenAPI document marks `@odata.type` `required` on nearly
+every schema, but the Graph service itself never requires it on request
+bodies, so pass `--optional '@odata.type'` when slicing Graph specs.
+
 ## Configure and start the local MCP server
 
 Save this as `operator/config.json`, substituting absolute paths, the public key,
