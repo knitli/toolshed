@@ -277,6 +277,14 @@ retains its signed-envelope-only contract. Storage must preserve immutable relea
 identities. Admission does not guarantee future availability, so runtime reads
 continue verifying records at use time.
 
+For a boundary that needs strict manifest and signature authentication plus the
+logical digest without changing generation state, use
+`authenticateManifest(envelope, trust, limitOverrides?)` from
+`@knitli/openapi-mcp/runtime`. It does not verify records, decide rollback
+against current state, or admit an executable release. Callers activating a
+catalog use `admitCatalogRelease`; callers retaining reviewed authority must
+still perform that authority and admission step after authentication.
+
 ## Recover from a bad release
 
 Before release, record the prior **observed package version**, its tarball digest,

@@ -166,6 +166,7 @@ for (const runtime of ["node", "bun"]) {
       search: true,
       rollback: true,
       cli: true,
+      authentication: true,
     });
     await writeFile(join(consumer, "consumer-result.json"), output);
   }, 180_000);
