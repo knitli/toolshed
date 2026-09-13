@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.2.1...@knitli/openapi-mcp-v1.3.0) (2026-09-13)
+
+
+### Features
+
+* **openapi-mcp:** expose manifest authentication ([#30](https://github.com/knitli/toolshed/issues/30)) ([4c874ce](https://github.com/knitli/toolshed/commit/4c874ce7a81c1a1dacbef2c6887749d834525c52))
+
 ## [1.2.1](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.2.0...@knitli/openapi-mcp-v1.2.1) (2026-09-12)
 
 
