@@ -279,7 +279,7 @@ continue verifying records at use time.
 
 For a boundary that needs strict manifest and signature authentication plus the
 logical digest without changing generation state, use
-`authenticateManifest(envelope, trust, limits?)` from
+`authenticateManifest(envelope, trust, limitOverrides?)` from
 `@knitli/openapi-mcp/runtime`. It does not verify records, decide rollback
 against current state, or admit an executable release. Callers activating a
 catalog use `admitCatalogRelease`; callers retaining reviewed authority must
