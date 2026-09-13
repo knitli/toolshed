@@ -6,6 +6,8 @@ import {
 } from "@knitli/openapi-mcp/conformance";
 import type {
   ActionDispatchPermit,
+  AdmittedManifest,
+  AuthenticatedManifest,
   AuthorizationContext,
   AuthorizationId,
   CallOutcome,
@@ -15,6 +17,7 @@ import type {
   SearchResult,
   SearchResultItem,
   SearchWarning,
+  Sha256,
   VerifiedActionRequestState,
 } from "@knitli/openapi-mcp/runtime";
 import {
@@ -32,6 +35,13 @@ type Equal<Actual, Expected> =
     ? true
     : false;
 type Assert<Condition extends true> = Condition;
+
+type _authenticatedManifestExtendsAdmitted = Assert<
+  AuthenticatedManifest extends AdmittedManifest ? true : false
+>;
+type _authenticatedManifestDigestIsLogicalSha256 = Assert<
+  Equal<AuthenticatedManifest["manifestDigest"], Sha256>
+>;
 
 type _actionPermitCannotBeForged = Assert<
   Equal<object extends ActionDispatchPermit ? true : false, false>

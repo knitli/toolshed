@@ -561,7 +561,14 @@ function detachedManifest(
   );
 }
 
-/** Authenticate a v4/v5 manifest without reading or mutating generation state. */
+/**
+ * Authenticate a strict v4/v5 manifest and trusted release signature, then
+ * return its domain-separated logical digest without reading or mutating
+ * generation state. This does not verify referenced inventory, validate
+ * rollback authorization against current state, admit a generation, or make a
+ * release executable; activation must use admitCatalogRelease or an equivalent
+ * authority path that performs the full inventory and state decision.
+ */
 export async function authenticateManifest(
   envelope: ManifestEnvelope,
   trust: ManifestTrust,

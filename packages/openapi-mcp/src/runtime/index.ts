@@ -13,10 +13,11 @@ export type { OpenApiMcpErrorCode } from "./errors.ts";
 export { OpenApiMcpError } from "./errors.ts";
 export type {
   AdmittedManifest,
+  AuthenticatedManifest,
   ManifestTrust,
   TrustedManifestKey,
 } from "./manifest.ts";
-export { admitManifest } from "./manifest.ts";
+export { admitManifest, authenticateManifest } from "./manifest.ts";
 export {
   createPreparedCall,
   digestBytes,

@@ -147,11 +147,31 @@ try {
   );
   assert.ok(envelope);
   assert.ok(nextEnvelope);
+  const publicRuntime = await import("@knitli/openapi-mcp/runtime");
+  const authenticate = Reflect.get(publicRuntime, "authenticateManifest");
+  assert.equal(
+    typeof authenticate,
+    "function",
+    "the public runtime must export authenticateManifest",
+  );
+  assert.equal(
+    await generations.get(prior.manifest.catalogId, options.issuer),
+    null,
+  );
+  const authenticated = await authenticate(envelope, trust);
+  assert.equal(authenticated.manifest.releaseId, prior.manifest.releaseId);
+  assert.equal(authenticated.manifestDigest.length, 64);
+  assert.equal(Object.isFrozen(authenticated), true);
+  assert.equal(
+    await generations.get(prior.manifest.catalogId, options.issuer),
+    null,
+  );
   const admitted = await admitCatalogRelease(
     { store, trust, generations },
     prior.manifest.catalogId,
     prior.manifest.releaseId,
   );
+  assert.equal(admitted.manifestDigest, authenticated.manifestDigest);
   const runtime = createOpenApiRuntime({
     store,
     trust,
@@ -430,6 +450,7 @@ try {
       search: true,
       rollback: true,
       cli: true,
+      authentication: true,
       publicReadAfterRejectedAdmission: recoveredRead,
       priorGeneration: 1,
       priorReleaseId: prior.manifest.releaseId,
