@@ -441,6 +441,12 @@ function validateSchema(
   if (schema === true) return;
   if (schema === false || !isObject(schema)) schemaFailure();
   for (const key of Object.keys(schema)) {
+    // OpenAPI Specification Extensions (`^x-`, OpenAPI 3.1 §4.9) are legal on a Schema Object and
+    // carry no validation semantics, so ignore the key and never walk its value -- Cloudflare's
+    // API document puts `x-auditable: true` on parameter schemas, and the compiler copies
+    // component schemas verbatim. Every other unknown keyword still fails: one with validation
+    // semantics (`pattern`, `contains`) must not be silently skipped.
+    if (key.startsWith("x-")) continue;
     if (!supportedSchemaKeys.has(key)) schemaFailure();
   }
 
