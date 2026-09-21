@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.3.0...@knitli/openapi-mcp-v1.3.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* **openapi-mcp:** ignore OpenAPI specification extensions on schemas ([73a2a36](https://github.com/knitli/toolshed/commit/73a2a36daf150f812b87b7b6c9e584c3906c62b7))
+
 # [1.3.0](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.2.1...@knitli/openapi-mcp-v1.3.0) (2026-09-13)
 
 
