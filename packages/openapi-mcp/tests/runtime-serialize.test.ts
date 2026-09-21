@@ -400,6 +400,93 @@ test("rejects ambiguous oneOf and unsupported discriminators", () => {
   }
 });
 
+test("ignores OpenAPI specification extensions on schemas at every nesting level", () => {
+  // Mirrors Cloudflare's API document: `x-auditable: true` rides on the `account_id` path
+  // parameter schema of workers-kv-namespace-list-namespaces, which made every call through that
+  // operation fail validation before dispatch.
+  const accountId = schema("account-id", {
+    description: "Identifier.",
+    example: "023e105f4ecef8ad9ca31a8372d0c353",
+    maxLength: 32,
+    readOnly: true,
+    type: "string",
+    "x-auditable": true,
+  });
+  const meta = schema("meta", {
+    type: "object",
+    properties: { region: { type: "string", "x-auditable": true } },
+    "x-internal": true,
+  });
+  const result = serializeArguments(
+    operation({
+      path: "/accounts/{account_id}/storage/kv/namespaces",
+      parameters: [
+        parameter("account_id", "path", accountId.id),
+        parameter("meta", "query", meta.id),
+      ],
+      schemaIds: [accountId.id, meta.id].sort(),
+    }),
+    schemas(accountId, meta),
+    {
+      path: { account_id: "023e105f4ecef8ad9ca31a8372d0c353" },
+      query: { meta: { region: "us" } },
+    },
+  );
+
+  expect(result.relativeUrl).toBe(
+    "/accounts/023e105f4ecef8ad9ca31a8372d0c353/storage/kv/namespaces?region=us",
+  );
+});
+
+test("rejects unknown schema keywords that are not specification extensions", () => {
+  // `pattern` is a real validation keyword this runtime does not implement -- skipping it would
+  // drop a constraint silently. `X-Auditable` is not an extension: the prefix is lower-case `x-`.
+  const semantic = schema("semantic", { type: "string", pattern: "^a" });
+  const wrongCase = schema("wrong-case", {
+    type: "string",
+    "X-Auditable": true,
+  });
+
+  for (const candidate of [semantic, wrongCase]) {
+    const call = () =>
+      serializeArguments(
+        operation({
+          path: "/validate",
+          parameters: [parameter("value", "query", candidate.id)],
+          schemaIds: [candidate.id],
+        }),
+        schemas(candidate),
+        { query: { value: "abc" } },
+      );
+    expect(call).toThrow(expect.objectContaining({ code: "INPUT_INVALID" }));
+    expect(call).toThrow(
+      "OpenAPI argument does not satisfy its declared schema",
+    );
+  }
+});
+
+test("never follows a $ref inside a specification extension value", () => {
+  // An extension's value is not a subschema position. The integer-only target is reachable in the
+  // closure, so following it would be silent and would reject this string.
+  const integerOnly = schema("integer-only", { type: "integer" });
+  const account = schema("account-with-extension", {
+    type: "string",
+    "x-derived-from": { $ref: integerOnly.id },
+  });
+
+  expect(
+    serializeArguments(
+      operation({
+        path: "/validate",
+        parameters: [parameter("value", "query", account.id)],
+        schemaIds: [account.id, integerOnly.id].sort(),
+      }),
+      schemas(account, integerOnly),
+      { query: { value: "not-an-integer" } },
+    ).relativeUrl,
+  ).toBe("/validate?value=not-an-integer");
+});
+
 test("ignores an inheritance-style discriminator with no oneOf/anyOf, as OpenAPI 3.0 allows", () => {
   // Mirrors Microsoft Graph's OpenAPI document: a base schema (microsoft.graph.entity) carries a
   // top-level `discriminator` with no `oneOf`/`anyOf`, and a derived schema references it via
