@@ -90,6 +90,11 @@ function manifestKey(catalogId: string, releaseId: string): string {
 
 const maximumSearchReleases = 8;
 const maximumInventorySchemaBatch = 128;
+// Operation batches are bounded by the catalog bundle cap (16 MiB), which
+// ingest already holds in memory whole, so one batch response can't exceed
+// memory the admitter already budgets. Schema batches keep the
+// maxSchemaClosureBytes-derived bound because they serve closure resolution.
+const OPERATION_BATCH_BYTE_BUDGET = 16 * 1024 * 1024;
 // State churn may require reproof, but one search may spend no more than the
 // same eight-release compatibility envelope used for manifest authentication.
 const maximumCompleteReleaseProofs = maximumSearchReleases;
@@ -261,20 +266,26 @@ async function verifyCompleteRelease(
     }
     return bytes;
   };
-  // Bounds each batch response by the schema-closure envelope and each request
-  // by the store's ID byte limit; one fixed JSON parameter keeps D1 bindings flat.
-  const batchSize = Math.max(
-    1,
-    Math.min(
-      maximumInventorySchemaBatch,
-      Math.floor(limits.maxSchemaClosureBytes / limits.maxRecordBytes),
-    ),
-  );
+  // Each response is bounded by its batch size times maxRecordBytes, and each
+  // request by the store's ID byte limit; one fixed JSON parameter keeps D1
+  // bindings flat.
+  const batchSizeFor = (byteBudget: number) =>
+    Math.max(
+      1,
+      Math.min(
+        maximumInventorySchemaBatch,
+        Math.floor(byteBudget / limits.maxRecordBytes),
+      ),
+    );
+  const operationBatchSize = batchSizeFor(OPERATION_BATCH_BYTE_BUDGET);
+  const schemaBatchSize = batchSizeFor(limits.maxSchemaClosureBytes);
   const nextBatch = <Id extends string>(
     ids: readonly Id[],
     start: number,
     kind: "operation" | "schema",
   ): Id[] => {
+    const batchSize =
+      kind === "operation" ? operationBatchSize : schemaBatchSize;
     const batch: Id[] = [];
     let requestBytes = 0;
     for (let index = start; index < ids.length; index += 1) {

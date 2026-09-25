@@ -383,8 +383,8 @@ test("concurrent higher generation cannot reinterpret admission as rollback", as
   expect(f.generations.state?.highestGeneration).toBe(2);
 });
 
-// Default limits give an inventory batch of min(128, 4 MiB / 1 MiB) = 4.
-const defaultInventoryBatch = 4;
+// Default limits give an operation batch of min(128, 16 MiB / 1 MiB) = 16.
+const defaultOperationBatch = 16;
 
 function batchedStore(
   f: Awaited<ReturnType<typeof fixture>>,
@@ -418,10 +418,25 @@ test("batched admission reads operations in O(n / batch) store calls", async () 
   const counts = batchedStore(f);
   await admitCatalogRelease(f, catalogId, releaseId);
   // Preflight plus the CAS pass each verify the complete release once.
-  expect(counts.batched).toBe(2 * Math.ceil(300 / defaultInventoryBatch));
+  expect(counts.batched).toBe(2 * Math.ceil(300 / defaultOperationBatch));
+  expect(counts.batched).toBe(38);
   expect(counts.batchedIds).toBe(2 * 300);
   expect(counts.single).toBe(0);
   expect(f.generations.state?.highestGeneration).toBe(1);
+});
+
+test("operation batches cap at 128 when records are small", async () => {
+  // 16 MiB / 64 KiB = 256, capped to 128.
+  const f = await fixture(manyOperations(300));
+  const counts = batchedStore(f);
+  await admitCatalogRelease(
+    { ...f, limits: { maxRecordBytes: 64 * 1024 } },
+    catalogId,
+    releaseId,
+  );
+  expect(counts.batched).toBe(2 * Math.ceil(300 / 128));
+  expect(counts.batchedIds).toBe(2 * 300);
+  expect(counts.single).toBe(0);
 });
 
 test("admission without getOperations keeps the per-row path", async () => {
@@ -439,14 +454,14 @@ test("admission without getOperations keeps the per-row path", async () => {
 
 describe("batched admission fails closed", () => {
   const cases = {
-    // Batch two is [op-0004]; each fault targets it.
+    // Batch two is [op-0016]; each fault targets it.
     missing: {
       respond: (
         ids: readonly string[],
         rows: readonly StoredRecord<OperationRecordV4>[],
       ) =>
         rows.filter(
-          (row) => ids.includes(row.id) && row.id !== "operation:tiny:op-0004",
+          (row) => ids.includes(row.id) && row.id !== "operation:tiny:op-0016",
         ),
       code: "RECORD_NOT_ADMITTED",
       message: "Release inventory operation is missing",
@@ -457,7 +472,7 @@ describe("batched admission fails closed", () => {
         rows: readonly StoredRecord<OperationRecordV4>[],
       ) => {
         const found = rows.filter((row) => ids.includes(row.id));
-        return ids.length === 4
+        return ids.length === defaultOperationBatch
           ? [...found.slice(0, 1), ...found.slice(0, 1), ...found.slice(2)]
           : found;
       },
@@ -469,7 +484,7 @@ describe("batched admission fails closed", () => {
         ids: readonly string[],
         rows: readonly StoredRecord<OperationRecordV4>[],
       ) =>
-        ids.includes("operation:tiny:op-0004")
+        ids.includes("operation:tiny:op-0016")
           ? rows.slice(0, 1)
           : rows.filter((row) => ids.includes(row.id)),
       code: "RECORD_NOT_ADMITTED",
@@ -483,7 +498,7 @@ describe("batched admission fails closed", () => {
         rows
           .filter((row) => ids.includes(row.id))
           .map((row) =>
-            row.id === "operation:tiny:op-0004"
+            row.id === "operation:tiny:op-0016"
               ? { ...row, record: { ...row.record, summary: "tampered" } }
               : row,
           ),
@@ -493,7 +508,7 @@ describe("batched admission fails closed", () => {
   } as const;
   for (const [fault, { respond, code, message }] of Object.entries(cases)) {
     test(`${fault} operation row`, async () => {
-      const f = await fixture(manyOperations(5));
+      const f = await fixture(manyOperations(17));
       const counts = batchedStore(f, respond);
       let accepts = 0;
       f.generations.accept = async () => {
