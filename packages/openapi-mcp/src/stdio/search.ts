@@ -56,6 +56,14 @@ export function createStdioSearchRuntime(
           throw new OpenApiMcpError("UPSTREAM_ERROR");
         },
       };
+      // Batch only when every source store can; otherwise keep per-row reads.
+      if (ordered.every((entry) => entry.store.getOperations !== undefined))
+        store.getOperations = async (catalog, release, ids) => {
+          const source = storeFor(catalog, release);
+          if (source.getOperations === undefined)
+            throw new OpenApiMcpError("RECORD_NOT_ADMITTED");
+          return source.getOperations(catalog, release, ids);
+        };
       return createRuntimeWithCandidateLookup(
         { ...options, limits, store },
         async (query, tryChargeSource) => {

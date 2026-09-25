@@ -86,6 +86,25 @@ WHERE s.catalog_id = ? AND s.release_id = ?
 ORDER BY s.record_id COLLATE BINARY
 LIMIT ?;`;
 
+const GET_OPERATIONS_SQL = `WITH requested(record_id) AS (
+  SELECT DISTINCT value FROM json_each(?) WHERE typeof(value) = 'text'
+)
+SELECT
+       CASE WHEN typeof(o.record_id) = 'text' AND length(CAST(o.record_id AS BLOB)) <= ? THEN o.record_id ELSE NULL END AS record_id,
+       length(CAST(o.record_id AS BLOB)) AS record_id_bytes,
+       CASE WHEN typeof(o.logical_digest) = 'text' AND length(CAST(o.logical_digest AS BLOB)) <= ? THEN o.logical_digest ELSE NULL END AS logical_digest,
+       length(CAST(o.logical_digest AS BLOB)) AS logical_digest_bytes,
+       CASE WHEN typeof(o.record_json) = 'text' AND length(CAST(o.record_json AS BLOB)) <= ? THEN o.record_json ELSE NULL END AS record_json,
+       length(CAST(o.record_json AS BLOB)) AS record_json_bytes
+FROM requested
+JOIN operations AS o ON o.record_id = requested.record_id
+JOIN release_metadata AS r
+  ON r.catalog_id = o.catalog_id AND r.release_id = o.release_id
+WHERE o.catalog_id = ? AND o.release_id = ?
+  AND r.format IN (4, 5) AND r.contract = 1
+ORDER BY o.record_id COLLATE BINARY
+LIMIT ?;`;
+
 type Row = Record<string, unknown>;
 type RowFailure = "MANIFEST_INVALID" | "RECORD_DIGEST_MISMATCH";
 const digestPattern = /^[0-9a-f]{64}$/;
@@ -132,6 +151,11 @@ export const CATALOG_STORE_PUBLIC_MESSAGES = Object.freeze({
   operationRowAmbiguous: "Stored operation row is ambiguous",
   operationIdentifierMismatch:
     "Stored operation identifier does not match request",
+  operationRequestLimitExceeded: "Operation request exceeds its limit",
+  operationRequestInvalid: "Operation request is invalid",
+  operationTransportTooManyRows:
+    "Stored operation transport returned too many rows",
+  operationRowsInvalid: "Stored operation rows are invalid",
   schemaRequestLimitExceeded: "Schema request exceeds its limit",
   schemaRequestInvalid: "Schema request is invalid",
   schemaTransportTooManyRows: "Stored schema transport returned too many rows",
@@ -610,6 +634,35 @@ function snapshotSchemaIds(
   value: unknown,
   limits: RuntimeLimits,
 ): readonly TypedSchemaId[] {
+  return snapshotRecordIds(
+    value,
+    limits,
+    requestedSchemaId,
+    CATALOG_STORE_PUBLIC_MESSAGES.schemaRequestLimitExceeded,
+    CATALOG_STORE_PUBLIC_MESSAGES.schemaRequestInvalid,
+  );
+}
+
+function snapshotOperationIds(
+  value: unknown,
+  limits: RuntimeLimits,
+): readonly TypedOperationId[] {
+  return snapshotRecordIds(
+    value,
+    limits,
+    requestedOperationId,
+    CATALOG_STORE_PUBLIC_MESSAGES.operationRequestLimitExceeded,
+    CATALOG_STORE_PUBLIC_MESSAGES.operationRequestInvalid,
+  );
+}
+
+function snapshotRecordIds<Id extends string>(
+  value: unknown,
+  limits: RuntimeLimits,
+  parse: (value: unknown) => Id,
+  limitMessage: string,
+  invalidMessage: string,
+): readonly Id[] {
   try {
     if (
       !Array.isArray(value) ||
@@ -625,26 +678,24 @@ function snapshotSchemaIds(
       length.value < 0
     )
       throw new Error();
-    if (length.value > limits.maxManifestRecords)
-      throw input(CATALOG_STORE_PUBLIC_MESSAGES.schemaRequestLimitExceeded);
+    if (length.value > limits.maxManifestRecords) throw input(limitMessage);
     const names = Object.getOwnPropertyNames(value);
     if (names.length !== length.value + 1 || !names.includes("length"))
       throw new Error();
-    const ids: TypedSchemaId[] = [];
+    const ids: Id[] = [];
     let totalBytes = 0;
     for (let index = 0; index < length.value; index += 1) {
       const id = Object.getOwnPropertyDescriptor(value, String(index));
       if (!id?.enumerable || !("value" in id)) throw new Error();
-      const parsed = requestedSchemaId(id.value);
+      const parsed = parse(id.value);
       totalBytes += textEncoder.encode(parsed).byteLength;
-      if (totalBytes > limits.maxSchemaClosureBytes)
-        throw input(CATALOG_STORE_PUBLIC_MESSAGES.schemaRequestLimitExceeded);
+      if (totalBytes > limits.maxSchemaClosureBytes) throw input(limitMessage);
       ids.push(parsed);
     }
     return ids;
   } catch (error) {
     if (error instanceof OpenApiMcpError) throw error;
-    throw input(CATALOG_STORE_PUBLIC_MESSAGES.schemaRequestInvalid);
+    throw input(invalidMessage);
   }
 }
 
@@ -838,6 +889,52 @@ class D1CatalogStore implements CatalogStore {
     return row as StoredRecord<OperationRecordV4>;
   }
 
+  async getOperations(
+    catalog: CatalogId,
+    release: ReleaseId,
+    ids: readonly TypedOperationId[],
+  ): Promise<readonly StoredRecord<OperationRecordV4>[]> {
+    const catalogIdValue = catalogId(catalog);
+    const releaseIdValue = releaseId(release);
+    const operationIds = snapshotOperationIds(ids, this.limits);
+    if (operationIds.length === 0) return [];
+    const requested = new Set<string>(operationIds);
+    const rows = await d1All(
+      this.database,
+      GET_OPERATIONS_SQL,
+      [
+        canonicalJson([...requested].sort()),
+        operationIdBytes,
+        digestBytes,
+        this.limits.maxRecordBytes,
+        catalogIdValue,
+        releaseIdValue,
+        requested.size + 1,
+      ],
+      "RECORD_DIGEST_MISMATCH",
+    );
+    if (rows.length > requested.size)
+      throw failure(
+        "RECORD_DIGEST_MISMATCH",
+        CATALOG_STORE_PUBLIC_MESSAGES.operationTransportTooManyRows,
+      );
+    // Unlike getSchemas, absent IDs are omitted rather than rejected, matching
+    // getOperation's null; callers decide whether absence is fatal.
+    const records: StoredRecord<OperationRecordV4>[] = [];
+    let previous = "";
+    for (const value of rows) {
+      const row = decodeRecord(value, "operation", this.limits);
+      if (!requested.has(row.id) || row.id <= previous)
+        throw failure(
+          "RECORD_DIGEST_MISMATCH",
+          CATALOG_STORE_PUBLIC_MESSAGES.operationRowsInvalid,
+        );
+      previous = row.id;
+      records.push(row as StoredRecord<OperationRecordV4>);
+    }
+    return records;
+  }
+
   async getSchemas(
     catalog: CatalogId,
     release: ReleaseId,
@@ -895,6 +992,6 @@ class D1CatalogStore implements CatalogStore {
 export function createD1CatalogStore(
   binding: D1CatalogDatabase,
   limits?: Partial<RuntimeLimits>,
-): CatalogStore {
+): Required<CatalogStore> {
   return new D1CatalogStore(binding, resolveRuntimeLimits(limits));
 }

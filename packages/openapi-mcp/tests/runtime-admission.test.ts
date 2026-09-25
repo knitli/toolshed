@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
   type AdmittedManifest,
   admitCatalogRelease,
@@ -381,4 +381,135 @@ test("concurrent higher generation cannot reinterpret admission as rollback", as
   ).rejects.toMatchObject({ code: "MANIFEST_GENERATION_CONFLICT" });
   expect(accepts).toBe(1);
   expect(f.generations.state?.highestGeneration).toBe(2);
+});
+
+// Default limits give an inventory batch of min(128, 4 MiB / 1 MiB) = 4.
+const defaultInventoryBatch = 4;
+
+function batchedStore(
+  f: Awaited<ReturnType<typeof fixture>>,
+  respond: (
+    ids: readonly string[],
+    rows: readonly StoredRecord<OperationRecordV4>[],
+  ) => readonly StoredRecord<OperationRecordV4>[] = (ids, rows) =>
+    rows.filter((row) => ids.includes(row.id)),
+) {
+  const counts = { single: 0, batched: 0, batchedIds: 0 };
+  const getOperation = f.store.getOperation;
+  f.store.getOperation = async (...args) => {
+    counts.single++;
+    return getOperation(...args);
+  };
+  f.store.getOperations = async (_catalog, _release, ids) => {
+    counts.batched++;
+    counts.batchedIds += ids.length;
+    return respond(ids, f.rows);
+  };
+  return counts;
+}
+
+const manyOperations = (count: number) =>
+  Array.from({ length: count }, (_, index) =>
+    operation(`op-${String(index).padStart(4, "0")}`),
+  );
+
+test("batched admission reads operations in O(n / batch) store calls", async () => {
+  const f = await fixture(manyOperations(300));
+  const counts = batchedStore(f);
+  await admitCatalogRelease(f, catalogId, releaseId);
+  // Preflight plus the CAS pass each verify the complete release once.
+  expect(counts.batched).toBe(2 * Math.ceil(300 / defaultInventoryBatch));
+  expect(counts.batchedIds).toBe(2 * 300);
+  expect(counts.single).toBe(0);
+  expect(f.generations.state?.highestGeneration).toBe(1);
+});
+
+test("admission without getOperations keeps the per-row path", async () => {
+  const f = await fixture(manyOperations(300));
+  let single = 0;
+  const getOperation = f.store.getOperation;
+  f.store.getOperation = async (...args) => {
+    single++;
+    return getOperation(...args);
+  };
+  expect(f.store.getOperations).toBeUndefined();
+  await admitCatalogRelease(f, catalogId, releaseId);
+  expect(single).toBe(2 * 300);
+});
+
+describe("batched admission fails closed", () => {
+  const cases = {
+    // Batch two is [op-0004]; each fault targets it.
+    missing: {
+      respond: (
+        ids: readonly string[],
+        rows: readonly StoredRecord<OperationRecordV4>[],
+      ) =>
+        rows.filter(
+          (row) => ids.includes(row.id) && row.id !== "operation:tiny:op-0004",
+        ),
+      code: "RECORD_NOT_ADMITTED",
+      message: "Release inventory operation is missing",
+    },
+    duplicated: {
+      respond: (
+        ids: readonly string[],
+        rows: readonly StoredRecord<OperationRecordV4>[],
+      ) => {
+        const found = rows.filter((row) => ids.includes(row.id));
+        return ids.length === 4
+          ? [...found.slice(0, 1), ...found.slice(0, 1), ...found.slice(2)]
+          : found;
+      },
+      code: "RECORD_NOT_ADMITTED",
+      message: "Release inventory operation rows are ambiguous",
+    },
+    unrequested: {
+      respond: (
+        ids: readonly string[],
+        rows: readonly StoredRecord<OperationRecordV4>[],
+      ) =>
+        ids.includes("operation:tiny:op-0004")
+          ? rows.slice(0, 1)
+          : rows.filter((row) => ids.includes(row.id)),
+      code: "RECORD_NOT_ADMITTED",
+      message: "Release inventory operation rows are ambiguous",
+    },
+    tampered: {
+      respond: (
+        ids: readonly string[],
+        rows: readonly StoredRecord<OperationRecordV4>[],
+      ) =>
+        rows
+          .filter((row) => ids.includes(row.id))
+          .map((row) =>
+            row.id === "operation:tiny:op-0004"
+              ? { ...row, record: { ...row.record, summary: "tampered" } }
+              : row,
+          ),
+      code: "RECORD_DIGEST_MISMATCH",
+      message: undefined,
+    },
+  } as const;
+  for (const [fault, { respond, code, message }] of Object.entries(cases)) {
+    test(`${fault} operation row`, async () => {
+      const f = await fixture(manyOperations(5));
+      const counts = batchedStore(f, respond);
+      let accepts = 0;
+      f.generations.accept = async () => {
+        accepts++;
+        return null;
+      };
+      const error = await admitCatalogRelease(f, catalogId, releaseId).catch(
+        (error) => error,
+      );
+      expect(error).toBeInstanceOf(OpenApiMcpError);
+      expect(error.code).toBe(code);
+      if (message !== undefined) expect(error.message).toBe(message);
+      expect(counts.batched).toBeGreaterThan(0);
+      expect(counts.single).toBe(0);
+      expect(accepts).toBe(0);
+      expect(f.generations.state).toBeNull();
+    });
+  }
 });
