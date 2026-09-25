@@ -287,6 +287,85 @@ function openFileDescriptorsFor(path: string): number | undefined {
   }
 }
 
+test("v4 SQLite batched operation reads return exactly the requested rows, decoded like single reads", async () => {
+  const artifact = createV4Catalog();
+  const database = new DatabaseSync(artifact.path);
+  const extraIds = Array.from(
+    { length: 6 },
+    (_, index) => `operation:api:list-${index}` as TypedOperationId,
+  );
+  try {
+    const insert = database.prepare(
+      "INSERT INTO operations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    for (const [index, id] of extraIds.entries()) {
+      insert.run(
+        catalogId,
+        releaseA,
+        id,
+        JSON.stringify({
+          id,
+          api: "api",
+          operationId: `list-${index}`,
+          method: "GET",
+          path: `/items/${index}`,
+          origin: "https://example.invalid",
+          summary: `list ${index}`,
+          deprecated: false,
+          parameters: [],
+          requestBody: null,
+          schemaIds: [schemaId],
+          tags: [],
+          advisory: {},
+        }),
+        String(index).repeat(64),
+        "api",
+        `list-${index}`,
+        `list ${index}`,
+        `/items/${index}`,
+        "list api items",
+      );
+    }
+  } finally {
+    database.close();
+  }
+  const store = new SqliteCatalogStore(artifact.path);
+  try {
+    const all = [operationId, ...extraIds];
+    const single = new Map();
+    for (const id of all)
+      single.set(id, await store.getOperation(catalogId, releaseA, id));
+    const expected = [...all].sort().map((id) => single.get(id));
+    // Out of order, duplicated, and with an absent ID, in one request.
+    const missing = "operation:api:missing" as TypedOperationId;
+    expect(
+      await store.getOperations(catalogId, releaseA, [
+        ...[...all].reverse(),
+        operationId,
+        missing,
+      ]),
+    ).toEqual(expected);
+    // The runtime's default batch is four; chunks across that boundary agree.
+    const chunked = [];
+    for (let offset = 0; offset < all.length; offset += 4)
+      chunked.push(
+        ...(await store.getOperations(
+          catalogId,
+          releaseA,
+          all.slice(offset, offset + 4),
+        )),
+      );
+    expect(chunked.sort((l, r) => (l.id < r.id ? -1 : 1))).toEqual(expected);
+    // Release B only has the original operation.
+    expect(await store.getOperations(catalogId, releaseB, all)).toEqual([
+      await store.getOperation(catalogId, releaseB, operationId),
+    ]);
+  } finally {
+    store.close();
+    rmSync(artifact.directory, { recursive: true, force: true });
+  }
+});
+
 test("v4 on-disk catalog serves manifest, search, operation, and schemas without mutation", async () => {
   const artifact = createV4Catalog();
   const before = readFileSync(artifact.path);

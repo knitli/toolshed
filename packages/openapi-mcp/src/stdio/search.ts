@@ -56,6 +56,15 @@ export function createStdioSearchRuntime(
           throw new OpenApiMcpError("UPSTREAM_ERROR");
         },
       };
+      // Batch only when every source store can; otherwise keep per-row reads.
+      // Every source was just checked, so `?? []` only fails closed as missing.
+      if (ordered.every((entry) => entry.store.getOperations !== undefined))
+        store.getOperations = async (catalog, release, ids) =>
+          (await storeFor(catalog, release).getOperations?.(
+            catalog,
+            release,
+            ids,
+          )) ?? [];
       return createRuntimeWithCandidateLookup(
         { ...options, limits, store },
         async (query, tryChargeSource) => {

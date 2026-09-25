@@ -209,6 +209,17 @@ export interface CatalogStore {
     releaseId: ReleaseId,
     id: TypedOperationId,
   ): Promise<StoredRecord<OperationRecordV4> | null>;
+  /**
+   * Optional batched operation read used by complete-release verification.
+   * Returns the stored rows for the requested IDs; a missing ID is omitted
+   * (as `getOperation` returns null). Stores without it are read row by row.
+   * It has no response-size bound of its own; callers bound the batch.
+   */
+  getOperations?(
+    catalogId: CatalogId,
+    releaseId: ReleaseId,
+    ids: readonly TypedOperationId[],
+  ): Promise<readonly StoredRecord<OperationRecordV4>[]>;
   getSchemas(
     catalogId: CatalogId,
     releaseId: ReleaseId,
