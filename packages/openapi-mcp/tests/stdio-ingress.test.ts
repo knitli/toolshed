@@ -21,6 +21,7 @@ import { compileRelease } from "../src/release/compile-release.ts";
 import { publishReleaseWithCheckpoint } from "../src/release/publish.ts";
 import {
   type CatalogId,
+  type CatalogStore,
   decodeOperationRef,
   type ReleaseId,
   type RuntimeLimits,
@@ -971,3 +972,69 @@ test("empty candidate-source queries consume the reduced shared store-call budge
   ).toBe(true);
   expect(calls).toBe(16);
 });
+
+function countingSearchEntry(
+  catalogId: string,
+  store: CatalogStore,
+  batched: boolean,
+  counts: { single: number; batched: number },
+) {
+  const wrapped: CatalogStore = {
+    searchCandidates: (query) => store.searchCandidates(query),
+    getManifest: (catalog, release) => store.getManifest(catalog, release),
+    getOperation: (catalog, release, id) => {
+      counts.single++;
+      return store.getOperation(catalog, release, id);
+    },
+    getSchemas: (catalog, release, ids) =>
+      store.getSchemas(catalog, release, ids),
+  };
+  const getOperations = store.getOperations?.bind(store);
+  if (batched && getOperations !== undefined)
+    wrapped.getOperations = (catalog, release, ids) => {
+      counts.batched++;
+      return getOperations(catalog, release, ids);
+    };
+  return {
+    catalogId,
+    releaseId: "release",
+    apiNamespaces: [catalogId],
+    store: wrapped,
+  };
+}
+
+for (const mixed of [false, true]) {
+  test(`stdio search ${mixed ? "falls back to per-row" : "batches"} admission reads when ${mixed ? "a store lacks" : "every store has"} getOperations`, async () => {
+    const f = await fixture();
+    const counts = { single: 0, batched: 0 };
+    const entries = [];
+    for (let index = 0; index < 2; index++) {
+      const release = await f.release(`catalog${index}`, "release", 1);
+      const store = f.store(release.paths.sqlite);
+      expect(typeof store.getOperations).toBe("function");
+      entries.push(
+        countingSearchEntry(
+          `catalog${index}`,
+          store,
+          !(mixed && index === 1),
+          counts,
+        ),
+      );
+    }
+    const search = createStdioSearchRuntime(entries, {
+      trust: f.trust,
+      generations: f.generations,
+    });
+    const result = await search.search({ query: "widgets", limit: 10 });
+    expect(result.operations.length).toBeGreaterThan(0);
+    // Hydration always reads per row; admission reads batch only when all can.
+    const hydrated = result.operations.length;
+    if (mixed) {
+      expect(counts.batched).toBe(0);
+      expect(counts.single).toBeGreaterThan(hydrated);
+    } else {
+      expect(counts.batched).toBeGreaterThan(0);
+      expect(counts.single).toBe(hydrated);
+    }
+  });
+}

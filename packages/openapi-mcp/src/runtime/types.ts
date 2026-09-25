@@ -213,6 +213,7 @@ export interface CatalogStore {
    * Optional batched operation read used by complete-release verification.
    * Returns the stored rows for the requested IDs; a missing ID is omitted
    * (as `getOperation` returns null). Stores without it are read row by row.
+   * It has no response-size bound of its own; callers bound the batch.
    */
   getOperations?(
     catalogId: CatalogId,

@@ -90,10 +90,11 @@ function manifestKey(catalogId: string, releaseId: string): string {
 
 const maximumSearchReleases = 8;
 const maximumInventorySchemaBatch = 128;
-// Operation batches are bounded by the catalog bundle cap (16 MiB), which
-// ingest already holds in memory whole, so one batch response can't exceed
-// memory the admitter already budgets. Schema batches keep the
-// maxSchemaClosureBytes-derived bound because they serve closure resolution.
+// Stores null record_json over maxRecordBytes, so one operation batch carries
+// at most 16 MiB of raw row text; rows are then verified one at a time, so
+// only one record's working copies are live at once. Sized for a Worker
+// isolate. Schema batches keep the maxSchemaClosureBytes-derived bound
+// because they serve closure resolution.
 const OPERATION_BATCH_BYTE_BUDGET = 16 * 1024 * 1024;
 // State churn may require reproof, but one search may spend no more than the
 // same eight-release compatibility envelope used for manifest authentication.
@@ -356,22 +357,24 @@ async function verifyCompleteRelease(
         ids,
       );
       const rows = snapshotRows(result, ids.length);
-      const verified = await Promise.all(
-        rows.map((row) =>
-          verifyStoredRecord(authenticated, row as never, limits),
-        ),
-      );
-      // Duplicate or unrequested rows fail closed; absent rows are missing.
+      // Duplicate or unrequested rows are integrity failures, like an identity
+      // mismatch on the per-row path; absent rows are missing. Verify one row
+      // at a time: batching saves round-trips, not hashing.
       const requested = new Set<string>(ids);
       const returned = new Map<string, OperationRecordV4>();
-      for (const record of verified) {
+      for (const row of rows) {
+        const record = await verifyStoredRecord(
+          authenticated,
+          row as StoredRecord<OperationRecordV4>,
+          limits,
+        );
         if (!requested.has(record.id) || returned.has(record.id)) {
           throw new OpenApiMcpError(
-            "RECORD_NOT_ADMITTED",
+            "RECORD_DIGEST_MISMATCH",
             "Release inventory operation rows are ambiguous",
           );
         }
-        returned.set(record.id, record as OperationRecordV4);
+        returned.set(record.id, record);
       }
       for (const id of ids) {
         const operation = returned.get(id);

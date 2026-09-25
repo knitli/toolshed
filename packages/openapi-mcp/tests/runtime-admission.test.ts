@@ -476,7 +476,7 @@ describe("batched admission fails closed", () => {
           ? [...found.slice(0, 1), ...found.slice(0, 1), ...found.slice(2)]
           : found;
       },
-      code: "RECORD_NOT_ADMITTED",
+      code: "RECORD_DIGEST_MISMATCH",
       message: "Release inventory operation rows are ambiguous",
     },
     unrequested: {
@@ -487,7 +487,7 @@ describe("batched admission fails closed", () => {
         ids.includes("operation:tiny:op-0016")
           ? rows.slice(0, 1)
           : rows.filter((row) => ids.includes(row.id)),
-      code: "RECORD_NOT_ADMITTED",
+      code: "RECORD_DIGEST_MISMATCH",
       message: "Release inventory operation rows are ambiguous",
     },
     tampered: {
