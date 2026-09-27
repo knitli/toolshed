@@ -1,0 +1,5 @@
+---
+exclude_paths:
+  - "scripts/**"
+  - "packages/*/scripts/**"
+  - "packages/openapi-mcp/fixtures/**"

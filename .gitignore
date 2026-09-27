@@ -5,4 +5,8 @@ packages/*/dist/
 *.headroom*
 *.local.*
 .wrangler/
+.worktrees/
+.claude/worktrees/
+__pycache__/
+.venv/
 
