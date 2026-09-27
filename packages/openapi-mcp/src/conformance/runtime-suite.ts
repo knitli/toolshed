@@ -272,6 +272,23 @@ export function runRuntimeConformanceSuite(
     },
   );
   useFault(
+    "catalog rejects duplicate batched operation transport rows",
+    { fault: "duplicate-operation" },
+    async ({ store, fixture }) => {
+      const getOperations = store.getOperations?.bind(store);
+      if (getOperations === undefined) return;
+      await assertPublicError(
+        adapter,
+        () =>
+          getOperations(fixture.catalogId, fixture.releaseA, [
+            fixture.operationId,
+          ]),
+        "RECORD_DIGEST_MISMATCH",
+        CATALOG_STORE_PUBLIC_MESSAGES.operationTransportTooManyRows,
+      );
+    },
+  );
+  useFault(
     "catalog rejects duplicate schema transport rows",
     { fault: "duplicate-schemas" },
     async ({ store, fixture }) => {
@@ -340,6 +357,24 @@ export function runRuntimeConformanceSuite(
     },
   );
   useFault(
+    "catalog redacts batched operation driver failures",
+    { fault: "driver-operation", injectedDriverError },
+    async ({ store, fixture }) => {
+      const getOperations = store.getOperations?.bind(store);
+      if (getOperations === undefined) return;
+      await assertPublicError(
+        adapter,
+        () =>
+          getOperations(fixture.catalogId, fixture.releaseA, [
+            fixture.operationId,
+          ]),
+        "RECORD_DIGEST_MISMATCH",
+        CATALOG_STORE_PUBLIC_MESSAGES.recordTransportUnavailable,
+        injectedDriverError,
+      );
+    },
+  );
+  useFault(
     "catalog redacts schema driver failures",
     { fault: "driver-schemas", injectedDriverError },
     async ({ store, fixture }) => {
@@ -392,6 +427,54 @@ export function runRuntimeConformanceSuite(
           fixture.missingOperationId,
         ),
         null,
+      );
+    },
+  );
+
+  use(
+    "catalog batched operations match single reads and omit absent IDs",
+    async ({ store, fixture }) => {
+      const getOperations = store.getOperations?.bind(store);
+      if (getOperations === undefined) return;
+      adapter.deepEqual(
+        await getOperations(fixture.catalogId, fixture.releaseA, [
+          fixture.missingOperationId,
+          fixture.operationId,
+          fixture.operationId,
+        ]),
+        [fixture.operationA],
+      );
+      adapter.deepEqual(
+        await getOperations(fixture.catalogId, fixture.releaseB, [
+          fixture.operationId,
+        ]),
+        [fixture.operationB],
+      );
+      adapter.deepEqual(
+        await getOperations(fixture.catalogId, "missing-release" as never, [
+          fixture.operationId,
+        ]),
+        [],
+      );
+      adapter.deepEqual(
+        await getOperations(fixture.catalogId, fixture.releaseA, []),
+        [],
+      );
+      await assertPublicError(
+        adapter,
+        () =>
+          getOperations(fixture.catalogId, fixture.releaseA, [
+            "schema:conformance:not-an-operation" as TypedOperationId,
+          ]),
+        "INPUT_INVALID",
+        CATALOG_STORE_PUBLIC_MESSAGES.operationIdentityInvalid,
+      );
+      const sparse = new Array(1) as TypedOperationId[];
+      await assertPublicError(
+        adapter,
+        () => getOperations(fixture.catalogId, fixture.releaseA, sparse),
+        "INPUT_INVALID",
+        CATALOG_STORE_PUBLIC_MESSAGES.operationRequestInvalid,
       );
     },
   );

@@ -25,6 +25,8 @@ import type {
 const catalog = "conformance" as CatalogId;
 const release = "release-a" as ReleaseId;
 const operationId = "operation:conformance:get-item" as TypedOperationId;
+const secondOperationId =
+  "operation:conformance:list-items" as TypedOperationId;
 const itemSchema =
   "schema:conformance:#/components/schemas/Item" as TypedSchemaId;
 const userSchema =
@@ -76,6 +78,24 @@ JOIN release_metadata AS r
 WHERE o.catalog_id = ? AND o.release_id = ? AND o.record_id = ?
   AND r.format IN (4, 5) AND r.contract = 1
 LIMIT 2;`,
+  operations: `WITH requested(record_id) AS (
+  SELECT DISTINCT value FROM json_each(?) WHERE typeof(value) = 'text'
+)
+SELECT
+       CASE WHEN typeof(o.record_id) = 'text' AND length(CAST(o.record_id AS BLOB)) <= ? THEN o.record_id ELSE NULL END AS record_id,
+       length(CAST(o.record_id AS BLOB)) AS record_id_bytes,
+       CASE WHEN typeof(o.logical_digest) = 'text' AND length(CAST(o.logical_digest AS BLOB)) <= ? THEN o.logical_digest ELSE NULL END AS logical_digest,
+       length(CAST(o.logical_digest AS BLOB)) AS logical_digest_bytes,
+       CASE WHEN typeof(o.record_json) = 'text' AND length(CAST(o.record_json AS BLOB)) <= ? THEN o.record_json ELSE NULL END AS record_json,
+       length(CAST(o.record_json AS BLOB)) AS record_json_bytes
+FROM requested
+JOIN operations AS o ON o.record_id = requested.record_id
+JOIN release_metadata AS r
+  ON r.catalog_id = o.catalog_id AND r.release_id = o.release_id
+WHERE o.catalog_id = ? AND o.release_id = ?
+  AND r.format IN (4, 5) AND r.contract = 1
+ORDER BY o.record_id COLLATE BINARY
+LIMIT ?;`,
   schemas: `WITH requested(record_id) AS (
   SELECT DISTINCT value FROM json_each(?) WHERE typeof(value) = 'text'
 )
@@ -266,8 +286,10 @@ function conformanceD1Factory(
     d1.enqueueResult(SQL.search, candidateDriverFailure);
   if (manifestDriverFailure !== undefined)
     d1.enqueueResult(SQL.manifest, manifestDriverFailure);
-  if (operationDriverFailure !== undefined)
+  if (operationDriverFailure !== undefined) {
     d1.enqueueResult(SQL.operation, operationDriverFailure);
+    d1.enqueueResult(SQL.operations, operationDriverFailure);
+  }
   if (schemasDriverFailure !== undefined)
     d1.enqueueResult(SQL.schemas, schemasDriverFailure);
   d1.handle(
@@ -417,6 +439,39 @@ function conformanceD1Factory(
     },
   );
   d1.handle(
+    SQL.operations,
+    ([
+      rawIds,
+      _idLimit,
+      _digestLimit,
+      _recordLimit,
+      boundCatalog,
+      boundRelease,
+      transportLimit,
+    ]) => {
+      if (typeof rawIds !== "string" || boundCatalog !== fixture.catalogId)
+        return { success: true, results: [] };
+      const row =
+        boundRelease === fixture.releaseA
+          ? fixture.operationA
+          : boundRelease === fixture.releaseB
+            ? fixture.operationB
+            : undefined;
+      if (
+        row === undefined ||
+        !(JSON.parse(rawIds) as string[]).includes(row.id)
+      )
+        return { success: true, results: [] };
+      return {
+        success: true,
+        results: Array.from(
+          { length: scenario?.fault === "duplicate-operation" ? 2 : 1 },
+          () => storedTransport(row),
+        ).slice(0, Number(transportLimit)),
+      };
+    },
+  );
+  d1.handle(
     SQL.schemas,
     ([
       rawIds,
@@ -527,7 +582,7 @@ async function expectPublicError(
 }
 
 describe("structural D1 CatalogStore", () => {
-  test("uses exactly the four fixed statements and binds every caller value", async () => {
+  test("uses exactly the five fixed statements and binds every caller value", async () => {
     const d1 = new StrictD1();
     const store = createD1CatalogStore(d1);
     const maliciousFts = `widget' OR 1=1; DROP TABLE operations; --`;
@@ -535,6 +590,7 @@ describe("structural D1 CatalogStore", () => {
     d1.enqueue(SQL.search, [searchRow()]);
     d1.enqueue(SQL.operation, [recordRow(operationId, operationRecord())]);
     d1.enqueue(SQL.schemas, [schemaRow(itemSchema)]);
+    d1.enqueue(SQL.operations, [recordRow(operationId, operationRecord())]);
 
     await store.getManifest(catalog, release);
     await store.searchCandidates({
@@ -544,6 +600,11 @@ describe("structural D1 CatalogStore", () => {
     });
     await store.getOperation(catalog, release, operationId);
     await store.getSchemas(catalog, release, [itemSchema]);
+    await store.getOperations(catalog, release, [
+      secondOperationId,
+      operationId,
+      secondOperationId,
+    ]);
 
     expect(d1.calls).toEqual([
       {
@@ -586,11 +647,80 @@ describe("structural D1 CatalogStore", () => {
         allCalls: 1,
         firstCalls: 0,
       },
+      {
+        sql: SQL.operations,
+        bindings: [
+          JSON.stringify([operationId, secondOperationId]),
+          651,
+          64,
+          1024 * 1024,
+          catalog,
+          release,
+          3,
+        ],
+        allCalls: 1,
+        firstCalls: 0,
+      },
     ]);
     expect(new Set(d1.calls.map(({ sql }) => sql))).toEqual(
       new Set(Object.values(SQL)),
     );
     expect(d1.calls.every(({ sql }) => !sql.includes(maliciousFts))).toBe(true);
+  });
+
+  test("batched operation reads decode like single reads and reject unrequested, disordered, or excess rows", async () => {
+    const first = recordRow(operationId, operationRecord());
+    const second = recordRow(
+      secondOperationId,
+      operationRecord(secondOperationId),
+    );
+    const ok = new StrictD1();
+    ok.enqueue(SQL.operations, [first, second]);
+    ok.enqueue(SQL.operation, [first]);
+    ok.enqueue(SQL.operation, [second]);
+    const store = createD1CatalogStore(ok);
+    expect(
+      await store.getOperations(catalog, release, [
+        secondOperationId,
+        operationId,
+      ]),
+    ).toEqual([
+      await store.getOperation(catalog, release, operationId),
+      await store.getOperation(catalog, release, secondOperationId),
+    ] as never);
+    const absent = new StrictD1();
+    absent.enqueue(SQL.operations, [second]);
+    expect(
+      await createD1CatalogStore(absent).getOperations(catalog, release, [
+        operationId,
+        secondOperationId,
+      ]),
+    ).toMatchObject([{ id: secondOperationId }]);
+
+    const unrequestedId = "operation:conformance:other" as TypedOperationId;
+    for (const [rows, message] of [
+      [
+        [recordRow(unrequestedId, operationRecord(unrequestedId))],
+        CATALOG_STORE_PUBLIC_MESSAGES.operationRowsInvalid,
+      ],
+      [[second, first], CATALOG_STORE_PUBLIC_MESSAGES.operationRowsInvalid],
+      [[first, first], CATALOG_STORE_PUBLIC_MESSAGES.operationRowsInvalid],
+      [
+        [first, second, first],
+        CATALOG_STORE_PUBLIC_MESSAGES.operationTransportTooManyRows,
+      ],
+    ] as const) {
+      const d1 = new StrictD1();
+      d1.enqueue(SQL.operations, rows);
+      const error = await capturedError(() =>
+        createD1CatalogStore(d1).getOperations(catalog, release, [
+          operationId,
+          secondOperationId,
+        ]),
+      );
+      expect(error.code).toBe("RECORD_DIGEST_MISMATCH");
+      expect(error.message).toBe(message);
+    }
   });
 
   test("validates caller identities before touching D1, including empty schema reads", async () => {

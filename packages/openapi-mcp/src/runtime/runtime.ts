@@ -90,6 +90,12 @@ function manifestKey(catalogId: string, releaseId: string): string {
 
 const maximumSearchReleases = 8;
 const maximumInventorySchemaBatch = 128;
+// Stores null record_json over maxRecordBytes, so one operation batch carries
+// at most 16 MiB of raw row text; rows are then verified one at a time, so
+// only one record's working copies are live at once. Sized for a Worker
+// isolate. Schema batches keep the maxSchemaClosureBytes-derived bound
+// because they serve closure resolution.
+const OPERATION_BATCH_BYTE_BUDGET = 16 * 1024 * 1024;
 // State churn may require reproof, but one search may spend no more than the
 // same eight-release compatibility envelope used for manifest authentication.
 const maximumCompleteReleaseProofs = maximumSearchReleases;
@@ -261,21 +267,54 @@ async function verifyCompleteRelease(
     }
     return bytes;
   };
-  const operationRoots: TypedSchemaId[][] = [];
-  for (const id of operationIds) {
-    chargeCompleteVerification(searchBudget, { work: 1, storeCalls: 1 });
-    const row = await store.getOperation(
-      authenticated.manifest.catalogId,
-      authenticated.manifest.releaseId,
-      id,
+  // Each response is bounded by its batch size times maxRecordBytes, and each
+  // request by the store's ID byte limit; one fixed JSON parameter keeps D1
+  // bindings flat.
+  const batchSizeFor = (byteBudget: number) =>
+    Math.max(
+      1,
+      Math.min(
+        maximumInventorySchemaBatch,
+        Math.floor(byteBudget / limits.maxRecordBytes),
+      ),
     );
-    if (row === null) {
+  const operationBatchSize = batchSizeFor(OPERATION_BATCH_BYTE_BUDGET);
+  const schemaBatchSize = batchSizeFor(limits.maxSchemaClosureBytes);
+  const nextBatch = <Id extends string>(
+    ids: readonly Id[],
+    start: number,
+    kind: "operation" | "schema",
+  ): Id[] => {
+    const batchSize =
+      kind === "operation" ? operationBatchSize : schemaBatchSize;
+    const batch: Id[] = [];
+    let requestBytes = 0;
+    for (let index = start; index < ids.length; index += 1) {
+      if (batch.length >= batchSize) break;
+      const idBytes = encoder.encode(ids[index]).byteLength;
+      if (
+        idBytes > limits.maxSchemaClosureBytes ||
+        (batch.length > 0 &&
+          requestBytes + idBytes > limits.maxSchemaClosureBytes)
+      )
+        break;
+      batch.push(ids[index]);
+      requestBytes += idBytes;
+    }
+    if (batch.length === 0) {
       throw new OpenApiMcpError(
         "RECORD_NOT_ADMITTED",
-        "Release inventory operation is missing",
+        `Release inventory ${kind} request exceeds its byte limit`,
       );
     }
-    const operation = await verifyStoredRecord(authenticated, row, limits);
+    return batch;
+  };
+
+  const operationRoots: TypedSchemaId[][] = [];
+  const admitOperation = (
+    id: TypedOperationId,
+    operation: OperationRecordV4,
+  ) => {
     if (!operation.id.startsWith("operation:") || operation.id !== id) {
       throw new OpenApiMcpError(
         "RECORD_DIGEST_MISMATCH",
@@ -286,42 +325,73 @@ async function verifyCompleteRelease(
     operationRoots.push(
       [...new Set(operation.schemaIds)].sort() as TypedSchemaId[],
     );
+  };
+  const missingOperation = () =>
+    new OpenApiMcpError(
+      "RECORD_NOT_ADMITTED",
+      "Release inventory operation is missing",
+    );
+  if (store.getOperations === undefined) {
+    for (const id of operationIds) {
+      chargeCompleteVerification(searchBudget, { work: 1, storeCalls: 1 });
+      const row = await store.getOperation(
+        authenticated.manifest.catalogId,
+        authenticated.manifest.releaseId,
+        id,
+      );
+      if (row === null) throw missingOperation();
+      admitOperation(id, await verifyStoredRecord(authenticated, row, limits));
+    }
+  } else {
+    let operationOffset = 0;
+    while (operationOffset < operationIds.length) {
+      const ids = nextBatch(operationIds, operationOffset, "operation");
+      operationOffset += ids.length;
+      chargeCompleteVerification(searchBudget, {
+        work: ids.length,
+        storeCalls: 1,
+      });
+      const result = await store.getOperations(
+        authenticated.manifest.catalogId,
+        authenticated.manifest.releaseId,
+        ids,
+      );
+      const rows = snapshotRows(result, ids.length);
+      // Duplicate or unrequested rows are integrity failures, like an identity
+      // mismatch on the per-row path; absent rows are missing. Verify one row
+      // at a time: batching saves round-trips, not hashing.
+      const requested = new Set<string>(ids);
+      const returned = new Map<string, OperationRecordV4>();
+      for (const row of rows) {
+        const record = await verifyStoredRecord(
+          authenticated,
+          row as StoredRecord<OperationRecordV4>,
+          limits,
+        );
+        if (!requested.has(record.id) || returned.has(record.id)) {
+          throw new OpenApiMcpError(
+            "RECORD_DIGEST_MISMATCH",
+            "Release inventory operation rows are ambiguous",
+          );
+        }
+        returned.set(record.id, record);
+      }
+      for (const id of ids) {
+        const operation = returned.get(id);
+        if (operation === undefined) throw missingOperation();
+        admitOperation(id, operation);
+      }
+    }
   }
 
-  const schemaBatchSize = Math.max(
-    1,
-    Math.min(
-      maximumInventorySchemaBatch,
-      Math.floor(limits.maxSchemaClosureBytes / limits.maxRecordBytes),
-    ),
-  );
   const schemas = new Map<
     TypedSchemaId,
     { readonly record: SchemaRecordV4; readonly bytes: number }
   >();
   let offset = 0;
   while (offset < schemaIds.length) {
-    const ids: TypedSchemaId[] = [];
-    let requestBytes = 0;
-    while (offset < schemaIds.length && ids.length < schemaBatchSize) {
-      const id = schemaIds[offset];
-      const idBytes = encoder.encode(id).byteLength;
-      if (
-        idBytes > limits.maxSchemaClosureBytes ||
-        (ids.length > 0 &&
-          requestBytes + idBytes > limits.maxSchemaClosureBytes)
-      )
-        break;
-      ids.push(id);
-      requestBytes += idBytes;
-      offset += 1;
-    }
-    if (ids.length === 0) {
-      throw new OpenApiMcpError(
-        "RECORD_NOT_ADMITTED",
-        "Release inventory schema request exceeds its byte limit",
-      );
-    }
+    const ids = nextBatch(schemaIds, offset, "schema");
+    offset += ids.length;
     chargeCompleteVerification(searchBudget, {
       work: ids.length,
       storeCalls: 1,

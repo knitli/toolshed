@@ -340,7 +340,7 @@ function bridge(database: SqliteDatabase): D1CatalogDatabase {
 export class SqliteCatalogStore implements CatalogStore {
   readonly legacyInventoryOnly: boolean;
   #database: SqliteDatabase | undefined;
-  #v4: CatalogStore | undefined;
+  #v4: Required<CatalogStore> | undefined;
   #legacyIdentity: LegacyV3CatalogIdentity | undefined;
   #limits: RuntimeLimits;
   #path: string;
@@ -382,7 +382,7 @@ export class SqliteCatalogStore implements CatalogStore {
     if (this.#database !== undefined) closeDatabase(this.#database);
     this.#database = undefined;
   }
-  #v4Store(): CatalogStore {
+  #v4Store(): Required<CatalogStore> {
     if (!this.#database) throw unsupported("Catalog store is closed");
     if (!this.#v4) throw unsupported("v3 artifacts are inventory-only");
     return this.#v4;
@@ -462,6 +462,13 @@ export class SqliteCatalogStore implements CatalogStore {
     id: TypedOperationId,
   ): Promise<StoredRecord<OperationRecordV4> | null> {
     return await this.#v4Store().getOperation(catalog, release, id);
+  }
+  async getOperations(
+    catalog: CatalogId,
+    release: ReleaseId,
+    ids: readonly TypedOperationId[],
+  ): Promise<readonly StoredRecord<OperationRecordV4>[]> {
+    return await this.#v4Store().getOperations(catalog, release, ids);
   }
   async getSchemas(
     catalog: CatalogId,

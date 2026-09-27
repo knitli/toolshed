@@ -1,3 +1,23 @@
+# [1.4.0](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.3.1...@knitli/openapi-mcp-v1.4.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **openapi-mcp:** tighten batched operation verification ([5bdf237](https://github.com/knitli/toolshed/commit/5bdf237fe1710b8bccfdbdb8a2321870730fc8ce))
+
+
+### Features
+
+* **openapi-mcp:** batch operation reads during complete-release verification ([37c55a5](https://github.com/knitli/toolshed/commit/37c55a569b6f1e1ab0b3a705b36307198863e83b))
+* **openapi-mcp:** bound operation batches by the catalog bundle cap ([eab33dd](https://github.com/knitli/toolshed/commit/eab33dd43f7e05b3a1b03b1af7f89c9e2210c5ef))
+
+## [1.3.1](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.3.0...@knitli/openapi-mcp-v1.3.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* **openapi-mcp:** ignore OpenAPI specification extensions on schemas ([73a2a36](https://github.com/knitli/toolshed/commit/73a2a36daf150f812b87b7b6c9e584c3906c62b7))
+
 # [1.3.0](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.2.1...@knitli/openapi-mcp-v1.3.0) (2026-09-13)
 
 
