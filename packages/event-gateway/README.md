@@ -22,7 +22,7 @@ control daemon supports status and detach only. Installation does not start it.
 
 ## Install and run
 
-Requires macOS or Linux and Python 3.13+. Development and CI pin Python 3.13.14
+Requires Apple Silicon macOS or Linux and Python 3.13+. Development and CI pin Python 3.13.14
 and uv 0.12.15. Use the committed lock:
 
 ```sh

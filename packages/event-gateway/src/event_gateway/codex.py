@@ -12,6 +12,7 @@ from websockets.exceptions import WebSocketException
 
 class CodexError(RuntimeError):
     def __init__(self, code):
+        """Expose a safe native-adapter failure code."""
         self.code = code
         super().__init__(code)
 
@@ -48,6 +49,7 @@ class CodexRpc:
     """Only the adapter's native methods; no arbitrary RPC command surface."""
 
     def __init__(self, socket_path):
+        """Bind the RPC transport to an explicit canonical socket."""
         self.socket_path = socket_path
         self.user_agent = None
 
@@ -94,7 +96,7 @@ class CodexRpc:
                 await ws.send(json.dumps({'id': response['id'], 'error': {
                     'code': -32601, 'message': 'Gateway refuses server actions'}}))
                 continue
-            if type(response.get('id')) is int and response['id'] == request_id:
+            if isinstance(response.get('id'), int) and not isinstance(response['id'], bool) and response['id'] == request_id:
                 if 'error' in response:
                     raise CodexError('native_rpc_refused')
                 if not isinstance(response.get('result'), dict):
@@ -105,6 +107,7 @@ class CodexRpc:
 
 class CodexAdapter:
     def __init__(self, mapping, *, test_presence_verifier=None):
+        """Bind native session metadata without granting production presence."""
         self.mapping = dict(mapping)
         self.rpc = CodexRpc(mapping['nativeSocket'])
         self.thread_id = _native_id(mapping['nativeThreadId'])

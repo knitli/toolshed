@@ -1,8 +1,9 @@
-"""Local v1 authentication seam, not an upstream protocol extension.
+r"""
+Local v1 authentication seam, not an upstream protocol extension.
 
 X-Event-Key-Id selects a configured trusted public key. X-Event-Audience must
 match the configured recipient. X-Event-Signature is unpadded base64url Ed25519
-of b'knitli-event-gateway-v1\\0' + audience UTF-8 + b'\\0' + exact HTTP body.
+of b'knitli-event-gateway-v1\0' + audience UTF-8 + b'\0' + exact HTTP body.
 Verify before parsing, persistence, or deduplication. Public keys use unpadded
 base64url raw Ed25519 bytes; private keys never leave their owner-only file.
 """
@@ -19,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 
 class SecurityError(ValueError):
     def __init__(self, code):
+        """Initialize an error containing only its safe reason code."""
         self.code = code
         super().__init__(code)
 
@@ -56,7 +58,13 @@ def load_or_create_signing_key(path):
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, 'rb') as stream:
             info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1 or info.st_size > 4096:
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_nlink != 1
+                or info.st_size > 4096
+            ):
                 raise SecurityError('unsafe_signing_key')
             key = serialization.load_pem_private_key(stream.read(4097), password=None)
             if not isinstance(key, Ed25519PrivateKey):

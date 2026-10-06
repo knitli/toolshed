@@ -1,4 +1,5 @@
 """Private local control daemon. This stage cannot enable automatic dispatch."""
+
 import asyncio
 import json
 import os
@@ -13,8 +14,12 @@ BLOCKERS = ["native_client_binding_unavailable", "cloud_authority_not_integrated
 
 
 def status(store):
-    return {"stage": "foundation", "automaticWakeEnabled": False,
-            "blockers": BLOCKERS, "store": store.status()}
+    return {
+        "stage": "foundation",
+        "automaticWakeEnabled": False,
+        "blockers": BLOCKERS,
+        "store": store.status(),
+    }
 
 
 async def serve(state_dir):
@@ -43,10 +48,12 @@ async def serve(state_dir):
                     request = json.loads(line)
                     if request == {"command": "status"}:
                         result = status(store)
-                    elif (isinstance(request, dict)
-                          and set(request) == {"command", "runtimeId"}
-                          and request["command"] == "detach"
-                          and isinstance(request["runtimeId"], str)):
+                    elif (
+                        isinstance(request, dict)
+                        and set(request) == {"command", "runtimeId"}
+                        and request["command"] == "detach"
+                        and isinstance(request["runtimeId"], str)
+                    ):
                         store.detach(request["runtimeId"])
                         result = {"detached": True}
                     else:
@@ -80,8 +87,11 @@ async def serve(state_dir):
 async def request(state_dir, value):
     path = Path(state_dir) / "control.sock"
     info = path.lstat()
-    if (not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) != 0o600):
+    if (
+        not stat.S_ISSOCK(info.st_mode)
+        or info.st_uid != os.getuid()
+        or stat.S_IMODE(info.st_mode) != 0o600
+    ):
         raise ValueError("unsafe_control_socket")
     async with asyncio.timeout(5):
         reader, writer = await asyncio.open_unix_connection(path, limit=8192)

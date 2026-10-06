@@ -7,13 +7,16 @@ import unittest
 from unittest.mock import patch
 
 from websockets.asyncio.server import unix_serve
+from websockets.exceptions import ConnectionClosed
 
 from event_gateway.codex import CodexAdapter, CodexError, CodexRpc, MAX_MESSAGE
 
 
 class CodexTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir='/private/tmp' if Path('/private/tmp').is_dir() else '/tmp')
+        # mkdtemp creates a private 0700 directory; short paths fit Unix sockets.
+        temporary_root = '/private/tmp' if Path('/private/tmp').is_dir() else '/tmp'  # nosec B108
+        self.temp = tempfile.TemporaryDirectory(dir=temporary_root)
         self.path = str(Path(self.temp.name) / 'native.sock')
         self.requests = []
         self.responses = {}
@@ -21,6 +24,9 @@ class CodexTests(unittest.IsolatedAsyncioTestCase):
         self.malformed = False
         self.server_action = False
         self.action_reply = None
+        self.handler_errors = []
+        self.boolean_response_id = False
+        self.user_agent = 'knitli_event_gateway/0.160.1'
         self.server = await unix_serve(self.handler, self.path, max_size=MAX_MESSAGE, close_timeout=0)
         os.chmod(self.path, 0o600)
 
@@ -28,6 +34,7 @@ class CodexTests(unittest.IsolatedAsyncioTestCase):
         self.server.close()
         await self.server.wait_closed()
         self.temp.cleanup()
+        self.assertEqual(self.handler_errors, [], "unexpected native fixture handler error")
 
     async def handler(self, ws):
         try:
@@ -41,7 +48,7 @@ class CodexTests(unittest.IsolatedAsyncioTestCase):
                     continue
                 await asyncio.sleep(self.delay)
                 if request['method'] == 'initialize':
-                    result = {'userAgent': 'knitli_event_gateway/0.160.1'}
+                    result = {'userAgent': self.user_agent}
                 else:
                     if self.server_action:
                         await ws.send(json.dumps({'id': 77, 'method': 'item/commandExecution/requestApproval', 'params': {}}))
@@ -49,10 +56,14 @@ class CodexTests(unittest.IsolatedAsyncioTestCase):
                 if self.malformed:
                     await ws.send('[]')
                 else:
+                    if self.boolean_response_id:
+                        await ws.send(json.dumps({'id': True, 'error': {'code': -1}}))
                     await ws.send(json.dumps({'id': request['id'], 'result': result}))
-        except Exception:
+        except ConnectionClosed:
             # Fault fixtures intentionally disconnect or time out the peer.
-            pass
+            return
+        except Exception as exc:
+            self.handler_errors.append(exc)
 
     def adapter(self, verifier=None):
         return CodexAdapter({'nativeSocket': self.path, 'nativeThreadId': 'thread-A'},
@@ -71,6 +82,19 @@ class CodexTests(unittest.IsolatedAsyncioTestCase):
                          ['initialize', 'initialized', 'server/diagnostics'])
         self.assertEqual(self.action_reply['error']['code'], -32601)
 
+    async def test_boolean_response_id_is_not_initialize_id(self):
+        self.boolean_response_id = True
+        self.assertEqual(await CodexRpc(self.path).call('server/diagnostics', {}), {})
+
+    async def test_user_agent_admits_only_probed_gateway_versions(self):
+        for version in ('0.160.0', '0.160.1'):
+            self.user_agent = f'knitli_event_gateway/{version} (Mac OS)'
+            self.assertEqual(await CodexRpc(self.path).call('server/diagnostics', {}), {})
+        for agent in ('codex/0.160.1', 'knitli_event_gateway/0.160.10'):
+            self.user_agent = agent
+            with self.assertRaisesRegex(CodexError, 'unsupported_native_version'):
+                await CodexRpc(self.path).call('server/diagnostics', {})
+
     async def test_production_presence_blocks_before_connection(self):
         adapter = self.adapter()
         self.assertEqual(await adapter.check(), 'unavailable')
@@ -80,10 +104,12 @@ class CodexTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_presence_loss_after_read(self):
         calls = 0
+
         async def presence(mapping):
             nonlocal calls
             calls += 1
             return calls == 1
+
         self.responses['thread/read'] = {'thread': {'id': 'thread-A', 'status': {'type': 'idle'}}}
         self.assertEqual(await self.adapter(presence).check(), 'unavailable')
         self.assertEqual(calls, 2)
@@ -149,7 +175,8 @@ class CodexTests(unittest.IsolatedAsyncioTestCase):
             await CodexRpc(self.path).call('server/diagnostics', {})
 
     async def test_socket_permissions_symlink_and_method_rejection(self):
-        os.chmod(self.path, 0o666)
+        # Deliberately insecure negative fixture: production must reject it.
+        os.chmod(self.path, 0o666)  # nosec B103
         with self.assertRaisesRegex(CodexError, 'unsafe_native_socket'):
             await CodexRpc(self.path).call('server/diagnostics', {})
         os.chmod(self.path, 0o600)

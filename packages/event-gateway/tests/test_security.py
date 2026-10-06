@@ -18,10 +18,12 @@ class SecurityTests(unittest.TestCase):
             signature = sign(body, key, 'runtime:one')
             verify(body, signature, public_key_text(key), 'runtime:one')
             other = load_or_create_signing_key(path.parent / 'other.pem')
-            for data, sig, trusted, audience in [(body + b' ', signature, key.public_key(), 'runtime:one'),
+            for data, sig, trusted, audience in [
+                (body + b' ', signature, key.public_key(), 'runtime:one'),
                 (body, signature, key.public_key(), 'runtime:two'),
                 (body, signature, other.public_key(), 'runtime:one'),
-                (body, signature + '=', key.public_key(), 'runtime:one')]:
+                (body, signature + '=', key.public_key(), 'runtime:one'),
+            ]:
                 with self.assertRaisesRegex(SecurityError, '^invalid_signature$'):
                     verify(data, sig, trusted, audience)
 

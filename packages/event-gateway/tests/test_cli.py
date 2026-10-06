@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import signal
 import stat
-import subprocess
+import subprocess  # nosec B404 - exercise our CLI with fixed interpreter, no shell
 import sys
 import tempfile
 import time
@@ -20,7 +20,8 @@ class CliTests(unittest.TestCase):
                         "--state-dir", str(self.state)]
 
     def cli(self, *args, code=0):
-        result = subprocess.run(self.command + list(args), capture_output=True,
+        result = subprocess.run(  # nosec B603 - fixed interpreter and synthetic test arguments
+            self.command + list(args), capture_output=True,
                                 text=True, timeout=10)
         self.assertEqual(result.returncode, code, result.stderr)
         return result.stdout
@@ -56,7 +57,8 @@ class CliTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "Unix control socket")
     def test_daemon_status_and_clean_signal_stop(self):
-        process = subprocess.Popen(self.command + ["run"], stdout=subprocess.PIPE,
+        process = subprocess.Popen(  # nosec B603 - fixed interpreter and literal daemon command
+            self.command + ["run"], stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, text=True)
         try:
             socket = self.state / "control.sock"

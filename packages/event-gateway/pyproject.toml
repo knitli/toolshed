@@ -9,7 +9,7 @@ description = "Local event gateway for governed agent delivery."
 requires-python = ">=3.13"
 license = "MIT OR Apache-2.0"
 dependencies = [
-  "cryptography>=46,<49",
+  "cryptography>=50.0.2,<51",
   "jsonschema>=4.25,<5",
   "websockets>=15,<17",
 ]

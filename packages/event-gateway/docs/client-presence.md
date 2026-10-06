@@ -15,6 +15,11 @@ passed `initialize`, `server/diagnostics`, and `thread/loaded/list` through
 launched child PID; loaded threads were empty. No model turns or active-session
 writes occurred. Both disposable processes were terminated afterward.
 
+The native initialize response product tokens were exactly
+`knitli_event_gateway/0.160.0` and `knitli_event_gateway/0.160.1`, matching the
+name supplied in `initialize.clientInfo`. The version guard checks that observed
+product token, not an assumed `codex/` prefix.
+
 This admits only those versions for **transport testing**, not client delivery.
 The historical spike's native idle/busy queue canary covered 0.160.0; that is not
 proof of the currently running mixed client/daemon combination.

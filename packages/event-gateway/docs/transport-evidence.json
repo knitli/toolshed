@@ -1,9 +1,9 @@
 {
-  "recordedAt": "2026-10-06T00:03:29.801546+00:00",
+  "recordedAt": "2026-10-06T00:14:00.947752+00:00",
   "scope": "isolated native read-only transport; production client presence remains unqualified",
   "python": "3.13.14",
   "websockets": "16.1.1",
-  "lockSha256": "2fc676675eed13b22b010d9a0aa7ebf4f8c9cf171d2066003579606406dc9146",
+  "lockSha256": "c49759ca1954f50cdebda3c44f7910b30f4817bf40ac2a8771d6568f65afbd47",
   "probe": "scripts/probe_codex_transport.py",
   "methods": [
     "initialize",
@@ -15,18 +15,21 @@
       "version": "0.160.0",
       "pidMatches": true,
       "loadedThreads": 0,
-      "modelTurns": 0
+      "modelTurns": 0,
+      "userAgentProduct": "knitli_event_gateway/0.160.0"
     },
     {
       "version": "0.160.1",
       "pidMatches": true,
       "loadedThreads": 0,
-      "modelTurns": 0
+      "modelTurns": 0,
+      "userAgentProduct": "knitli_event_gateway/0.160.1"
     }
   ],
   "cleanup": "Each launched child terminated; only its own canonical socket and temporary Codex home removed. No global daemon stop or active-session writes.",
   "lockedTransportTests": {
-    "count": 10,
+    "count": 12,
     "result": "passed"
-  }
+  },
+  "cryptography": "50.0.2"
 }

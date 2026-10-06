@@ -1,8 +1,10 @@
-"""Delivery state machine. Authority and client-presence seams are fail closed.
+"""
+Delivery state machine. Authority and client-presence seams are fail closed.
 
 This is a local integration interface, not a cloud API frozen by PR1. No
 production authority or qualified Codex presence provider ships in this stage.
 """
+
 import asyncio
 from dataclasses import dataclass
 import time
@@ -14,6 +16,7 @@ from .security import verify
 
 class Refused(ValueError):
     def __init__(self, code):
+        """Expose a bounded refusal code without payload details."""
         self.code = code
         super().__init__(code)
 
@@ -21,6 +24,7 @@ class Refused(ValueError):
 @dataclass(frozen=True)
 class Permit:
     """A freshly authenticated, single-use admission; never cached offline."""
+
     delivery_id: str
     attempt_id: str
     issued_at: float
@@ -28,9 +32,17 @@ class Permit:
     identity: tuple
 
 
-FENCES = ("principal", "agent", "runtimeId", "nodeGeneration",
-          "runtimeGeneration", "attachmentGeneration", "consumerGeneration",
-          "sourceStateVersion", "policyRevision")
+FENCES = (
+    "principal",
+    "agent",
+    "runtimeId",
+    "nodeGeneration",
+    "runtimeGeneration",
+    "attachmentGeneration",
+    "consumerGeneration",
+    "sourceStateVersion",
+    "policyRevision",
+)
 
 
 def identity(envelope):
@@ -38,7 +50,10 @@ def identity(envelope):
 
 
 def valid_native_id(value):
-    return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value) is not None
+    return (
+        isinstance(value, str)
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value) is not None
+    )
 
 
 class UnavailableAuthority:
@@ -50,8 +65,10 @@ class UnavailableAuthority:
 
 
 class Gateway:
-    def __init__(self, store, authority, adapter_factory, *, audience, keys,
-                 clock=time.time):
+    def __init__(
+        self, store, authority, adapter_factory, *, audience, keys, clock=time.time
+    ):
+        """Bind local storage to explicit trusted integration providers."""
         self.store, self.authority = store, authority
         self.adapter_factory, self.clock = adapter_factory, clock
         self.audience, self.keys = audience, dict(keys)
@@ -76,12 +93,14 @@ class Gateway:
 
     def _permit_valid(self, permit, envelope):
         now = self.clock()
-        return (isinstance(permit, Permit)
-                and permit.delivery_id == envelope["deliveryId"]
-                and permit.attempt_id == envelope["attemptId"]
-                and permit.identity == identity(envelope)
-                and permit.issued_at <= now < permit.expires_at
-                and 0 < permit.expires_at - permit.issued_at <= 5)
+        return (
+            isinstance(permit, Permit)
+            and permit.delivery_id == envelope["deliveryId"]
+            and permit.attempt_id == envelope["attemptId"]
+            and permit.identity == identity(envelope)
+            and permit.issued_at <= now < permit.expires_at
+            and 0 < permit.expires_at - permit.issued_at <= 5
+        )
 
     async def dispatch(self, delivery_id):
         envelope = self.store.delivery_envelope(delivery_id)
@@ -105,8 +124,11 @@ class Gateway:
                 return {**row, "reason": "authority_unavailable"}
             # Remote awaits may race detach, transfer, expiration, and client exit.
             current = self.store.get_attachment(runtime)
-            if (current != mapping or not self._permit_valid(permit, envelope)
-                    or await adapter.check() != "available"):
+            if (
+                current != mapping
+                or not self._permit_valid(permit, envelope)
+                or await adapter.check() != "available"
+            ):
                 return {**row, "reason": "admission_fenced"}
             if not self._permit_valid(permit, envelope):
                 return {**row, "reason": "admission_expired"}
@@ -118,15 +140,18 @@ class Gateway:
                 submission_id = result["submission_id"]
                 if not valid_native_id(submission_id):
                     raise Refused("invalid_native_receipt")
-                row = self.store.finish(delivery_id, "submitted",
-                                        submission_id=submission_id)
+                row = self.store.finish(
+                    delivery_id, "submitted", submission_id=submission_id
+                )
             except asyncio.CancelledError:
-                self.store.finish(delivery_id, "ambiguous",
-                                  reason="native_outcome_unknown")
+                self.store.finish(
+                    delivery_id, "ambiguous", reason="native_outcome_unknown"
+                )
                 raise
             except Exception:
-                return self.store.finish(delivery_id, "ambiguous",
-                                         reason="native_outcome_unknown")
+                return self.store.finish(
+                    delivery_id, "ambiguous", reason="native_outcome_unknown"
+                )
             await self._acknowledge(envelope, result)
             return row
 
@@ -155,27 +180,41 @@ class Gateway:
             return {**row, "reason": "client_unavailable"}
         adapter = self.adapter_factory(mapping)
         try:
-            result = await asyncio.wait_for(adapter.reconcile(
-                delivery_id, known_submission_id=receipt.get("submission_id")), 10)
+            result = await asyncio.wait_for(
+                adapter.reconcile(
+                    delivery_id, known_submission_id=receipt.get("submission_id")
+                ),
+                10,
+            )
         except Exception:
             return {**row, "reason": "reconciliation_unknown"}
-        if (result.get("status") in ("submitted", "observed")
-                and not valid_native_id(result.get("submission_id"))):
+        if result.get("status") in ("submitted", "observed") and not valid_native_id(
+            result.get("submission_id")
+        ):
             return {**row, "reason": "invalid_native_receipt"}
-        if (receipt.get("submission_id") is not None
-                and result.get("status") in ("submitted", "observed")
-                and result.get("submission_id") != receipt["submission_id"]):
+        if (
+            receipt.get("submission_id") is not None
+            and result.get("status") in ("submitted", "observed")
+            and result.get("submission_id") != receipt["submission_id"]
+        ):
             return {**row, "reason": "native_receipt_conflict"}
-        if result.get("status") == "observed" and not valid_native_id(result.get("turn_id")):
+        if result.get("status") == "observed" and not valid_native_id(
+            result.get("turn_id")
+        ):
             return {**row, "reason": "invalid_native_receipt"}
         if result.get("status") == "observed":
-            row = self.store.finish(delivery_id, "observed",
-                                    submission_id=result.get("submission_id"),
-                                    turn_id=result["turn_id"])
+            row = self.store.finish(
+                delivery_id,
+                "observed",
+                submission_id=result.get("submission_id"),
+                turn_id=result["turn_id"],
+            )
         elif result.get("status") == "submitted":
             # Queue evidence can recover a lost response's authentic receipt;
             # preserve ambiguity until a native turn is correlated.
-            self.store.finish(delivery_id, row["status"], submission_id=result["submission_id"])
+            self.store.finish(
+                delivery_id, row["status"], submission_id=result["submission_id"]
+            )
         # Known queued evidence settles submitted only; ambiguity stays fenced
         # until consumption is correlated. No absent-history retry.
         if result.get("status") in ("submitted", "observed"):

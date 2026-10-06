@@ -1,4 +1,5 @@
 """Local lifecycle commands; unproven attachment is a visible refusal."""
+
 import argparse
 import asyncio
 import json
@@ -7,15 +8,22 @@ import re
 import sys
 
 from .daemon import request, serve, status
-from .security import (ensure_private_directory, load_or_create_signing_key,
-                       public_key_text, SecurityError)
+from .security import (
+    ensure_private_directory,
+    load_or_create_signing_key,
+    public_key_text,
+    SecurityError,
+)
 from .store import Store, StoreError
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="knitli-event-gateway")
-    parser.add_argument("--state-dir", type=Path,
-                        default=Path.home() / ".local/state/knitli-event-gateway")
+    parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=Path.home() / ".local/state/knitli-event-gateway",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
     commands.add_parser("run", help="Run the private control daemon")
@@ -36,18 +44,27 @@ def main(argv=None):
             asyncio.run(serve(state_dir))
             return 0
         if args.command == "attach":
-            print(json.dumps({"attached": False,
-                              "reason": "native_client_binding_unavailable"}))
+            print(
+                json.dumps(
+                    {"attached": False, "reason": "native_client_binding_unavailable"}
+                )
+            )
             return 2
         if args.command == "enroll":
             if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", args.challenge):
                 parser.error("invalid_challenge")
             ensure_private_directory(state_dir)
             key = load_or_create_signing_key(state_dir / "node-key.pem")
-            print(json.dumps({"status": "owner_enrollment_pending",
-                              "publicKey": public_key_text(key),
-                              "challenge": args.challenge,
-                              "reason": "cloud_enrollment_not_integrated"}))
+            print(
+                json.dumps(
+                    {
+                        "status": "owner_enrollment_pending",
+                        "publicKey": public_key_text(key),
+                        "challenge": args.challenge,
+                        "reason": "cloud_enrollment_not_integrated",
+                    }
+                )
+            )
             return 2
         value = {"command": args.command}
         if args.command == "detach":

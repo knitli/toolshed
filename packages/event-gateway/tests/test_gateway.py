@@ -36,6 +36,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.ack_calls = 0
         self.after_admit = None
         self.after_check = None
+        self.custom_submit = None
         self.receipt = {'status': 'unknown'}
         self.gateway = Gateway(self.store, self, lambda mapping: self,
                                audience='test-gateway', keys={'test': self.key.public_key()},
@@ -64,6 +65,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def submit(self, envelope):
         self.assertEqual(self.store.delivery(envelope['deliveryId'])['status'], 'submitting')
         self.native_calls += 1
+        if self.custom_submit:
+            return await self.custom_submit(envelope)
         if self.drop_response:
             raise TimeoutError()
         return {'submission_id': 'submission-1'}
@@ -155,11 +158,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         entered = asyncio.Event()
 
         async def pending_submit(envelope):
-            self.native_calls += 1
             entered.set()
             await asyncio.Event().wait()
 
-        self.submit = pending_submit
+        self.custom_submit = pending_submit
         task = asyncio.create_task(self.gateway.dispatch(ident))
         await asyncio.wait_for(entered.wait(), 1)
         task.cancel()

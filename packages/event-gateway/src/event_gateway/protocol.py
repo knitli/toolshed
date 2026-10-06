@@ -17,6 +17,7 @@ FRESHNESS_LIFETIME_MS = 60_000
 
 class ProtocolError(ValueError):
     def __init__(self, code):
+        """Initialize an error containing only its safe reason code."""
         self.code = code
         super().__init__(code)
 
@@ -152,7 +153,10 @@ def matches_delivery_id(envelope):
 def acknowledgment_matches_delivery(envelope, acknowledgment):
     keys = ('eventId', 'deliveryId', 'attemptId', 'principal', 'agent', 'runtimeId',
             'nodeGeneration', 'runtimeGeneration', 'attachmentGeneration', 'consumerGeneration')
-    return all(acknowledgment.get(key) == envelope.get(key) for key in keys) and acknowledgment.get('deliveredSourceStateVersion') == envelope.get('sourceStateVersion')
+    return (
+        all(acknowledgment.get(key) == envelope.get(key) for key in keys)
+        and acknowledgment.get('deliveredSourceStateVersion') == envelope.get('sourceStateVersion')
+    )
 
 
 def acknowledgment_advances_current_watermark(envelope, acknowledgment, current_source_state_version):

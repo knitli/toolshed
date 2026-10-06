@@ -39,6 +39,7 @@ async def probe(binary):
             if diagnostics['process']['id'] != process.pid or loaded['data'] != []:
                 raise RuntimeError('isolated native identity or empty-thread check failed')
             return {'version': rpc.user_agent.split('/', 1)[1].split(' ', 1)[0],
+                    'userAgentProduct': rpc.user_agent.split(' ', 1)[0],
                     'pidMatches': True, 'loadedThreads': 0, 'modelTurns': 0}
         finally:
             process.terminate()
