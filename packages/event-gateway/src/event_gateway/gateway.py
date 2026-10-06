@@ -1,9 +1,7 @@
-"""
-Delivery state machine. Authority and client-presence seams are fail closed.
+"""Delivery state machine with fail-closed authority and presence seams."""
 
-This is a local integration interface, not a cloud API frozen by PR1. No
-production authority or qualified Codex presence provider ships in this stage.
-"""
+# This is a local integration interface, not a cloud API frozen by PR1. No
+# production authority or qualified Codex presence provider ships in this stage.
 
 import asyncio
 from dataclasses import dataclass

@@ -41,6 +41,12 @@ Scratch copies or in-memory module mutations left production source intact:
 | Lose observed ACK recovery | Real implementation initially drops the row from recovery; regression red, durable ACK fix green |
 | Cancel native RPC without quarantine | Real implementation initially retains `submitting`; regression red, cancellation fix green |
 | Drop durable ACK marking/fence/capacity | Three narrow store mutations fail; restored green |
+| Remove boolean RPC-ID exclusion or native-version guard | Each focused transport test fails; unchanged source passes all 12 |
+
+Final local suite: 44 Python tests pass. Review upgraded cryptography to 50.0.2;
+the installed signature/consumer checks and both native read-only probes were
+repeated with that lock. Module summaries use one line to satisfy the conflicting
+multiline documentation rules, retaining the explanations in comments.
 
 Exact disposable native, locked dependency evidence is in
 [transport-evidence.json](transport-evidence.json), reproducible with

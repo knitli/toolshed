@@ -22,7 +22,7 @@ class CliTests(unittest.TestCase):
     def cli(self, *args, code=0):
         result = subprocess.run(  # nosec B603 - fixed interpreter and synthetic test arguments
             self.command + list(args), capture_output=True,
-                                text=True, timeout=10)
+            text=True, timeout=10)
         self.assertEqual(result.returncode, code, result.stderr)
         return result.stdout
 
@@ -59,7 +59,7 @@ class CliTests(unittest.TestCase):
     def test_daemon_status_and_clean_signal_stop(self):
         process = subprocess.Popen(  # nosec B603 - fixed interpreter and literal daemon command
             self.command + ["run"], stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, text=True)
+            stderr=subprocess.PIPE, text=True)
         try:
             socket = self.state / "control.sock"
             deadline = time.monotonic() + 5

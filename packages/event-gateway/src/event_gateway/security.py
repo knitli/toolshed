@@ -1,12 +1,11 @@
-r"""
-Local v1 authentication seam, not an upstream protocol extension.
+"""Proposed local v1 authentication, not an upstream protocol extension."""
 
-X-Event-Key-Id selects a configured trusted public key. X-Event-Audience must
-match the configured recipient. X-Event-Signature is unpadded base64url Ed25519
-of b'knitli-event-gateway-v1\0' + audience UTF-8 + b'\0' + exact HTTP body.
-Verify before parsing, persistence, or deduplication. Public keys use unpadded
-base64url raw Ed25519 bytes; private keys never leave their owner-only file.
-"""
+# X-Event-Key-Id selects a configured trusted public key. X-Event-Audience must
+# match the configured recipient. X-Event-Signature is unpadded base64url Ed25519.
+# Signed bytes: ASCII knitli-event-gateway-v1, NUL, ASCII audience, NUL, exact body.
+# Verify before parsing, persistence, or deduplication. Public keys use unpadded
+# base64url raw Ed25519 bytes; private keys never leave their owner-only file.
+
 import base64
 import os
 import re
