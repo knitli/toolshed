@@ -1,0 +1,98 @@
+Full suite command (event-gateway cwd): ./.venv/bin/python -m unittest discover -s tests
+Local socket binding enabled.
+Ran 73 tests in 1.032s
+OK
+
+Receiver diagnosis, no fix: valid native row maximum250 bytes, first4096-byte read leaves89-byte partial, next4096-byte read =>4185 aggregate. Pre-split >4096 guard rejects valid burst. Live malformed order133 between sequences88 and107 is consistent; this does not prove native writer close cause.
+
+native-witness-red-green.txt
+Production sabotage: replace now - self.seen >= 1.0 with now - self.seen >= 2.0
+cwd: /opt/coder/toolshed/.worktrees/codex-native-selection/packages/event-gateway/tests
+command: /opt/coder/toolshed/.worktrees/codex-native-selection/packages/event-gateway/.venv/bin/python -m unittest test_codex_bridge_spike.CodexBridgeSpikeTests.test_native_witness_fails_closed
+RED exit=1
+F
+======================================================================
+FAIL: test_native_witness_fails_closed (test_codex_bridge_spike.CodexBridgeSpikeTests.test_native_witness_fails_closed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/coder/toolshed/.worktrees/codex-native-selection/packages/event-gateway/tests/test_codex_bridge_spike.py", line 29, in test_native_witness_fails_closed
+    self.assertEqual(witness.status(123, 11.0), (False, 'expired'))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Tuples differ: (True, 'native') != (False, 'expired')
+
+First differing element 0:
+True
+False
+
+- (True, 'native')
++ (False, 'expired')
+
+----------------------------------------------------------------------
+Ran 1 test in 0.023s
+
+FAILED (failures=1)
+RESTORED GREEN exit=0
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.032s
+
+OK
+
+native-emitter-red-green.txt
+Command: packages/event-gateway/.venv/bin/python /private/tmp/native-emitter-check.py
+Production sabotage: replace heartbeat output condition with if True
+RED exit=1
+Traceback (most recent call last):
+  File "/private/tmp/native-emitter-check.py", line 39, in <module>
+    check()
+    ~~~~~^^
+  File "/private/tmp/native-emitter-check.py", line 33, in check
+    assert len(shown) == 3, shown
+           ^^^^^^^^^^^^^^^
+AssertionError: [{'order': 1, 'client': 'client-a', 'cause': 'heartbeat', 'sequence': 1, 'generation': 1, 'sinkEligible': True, 'sinkCause': 'native', 'observedMonotonic': 10}, {'order': 2, 'client': 'client-a', 'cause': 'heartbeat', 'sequence': 2, 'generation': 1, 'sinkEligible': True, 'sinkCause': 'native', 'observedMonotonic': 10.25}, {'order': 3, 'client': 'client-a', 'cause': 'heartbeat', 'sequence': 2, 'generation': 1, 'sinkEligible': False, 'sinkCause': 'expired', 'observedMonotonic': 11}, {'order': 4, 'client': 'client-a', 'cause': 'heartbeat', 'sequence': 2, 'generation': 2, 'sinkEligible': False, 'sinkCause': 'expired', 'observedMonotonic': 11.25}]
+RESTORED GREEN exit=0
+All four rows logged; unchanged heartbeat suppressed; expiry and generation printed; timestamps retained.
+
+FINAL RECEIVER FIX
+Split complete lines before limiting each frame or trailing partial to 4096 bytes. The earlier live run remains historical evidence from the faulty receiver; no new live success claimed.
+
+Command: /opt/coder/toolshed/.worktrees/codex-native-selection/packages/event-gateway/.venv/bin/python -m unittest test_codex_bridge_spike.CodexBridgeSpikeTests.test_native_fifo_limits_individual_frames_not_read_batches
+Production sabotage: restore aggregate >4096 rejection before splitting individual frames.
+RED exit=1
+F
+======================================================================
+FAIL: test_native_fifo_limits_individual_frames_not_read_batches (test_codex_bridge_spike.CodexBridgeSpikeTests.test_native_fifo_limits_individual_frames_not_read_batches)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/coder/toolshed/.worktrees/codex-native-selection/packages/event-gateway/tests/test_codex_bridge_spike.py", line 72, in test_native_fifo_limits_individual_frames_not_read_batches
+    self.assertEqual(received, expected)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [b'{"[4033 chars]', b'', b'{"sequence": 52, "cause": "xxxxxxxxx[7732 chars]x"}'] != [b'{"[4033 chars]', b'{"sequence": 25, "cause": "xxxxxxxxxxxxxx[12101 chars]x"}']
+
+First differing element 25:
+b''
+b'{"sequence": 25, "cause": "xxxxxxxxxxxxxx[112 chars]xx"}'
+
+Second list contains 26 additional elements.
+First extra element 74:
+b'{"sequence": 74, "cause": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}'
+
+Diff is 17898 characters long. Set self.maxDiff to None to see it.
+
+----------------------------------------------------------------------
+Ran 1 test in 0.024s
+
+FAILED (failures=1)
+RESTORED GREEN exit=0
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.021s
+
+OK
+
+Final full suite command (event-gateway cwd): ./.venv/bin/python -m unittest discover -s tests
+Local socket binding enabled.
+Ran 74 tests in 1.048s
+OK
+Ruff for harness and focused tests: All checks passed!
+git diff --check: passed

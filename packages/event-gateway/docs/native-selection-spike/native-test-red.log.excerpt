@@ -1,0 +1,10 @@
+  TRY 1 FAIL [   0.072s] (─────────) codex-tui app::selection_witness::tests::revocation_and_reconnect_never_reuse_selection_generation
+    test app::selection_witness::tests::revocation_and_reconnect_never_reuse_selection_generation ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5591 filtered out; finished in 0.06s
+    revocation must clear eligibility
+  TRY 2 FAIL [   0.041s] (1/1) codex-tui app::selection_witness::tests::revocation_and_reconnect_never_reuse_selection_generation
+    test app::selection_witness::tests::revocation_and_reconnect_never_reuse_selection_generation ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5591 filtered out; finished in 0.03s
+    revocation must clear eligibility
+     Summary [   0.146s] 1 test run: 0 passed, 1 failed, 5619 skipped
+  TRY 2 FAIL [   0.041s] (1/1) codex-tui app::selection_witness::tests::revocation_and_reconnect_never_reuse_selection_generation
