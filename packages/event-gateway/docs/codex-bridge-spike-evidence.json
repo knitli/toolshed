@@ -1,0 +1,579 @@
+{
+  "binaryVersion": "codex-cli 0.160.0",
+  "binarySha256": "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b",
+  "sourceTag": "rust-v0.160.0",
+  "sourceCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "websocketsVersion": "16.1.1",
+  "wireRows": 249,
+  "wireSha256": "c792325037484f2736d2145261f7f57df9e8fa337e8e5a2600848c20675f66dc",
+  "forbiddenTurnOrQueueMessages": 0,
+  "excerpt": [
+    {
+      "order": 65,
+      "connection": 0,
+      "direction": "menu-open",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 66,
+      "connection": 2,
+      "direction": "client",
+      "method": "model/list",
+      "rpcId": "model-list-a97a6fcf-2262-4f5b-863a-d3f64c040036",
+      "threadId": null
+    },
+    {
+      "order": 67,
+      "connection": 2,
+      "direction": "server",
+      "method": null,
+      "rpcId": "model-list-a97a6fcf-2262-4f5b-863a-d3f64c040036",
+      "threadId": null
+    },
+    {
+      "order": 68,
+      "connection": 0,
+      "direction": "menu-cancel",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 69,
+      "connection": 0,
+      "direction": "menu-returned",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 70,
+      "connection": 0,
+      "direction": "picker-open",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 71,
+      "connection": 3,
+      "direction": "open",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 72,
+      "connection": 3,
+      "direction": "client",
+      "method": "initialize",
+      "rpcId": "initialize",
+      "threadId": null
+    },
+    {
+      "order": 73,
+      "connection": 3,
+      "direction": "server",
+      "method": null,
+      "rpcId": "initialize",
+      "threadId": null
+    },
+    {
+      "order": 74,
+      "connection": 3,
+      "direction": "server",
+      "method": "remoteControl/status/changed",
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 75,
+      "connection": 3,
+      "direction": "client",
+      "method": "initialized",
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 76,
+      "connection": 3,
+      "direction": "client",
+      "method": "thread/list",
+      "rpcId": 1,
+      "threadId": null
+    },
+    {
+      "order": 77,
+      "connection": 3,
+      "direction": "server",
+      "method": null,
+      "rpcId": 1,
+      "threadId": null
+    },
+    {
+      "order": 78,
+      "connection": 0,
+      "direction": "picker-cancel",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 79,
+      "connection": 3,
+      "direction": "close",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 80,
+      "connection": 0,
+      "direction": "returned-from-picker",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 81,
+      "connection": 0,
+      "direction": "new-thread",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 82,
+      "connection": 2,
+      "direction": "client",
+      "method": "config/read",
+      "rpcId": "tui-config-read-106f64e4-63d3-4988-ab7b-06653d6ea85a",
+      "threadId": null
+    },
+    {
+      "order": 83,
+      "connection": 2,
+      "direction": "server",
+      "method": null,
+      "rpcId": "tui-config-read-106f64e4-63d3-4988-ab7b-06653d6ea85a",
+      "threadId": null
+    },
+    {
+      "order": 84,
+      "connection": 2,
+      "direction": "client",
+      "method": "thread/start",
+      "rpcId": 6,
+      "threadId": null
+    },
+    {
+      "order": 85,
+      "connection": 1,
+      "direction": "server",
+      "method": "thread/started",
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 86,
+      "connection": 2,
+      "direction": "server",
+      "method": null,
+      "rpcId": 6,
+      "threadId": "01a10f04-8177-7c72-be4b-d1419a10aa76"
+    },
+    {
+      "order": 87,
+      "connection": 2,
+      "direction": "server",
+      "method": "thread/started",
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 88,
+      "connection": 2,
+      "direction": "client",
+      "method": "plugin/list",
+      "rpcId": "plugin-list-d4948c84-26c3-4767-bd59-2444bb8be787",
+      "threadId": null
+    },
+    {
+      "order": 89,
+      "connection": 2,
+      "direction": "client",
+      "method": "skills/list",
+      "rpcId": 7,
+      "threadId": null
+    },
+    {
+      "order": 90,
+      "connection": 2,
+      "direction": "server",
+      "method": null,
+      "rpcId": 7,
+      "threadId": null
+    },
+    {
+      "order": 91,
+      "connection": 2,
+      "direction": "client",
+      "method": "plugin/list",
+      "rpcId": "plugin-list-421d84e7-962f-4206-b17d-3177f191116a",
+      "threadId": null
+    },
+    {
+      "order": 92,
+      "connection": 2,
+      "direction": "server",
+      "method": null,
+      "rpcId": "plugin-list-d4948c84-26c3-4767-bd59-2444bb8be787",
+      "threadId": null
+    },
+    {
+      "order": 93,
+      "connection": 2,
+      "direction": "server",
+      "method": null,
+      "rpcId": "plugin-list-421d84e7-962f-4206-b17d-3177f191116a",
+      "threadId": null
+    },
+    {
+      "order": 94,
+      "connection": 0,
+      "direction": "return-old",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 95,
+      "connection": 2,
+      "direction": "client",
+      "method": "thread/read",
+      "rpcId": 8,
+      "threadId": "01a10f02-accc-7001-a95f-d156f2cccd2b"
+    },
+    {
+      "order": 96,
+      "connection": 2,
+      "direction": "server",
+      "method": null,
+      "rpcId": 8,
+      "threadId": "01a10f02-accc-7001-a95f-d156f2cccd2b"
+    },
+    {
+      "order": 97,
+      "connection": 2,
+      "direction": "client",
+      "method": "config/read",
+      "rpcId": "tui-project-trust-read-ab3f040b-311c-4b06-9516-7149fcc1379a",
+      "threadId": null
+    },
+    {
+      "order": 98,
+      "connection": 2,
+      "direction": "server",
+      "method": null,
+      "rpcId": "tui-project-trust-read-ab3f040b-311c-4b06-9516-7149fcc1379a",
+      "threadId": null
+    },
+    {
+      "order": 99,
+      "connection": 2,
+      "direction": "client",
+      "method": "thread/resume",
+      "rpcId": 9,
+      "threadId": "01a10f02-accc-7001-a95f-d156f2cccd2b"
+    },
+    {
+      "order": 100,
+      "connection": 2,
+      "direction": "server",
+      "method": null,
+      "rpcId": 9,
+      "threadId": null
+    },
+    {
+      "order": 160,
+      "connection": 0,
+      "direction": "normal-exit",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 161,
+      "connection": 2,
+      "direction": "close",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 162,
+      "connection": 0,
+      "direction": "forced-crash",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 163,
+      "connection": 4,
+      "direction": "close",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 164,
+      "connection": 0,
+      "direction": "relaunch",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 165,
+      "connection": 5,
+      "direction": "open",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 166,
+      "connection": 5,
+      "direction": "client",
+      "method": "initialize",
+      "rpcId": "initialize",
+      "threadId": null
+    },
+    {
+      "order": 167,
+      "connection": 5,
+      "direction": "server",
+      "method": null,
+      "rpcId": "initialize",
+      "threadId": null
+    },
+    {
+      "order": 168,
+      "connection": 5,
+      "direction": "server",
+      "method": "remoteControl/status/changed",
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 169,
+      "connection": 5,
+      "direction": "client",
+      "method": "initialized",
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 226,
+      "connection": 0,
+      "direction": "backend-restart",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 227,
+      "connection": 1,
+      "direction": "close",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 228,
+      "connection": 5,
+      "direction": "close",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 229,
+      "connection": 6,
+      "direction": "open",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 230,
+      "connection": 6,
+      "direction": "close",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 231,
+      "connection": 7,
+      "direction": "open",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 232,
+      "connection": 7,
+      "direction": "client",
+      "method": "initialize",
+      "rpcId": "initialize",
+      "threadId": null
+    },
+    {
+      "order": 233,
+      "connection": 7,
+      "direction": "server",
+      "method": null,
+      "rpcId": "initialize",
+      "threadId": null
+    },
+    {
+      "order": 234,
+      "connection": 7,
+      "direction": "server",
+      "method": "remoteControl/status/changed",
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 235,
+      "connection": 7,
+      "direction": "client",
+      "method": "initialized",
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 236,
+      "connection": 7,
+      "direction": "client",
+      "method": "account/read",
+      "rpcId": 1,
+      "threadId": null
+    },
+    {
+      "order": 237,
+      "connection": 7,
+      "direction": "server",
+      "method": null,
+      "rpcId": 1,
+      "threadId": null
+    },
+    {
+      "order": 238,
+      "connection": 7,
+      "direction": "client",
+      "method": "model/list",
+      "rpcId": 2,
+      "threadId": null
+    },
+    {
+      "order": 239,
+      "connection": 7,
+      "direction": "client",
+      "method": "configRequirements/read",
+      "rpcId": 3,
+      "threadId": null
+    },
+    {
+      "order": 240,
+      "connection": 7,
+      "direction": "client",
+      "method": "collaborationMode/list",
+      "rpcId": "collaboration-mode-list-3c8b5c81-65d7-4cff-8589-5358aaf486a7",
+      "threadId": null
+    },
+    {
+      "order": 241,
+      "connection": 7,
+      "direction": "server",
+      "method": null,
+      "rpcId": "collaboration-mode-list-3c8b5c81-65d7-4cff-8589-5358aaf486a7",
+      "threadId": null
+    },
+    {
+      "order": 242,
+      "connection": 7,
+      "direction": "server",
+      "method": null,
+      "rpcId": 2,
+      "threadId": null
+    },
+    {
+      "order": 243,
+      "connection": 7,
+      "direction": "server",
+      "method": null,
+      "rpcId": 3,
+      "threadId": null
+    },
+    {
+      "order": 244,
+      "connection": 7,
+      "direction": "client",
+      "method": "thread/resume",
+      "rpcId": 4,
+      "threadId": "01a10f05-a326-7700-bc7b-fac9173c5cdf"
+    },
+    {
+      "order": 245,
+      "connection": 7,
+      "direction": "server",
+      "method": null,
+      "rpcId": 4,
+      "threadId": null
+    },
+    {
+      "order": 246,
+      "connection": 7,
+      "direction": "client",
+      "method": "plugin/list",
+      "rpcId": "plugin-list-9a9e07db-e623-48de-bd94-b6b37492ffaa",
+      "threadId": null
+    },
+    {
+      "order": 247,
+      "connection": 7,
+      "direction": "server",
+      "method": null,
+      "rpcId": "plugin-list-9a9e07db-e623-48de-bd94-b6b37492ffaa",
+      "threadId": null
+    },
+    {
+      "order": 248,
+      "connection": 0,
+      "direction": "reconnect-observed",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    },
+    {
+      "order": 249,
+      "connection": 7,
+      "direction": "close",
+      "method": null,
+      "rpcId": null,
+      "threadId": null
+    }
+  ],
+  "retainedHarnessSmoke": {
+    "wireRows": 45,
+    "cancelOrder": 43,
+    "returnedOrder": 44,
+    "wireMessagesBetween": 0,
+    "homeAndSocketsRemoved": true
+  }
+}
