@@ -1,0 +1,122 @@
+name: Event Gateway Trusted Contract
+
+# Runs the trusted base workflow. Never check out or execute PR code here.
+# This first activates after the introducing PR has merged into main.
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  verify:
+    name: Verify immutable contract bytes (trusted base)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Mark the exact candidate verification pending
+        shell: bash
+        run: |
+          [[ "$PR_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          gh api --method POST "repos/knitli/toolshed/statuses/$PR_HEAD_SHA" \
+            -f state=pending -f 'context=Event Gateway / trusted contract' \
+            -f description='Checking canonical contract hashes from trusted policy' \
+            -f target_url="$RUN_URL" > /dev/null
+      - name: Compare fixed blobs without checking out the pull request
+        id: verify
+        env:
+          PR_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 -I - <<'PYTHON'
+          import base64
+          import hashlib
+          import json
+          import os
+          import re
+          import urllib.parse
+          import urllib.request
+
+          # Updating this trusted pin requires a separate reviewed base change.
+          PIN = "cd7b288daaccef6c042ad23598668afe2e220925"
+          # Verified against the Git blobs at PIN, not supplied by the candidate.
+          SOURCES = {
+              "src/protocol.schema.json": "544db5860957f4b80f184225fd0703fa384fff67fc24f5fcf316ad86bab1e272",
+              "src/protocol.ts": "f970bbeaeced4a012081fc1c7ab09973cd88d05dc680d22237163b359ada04e1",
+              "src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+              "__tests__/fixtures/protocol-v1.json": "4c2889c69c913f723e6a5005a8582ee5cc9559e3c095b689c23d4aa28104a064",
+          }
+          PREFIX = "apps/os/packages/event-runtime/"
+          SNAPSHOT = "packages/event-gateway/contracts/event-v1/"
+          LIMIT = 2 * 1024 * 1024
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  raise ValueError("redirect refused")
+
+          def read_blob(path, ref, token):
+              url = ("https://api.github.com/repos/knitli/toolshed/contents/"
+                     + path + "?" + urllib.parse.urlencode({"ref": ref}))
+              request = urllib.request.Request(url, headers={
+                  "Authorization": "Bearer " + token,
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              })
+              with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
+                  raw = response.read(LIMIT + 1)
+              if len(raw) > LIMIT:
+                  raise ValueError("oversized blob response")
+              value = json.loads(raw)
+              if value["type"] != "file" or value["encoding"] != "base64":
+                  raise ValueError("not an encoded file")
+              blob = base64.b64decode("".join(value["content"].splitlines()), validate=True)
+              if value["size"] != len(blob):
+                  raise ValueError("size mismatch")
+              return blob
+
+          def verify_contract(head, pr_token):
+              if not re.fullmatch(r"[0-9a-f]{40}", head):
+                  raise ValueError("invalid head")
+              entries = []
+              for source, expected_hash in SOURCES.items():
+                  name = source.rsplit("/", 1)[-1]
+                  candidate = read_blob(SNAPSHOT + name, head, pr_token)
+                  if hashlib.sha256(candidate).hexdigest() != expected_hash:
+                      raise ValueError("contract differs")
+                  entries.append({"file": name, "originalPath": PREFIX + source,
+                                  "sha256": expected_hash})
+              manifest = json.loads(read_blob(SNAPSHOT + "manifest.json", head, pr_token))
+              expected = {"repository": "https://github.com/knitli/knitli-site.git",
+                          "commit": PIN, "protocolVersion": 1, "files": entries}
+              if (not isinstance(manifest, dict)
+                      or not isinstance(manifest.get("protocolVersion"), int)
+                      or isinstance(manifest.get("protocolVersion"), bool)
+                      or manifest != expected):
+                  raise ValueError("manifest differs")
+
+          if __name__ == "__main__":
+              try:
+                  head = os.environ["PR_HEAD_SHA"]
+                  verify_contract(head, os.environ["PR_TOKEN"])
+              except (ValueError, KeyError, TypeError, OSError):
+                  raise SystemExit("Contract verification failed; no PR code was executed.") from None
+              print("Contract verified for PR head " + head + " against " + PIN)
+          PYTHON
+      - name: Publish the exact candidate verification result
+        if: always()
+        env:
+          RESULT: ${{ steps.verify.outcome == 'success' && 'success' || 'failure' }}
+        shell: bash
+        run: |
+          [[ "$PR_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          gh api --method POST "repos/knitli/toolshed/statuses/$PR_HEAD_SHA" \
+            -f state="$RESULT" -f 'context=Event Gateway / trusted contract' \
+            -f description='Canonical contract verification completed' \
+            -f target_url="$RUN_URL" > /dev/null

@@ -1,0 +1,183 @@
+{
+  "validEnvelopes": [
+    {
+      "schemaVersion": 1,
+      "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+      "source": "manual",
+      "canonicalSubject": {
+        "kind": "manual",
+        "subjectId": "pilot-canary"
+      },
+      "eventKind": "manual",
+      "reasonCode": "owner_canary",
+      "sourceStateVersion": "manual-1",
+      "policyRevision": 1,
+      "observedAt": "2026-10-05T11:59:45.000Z",
+      "principal": "adam@knitli.com",
+      "agent": "pilot-agent",
+      "eventReference": "ref_018e2c70-7c6a-7a04-8000-000000000001",
+      "runtimeId": "018e2c70-7c6a-7a02-8000-000000000001",
+      "nodeGeneration": 1,
+      "runtimeGeneration": 2,
+      "attachmentGeneration": 3,
+      "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+      "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+      "issuedAt": "2026-10-05T12:00:00.000Z",
+      "expiresAt": "2026-10-05T12:01:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "018e2c70-7c6a-7a11-8000-000000000001",
+      "source": "github",
+      "canonicalSubject": {
+        "kind": "github_pr",
+        "repositoryId": "1234567890123",
+        "pullRequestNumber": 17
+      },
+      "eventKind": "attention",
+      "reasonCode": "review_comment",
+      "sourceStateVersion": "commit:0123456789abcdef",
+      "policyRevision": 4,
+      "candidateGeneration": 7,
+      "observedAt": "2026-10-05T11:59:50.000Z",
+      "principal": "adam@knitli.com",
+      "agent": "pilot-agent",
+      "eventReference": "ref_018e2c70-7c6a-7a14-8000-000000000001",
+      "runtimeId": "018e2c70-7c6a-7a12-8000-000000000001",
+      "nodeGeneration": 1,
+      "runtimeGeneration": 2,
+      "attachmentGeneration": 5,
+      "consumerGeneration": 9,
+      "deliveryId": "dly_a33ff89dff2a5dc71b11f0f41a13725b8b37107143b3f10b1131757271519340",
+      "attemptId": "018e2c70-7c6a-7a13-8000-000000000001",
+      "issuedAt": "2026-10-05T12:00:00.000Z",
+      "expiresAt": "2026-10-05T12:01:00.000Z"
+    }
+  ],
+  "validAcknowledgments": [
+    {
+      "schemaVersion": 1,
+      "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+      "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+      "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+      "principal": "adam@knitli.com",
+      "agent": "pilot-agent",
+      "runtimeId": "018e2c70-7c6a-7a02-8000-000000000001",
+      "nodeGeneration": 1,
+      "runtimeGeneration": 2,
+      "attachmentGeneration": 3,
+      "deliveredSourceStateVersion": "manual-1",
+      "acknowledgedAt": "2026-10-05T12:00:10.000Z",
+      "status": "submitted",
+      "nativeCorrelation": {
+        "kind": "queued",
+        "submissionId": "subm_7e87"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "018e2c70-7c6a-7a11-8000-000000000001",
+      "deliveryId": "dly_a33ff89dff2a5dc71b11f0f41a13725b8b37107143b3f10b1131757271519340",
+      "attemptId": "018e2c70-7c6a-7a13-8000-000000000001",
+      "principal": "adam@knitli.com",
+      "agent": "pilot-agent",
+      "runtimeId": "018e2c70-7c6a-7a12-8000-000000000001",
+      "nodeGeneration": 1,
+      "runtimeGeneration": 2,
+      "attachmentGeneration": 5,
+      "consumerGeneration": 9,
+      "deliveredSourceStateVersion": "commit:0123456789abcdef",
+      "acknowledgedAt": "2026-10-05T12:00:20.000Z",
+      "status": "observed",
+      "nativeCorrelation": {
+        "kind": "turn",
+        "submissionId": "subm_9f45",
+        "turnId": "turn_294"
+      }
+    }
+  ],
+  "invalidEnvelopes": [
+    {
+      "case": "free-text-comment-field",
+      "value": {
+        "schemaVersion": 1,
+        "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+        "source": "manual",
+        "canonicalSubject": {
+          "kind": "manual",
+          "subjectId": "pilot-canary"
+        },
+        "eventKind": "manual",
+        "reasonCode": "owner_canary",
+        "sourceStateVersion": "manual-1",
+        "policyRevision": 1,
+        "observedAt": "2026-10-05T11:59:45.000Z",
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "eventReference": "ref_018e2c70-7c6a-7a04-8000-000000000001",
+        "runtimeId": "018e2c70-7c6a-7a02-8000-000000000001",
+        "nodeGeneration": 1,
+        "runtimeGeneration": 2,
+        "attachmentGeneration": 3,
+        "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+        "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+        "issuedAt": "2026-10-05T12:00:00.000Z",
+        "expiresAt": "2026-10-05T12:01:00.000Z",
+        "comment": "reviewer-authored text must not leave GitHub"
+      }
+    },
+    {
+      "case": "source-and-subject-mismatch",
+      "value": {
+        "schemaVersion": 1,
+        "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+        "source": "manual",
+        "canonicalSubject": {
+          "kind": "github_pr",
+          "repositoryId": "1234567890123",
+          "pullRequestNumber": 17
+        },
+        "eventKind": "manual",
+        "reasonCode": "owner_canary",
+        "sourceStateVersion": "manual-1",
+        "policyRevision": 1,
+        "observedAt": "2026-10-05T11:59:45.000Z",
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "eventReference": "ref_018e2c70-7c6a-7a04-8000-000000000001",
+        "runtimeId": "018e2c70-7c6a-7a02-8000-000000000001",
+        "nodeGeneration": 1,
+        "runtimeGeneration": 2,
+        "attachmentGeneration": 3,
+        "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+        "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+        "issuedAt": "2026-10-05T12:00:00.000Z",
+        "expiresAt": "2026-10-05T12:01:00.000Z"
+      }
+    }
+  ],
+  "invalidAcknowledgments": [
+    {
+      "case": "observed-without-turn-correlation",
+      "value": {
+        "schemaVersion": 1,
+        "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+        "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+        "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "runtimeId": "018e2c70-7c6a-7a02-8000-000000000001",
+        "nodeGeneration": 1,
+        "runtimeGeneration": 2,
+        "attachmentGeneration": 3,
+        "deliveredSourceStateVersion": "manual-1",
+        "acknowledgedAt": "2026-10-05T12:00:10.000Z",
+        "status": "observed",
+        "nativeCorrelation": {
+          "kind": "queued",
+          "submissionId": "subm_7e87"
+        }
+      }
+    }
+  ]
+}

@@ -11,6 +11,7 @@
         "strip-ansi",
         "codeweaver",
         "openapi-mcp",
+        "event-gateway",
         "marketplace",
         "mkt",
         "market",

@@ -1,0 +1,27 @@
+{
+  "repository": "https://github.com/knitli/knitli-site.git",
+  "commit": "cd7b288daaccef6c042ad23598668afe2e220925",
+  "protocolVersion": 1,
+  "files": [
+    {
+      "file": "protocol.schema.json",
+      "originalPath": "apps/os/packages/event-runtime/src/protocol.schema.json",
+      "sha256": "544db5860957f4b80f184225fd0703fa384fff67fc24f5fcf316ad86bab1e272"
+    },
+    {
+      "file": "protocol.ts",
+      "originalPath": "apps/os/packages/event-runtime/src/protocol.ts",
+      "sha256": "f970bbeaeced4a012081fc1c7ab09973cd88d05dc680d22237163b359ada04e1"
+    },
+    {
+      "file": "policy.ts",
+      "originalPath": "apps/os/packages/event-runtime/src/policy.ts",
+      "sha256": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3"
+    },
+    {
+      "file": "protocol-v1.json",
+      "originalPath": "apps/os/packages/event-runtime/__tests__/fixtures/protocol-v1.json",
+      "sha256": "4c2889c69c913f723e6a5005a8582ee5cc9559e3c095b689c23d4aa28104a064"
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+# Foundation validation
+
+Base: freshly fetched Toolshed `origin/main`,
+`4157bab84934e0e4fa0170d4a7415855c065d786` (2026-10-05).
+The owner authorized a disabled foundation plus separate Codex bridge research.
+This evidence does not qualify automatic wake or complete PR2's release gates.
+
+## Tested boundaries
+
+- Canonical PR1 schema and fixture blobs exported at the manifest's full commit;
+  local hashes and a fetch of those exact Git blobs match. Runtime parsing rejects
+  malformed/duplicate keys, unknown fields, bad freshness and wrong delivery IDs.
+- Real disposable Unix WebSocket fixtures exercise framing, deadlines, bounded
+  history, server-action refusal and exact native user-message correlation.
+- Real disposable TCP fixtures exercise absolute header/body deadlines despite
+  trickled bytes, duplicate framing and bounded concurrency.
+- SQLite tests cover private files, one writer, receipt conflicts, restart
+  quarantine, generation tombstones, capacity and persistent ACK recovery.
+- Dispatcher fixtures test authority expiry/detach across awaits, busy accepted
+  deliveries outliving transport expiry, cancellation and lost native response,
+  and lost cloud ACK. Recovery never calls the native submit method a second time.
+- Production CLI refuses attachment, reports automatic wake disabled, preserves
+  local private keys without claiming enrollment, and runs/stops a private control
+  daemon. An installed wheel outside the source tree loads its embedded schema.
+- Existing Bun suite: 1,101 pass, one preexisting skip, zero failures; marketplace
+  and generated scope checks pass. CI separately exercises Linux and macOS.
+
+## Causal red/green checks
+
+Scratch copies or in-memory module mutations left production source intact:
+
+| Defect introduced | Evidence of detection |
+| --- | --- |
+| Remove duplicate-key guard | Parser test fails on wrong error code; restored green |
+| Remove native client-message correlation | Unrelated completed turn becomes observed; test fails; restored green |
+| Remove dedup conflict, restart quarantine, detach fence, capacity or writer lock | Five narrow store mutations each produce a targeted failure; restored green |
+| Bypass signature verification | Bad-signature gateway assertion fails; restored green |
+| Bypass dispatch permit check | Expired-permit gateway assertion fails; restored green |
+| Treat lost native response as submitted | Ambiguity assertion fails; restored green |
+| Relax absolute header deadline | Trickled-header test times out waiting for rejection; restored green |
+| Lose observed ACK recovery | Real implementation initially drops the row from recovery; regression red, durable ACK fix green |
+| Cancel native RPC without quarantine | Real implementation initially retains `submitting`; regression red, cancellation fix green |
+| Drop durable ACK marking/fence/capacity | Three narrow store mutations fail; restored green |
+| Remove boolean RPC-ID exclusion or native-version guard | Each focused transport test fails; unchanged source passes all 12 |
+| Accept a different or missing consumer-generation fence | Two store regressions initially accept stale work; fixed equality/transfer/tombstone checks pass |
+
+Review round 2 reproduced receipt loss on detach during native submission,
+reconciliation across destination/lease changes, submitted ACK recovery after
+client exit, expired session-slot retention, interrupted key writes, invalid
+adapter metadata/ID handling, oversized unterminated headers, malformed contract
+manifests, and startup retention reclamation. Targeted regressions went red
+before each correction and green afterward. New private-directory ancestors are
+0700; concurrent key creators observe one fully fsynced, atomically published key.
+
+The next code review reproduced an exception escaping the post-admission client
+check and a node-wide session cap contrary to the pinned per-agent policy. Both
+regressions went red; checks now contain expected client failures and session
+admission counts the incoming agent's live mappings, including transfer capacity.
+
+A later maintainer review reproduced storage-capacity failure escaping dispatch;
+its regression now returns a queued capacity refusal without a native call and
+successfully retries after capacity returns. A separate test proves that the
+permit can expire during the last awaited client check, requiring the subsequent
+expiry guard.
+
+The security-focused review found reusable App-key exposure in PR-controlled CI.
+Ordinary PR tests now verify local hashes offline without that key. A new
+trusted-base workflow reads five fixed candidate blobs as data and compares
+against a hardcoded reviewed pin/hash policy, without fetching the private
+repository or executing candidate code. It publishes pending/pass/fail against
+the validated candidate SHA. Its four verifier checks reject modified bytes,
+forged pin/repository/version, mutable heads, oversized responses and redirects.
+The trusted hashes were independently rechecked against the upstream Git blobs.
+This workflow first activates after this introducing PR merges; no live trusted
+workflow run or branch-protection configuration is claimed for the bootstrap.
+
+Final local suite: 71 Python tests pass. Review upgraded cryptography to 50.0.2;
+the installed signature/consumer checks and both native read-only probes were
+repeated with that lock. Module summaries use one line to satisfy the conflicting
+multiline documentation rules, retaining the explanations in comments.
+
+Exact disposable native, locked dependency evidence is in
+[transport-evidence.json](transport-evidence.json), reproducible with
+`scripts/probe_codex_transport.py --binary /absolute/path/to/codex`.
+Both 0.160.0 and 0.160.1 read-only canaries matched the launched server PID,
+with zero loaded threads and zero model turns. These canaries prove transport;
+they do not prove selected-client presence.
+
+## Remaining qualification gates
+
+Native client selection/consumption fencing; production owner enrollment and
+current cloud admission; private Mesh delivery; three-session routing; user-service
+install/upgrade lifecycle; source-aware coalescing; and shared semantic boundary
+vectors executed by both OS TypeScript and Toolshed Python validators remain open.
+The proposed local signature and permit seams require a reviewed PR3 contract.
