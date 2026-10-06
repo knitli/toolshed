@@ -4,6 +4,8 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import runpy
+import tempfile
 import textwrap
 import unittest
 from unittest.mock import patch
@@ -12,8 +14,10 @@ from unittest.mock import patch
 PACKAGE = Path(__file__).resolve().parents[1]
 WORKFLOW = PACKAGE.parents[1] / ".github/workflows/event-gateway-contract.yml"
 SOURCE = textwrap.dedent(WORKFLOW.read_text().split("<<'PYTHON'\n", 1)[1].rsplit("          PYTHON", 1)[0])
-POLICY = {"__name__": "workflow_test"}
-exec(compile(SOURCE, str(WORKFLOW), "exec"), POLICY)  # nosec B102 - test our inline verifier without credentials
+with tempfile.TemporaryDirectory() as policy_directory:
+    policy_path = Path(policy_directory) / "verifier.py"
+    policy_path.write_text(SOURCE)
+    POLICY = runpy.run_path(str(policy_path), run_name="workflow_test")["verify_contract"].__globals__
 HEAD = "a" * 40
 
 
