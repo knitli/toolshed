@@ -39,7 +39,7 @@ Two new native tests ran through upstream `just test -p codex-tui --cargo-profil
 - `revocation_and_reconnect_never_reuse_selection_generation`: production sabotage retained eligibility on revocation; assertion `revocation must clear eligibility` failed. Restoring production passed.
 - `delayed_loop_revokes_before_renewal`: production sabotage disabled the 750 ms expiration; assertion `delayed loop must revoke before renewing` failed. Restoring production passed.
 
-[Red/green excerpts](native-selection-spike/) retain exact focused result lines. The final source was restored before the successful final binary build. Python sink expiry likewise had an individual assertion-red/restored-green check. The full Python suite passed: 74 tests in 1.048 seconds (local-socket permission was required). Sink and emitter mutation evidence is retained alongside the native test excerpts.
+[Red/green excerpts](native-selection-spike/) retain exact focused result lines. The final source was restored before the successful final binary build. Python sink expiry likewise had an individual assertion-red/restored-green check. After the cleanup corrections below, the full Python suite passed: 76 tests in 1.044 seconds (local-socket permission was required). Sink and emitter mutation evidence is retained alongside the native test excerpts.
 
 Scoped Rust formatting completed with pinned rustfmt. The repository-wide `just fmt` could not complete because unrelated formatter/download tooling was unavailable; its incidental justfile edit was restored. This is a bounded feasibility patch, not an upstream-ready or cross-platform release.
 
