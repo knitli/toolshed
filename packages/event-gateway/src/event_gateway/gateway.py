@@ -101,12 +101,18 @@ class Gateway:
             and 0 < permit.expires_at - permit.issued_at <= 5
         )
 
+    async def _adapter_available(self, adapter):
+        try:
+            return await adapter.check() == "available"
+        except (Refused, CodexError, OSError):
+            return False
+
     async def _available_adapter(self, mapping):
         try:
             adapter = self.adapter_factory(mapping)
-            return adapter if await adapter.check() == "available" else None
         except (Refused, CodexError, OSError):
             return None
+        return adapter if await self._adapter_available(adapter) else None
 
     async def dispatch(self, delivery_id):
         envelope = self.store.delivery_envelope(delivery_id)
@@ -133,7 +139,7 @@ class Gateway:
             if (
                 current != mapping
                 or not self._permit_valid(permit, envelope)
-                or await adapter.check() != "available"
+                or not await self._adapter_available(adapter)
             ):
                 return {**row, "reason": "admission_fenced"}
             if not self._permit_valid(permit, envelope):

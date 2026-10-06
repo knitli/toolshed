@@ -52,7 +52,12 @@ manifests, and startup retention reclamation. Targeted regressions went red
 before each correction and green afterward. New private-directory ancestors are
 0700; concurrent key creators observe one fully fsynced, atomically published key.
 
-Final local suite: 63 Python tests pass. Review upgraded cryptography to 50.0.2;
+The next code review reproduced an exception escaping the post-admission client
+check and a node-wide session cap contrary to the pinned per-agent policy. Both
+regressions went red; checks now contain expected client failures and session
+admission counts the incoming agent's live mappings, including transfer capacity.
+
+Final local suite: 65 Python tests pass. Review upgraded cryptography to 50.0.2;
 the installed signature/consumer checks and both native read-only probes were
 repeated with that lock. Module summaries use one line to satisfy the conflicting
 multiline documentation rules, retaining the explanations in comments.

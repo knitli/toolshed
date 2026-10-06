@@ -7,7 +7,7 @@ import unittest
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from event_gateway.codex import CodexAdapter
+from event_gateway.codex import CodexAdapter, CodexError
 from event_gateway.gateway import Gateway, Permit, Refused, identity
 from event_gateway.security import SecurityError, sign
 from event_gateway.store import Store, IDENTITY
@@ -140,6 +140,20 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.after_check = lambda count: self.store.detach(self.event['runtimeId']) if count == 2 else None
         await self.gateway.dispatch(ident)
         self.assertEqual(self.native_calls, 0)
+
+    async def test_post_admission_client_failure_stays_queued(self):
+        ident = self.accept()['deliveryId']
+
+        def fail_second_check(count):
+            if count % 2 == 0:
+                raise CodexError('native_transport_failed')
+
+        self.after_check = fail_second_check
+        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'queued')
+        self.assertEqual(self.native_calls, 0)
+        self.after_check = None
+        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'submitted')
+        self.assertEqual(self.native_calls, 1)
 
     async def test_lost_native_response_is_ambiguous_and_never_replayed(self):
         ident = self.accept()['deliveryId']

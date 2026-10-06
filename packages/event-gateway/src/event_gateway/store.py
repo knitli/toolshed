@@ -203,9 +203,14 @@ class Store:
             "SELECT data FROM attachments WHERE runtime=?", (mapping["runtimeId"],)
         ).fetchone()
         old = json.loads(row[0]) if row else None
-        if (not old or old["leaseExpiresAt"] <= self.clock()) and len(
-            self.list_attachments()
-        ) >= 3:
+        if (
+            sum(
+                live["agent"] == mapping["agent"]
+                and live["runtimeId"] != mapping["runtimeId"]
+                for live in self.list_attachments()
+            )
+            >= 3
+        ):
             raise StoreError("capacity", "session_capacity")
         if old:
             if old["leaseExpiresAt"] <= self.clock() and all(

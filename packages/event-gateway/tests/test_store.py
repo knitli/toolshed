@@ -187,6 +187,31 @@ class StoreTests(unittest.TestCase):
         self.store.put_attachment(dict(advanced, leaseExpiresAt=NOW + 7200))
         self.assertEqual(self.store.status()["attachments"], 3)
 
+    def test_session_capacity_is_per_agent_and_fences_transfers(self):
+        for _ in range(2):
+            self.store.put_attachment(dict(self.mapping, runtimeId=str(uuid.uuid4())))
+        other = dict(self.mapping, runtimeId=str(uuid.uuid4()), agent="other-agent")
+        self.store.put_attachment(other)
+        self.store.put_attachment(dict(self.mapping, leaseExpiresAt=NOW + 7200))
+        with self.assertRaisesRegex(StoreError, "session_capacity"):
+            self.store.put_attachment(
+                dict(
+                    other,
+                    agent=self.mapping["agent"],
+                    attachmentGeneration=other["attachmentGeneration"] + 1,
+                )
+            )
+        moved = dict(
+            self.mapping,
+            agent="other-agent",
+            attachmentGeneration=self.mapping["attachmentGeneration"] + 1,
+        )
+        self.store.put_attachment(moved)
+        self.store.put_attachment(dict(self.mapping, runtimeId=str(uuid.uuid4())))
+        self.assertEqual(len(self.store.list_attachments()), 5)
+        with self.assertRaisesRegex(StoreError, "session_capacity"):
+            self.store.put_attachment(dict(self.mapping, runtimeId=str(uuid.uuid4())))
+
     def test_capacity_and_pilot_limit(self):
         self.store.max_rows = 1
         ident = self.store.accept(self.event)["deliveryId"]
