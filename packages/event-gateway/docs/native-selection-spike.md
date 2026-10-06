@@ -42,3 +42,7 @@ Two new native tests ran through upstream `just test -p codex-tui --cargo-profil
 [Red/green excerpts](native-selection-spike/) retain exact focused result lines. The final source was restored before the successful final binary build. Python sink expiry likewise had an individual assertion-red/restored-green check. The full Python suite passed: 74 tests in 1.048 seconds (local-socket permission was required). Sink and emitter mutation evidence is retained alongside the native test excerpts.
 
 Scoped Rust formatting completed with pinned rustfmt. The repository-wide `just fmt` could not complete because unrelated formatter/download tooling was unavailable; its incidental justfile edit was restored. This is a bounded feasibility patch, not an upstream-ready or cross-platform release.
+
+## PR 35 cleanup follow-up
+
+The FIFO reader now waits for its initial writer, then emits EOF once and ends after that writer disconnects (or the child exits before connecting). Previously it continued polling every 25 ms after permanent EOF. Both metadata logs now close even if earlier resource cleanup raises. Two regressions each passed an isolated production-sabotage assertion-red/restored-green check; see [review proof](native-selection-spike/review35-red-green.log.excerpt). The native spike remains partial; these harness fixes do not repair the native writer or establish saved-thread resume.

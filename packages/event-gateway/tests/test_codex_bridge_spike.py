@@ -1,8 +1,11 @@
 """Keep the disposable observer's no-turn boundary in normal CI discovery."""
+import asyncio
 import importlib.util
 import json
 from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 
 class CodexBridgeSpikeTests(unittest.TestCase):
@@ -80,3 +83,54 @@ class CodexBridgeSpikeTests(unittest.TestCase):
                          (b'', False, [b'valid']))
         self.assertEqual(observer.witness_frames(b'x' * 4096, b'x\nvalid\n', False),
                          (b'', False, [b'', b'valid']))
+
+    def test_native_fifo_waits_for_writer_then_stops_at_eof(self):
+        path = Path(__file__).parents[1] / 'scripts' / 'observe_codex_bridge.py'
+        spec = importlib.util.spec_from_file_location('observe_codex_bridge', path)
+        observer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(observer)
+        states = []
+        reads = [b'', b'{}\n', b'']
+
+        def read(*_):
+            self.assertTrue(reads, 'reader must stop after connected writer EOF')
+            return reads.pop(0)
+
+        async def no_sleep(_):
+            pass
+
+        with patch.object(observer.os, 'read', side_effect=read), \
+                patch.object(observer.asyncio, 'sleep', side_effect=no_sleep):
+            asyncio.run(observer.read_witness(
+                123, lambda: 456, lambda: True,
+                lambda witness, pid, now: states.append(witness.status(pid, now))))
+        self.assertEqual(reads, [], 'reader must wait for the initial writer')
+        self.assertEqual(states, [(False, 'eof'), (False, 'malformed'), (False, 'eof')])
+
+    def test_observer_closes_logs_when_cleanup_fails(self):
+        path = Path(__file__).parents[1] / 'scripts' / 'observe_codex_bridge.py'
+        spec = importlib.util.spec_from_file_location('observe_codex_bridge', path)
+        observer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(observer)
+        opened = {}
+        original_open = Path.open
+
+        def tracked_open(path, *args, **kwargs):
+            handle = original_open(path, *args, **kwargs)
+            if path.name.endswith('.jsonl'):
+                opened[path.name] = handle
+            return handle
+
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(Path, 'open', tracked_open), \
+                    patch.object(observer.subprocess, 'Popen', side_effect=RuntimeError('backend failed')), \
+                    patch.object(observer.shutil, 'rmtree', side_effect=OSError('cleanup failed')):
+                with self.assertRaisesRegex(OSError, 'cleanup failed'):
+                    asyncio.run(observer.observe(Path('/unused'), Path(directory), Path('/unused')))
+            try:
+                self.assertEqual(set(opened), {'wire.jsonl', 'native.jsonl'})
+                self.assertTrue(all(handle.closed for handle in opened.values()),
+                                'both logs must close even when resource cleanup raises')
+            finally:
+                for handle in opened.values():
+                    handle.close()

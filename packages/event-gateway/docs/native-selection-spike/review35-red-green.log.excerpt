@@ -1,0 +1,77 @@
+TEST test_native_fifo_waits_for_writer_then_stops_at_eof
+Isolated production sabotage: '                emit(witness, pid, now)\n                return' -> '                emit(witness, pid, now)\n                pass'
+RED exit=1
+F
+======================================================================
+FAIL: test_native_fifo_waits_for_writer_then_stops_at_eof (test_codex_bridge_spike.CodexBridgeSpikeTests.test_native_fifo_waits_for_writer_then_stops_at_eof)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/var/folders/43/sd8c5gyd4mq1twfp41pj9l_40000gn/T/codex-review35-k85z54gz/tests/test_codex_bridge_spike.py", line 104, in test_native_fifo_waits_for_writer_then_stops_at_eof
+    asyncio.run(observer.read_witness(
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+        123, lambda: 456, lambda: True,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        lambda witness, pid, now: states.append(witness.status(pid, now))))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/adampoulemanos/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/asyncio/runners.py", line 196, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/Users/adampoulemanos/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/asyncio/runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/Users/adampoulemanos/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/private/var/folders/43/sd8c5gyd4mq1twfp41pj9l_40000gn/T/codex-review35-k85z54gz/scripts/observe_codex_bridge.py", line 134, in read_witness
+    data = os.read(descriptor, 4096)
+  File "/Users/adampoulemanos/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/unittest/mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Users/adampoulemanos/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/unittest/mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Users/adampoulemanos/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/unittest/mock.py", line 1240, in _execute_mock_call
+    result = effect(*args, **kwargs)
+  File "/private/var/folders/43/sd8c5gyd4mq1twfp41pj9l_40000gn/T/codex-review35-k85z54gz/tests/test_codex_bridge_spike.py", line 96, in read
+    self.assertTrue(reads, 'reader must stop after connected writer EOF')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: [] is not true : reader must stop after connected writer EOF
+
+----------------------------------------------------------------------
+Ran 1 test in 0.015s
+
+FAILED (failures=1)
+
+RESTORED GREEN exit=0
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.013s
+
+OK
+
+TEST test_observer_closes_logs_when_cleanup_fails
+Isolated production sabotage: '                log.close()' -> '                pass'
+RED exit=1
+F
+======================================================================
+FAIL: test_observer_closes_logs_when_cleanup_fails (test_codex_bridge_spike.CodexBridgeSpikeTests.test_observer_closes_logs_when_cleanup_fails)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/var/folders/43/sd8c5gyd4mq1twfp41pj9l_40000gn/T/codex-review35-k85z54gz/tests/test_codex_bridge_spike.py", line 132, in test_observer_closes_logs_when_cleanup_fails
+    self.assertTrue(all(handle.closed for handle in opened.values()),
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    'both logs must close even when resource cleanup raises')
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : both logs must close even when resource cleanup raises
+
+----------------------------------------------------------------------
+Ran 1 test in 0.014s
+
+FAILED (failures=1)
+
+RESTORED GREEN exit=0
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.014s
+
+OK

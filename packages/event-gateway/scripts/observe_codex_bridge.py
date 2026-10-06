@@ -124,6 +124,37 @@ def witness_frames(pending, data, discarding):
     return pending, discarding, frames
 
 
+async def read_witness(descriptor, backend_pid, client_alive, emit):
+    witness, pending, previous = Witness(), b'', None
+    discarding = connected = False
+    while True:
+        pid, now = backend_pid(), time.monotonic()
+        changed = False
+        try:
+            data = os.read(descriptor, 4096)
+        except BlockingIOError:
+            data = None
+            connected = True  # A writer exists, but has no bytes ready.
+        if data == b'':
+            witness.eof()
+            if connected or not client_alive():
+                emit(witness, pid, now)
+                return
+            # A nonblocking FIFO reports EOF before the child opens its writer.
+        elif data:
+            connected = True
+            pending, discarding, frames = witness_frames(pending, data, discarding)
+            for raw in frames:
+                witness.receive(raw, pid, now)
+                emit(witness, pid, now)
+                changed = True
+        state = witness.status(pid, now)
+        if state != previous and not changed:
+            emit(witness, pid, now)
+        previous = state
+        await asyncio.sleep(.025)
+
+
 async def observe(binary, root, client_binary=None):
     home = root / 'home'
     home.mkdir(mode=0o700)
@@ -239,33 +270,6 @@ async def observe(binary, root, client_binary=None):
                 await asyncio.sleep(.05)
         tasks.append(asyncio.create_task(drain()))
         if client_binary:
-            async def read_witness():
-                nonlocal order
-                witness, pending, previous = Witness(), b'', None
-                discarding = False
-                while True:
-                    pid = back.pid if back is not None and back.poll() is None else None
-                    now = time.monotonic()
-                    changed = False
-                    try:
-                        data = os.read(descriptor, 4096)
-                    except BlockingIOError:
-                        data = None
-                    if data == b'':
-                        witness.eof()
-                        pending, discarding = b'', False
-                    elif data:
-                        pending, discarding, frames = witness_frames(pending, data, discarding)
-                        for raw in frames:
-                            witness.receive(raw, pid, now)
-                            emit(witness, pid, now)
-                            changed = True
-                    state = witness.status(pid, now)
-                    if state != previous and not changed:
-                        emit(witness, pid, now)
-                    previous = state
-                    await asyncio.sleep(.025)
-
             last_native_state = None
 
             def emit(witness, pid, now):
@@ -282,7 +286,9 @@ async def observe(binary, root, client_binary=None):
                     print(json.dumps(row), flush=True)
                 last_native_state = state
 
-            tasks.append(asyncio.create_task(read_witness()))
+            tasks.append(asyncio.create_task(read_witness(
+                descriptor, lambda: back.pid if back is not None and back.poll() is None else None,
+                lambda: process.poll() is None, emit)))
 
     try:
         back = await backend()
@@ -323,30 +329,34 @@ async def observe(binary, root, client_binary=None):
                           'send NAME ESCAPED_KEYS; read NAME; kill NAME; suspend NAME; continue NAME; disconnect; restart; '
                           'mark CASE; quit', flush=True)
     finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        for descriptor in fifo_fds:
-            os.close(descriptor)
-        for fifo in fifo_paths:
-            fifo.unlink(missing_ok=True)
-        if native_log:
-            native_log.close()
-        for process in children:
-            stop(process)
-        for _, descriptor in peers.values():
-            os.close(descriptor)
-        for socket, identity in sockets.items():
+        try:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            for descriptor in fifo_fds:
+                os.close(descriptor)
+            for fifo in fifo_paths:
+                fifo.unlink(missing_ok=True)
+            for process in children:
+                stop(process)
+            for _, descriptor in peers.values():
+                os.close(descriptor)
+            for socket, identity in sockets.items():
+                try:
+                    stat = socket.stat()
+                    if (stat.st_dev, stat.st_ino) == identity:
+                        socket.unlink(missing_ok=True)
+                except FileNotFoundError:
+                    pass  # The owned backend may already have removed its socket.
+            for alias in ('backend.sock', 'proxy.sock'):
+                (root / alias).unlink(missing_ok=True)
+            shutil.rmtree(home)
+        finally:
             try:
-                stat = socket.stat()
-                if (stat.st_dev, stat.st_ino) == identity:
-                    socket.unlink(missing_ok=True)
-            except FileNotFoundError:
-                pass  # The owned backend may already have removed its socket.
-        for alias in ('backend.sock', 'proxy.sock'):
-            (root / alias).unlink(missing_ok=True)
-        shutil.rmtree(home)
-        log.close()
+                if native_log:
+                    native_log.close()
+            finally:
+                log.close()
 
 
 if __name__ == '__main__':
