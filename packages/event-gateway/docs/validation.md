@@ -42,8 +42,9 @@ Scratch copies or in-memory module mutations left production source intact:
 | Cancel native RPC without quarantine | Real implementation initially retains `submitting`; regression red, cancellation fix green |
 | Drop durable ACK marking/fence/capacity | Three narrow store mutations fail; restored green |
 | Remove boolean RPC-ID exclusion or native-version guard | Each focused transport test fails; unchanged source passes all 12 |
+| Accept a different or missing consumer-generation fence | Two store regressions initially accept stale work; fixed equality/transfer/tombstone checks pass |
 
-Final local suite: 44 Python tests pass. Review upgraded cryptography to 50.0.2;
+Final local suite: 47 Python tests pass. Review upgraded cryptography to 50.0.2;
 the installed signature/consumer checks and both native read-only probes were
 repeated with that lock. Module summaries use one line to satisfy the conflicting
 multiline documentation rules, retaining the explanations in comments.

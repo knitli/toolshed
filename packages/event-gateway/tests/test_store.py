@@ -44,6 +44,55 @@ class StoreTests(unittest.TestCase):
         event["deliveryId"] = derive_delivery_id(event)
         return event
 
+    def test_consumer_generation_fences_acceptance_and_transfer(self):
+        mapping = dict(
+            self.mapping,
+            attachmentGeneration=self.mapping["attachmentGeneration"] + 1,
+            consumerGeneration=4,
+        )
+        self.store.put_attachment(mapping)
+        event = dict(
+            self.event,
+            attachmentGeneration=mapping["attachmentGeneration"],
+            consumerGeneration=5,
+        )
+        event["deliveryId"] = derive_delivery_id(event)
+        with self.assertRaises(StoreError):
+            self.store.accept(event)
+        event["consumerGeneration"] = 4
+        event["deliveryId"] = derive_delivery_id(event)
+        ident = self.store.accept(event)["deliveryId"]
+        self.store.put_attachment(dict(mapping, consumerGeneration=5))
+        self.assertEqual(self.store.get(ident)["status"], "stale")
+        with self.assertRaises(StoreError):
+            self.store.accept(event)
+        with self.assertRaises(StoreError):
+            self.store.put_attachment(mapping)
+        self.store.detach(mapping["runtimeId"])
+        with self.assertRaises(StoreError):
+            self.store.put_attachment(dict(mapping, consumerGeneration=5))
+        self.store.put_attachment(dict(mapping, consumerGeneration=6))
+        without_consumer = dict(
+            mapping, attachmentGeneration=mapping["attachmentGeneration"] + 1
+        )
+        del without_consumer["consumerGeneration"]
+        with self.assertRaises(StoreError):
+            self.store.put_attachment(without_consumer)
+
+    def test_optional_consumer_generation_validation(self):
+        for value in [True, False, 0, -1, 1.5, None, "1", 2**53]:
+            with self.subTest(value=value), self.assertRaises(StoreError):
+                self.store.put_attachment(dict(self.mapping, consumerGeneration=value))
+        self.store.accept(self.event)
+        event = dict(self.new_event(), consumerGeneration=1)
+        event["deliveryId"] = derive_delivery_id(event)
+        with self.assertRaises(StoreError):
+            self.store.accept(event)
+        self.store.put_attachment(dict(self.mapping, consumerGeneration=1))
+        with self.assertRaises(StoreError):
+            self.store.accept(self.event)
+        self.store.accept(event)
+
     def test_durable_dedup_conflict_and_privacy(self):
         first = self.store.accept(self.event)
         again = self.store.accept(dict(self.event, attemptId=str(uuid.uuid4())))

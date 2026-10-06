@@ -176,11 +176,13 @@ class Store:
             for k in ("runtimeId", "principal", "agent")
         ):
             raise StoreError("invalid_attachment")
+        generations = (*IDENTITY[3:], "consumerGeneration")
         if any(
             not isinstance(mapping[k], int)
             or isinstance(mapping[k], bool)
-            or mapping[k] < 1
-            for k in IDENTITY[3:]
+            or not 1 <= mapping[k] <= 2**53 - 1
+            for k in generations
+            if k in mapping
         ):
             raise StoreError("invalid_attachment")
         lease = mapping["leaseExpiresAt"]
@@ -201,12 +203,12 @@ class Store:
             raise StoreError("capacity", "session_capacity")
         if old:
             if old["leaseExpiresAt"] == 0 and all(
-                mapping[k] == old[k] for k in IDENTITY[3:]
+                mapping.get(k, 0) == old.get(k, 0) for k in generations
             ):
                 raise StoreError("stale")
-            if any(mapping[k] < old[k] for k in IDENTITY[3:]):
+            if any(mapping.get(k, 0) < old.get(k, 0) for k in generations):
                 raise StoreError("stale")
-            if all(mapping[k] == old[k] for k in IDENTITY[3:]) and {
+            if all(mapping.get(k, 0) == old.get(k, 0) for k in generations) and {
                 k: v for k, v in mapping.items() if k != "leaseExpiresAt"
             } != {k: v for k, v in old.items() if k != "leaseExpiresAt"}:
                 raise StoreError(
@@ -215,7 +217,9 @@ class Store:
         data = _json(mapping)
         self._capacity(32768 + len(data.encode()) * 3)
         with self.db:
-            if old and any(old[k] != mapping[k] for k in IDENTITY):
+            if old and any(
+                old.get(k) != mapping.get(k) for k in (*IDENTITY, "consumerGeneration")
+            ):
                 self._fence(mapping["runtimeId"])
             self.db.execute(
                 "INSERT OR REPLACE INTO attachments VALUES (?,?)",
@@ -254,7 +258,10 @@ class Store:
         if (
             not mapping
             or mapping["leaseExpiresAt"] <= self.clock()
-            or any(envelope.get(k) != mapping[k] for k in IDENTITY)
+            or any(
+                envelope.get(k) != mapping.get(k)
+                for k in (*IDENTITY, "consumerGeneration")
+            )
         ):
             raise StoreError("stale", "attachment_fenced")
         return mapping

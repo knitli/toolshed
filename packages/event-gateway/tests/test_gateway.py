@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from event_gateway.gateway import Gateway, Permit, Refused, identity
 from event_gateway.security import SecurityError, sign
 from event_gateway.store import Store, IDENTITY
+from event_gateway.protocol import derive_delivery_id
 
 
 FIXTURES = json.loads((Path(__file__).resolve().parents[1] / 'contracts/event-v1/protocol-v1.json').read_text())
@@ -98,6 +99,21 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.gateway.dispatch(ident))['status'], 'submitted')
         await self.gateway.dispatch(ident)
         self.assertEqual(self.native_calls, 1)
+
+    async def test_optional_consumer_generation_is_a_destination_fence(self):
+        self.mapping['runtimeGeneration'] += 1
+        self.mapping['consumerGeneration'] = 3
+        self.store.put_attachment(self.mapping)
+        self.event['runtimeGeneration'] += 1
+        self.event['consumerGeneration'] = 4
+        self.event['deliveryId'] = derive_delivery_id(self.event)
+        with self.assertRaises(Refused):
+            self.accept()
+        self.assertIsNone(self.store.delivery(self.event['deliveryId']))
+        self.event['consumerGeneration'] = 3
+        self.event['deliveryId'] = derive_delivery_id(self.event)
+        self.assertEqual(self.accept()['status'], 'queued')
+        self.assertEqual(self.native_calls, 0)
 
     async def test_expired_permit_and_detach_across_await_do_not_submit(self):
         ident = self.accept()['deliveryId']

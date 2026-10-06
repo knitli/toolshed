@@ -85,7 +85,7 @@ class Gateway:
         mapping = self.store.get_attachment(envelope["runtimeId"])
         if not mapping or mapping["leaseExpiresAt"] <= self.clock():
             raise Refused("attachment_unavailable")
-        if any(mapping.get(key) != envelope.get(key) for key in FENCES[:6]):
+        if any(mapping.get(key) != envelope.get(key) for key in FENCES[:7]):
             raise Refused("attachment_fenced")
         return self.store.accept(envelope)
 
