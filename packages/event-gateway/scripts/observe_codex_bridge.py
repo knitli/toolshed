@@ -88,7 +88,6 @@ class Witness:
             self.reason = 'native'
         except (ValueError, TypeError, UnicodeError):
             return
-        self.status(backend_pid, now)
 
     def status(self, backend_pid, now):
         if self.row is None:
