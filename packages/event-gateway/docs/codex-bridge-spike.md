@@ -113,3 +113,7 @@ Next implementation needs an actual client-side selection witness plus native
 acceptance/dispatch fencing, or a deliberately constrained custom client with
 explicitly different semantics. This spike authorizes neither production delivery
 nor a production fork; retain the disabled adapter until that contract is proven.
+
+## Native follow-up
+
+The source-level follow-up is [a partial feasibility result](native-selection-spike.md): native selection and loop-gap revocation were observed, but burst transport availability and successful saved-thread resume remain unresolved. It does not change the stock-proxy verdict or enable production native authority.

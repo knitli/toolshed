@@ -7,6 +7,9 @@ import os
 from pathlib import Path
 import pty
 import shutil
+import signal
+import time
+from uuid import UUID
 import struct
 import subprocess
 import tempfile
@@ -19,8 +22,8 @@ from websockets.asyncio.server import unix_serve
 # Only the no-turn methods needed by the observed 0.160.0 TUI are forwarded.
 METHODS = frozenset('initialize initialized account/read config/read hooks/list model/list '
                    'configRequirements/read collaborationMode/list thread/start thread/read '
-                   'thread/resume thread/list thread/loaded/list thread/turns/list '
-                   'thread/unsubscribe skills/list plugin/list'.split())
+                   'thread/resume thread/list thread/loaded/list thread/turns/list thread/name/set '
+                   'thread/unsubscribe skills/list plugin/list server/diagnostics'.split())
 
 
 def permitted(direction, message):
@@ -47,7 +50,111 @@ def check():
     print('metadata and no-turn guard checks passed')
 
 
-async def observe(binary, root):
+class Witness:
+    """Disposable fail-closed observation lease, never production authority."""
+
+    def __init__(self):
+        self.row = None
+        self.seen = 0.0
+        self.client_id = None
+        self.sequence = 0
+        self.reason = 'unavailable'
+
+    def receive(self, raw, backend_pid, now):
+        self.row = None
+        self.reason = 'malformed'
+        try:
+            row = json.loads(raw)
+            fields = {'clientId', 'backendPid', 'connectionId', 'threadId',
+                      'generation', 'eligible', 'sequence', 'cause'}
+            if not isinstance(row, dict) or set(row) != fields:
+                return
+            for field in ('clientId', 'connectionId', 'threadId'):
+                value = row[field]
+                if value is None and field != 'clientId':
+                    continue
+                if not isinstance(value, str) or str(UUID(value)) != value:
+                    return
+            if (type(row['eligible']) is not bool
+                    or type(row['generation']) is not int or row['generation'] < 0
+                    or type(row['sequence']) is not int or row['sequence'] <= self.sequence
+                    or not isinstance(row['cause'], str) or len(row['cause']) > 128
+                    or (row['backendPid'] is not None and type(row['backendPid']) is not int)
+                    or (self.client_id is not None and row['clientId'] != self.client_id)):
+                return
+            self.client_id = row['clientId']
+            self.sequence = row['sequence']
+            self.row, self.seen = row, now
+            self.reason = 'native'
+        except (ValueError, TypeError, UnicodeError):
+            return
+
+    def status(self, backend_pid, now):
+        if self.row is None:
+            return False, self.reason
+        if backend_pid is None or self.row['backendPid'] != backend_pid:
+            return False, 'unknown-backend'
+        if now - self.seen >= 1.0:
+            return False, 'expired'
+        if self.row['connectionId'] is None or self.row['threadId'] is None:
+            return False, 'unavailable'
+        return self.row['eligible'], 'native'
+
+    def eof(self):
+        self.row = None
+        self.reason = 'eof'
+
+
+def witness_frames(pending, data, discarding):
+    """Bound individual JSON lines; an empty frame revokes a malformed lease."""
+    if discarding:
+        if b'\n' not in data:
+            return b'', True, []
+        _, data = data.split(b'\n', 1)
+    pending += data
+    frames = []
+    while b'\n' in pending:
+        raw, pending = pending.split(b'\n', 1)
+        frames.append(raw if len(raw) <= 4096 else b'')
+    discarding = len(pending) > 4096
+    if discarding:
+        frames.append(b'')
+        pending = b''
+    return pending, discarding, frames
+
+
+async def read_witness(descriptor, backend_pid, client_alive, emit):
+    witness, pending, previous = Witness(), b'', None
+    discarding = connected = False
+    while True:
+        pid, now = backend_pid(), time.monotonic()
+        changed = False
+        try:
+            data = os.read(descriptor, 4096)
+        except BlockingIOError:
+            data = None
+            connected = True  # A writer exists, but has no bytes ready.
+        if data == b'':
+            witness.eof()
+            if connected or not client_alive():
+                emit(witness, pid, now)
+                return
+            # A nonblocking FIFO reports EOF before the child opens its writer.
+        elif data:
+            connected = True
+            pending, discarding, frames = witness_frames(pending, data, discarding)
+            for raw in frames:
+                witness.receive(raw, pid, now)
+                emit(witness, pid, now)
+                changed = True
+        state = witness.status(pid, now)
+        if state != previous and not changed:
+            emit(witness, pid, now)
+        previous = state
+        await asyncio.sleep(.025)
+
+
+async def observe(binary, root, client_binary=None):
     home = root / 'home'
     home.mkdir(mode=0o700)
     (home / 'config.toml').write_text(f'[projects.{json.dumps(str(root))}]\ntrust_level = "trusted"\n')
@@ -59,6 +166,9 @@ async def observe(binary, root):
     env = {'PATH': os.defpath, 'HOME': str(root), 'CODEX_HOME': str(home), 'TERM': 'xterm-256color'}
     children, peers, ui, sockets = [], {}, {}, {}
     order = connection = 0
+    owned_connections, fifo_paths, fifo_fds, tasks = set(), [], [], []
+    back = None
+    native_log = (root / 'native.jsonl').open('w') if client_binary else None
     log = (root / 'wire.jsonl').open('w')
 
     def record(channel, direction, message):
@@ -74,6 +184,7 @@ async def observe(binary, root):
         connection += 1
         channel = connection
         record(channel, 'open', {})
+        owned_connections.add(front)
         try:
             async with unix_connect(str((root / 'backend.sock').resolve()), max_size=4194304,
                                     max_queue=8) as back:
@@ -96,6 +207,7 @@ async def observe(binary, root):
         except (OSError, TimeoutError):
             pass  # Expected while the dedicated backend is restarting.
         finally:
+            owned_connections.discard(front)
             record(channel, 'close', {})
 
     async def backend():
@@ -116,6 +228,7 @@ async def observe(binary, root):
 
     def stop(process):
         if process.poll() is None:
+            process.send_signal(signal.SIGCONT)
             process.terminate()
         try:
             process.wait(timeout=3)
@@ -126,12 +239,20 @@ async def observe(binary, root):
     def launch(name, thread):
         if name in peers:
             raise ValueError('use a new client name for each launch')
+        child_env = dict(env)
+        if client_binary:
+            fifo = root / f'witness-{len(fifo_paths)}.fifo'
+            os.mkfifo(fifo, 0o600)
+            fifo_paths.append(fifo)
+            descriptor = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+            fifo_fds.append(descriptor)
+            child_env['CODEX_SELECTION_WITNESS_PIPE'] = str(fifo)
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 120, 0, 0))
         args = [] if thread == 'new' else ['resume', thread]
-        process = subprocess.Popen([str(binary), *flags, *args, '--remote',
+        process = subprocess.Popen([str(client_binary or binary), *flags, *args, '--remote',
                                     f'unix://{root}/proxy.sock', '--no-alt-screen', '-C', str(root)],
-                                   env=env, cwd=root, stdin=slave, stdout=slave, stderr=slave,
+                                   env=child_env, cwd=root, stdin=slave, stdout=slave, stderr=slave,
                                    start_new_session=True)
         children.append(process)
         os.close(slave)
@@ -146,13 +267,33 @@ async def observe(binary, root):
                 except (BlockingIOError, OSError):
                     pass
                 await asyncio.sleep(.05)
-        asyncio.create_task(drain())
+        tasks.append(asyncio.create_task(drain()))
+        if client_binary:
+            last_native_state = None
+
+            def emit(witness, pid, now):
+                nonlocal order, last_native_state
+                order += 1
+                eligible, reason = witness.status(pid, now)
+                row = {'order': order, 'client': name, **(witness.row or {}),
+                       'sinkEligible': eligible, 'sinkCause': reason, 'observedMonotonic': now}
+                native_log.write(json.dumps(row) + '\n')
+                native_log.flush()
+                state = {key: value for key, value in row.items()
+                         if key not in ('order', 'sequence', 'cause', 'observedMonotonic')}
+                if row.get('cause') != 'heartbeat' or state != last_native_state:
+                    print(json.dumps(row), flush=True)
+                last_native_state = state
+
+            tasks.append(asyncio.create_task(read_witness(
+                descriptor, lambda: back.pid if back is not None and back.poll() is None else None,
+                lambda: process.poll() is None, emit)))
 
     try:
         back = await backend()
         async with unix_serve(proxy, str(root / 'proxy.sock'), max_size=4194304, max_queue=8):
             print('Commands: launch NAME new|UUID; send NAME ESCAPED_KEYS; read NAME; '
-                  'kill NAME; restart; mark CASE; quit', flush=True)
+                  'kill NAME; suspend NAME; continue NAME; disconnect; restart; mark CASE; quit', flush=True)
             while True:
                 try:
                     parts = (await asyncio.to_thread(input)).split(' ', 2)
@@ -170,6 +311,11 @@ async def observe(binary, root):
                         print(repr(ui.pop(parts[1], '')), flush=True)
                     elif command == 'kill':
                         peers[parts[1]][0].kill()
+                    elif command in ('suspend', 'continue'):
+                        peers[parts[1]][0].send_signal(
+                            signal.SIGSTOP if command == 'suspend' else signal.SIGCONT)
+                    elif command == 'disconnect':
+                        await asyncio.gather(*(connection.close() for connection in tuple(owned_connections)))
                     elif command == 'restart':
                         stop(back)
                         back = await backend()
@@ -179,29 +325,43 @@ async def observe(binary, root):
                         raise ValueError('unknown command')
                 except (IndexError, KeyError, ValueError):
                     print('Invalid command or client name. Use: launch NAME new|UUID; '
-                          'send NAME ESCAPED_KEYS; read NAME; kill NAME; restart; '
+                          'send NAME ESCAPED_KEYS; read NAME; kill NAME; suspend NAME; continue NAME; disconnect; restart; '
                           'mark CASE; quit', flush=True)
     finally:
-        for process in children:
-            stop(process)
-        for _, descriptor in peers.values():
-            os.close(descriptor)
-        for socket, identity in sockets.items():
+        try:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            for descriptor in fifo_fds:
+                os.close(descriptor)
+            for fifo in fifo_paths:
+                fifo.unlink(missing_ok=True)
+            for process in children:
+                stop(process)
+            for _, descriptor in peers.values():
+                os.close(descriptor)
+            for socket, identity in sockets.items():
+                try:
+                    stat = socket.stat()
+                    if (stat.st_dev, stat.st_ino) == identity:
+                        socket.unlink(missing_ok=True)
+                except FileNotFoundError:
+                    pass  # The owned backend may already have removed its socket.
+            for alias in ('backend.sock', 'proxy.sock'):
+                (root / alias).unlink(missing_ok=True)
+            shutil.rmtree(home)
+        finally:
             try:
-                stat = socket.stat()
-                if (stat.st_dev, stat.st_ino) == identity:
-                    socket.unlink(missing_ok=True)
-            except FileNotFoundError:
-                pass  # The owned backend may already have removed its socket.
-        for alias in ('backend.sock', 'proxy.sock'):
-            (root / alias).unlink(missing_ok=True)
-        shutil.rmtree(home)
-        log.close()
+                if native_log:
+                    native_log.close()
+            finally:
+                log.close()
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path)
+    parser.add_argument('--client-binary', type=Path)
     parser.add_argument('--self-check', action='store_true')
     args = parser.parse_args()
     if args.self_check:
@@ -209,7 +369,9 @@ if __name__ == '__main__':
     else:
         if not args.binary or not args.binary.is_absolute() or not args.binary.is_file():
             parser.error('--binary must be an absolute executable path')
+        if args.client_binary and (not args.client_binary.is_absolute() or not args.client_binary.is_file()):
+            parser.error('--client-binary must be an absolute executable path')
         scratch = Path(tempfile.mkdtemp(prefix='codex-bridge-', dir='/private/tmp' if Path('/private/tmp').exists() else '/tmp'))
         print(f'Private evidence: {scratch}', flush=True)
         print(f'Binary: {args.binary.resolve()} SHA256: {hashlib.sha256(args.binary.read_bytes()).hexdigest()}', flush=True)
-        asyncio.run(observe(args.binary, scratch))
+        asyncio.run(observe(args.binary, scratch, args.client_binary))

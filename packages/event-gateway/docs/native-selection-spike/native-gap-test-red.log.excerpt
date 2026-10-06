@@ -1,0 +1,10 @@
+  TRY 1 FAIL [   0.068s] (─────────) codex-tui app::selection_witness::tests::delayed_loop_revokes_before_renewal
+    test app::selection_witness::tests::delayed_loop_revokes_before_renewal ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5592 filtered out; finished in 0.05s
+    delayed loop must revoke before renewing
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::tests::delayed_loop_revokes_before_renewal
+    test app::selection_witness::tests::delayed_loop_revokes_before_renewal ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5592 filtered out; finished in 0.02s
+    delayed loop must revoke before renewing
+     Summary [   0.139s] 1 test run: 0 passed, 1 failed, 5620 skipped
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::tests::delayed_loop_revokes_before_renewal
