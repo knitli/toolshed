@@ -158,32 +158,41 @@ async def observe(binary, root):
                     parts = (await asyncio.to_thread(input)).split(' ', 2)
                 except EOFError:
                     break
-                command = parts[0]
-                if command == 'quit':
-                    break
-                if command == 'launch':
-                    launch(parts[1], parts[2])
-                elif command == 'send':
-                    os.write(peers[parts[1]][1], parts[2].encode().decode('unicode_escape').encode())
-                elif command == 'read':
-                    print(repr(ui.pop(parts[1], '')), flush=True)
-                elif command == 'kill':
-                    peers[parts[1]][0].kill()
-                elif command == 'restart':
-                    stop(back)
-                    back = await backend()
-                elif command == 'mark':
-                    record(0, parts[1], {})
+                try:
+                    command = parts[0]
+                    if command == 'quit':
+                        break
+                    if command == 'launch':
+                        launch(parts[1], parts[2])
+                    elif command == 'send':
+                        os.write(peers[parts[1]][1], parts[2].encode().decode('unicode_escape').encode())
+                    elif command == 'read':
+                        print(repr(ui.pop(parts[1], '')), flush=True)
+                    elif command == 'kill':
+                        peers[parts[1]][0].kill()
+                    elif command == 'restart':
+                        stop(back)
+                        back = await backend()
+                    elif command == 'mark':
+                        record(0, parts[1], {})
+                    else:
+                        raise ValueError('unknown command')
+                except (IndexError, KeyError, ValueError):
+                    print('Invalid command or client name. Use: launch NAME new|UUID; '
+                          'send NAME ESCAPED_KEYS; read NAME; kill NAME; restart; '
+                          'mark CASE; quit', flush=True)
     finally:
         for process in children:
             stop(process)
         for _, descriptor in peers.values():
             os.close(descriptor)
         for socket, identity in sockets.items():
-            if socket.exists():
+            try:
                 stat = socket.stat()
                 if (stat.st_dev, stat.st_ino) == identity:
-                    socket.unlink()
+                    socket.unlink(missing_ok=True)
+            except FileNotFoundError:
+                pass  # The owned backend may already have removed its socket.
         for alias in ('backend.sock', 'proxy.sock'):
             (root / alias).unlink(missing_ok=True)
         shutil.rmtree(home)
