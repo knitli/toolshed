@@ -101,6 +101,13 @@ class Gateway:
             and 0 < permit.expires_at - permit.issued_at <= 5
         )
 
+    async def _available_adapter(self, mapping):
+        try:
+            adapter = self.adapter_factory(mapping)
+            return adapter if await adapter.check() == "available" else None
+        except (Refused, CodexError, OSError):
+            return None
+
     async def dispatch(self, delivery_id):
         envelope = self.store.delivery_envelope(delivery_id)
         if envelope is None:
@@ -114,12 +121,8 @@ class Gateway:
             mapping = self.store.get_attachment(runtime)
             if not mapping or mapping["leaseExpiresAt"] <= self.clock():
                 return {**row, "reason": "client_unavailable"}
-            try:
-                adapter = self.adapter_factory(mapping)
-                available = await adapter.check() == "available"
-            except (Refused, CodexError, OSError):
-                available = False
-            if not available:
+            adapter = await self._available_adapter(mapping)
+            if adapter is None:
                 return {**row, "reason": "client_unavailable_or_busy"}
             try:
                 permit = await asyncio.wait_for(self.authority.admit(envelope), 8)
