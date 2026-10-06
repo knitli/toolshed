@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "knitli-event-gateway"
+version = "0.1.0"
+description = "Local event gateway for governed agent delivery."
+requires-python = ">=3.13"
+license = "MIT OR Apache-2.0"
+dependencies = [
+  "cryptography>=46,<49",
+  "jsonschema>=4.25,<5",
+  "websockets>=15,<17",
+]
+
+[project.scripts]
+knitli-event-gateway = "event_gateway.cli:main"
+
+[dependency-groups]
+dev = ["ruff>=0.14,<1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/event_gateway"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"contracts/event-v1" = "event_gateway/contracts/event-v1"
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

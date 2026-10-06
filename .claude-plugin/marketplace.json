@@ -47,7 +47,8 @@
       ]
     },
     "extraScopes": [
-      "openapi-mcp"
+      "openapi-mcp",
+      "event-gateway"
     ]
   },
   "metadata": {

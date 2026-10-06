@@ -10,3 +10,6 @@ packages/*/dist/
 __pycache__/
 .venv/
 
+packages/event-gateway/build/
+packages/event-gateway/*.egg-info/
+packages/event-gateway/.ruff_cache/

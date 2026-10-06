@@ -15,7 +15,9 @@
       "**/*.json",
       "**/*.jsonc",
       "!!**/node_modules",
-      "!!**/dist"
+      "!!**/dist",
+      // Immutable upstream contract bytes are verified by SHA-256.
+      "!!packages/event-gateway/contracts/**"
     ]
   },
   "formatter": {
