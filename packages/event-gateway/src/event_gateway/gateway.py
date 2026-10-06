@@ -11,6 +11,7 @@ import re
 from .codex import CodexError
 from .protocol import parse_envelope, matches_delivery_id
 from .security import verify
+from .store import StoreError
 
 
 class Refused(ValueError):
@@ -114,6 +115,16 @@ class Gateway:
             return None
         return adapter if await self._adapter_available(adapter) else None
 
+    def _begin_submission(self, delivery_id):
+        try:
+            if self.store.begin_submit(delivery_id):
+                return None
+            return self.store.delivery(delivery_id)
+        except StoreError as exc:
+            if exc.code != "capacity":
+                raise
+            return {**self.store.delivery(delivery_id), "reason": self.store.blocked_reason}
+
     async def dispatch(self, delivery_id):
         envelope = self.store.delivery_envelope(delivery_id)
         if envelope is None:
@@ -144,8 +155,9 @@ class Gateway:
                 return {**row, "reason": "admission_fenced"}
             if not self._permit_valid(permit, envelope):
                 return {**row, "reason": "admission_expired"}
-            if not self.store.begin_submit(delivery_id):
-                return self.store.delivery(delivery_id)
+            refused = self._begin_submission(delivery_id)
+            if refused is not None:
+                return refused
             try:
                 # Submission already durably started: EVERY error is uncertain.
                 result = await asyncio.wait_for(adapter.submit(envelope), 10)

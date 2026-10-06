@@ -57,7 +57,13 @@ check and a node-wide session cap contrary to the pinned per-agent policy. Both
 regressions went red; checks now contain expected client failures and session
 admission counts the incoming agent's live mappings, including transfer capacity.
 
-Final local suite: 65 Python tests pass. Review upgraded cryptography to 50.0.2;
+A later maintainer review reproduced storage-capacity failure escaping dispatch;
+its regression now returns a queued capacity refusal without a native call and
+successfully retries after capacity returns. A separate test proves that the
+permit can expire during the last awaited client check, requiring the subsequent
+expiry guard.
+
+Final local suite: 67 Python tests pass. Review upgraded cryptography to 50.0.2;
 the installed signature/consumer checks and both native read-only probes were
 repeated with that lock. Module summaries use one line to satisfy the conflicting
 multiline documentation rules, retaining the explanations in comments.

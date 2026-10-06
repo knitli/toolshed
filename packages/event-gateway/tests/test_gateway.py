@@ -155,6 +155,25 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.gateway.dispatch(ident))['status'], 'submitted')
         self.assertEqual(self.native_calls, 1)
 
+    async def test_permit_expiry_during_final_client_check_is_fenced(self):
+        ident = self.accept()['deliveryId']
+        self.after_check = lambda count: setattr(self, 'now', self.now + 6) if count == 2 else None
+        row = await self.gateway.dispatch(ident)
+        self.assertEqual(row['reason'], 'admission_expired')
+        self.assertEqual(row['status'], 'queued')
+        self.assertEqual(self.native_calls, 0)
+
+    async def test_submission_storage_capacity_stays_queued(self):
+        ident = self.accept()['deliveryId']
+        self.store.max_bytes = self.store._size() + 1
+        row = await self.gateway.dispatch(ident)
+        self.assertEqual(row['status'], 'queued')
+        self.assertEqual(row['reason'], 'storage_capacity')
+        self.assertEqual(self.native_calls, 0)
+        self.store.max_bytes = 64 * 1024 * 1024
+        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'submitted')
+        self.assertEqual(self.native_calls, 1)
+
     async def test_lost_native_response_is_ambiguous_and_never_replayed(self):
         ident = self.accept()['deliveryId']
         self.drop_response = True
