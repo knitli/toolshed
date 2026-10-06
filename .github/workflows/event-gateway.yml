@@ -44,7 +44,7 @@ jobs:
           path: .contract-source
           persist-credentials: false
       - name: Verify pinned upstream contract
-        run: uv run --frozen python scripts/sync_contract.py --check --fetch --repository ../../.contract-source
+        run: uv run --frozen python scripts/sync_contract.py --check --fetch --repository "$GITHUB_WORKSPACE/.contract-source"
       - name: Lint Python
         run: uv run --frozen ruff check src tests scripts
       - name: Test gateway
