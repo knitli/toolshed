@@ -61,9 +61,16 @@ uv run --frozen python -m unittest discover -s tests -v
 ```
 
 An update requires an explicit reviewed 40-character commit; never a branch or
-tag. CI verifies the vendored bytes against upstream Git blobs on Linux and Mac,
-runs the shared corpus and local fault tests, and installs the wheel outside
-the repository. Snapshot verification does not prove that every Python semantic
+tag. Ordinary Linux/macOS PR CI checks the local manifest hashes offline, runs
+the shared corpus and local fault tests, and installs the wheel outside the
+repository. It receives no App key. A separate trusted-base workflow compares
+five fixed candidate blobs with the reviewed pin and source hashes, treating
+all candidate files as data and publishing a status against the exact head SHA.
+Those hashes were independently verified against the immutable upstream Git
+blobs. Updating this trusted policy requires a reviewed base change before a
+new snapshot can pass. The new trusted workflow first activates after this
+introducing PR merges; its inline verifier is tested locally for this bootstrap.
+Snapshot verification does not prove that every Python semantic
 edge matches TypeScript: the canonical corpus still lacks portable semantic
 boundary vectors. Expanding that corpus and running both validators is an open
 cross-repository qualification gate.

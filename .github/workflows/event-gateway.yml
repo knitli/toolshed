@@ -26,25 +26,8 @@ jobs:
           version: "0.12.15"
           python-version: "3.13.14"
       - run: uv sync --frozen
-      - name: Read-only token for private contract repository
-        id: contract-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
-        with:
-          client-id: ${{ secrets.KNITLI_AGENT_CLIENT_ID }}
-          private-key: ${{ secrets.KNITLI_AGENT_PRIVATE_KEY }}
-          owner: knitli
-          repositories: knitli-site
-          permission-contents: read
-      - name: Check out the immutable contract source
-        uses: actions/checkout@v7
-        with:
-          repository: knitli/knitli-site
-          ref: cd7b288daaccef6c042ad23598668afe2e220925
-          token: ${{ steps.contract-token.outputs.token }}
-          path: .contract-source
-          persist-credentials: false
-      - name: Verify pinned upstream contract
-        run: uv run --frozen python scripts/sync_contract.py --check --fetch --repository "$GITHUB_WORKSPACE/.contract-source"
+      - name: Verify vendored contract hashes without credentials
+        run: uv run --frozen python scripts/sync_contract.py --check
       - name: Lint Python
         run: uv run --frozen ruff check src tests scripts
       - name: Test gateway

@@ -63,7 +63,18 @@ successfully retries after capacity returns. A separate test proves that the
 permit can expire during the last awaited client check, requiring the subsequent
 expiry guard.
 
-Final local suite: 67 Python tests pass. Review upgraded cryptography to 50.0.2;
+The security-focused review found reusable App-key exposure in PR-controlled CI.
+Ordinary PR tests now verify local hashes offline without that key. A new
+trusted-base workflow reads five fixed candidate blobs as data and compares
+against a hardcoded reviewed pin/hash policy, without fetching the private
+repository or executing candidate code. It publishes pending/pass/fail against
+the validated candidate SHA. Its four verifier checks reject modified bytes,
+forged pin/repository/version, mutable heads, oversized responses and redirects.
+The trusted hashes were independently rechecked against the upstream Git blobs.
+This workflow first activates after this introducing PR merges; no live trusted
+workflow run or branch-protection configuration is claimed for the bootstrap.
+
+Final local suite: 71 Python tests pass. Review upgraded cryptography to 50.0.2;
 the installed signature/consumer checks and both native read-only probes were
 repeated with that lock. Module summaries use one line to satisfy the conflicting
 multiline documentation rules, retaining the explanations in comments.
