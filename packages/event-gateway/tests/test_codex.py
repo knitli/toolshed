@@ -9,7 +9,7 @@ from unittest.mock import patch
 from websockets.asyncio.server import unix_serve
 from websockets.exceptions import ConnectionClosed
 
-from event_gateway.codex import CodexAdapter, CodexError, CodexRpc, MAX_MESSAGE
+from event_gateway.codex import CodexAdapter, CodexError, CodexRpc, MAX_MESSAGE, _native_id
 
 
 class CodexTests(unittest.IsolatedAsyncioTestCase):
@@ -71,6 +71,29 @@ class CodexTests(unittest.IsolatedAsyncioTestCase):
 
     async def present(self, mapping):
         return True
+
+    async def test_native_id_rule_matches_receipt_boundaries(self):
+        for value in ('A', 'receipt.part:1-2_3', 'a' * 128):
+            with self.subTest(valid=value):
+                self.assertEqual(_native_id(value), value)
+        for value in ('_receipt', '-receipt', 'a' * 129, '', 'a b', None, True):
+            with self.subTest(invalid=value):
+                with self.assertRaisesRegex(CodexError, 'invalid_native_response'):
+                    _native_id(value)
+
+    async def test_invalid_mapping_has_bounded_error(self):
+        mappings = [None, [], {}, {'nativeSocket': self.path},
+                    {'nativeThreadId': 'thread-A'},
+                    {'nativeSocket': None, 'nativeThreadId': 'thread-A'},
+                    {'nativeSocket': 42, 'nativeThreadId': 'thread-A'},
+                    {'nativeSocket': 'relative.sock', 'nativeThreadId': 'thread-A'},
+                    {'nativeSocket': self.path, 'nativeThreadId': None},
+                    {'nativeSocket': self.path, 'nativeThreadId': '_thread'}]
+        for mapping in mappings:
+            with self.subTest(mapping=mapping):
+                with self.assertRaisesRegex(CodexError, 'invalid_native_mapping'):
+                    CodexAdapter(mapping)
+        self.assertEqual(self.requests, [])
 
     async def test_initialize_read_and_refuse_actions(self):
         self.server_action = True

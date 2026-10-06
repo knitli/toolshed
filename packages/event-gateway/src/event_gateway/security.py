@@ -7,6 +7,8 @@
 # base64url raw Ed25519 bytes; private keys never leave their owner-only file.
 
 import base64
+import fcntl
+import tempfile
 import os
 import re
 import stat
@@ -30,7 +32,7 @@ def ensure_private_directory(path):
     for component in (*reversed(path.parents), path):
         if component.is_symlink():
             raise SecurityError('unsafe_state_directory')
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        component.mkdir(mode=0o700, exist_ok=True)
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
         raise SecurityError('unsafe_state_directory')
@@ -40,39 +42,47 @@ def ensure_private_directory(path):
 def load_or_create_signing_key(path):
     path = Path(path)
     ensure_private_directory(path.parent)
+    directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    except FileExistsError:
-        pass
+        # Serialize creators so a concurrent enrollment never replaces a key.
+        fcntl.flock(directory_fd, fcntl.LOCK_EX)
+        if not os.path.lexists(path):
+            key = Ed25519PrivateKey.generate()
+            data = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+            fd, temporary = tempfile.mkstemp(prefix='.node-key-', dir=path.parent)
+            try:
+                with os.fdopen(fd, 'wb') as stream:
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.rename(temporary, path)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+        os.fsync(directory_fd)
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, 'rb') as stream:
+                info = os.fstat(stream.fileno())
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_nlink != 1
+                    or info.st_size > 4096
+                ):
+                    raise SecurityError('unsafe_signing_key')
+                key = serialization.load_pem_private_key(stream.read(4097), password=None)
+                if not isinstance(key, Ed25519PrivateKey):
+                    raise SecurityError('invalid_signing_key')
+                return key
+        except (OSError, ValueError, TypeError) as exc:
+            if isinstance(exc, SecurityError):
+                raise
+            raise SecurityError('invalid_signing_key') from None
     except OSError:
         raise SecurityError('invalid_signing_key') from None
-    else:
-        key = Ed25519PrivateKey.generate()
-        data = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
-        with os.fdopen(fd, 'wb') as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-    try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        with os.fdopen(fd, 'rb') as stream:
-            info = os.fstat(stream.fileno())
-            if (
-                not stat.S_ISREG(info.st_mode)
-                or info.st_uid != os.getuid()
-                or stat.S_IMODE(info.st_mode) != 0o600
-                or info.st_nlink != 1
-                or info.st_size > 4096
-            ):
-                raise SecurityError('unsafe_signing_key')
-            key = serialization.load_pem_private_key(stream.read(4097), password=None)
-            if not isinstance(key, Ed25519PrivateKey):
-                raise SecurityError('invalid_signing_key')
-            return key
-    except (OSError, ValueError, TypeError) as exc:
-        if isinstance(exc, SecurityError):
-            raise
-        raise SecurityError('invalid_signing_key') from None
+    finally:
+        os.close(directory_fd)
 
 
 def _encode(value):

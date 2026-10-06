@@ -40,7 +40,7 @@ def _socket_identity(path):
 
 
 def _native_id(value):
-    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,512}', value):
+    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}', value):
         raise CodexError('invalid_native_response')
     return value
 
@@ -108,9 +108,18 @@ class CodexRpc:
 class CodexAdapter:
     def __init__(self, mapping, *, test_presence_verifier=None):
         """Bind native session metadata without granting production presence."""
+        if not isinstance(mapping, dict):
+            raise CodexError('invalid_native_mapping')
+        socket_path = mapping.get('nativeSocket')
+        if (not isinstance(socket_path, str) or not Path(socket_path).is_absolute()
+                or '\0' in socket_path):
+            raise CodexError('invalid_native_mapping')
+        try:
+            self.thread_id = _native_id(mapping.get('nativeThreadId'))
+        except CodexError:
+            raise CodexError('invalid_native_mapping') from None
         self.mapping = dict(mapping)
-        self.rpc = CodexRpc(mapping['nativeSocket'])
-        self.thread_id = _native_id(mapping['nativeThreadId'])
+        self.rpc = CodexRpc(socket_path)
         # This injection is for fixtures, never populated from enrollment/config.
         self._test_presence_verifier = test_presence_verifier
 

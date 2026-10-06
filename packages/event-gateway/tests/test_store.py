@@ -162,6 +162,31 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(StoreError):
             self.store.put_attachment(self.mapping)
 
+    def test_expired_leases_release_slots_and_preserve_generation_tombstones(self):
+        expired = dict(self.mapping, leaseExpiresAt=NOW + 1)
+        self.store.put_attachment(expired)
+        for _ in range(2):
+            self.store.put_attachment(dict(expired, runtimeId=str(uuid.uuid4())))
+        self.now += 2
+        fresh = dict(self.mapping, runtimeId=str(uuid.uuid4()))
+        self.store.put_attachment(fresh)
+        self.assertEqual(self.store.list_attachments(), [fresh])
+        self.assertEqual(self.store.status()["attachments"], 1)
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        with self.assertRaises(StoreError):
+            self.store.put_attachment(self.mapping)
+        advanced = dict(
+            self.mapping, attachmentGeneration=self.mapping["attachmentGeneration"] + 1
+        )
+        self.store.put_attachment(advanced)
+        third = dict(self.mapping, runtimeId=str(uuid.uuid4()))
+        self.store.put_attachment(third)
+        with self.assertRaisesRegex(StoreError, "session_capacity"):
+            self.store.put_attachment(dict(self.mapping, runtimeId=str(uuid.uuid4())))
+        self.store.put_attachment(dict(advanced, leaseExpiresAt=NOW + 7200))
+        self.assertEqual(self.store.status()["attachments"], 3)
+
     def test_capacity_and_pilot_limit(self):
         self.store.max_rows = 1
         ident = self.store.accept(self.event)["deliveryId"]
@@ -326,6 +351,31 @@ class StoreTests(unittest.TestCase):
         )
         with self.assertRaises(StoreError):
             self.store.accept(self.event)
+
+    def test_reopen_reclaims_expired_settled_rows_before_capacity_check(self):
+        for _ in range(100):
+            ident = self.store.accept(self.new_event())["deliveryId"]
+            self.store.finish(ident, "stale")
+        ambiguous = self.store.accept(self.new_event())["deliveryId"]
+        self.store.begin_submit(ambiguous)
+        self.store.finish(ambiguous, "ambiguous")
+        unacked = self.store.accept(self.new_event())["deliveryId"]
+        self.store.begin_submit(unacked)
+        self.store.finish(unacked, "observed", submission_id="queue", turn_id="turn")
+        self.store.close()
+        self.assertGreater((self.path / "ledger.sqlite").stat().st_size, 131072)
+        self.now += RETENTION + 120
+        self.store = Store(self.path, clock=self.clock, max_bytes=131072)
+        self.assertIsNone(self.store.get(ident))
+        self.assertEqual(self.store.get(ambiguous)["status"], "ambiguous")
+        self.assertEqual(self.store.get(unacked)["status"], "observed")
+        self.assertLessEqual(self.store.status()["bytes"], 131072)
+
+    def test_nested_state_directories_are_private(self):
+        nested = Path(self.tmp.name).resolve() / "new-parent" / "inner" / "state"
+        with Store(nested):
+            for directory in (nested, nested.parent, nested.parent.parent):
+                self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
 
     def test_private_directory_single_writer_and_symlinks(self):
         with self.assertRaisesRegex(StoreError, "writer_locked"):

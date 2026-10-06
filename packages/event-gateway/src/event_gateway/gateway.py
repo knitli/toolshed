@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import time
 import re
 
+from .codex import CodexError
 from .protocol import parse_envelope, matches_delivery_id
 from .security import verify
 
@@ -113,8 +114,12 @@ class Gateway:
             mapping = self.store.get_attachment(runtime)
             if not mapping or mapping["leaseExpiresAt"] <= self.clock():
                 return {**row, "reason": "client_unavailable"}
-            adapter = self.adapter_factory(mapping)
-            if await adapter.check() != "available":
+            try:
+                adapter = self.adapter_factory(mapping)
+                available = await adapter.check() == "available"
+            except (Refused, CodexError, OSError):
+                available = False
+            if not available:
                 return {**row, "reason": "client_unavailable_or_busy"}
             try:
                 permit = await asyncio.wait_for(self.authority.admit(envelope), 8)
@@ -138,8 +143,13 @@ class Gateway:
                 submission_id = result["submission_id"]
                 if not valid_native_id(submission_id):
                     raise Refused("invalid_native_receipt")
+                # Detach/transfer can fence the in-flight native call. Retain
+                # its authentic receipt without undoing the ambiguous state.
+                state = self.store.delivery(delivery_id)["status"]
                 row = self.store.finish(
-                    delivery_id, "submitted", submission_id=submission_id
+                    delivery_id,
+                    "ambiguous" if state == "ambiguous" else "submitted",
+                    submission_id=submission_id,
                 )
             except asyncio.CancelledError:
                 self.store.finish(
@@ -150,7 +160,8 @@ class Gateway:
                 return self.store.finish(
                     delivery_id, "ambiguous", reason="native_outcome_unknown"
                 )
-            await self._acknowledge(envelope, result)
+            if row["status"] == "submitted":
+                await self._acknowledge(envelope, result)
             return row
 
     async def _acknowledge(self, envelope, evidence):
@@ -164,57 +175,71 @@ class Gateway:
         return True
 
     async def reconcile(self, delivery_id):
-        row = self.store.delivery(delivery_id)
-        if not row or row["status"] not in ("submitted", "ambiguous", "observed"):
-            return row
         envelope = self.store.delivery_envelope(delivery_id)
-        receipt = self.store.native_receipt(delivery_id) or {}
-        if row["status"] == "observed":
+        if envelope is None:
+            return None
+        lock = self._locks.setdefault(envelope["runtimeId"], asyncio.Lock())
+        async with lock:
+            row = self.store.delivery(delivery_id)
+            if not row or row["status"] not in ("submitted", "ambiguous", "observed"):
+                return row
+            receipt = self.store.native_receipt(delivery_id) or {}
+            # Stored receipts can retry historical ACKs even after client exit.
             if receipt.get("ack_pending"):
-                await self._acknowledge(envelope, {**receipt, "status": "observed"})
-            return self.store.delivery(delivery_id)
-        mapping = self.store.get_attachment(envelope["runtimeId"])
-        if not mapping:
-            return {**row, "reason": "client_unavailable"}
-        adapter = self.adapter_factory(mapping)
-        try:
-            result = await asyncio.wait_for(
-                adapter.reconcile(
-                    delivery_id, known_submission_id=receipt.get("submission_id")
-                ),
-                10,
-            )
-        except Exception:
-            return {**row, "reason": "reconciliation_unknown"}
-        if result.get("status") in ("submitted", "observed") and not valid_native_id(
-            result.get("submission_id")
-        ):
-            return {**row, "reason": "invalid_native_receipt"}
-        if (
-            receipt.get("submission_id") is not None
-            and result.get("status") in ("submitted", "observed")
-            and result.get("submission_id") != receipt["submission_id"]
-        ):
-            return {**row, "reason": "native_receipt_conflict"}
-        if result.get("status") == "observed" and not valid_native_id(
-            result.get("turn_id")
-        ):
-            return {**row, "reason": "invalid_native_receipt"}
-        if result.get("status") == "observed":
-            row = self.store.finish(
-                delivery_id,
-                "observed",
-                submission_id=result.get("submission_id"),
-                turn_id=result["turn_id"],
-            )
-        elif result.get("status") == "submitted":
-            # Queue evidence can recover a lost response's authentic receipt;
-            # preserve ambiguity until a native turn is correlated.
-            self.store.finish(
-                delivery_id, row["status"], submission_id=result["submission_id"]
-            )
-        # Known queued evidence settles submitted only; ambiguity stays fenced
-        # until consumption is correlated. No absent-history retry.
-        if result.get("status") in ("submitted", "observed"):
-            await self._acknowledge(envelope, result)
-        return row
+                await self._acknowledge(envelope, {**receipt, "status": row["status"]})
+            row = self.store.delivery(delivery_id)
+            if row["status"] == "observed":
+                return row
+            mapping = self.store.get_attachment(envelope["runtimeId"])
+            if (
+                not mapping
+                or mapping["leaseExpiresAt"] <= self.clock()
+                or any(mapping.get(key) != envelope.get(key) for key in FENCES[:7])
+            ):
+                return {**row, "reason": "attachment_fenced"}
+            try:
+                adapter = self.adapter_factory(mapping)
+                result = await asyncio.wait_for(
+                    adapter.reconcile(
+                        delivery_id, known_submission_id=receipt.get("submission_id")
+                    ),
+                    10,
+                )
+            except Exception:
+                return {**row, "reason": "reconciliation_unknown"}
+            # Native evidence belongs only to the unchanged, live destination.
+            current = self.store.get_attachment(envelope["runtimeId"])
+            if current != mapping or current["leaseExpiresAt"] <= self.clock():
+                return {**self.store.delivery(delivery_id), "reason": "attachment_fenced"}
+            if result.get("status") in ("submitted", "observed") and not valid_native_id(
+                result.get("submission_id")
+            ):
+                return {**row, "reason": "invalid_native_receipt"}
+            if (
+                receipt.get("submission_id") is not None
+                and result.get("status") in ("submitted", "observed")
+                and result.get("submission_id") != receipt["submission_id"]
+            ):
+                return {**row, "reason": "native_receipt_conflict"}
+            if result.get("status") == "observed" and not valid_native_id(
+                result.get("turn_id")
+            ):
+                return {**row, "reason": "invalid_native_receipt"}
+            if result.get("status") == "observed":
+                row = self.store.finish(
+                    delivery_id,
+                    "observed",
+                    submission_id=result.get("submission_id"),
+                    turn_id=result["turn_id"],
+                )
+            elif result.get("status") == "submitted":
+                # Queue evidence can recover a lost response's authentic receipt;
+                # preserve ambiguity until a native turn is correlated.
+                self.store.finish(
+                    delivery_id, row["status"], submission_id=result["submission_id"]
+                )
+            # Known queued evidence settles submitted only; ambiguity stays fenced
+            # until consumption is correlated. No absent-history retry.
+            if result.get("status") in ("submitted", "observed"):
+                await self._acknowledge(envelope, result)
+            return row

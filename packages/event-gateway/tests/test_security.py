@@ -1,6 +1,10 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+from concurrent.futures import ThreadPoolExecutor
+import os
+import stat
 
 from event_gateway.security import (SecurityError, ensure_private_directory,
     load_or_create_signing_key, public_key_text, sign, verify)
@@ -26,6 +30,42 @@ class SecurityTests(unittest.TestCase):
             ]:
                 with self.assertRaisesRegex(SecurityError, '^invalid_signature$'):
                     verify(data, sig, trusted, audience)
+
+    def test_failed_initial_write_leaves_no_published_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / 'state/key.pem'
+            with patch('event_gateway.security.os.fsync', side_effect=OSError('write failed')):
+                with self.assertRaises((SecurityError, OSError)):
+                    load_or_create_signing_key(path)
+            self.assertFalse(path.exists())
+            self.assertEqual(list(path.parent.iterdir()), [])
+            key = load_or_create_signing_key(path)
+            self.assertEqual(public_key_text(key), public_key_text(load_or_create_signing_key(path)))
+
+    def test_concurrent_creation_and_directory_sync(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / 'key.pem'
+            synced = []
+            original_fsync = os.fsync
+
+            def record_fsync(fd):
+                synced.append(stat.S_ISDIR(os.fstat(fd).st_mode))
+                original_fsync(fd)
+
+            with patch('event_gateway.security.os.fsync', side_effect=record_fsync):
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    keys = list(executor.map(lambda _: public_key_text(load_or_create_signing_key(path)), range(8)))
+            self.assertEqual(len(set(keys)), 1)
+            self.assertIn(True, synced)
+            self.assertEqual(list(path.parent.iterdir()), [path])
+
+    def test_nested_state_directories_are_private(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            leaf = root / 'first/second/state'
+            ensure_private_directory(leaf)
+            for component in (root / 'first', root / 'first/second', leaf):
+                self.assertEqual(stat.S_IMODE(component.stat().st_mode), 0o700)
 
     def test_unsafe_files(self):
         with tempfile.TemporaryDirectory() as directory:

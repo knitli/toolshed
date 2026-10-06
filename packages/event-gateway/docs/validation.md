@@ -44,7 +44,15 @@ Scratch copies or in-memory module mutations left production source intact:
 | Remove boolean RPC-ID exclusion or native-version guard | Each focused transport test fails; unchanged source passes all 12 |
 | Accept a different or missing consumer-generation fence | Two store regressions initially accept stale work; fixed equality/transfer/tombstone checks pass |
 
-Final local suite: 47 Python tests pass. Review upgraded cryptography to 50.0.2;
+Review round 2 reproduced receipt loss on detach during native submission,
+reconciliation across destination/lease changes, submitted ACK recovery after
+client exit, expired session-slot retention, interrupted key writes, invalid
+adapter metadata/ID handling, oversized unterminated headers, malformed contract
+manifests, and startup retention reclamation. Targeted regressions went red
+before each correction and green afterward. New private-directory ancestors are
+0700; concurrent key creators observe one fully fsynced, atomically published key.
+
+Final local suite: 63 Python tests pass. Review upgraded cryptography to 50.0.2;
 the installed signature/consumer checks and both native read-only probes were
 repeated with that lock. Module summaries use one line to satisfy the conflicting
 multiline documentation rules, retaining the explanations in comments.

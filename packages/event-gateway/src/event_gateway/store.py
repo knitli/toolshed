@@ -46,12 +46,12 @@ class Store:
         self.blocked_reason = None
         if max_rows < 1 or max_bytes < 1:
             raise ValueError("positive store limits required")
-        # Reject symlinks in every path component, including existing ancestors.
-        for part in (self.path, *self.path.parents):
-            if part.is_symlink():
-                raise StoreError("unsafe_state")
-        self.path.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self._check(self.path, directory=True)
+        from .security import SecurityError, ensure_private_directory
+
+        try:
+            self.path = ensure_private_directory(self.path)
+        except SecurityError as exc:
+            raise StoreError("unsafe_state") from exc
         try:
             self.lock = os.open(
                 self.path / "writer.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600
@@ -99,6 +99,12 @@ class Store:
                     "UPDATE deliveries SET state='ambiguous', reason='restart_during_submit', updated=? WHERE state='submitting'",
                     (self.clock(),),
                 )
+            reclaimed = self.cleanup()
+            if reclaimed and self._size() > self.max_bytes:
+                # DELETE frees SQLite pages but does not shrink the database file.
+                self.db.execute("VACUUM")
+                self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                self.db.execute(f"PRAGMA max_page_count={pages}")
             self._capacity()
         except BaseException:
             self.close()
@@ -163,7 +169,7 @@ class Store:
         return [
             value
             for row in self.db.execute("SELECT data FROM attachments ORDER BY runtime")
-            if (value := json.loads(row[0]))["leaseExpiresAt"] != 0
+            if (value := json.loads(row[0]))["leaseExpiresAt"] > self.clock()
         ]
 
     def put_attachment(self, mapping):
@@ -197,12 +203,12 @@ class Store:
             "SELECT data FROM attachments WHERE runtime=?", (mapping["runtimeId"],)
         ).fetchone()
         old = json.loads(row[0]) if row else None
-        if (not old or old["leaseExpiresAt"] == 0) and len(
+        if (not old or old["leaseExpiresAt"] <= self.clock()) and len(
             self.list_attachments()
         ) >= 3:
             raise StoreError("capacity", "session_capacity")
         if old:
-            if old["leaseExpiresAt"] == 0 and all(
+            if old["leaseExpiresAt"] <= self.clock() and all(
                 mapping.get(k, 0) == old.get(k, 0) for k in generations
             ):
                 raise StoreError("stale")

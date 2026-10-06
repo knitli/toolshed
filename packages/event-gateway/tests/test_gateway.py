@@ -7,6 +7,7 @@ import unittest
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from event_gateway.codex import CodexAdapter
 from event_gateway.gateway import Gateway, Permit, Refused, identity
 from event_gateway.security import SecurityError, sign
 from event_gateway.store import Store, IDENTITY
@@ -39,6 +40,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.after_check = None
         self.custom_submit = None
         self.receipt = {'status': 'unknown'}
+        self.reconcile_calls = 0
+        self.after_reconcile = None
         self.gateway = Gateway(self.store, self, lambda mapping: self,
                                audience='test-gateway', keys={'test': self.key.public_key()},
                                clock=lambda: self.now)
@@ -78,7 +81,20 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             raise OSError('injected lost ACK')
 
     async def reconcile(self, delivery_id, *, known_submission_id=None):
+        self.reconcile_calls += 1
+        if self.after_reconcile:
+            self.after_reconcile()
         return self.receipt
+
+    async def test_missing_native_mapping_is_bounded_unavailability(self):
+        ident = self.accept()['deliveryId']
+        self.gateway.adapter_factory = CodexAdapter
+        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'queued')
+        self.gateway.adapter_factory = lambda mapping: self
+        await self.gateway.dispatch(ident)
+        self.gateway.adapter_factory = CodexAdapter
+        self.assertEqual((await self.gateway.reconcile(ident))['status'], 'submitted')
+        self.assertEqual(self.native_calls, 1)
 
     async def test_authentication_and_current_attachment_before_dedup(self):
         self.accept()
@@ -143,6 +159,56 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         await self.gateway.dispatch(ident)
         self.assertEqual(self.native_calls, 1)
 
+    async def test_submitted_ack_recovers_without_native_client(self):
+        ident = self.accept()['deliveryId']
+        self.drop_ack = True
+        await self.gateway.dispatch(ident)
+        self.now = self.mapping['leaseExpiresAt'] + 1
+        self.drop_ack = False
+        calls = self.ack_calls
+        self.gateway.adapter_factory = lambda mapping: self.fail('expired client used')
+        await self.gateway.reconcile(ident)
+        self.assertEqual(self.ack_calls, calls + 1)
+        self.assertFalse(self.store.native_receipt(ident)['ack_pending'])
+        self.assertEqual(self.native_calls, 1)
+
+    async def test_reconciliation_rejects_replacement_destination(self):
+        ident = self.accept()['deliveryId']
+        await self.gateway.dispatch(ident)
+        self.mapping['consumerGeneration'] = 1
+        self.store.put_attachment(self.mapping)
+        self.receipt = {'status': 'observed', 'submission_id': 'submission-1', 'turn_id': 'turn-1'}
+        calls = self.ack_calls
+        self.assertEqual((await self.gateway.reconcile(ident))['status'], 'ambiguous')
+        self.assertEqual(self.reconcile_calls, 0)
+        self.assertEqual(self.ack_calls, calls)
+        self.assertIsNone(self.store.native_receipt(ident)['turn_id'])
+
+    async def test_reconciliation_fences_destination_changes_across_await(self):
+        ident = self.accept()['deliveryId']
+        await self.gateway.dispatch(ident)
+        self.receipt = {'status': 'observed', 'submission_id': 'submission-1', 'turn_id': 'turn-1'}
+
+        def transfer():
+            self.mapping['consumerGeneration'] = 1
+            self.store.put_attachment(self.mapping)
+
+        self.after_reconcile = transfer
+        calls = self.ack_calls
+        self.assertEqual((await self.gateway.reconcile(ident))['status'], 'ambiguous')
+        self.assertEqual(self.ack_calls, calls)
+        self.assertIsNone(self.store.native_receipt(ident)['turn_id'])
+
+    async def test_reconciliation_fences_lease_expiry_across_await(self):
+        ident = self.accept()['deliveryId']
+        await self.gateway.dispatch(ident)
+        self.receipt = {'status': 'observed', 'submission_id': 'submission-1', 'turn_id': 'turn-1'}
+        self.after_reconcile = lambda: setattr(self, 'now', self.mapping['leaseExpiresAt'] + 1)
+        calls = self.ack_calls
+        self.assertEqual((await self.gateway.reconcile(ident))['status'], 'submitted')
+        self.assertEqual(self.ack_calls, calls)
+        self.assertIsNone(self.store.native_receipt(ident)['turn_id'])
+
     async def test_malformed_observation_cannot_settle_ambiguous_delivery(self):
         ident = self.accept()['deliveryId']
         self.drop_response = True
@@ -184,6 +250,20 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await task
         self.assertEqual(self.store.delivery(ident)['status'], 'ambiguous')
+        await self.gateway.dispatch(ident)
+        self.assertEqual(self.native_calls, 1)
+
+    async def test_detach_during_submit_preserves_successful_native_receipt(self):
+        ident = self.accept()['deliveryId']
+
+        async def detached_submit(envelope):
+            self.store.detach(envelope['runtimeId'])
+            return {'submission_id': 'submission-1'}
+
+        self.custom_submit = detached_submit
+        row = await self.gateway.dispatch(ident)
+        self.assertEqual(row['status'], 'ambiguous')
+        self.assertEqual(self.store.native_receipt(ident)['submission_id'], 'submission-1')
         await self.gateway.dispatch(ident)
         self.assertEqual(self.native_calls, 1)
 

@@ -8,12 +8,20 @@ from .protocol import ProtocolError
 from .security import SecurityError
 from .store import StoreError
 
+MAX_HEADER_BYTES = 8192
+
 
 class Listener:
     def __init__(self, gateway, *, deadline=5, concurrency=8):
         """Bound request processing by absolute time and concurrency."""
         self.gateway, self.deadline = gateway, deadline
         self.concurrency, self.active = concurrency, 0
+
+    async def start(self, host, port):
+        """Construct the server with the same header bound as request validation."""
+        return await asyncio.start_server(
+            self.handle, host, port, limit=MAX_HEADER_BYTES
+        )
 
     async def handle(self, reader, writer):
         if self.active >= self.concurrency:
@@ -23,7 +31,7 @@ class Listener:
         try:
             async with asyncio.timeout(self.deadline):
                 head = await reader.readuntil(b"\r\n\r\n")
-                if len(head) > 8192:
+                if len(head) > MAX_HEADER_BYTES:
                     raise Refused("headers_too_large")
                 lines = head.decode("ascii").split("\r\n")
                 if lines[0] != "POST /v1/deliver HTTP/1.1":

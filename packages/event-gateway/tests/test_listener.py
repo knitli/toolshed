@@ -10,7 +10,7 @@ class ListenerTests(unittest.IsolatedAsyncioTestCase):
         self.accepted = 0
         self.reject_signature = False
         self.listener = Listener(self, deadline=0.1, concurrency=1)
-        self.server = await asyncio.start_server(self.listener.handle, '127.0.0.1', 0, limit=8192)
+        self.server = await self.listener.start('127.0.0.1', 0)
         self.addAsyncCleanup(self.close_server)
 
     async def close_server(self):
@@ -65,6 +65,14 @@ class ListenerTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.01)
         self.assertIn(b'503 Result', await self.request(b''))
         self.assertIn(b'408 Result', await asyncio.wait_for(reader.read(), 1))
+        self.assertEqual(self.accepted, 0)
+
+    async def test_unterminated_oversized_header_rejected_before_deadline(self):
+        self.listener.deadline = 2
+        reader, writer = await self.connect()
+        writer.write(b'POST /v1/deliver HTTP/1.1\r\nX: ' + b'a' * 9000)
+        await writer.drain()
+        self.assertIn(b'400 Result', await asyncio.wait_for(reader.read(), 0.5))
         self.assertEqual(self.accepted, 0)
 
 

@@ -40,16 +40,16 @@ def main():
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--fetch', action='store_true')
     args = parser.parse_args()
-    if args.check:
-        if args.pin:
-            parser.error('--check uses the manifest pin; omit --pin')
-        manifest = json.loads((DEST / 'manifest.json').read_text())
-        pin = manifest['commit']
-    else:
-        pin = args.pin
-    if not isinstance(pin, str) or not re.fullmatch('[0-9a-f]{40}', pin):
-        parser.error('an explicit 40-character lowercase hexadecimal commit is required')
     try:
+        if args.check:
+            if args.pin:
+                parser.error('--check uses the manifest pin; omit --pin')
+            manifest = json.loads((DEST / 'manifest.json').read_text())
+            pin = manifest['commit']
+        else:
+            pin = args.pin
+        if not isinstance(pin, str) or not re.fullmatch('[0-9a-f]{40}', pin):
+            parser.error('an explicit 40-character lowercase hexadecimal commit is required')
         if args.check:
             expected_paths = {'apps/os/packages/event-runtime/' + p for p in SOURCES}
             if manifest['protocolVersion'] != 1 or manifest['repository'] != REPOSITORY or {entry['originalPath'] for entry in manifest['files']} != expected_paths or len(manifest['files']) != len(SOURCES):
@@ -76,7 +76,7 @@ def main():
                 entries.append({'file': name, 'originalPath': 'apps/os/packages/event-runtime/' + source, 'sha256': digest(blob)})
             (DEST / 'manifest.json').write_text(json.dumps({'repository': REPOSITORY, 'commit': pin, 'protocolVersion': 1, 'files': entries}, indent=2) + '\n')
             print('contract exported: ' + pin)
-    except (ValueError, KeyError, OSError, subprocess.CalledProcessError):
+    except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError):
         parser.exit(1, 'contract verification or export failed\n')
 
 
