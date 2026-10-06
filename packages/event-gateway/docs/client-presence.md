@@ -38,6 +38,14 @@ explicitly identify the canonical socket under its user-owned mode-0700 parent.
 The socket itself must be user-owned, mode 0600 or 0700. No socket permissions
 or daemon settings on the user's shared runtime were changed during the probe.
 
+## Stock TUI observation follow-up
+
+The [bounded bridge spike](codex-bridge-spike.md) observed a model-menu cancellation
+with no wire transition, separate picker connections, and transport reconnects.
+A launcher/proxy cannot establish authoritative selected-client presence. Saved-thread
+return and same-thread multi-client selection remain unproven under the no-turn boundary.
+Production presence checks remain disabled.
+
 ## Protocol bounds
 
 Each connection has one absolute ten-second deadline covering connect,

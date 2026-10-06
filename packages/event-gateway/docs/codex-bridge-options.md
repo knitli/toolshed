@@ -1,5 +1,10 @@
 # Codex bridge options
 
+Follow-up: the [bounded stock-TUI spike](codex-bridge-spike.md) now provides live
+evidence rejecting proxy-only selection authority. The investigation below is
+the earlier planning record; its proposed spike has since been executed within
+the documented no-turn limits. Production delivery remains disabled.
+
 Investigation: 2026-10-05. **Production delivery remains disabled.** This document proposes research, not a supported native API or permission to enable delivery. Only this document was changed during the investigation; no active-client messages, model turns, daemon restarts, or configuration changes were performed.
 
 ## Decision
