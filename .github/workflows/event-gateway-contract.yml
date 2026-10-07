@@ -1,7 +1,8 @@
 name: Event Gateway Trusted Contract
 
 # Runs the trusted base workflow. Never check out or execute PR code here.
-# This first activates after the introducing PR has merged into main.
+# To rotate control pins, merge a constants-only change first, then merge a
+# snapshot update matching those trusted constants.
 on:
   pull_request_target:
     branches: [main]
@@ -56,6 +57,13 @@ jobs:
           PREFIX = "apps/os/packages/event-runtime/"
           SNAPSHOT = "packages/event-gateway/contracts/event-v1/"
           LIMIT = 2 * 1024 * 1024
+          CONTROL_SNAPSHOT = "packages/event-gateway/contracts/event-control-v1/"
+          # These trusted-base digests authorize the candidate snapshot. The
+          # manifest commits the OS revision, eight source hashes, Zod and fixtures.
+          CONTROL_PINS = {
+              "fixtures.json": "1f803540d102cecce15a134ff29cc4fa62a83483e07112a3f33036b111b4473c",
+              "manifest.json": "88e5cdb37621417ccc0656932b47f6993f7aaa0d0ac4243391a799461f6ae4d7",
+          }
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -101,10 +109,19 @@ jobs:
                       or manifest != expected):
                   raise ValueError("manifest differs")
 
+          def verify_control_contract(head, pr_token):
+              if not re.fullmatch(r"[0-9a-f]{40}", head):
+                  raise ValueError("invalid head")
+              for name, expected_sha256 in CONTROL_PINS.items():
+                  candidate = read_blob(CONTROL_SNAPSHOT + name, head, pr_token)
+                  if hashlib.sha256(candidate).hexdigest() != expected_sha256:
+                      raise ValueError("control contract differs")
+
           if __name__ == "__main__":
               try:
                   head = os.environ["PR_HEAD_SHA"]
                   verify_contract(head, os.environ["PR_TOKEN"])
+                  verify_control_contract(head, os.environ["PR_TOKEN"])
               except (ValueError, KeyError, TypeError, OSError):
                   raise SystemExit("Contract verification failed; no PR code was executed.") from None
               print("Contract verified for PR head " + head + " against " + PIN)
