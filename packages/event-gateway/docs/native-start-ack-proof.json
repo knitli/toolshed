@@ -2,13 +2,13 @@
   "baseBranchHead": "b4882ca00dbf071d7f143e6c8456a8265140b93a",
   "cloudCommit": "9b1ab6e2c2cf801fe035c766d03f26f1b2f85790",
   "sourceSha256": {
-    "packages/event-gateway/src/event_gateway/store.py": "d16ae122dc7cda06c9c78967e5cb752879e047c196f406de040240508ab13634",
+    "packages/event-gateway/src/event_gateway/store.py": "3f93552273e3c3aa15936b1a1fef7172631fb4fa462cabd19a462def69e345b1",
     "packages/event-gateway/src/event_gateway/gateway.py": "77a172892b1f9e724f825f6102b4f224cb9d61226a76d5dbf056c979b903de6d",
     "packages/event-gateway/src/event_gateway/cloud.py": "f970e6b902cb7e893241d0f914a6a4473f26635a0d790f11c6ed4b30679a3ad6",
-    "packages/event-gateway/src/event_gateway/native.py": "2f972798fdb29095aa30ca12332c43d7aa1ad4ea186d02d8122b2bc430ffbbb2",
-    "packages/event-gateway/tests/test_store.py": "6c96ea2206d65a08af7dd3e8f8603eef841f2e0bca9a599a3aacff7fa6b47bcd",
-    "packages/event-gateway/tests/test_gateway.py": "e10396aa1b5438820b207a3301626fc3af1cacf136e91bfe2e5875f39339055d",
-    "packages/event-gateway/tests/test_cloud.py": "4171d8c235dbed2c8072477f93b228074cb81a701c2ffb79db0edf1ec323c17a",
+    "packages/event-gateway/src/event_gateway/native.py": "64b25aa8f4aa22da10199ce2e3412a6bd209003e07032f72e04ffdda18f7ae2a",
+    "packages/event-gateway/tests/test_store.py": "71f5e2b5e7664af96b5bab8cbb59676526d107860df9ac360e6c3fe1b7206360",
+    "packages/event-gateway/tests/test_gateway.py": "8578f9b4774ea1df5ffe0ff41b70f0bb545cf62c80c824e7a22e8bf04545ff0f",
+    "packages/event-gateway/tests/test_cloud.py": "e67c59c6baa96f034c4789cb3e28470d4b160fbdb98f635d62d747e49ba4777f",
     "packages/event-gateway/tests/test_gateway_integration.py": "482a1d4f126b260826c1a661b449857f0951049d7ec4d3bb2267b8890e6b42d2",
     "packages/event-gateway/tests/test_protocol.py": "31566041015ca2e73070289e9da6c8e05437a52aeef596e0ded2c70fad075e00",
     "packages/event-gateway/contracts/event-control-v1/export.mjs": "131f43cf67b3e441535b32b33eb94775a3e6f9287053ca6a672af0c391ddac77",
@@ -18,9 +18,10 @@
     "packages/event-gateway/contracts/event-v1/protocol.schema.json": "7326d3815b9be28448f47f1e3db5a038c6064ebf39a9f9bed07e452142a710d4",
     "packages/event-gateway/contracts/event-v1/protocol.ts": "076f63539abfe9c78a870a89779178c8b62029dccc1cc8ef0bc51f0c1c6c7917",
     "packages/event-gateway/contracts/event-v1/manifest.json": "c2be6695e1b22d1b1e58059f11283d4ad56226fbdac1c611b8dadbb161c659fd",
-    "packages/event-gateway/README.md": "41000ec7ce3c8928fc861361d3c835808b8b00bf5decaad1db4b4da2fc747fb6",
+    "packages/event-gateway/README.md": "75f07cff4af6153f0d504a8c5cd28e5334aa9cae486046432ce1a2b47e1987c5",
     "packages/event-gateway/docs/native-bridge.md": "7935f1ab1f508a4db41f8f9e4c692124484f5ae15b71a1a3365464c2ccefd0d6",
-    "packages/event-gateway/docs/no-start-settlement.md": "8078def0ca683978c9db939592a58cc0ed2c69914885dd143164b71b97c17304"
+    "packages/event-gateway/docs/no-start-settlement.md": "8078def0ca683978c9db939592a58cc0ed2c69914885dd143164b71b97c17304",
+    "packages/event-gateway/tests/test_native.py": "a02b787373bebd845cb875fec24fe1d29b53a450caa3aa52829f66c201078763"
   },
   "individualCausalCases": [
     {
@@ -156,13 +157,43 @@
       "intendedAssertion": "AssertionError: False is not true",
       "redLogSha256": "0f1e586f386cd5069cbe1d629e81e61eba3e658a41623fef68e72dbe55fd9e2b",
       "greenLogSha256": "9a8abc39adb3abe9f9553e858fed7dceb7b74d32d6bd14346fa1676b3d84883c"
+    },
+    {
+      "case": "acknowledgment_guard",
+      "selector": "test_store.StoreTests.test_native_ack_is_immutable_cas_and_stops_retries_after_restart",
+      "mutation": "if type(acknowledgment) is not dict: -> if not isinstance(acknowledgment, dict):",
+      "intendedAssertion": "StoreError not raised",
+      "redExit": 1,
+      "greenExit": 0,
+      "redLogSha256": "ffc4d5658e910918f3603dcdd38725a99aac498d0d4bc5409c6ab31d27a52bba",
+      "greenLogSha256": "7e755804b06d100fd37c43ac49c7fbbef87cf7d6cc5ea8cd7b71af5fdd031954"
+    },
+    {
+      "case": "cloud_schema",
+      "selector": "test_cloud.CloudTests.test_native_ack_wire_and_node_proof_match_external_vector",
+      "mutation": "ack = parse_acknowledgment(_json(acknowledgment), now_ms=self._clock() * 1000) -> ack = json.loads(_json(acknowledgment))",
+      "intendedAssertion": "CloudError not raised",
+      "redExit": 1,
+      "greenExit": 0,
+      "redLogSha256": "37e499186861f76d24203c3384cafbd69cf55fa6005df46ec84e65576286c7f5",
+      "greenLogSha256": "c96f4a536909f1fcb16e5d3eba009dd3ba711a9b72ffb17a6e7aaf9796bc1a30"
+    },
+    {
+      "case": "result_guard",
+      "selector": "test_store.StoreTests.test_native_ack_is_immutable_cas_and_stops_retries_after_restart",
+      "mutation": "if type(result) is not dict: -> if not isinstance(result, dict):",
+      "intendedAssertion": "StoreError not raised",
+      "redExit": 1,
+      "greenExit": 0,
+      "redLogSha256": "d4e49bbc76e21ea98e546abb722adbf98c38cd5d5c63cc836aaf9995855a3b72",
+      "greenLogSha256": "7e755804b06d100fd37c43ac49c7fbbef87cf7d6cc5ea8cd7b71af5fdd031954"
     }
   ],
   "historicalReasonTagOnlyRedsExcluded": true,
   "fullSourceSuite": {
-    "tests": 172,
-    "passed": 172,
-    "logSha256": "64eb1d66611b20b182555ecf79f33233d0cb2951fb2dfaf41d96a875a14407a2"
+    "tests": 173,
+    "passed": 173,
+    "logSha256": "b253d44f169ad73140ef0dbe8ddfb80d80146c1357c0f26601de2c23af378392"
   },
   "ruff": "src tests scripts pass",
   "canonicalRemoteVerification": {
@@ -237,16 +268,57 @@
     "closedNativeAckParsed": true,
     "automaticWakeEnabled": false,
     "ownerClientChanged": false,
-    "wheelSha256": "86fa2c555a78d281b531be943d1d77a5b8b5a96d573603b7bc976b623811f2f7"
+    "wheelSha256": "77c2cbf985f9874bf6c8915c9d2cfd7178b751709e70f4e7186a5bcb5e0bbf61"
   },
   "installedIntegrationChecks": [
     "Node ACK body/canonical proof vector",
-    "real CloudClient/NativeBridgeAdapter/Store no-start then started ACK retry"
+    "real CloudClient/NativeBridgeAdapter/Store no-start then started ACK retry",
+    "unsupported UUID rejected before native submit"
   ],
   "limits": [
     "Registration only: no input observation, slot release or watermark advancement",
     "Controlled peers and disposable wheel only; no deployed Access/Mesh/owner-client proof",
     "Public native binding and automatic native wake remain disabled",
     "SQLite schema3 retained on rollback; old parser leaves evidence pending"
-  ]
+  ],
+  "uuidAdmissionCorrection": {
+    "cases": {
+      "gateway": {
+        "assertion_observed": true,
+        "expected_assertion": "AssertionError: 'submitted' != 'queued'",
+        "green_exit": 0,
+        "green_log": "gateway-green.log",
+        "green_sha256": "246c60841143431bb2a2f2b41e0bc9aaa5e52842186f0778f42330d362309cf9",
+        "mutant_exit": 1,
+        "mutant_log": "gateway-mutant.log",
+        "mutant_sha256": "98f80b8d0c352a9118210953727e0df1a2e6cdb1d6bacfb47fcef83f13b2265a",
+        "selector": "test_gateway.GatewayTests.test_v1_turn_id_is_rejected_before_native_submission",
+        "source_mutation": "or not _uuid(request[\"clientUserMessageId\"]) -> or not _native_uuid(request[\"clientUserMessageId\"])",
+        "source_sha256": "64b25aa8f4aa22da10199ce2e3412a6bd209003e07032f72e04ffdda18f7ae2a",
+        "test_sha256": "8578f9b4774ea1df5ffe0ff41b70f0bb545cf62c80c824e7a22e8bf04545ff0f",
+        "tool_error_observed": false
+      },
+      "validator": {
+        "assertion_observed": true,
+        "expected_assertion": "NativeError not raised",
+        "green_exit": 0,
+        "green_log": "validator-green.log",
+        "green_sha256": "6d162ead90ab5c2ce1753a9af0116ad733051c7625cc4aa443571f8fbfdf3e95",
+        "mutant_exit": 1,
+        "mutant_log": "validator-mutant.log",
+        "mutant_sha256": "d2555152df7632003e94e600b3af5d17fe546a69540f61ea93a583b335e37c29",
+        "selector": "test_native.NativeValidationTests.test_request_closed_shape_types_and_admission_identity",
+        "source_mutation": "or not _uuid(request[\"clientUserMessageId\"]) -> or not _native_uuid(request[\"clientUserMessageId\"])",
+        "source_sha256": "64b25aa8f4aa22da10199ce2e3412a6bd209003e07032f72e04ffdda18f7ae2a",
+        "test_sha256": "a02b787373bebd845cb875fec24fe1d29b53a450caa3aa52829f66c201078763",
+        "tool_error_observed": false
+      }
+    },
+    "scope": "scratch copies only; source and tests frozen; cases independent"
+  },
+  "installedIntegrationLogSha256": "aeb97d7f238811d1a2f9dbdda704c381ab80564583f79fb59bb2076f54b3449f",
+  "correctionAudit": {
+    "result": "No actionable defects after all four shared validator callers were traced",
+    "reportSha256": "0b977b55342976d1a5cd8cda9347e3c1ad6ce58e44e699a41030064e1a8e5048"
+  }
 }

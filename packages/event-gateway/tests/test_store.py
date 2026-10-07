@@ -275,6 +275,12 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(self.store.native_receipt(ident)["submission_id"])
         self.assertEqual(self.store.delivery(ident)["reason"], "native_started_ack_pending")
         acknowledgment = self.native_ack(admission, receipt)
+
+        class AckSubclass(dict):
+            pass
+
+        with self.assertRaisesRegex(StoreError, "invalid_native_acknowledgment"):
+            self.store.persist_native_ack(ident, attempt, AckSubclass(acknowledgment))
         saved = self.store.persist_native_ack(ident, attempt, acknowledgment)
         self.assertEqual(saved, acknowledgment)
         changed = dict(acknowledgment, acknowledgedAt="2026-10-05T12:00:01.000Z")
@@ -285,6 +291,16 @@ class StoreTests(unittest.TestCase):
         with self.assertRaisesRegex(StoreError, "invalid_native_acknowledgment"):
             self.store.persist_native_ack(ident, attempt, wrong_permit)
         self.assertTrue(self.store.native_receipt(ident)["ack_pending"])
+
+        class MisleadingResult(dict):
+            def __getitem__(self, key):
+                if key == "current":
+                    return False
+                return super().__getitem__(key)
+
+        with self.assertRaisesRegex(StoreError, "invalid_acknowledgment_result"):
+            self.store.complete_native_ack(ident, attempt, saved,
+                                           MisleadingResult(status="submitted", current=True))
         self.assertTrue(self.store.complete_native_ack(ident, attempt, saved, {"status": "submitted", "current": False}))
         self.assertEqual(self.store.current_attempt(ident)["native_ack"], saved)
         self.assertEqual(self.store.current_attempt(ident)["state"], "submitted")

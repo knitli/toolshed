@@ -533,6 +533,20 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.submissions, [])
         self.assertEqual(self.settlements[0][1], {'type': 'local_not_submitted'})
 
+    async def test_v1_turn_id_is_rejected_before_native_submission(self):
+        ident = self.accept()['deliveryId']
+        prepare = self.prepare
+
+        async def legacy_turn(admission):
+            request = await prepare(admission)
+            request['clientUserMessageId'] = str(uuid.uuid1())
+            return request
+
+        with patch.object(self, 'prepare', legacy_turn):
+            self.assertEqual((await self.gateway.dispatch(ident))['status'], 'queued')
+        self.assertEqual(self.submissions, [])
+        self.assertEqual(self.settlements[0][1], {'type': 'local_not_submitted'})
+
     async def test_reconciliation_rejects_replacement_destination(self):
         ident = self.accept()['deliveryId']
         self.drop_response = True

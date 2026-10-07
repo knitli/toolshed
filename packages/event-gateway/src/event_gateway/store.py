@@ -564,7 +564,10 @@ class Store:
         from .native import NativeError, validate_receipt, validate_request
         from .protocol import _timestamp
 
-        if type(acknowledgment) is not dict or attempt["admission"] is None or attempt["started_receipt"] is None:
+        # Exact built-in dict required at this boundary; subclasses can override mapping methods.
+        if type(acknowledgment) is not dict:  # pylint: disable=unidiomatic-typecheck
+            raise StoreError("invalid_native_acknowledgment")
+        if attempt["admission"] is None or attempt["started_receipt"] is None:
             raise StoreError("invalid_native_acknowledgment")
         admission = json.loads(attempt["admission"])
         envelope = admission["envelope"]
@@ -633,8 +636,11 @@ class Store:
             encoded = self._validate_native_ack(row, acknowledgment)
             if row["native_ack"] != encoded:
                 raise StoreError("acknowledgment_conflict")
-            if (type(result) is not dict or set(result) != {"status", "current"}
-                    or result["status"] != "submitted" or type(result["current"]) is not bool
+            # Exact built-in dict required at this boundary; subclasses can override mapping methods.
+            if type(result) is not dict:  # pylint: disable=unidiomatic-typecheck
+                raise StoreError("invalid_acknowledgment_result")
+            if (set(result) != {"status", "current"}
+                    or result["status"] != "submitted" or not isinstance(result["current"], bool)
                     or result["current"] is not False):
                 raise StoreError("invalid_acknowledgment_result")
             if row["state"] == "submitted" and self.db.execute(

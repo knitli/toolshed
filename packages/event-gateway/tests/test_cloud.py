@@ -11,6 +11,7 @@ import shutil
 import subprocess  # nosec B404
 import tempfile
 import unittest
+import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -123,6 +124,12 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         acknowledgment = gateway._native_acknowledgment(attempt)
         self.assertEqual(acknowledgment, vector_ack)
         self.result = {"status": "submitted", "current": False}
+        invalid_turn_id = copy.deepcopy(acknowledgment)
+        invalid_turn_id["nativeCorrelation"]["turnId"] = str(uuid.uuid1())
+        with self.assertRaisesRegex(CloudError, "^invalid_acknowledgment$"):
+            await self.client.acknowledge(FIXTURE["original"], invalid_turn_id)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.credential_calls, 0)
         self.client._nonce = lambda: vector["proof"]["nonce"]
 
         self.assertEqual(await self.client.acknowledge(FIXTURE["original"], acknowledgment), self.result)
