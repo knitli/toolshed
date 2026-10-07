@@ -96,14 +96,17 @@ settlement must confirm the complete attempt, permit and evidence before one
 fresh attempt returns to waiting; the original budget charge remains. No offline
 or cached authority is accepted. Direct native starts retain the full original
 request/receipt and one immutable
-`native_turn_started` submitted ACK. Recovery retries only that ACK, never a new
-claim or native operation. Registration does not prove input observation or
-release the pending slot. Older cloud parsers leave the ACK pending.
+`native_turn_started` submitted ACK. Recovery retries that ACK and may poll the
+original request read-only; it never claims or starts again. Registration does
+not prove input observation or release the pending slot. A full InputRecorded
+receipt permits a separate immutable observed ACK after confirmed registration.
+Older cloud parsers leave the exact ACK pending.
 See [no-start settlement](docs/no-start-settlement.md) and
-[native bridge](docs/native-bridge.md) for the qualification gates. The
-[ACK proof index](docs/native-start-ack-proof.json) records 18 individual causal
-cases, 172 passing source tests, the independent Node proof vector and installed
-wheel qualification.
+[native input observation](docs/native-input-observation.md) for the qualification
+gates. The historical [registration ACK proof](docs/native-start-ack-proof.json)
+records its 23 individual causal cases, 173 passing source tests, independent
+Node vector and installed-wheel qualification; it does not prove the later
+observed phase.
 
 The spool retains accepted metadata, private attachment mappings, deduplication,
 and ambiguity. It fences generations, stops at capacity, and never evicts live

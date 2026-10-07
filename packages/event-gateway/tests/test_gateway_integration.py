@@ -12,8 +12,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from event_gateway.cloud import CloudClient, Credentials, _iso, canonical_node_proof
 from event_gateway.gateway import Gateway
-from event_gateway.native import NativeBridgeAdapter
-from event_gateway.protocol import _timestamp
+from event_gateway.native import IDENTITY as NATIVE_IDENTITY, NativeBridgeAdapter
+from event_gateway.protocol import _timestamp, parse_acknowledgment
 from event_gateway.security import sign
 from event_gateway.store import IDENTITY, Store
 
@@ -31,6 +31,7 @@ class InjectedBridge:
         self.calls, self.at_start = [], []
         self.outcome = "terminalNotStarted"
         self.retained = {}
+        self.drop_start = False
 
     def challenge(self):
         self.calls.append(("challenge", None))
@@ -51,6 +52,8 @@ class InjectedBridge:
         else:
             outcome = {"status": "terminalNotStarted", "reason": "busy", "receiptId": str(uuid.uuid4()), "replayed": False}
         self.retained[request["attemptId"]] = outcome
+        if self.drop_start:
+            raise TimeoutError("native start registered; response lost")
         return outcome
 
     def restore_attempt(self, request):
@@ -75,7 +78,9 @@ class GatewayIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.key = Ed25519PrivateKey.generate()
         self.requests, self.admissions, self.settled = [], {}, {}
         self.credential_calls = 0
-        self.drop_settlement = self.drop_ack = False
+        self.drop_settlement = self.drop_ack = self.drop_observed_ack = False
+        self.observed_response = None
+        self.accepted_acks = {}
         self.bridge = InjectedBridge(self.store.path, self.mapping["nativeThreadId"])
         self.client = CloudClient(
             origin="https://events.example.com", principal=self.envelope["principal"], agent=self.envelope["agent"],
@@ -132,15 +137,41 @@ class GatewayIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 self.drop_settlement = False
                 raise TimeoutError("settlement accepted; response lost")
         elif path == "/v1/ack":
-            self.assertEqual(attempt["native_ack"], body)
-            self.assertEqual(attempt["started_receipt"]["outcome"]["turnId"],
-                             body["nativeCorrelation"]["turnId"])
+            observed = body["status"] == "observed"
+            column = "native_observed_ack" if observed else "native_ack"
+            # A separate reader proves the receipt and immutable DTO committed before HTTP.
+            with closing(sqlite3.connect(self.store.path / "ledger.sqlite")) as reader:
+                reader.row_factory = sqlite3.Row
+                persisted = reader.execute("SELECT * FROM attempts WHERE delivery_id=? AND attempt_id=?",
+                                           (self.ident, attempt["attempt_id"])).fetchone()
+            self.assertEqual(json.loads(persisted[column]), body)
+            full_receipt = json.loads(persisted["input_recorded_receipt"] if observed else
+                                      persisted["started_receipt"] or persisted["input_recorded_receipt"])
+            self.assertEqual({key: full_receipt[key] for key in NATIVE_IDENTITY},
+                             {key: attempt["native_request"][key] for key in NATIVE_IDENTITY})
+            self.assertEqual(full_receipt["outcome"]["turnId"], body["nativeCorrelation"]["turnId"])
             self.assertEqual(body["nativeCorrelation"]["permitId"], attempt["admission"]["permitId"])
-            self.assertEqual(body["status"], "submitted")
-            result = {"status": "submitted", "current": False}
-            if self.drop_ack:
+            if observed:
+                self.assertEqual(attempt["ack_state"], "submitted")
+                self.assertEqual(full_receipt["outcome"]["status"], "inputRecorded")
+                self.assertEqual(full_receipt["outcome"]["itemId"], body["nativeCorrelation"]["itemId"])
+                self.assertEqual(self.accepted_acks[(attempt["attempt_id"], "submitted")], attempt["native_ack"])
+                if self.observed_response == "reject":
+                    return 400, {"content-type": "application/json"}, b'{"error":"invalid_request"}'
+                if self.observed_response == "invalid":
+                    return 200, {"content-type": "application/json"}, b'{"status":"submitted","current":false}'
+            identity = (attempt["attempt_id"], body["status"])
+            replayed = identity in self.accepted_acks
+            if replayed:
+                self.assertEqual(self.accepted_acks[identity], body)
+            self.accepted_acks[identity] = copy.deepcopy(body)
+            result = {"status": body["status"], "current": observed and not replayed}
+            if observed and self.drop_observed_ack:
+                self.drop_observed_ack = False
+                raise TimeoutError("observed ACK accepted; response lost")
+            if not observed and self.drop_ack:
                 self.drop_ack = False
-                raise TimeoutError("ACK accepted; response lost")
+                raise TimeoutError("submitted ACK accepted; response lost")
         else:
             self.fail("Unexpected cloud path: " + path)
         return 200, {"content-type": "application/json"}, json.dumps(result).encode()
@@ -174,16 +205,132 @@ class GatewayIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.gateway.reconcile(self.ident))["status"], "submitted")
         acks = self.requests[-2:]
         self.assertEqual(acks[0]["body"], acks[1]["body"])
-        self.assertEqual(self.bridge.calls, native_calls_before_retry)
+        self.assertEqual(self.bridge.calls, native_calls_before_retry + [("restore", native), ("receipt", native)])
         self.assertEqual(self.store.current_attempt(self.ident)["native_ack"], acknowledgment)
         self.assertFalse(self.store.native_receipt(self.ident)["ack_pending"])
         before = len(self.requests), len(self.bridge.calls)
         self.assertEqual((await self.gateway.reconcile(self.ident))["status"], "submitted")
-        self.assertEqual((len(self.requests), len(self.bridge.calls)), before)
+        self.assertEqual((len(self.requests), len(self.bridge.calls)), (before[0], before[1] + 2))
+        self.assertEqual(self.bridge.calls[-2:], [("restore", native), ("receipt", native)])
         self.assertEqual([item["url"].removeprefix(self.client.origin) for item in self.requests],
                          ["/v1/dispatch/claim", "/v1/dispatch/settle-no-start", "/v1/dispatch/claim", "/v1/ack", "/v1/ack"])
         self.assertNotEqual(acks[0]["headers"]["x-event-node-proof"], acks[1]["headers"]["x-event-node-proof"])
         self.assertNotEqual(acks[0]["headers"]["authorization"], acks[1]["headers"]["authorization"])
+
+    async def test_observed_receipt_signed_ack_retries_exact_after_restart(self):
+        self.bridge.outcome = "started"
+        self.assertEqual((await self.gateway.dispatch(self.ident))["status"], "submitted")
+        registered = self.store.current_attempt(self.ident)
+        native = registered["native_request"]
+        outcome = {"status": "inputRecorded", "turnId": native["clientUserMessageId"],
+                   "itemId": str(uuid.uuid4()), "replayed": True}
+        self.bridge.retained[registered["attempt_id"]] = outcome
+        before_native = copy.deepcopy(self.bridge.calls)
+        self.drop_observed_ack = True
+        result = await self.gateway.reconcile(self.ident)
+        self.assertEqual((result["status"], result["reason"]), ("submitted", "native_observed_ack_pending"))
+        current = self.store.current_attempt(self.ident)
+        observed_ack = current["native_observed_ack"]
+        self.assertEqual(current["input_recorded_receipt"], {
+            **{key: native[key] for key in NATIVE_IDENTITY}, "outcome": outcome})
+        self.assertEqual(current["started_receipt"], registered["started_receipt"])
+        self.assertEqual(current["native_ack"], registered["native_ack"])
+        self.assertEqual(current["ack_state"], "submitted")
+        self.assertEqual(observed_ack["nativeCorrelation"], {
+            "kind": "native_input_recorded", "permitId": native["permitId"],
+            "turnId": outcome["turnId"], "itemId": outcome["itemId"]})
+        self.assertEqual(parse_acknowledgment(json.dumps(observed_ack).encode(), now_ms=self.now * 1000), observed_ack)
+        self.assertTrue(self.store.native_receipt(self.ident)["ack_pending"])
+        self.assertGreater(current["reserved_bytes"], 0)
+        self.assertEqual(self.bridge.calls, before_native + [("restore", native), ("receipt", native)])
+        calls_after_observation = copy.deepcopy(self.bridge.calls)
+        self.store.close()
+        self.store = Store(self.bridge.path, clock=lambda: self.now)
+        self.gateway.store = self.store
+        self.now += 3600
+        self.assertEqual((await self.gateway.reconcile(self.ident))["status"], "observed")
+        restored = self.store.current_attempt(self.ident)
+        self.assertEqual(restored["input_recorded_receipt"], current["input_recorded_receipt"])
+        self.assertEqual(restored["started_receipt"], registered["started_receipt"])
+        self.assertEqual(restored["native_observed_ack"], observed_ack)
+        self.assertEqual(restored["native_ack"], registered["native_ack"])
+        self.assertEqual(restored["ack_state"], "observed")
+        self.assertEqual(restored["reserved_bytes"], 0)
+        self.assertFalse(self.store.native_receipt(self.ident)["ack_pending"])
+        observed_requests = self.requests[-2:]
+        self.assertEqual([json.loads(item["body"]) for item in observed_requests], [observed_ack, observed_ack])
+        self.assertEqual(observed_requests[0]["body"], observed_requests[1]["body"])
+        for header in ("authorization", "cf-access-token", "x-event-node-proof"):
+            self.assertNotEqual(observed_requests[0]["headers"][header], observed_requests[1]["headers"][header])
+        self.assertEqual(self.bridge.calls, calls_after_observation)
+        self.assertEqual([item["url"].removeprefix(self.client.origin) for item in self.requests],
+                         ["/v1/dispatch/claim", "/v1/ack", "/v1/ack", "/v1/ack"])
+        before = len(self.requests), len(self.bridge.calls)
+        await self.gateway.reconcile(self.ident)
+        await self.gateway.dispatch(self.ident)
+        self.assertEqual((len(self.requests), len(self.bridge.calls)), before)
+        self.assertEqual(self.store.list_reconcilable(), [])
+
+    async def test_old_cloud_rejection_keeps_exact_observed_phase_pending(self):
+        self.bridge.outcome = "started"
+        await self.gateway.dispatch(self.ident)
+        registered = self.store.current_attempt(self.ident)
+        native = registered["native_request"]
+        self.bridge.retained[registered["attempt_id"]] = {
+            "status": "inputRecorded", "turnId": native["clientUserMessageId"],
+            "itemId": str(uuid.uuid4()), "replayed": True}
+        for response in ("reject", "invalid"):
+            self.observed_response = response
+            result = await self.gateway.reconcile(self.ident)
+            self.assertEqual((result["status"], result["reason"]), ("submitted", "native_observed_ack_pending"))
+            pending = self.store.current_attempt(self.ident)
+            self.assertEqual(pending["ack_state"], "submitted")
+            self.assertTrue(self.store.native_receipt(self.ident)["ack_pending"])
+            self.assertGreater(pending["reserved_bytes"], 0)
+            self.store.close()
+            self.store = Store(self.bridge.path, clock=lambda: self.now)
+            self.gateway.store = self.store
+            self.now += 3600
+        self.assertEqual(self.requests[-2]["body"], self.requests[-1]["body"])
+        self.assertEqual(json.loads(self.requests[-1]["body"]), pending["native_observed_ack"])
+        self.assertEqual([name for name, _ in self.bridge.calls], ["challenge", "challenge", "start", "restore", "receipt"])
+        self.assertNotIn((registered["attempt_id"], "observed"), self.accepted_acks)
+        before_native = copy.deepcopy(self.bridge.calls)
+        self.observed_response = None
+        self.assertEqual((await self.gateway.reconcile(self.ident))["status"], "observed")
+        self.assertEqual(self.requests[-2]["body"], self.requests[-1]["body"])
+        self.assertEqual(self.bridge.calls, before_native)
+        self.assertEqual(self.store.current_attempt(self.ident)["native_ack"], registered["native_ack"])
+
+    async def test_input_recorded_only_recovery_registers_then_observes_without_fake_started(self):
+        self.bridge.outcome = "started"
+        self.bridge.drop_start = True
+        self.assertEqual((await self.gateway.dispatch(self.ident))["status"], "ambiguous")
+        attempted = self.store.current_attempt(self.ident)
+        native = attempted["native_request"]
+        self.assertIsNone(attempted["started_receipt"])
+        self.assertIsNone(attempted["native_ack"])
+        outcome = {"status": "inputRecorded", "turnId": native["clientUserMessageId"],
+                   "itemId": str(uuid.uuid4()), "replayed": True}
+        self.bridge.retained[attempted["attempt_id"]] = outcome
+        before_native = copy.deepcopy(self.bridge.calls)
+        self.assertEqual((await self.gateway.reconcile(self.ident))["status"], "observed")
+        recovered = self.store.current_attempt(self.ident)
+        self.assertIsNone(recovered["started_receipt"])
+        self.assertEqual(recovered["input_recorded_receipt"], {
+            **{key: native[key] for key in NATIVE_IDENTITY}, "outcome": outcome})
+        self.assertEqual([json.loads(item["body"])["status"] for item in self.requests[1:]], ["submitted", "observed"])
+        self.assertEqual(self.bridge.calls, before_native + [("restore", native), ("receipt", native)])
+        self.assertEqual(recovered["native_ack"]["nativeCorrelation"], {
+            "kind": "native_turn_started", "permitId": native["permitId"], "turnId": outcome["turnId"]})
+        self.assertEqual(recovered["native_observed_ack"]["nativeCorrelation"], {
+            "kind": "native_input_recorded", "permitId": native["permitId"],
+            "turnId": outcome["turnId"], "itemId": outcome["itemId"]})
+        before = len(self.requests), len(self.bridge.calls)
+        await self.gateway.reconcile(self.ident)
+        await self.gateway.dispatch(self.ident)
+        self.assertEqual((len(self.requests), len(self.bridge.calls)), before)
+        self.assertFalse(self.store.native_receipt(self.ident)["ack_pending"])
 
     async def test_lost_settlement_response_retries_exact_signed_retirement_without_native_replay(self):
         self.drop_settlement = True

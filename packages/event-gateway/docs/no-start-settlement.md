@@ -83,7 +83,8 @@ immutable ACK; successful ACK recovery does not imply input observation or free
 the pending slot. Older cloud parsers reject this branch and leave evidence
 pending until compatible recovery is restored. Never downgrade to queue evidence.
 
-SQLite schema 3 also retains the immutable native ACK. Migration preserves legacy
+SQLite schema 3 introduced the immutable submitted native ACK; schema 4 adds
+the actual input-recorded receipt and separate observed ACK. Migration preserves legacy
 queue receipts and clears only proven direct-turn submission aliases. Stop the daemon
 before upgrade or rollback; older binaries refuse this version. Retain the
 private database rather than deleting evidence or attempting a down migration.

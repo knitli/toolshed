@@ -96,6 +96,12 @@ retains slot, budget charge and source watermark. Native input observation is a
 separate proof gate. Public native binding remains unqualified; these changes
 do not install a client or qualify production delivery.
 
+The [input-observation consumer](native-input-observation.md) adds a separate
+immutable observed ACK from a full, read-only InputRecorded receipt. It confirms
+registration first and never derives observation from a start alone. The native
+signal is qualified in [checkpoint PR #45](https://github.com/knitli/toolshed/pull/45);
+coupled deployment and owner-client acceptance remain pending.
+
 The prototype checks stale/expired/wrong-thread/disconnected refusal, busy
 refusal, revoke/start ordering, post-commit cancellation, and exact retained
 receipts. The Python qualifier exercises the actual patched TUI/Core path and

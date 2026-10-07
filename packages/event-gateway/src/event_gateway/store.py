@@ -81,7 +81,7 @@ class Store:
             pages = max(1, (max_bytes - 65536) // (3 * 4096))
             self.db.execute(f"PRAGMA max_page_count={pages}")
             version = self.db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3):
+            if version not in (0, 1, 2, 3, 4):
                 raise StoreError("unsupported_schema")
             with self.db:
                 self.db.execute("BEGIN IMMEDIATE")
@@ -100,7 +100,7 @@ class Store:
                     delivery_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
                     state TEXT NOT NULL, envelope TEXT NOT NULL, admission TEXT,
                     native_request TEXT, evidence TEXT, receipt TEXT, settlement TEXT, started_receipt TEXT,
-                    native_ack TEXT,
+                    native_ack TEXT, input_recorded_receipt TEXT, native_observed_ack TEXT,
                     reason TEXT, fenced INTEGER NOT NULL DEFAULT 0,
                     reserved_bytes INTEGER NOT NULL, updated REAL NOT NULL,
                     PRIMARY KEY(delivery_id,attempt_id))""")
@@ -109,9 +109,12 @@ class Store:
                     self.db.execute("ALTER TABLE attempts ADD COLUMN started_receipt TEXT")
                 if "native_ack" not in columns:
                     self.db.execute("ALTER TABLE attempts ADD COLUMN native_ack TEXT")
+                for column in ("input_recorded_receipt", "native_observed_ack"):
+                    if column not in columns:
+                        self.db.execute(f"ALTER TABLE attempts ADD COLUMN {column} TEXT")
                 if version < 3:
                     self._migrate_native_turn_aliases()
-                self.db.execute("PRAGMA user_version=3")
+                self.db.execute("PRAGMA user_version=4")
                 self.db.execute(
                     "UPDATE attempts SET state='ambiguous', reason='restart_during_submit', updated=? WHERE state='submitting'",
                     (self.clock(),),
@@ -407,7 +410,8 @@ class Store:
         if not envelope or (attempt_id is not None and envelope["attemptId"] != attempt_id):
             return None
         return self.db.execute(
-            "SELECT * FROM attempts WHERE delivery_id=? AND attempt_id=?",
+            "SELECT a.*, d.ack_state FROM attempts a JOIN deliveries d ON d.id=a.delivery_id "
+            "WHERE a.delivery_id=? AND a.attempt_id=?",
             (delivery_id, envelope["attemptId"]),
         ).fetchone()
 
@@ -417,7 +421,8 @@ class Store:
         if row is None:
             return None
         result = dict(row)
-        for key in ("envelope", "admission", "native_request", "evidence", "receipt", "settlement", "started_receipt", "native_ack"):
+        for key in ("envelope", "admission", "native_request", "evidence", "receipt", "settlement", "started_receipt", "native_ack",
+                    "input_recorded_receipt", "native_observed_ack"):
             result[key] = json.loads(result[key]) if result[key] is not None else None
         return result
 
@@ -521,25 +526,33 @@ class Store:
         return True
 
     def record_started(self, delivery_id, attempt_id, receipt):
+        return self._record_native_positive(delivery_id, attempt_id, receipt)
+
+    def record_input_recorded(self, delivery_id, attempt_id, receipt):
+        """Retain the actual full Core observation; never synthesize a Started receipt."""
+        return self._record_native_positive(delivery_id, attempt_id, receipt, observed=True)
+
+    def _record_native_positive(self, delivery_id, attempt_id, receipt, *, observed=False):
         from .native import NativeError, validate_receipt
 
+        column = "input_recorded_receipt" if observed else "started_receipt"
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             row = self._attempt(delivery_id, attempt_id)
-            if row is None or row["native_request"] is None or row["state"] not in ("submitting", "submitted", "ambiguous", "settlement_pending"):
+            if row is None or row["native_request"] is None or row["state"] not in ("submitting", "submitted", "ambiguous", "settlement_pending", "observed"):
                 raise StoreError("invalid_transition")
             try:
-                outcome = validate_receipt(json.loads(row["native_request"]), receipt)
+                outcome = validate_receipt(json.loads(row["native_request"]), receipt, allow_input_recorded=observed)
             except NativeError as exc:
                 raise StoreError("invalid_receipt") from exc
-            if outcome["status"] != "started":
+            if outcome["status"] != ("inputRecorded" if observed else "started"):
                 raise StoreError("invalid_receipt")
             turn = outcome["turnId"]
             positive = self.native_receipt(delivery_id)
             if positive["turn_id"] is not None and positive["turn_id"] != turn:
                 raise StoreError("receipt_conflict")
-            if row["started_receipt"] is not None:
-                previous = json.loads(row["started_receipt"])
+            if row[column] is not None:
+                previous = json.loads(row[column])
                 current = json.loads(_json(receipt))
                 previous["outcome"].pop("replayed", None)
                 current["outcome"].pop("replayed", None)
@@ -548,40 +561,53 @@ class Store:
                 return self.delivery(delivery_id)
             encoded = _json(receipt)
             self._spend(row, len(encoded.encode()))
-            state = "ambiguous" if row["state"] in ("ambiguous", "settlement_pending") else "submitted"
+            state = ("observed" if row["state"] == "observed" else
+                     "ambiguous" if row["state"] in ("ambiguous", "settlement_pending") else "submitted")
+            reason = (None if state == "observed" else "native_observed_ack_pending" if observed
+                      else "native_started_ack_pending")
             self.db.execute(
-                "UPDATE attempts SET state=?, started_receipt=?, reason='native_started_ack_pending', updated=? WHERE delivery_id=? AND attempt_id=?",
-                (state, encoded, self.clock(), delivery_id, attempt_id),
+                # column is only input_recorded_receipt or started_receipt; all values are bound.
+                f"UPDATE attempts SET state=?, {column}=?, reason=?, updated=? WHERE delivery_id=? AND attempt_id=?",  # nosec B608
+                (state, encoded, reason, self.clock(), delivery_id, attempt_id),
             )
             self.db.execute(
-                "UPDATE deliveries SET state=?, submission=?, turn=?, reason='native_started_ack_pending', updated=? WHERE id=?",
+                "UPDATE deliveries SET state=?, submission=?, turn=?, reason=?, updated=? WHERE id=?",
                 (state, None if positive["submission_id"] == turn else positive["submission_id"], turn,
-                 self.clock(), delivery_id),
+                 reason, self.clock(), delivery_id),
             )
         return self.delivery(delivery_id)
 
-    def _validate_native_ack(self, attempt, acknowledgment):
+    def _validate_native_ack(self, attempt, acknowledgment, *, observed=False):
         from .native import NativeError, validate_receipt, validate_request
         from .protocol import _timestamp
 
         # Exact built-in dict required at this boundary; subclasses can override mapping methods.
         if type(acknowledgment) is not dict:  # pylint: disable=unidiomatic-typecheck
             raise StoreError("invalid_native_acknowledgment")
-        if attempt["admission"] is None or attempt["started_receipt"] is None:
+        stored_receipt = (attempt["input_recorded_receipt"] if observed else
+                          attempt["started_receipt"] or attempt["input_recorded_receipt"])
+        if attempt["admission"] is None or stored_receipt is None:
             raise StoreError("invalid_native_acknowledgment")
+        if observed and (attempt["native_ack"] is None or attempt["ack_state"] not in ("submitted", "observed")):
+            raise StoreError("native_registration_pending")
         admission = json.loads(attempt["admission"])
         envelope = admission["envelope"]
         request = json.loads(attempt["native_request"])
-        receipt = json.loads(attempt["started_receipt"])
+        receipt = json.loads(stored_receipt)
         try:
             request = validate_request(request, admission)
-            outcome = validate_receipt(request, receipt)
+            outcome = validate_receipt(request, receipt, allow_input_recorded=True)
         except NativeError:
             raise StoreError("invalid_native_acknowledgment") from None
-        if outcome["status"] != "started":
+        if outcome["status"] not in (("inputRecorded",) if observed else ("started", "inputRecorded")):
             raise StoreError("invalid_native_acknowledgment")
         correlation = {"kind": "native_turn_started", "permitId": admission["permitId"],
                        "turnId": outcome["turnId"]}
+        if observed:
+            correlation.update(kind="native_input_recorded", itemId=outcome["itemId"])
+            submitted = json.loads(attempt["native_ack"])
+            if self._validate_native_ack(attempt, submitted) != attempt["native_ack"]:
+                raise StoreError("invalid_native_acknowledgment")
         expected = {
             "schemaVersion": 1,
             "eventId": envelope["eventId"],
@@ -594,7 +620,7 @@ class Store:
             "runtimeGeneration": envelope["runtimeGeneration"],
             "attachmentGeneration": envelope["attachmentGeneration"],
             "deliveredSourceStateVersion": envelope["sourceStateVersion"],
-            "status": "submitted",
+            "status": "observed" if observed else "submitted",
             "nativeCorrelation": correlation,
         }
         if "consumerGeneration" in envelope:
@@ -609,48 +635,53 @@ class Store:
         except (TypeError, ValueError, KeyError, RecursionError):
             raise StoreError("invalid_native_acknowledgment") from None
 
-    def persist_native_ack(self, delivery_id, attempt_id, acknowledgment):
-        """Persist one immutable submitted ACK after retaining the native receipt."""
+    def persist_native_ack(self, delivery_id, attempt_id, acknowledgment, *, observed=False):
+        """Persist one immutable ACK per phase after retaining the actual native receipt."""
+        column = "native_observed_ack" if observed else "native_ack"
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             row = self._attempt(delivery_id, attempt_id)
-            if row is None or row["state"] not in ("submitted", "ambiguous"):
+            if row is None or row["state"] not in ("submitted", "ambiguous", "observed"):
                 raise StoreError("invalid_transition")
-            encoded = self._validate_native_ack(row, acknowledgment)
-            if row["native_ack"] is not None:
-                if row["native_ack"] != encoded:
+            encoded = self._validate_native_ack(row, acknowledgment, observed=observed)
+            if row[column] is not None:
+                if row[column] != encoded:
                     raise StoreError("acknowledgment_conflict")
-                return json.loads(row["native_ack"])
+                return json.loads(row[column])
             self._spend(row, len(encoded.encode()))
-            self.db.execute("UPDATE attempts SET native_ack=?, updated=? WHERE delivery_id=? AND attempt_id=?",
+            # column is only native_observed_ack or native_ack; all values are bound.
+            self.db.execute(f"UPDATE attempts SET {column}=?, updated=? WHERE delivery_id=? AND attempt_id=?",  # nosec B608
                             (encoded, self.clock(), delivery_id, attempt_id))
         return json.loads(encoded)
 
-    def complete_native_ack(self, delivery_id, attempt_id, acknowledgment, result):
-        """CAS an exact accepted native-start ACK without settling or releasing capacity."""
+    def complete_native_ack(self, delivery_id, attempt_id, acknowledgment, result, *, observed=False):
+        """CAS the exact accepted phase; older submitted replies never demote observation."""
+        column = "native_observed_ack" if observed else "native_ack"
+        status = "observed" if observed else "submitted"
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             row = self._attempt(delivery_id, attempt_id)
-            if row is None or row["state"] not in ("submitted", "ambiguous"):
+            if row is None or row["state"] not in ("submitted", "ambiguous", "observed"):
                 return False
-            encoded = self._validate_native_ack(row, acknowledgment)
-            if row["native_ack"] != encoded:
+            encoded = self._validate_native_ack(row, acknowledgment, observed=observed)
+            if row[column] != encoded:
                 raise StoreError("acknowledgment_conflict")
             # Exact built-in dict required at this boundary; subclasses can override mapping methods.
             if type(result) is not dict:  # pylint: disable=unidiomatic-typecheck
                 raise StoreError("invalid_acknowledgment_result")
             if (set(result) != {"status", "current"}
-                    or result["status"] != "submitted" or not isinstance(result["current"], bool)
-                    or result["current"] is not False):
+                    or result["status"] != status or not isinstance(result["current"], bool)
+                    or (not observed and result["current"] is not False)):
                 raise StoreError("invalid_acknowledgment_result")
-            if row["state"] == "submitted" and self.db.execute(
-                "SELECT ack_state FROM deliveries WHERE id=?", (delivery_id,)
-            ).fetchone()[0] == "submitted":
+            if row["ack_state"] == "observed" or (not observed and row["ack_state"] == "submitted"):
                 return True
-            self.db.execute("UPDATE attempts SET state='submitted', reason=NULL, updated=? WHERE delivery_id=? AND attempt_id=?",
-                            (self.clock(), delivery_id, attempt_id))
-            self.db.execute("UPDATE deliveries SET state='submitted', ack_state='submitted', reason=NULL, updated=? WHERE id=?",
-                            (self.clock(), delivery_id))
+            self.db.execute("UPDATE attempts SET state=?, reason=NULL, updated=? WHERE delivery_id=? AND attempt_id=?",
+                            (status, self.clock(), delivery_id, attempt_id))
+            self.db.execute("UPDATE deliveries SET state=?, ack_state=?, reason=NULL, updated=? WHERE id=?",
+                            (status, status, self.clock(), delivery_id))
+            if observed:
+                self.db.execute("UPDATE attempts SET reserved_bytes=0 WHERE delivery_id=? AND attempt_id=?",
+                                (delivery_id, attempt_id))
         return True
 
     def begin_settlement(self, delivery_id, attempt_id, evidence, *, receipt=None, reason=None):
@@ -848,10 +879,15 @@ class Store:
         row = self.db.execute(
             """SELECT submission,turn,state,ack_state,
                EXISTS(SELECT 1 FROM attempts WHERE delivery_id=deliveries.id
-                      AND started_receipt IS NOT NULL AND state!='settled') AS native_started,
+                      AND (started_receipt IS NOT NULL OR input_recorded_receipt IS NOT NULL)
+                      AND state!='settled') AS native_started,
                EXISTS(SELECT 1 FROM attempts WHERE delivery_id=deliveries.id
-                      AND started_receipt IS NOT NULL AND native_ack IS NOT NULL AND state!='settled'
-                      AND deliveries.ack_state='submitted') AS native_acknowledged
+                      AND (started_receipt IS NOT NULL OR input_recorded_receipt IS NOT NULL)
+                      AND native_ack IS NOT NULL AND state!='settled'
+                      AND deliveries.ack_state IN ('submitted','observed')) AS native_acknowledged,
+               EXISTS(SELECT 1 FROM attempts WHERE delivery_id=deliveries.id
+                      AND input_recorded_receipt IS NOT NULL AND state!='settled'
+                      AND deliveries.ack_state IS NOT 'observed') AS native_observation_pending
                FROM deliveries WHERE id=?""",
             (delivery_id,),
         ).fetchone()
@@ -859,7 +895,8 @@ class Store:
             {
                 "submission_id": row["submission"],
                 "turn_id": row["turn"],
-                "ack_pending": (bool(row["native_started"]) and not row["native_acknowledged"]) or (
+                "ack_pending": bool(row["native_observation_pending"]) or (
+                    bool(row["native_started"]) and not row["native_acknowledged"]) or (
                     row["state"] in ("submitted", "observed")
                     and row["ack_state"] != row["state"]
                 ),

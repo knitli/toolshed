@@ -159,20 +159,33 @@ const submittedAcknowledgmentSchema = z.strictObject({
   ]),
 });
 
+const nativeInputRecordedCorrelationSchema = z.strictObject({
+  kind: z.literal("native_input_recorded"),
+  permitId: uuidV4OrV7Schema,
+  turnId: uuidV4OrV7Schema,
+  itemId: uuidV4OrV7Schema.meta({ "x-distinct-from": "turnId" }),
+}).refine(correlation => correlation.itemId !== correlation.turnId, {
+  message: "itemId must differ from turnId",
+});
+
 const observedAcknowledgmentSchema = z.strictObject({
   ...commonAcknowledgmentShape,
   status: z.literal("observed"),
-  nativeCorrelation: z.strictObject({
-    kind: z.literal("turn"),
-    submissionId: nativeIdSchema,
-    turnId: nativeIdSchema,
-  }),
+  nativeCorrelation: z.union([
+    z.strictObject({
+      kind: z.literal("turn"),
+      submissionId: nativeIdSchema,
+      turnId: nativeIdSchema,
+    }),
+    nativeInputRecordedCorrelationSchema,
+  ]),
 });
 
 /**
  * A queue receipt or direct native-turn registration is `submitted`; it does
- * not prove input observation. `observed` requires a queue-correlated turn.
- * The version is the one delivered to this runtime, never a mutable watermark.
+ * not prove input observation. `observed` is either a queue-correlated turn or
+ * the input-recorded item bound to an already registered native turn. The
+ * version is the one delivered to this runtime, never a mutable watermark.
  */
 export const EventObservationAckSchema = z.union([
   submittedAcknowledgmentSchema,

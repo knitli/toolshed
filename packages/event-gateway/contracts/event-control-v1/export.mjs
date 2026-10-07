@@ -73,10 +73,23 @@ EventObservationAckSchema.parse(nativeAck);
 const nativeAckBody = JSON.stringify(nativeAck);
 const nativeAckBinding = { ...binding, path: '/v1/ack',
   bodySha256: createHash('sha256').update(nativeAckBody).digest('hex') };
+const nativeObservedFixture = corpus.validAcknowledgments.find(ack => ack.nativeCorrelation.kind === 'native_input_recorded');
+if (!nativeObservedFixture) throw Error('canonical native-input ACK fixture missing');
+const nativeObservedAck = { ...nativeObservedFixture, acknowledgedAt: issuedAt,
+  nativeCorrelation: { ...nativeObservedFixture.nativeCorrelation, permitId,
+    turnId: nativeAck.nativeCorrelation.turnId } };
+EventObservationAckSchema.parse(nativeObservedAck);
+const nativeObservedBody = JSON.stringify(nativeObservedAck);
+const nativeObservedBinding = { ...binding, path: '/v1/ack',
+  bodySha256: createHash('sha256').update(nativeObservedBody).digest('hex') };
 const fixture = { original, admitted, overBudget, claim,
   nativeAck,
   nativeAckNodeProof: { principal: nativeAck.principal, binding: nativeAckBinding, body: nativeAckBody, proof,
     canonical: canonicalNodeProof(nativeAck.principal, proof, nativeAckBinding) },
+  nativeObservedAck,
+  nativeObservedAckNodeProof: { principal: nativeObservedAck.principal, binding: nativeObservedBinding,
+    body: nativeObservedBody, proof,
+    canonical: canonicalNodeProof(nativeObservedAck.principal, proof, nativeObservedBinding) },
   nodeProof: { principal: original.principal, binding, body, proof, canonical: canonicalNodeProof(original.principal, proof, binding) },
   noStart, localNoStart, noStartResult, localNoStartResult,
   noStartNodeProof: { principal: original.principal, binding: noStartBinding, body: noStartBody, proof,
