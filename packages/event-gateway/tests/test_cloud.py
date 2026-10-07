@@ -15,6 +15,7 @@ import unittest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from event_gateway.cloud import CloudClient, CloudError, Credentials, canonical_node_proof, validate_admission
+from event_gateway.gateway import Gateway
 from event_gateway.protocol import _timestamp, derive_delivery_id
 
 
@@ -111,6 +112,35 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         self.key.public_key().verify(base64.urlsafe_b64decode(proof["signature"] + "=="),
                                      canonical_node_proof(self.client.principal, self.client.origin,
                                                           "/v1/dispatch/claim", request["body"], proof))
+
+    async def test_native_ack_wire_and_node_proof_match_external_vector(self):
+        vector_ack = FIXTURE["nativeAck"]
+        vector = FIXTURE["nativeAckNodeProof"]
+        gateway = object.__new__(Gateway)
+        gateway.clock = lambda: self.now
+        attempt = {"admission": FIXTURE["admitted"],
+                   "started_receipt": {"outcome": {"turnId": vector_ack["nativeCorrelation"]["turnId"]}}}
+        acknowledgment = gateway._native_acknowledgment(attempt)
+        self.assertEqual(acknowledgment, vector_ack)
+        self.result = {"status": "submitted", "current": False}
+        self.client._nonce = lambda: vector["proof"]["nonce"]
+
+        self.assertEqual(await self.client.acknowledge(FIXTURE["original"], acknowledgment), self.result)
+        request = self.requests[-1]
+        self.assertEqual(request["url"], vector["binding"]["audience"] + vector["binding"]["path"])
+        self.assertEqual(request["method"], vector["binding"]["method"])
+        self.assertEqual(request["body"], vector["body"].encode())
+        self.assertEqual(hashlib.sha256(request["body"]).hexdigest(), vector["binding"]["bodySha256"])
+        self.assertFalse(request["follow_redirects"])
+
+        proof = json.loads(request["headers"]["x-event-node-proof"])
+        for key in ("nodeId", "nodeGeneration", "issuedAt", "nonce"):
+            self.assertEqual(proof[key], vector["proof"][key])
+        canonical = canonical_node_proof(vector["principal"], vector["binding"]["audience"],
+                                         vector["binding"]["path"], request["body"], proof)
+        self.assertEqual(canonical, vector["canonical"].encode())
+        self.key.public_key().verify(base64.urlsafe_b64decode(proof["signature"] + "=="),
+                                     vector["canonical"].encode())
 
     async def test_fresh_credentials_and_nonce_on_every_request(self):
         await self.client.claim(FIXTURE["original"])

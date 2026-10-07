@@ -31,18 +31,21 @@ policy requires a new attachment generation and newly identified delivery. Old r
 cannot close a replacement, and cloud retirement retains the original budget
 charge. A native restart or missing receipt leaves ambiguity fenced.
 
-Cloud implementation: [OS PR #683](https://github.com/knitli/knitli-site/pull/683).
-The control snapshot pins immutable OS commit
-`3aaedc306640631e49001b99d02cba589eaebc4a`; its exporter checks all eight source
-hashes and Zod 4.5.4 before evaluating the actual claim/settlement schemas and
-node-proof vectors. [Toolshed PR #39](https://github.com/knitli/toolshed/pull/39)
-authorizes this complete fixture/manifest pair separately. The transport
-`event-v1` pin remains unchanged. Policy approval and merge must precede the
-snapshot update's trusted status on main.
+Cloud no-start implementation: [OS PR #683](https://github.com/knitli/knitli-site/pull/683),
+original immutable commit `3aaedc306640631e49001b99d02cba589eaebc4a`.
+The current event and control snapshots both pin the direct-start ACK follow-up,
+[OS PR #684](https://github.com/knitli/knitli-site/pull/684), at
+`9b1ab6e2c2cf801fe035c766d03f26f1b2f85790`. The control exporter checks all
+eight source hashes and Zod 4.5.4 before evaluating the actual claim, settlement
+and ACK schemas and node-proof vectors. All immutable source hashes were checked
+against GitHub. The separately reviewed trusted policy must authorize this
+complete event/control family before the consumer receives a successful trusted
+status. [Toolshed PR #39](https://github.com/knitli/toolshed/pull/39) retains the
+original no-start family for older consumers; it does not authorize the ACK family.
 
 ## Proof and remaining gates
 
-The complete local suite passes 165 tests after integrating the canonical
+The original no-start checkpoint passed 165 tests after integrating its canonical
 snapshot, trusted policy and review corrections; Ruff passes. New and repaired
 cases have individual causal assertion-red/restored-green evidence, including
 two real defects found in the independent audit: concurrent dispatch used an
@@ -73,12 +76,15 @@ uv run --frozen python scripts/qualify_native_bridge.py --binary /absolute/path/
 ```
 
 A direct Core start supplies authentic turn evidence but is not a queued receipt.
-The canonical cloud submitted ACK currently requires `kind: "queued"`; this
-slice persists direct starts with `native_started_ack_unqualified` and keeps ACK
-pending. A separately reviewed canonical correlation extension is required
-before production qualification. Never fabricate queue evidence.
+The original no-start checkpoint left direct starts ACK-pending. The follow-up
+canonical submitted correlation is `native_turn_started`, bound to the original
+permit and authentic turn. It retains the full local request/receipt and one
+immutable ACK; successful ACK recovery does not imply input observation or free
+the pending slot. Older cloud parsers reject this branch and leave evidence
+pending until compatible recovery is restored. Never downgrade to queue evidence.
 
-SQLite schema 2 retains the attempt ledger and settlement proof. Stop the daemon
+SQLite schema 3 also retains the immutable native ACK. Migration preserves legacy
+queue receipts and clears only proven direct-turn submission aliases. Stop the daemon
 before upgrade or rollback; older binaries refuse this version. Retain the
 private database rather than deleting evidence or attempting a down migration.
 Cloud rollback likewise requires admissions disabled and settlement records

@@ -811,22 +811,49 @@
               "const": "submitted"
             },
             "nativeCorrelation": {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "const": "queued"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "queued"
+                    },
+                    "submissionId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "submissionId"
+                  ],
+                  "additionalProperties": false
                 },
-                "submissionId": {
-                  "type": "string",
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "native_turn_started"
+                    },
+                    "permitId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "turnId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "permitId",
+                    "turnId"
+                  ],
+                  "additionalProperties": false
                 }
-              },
-              "required": [
-                "kind",
-                "submissionId"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "required": [

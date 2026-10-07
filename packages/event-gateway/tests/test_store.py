@@ -77,6 +77,22 @@ class StoreTests(unittest.TestCase):
         return {**{key: admission["envelope"][key] for key in ("deliveryId", "attemptId", "nodeGeneration")},
                 "status": "not_started", "permitId": admission["permitId"], "nodeId": admission["nodeId"], "evidence": evidence}
 
+    def native_ack(self, admission, receipt, acknowledged_at=None):
+        envelope = admission["envelope"]
+        acknowledgment = {
+            "schemaVersion": 1,
+            **{key: envelope[key] for key in ("eventId", "deliveryId", "attemptId", "principal", "agent", "runtimeId",
+                                               "nodeGeneration", "runtimeGeneration", "attachmentGeneration")},
+            "deliveredSourceStateVersion": envelope["sourceStateVersion"],
+            "acknowledgedAt": acknowledged_at or "2026-10-05T12:00:00.000Z",
+            "status": "submitted",
+            "nativeCorrelation": {"kind": "native_turn_started", "permitId": admission["permitId"],
+                                  "turnId": receipt["outcome"]["turnId"]},
+        }
+        if "consumerGeneration" in envelope:
+            acknowledgment["consumerGeneration"] = envelope["consumerGeneration"]
+        return acknowledgment
+
     def test_claim_intent_restarts_exact_and_reserves_capacity(self):
         ident = self.store.accept(self.event)["deliveryId"]
         self.assertTrue(self.store.begin_claim(ident))
@@ -219,7 +235,7 @@ class StoreTests(unittest.TestCase):
         with self.assertRaisesRegex(StoreError, "receipt_conflict"):
             self.store.complete_settlement(ident, attempt, self.settlement(admission, evidence))
 
-    def test_started_receipt_is_preserved_and_ack_remains_unqualified(self):
+    def test_started_receipt_is_preserved_without_queue_alias(self):
         ident, admission = self.admitted()
         attempt = self.event["attemptId"]
         request = self.request(admission)
@@ -233,15 +249,79 @@ class StoreTests(unittest.TestCase):
             self.store.record_started(ident, attempt, bad)
         result = self.store.record_started(ident, attempt, receipt)
         self.assertEqual(result["status"], "submitted")
-        self.assertEqual(result["reason"], "native_started_ack_unqualified")
+        self.assertEqual(result["reason"], "native_started_ack_pending")
         self.assertEqual(self.store.current_attempt(ident)["started_receipt"], receipt)
-        self.assertEqual(self.store.native_receipt(ident), {"submission_id": request["clientUserMessageId"],
+        self.assertEqual(self.store.native_receipt(ident), {"submission_id": None,
                          "turn_id": request["clientUserMessageId"], "ack_pending": True})
         self.store.close()
         self.store = Store(self.path, clock=self.clock)
         self.assertEqual(self.store.current_attempt(ident)["started_receipt"], receipt)
         with self.assertRaisesRegex(StoreError, "receipt_conflict"):
             self.store.begin_settlement(ident, attempt, {"type": "local_not_submitted"})
+
+    def test_native_ack_is_immutable_cas_and_stops_retries_after_restart(self):
+        ident, admission = self.admitted()
+        attempt = self.event["attemptId"]
+        request = self.request(admission)
+        self.store.begin_native(ident, attempt, request)
+        self.store.finish(ident, "ambiguous", attempt_id=attempt)
+        receipt = self.receipt(request)
+        receipt["outcome"] = {"status": "started", "turnId": request["clientUserMessageId"], "replayed": True}
+        self.store.record_started(ident, attempt, receipt)
+        replay = copy.deepcopy(receipt)
+        replay["outcome"]["replayed"] = False
+        self.store.record_started(ident, attempt, replay)
+        self.assertEqual(self.store.current_attempt(ident)["started_receipt"], receipt)
+        self.assertIsNone(self.store.native_receipt(ident)["submission_id"])
+        self.assertEqual(self.store.delivery(ident)["reason"], "native_started_ack_pending")
+        acknowledgment = self.native_ack(admission, receipt)
+        saved = self.store.persist_native_ack(ident, attempt, acknowledgment)
+        self.assertEqual(saved, acknowledgment)
+        changed = dict(acknowledgment, acknowledgedAt="2026-10-05T12:00:01.000Z")
+        with self.assertRaisesRegex(StoreError, "acknowledgment_conflict"):
+            self.store.persist_native_ack(ident, attempt, changed)
+        wrong_permit = copy.deepcopy(acknowledgment)
+        wrong_permit["nativeCorrelation"]["permitId"] = str(uuid.uuid4())
+        with self.assertRaisesRegex(StoreError, "invalid_native_acknowledgment"):
+            self.store.persist_native_ack(ident, attempt, wrong_permit)
+        self.assertTrue(self.store.native_receipt(ident)["ack_pending"])
+        self.assertTrue(self.store.complete_native_ack(ident, attempt, saved, {"status": "submitted", "current": False}))
+        self.assertEqual(self.store.current_attempt(ident)["native_ack"], saved)
+        self.assertEqual(self.store.current_attempt(ident)["state"], "submitted")
+        self.assertEqual(self.store.native_receipt(ident), {"submission_id": None,
+                         "turn_id": request["clientUserMessageId"], "ack_pending": False})
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertEqual(self.store.current_attempt(ident)["native_ack"], saved)
+        self.assertFalse(self.store.native_receipt(ident)["ack_pending"])
+        self.assertFalse(self.store.complete_native_ack(ident, str(uuid.uuid4()), saved,
+                                                        {"status": "submitted", "current": False}))
+        with self.assertRaisesRegex(StoreError, "invalid_acknowledgment_result"):
+            self.store.complete_native_ack(ident, attempt, saved, {"status": "observed", "current": True})
+
+    def test_schema_v2_migration_clears_only_proven_native_turn_aliases(self):
+        direct, admission = self.admitted()
+        attempt = self.event["attemptId"]
+        request = self.request(admission)
+        self.store.begin_native(direct, attempt, request)
+        receipt = self.receipt(request)
+        receipt["outcome"] = {"status": "started", "turnId": request["clientUserMessageId"], "replayed": False}
+        self.store.record_started(direct, attempt, receipt)
+        self.store.db.execute("UPDATE deliveries SET submission=turn WHERE id=?", (direct,))
+
+        legacy = self.store.accept(self.new_event())["deliveryId"]
+        self.store.begin_submit(legacy)
+        self.store.finish(legacy, "submitted", submission_id="legacy-queue-id")
+        self.store.db.execute("PRAGMA user_version=2")
+        self.store.db.commit()
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+
+        self.assertIsNone(self.store.native_receipt(direct)["submission_id"])
+        self.assertEqual(self.store.native_receipt(direct)["turn_id"], request["clientUserMessageId"])
+        self.assertEqual(self.store.native_receipt(legacy)["submission_id"], "legacy-queue-id")
+        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 3)
 
     def test_started_contradiction_cancels_pending_negative_settlement(self):
         ident, admission = self.admitted()
@@ -321,7 +401,7 @@ class StoreTests(unittest.TestCase):
             self.store.db.commit()
             self.store.close()
             self.store = Store(self.path, clock=self.clock)
-            self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 3)
             self.assertEqual(self.store.get(ident)["status"], "ambiguous")
             self.assertIsNone(self.store.current_attempt(ident))
             self.assertFalse(self.store.begin_claim(ident))

@@ -83,9 +83,18 @@ an unknown native receipt authorizes retry. The original budget charge remains.
 Cloud PR [#683](https://github.com/knitli/knitli-site/pull/683) implements exact
 permit retirement and immutable historical admission recovery. The local and
 native changes require their own review and coupled qualification. This does
-not enable production wake. A separate ACK correlation extension is also needed:
-the existing `queued` native ACK cannot truthfully represent a direct Core start.
-Authentic direct starts remain durably submitted with ACK pending.
+not enable production wake. Direct native starts use the separately pinned
+submitted correlation `{kind:"native_turn_started",permitId,turnId}`. The gateway
+retains the full original native request/receipt and persists one immutable ACK
+before HTTP. Exact recovery keeps `acknowledgedAt` and all identity fields, while
+obtaining a fresh node proof. Completion is bound to that exact attempt and ACK,
+even after detach marks its state ambiguous. Queue receipts retain their
+existing correlation; no queue submission ID is fabricated.
+
+A submitted ACK means Core registered the turn. It returns `current:false` and
+retains slot, budget charge and source watermark. Native input observation is a
+separate proof gate. Public native binding remains unqualified; these changes
+do not install a client or qualify production delivery.
 
 The prototype checks stale/expired/wrong-thread/disconnected refusal, busy
 refusal, revoke/start ordering, post-commit cancellation, and exact retained

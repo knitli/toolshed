@@ -76,6 +76,26 @@
     },
     {
       "schemaVersion": 1,
+      "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+      "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+      "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+      "principal": "adam@knitli.com",
+      "agent": "pilot-agent",
+      "runtimeId": "018e2c70-7c6a-7a02-8000-000000000001",
+      "nodeGeneration": 1,
+      "runtimeGeneration": 2,
+      "attachmentGeneration": 3,
+      "deliveredSourceStateVersion": "manual-1",
+      "acknowledgedAt": "2026-10-05T12:00:10.000Z",
+      "status": "submitted",
+      "nativeCorrelation": {
+        "kind": "native_turn_started",
+        "permitId": "018e2c70-7c6a-7a05-8000-000000000001",
+        "turnId": "018e2c70-7c6a-7a06-8000-000000000001"
+      }
+    },
+    {
+      "schemaVersion": 1,
       "eventId": "018e2c70-7c6a-7a11-8000-000000000001",
       "deliveryId": "dly_a33ff89dff2a5dc71b11f0f41a13725b8b37107143b3f10b1131757271519340",
       "attemptId": "018e2c70-7c6a-7a13-8000-000000000001",
@@ -176,6 +196,76 @@
         "nativeCorrelation": {
           "kind": "queued",
           "submissionId": "subm_7e87"
+        }
+      }
+    },
+    {
+      "case": "native-start-in-observed-status",
+      "value": {
+        "schemaVersion": 1,
+        "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+        "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+        "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "runtimeId": "018e2c70-7c6a-7a02-8000-000000000001",
+        "nodeGeneration": 1,
+        "runtimeGeneration": 2,
+        "attachmentGeneration": 3,
+        "deliveredSourceStateVersion": "manual-1",
+        "acknowledgedAt": "2026-10-05T12:00:10.000Z",
+        "status": "observed",
+        "nativeCorrelation": {
+          "kind": "native_turn_started",
+          "permitId": "018e2c70-7c6a-7a05-8000-000000000001",
+          "turnId": "018e2c70-7c6a-7a06-8000-000000000001"
+        }
+      }
+    },
+    {
+      "case": "native-start-invalid-turn-id",
+      "value": {
+        "schemaVersion": 1,
+        "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+        "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+        "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "runtimeId": "018e2c70-7c6a-7a02-8000-000000000001",
+        "nodeGeneration": 1,
+        "runtimeGeneration": 2,
+        "attachmentGeneration": 3,
+        "deliveredSourceStateVersion": "manual-1",
+        "acknowledgedAt": "2026-10-05T12:00:10.000Z",
+        "status": "submitted",
+        "nativeCorrelation": {
+          "kind": "native_turn_started",
+          "permitId": "018e2c70-7c6a-7a05-8000-000000000001",
+          "turnId": "turn_294"
+        }
+      }
+    },
+    {
+      "case": "native-start-extra-submission-id",
+      "value": {
+        "schemaVersion": 1,
+        "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+        "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+        "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "runtimeId": "018e2c70-7c6a-7a02-8000-000000000001",
+        "nodeGeneration": 1,
+        "runtimeGeneration": 2,
+        "attachmentGeneration": 3,
+        "deliveredSourceStateVersion": "manual-1",
+        "acknowledgedAt": "2026-10-05T12:00:10.000Z",
+        "status": "submitted",
+        "nativeCorrelation": {
+          "kind": "native_turn_started",
+          "permitId": "018e2c70-7c6a-7a05-8000-000000000001",
+          "turnId": "018e2c70-7c6a-7a06-8000-000000000001",
+          "submissionId": "fabricated"
         }
       }
     }

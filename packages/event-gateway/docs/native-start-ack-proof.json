@@ -1,0 +1,252 @@
+{
+  "baseBranchHead": "b4882ca00dbf071d7f143e6c8456a8265140b93a",
+  "cloudCommit": "9b1ab6e2c2cf801fe035c766d03f26f1b2f85790",
+  "sourceSha256": {
+    "packages/event-gateway/src/event_gateway/store.py": "d16ae122dc7cda06c9c78967e5cb752879e047c196f406de040240508ab13634",
+    "packages/event-gateway/src/event_gateway/gateway.py": "77a172892b1f9e724f825f6102b4f224cb9d61226a76d5dbf056c979b903de6d",
+    "packages/event-gateway/src/event_gateway/cloud.py": "f970e6b902cb7e893241d0f914a6a4473f26635a0d790f11c6ed4b30679a3ad6",
+    "packages/event-gateway/src/event_gateway/native.py": "2f972798fdb29095aa30ca12332c43d7aa1ad4ea186d02d8122b2bc430ffbbb2",
+    "packages/event-gateway/tests/test_store.py": "6c96ea2206d65a08af7dd3e8f8603eef841f2e0bca9a599a3aacff7fa6b47bcd",
+    "packages/event-gateway/tests/test_gateway.py": "e10396aa1b5438820b207a3301626fc3af1cacf136e91bfe2e5875f39339055d",
+    "packages/event-gateway/tests/test_cloud.py": "4171d8c235dbed2c8072477f93b228074cb81a701c2ffb79db0edf1ec323c17a",
+    "packages/event-gateway/tests/test_gateway_integration.py": "482a1d4f126b260826c1a661b449857f0951049d7ec4d3bb2267b8890e6b42d2",
+    "packages/event-gateway/tests/test_protocol.py": "31566041015ca2e73070289e9da6c8e05437a52aeef596e0ded2c70fad075e00",
+    "packages/event-gateway/contracts/event-control-v1/export.mjs": "131f43cf67b3e441535b32b33eb94775a3e6f9287053ca6a672af0c391ddac77",
+    "packages/event-gateway/contracts/event-control-v1/fixtures.json": "a47fa45935463df5a91984e4d2f5f6b5304944d0fcd99872c3bb30bd981908d1",
+    "packages/event-gateway/contracts/event-control-v1/manifest.json": "9d23b546a8516464db44241c90c031b94c5da572168f1e7734dc16532dfa354a",
+    "packages/event-gateway/contracts/event-v1/protocol-v1.json": "2aa35df5cace7a4c646316cfda44171adecf2ab6eeb4c26124901fb6eb00c90f",
+    "packages/event-gateway/contracts/event-v1/protocol.schema.json": "7326d3815b9be28448f47f1e3db5a038c6064ebf39a9f9bed07e452142a710d4",
+    "packages/event-gateway/contracts/event-v1/protocol.ts": "076f63539abfe9c78a870a89779178c8b62029dccc1cc8ef0bc51f0c1c6c7917",
+    "packages/event-gateway/contracts/event-v1/manifest.json": "c2be6695e1b22d1b1e58059f11283d4ad56226fbdac1c611b8dadbb161c659fd",
+    "packages/event-gateway/README.md": "41000ec7ce3c8928fc861361d3c835808b8b00bf5decaad1db4b4da2fc747fb6",
+    "packages/event-gateway/docs/native-bridge.md": "7935f1ab1f508a4db41f8f9e4c692124484f5ae15b71a1a3365464c2ccefd0d6",
+    "packages/event-gateway/docs/no-start-settlement.md": "8078def0ca683978c9db939592a58cc0ed2c69914885dd143164b71b97c17304"
+  },
+  "individualCausalCases": [
+    {
+      "selector": "packages/event-gateway/tests/test_store.py::StoreTests.test_started_receipt_is_preserved_without_queue_alias",
+      "mutation": "Store.record_started writes turnId into deliveries.submission when no queue submission exists.",
+      "intendedAssertion": "AssertionError: {'submission_id': 'a049bbb1-a927-40c1-9076-1f7f387f0e91', '[65 chars]True} != {'submission_id': None, 'turn_id': 'a049bbb1-a927-40c1-9076[31 chars]True}",
+      "redLogSha256": "9611bb6d68508dbb9befc2169a99bd23f2ff1d6add7363adc8059a6d3f4f0c8a",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_store.py::StoreTests.test_native_ack_is_immutable_cas_and_stops_retries_after_restart",
+      "mutation": "Record started receipt with replayed=true, then replay it with replayed=false; attempt ACK mutation acknowledgedAt=2026-10-05T12:00:01.000Z and wrong nativeCorrelation.permitId=fresh UUID; reject both. Complete only with {status:submitted,current:false}; reject observed/current:true.",
+      "intendedAssertion": "AssertionError: 'd4fe0364-2b6a-45d2-828d-515c049954ff' is not None",
+      "redLogSha256": "14530c6c01ea7211f270ea343529f6a78a8b77ea0711eebb2916112e95430ca0",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_store.py::StoreTests.test_schema_v2_migration_clears_only_proven_native_turn_aliases",
+      "mutation": "Construct a proven direct-start row, force legacy deliveries.submission=turn and PRAGMA user_version=2; retain an ordinary queued row with submission_id=legacy-queue-id. Migration must clear only the proven direct-start alias.",
+      "intendedAssertion": "AssertionError: '39ed1599-a29e-4b8d-9971-bd7c29165117' is not None",
+      "redLogSha256": "4bd51aa0e503d48df1d45ad7fc1482e8e3d7aa999dcb44e2e715236de89ac754",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_store.py::StoreTests.test_schema_zero_and_one_migrate_without_requeueing_native_work",
+      "mutation": "For PRAGMA user_version 0 and 1, drop attempts, reopen, and require schema v3 while the formerly submitting delivery remains ambiguous, has no current attempt, cannot be claimed, and keeps its envelope.",
+      "intendedAssertion": "AssertionError: 2 != 3",
+      "redLogSha256": "ea05fbd81e0a3fc68b1cef84b8d5810bed3e724df72baa58402b951c43a2b3ea",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_gateway.py::GatewayTests.test_started_receipt_gets_submitted_ack_and_never_restarts_native",
+      "mutation": "Gateway._ack_started fabricates submitted/current:false and completes locally without calling authority.acknowledge.",
+      "intendedAssertion": "AssertionError: 0 != 1",
+      "redLogSha256": "5344524baf5fd8cdcd064b8195a23619046c010103d8e51f54d365d2b2679c4d",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_gateway.py::GatewayTests.test_lost_native_ack_retries_exact_persisted_dto_after_restart",
+      "mutation": "Gateway rebuilds acknowledgedAt on retry and Store.persist_native_ack overwrites the immutable ACK, allowing changed DTO transmission.",
+      "intendedAssertion": "AssertionError: Lists differ: [{'ac[684 chars]-05T13:00:30.000Z', 'agent': 'pilot-agent', 'a[582 chars]ed'}] != [{'ac[684 chars]-05T12:00:30.000Z', 'agent': 'pilot-agent', 'a[582 chars]ed'}]",
+      "redLogSha256": "1add51660ea6c9182cc5896da346d97a17947d2db2abed381596e53a6f72cd59",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_gateway.py::GatewayTests.test_ack_storage_capacity_failure_keeps_receipt_and_sends_nothing",
+      "mutation": "Gateway continues to authority.acknowledge after Store.persist_native_ack raises StoreError, sending a positive ACK that was not persisted.",
+      "intendedAssertion": "AssertionError: Lists differ: [{'schemaVersion': 1, 'eventId': '018e2c70[614 chars]3'}}] != []",
+      "redLogSha256": "c0ee3dfd06fa0d6b5ddb0af4f5bc3a82a763ded78c659aac2ae6288b0997e911",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_gateway.py::GatewayTests.test_detach_during_submit_preserves_authentic_positive",
+      "mutation": "Use a submit callback that detaches the runtime during submit, then returns the authentic started receipt. Require submitted status, receipt retained, and no negative settlement.",
+      "intendedAssertion": "AssertionError: 'ambiguous' != 'submitted'",
+      "redLogSha256": "d277efe5e2547ace944d36fc2cddf6af3470d556faa6d5183bbdc67270adb166",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_gateway.py::GatewayTests.test_recovered_positive_is_immutable_and_never_resubmitted",
+      "mutation": "Gateway.reconcile permits a submitted attempt with a positive started_receipt to perform another native lookup.",
+      "intendedAssertion": "AssertionError: 2 != 1",
+      "redLogSha256": "f8d84f7512019b2c18d2196188ebab0ea7731da5512826e449038c63c4e9894e",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_gateway_integration.py::GatewayIntegrationTests.test_real_clients_retire_terminal_no_start_then_ack_started_receipt",
+      "mutation": "After restart, rebuild acknowledgedAt and overwrite the persisted native ACK, changing replayed ACK body bytes.",
+      "intendedAssertion": "AssertionError: b'{\"a[23 chars]-05T12:00:58.000Z\",\"agent\":\"pilot-agent\",\"atta[551 chars]ed\"}' != b'{\"a[23 chars]-05T13:00:58.000Z\",\"agent\":\"pilot-agent\",\"atta[551 chars]ed\"}'",
+      "redLogSha256": "13fdd861940e39cc324bf40c5e6da99e51b34f977de03ff5b570a1af27082feb",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_gateway_integration.py::GatewayIntegrationTests.test_real_clients_retire_terminal_no_start_then_ack_started_receipt",
+      "mutation": "Permit read-only native reconciliation of a submitted attempt despite its persisted positive started receipt.",
+      "intendedAssertion": "AssertionError: Lists differ: [('ch[1643 chars]1'}}), ('restore', {'attemptId': '98ea72dd-0ef[1529 chars]c'})] != [('ch[1643 chars]1'}})]",
+      "redLogSha256": "df4ef2a82c386466502c44375459d991abecc04d6c80d0f5d33e8a809208a181",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_gateway.py::GatewayTests.test_detach_after_ack_does_not_reopen_native_ack",
+      "mutation": "Complete one submitted ACK, detach the runtime, then reconcile. ACK completion must survive fencing to ambiguous state, leave ack_pending=false, and suppress a duplicate ACK.",
+      "intendedAssertion": "AssertionError: 2 != 1",
+      "redLogSha256": "28486eb0758f0030e873dc5b64617399933892d995977c8430ce5328111ad50a",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_cloud.py::CloudTests.test_native_ack_wire_and_node_proof_match_external_vector",
+      "mutation": "Use GET instead of POST in canonical node-proof bytes; Python self-signing remains internally consistent but must disagree with independent Node vector.",
+      "intendedAssertion": "AssertionError: b'[\"e[63 chars]om\",\"GET\",\"/v1/ack\",\"0b614777db4060ac22b71a730[144 chars]02\"]' != b'[\"e[63 chars]om\",\"POST\",\"/v1/ack\",\"0b614777db4060ac22b71a73[145 chars]02\"]'",
+      "redLogSha256": "a09124b3f275888a11e05d76b09502d6e7e944d775fe33d47a608844f1c25a4b",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "packages/event-gateway/tests/test_cloud.py::CloudTests.test_native_ack_wire_and_node_proof_match_external_vector",
+      "mutation": "Sort Python JSON keys, changing exact ACK wire bytes from the Node vector while preserving parsed object semantics.",
+      "intendedAssertion": "AssertionError: b'{\"acknowledgedAt\":\"2026-10-05T12:00:58.000Z[580 chars]ed\"}' != b'{\"schemaVersion\":1,\"eventId\":\"018e2c70-7c6a[580 chars]1\"}}'",
+      "redLogSha256": "ab642900b1099c99e60f9ea7ac06c47051e6e6b72ba94076b9166237f1cc808a",
+      "green": "current full source suite; each selector passed"
+    },
+    {
+      "selector": "tests/test_protocol.py::ProtocolTests.test_shared_vectors",
+      "case": "native-identity",
+      "redExit": 1,
+      "greenExit": 0,
+      "intendedAssertion": "AssertionError: False is not true",
+      "redLogSha256": "856bd33de36dc7ad32ae34fef8490fa10c563f865a01328931d1dfe4491e1661",
+      "greenLogSha256": "9a8abc39adb3abe9f9553e858fed7dceb7b74d32d6bd14346fa1676b3d84883c"
+    },
+    {
+      "selector": "tests/test_protocol.py::ProtocolTests.test_shared_vectors",
+      "case": "native-watermark",
+      "redExit": 1,
+      "greenExit": 0,
+      "intendedAssertion": "AssertionError: True != False",
+      "redLogSha256": "b17fe3decd00308fa98cb2346ede9d971fb9ff8fe1a3deecc95fe8c50f2c69a1",
+      "greenLogSha256": "9a8abc39adb3abe9f9553e858fed7dceb7b74d32d6bd14346fa1676b3d84883c"
+    },
+    {
+      "selector": "tests/test_protocol.py::ProtocolTests.test_shared_vectors",
+      "case": "observed-third-vector",
+      "redExit": 1,
+      "greenExit": 0,
+      "intendedAssertion": "AssertionError: False is not true",
+      "redLogSha256": "8a89333fc345dc264c4b5df10a3f065d2ee1ee946e0207285da87145e966e9a1",
+      "greenLogSha256": "9a8abc39adb3abe9f9553e858fed7dceb7b74d32d6bd14346fa1676b3d84883c"
+    },
+    {
+      "selector": "tests/test_protocol.py::ProtocolTests.test_shared_vectors",
+      "case": "positional-pairing",
+      "redExit": 1,
+      "greenExit": 0,
+      "intendedAssertion": "AssertionError: False is not true",
+      "redLogSha256": "0f1e586f386cd5069cbe1d629e81e61eba3e658a41623fef68e72dbe55fd9e2b",
+      "greenLogSha256": "9a8abc39adb3abe9f9553e858fed7dceb7b74d32d6bd14346fa1676b3d84883c"
+    }
+  ],
+  "historicalReasonTagOnlyRedsExcluded": true,
+  "fullSourceSuite": {
+    "tests": 172,
+    "passed": 172,
+    "logSha256": "64eb1d66611b20b182555ecf79f33233d0cb2951fb2dfaf41d96a875a14407a2"
+  },
+  "ruff": "src tests scripts pass",
+  "canonicalRemoteVerification": {
+    "pin": "9b1ab6e2c2cf801fe035c766d03f26f1b2f85790",
+    "eventSources": {
+      "apps/os/packages/event-runtime/src/protocol.schema.json": "7326d3815b9be28448f47f1e3db5a038c6064ebf39a9f9bed07e452142a710d4",
+      "apps/os/packages/event-runtime/src/protocol.ts": "076f63539abfe9c78a870a89779178c8b62029dccc1cc8ef0bc51f0c1c6c7917",
+      "apps/os/packages/event-runtime/src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+      "apps/os/packages/event-runtime/__tests__/fixtures/protocol-v1.json": "2aa35df5cace7a4c646316cfda44171adecf2ab6eeb4c26124901fb6eb00c90f"
+    },
+    "controlPins": {
+      "fixtures.json": "a47fa45935463df5a91984e4d2f5f6b5304944d0fcd99872c3bb30bd981908d1",
+      "manifest.json": "9d23b546a8516464db44241c90c031b94c5da572168f1e7734dc16532dfa354a"
+    },
+    "remoteBlobs": [
+      {
+        "path": "apps/os/packages/event-runtime/src/protocol.schema.json",
+        "sha256": "7326d3815b9be28448f47f1e3db5a038c6064ebf39a9f9bed07e452142a710d4",
+        "verifiedRemote": true
+      },
+      {
+        "path": "apps/os/packages/event-runtime/src/protocol.ts",
+        "sha256": "076f63539abfe9c78a870a89779178c8b62029dccc1cc8ef0bc51f0c1c6c7917",
+        "verifiedRemote": true
+      },
+      {
+        "path": "apps/os/packages/event-runtime/src/policy.ts",
+        "sha256": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+        "verifiedRemote": true
+      },
+      {
+        "path": "apps/os/packages/event-runtime/__tests__/fixtures/protocol-v1.json",
+        "sha256": "2aa35df5cace7a4c646316cfda44171adecf2ab6eeb4c26124901fb6eb00c90f",
+        "verifiedRemote": true
+      },
+      {
+        "path": "apps/os/packages/event-runtime/src/contracts.ts",
+        "sha256": "49e6170050b18ca6ee580bf8ebc38256e4795827ce6378629c78bb54e9920123",
+        "verifiedRemote": true
+      },
+      {
+        "path": "apps/os/packages/event-runtime/src/api.ts",
+        "sha256": "17c7abfcbc623abb7901f67be856ee8e7bfed3ec3d9e3c34408a01f75ff3cf0d",
+        "verifiedRemote": true
+      },
+      {
+        "path": "apps/os/packages/event-runtime/src/registry.ts",
+        "sha256": "98eff05fedf7415182e4bde5a0fa97cb4e64a712b65fdbe483e926b17222b6c1",
+        "verifiedRemote": true
+      },
+      {
+        "path": "apps/os/packages/event-runtime/src/coordinator.ts",
+        "sha256": "94632f474ac814fd9c5e46d6a84e6645bee53dd61edb77657f02477d7a4b0394",
+        "verifiedRemote": true
+      },
+      {
+        "path": "apps/os/packages/event-runtime/src/coordinator-admission.ts",
+        "sha256": "b0f6048e25d023f9caeb215de63dd0ca2c056f3d111aa042d031739b828d831e",
+        "verifiedRemote": true
+      },
+      {
+        "path": "apps/os/packages/event-runtime/src/authority-client.ts",
+        "sha256": "1028a9808a5c33036cdde013de7caf1859d713975ef0f9cd6f3b5a0bd4f85682",
+        "verifiedRemote": true
+      }
+    ]
+  },
+  "isolatedInstalledWheel": {
+    "isolatedWheelInstalled": true,
+    "allProductionModulesByteMatch": 11,
+    "eventContractFilesByteMatch": true,
+    "closedNativeAckParsed": true,
+    "automaticWakeEnabled": false,
+    "ownerClientChanged": false,
+    "wheelSha256": "86fa2c555a78d281b531be943d1d77a5b8b5a96d573603b7bc976b623811f2f7"
+  },
+  "installedIntegrationChecks": [
+    "Node ACK body/canonical proof vector",
+    "real CloudClient/NativeBridgeAdapter/Store no-start then started ACK retry"
+  ],
+  "limits": [
+    "Registration only: no input observation, slot release or watermark advancement",
+    "Controlled peers and disposable wheel only; no deployed Access/Mesh/owner-client proof",
+    "Public native binding and automatic native wake remain disabled",
+    "SQLite schema3 retained on rollback; old parser leaves evidence pending"
+  ]
+}

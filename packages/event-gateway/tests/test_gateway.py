@@ -36,10 +36,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.mapping.update(leaseExpiresAt=NOW + 3600, nativeThreadId=str(uuid.uuid4()))
         self.store.put_attachment(self.mapping)
         self.key = Ed25519PrivateKey.generate()
-        self.claims, self.settlements, self.submissions, self.lookups = [], [], [], []
+        self.claims, self.settlements, self.submissions, self.lookups, self.acknowledgments = [], [], [], [], []
         self.admissions = {}
         self.check_calls = 0
-        self.busy = self.drop_claim = self.drop_settlement = self.drop_response = False
+        self.busy = self.drop_claim = self.drop_settlement = self.drop_response = self.drop_acknowledgment = False
         self.after_check = self.after_claim = self.custom_submit = None
         self.outcome = 'started'
         self.recovered_outcome = 'unknown'
@@ -123,6 +123,16 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         return {**{key: admission['envelope'][key] for key in ('deliveryId', 'attemptId', 'nodeGeneration')},
                 'status': 'not_started', 'permitId': admission['permitId'], 'nodeId': admission['nodeId'],
                 'evidence': evidence}
+
+    async def acknowledge(self, envelope, acknowledgment):
+        self.acknowledgments.append(copy.deepcopy(acknowledgment))
+        attempt = self.store.current_attempt(acknowledgment['deliveryId'])
+        self.assertEqual(attempt['native_ack'], acknowledgment)
+        self.assertEqual(envelope, attempt['admission']['envelope'])
+        if self.drop_acknowledgment:
+            self.drop_acknowledgment = False
+            raise TimeoutError('lost ACK response')
+        return {'status': 'submitted', 'current': False}
 
     async def test_authentication_and_current_attachment_before_dedup(self):
         self.accept()
@@ -371,20 +381,74 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(self.submissions[0]['attemptId'], self.submissions[1]['attemptId'])
         self.assertEqual(self.submissions[0]['deliveryId'], self.submissions[1]['deliveryId'])
 
-    async def test_started_receipt_quarantines_authentic_turn_without_cloud_ack(self):
+    async def test_started_receipt_gets_submitted_ack_and_never_restarts_native(self):
         ident = self.accept()['deliveryId']
         row = await self.gateway.dispatch(ident)
-        self.assertEqual(row['reason'], 'native_started_ack_unqualified')
+        self.assertEqual(row['status'], 'submitted')
+        self.assertIsNone(row['reason'])
         attempt = self.store.current_attempt(ident)
         self.assertEqual(attempt['started_receipt'], self.receipt(self.submissions[0], 'started'))
+        self.assertEqual(attempt['native_ack']['nativeCorrelation'], {
+            'kind': 'native_turn_started', 'permitId': attempt['admission']['permitId'],
+            'turnId': self.submissions[0]['clientUserMessageId'],
+        })
+        self.assertNotIn('submissionId', attempt['native_ack']['nativeCorrelation'])
         self.assertEqual(self.store.native_receipt(ident)['turn_id'], self.submissions[0]['clientUserMessageId'])
-        self.assertTrue(self.store.native_receipt(ident)['ack_pending'])
+        self.assertIsNone(self.store.native_receipt(ident)['submission_id'])
+        self.assertFalse(self.store.native_receipt(ident)['ack_pending'])
+        self.assertEqual(len(self.acknowledgments), 1)
         self.restart()
-        self.gateway.adapter_factory = lambda mapping: self.fail('quarantined positive receipt needs no lookup')
-        self.assertEqual((await self.gateway.reconcile(ident))['reason'], 'native_started_ack_unqualified')
+        self.gateway.adapter_factory = lambda mapping: self.fail('positive receipt needs no native lookup')
+        self.assertEqual((await self.gateway.reconcile(ident))['status'], 'submitted')
         await self.gateway.dispatch(ident)
         self.assertEqual(self.settlements, [])
+        self.assertEqual(len(self.acknowledgments), 1)
         self.assertEqual(len(self.submissions), 1)
+
+    async def test_lost_native_ack_retries_exact_persisted_dto_after_restart(self):
+        ident = self.accept()['deliveryId']
+        self.drop_acknowledgment = True
+        row = await self.gateway.dispatch(ident)
+        self.assertEqual(row['reason'], 'native_started_ack_pending')
+        persisted = self.store.current_attempt(ident)['native_ack']
+        self.assertTrue(self.store.native_receipt(ident)['ack_pending'])
+        self.restart()
+        self.now += 3600
+        self.gateway.adapter_factory = lambda mapping: self.fail('persisted positive receipt needs no native lookup')
+        self.assertEqual((await self.gateway.reconcile(ident))['status'], 'submitted')
+        self.assertEqual(self.acknowledgments, [persisted, persisted])
+        self.assertEqual(self.store.current_attempt(ident)['native_ack'], persisted)
+        self.assertFalse(self.store.native_receipt(ident)['ack_pending'])
+        self.assertEqual(len(self.submissions), 1)
+        self.assertEqual(self.lookups, [])
+        self.assertEqual(self.settlements, [])
+
+    async def test_ack_storage_capacity_failure_keeps_receipt_and_sends_nothing(self):
+        ident = self.accept()['deliveryId']
+        record_started = self.store.record_started
+
+        def record_then_fill(delivery_id, attempt_id, receipt):
+            result = record_started(delivery_id, attempt_id, receipt)
+            self.store.max_bytes = self.store._size()
+            return result
+
+        self.store.record_started = record_then_fill
+        row = await self.gateway.dispatch(ident)
+        self.assertEqual(self.acknowledgments, [])
+        self.assertEqual(row['reason'], 'native_ack_persistence_pending')
+        current = self.store.current_attempt(ident)
+        self.assertIsNotNone(current['started_receipt'])
+        self.assertIsNone(current['native_ack'])
+
+    async def test_detach_after_ack_does_not_reopen_native_ack(self):
+        ident = self.accept()['deliveryId']
+        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'submitted')
+        self.store.detach(self.event['runtimeId'])
+        self.gateway.adapter_factory = lambda mapping: self.fail('acknowledged start needs no native lookup')
+        row = await self.gateway.reconcile(ident)
+        self.assertEqual(len(self.acknowledgments), 1)
+        self.assertEqual(row['status'], 'ambiguous')
+        self.assertFalse(self.store.native_receipt(ident)['ack_pending'])
 
     async def test_ordinary_not_started_and_unknown_never_retire(self):
         ident = self.accept()['deliveryId']
@@ -433,7 +497,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             return self.receipt(request, 'started')
 
         self.custom_submit = detached
-        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'ambiguous')
+        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'submitted')
         attempt = self.store.current_attempt(ident)
         self.assertEqual(attempt['started_receipt'], self.receipt(self.submissions[0], 'started'))
         self.assertEqual(self.store.native_receipt(ident)['turn_id'], self.submissions[0]['clientUserMessageId'])
@@ -448,8 +512,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         await self.gateway.reconcile(ident)
         receipt = self.receipt(self.submissions[0], 'started', replayed=True)
         self.assertEqual(self.store.current_attempt(ident)['started_receipt'], receipt)
-        self.assertEqual(self.store.delivery(ident)['reason'], 'native_started_ack_unqualified')
-        self.assertTrue(self.store.native_receipt(ident)['ack_pending'])
+        self.assertIsNone(self.store.delivery(ident)['reason'])
+        self.assertFalse(self.store.native_receipt(ident)['ack_pending'])
         self.recovered_outcome = 'terminalNotStarted'
         await self.gateway.reconcile(ident)
         await self.gateway.dispatch(ident)

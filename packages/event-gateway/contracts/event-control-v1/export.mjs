@@ -36,7 +36,8 @@ const canonicalSource = source['registry.ts'].match(/export function canonicalNo
 // eslint-disable-next-line no-unsanitized/method -- Execute the reviewed pinned proof function after the same pre-evaluation checks; regeneration explicitly trusts local source.
 const { canonicalNodeProof } = await import(dataModule(canonicalSource));
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- Fixed fixture filename within the explicitly supplied local checkout.
-const original = JSON.parse(readFileSync(resolve(base, '../__tests__/fixtures/protocol-v1.json'), 'utf8')).validEnvelopes[0];
+const corpus = JSON.parse(readFileSync(resolve(base, '../__tests__/fixtures/protocol-v1.json'), 'utf8'));
+const original = corpus.validEnvelopes[0];
 const nodeId = '00000000-0000-4000-8000-000000000001';
 const permitId = '00000000-0000-4000-8000-000000000002';
 const issuedAt = '2026-10-05T12:00:58.000Z';
@@ -62,7 +63,20 @@ contracts.DispatchNoStartResultSchema.parse(localNoStartResult);
 const noStartBody = JSON.stringify(noStart);
 const noStartBinding = { ...binding, path: '/v1/dispatch/settle-no-start',
   bodySha256: createHash('sha256').update(noStartBody).digest('hex') };
+const nativeAckFixture = corpus.validAcknowledgments.find(ack => ack.nativeCorrelation.kind === 'native_turn_started');
+if (!nativeAckFixture) throw Error('canonical native-start ACK fixture missing');
+const nativeAck = { ...nativeAckFixture, acknowledgedAt: issuedAt,
+  nativeCorrelation: { ...nativeAckFixture.nativeCorrelation, permitId } };
+// eslint-disable-next-line no-unsanitized/method -- Same reviewed protocol module, after pre-evaluation source-pin checks above.
+const { EventObservationAckSchema } = await import(protocol);
+EventObservationAckSchema.parse(nativeAck);
+const nativeAckBody = JSON.stringify(nativeAck);
+const nativeAckBinding = { ...binding, path: '/v1/ack',
+  bodySha256: createHash('sha256').update(nativeAckBody).digest('hex') };
 const fixture = { original, admitted, overBudget, claim,
+  nativeAck,
+  nativeAckNodeProof: { principal: nativeAck.principal, binding: nativeAckBinding, body: nativeAckBody, proof,
+    canonical: canonicalNodeProof(nativeAck.principal, proof, nativeAckBinding) },
   nodeProof: { principal: original.principal, binding, body, proof, canonical: canonicalNodeProof(original.principal, proof, binding) },
   noStart, localNoStart, noStartResult, localNoStartResult,
   noStartNodeProof: { principal: original.principal, binding: noStartBinding, body: noStartBody, proof,

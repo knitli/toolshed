@@ -3,6 +3,7 @@
 import asyncio
 import time
 
+from .cloud import _iso
 from .codex import CodexError
 from .native import NativeError, validate_request, validate_receipt
 from .protocol import parse_envelope, matches_delivery_id
@@ -27,6 +28,9 @@ class UnavailableAuthority:
         raise Refused("authority_unavailable")
 
     async def settle_no_start(self, admission, evidence):
+        raise Refused("authority_unavailable")
+
+    async def acknowledge(self, envelope, acknowledgment):
         raise Refused("authority_unavailable")
 
 
@@ -109,8 +113,8 @@ class Gateway:
     async def _receipt(self, delivery_id, attempt, receipt):
         outcome = validate_receipt(attempt["native_request"], receipt)
         if outcome["status"] == "started":
-            # Direct started evidence is authentic, but has no qualified cloud ACK DTO.
-            return self.store.record_started(delivery_id, attempt["attempt_id"], receipt)
+            self.store.record_started(delivery_id, attempt["attempt_id"], receipt)
+            return await self._ack_started(delivery_id, attempt["attempt_id"])
         if outcome["status"] == "terminalNotStarted":
             self.store.begin_settlement(delivery_id, attempt["attempt_id"],
                 {"type": "native_terminal_no_start", "receiptId": outcome["receiptId"]},
@@ -118,6 +122,48 @@ class Gateway:
             return await self._settle(delivery_id)
         return self.store.finish(delivery_id, "ambiguous", reason="native_outcome_unknown",
                                  attempt_id=attempt["attempt_id"])
+
+    def _native_acknowledgment(self, attempt):
+        envelope = attempt["admission"]["envelope"]
+        acknowledgment = {
+            "schemaVersion": 1,
+            **{key: envelope[key] for key in (
+                "eventId", "deliveryId", "attemptId", "principal", "agent", "runtimeId",
+                "nodeGeneration", "runtimeGeneration", "attachmentGeneration",
+            )},
+            "deliveredSourceStateVersion": envelope["sourceStateVersion"],
+            "acknowledgedAt": _iso(self.clock()),
+            "status": "submitted",
+            "nativeCorrelation": {
+                "kind": "native_turn_started",
+                "permitId": attempt["admission"]["permitId"],
+                "turnId": attempt["started_receipt"]["outcome"]["turnId"],
+            },
+        }
+        if "consumerGeneration" in envelope:
+            acknowledgment["consumerGeneration"] = envelope["consumerGeneration"]
+        return acknowledgment
+
+    async def _ack_started(self, delivery_id, attempt_id):
+        attempt = self.store.current_attempt(delivery_id)
+        if not attempt or attempt["attempt_id"] != attempt_id or not attempt.get("started_receipt"):
+            return self._row(delivery_id)
+        if not self.store.native_receipt(delivery_id)["ack_pending"]:
+            return self._row(delivery_id)
+        try:
+            acknowledgment = self.store.persist_native_ack(
+                delivery_id, attempt_id, attempt.get("native_ack") or self._native_acknowledgment(attempt)
+            )
+        except StoreError:
+            return self._row(delivery_id, "native_ack_persistence_pending")
+        try:
+            result = await asyncio.wait_for(
+                self.authority.acknowledge(attempt["admission"]["envelope"], acknowledgment), 8
+            )
+            self.store.complete_native_ack(delivery_id, attempt_id, acknowledgment, result)
+        except Exception:
+            return self._row(delivery_id, "native_started_ack_pending")
+        return self._row(delivery_id)
 
     async def dispatch(self, delivery_id):
         envelope = self.store.delivery_envelope(delivery_id)
@@ -202,7 +248,7 @@ class Gateway:
             if attempt["state"] == "settlement_pending":
                 return await self._settle(delivery_id)
             if attempt.get("started_receipt"):
-                return self._row(delivery_id, "native_started_ack_unqualified")
+                return await self._ack_started(delivery_id, attempt["attempt_id"])
             if attempt["state"] not in ("submitting", "ambiguous"):
                 return self._row(delivery_id)
             mapping = self.store.get_attachment(envelope["runtimeId"])

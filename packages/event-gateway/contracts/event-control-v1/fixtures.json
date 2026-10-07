@@ -69,6 +69,43 @@
     "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
     "attemptId": "018e2c70-7c6a-7a03-8000-000000000001"
   },
+  "nativeAck": {
+    "schemaVersion": 1,
+    "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+    "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+    "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+    "principal": "adam@knitli.com",
+    "agent": "pilot-agent",
+    "runtimeId": "018e2c70-7c6a-7a02-8000-000000000001",
+    "nodeGeneration": 1,
+    "runtimeGeneration": 2,
+    "attachmentGeneration": 3,
+    "deliveredSourceStateVersion": "manual-1",
+    "acknowledgedAt": "2026-10-05T12:00:58.000Z",
+    "status": "submitted",
+    "nativeCorrelation": {
+      "kind": "native_turn_started",
+      "permitId": "00000000-0000-4000-8000-000000000002",
+      "turnId": "018e2c70-7c6a-7a06-8000-000000000001"
+    }
+  },
+  "nativeAckNodeProof": {
+    "principal": "adam@knitli.com",
+    "binding": {
+      "audience": "https://events.example.com",
+      "method": "POST",
+      "path": "/v1/ack",
+      "bodySha256": "0b614777db4060ac22b71a730fc0890f3f36669239cbc447f61ec47d62db4369"
+    },
+    "body": "{\"schemaVersion\":1,\"eventId\":\"018e2c70-7c6a-7a01-8000-000000000001\",\"deliveryId\":\"dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217\",\"attemptId\":\"018e2c70-7c6a-7a03-8000-000000000001\",\"principal\":\"adam@knitli.com\",\"agent\":\"pilot-agent\",\"runtimeId\":\"018e2c70-7c6a-7a02-8000-000000000001\",\"nodeGeneration\":1,\"runtimeGeneration\":2,\"attachmentGeneration\":3,\"deliveredSourceStateVersion\":\"manual-1\",\"acknowledgedAt\":\"2026-10-05T12:00:58.000Z\",\"status\":\"submitted\",\"nativeCorrelation\":{\"kind\":\"native_turn_started\",\"permitId\":\"00000000-0000-4000-8000-000000000002\",\"turnId\":\"018e2c70-7c6a-7a06-8000-000000000001\"}}",
+    "proof": {
+      "nodeId": "00000000-0000-4000-8000-000000000001",
+      "nodeGeneration": 1,
+      "issuedAt": "2026-10-05T12:00:58.000Z",
+      "nonce": "00000000-0000-4000-8000-000000000002"
+    },
+    "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/ack\",\"0b614777db4060ac22b71a730fc0890f3f36669239cbc447f61ec47d62db4369\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-05T12:00:58.000Z\",\"00000000-0000-4000-8000-000000000002\"]"
+  },
   "nodeProof": {
     "principal": "adam@knitli.com",
     "binding": {

@@ -57,7 +57,7 @@ presence/authority seams are implemented.
 ## Contract and validation
 
 `contracts/event-v1/manifest.json` pins the canonical OS schema, semantic
-reference, and fixture bytes at `cd7b288daaccef6c042ad23598668afe2e220925`.
+reference, and fixture bytes at `9b1ab6e2c2cf801fe035c766d03f26f1b2f85790`.
 
 ```sh
 uv run --frozen python scripts/sync_contract.py --check --fetch
@@ -89,13 +89,21 @@ boundary vectors. Expanding that corpus and running both validators is an open
 cross-repository qualification gate.
 
 `security.py` documents a **proposed local** Ed25519 transport seam (exact bytes,
-recipient audience, configured public-key ID). The dispatcher retains the exact cloud admission DTO. Recovery of an expired
+recipient audience, configured public-key ID). The dispatcher retains the exact
+cloud admission DTO. Recovery of an expired
 original permit can authorize its retirement, never a native start. Cloud
 settlement must confirm the complete attempt, permit and evidence before one
 fresh attempt returns to waiting; the original budget charge remains. No offline
-or cached authority is accepted. Direct native starts carry authentic turn IDs
-but remain pending ACK until the cloud protocol qualifies that correlation.
-See [no-start settlement](docs/no-start-settlement.md) for the current scope.
+or cached authority is accepted. Direct native starts retain the full original
+request/receipt and one immutable
+`native_turn_started` submitted ACK. Recovery retries only that ACK, never a new
+claim or native operation. Registration does not prove input observation or
+release the pending slot. Older cloud parsers leave the ACK pending.
+See [no-start settlement](docs/no-start-settlement.md) and
+[native bridge](docs/native-bridge.md) for the qualification gates. The
+[ACK proof index](docs/native-start-ack-proof.json) records 18 individual causal
+cases, 172 passing source tests, the independent Node proof vector and installed
+wheel qualification.
 
 The spool retains accepted metadata, private attachment mappings, deduplication,
 and ambiguity. It fences generations, stops at capacity, and never evicts live
