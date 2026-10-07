@@ -232,9 +232,10 @@ jobs:
                       if publish_if_current(number, head, state, description, token, run_url, workflow_source):
                           results.append((number, head, state))
                           print(f"PR #{number} {head}: {state}")
-                  except (ValueError, KeyError, TypeError, OSError):
+                  except (ValueError, KeyError, TypeError, OSError) as error:
                       publication_failed = True
-                      print("Contract status publication failed; continuing with remaining PRs.")
+                      identifier = number if type(number) is int else "unknown"
+                      print(f"PR #{identifier}: {type(error).__name__}; contract status publication failed; continuing.")
               if publication_failed:
                   raise OSError("Some contract statuses could not be published")
               return results

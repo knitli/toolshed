@@ -1,5 +1,6 @@
 """Exercise the trusted verifier with candidate bytes, without credentials/network."""
 import base64
+from contextlib import redirect_stdout
 import hashlib
 import io
 import json
@@ -350,7 +351,9 @@ class ContractWorkflowTests(unittest.TestCase):
                             failed_requests.append((endpoint, state))
                             raise failure
 
-                    with self.assertRaises((ValueError, KeyError, TypeError, OSError)) as raised:
+                    output = io.StringIO()
+                    with redirect_stdout(output), self.assertRaises(
+                            (ValueError, KeyError, TypeError, OSError)) as raised:
                         self.refresh((HEAD, later_head), before_request=unavailable)
                     self.assertEqual(
                         [(endpoint, payload["state"]) for endpoint, payload in self.runner_posts
@@ -363,3 +366,5 @@ class ContractWorkflowTests(unittest.TestCase):
                     )
                     self.assertEqual(failed_requests, [(failed_endpoint, failed_state)])
                     self.assertIsInstance(raised.exception, OSError)
+                    self.assertIn(f"PR #1: {type(failure).__name__}", output.getvalue())
+                    self.assertNotIn(str(failure), output.getvalue())
