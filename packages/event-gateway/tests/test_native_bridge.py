@@ -167,6 +167,52 @@ class NativeBridgeTests(unittest.TestCase):
                 self.assertTrue(server.release_primary.is_set())
                 self.assertLessEqual(clock[0], 10.1)
 
+    def test_input_recorded_expiry_wait_has_independent_deadline(self):
+        server = SimpleNamespace(release_primary=threading.Event(), model_requests=1,
+                                 request_counts={"primary": 1, "title": 0, "unknown": 0})
+        request, recorded, lookups = {}, {}, []
+        clock = {"monotonic": 0.0, "wall_ms": 0.0}
+
+        def sleep(seconds):
+            clock["monotonic"] += seconds
+            clock["wall_ms"] += seconds * 1000
+
+        def start(value):
+            request.update(deepcopy(value))
+            recorded.update(status="inputRecorded", turnId=value["clientUserMessageId"],
+                            itemId=str(uuid4()), replayed=True)
+            return {"status": "started", "turnId": value["clientUserMessageId"],
+                    "replayed": False}
+
+        def receipt(value):
+            self.assertEqual(value, request)
+            lookups.append(deepcopy(value))
+            if len(lookups) == 1:
+                # Model a backward wall-clock correction while the first receipt is observed.
+                clock["monotonic"] += 8
+                clock["wall_ms"] = 1000
+            return dict(recorded)
+
+        bridge = SimpleNamespace(start=Mock(side_effect=start), receipt=Mock(side_effect=receipt),
+                                 challenge=Mock(return_value={"eligible": False}))
+        process = Mock(poll=Mock(return_value=None))
+        with patch.object(native.time, "sleep", side_effect=sleep), \
+             patch.object(native.time, "monotonic", side_effect=lambda: clock["monotonic"]), \
+             patch.object(native.time, "time_ns",
+                          side_effect=lambda: int(clock["wall_ms"] * 1_000_000)):
+            try:
+                result = native.qualify_input_recorded(bridge, server, process, witness())
+            except native.BridgeError as error:
+                self.fail(f"permit-expiry wait inherited the stale earlier-phase deadline: {error}")
+
+        self.assertEqual(result["outcome"], "inputRecorded")
+        self.assertEqual(result["recoveredWhileIneligibleAfterPermitExpiry"], True)
+        self.assertEqual(lookups, [request] * 3)
+        self.assertAlmostEqual(clock["monotonic"], 12.05)
+        bridge.start.assert_called_once()
+        bridge.challenge.assert_called_once_with()
+        self.assertTrue(server.release_primary.is_set())
+
     def test_terminal_retry_qualification_preserves_delivery_and_exact_receipts(self):
         initial = witness()
         renewed = dict(initial, generation=3, sequence=2)

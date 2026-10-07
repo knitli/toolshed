@@ -87,12 +87,12 @@
     }
   ],
   "individualNativeAssertionRedRestoredGreenPairs": 12,
-  "harnessTests": 15,
-  "individualHarnessGuardPairs": 16,
+  "harnessTests": 16,
+  "individualHarnessGuardPairs": 17,
   "syntheticQualification": {
     "cloudSettlementProven": false,
     "exactReceiptRecovered": true,
-    "itemId": "01a1152a-632a-7930-b349-ca4fdb06e298",
+    "itemId": "01a11548-1aeb-7612-ae7c-693144a6547e",
     "mockModelRequests": 2,
     "nativeOnly": true,
     "outcome": "inputRecorded",
@@ -100,10 +100,12 @@
     "qualification": "synthetic-native-input-recorded",
     "realModelCalls": 0,
     "recoveredWhileIneligibleAfterPermitExpiry": true,
-    "threadId": "01a1152a-624f-7c90-9c16-936e55f0be25",
+    "threadId": "01a11548-1a10-7951-936e-19fcde353d07",
     "titleModelRequests": 1,
-    "turnId": "0720ae1b-7784-43eb-a9c6-f5e4167413e0",
-    "unknownModelRequests": 0
+    "turnId": "edb72791-6ed6-421d-9b84-92ca5310b03b",
+    "unknownModelRequests": 0,
+    "evidencePath": "/private/tmp/native-input-recorded-deadline-fix/live-qualification.json",
+    "evidenceSha256": "0df6c5b2cb56c3033626b6f5ca256ff3b283d247f4779acbf6f2a5ee9a6cbb5a"
   },
   "proof": "input-recorded-test-proof.json",
   "harnessProof": "input-recorded-harness-proof.json",
@@ -116,9 +118,12 @@
     "Initial causal pairs precede two clone-only test lint edits; review-fix 12 TUI/18 receipt tests precede its just fix, which made no source edits. Protocol and actual Core integration are prior successful runs with unchanged protocol/Core observer source."
   ],
   "harnessFocusedTests": {
-    "passed": 15,
+    "passed": 16,
     "failed": 0,
-    "logSha256": "e45929de0d8066830c9fe49831633940c64c4cebb4b00989ab72b09b3f652eae"
+    "selector": "test_native_bridge.NativeBridgeTests",
+    "stage": "after expiry-deadline correction",
+    "logPath": "/private/tmp/native-input-recorded-deadline-fix/qualifier-tests.log",
+    "logSha256": "554dd9d34bbccc95f25b7f59c3205f3756811953a774f231855b2ad2db83e7b2"
   },
   "priorCandidate": {
     "binarySha256": "6ae0cb3accb4dedfcd5963d04ccfe61e65cd1795bec86e5f02aff696e72f1e8c",
@@ -303,5 +308,51 @@
   "reviewCorrectionAudit": {
     "result": "No concrete P1/P2; exact cache identity, read-only polling and stronger receipt precedence verified",
     "reportSha256": "2b06d64f313b99e6e149a341c01a8b2048656578941418862bdcb3d2f1ee51ea"
+  },
+  "expiryDeadlineCorrection": {
+    "behavior": "The permit-expiry wait now owns a fresh monotonic deadline after earlier receipt and primary-request phases.",
+    "test": "test_input_recorded_expiry_wait_has_independent_deadline",
+    "scenario": "A backward realtime adjustment leaves the permit unexpired while monotonic elapsed time has already consumed eight seconds of the prior budget.",
+    "red": {
+      "exitCode": 1,
+      "kind": "assertion",
+      "logPath": "/private/tmp/native-input-recorded-deadline-fix/deadline-isolation-red.log",
+      "logSha256": "95fca0ed83e62bc39b54e7edca0b2f7f37793c9498aefc8ad0d9e8f3444d0b57"
+    },
+    "green": {
+      "exitCode": 0,
+      "logPath": "/private/tmp/native-input-recorded-deadline-fix/deadline-isolation-green.log",
+      "logSha256": "1d4fad0683dd1ec2e239feb14f2ba2f65fae8c20a579fc92ed5eb8e0ab951c58"
+    },
+    "ruff": {
+      "tool": "ruff 0.16.10",
+      "command": "ruff check src tests scripts",
+      "passed": true,
+      "logPath": "/private/tmp/native-input-recorded-deadline-fix/ruff.log",
+      "logSha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "nativePatchChanged": false,
+    "updatedAtUtc": "2026-10-07T07:34:15+00:00",
+    "liveQualification": {
+      "path": "/private/tmp/native-input-recorded-deadline-fix/live-qualification.json",
+      "sha256": "0df6c5b2cb56c3033626b6f5ca256ff3b283d247f4779acbf6f2a5ee9a6cbb5a",
+      "logPath": "/private/tmp/native-input-recorded-deadline-fix/live-qualification.log",
+      "logSha256": "f1264442066de6974265280e21bfcc0e855300cbdfb0ced66776aa78aa222f5a",
+      "gitHead": "438d9739bc558a8c7808768f588706561a4f7a54",
+      "qualifierScriptSha256": "10944a16bcdad3af48528f1c174adef1fab3cecca2073b372ccc92d5db8ddb6c",
+      "testFileSha256": "986516515ec6854779fa7a3cce645033e0a9e080ea4aa0ea6de9faf0eb441448",
+      "nativePatchSha256": "0aeec9c1e63f867d95f531c65d6ac5b5618b40079028a64b22467af7e856f8da",
+      "binaryPath": "/private/tmp/codex-native-input-observation-spike/codex-native-input-observer-bin-pr45-p2-fallback",
+      "binarySha256Before": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
+      "binarySha256After": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
+      "nativeBinaryRebuilt": false,
+      "outcome": "inputRecorded",
+      "exactReceiptRecovered": true,
+      "recoveredWhileIneligibleAfterPermitExpiry": true,
+      "primaryModelRequests": 1,
+      "titleModelRequests": 1,
+      "unknownModelRequests": 0,
+      "realModelCalls": 0
+    }
   }
 }

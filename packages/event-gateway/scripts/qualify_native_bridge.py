@@ -584,6 +584,7 @@ def qualify_input_recorded(bridge, server, process, witness):
         busy = bridge.challenge()
         require(busy["eligible"] is False)
         # Read-only recovery needs neither a fresh lease nor a live permit.
+        deadline = time.monotonic() + 10
         while time.time_ns() // 1_000_000 <= request["permitExpiresAt"]:
             require(process.poll() is None and time.monotonic() < deadline)
             time.sleep(0.05)
