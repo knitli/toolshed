@@ -27,6 +27,8 @@ One five-second deadline covers credentials, signing and the HTTP call.
 Provider/transport exceptions, including exceptions already typed as `CloudError`,
 become fixed codes without their original message. Timeouts retain
 `request_timeout`; cancellation propagates.
+Malformed response JSON, UTF-8, duplicate keys and excessive nesting return
+`invalid_response`, distinct from provider/transport `unavailable`.
 
 `cf-access-token` authenticates to the Access edge, which supplies the original
 `cf-access-jwt-assertion` to Event. `Authorization: Bearer ...` carries the agent
@@ -35,6 +37,9 @@ bytes, POST path, Event origin, owner, node ID and generation. No credentials
 occur in signed node-proof JSON.
 
 - `claim(envelope)` returns the closed `admitted` or `over_budget` DTO. An
+  original queued envelope is validated at its issuance time so transport expiry
+  cannot prevent fresh cloud admission. The admitted reply is validated against
+  the current clock. An
   admitted reply includes UUID `permitId`, matching `nodeId`, an unexpired exact
   five-second window, and the returned envelope. Only transport `issuedAt` and
   `expiresAt` may differ from the requested envelope. All semantic fields,
@@ -63,9 +68,15 @@ as permission to start another native attempt.
 `contracts/event-control-v1/manifest.json` pins the exact Event source files from
 OS commit `737dca25de52ae39e2aa293c878521d02adacf60`, plus the Zod version and
 fixture SHA-256. It does not modify the earlier frozen `event-v1` transport pin.
-The exporter executes the source's actual Zod claim schemas and
-`canonicalNodeProof()` to generate the cross-language fixture. It does not import
-Worker runtime code or make network requests.
+In `--check` mode, the exporter verifies the committed revision, every source
+hash and installed Zod version before evaluating source. A mismatch stops before
+any data-module import. It then executes the source's actual Zod claim schemas
+and `canonicalNodeProof()` to check the cross-language fixture. Generation
+without `--check` is an explicit operation on reviewed, fully trusted local
+source and an installed trusted Zod dependency; it executes that code and writes
+a new pin for review. Neither mode imports Worker runtime code or makes network
+requests. The source extraction is deliberately specific to the pinned function
+and imports; changing that source requires reviewing the exporter again.
 
 From `packages/event-gateway`, using Node 24.19.0 and the pinned Zod 4.5.4 module:
 
@@ -75,12 +86,15 @@ UV_CACHE_DIR=/private/tmp/event-cloud-uv-cache uv run --frozen python -m unittes
 UV_CACHE_DIR=/private/tmp/event-cloud-uv-cache uv run --frozen ruff check src/event_gateway/cloud.py tests/test_cloud.py
 ```
 
-Qualification used Python 3.13.14 and uv 0.12.15: 18 focused tests and all 94
-package tests passed, and lint passed. Sixteen isolated production mutations each produced assertion
+Qualification used Python 3.13.14, uv 0.12.15 and Node 24.19.0: 20 focused tests
+and all 96 package tests passed, and lint passed. Nineteen isolated production mutations each produced assertion
 failures, zero test errors, and passed the same case after restoration:
 
 | Removed or weakened guard | Focused case |
 | --- | --- |
+| Pre-evaluation source pin verification | Modified source cannot execute a side effect |
+| Historical validation of queued claim input | Expired original gets fresh admission |
+| Deterministic response decode refusal | Invalid UTF-8, JSON, duplicate keys and nesting |
 | Credential provider exception sanitization | Credential `CloudError` regression |
 | HTTP transport exception sanitization | Transport `CloudError` regression |
 | Closed response fields | Claim DTO fences |

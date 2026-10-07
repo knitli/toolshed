@@ -3,7 +3,11 @@ import base64
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -17,6 +21,42 @@ FIXTURE = json.loads((ROOT / "contracts/event-control-v1/fixtures.json").read_te
 NOW = _timestamp(FIXTURE["admitted"]["permitIssuedAt"]) / 1000
 NODE = FIXTURE["admitted"]["nodeId"]
 JSON_HEADERS = {"content-type": "application/json"}
+
+
+class ExportPinTests(unittest.TestCase):
+    def test_modified_source_refused_before_evaluation(self):
+        # A local fixture under this checkout lets git identify the real revision
+        # without creating commits or requiring another repository in CI.
+        with tempfile.TemporaryDirectory(prefix="cloud-pin-test-", dir=ROOT) as directory:
+            scratch = Path(directory)
+            source = scratch / "packages/event-runtime/src"
+            source.mkdir(parents=True)
+            contract = ROOT / "contracts/event-control-v1"
+            exporter = scratch / "export.mjs"
+            shutil.copyfile(contract / "export.mjs", exporter)
+            pin = json.loads((contract / "manifest.json").read_text())
+            pin["revision"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+            for name in pin["sources"]:
+                (source / Path(name).name).write_text("export const harmless = true;\n")
+                pin["sources"][name] = hashlib.sha256((source / Path(name).name).read_bytes()).hexdigest()
+            dependency = scratch / "zod"
+            dependency.mkdir()
+            (dependency / "package.json").write_text(json.dumps({"version": pin["zodVersion"]}))
+            (dependency / "index.js").write_text("export const z = {};\n")
+            (scratch / "manifest.json").write_text(json.dumps(pin))
+            marker = scratch / "must-not-execute"
+            (source / "contracts.ts").write_text(
+                "import {writeFileSync} from 'node:fs';\n"
+                "writeFileSync(process.env.EVENT_EXPORT_TEST_MARKER, 'executed');\n"
+            )
+            result = subprocess.run(
+                ["node", str(exporter), str(scratch), str(dependency / "index.js"), "--check"],
+                capture_output=True, text=True, timeout=10,
+                env={**os.environ, "EVENT_EXPORT_TEST_MARKER": str(marker)},
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(marker.exists(), "modified source executed before its pin was checked")
+            self.assertIn("source pin mismatch before evaluation", result.stderr)
 
 
 class CloudTests(unittest.IsolatedAsyncioTestCase):
@@ -74,6 +114,25 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(json.loads(first["x-event-node-proof"])["nonce"],
                             json.loads(second["x-event-node-proof"])["nonce"])
         self.assertNotIn("secret", repr(Credentials("secret", "secret")))
+
+    async def test_delayed_claim_refreshes_transport_but_rejects_stale_reply(self):
+        self.now += 3600
+        self.result["permitIssuedAt"] = "2026-10-05T13:00:58.000Z"
+        self.result["permitExpiresAt"] = "2026-10-05T13:01:03.000Z"
+        self.result["envelope"]["issuedAt"] = "2026-10-05T13:00:58.000Z"
+        self.result["envelope"]["expiresAt"] = "2026-10-05T13:01:58.000Z"
+        try:
+            result = await self.client.claim(FIXTURE["original"])
+        except CloudError as error:
+            self.fail("queued claim could not request refresh: " + error.code)
+        self.assertEqual(result, self.result)
+        self.assertEqual(len(self.requests), 1)
+        self.result["envelope"] = copy.deepcopy(FIXTURE["original"])
+        with self.assertRaisesRegex(CloudError, "^invalid_envelope$"):
+            await self.client.claim(FIXTURE["original"])
+        self.result = copy.deepcopy(FIXTURE["admitted"])
+        with self.assertRaisesRegex(CloudError, "^permit_expired$"):
+            await self.client.claim(FIXTURE["original"])
 
     async def test_closed_claim_response_and_permit_fences(self):
         mutations = {
@@ -143,11 +202,12 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         for raw, headers in ((b" " * 8193 + json.dumps(FIXTURE["admitted"]).encode(), JSON_HEADERS), (b'{}', {"content-type": "text/html"}),
                              (b'{}', {"content-type": "application/json", "content-encoding": "gzip"}),
                              (b'{"status":1,"status":2}', JSON_HEADERS),
-                             (b'\xff', JSON_HEADERS), (b'NaN', JSON_HEADERS), (b'[]', JSON_HEADERS)):
+                             (b'\xff', JSON_HEADERS), (b'NaN', JSON_HEADERS), (b'[]', JSON_HEADERS),
+                             (b'{', JSON_HEADERS), (b'[' * 34 + b']' * 34, JSON_HEADERS)):
             async def send(**_):
                 return 200, headers, raw
             self.client._send = send
-            with self.subTest(raw=raw[:30]), self.assertRaises(CloudError):
+            with self.subTest(raw=raw[:30]), self.assertRaisesRegex(CloudError, "^invalid_response$"):
                 await self.client.claim(FIXTURE["original"])
 
     async def test_credentials_and_transport_errors_do_not_escape(self):

@@ -11,6 +11,17 @@ if (!root || !zodPath || (check && check !== '--check')) throw Error('usage: exp
 const base = resolve(root, 'packages/event-runtime/src');
 const names = ['contracts.ts', 'api.ts', 'registry.ts', 'coordinator.ts', 'coordinator-admission.ts', 'authority-client.ts', 'protocol.ts', 'policy.ts'];
 const source = Object.fromEntries(names.map(name => [name, readFileSync(resolve(base, name), 'utf8')]));
+const destination = dirname(fileURLToPath(import.meta.url));
+const revision = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+const zodVersion = JSON.parse(readFileSync(resolve(dirname(zodPath), 'package.json'), 'utf8')).version;
+const sources = Object.fromEntries(names.map(name => [`apps/os/packages/event-runtime/src/${name}`, createHash('sha256').update(source[name]).digest('hex')]));
+if (check) {
+  const pinned = JSON.parse(readFileSync(resolve(destination, 'manifest.json'), 'utf8'));
+  if (revision !== pinned.revision || zodVersion !== pinned.zodVersion ||
+      Object.keys(pinned.sources).length !== names.length ||
+      Object.entries(sources).some(([name, digest]) => pinned.sources[name] !== digest))
+    throw Error('source pin mismatch before evaluation');
+}
 const dataModule = code => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(code, { mode: 'transform' })).toString('base64')}`;
 const policy = dataModule(source['policy.ts']);
 const zod = pathToFileURL(resolve(zodPath)).href;
@@ -33,13 +44,10 @@ const binding = { audience: 'https://events.example.com', method: 'POST', path: 
 const overBudget = { status: 'over_budget', budget: { used: 10, remaining: 0, limit: 10, windowMs: 3600000 } };
 contracts.DispatchClaimResultSchema.parse(overBudget);
 const fixture = { original, admitted, overBudget, claim, nodeProof: { principal: original.principal, binding, body, proof, canonical: canonicalNodeProof(original.principal, proof, binding) } };
-const destination = dirname(fileURLToPath(import.meta.url));
 const json = value => JSON.stringify(value, null, 2) + '\n';
 const fixtureText = json(fixture);
 const manifest = {
-  repository: 'knitli/knitli-site', revision: execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-  zodVersion: JSON.parse(readFileSync(resolve(dirname(zodPath), 'package.json'), 'utf8')).version,
-  sources: Object.fromEntries(names.map(name => [`apps/os/packages/event-runtime/src/${name}`, createHash('sha256').update(source[name]).digest('hex')])),
+  repository: 'knitli/knitli-site', revision, zodVersion, sources,
   fixturesSha256: createHash('sha256').update(fixtureText).digest('hex'),
 };
 for (const [name, content] of [['fixtures.json', fixtureText], ['manifest.json', json(manifest)]]) {

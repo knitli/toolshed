@@ -48,9 +48,12 @@ def _response(raw):
         raise CloudError("invalid_response")
     def reject_constant(_):
         raise CloudError("invalid_response")
-    value = json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs, parse_constant=reject_constant)
-    _depth(value)
-    return value
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs, parse_constant=reject_constant)
+        _depth(value)
+        return value
+    except (ValueError, RecursionError):
+        raise CloudError("invalid_response") from None
 
 
 def _uuid(value):
@@ -170,18 +173,19 @@ class CloudClient:
             # Provider/transport errors can quote credentials: never propagate them.
             raise CloudError("unavailable") from None
 
-    def _envelope(self, envelope):
+    def _envelope(self, envelope, *, historical=False):
         try:
-            parsed = parse_envelope(_json(envelope), now_ms=self._clock() * 1000)
+            now_ms = _timestamp(envelope["issuedAt"]) if historical else self._clock() * 1000
+            parsed = parse_envelope(_json(envelope), now_ms=now_ms)
             if (not matches_delivery_id(parsed) or parsed["principal"] != self.principal
                     or parsed["agent"] != self.agent or parsed["nodeGeneration"] != self.node_generation):
                 raise CloudError("identity_mismatch")
             return parsed
-        except (ProtocolError, ValueError, TypeError):
+        except (ProtocolError, ValueError, TypeError, KeyError):
             raise CloudError("invalid_envelope") from None
 
     async def claim(self, envelope):
-        expected = self._envelope(envelope)
+        expected = self._envelope(envelope, historical=True)
         result = await self._post("/v1/dispatch/claim", {key: expected[key] for key in ("deliveryId", "attemptId")})
         if isinstance(result, dict) and result.get("status") == "over_budget":
             _closed(result, ("status", "budget"))
@@ -212,11 +216,9 @@ class CloudClient:
     async def acknowledge(self, envelope, acknowledgment):
         # ACK may outlive transport freshness. Validate at its original issue time.
         try:
-            parsed = parse_envelope(_json(envelope), now_ms=_timestamp(envelope["issuedAt"]))
+            parsed = self._envelope(envelope, historical=True)
             ack = parse_acknowledgment(_json(acknowledgment), now_ms=self._clock() * 1000)
-            if (not matches_delivery_id(parsed) or parsed["principal"] != self.principal
-                    or parsed["agent"] != self.agent or parsed["nodeGeneration"] != self.node_generation
-                    or not acknowledgment_matches_delivery(parsed, ack)):
+            if not acknowledgment_matches_delivery(parsed, ack):
                 raise CloudError("identity_mismatch")
         except (ProtocolError, KeyError, TypeError, ValueError):
             raise CloudError("invalid_acknowledgment") from None
