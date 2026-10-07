@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from event_gateway.cloud import _iso
 from event_gateway.codex import CodexError
 from event_gateway.gateway import Gateway, Refused
-from event_gateway.native import EVENT_FIELDS, IDENTITY as NATIVE_IDENTITY
+from event_gateway.native import EVENT_FIELDS, IDENTITY as NATIVE_IDENTITY, NativeBridgeAdapter
 from event_gateway.protocol import _timestamp, derive_delivery_id
 from event_gateway.security import SecurityError, sign
 from event_gateway.store import Store, StoreError, IDENTITY, RETENTION
@@ -327,6 +328,111 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(witnessed), 1)
         self.assertEqual(witnessed[0]['state'], 'submitting')
         self.assertEqual(witnessed[0]['native_request'], self.submissions[0])
+
+    async def _v3_ambiguous_bridge(self, *, lost_response=False):
+        ident = self.accept()['deliveryId']
+        witnessed = []
+        owner = self
+
+        class RecordingBridge:
+            receipt_version = 3
+
+            def challenge(self):
+                return {'eligible': True, 'clientId': str(uuid.uuid4()),
+                        'serverInstanceId': str(uuid.uuid4()), 'serverGeneration': 1,
+                        'threadId': owner.mapping['nativeThreadId'], 'generation': 2}
+
+            def start(self, request):
+                owner.submissions.append(copy.deepcopy(request))
+                durable = sqlite3.connect(f'file:{owner.store.path / "ledger.sqlite"}?mode=ro', uri=True)
+                try:
+                    state, request_json = durable.execute(
+                        'SELECT state, native_request FROM attempts WHERE delivery_id=?', (ident,)).fetchone()
+                    witnessed.append({'state': state, 'native_request': json.loads(request_json)})
+                finally:
+                    durable.close()
+                if lost_response:
+                    raise TimeoutError('lost native response')
+                return {'status': 'unknown'}
+
+            def restore_attempt(self, request):
+                owner.lookups.append(('restore', copy.deepcopy(request)))
+
+            def receipt(self, request):
+                owner.lookups.append(('receipt', copy.deepcopy(request)))
+                return owner.receipt(request, owner.recovered_outcome, replayed=True)['outcome']
+
+        bridge = RecordingBridge()
+        self.gateway.adapter_factory = lambda mapping: NativeBridgeAdapter(mapping, bridge)
+        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'ambiguous')
+        self.assertEqual(len(witnessed), 1)
+        self.assertEqual(witnessed[0]['state'], 'submitting')
+        persisted = witnessed[0]['native_request']
+        self.assertEqual(persisted.get('receiptVersion'), 3)
+        self.assertEqual(self.submissions, [{k: v for k, v in persisted.items() if k != 'receiptVersion'}])
+        self.restart()
+        self.assertEqual(self.store.current_attempt(ident)['native_request'], persisted)
+        return ident, bridge
+
+    async def _assert_v3_restart_mode_fence(self, *, lost_response=False):
+        ident, bridge = await self._v3_ambiguous_bridge(lost_response=lost_response)
+        original = self.store.current_attempt(ident)
+        bridge.receipt_version = 2
+        for status in ('started', 'inputRecorded', 'terminalNotStarted'):
+            self.recovered_outcome = status
+            self.assertEqual((await self.gateway.reconcile(ident))['status'], 'ambiguous')
+            current = self.store.current_attempt(ident)
+            self.assertEqual(current['attempt_id'], original['attempt_id'])
+            for field in ('started_receipt', 'input_recorded_receipt', 'receipt', 'native_ack', 'native_observed_ack'):
+                self.assertIsNone(current[field])
+        await self.gateway.dispatch(ident)
+        self.assertEqual(len(self.submissions), 1)
+        self.assertEqual(self.lookups, [])
+        self.assertEqual(self.settlements, [])
+        self.assertEqual(self.acknowledgments, [])
+        bridge.receipt_version = 3
+        self.recovered_outcome = 'inputRecorded'
+        self.assertEqual((await self.gateway.reconcile(ident))['status'], 'observed')
+        current = self.store.current_attempt(ident)
+        self.assertEqual(current['input_recorded_receipt']['generation'], original['native_request']['generation'])
+        self.assertEqual(current['ack_state'], 'observed')
+        self.assertEqual([ack['status'] for ack in self.acknowledgments], ['submitted', 'observed'])
+        self.assertEqual(self.lookups, [('restore', self.submissions[0]), ('receipt', self.submissions[0])])
+        self.assertEqual(len(self.submissions), 1)
+        self.assertEqual(self.settlements, [])
+
+    async def test_v3_unknown_persists_mode_before_start_and_fences_restart(self):
+        await self._assert_v3_restart_mode_fence()
+
+    async def test_v3_lost_response_persists_mode_before_start_and_fences_restart(self):
+        await self._assert_v3_restart_mode_fence(lost_response=True)
+
+    async def test_v3_store_rejects_downgraded_receipts_without_adapter(self):
+        ident, _bridge = await self._v3_ambiguous_bridge()
+        attempt = self.store.current_attempt(ident)
+        request = attempt['native_request']
+        self.gateway.adapter_factory = lambda mapping: self
+        for status, record in (('started', self.store.record_started),
+                               ('inputRecorded', self.store.record_input_recorded),
+                               ('terminalNotStarted', None)):
+            with self.subTest(status=status):
+                receipt = self.receipt(request, status, replayed=True)
+                with self.assertRaises(StoreError):
+                    if record:
+                        record(ident, attempt['attempt_id'], receipt)
+                    else:
+                        self.store.begin_settlement(ident, attempt['attempt_id'],
+                            {'type': 'native_terminal_no_start', 'receiptId': receipt['outcome']['receiptId']},
+                            receipt=receipt)
+                self.recovered_outcome = status
+                self.assertEqual((await self.gateway.reconcile(ident))['status'], 'ambiguous')
+        current = self.store.current_attempt(ident)
+        for field in ('started_receipt', 'input_recorded_receipt', 'receipt', 'native_ack', 'native_observed_ack'):
+            self.assertIsNone(current[field])
+        self.assertEqual(current['attempt_id'], attempt['attempt_id'])
+        self.assertEqual(self.settlements, [])
+        self.assertEqual(self.acknowledgments, [])
+        self.assertEqual(len(self.submissions), 1)
 
     async def test_post_admission_client_failure_settles_local_no_start(self):
         ident = self.accept()['deliveryId']

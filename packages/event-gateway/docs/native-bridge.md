@@ -102,6 +102,10 @@ registration first and never derives observation from a start alone. The native
 signal is qualified in [checkpoint PR #45](https://github.com/knitli/toolshed/pull/45);
 coupled deployment and owner-client acceptance remain pending.
 
+The [explicit receipt v3 consumer](native-bridge/receipt-v3.md) binds the local
+bridge generation in addition to the existing receipt identity. It retains v2
+as the default and preserves historical schema-4 receipt and ACK bytes.
+
 The prototype checks stale/expired/wrong-thread/disconnected refusal, busy
 refusal, revoke/start ordering, post-commit cancellation, and exact retained
 receipts. The Python qualifier exercises the actual patched TUI/Core path and
