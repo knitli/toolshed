@@ -1,0 +1,16 @@
+{
+  "repository": "knitli/knitli-site",
+  "revision": "737dca25de52ae39e2aa293c878521d02adacf60",
+  "zodVersion": "4.5.4",
+  "sources": {
+    "apps/os/packages/event-runtime/src/contracts.ts": "e80e4cfe6e3f8d51ebe99746699ba6892a0d78becbbf3d5a6d9688b5c6d130a9",
+    "apps/os/packages/event-runtime/src/api.ts": "e1b855d88fe8a7811139859593d3d6c3d85e3e426cafb28807aebf3ece730cb1",
+    "apps/os/packages/event-runtime/src/registry.ts": "a34c5db57b33d3b843d11f4f2d044d107b1b8f5af82ee1d9de07fb23609c1b35",
+    "apps/os/packages/event-runtime/src/coordinator.ts": "a9c1787d58f1143b553dea3865bc6f30c34a53c3f0430697b662c2919efacca7",
+    "apps/os/packages/event-runtime/src/coordinator-admission.ts": "b0f6048e25d023f9caeb215de63dd0ca2c056f3d111aa042d031739b828d831e",
+    "apps/os/packages/event-runtime/src/authority-client.ts": "1028a9808a5c33036cdde013de7caf1859d713975ef0f9cd6f3b5a0bd4f85682",
+    "apps/os/packages/event-runtime/src/protocol.ts": "f970bbeaeced4a012081fc1c7ab09973cd88d05dc680d22237163b359ada04e1",
+    "apps/os/packages/event-runtime/src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3"
+  },
+  "fixturesSha256": "1f803540d102cecce15a134ff29cc4fa62a83483e07112a3f33036b111b4473c"
+}
