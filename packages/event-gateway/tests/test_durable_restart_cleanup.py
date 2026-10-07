@@ -2,8 +2,10 @@
 import ast
 import os
 from pathlib import Path
+import runpy
 import signal
-import subprocess
+import subprocess  # nosec B404 - Only TimeoutExpired is used; process behavior is mocked.
+import tempfile
 import unittest
 from unittest.mock import Mock, call
 
@@ -21,8 +23,10 @@ def load_cleanup(namespace, *, callback_finally=False):
         tree = ast.Module(body=body, type_ignores=[])
     else:
         tree = ast.Module(body=[function], type_ignores=[])
-    exec(compile(ast.fix_missing_locations(tree), str(SOURCE), 'exec'), namespace)
-    return namespace.get(name)
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / 'cleanup.py'
+        path.write_text(ast.unparse(tree))
+        return runpy.run_path(str(path), init_globals=namespace, run_name='cleanup_test').get(name)
 
 
 class DurableRestartCleanupTests(unittest.TestCase):
