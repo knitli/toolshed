@@ -579,6 +579,7 @@ def qualify_input_recorded(bridge, server, process, witness):
                 break
             require(recorded["status"] == "started")
             time.sleep(0.05)
+        deadline = time.monotonic() + 10
         while not server.request_counts["primary"] and time.monotonic() < deadline:
             time.sleep(0.01)
         busy = bridge.challenge()

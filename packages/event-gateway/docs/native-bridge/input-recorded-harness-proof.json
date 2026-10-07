@@ -34,11 +34,28 @@
       "greenExitCode": 0,
       "greenLogPath": "/private/tmp/native-input-recorded-deadline-fix/deadline-isolation-green.log",
       "greenLogSha256": "1d4fad0683dd1ec2e239feb14f2ba2f65fae8c20a579fc92ed5eb8e0ab951c58"
+    },
+    {
+      "test": "test_input_recorded_primary_wait_has_independent_deadline",
+      "mutation": [
+        "deadline = time.monotonic() + 10\\n        while not server.request_counts[\"primary\"] and time.monotonic() < deadline:",
+        "while not server.request_counts[\"primary\"] and time.monotonic() < deadline:"
+      ],
+      "scenario": "The first receipt lookup returns InputRecorded at monotonic 10.1s, after the original 10s budget; the mock primary request arrives only when the subsequent wait advances time. A fresh phase budget must wait for the request before challenging eligibility.",
+      "red": "test_input_recorded_primary_wait_has_independent_deadline (test_native_bridge.NativeBridgeTests.test_input_recorded_primary_wait_has_independent_deadline) ... FAIL\n\n======================================================================\nFAIL: test_input_recorded_primary_wait_has_independent_deadline (test_native_bridge.NativeBridgeTests.test_input_recorded_primary_wait_has_independent_deadline)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/tests/test_native_bridge.py\", line 254, in test_input_recorded_primary_wait_has_independent_deadline\n    result = native.qualify_input_recorded(bridge, server, process, witness())\n  File \"/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/scripts/qualify_native_bridge.py\", line 585, in qualify_input_recorded\n    require(busy[\"eligible\"] is False)\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/scripts/qualify_native_bridge.py\", line 62, in require\n    raise BridgeError(\"invalid bridge frame or state\")\nqualify_native_bridge.BridgeError: invalid bridge frame or state\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/tests/test_native_bridge.py\", line 256, in test_input_recorded_primary_wait_has_independent_deadline\n    self.fail(f\"primary-request wait inherited the stale receipt deadline: {error}\")\n    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: primary-request wait inherited the stale receipt deadline: invalid bridge frame or state\n\n----------------------------------------------------------------------\nRan 1 test in 0.001s\n\nFAILED (failures=1)\n",
+      "green": "test_input_recorded_primary_wait_has_independent_deadline (test_native_bridge.NativeBridgeTests.test_input_recorded_primary_wait_has_independent_deadline) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in 0.001s\n\nOK\n",
+      "redExitCode": 1,
+      "redKind": "assertion",
+      "redLogPath": "/private/tmp/native-input-recorded-primary-deadline-fix/primary-deadline-red.log",
+      "redLogSha256": "5cb24ddb5db81c81b3e7f91102ca6baa784811ec7194ebb634d5eedf0230706a",
+      "greenExitCode": 0,
+      "greenLogPath": "/private/tmp/native-input-recorded-primary-deadline-fix/primary-deadline-green.log",
+      "greenLogSha256": "2d4cdaa0dbd29885484c205ce14ca83ab10aadfafd878db94ee46d669ba85067"
     }
   ],
   "source_sha256": {
-    "scripts/qualify_native_bridge.py": "10944a16bcdad3af48528f1c174adef1fab3cecca2073b372ccc92d5db8ddb6c",
-    "tests/test_native_bridge.py": "986516515ec6854779fa7a3cce645033e0a9e080ea4aa0ea6de9faf0eb441448"
+    "scripts/qualify_native_bridge.py": "a91a33276c89035ea1e57f02170a2bb31eae5724adc6e10c597e48c335d94e31",
+    "tests/test_native_bridge.py": "6e11a2363e9700e202d98845a4df0f8e6271a38ef324bb4678d4b1ed2f05551c"
   },
   "isolatedGuardMatrix": {
     "guards": [
@@ -194,49 +211,61 @@
         ],
         "red": "test_input_recorded_expiry_wait_has_independent_deadline (test_native_bridge.NativeBridgeTests.test_input_recorded_expiry_wait_has_independent_deadline) ... FAIL\n\n======================================================================\nFAIL: test_input_recorded_expiry_wait_has_independent_deadline (test_native_bridge.NativeBridgeTests.test_input_recorded_expiry_wait_has_independent_deadline)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/private/tmp/native-input-recorded-deadline-fix/red/tests/test_native_bridge.py\", line 204, in test_input_recorded_expiry_wait_has_independent_deadline\n    result = native.qualify_input_recorded(bridge, server, process, witness())\n  File \"/private/tmp/native-input-recorded-deadline-fix/red/scripts/qualify_native_bridge.py\", line 588, in qualify_input_recorded\n    require(process.poll() is None and time.monotonic() < deadline)\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/private/tmp/native-input-recorded-deadline-fix/red/scripts/qualify_native_bridge.py\", line 62, in require\n    raise BridgeError(\"invalid bridge frame or state\")\nqualify_native_bridge.BridgeError: invalid bridge frame or state\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/private/tmp/native-input-recorded-deadline-fix/red/tests/test_native_bridge.py\", line 206, in test_input_recorded_expiry_wait_has_independent_deadline\n    self.fail(f\"permit-expiry wait inherited the stale earlier-phase deadline: {error}\")\n    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: permit-expiry wait inherited the stale earlier-phase deadline: invalid bridge frame or state\n\n----------------------------------------------------------------------\nRan 1 test in 0.002s\n\nFAILED (failures=1)\n",
         "green": "test_input_recorded_expiry_wait_has_independent_deadline (test_native_bridge.NativeBridgeTests.test_input_recorded_expiry_wait_has_independent_deadline) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in 0.001s\n\nOK\n"
+      },
+      {
+        "guard": "primary_wait_deadline_has_independent_budget",
+        "mutation": [
+          "deadline = time.monotonic() + 10\\n        while not server.request_counts[\"primary\"] and time.monotonic() < deadline:",
+          "while not server.request_counts[\"primary\"] and time.monotonic() < deadline:"
+        ],
+        "red": "test_input_recorded_primary_wait_has_independent_deadline (test_native_bridge.NativeBridgeTests.test_input_recorded_primary_wait_has_independent_deadline) ... FAIL\n\n======================================================================\nFAIL: test_input_recorded_primary_wait_has_independent_deadline (test_native_bridge.NativeBridgeTests.test_input_recorded_primary_wait_has_independent_deadline)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/tests/test_native_bridge.py\", line 254, in test_input_recorded_primary_wait_has_independent_deadline\n    result = native.qualify_input_recorded(bridge, server, process, witness())\n  File \"/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/scripts/qualify_native_bridge.py\", line 585, in qualify_input_recorded\n    require(busy[\"eligible\"] is False)\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/scripts/qualify_native_bridge.py\", line 62, in require\n    raise BridgeError(\"invalid bridge frame or state\")\nqualify_native_bridge.BridgeError: invalid bridge frame or state\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/tests/test_native_bridge.py\", line 256, in test_input_recorded_primary_wait_has_independent_deadline\n    self.fail(f\"primary-request wait inherited the stale receipt deadline: {error}\")\n    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: primary-request wait inherited the stale receipt deadline: invalid bridge frame or state\n\n----------------------------------------------------------------------\nRan 1 test in 0.001s\n\nFAILED (failures=1)\n",
+        "green": "test_input_recorded_primary_wait_has_independent_deadline (test_native_bridge.NativeBridgeTests.test_input_recorded_primary_wait_has_independent_deadline) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in 0.001s\n\nOK\n"
       }
     ],
     "scratch_test_adjustment": "Started fault includes otherwise valid observation fields to isolate status gate without missing-key errors.",
     "source_sha256": {
-      "scripts/qualify_native_bridge.py": "10944a16bcdad3af48528f1c174adef1fab3cecca2073b372ccc92d5db8ddb6c",
-      "tests/test_native_bridge.py": "986516515ec6854779fa7a3cce645033e0a9e080ea4aa0ea6de9faf0eb441448"
+      "scripts/qualify_native_bridge.py": "a91a33276c89035ea1e57f02170a2bb31eae5724adc6e10c597e48c335d94e31",
+      "tests/test_native_bridge.py": "6e11a2363e9700e202d98845a4df0f8e6271a38ef324bb4678d4b1ed2f05551c"
     }
   },
   "focusedTests": {
-    "passed": 16,
+    "passed": 17,
     "failed": 0,
     "selector": "test_native_bridge.NativeBridgeTests",
-    "stage": "after expiry-deadline correction",
-    "logPath": "/private/tmp/native-input-recorded-deadline-fix/qualifier-tests.log",
-    "logSha256": "554dd9d34bbccc95f25b7f59c3205f3756811953a774f231855b2ad2db83e7b2"
+    "stage": "after independent primary-request deadline correction",
+    "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/qualifier-tests.log",
+    "logSha256": "a7ce1abc505dfc087754d40313ad47d1ce6eee98888be59ba0a536ec171ac9e9"
   },
   "harnessFocusedTests": {
-    "passed": 16,
+    "passed": 17,
     "failed": 0,
     "selector": "test_native_bridge.NativeBridgeTests",
-    "stage": "after expiry-deadline correction",
-    "logPath": "/private/tmp/native-input-recorded-deadline-fix/qualifier-tests.log",
-    "logSha256": "554dd9d34bbccc95f25b7f59c3205f3756811953a774f231855b2ad2db83e7b2"
+    "stage": "after independent primary-request deadline correction",
+    "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/qualifier-tests.log",
+    "logSha256": "a7ce1abc505dfc087754d40313ad47d1ce6eee98888be59ba0a536ec171ac9e9"
   },
   "ruff": {
     "tool": "ruff 0.16.10",
     "command": "ruff check src tests scripts",
     "passed": true,
-    "logPath": "/private/tmp/native-input-recorded-deadline-fix/ruff.log",
+    "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/ruff.log",
     "logSha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
   },
-  "updatedAtUtc": "2026-10-07T07:31:45+00:00",
+  "updatedAtUtc": "2026-10-07T07:50:33+00:00",
   "liveQualification": {
-    "path": "/private/tmp/native-input-recorded-deadline-fix/live-qualification.json",
-    "sha256": "0df6c5b2cb56c3033626b6f5ca256ff3b283d247f4779acbf6f2a5ee9a6cbb5a",
-    "qualifierScriptSha256": "10944a16bcdad3af48528f1c174adef1fab3cecca2073b372ccc92d5db8ddb6c",
-    "testFileSha256": "986516515ec6854779fa7a3cce645033e0a9e080ea4aa0ea6de9faf0eb441448",
+    "path": "/private/tmp/native-input-recorded-primary-deadline-fix/live-qualification.json",
+    "sha256": "63f99e3be95d5720fd02a76ad6a98af16946e5c2b18a6fb3d0dea23c3c3c9416",
+    "qualifierScriptSha256": "a91a33276c89035ea1e57f02170a2bb31eae5724adc6e10c597e48c335d94e31",
+    "testFileSha256": "6e11a2363e9700e202d98845a4df0f8e6271a38ef324bb4678d4b1ed2f05551c",
     "nativePatchSha256": "0aeec9c1e63f867d95f531c65d6ac5b5618b40079028a64b22467af7e856f8da",
     "binarySha256": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
     "nativeBinaryRebuilt": false,
     "outcome": "inputRecorded",
     "exactReceiptRecovered": true,
     "recoveredWhileIneligibleAfterPermitExpiry": true,
+    "primaryModelRequests": 1,
+    "titleModelRequests": 1,
+    "unknownModelRequests": 0,
     "realModelCalls": 0
   }
 }

@@ -87,12 +87,12 @@
     }
   ],
   "individualNativeAssertionRedRestoredGreenPairs": 12,
-  "harnessTests": 16,
-  "individualHarnessGuardPairs": 17,
+  "harnessTests": 17,
+  "individualHarnessGuardPairs": 18,
   "syntheticQualification": {
     "cloudSettlementProven": false,
     "exactReceiptRecovered": true,
-    "itemId": "01a11548-1aeb-7612-ae7c-693144a6547e",
+    "itemId": "01a11556-61be-7792-a267-e95573366ce1",
     "mockModelRequests": 2,
     "nativeOnly": true,
     "outcome": "inputRecorded",
@@ -100,12 +100,12 @@
     "qualification": "synthetic-native-input-recorded",
     "realModelCalls": 0,
     "recoveredWhileIneligibleAfterPermitExpiry": true,
-    "threadId": "01a11548-1a10-7951-936e-19fcde353d07",
+    "threadId": "01a11556-60ec-73d2-afff-d56f8a56a087",
     "titleModelRequests": 1,
-    "turnId": "edb72791-6ed6-421d-9b84-92ca5310b03b",
+    "turnId": "44b7ef21-4ab1-4427-95b6-340574a1be56",
     "unknownModelRequests": 0,
-    "evidencePath": "/private/tmp/native-input-recorded-deadline-fix/live-qualification.json",
-    "evidenceSha256": "0df6c5b2cb56c3033626b6f5ca256ff3b283d247f4779acbf6f2a5ee9a6cbb5a"
+    "evidencePath": "/private/tmp/native-input-recorded-primary-deadline-fix/live-qualification.json",
+    "evidenceSha256": "63f99e3be95d5720fd02a76ad6a98af16946e5c2b18a6fb3d0dea23c3c3c9416"
   },
   "proof": "input-recorded-test-proof.json",
   "harnessProof": "input-recorded-harness-proof.json",
@@ -118,12 +118,12 @@
     "Initial causal pairs precede two clone-only test lint edits; review-fix 12 TUI/18 receipt tests precede its just fix, which made no source edits. Protocol and actual Core integration are prior successful runs with unchanged protocol/Core observer source."
   ],
   "harnessFocusedTests": {
-    "passed": 16,
+    "passed": 17,
     "failed": 0,
     "selector": "test_native_bridge.NativeBridgeTests",
-    "stage": "after expiry-deadline correction",
-    "logPath": "/private/tmp/native-input-recorded-deadline-fix/qualifier-tests.log",
-    "logSha256": "554dd9d34bbccc95f25b7f59c3205f3756811953a774f231855b2ad2db83e7b2"
+    "stage": "after independent primary-request deadline correction",
+    "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/qualifier-tests.log",
+    "logSha256": "a7ce1abc505dfc087754d40313ad47d1ce6eee98888be59ba0a536ec171ac9e9"
   },
   "priorCandidate": {
     "binarySha256": "6ae0cb3accb4dedfcd5963d04ccfe61e65cd1795bec86e5f02aff696e72f1e8c",
@@ -354,5 +354,48 @@
       "unknownModelRequests": 0,
       "realModelCalls": 0
     }
+  },
+  "primaryWaitDeadlineCorrection": {
+    "behavior": "The wait for the mock primary request now owns its own fresh 10-second monotonic deadline after InputRecorded is observed.",
+    "test": "test_input_recorded_primary_wait_has_independent_deadline",
+    "scenario": "The first receipt lookup returns InputRecorded at monotonic 10.1s, after the original 10s budget; the mock primary request arrives only when the subsequent wait advances time. A fresh phase budget must wait for the request before challenging eligibility.",
+    "red": {
+      "exitCode": 1,
+      "kind": "assertion",
+      "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/primary-deadline-red.log",
+      "logSha256": "5cb24ddb5db81c81b3e7f91102ca6baa784811ec7194ebb634d5eedf0230706a"
+    },
+    "green": {
+      "exitCode": 0,
+      "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/primary-deadline-green.log",
+      "logSha256": "2d4cdaa0dbd29885484c205ce14ca83ab10aadfafd878db94ee46d669ba85067"
+    },
+    "focusedTests": {
+      "passed": 17,
+      "failed": 0,
+      "selector": "test_native_bridge.NativeBridgeTests",
+      "stage": "after independent primary-request deadline correction",
+      "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/qualifier-tests.log",
+      "logSha256": "a7ce1abc505dfc087754d40313ad47d1ce6eee98888be59ba0a536ec171ac9e9"
+    },
+    "ruff": {
+      "tool": "ruff 0.16.10",
+      "command": "ruff check src tests scripts",
+      "passed": true,
+      "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/ruff.log",
+      "logSha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "qualifierScriptSha256": "a91a33276c89035ea1e57f02170a2bb31eae5724adc6e10c597e48c335d94e31",
+    "testFileSha256": "6e11a2363e9700e202d98845a4df0f8e6271a38ef324bb4678d4b1ed2f05551c",
+    "nativePatchChanged": false,
+    "nativeBinaryRebuilt": false,
+    "binarySha256": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
+    "liveQualification": {
+      "path": "/private/tmp/native-input-recorded-primary-deadline-fix/live-qualification.json",
+      "sha256": "63f99e3be95d5720fd02a76ad6a98af16946e5c2b18a6fb3d0dea23c3c3c9416",
+      "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/live-qualification.log",
+      "logSha256": "ed7882e43666f16cd5ebb8157e3d6f74189fc2fadca6aa8e0ef019ab585d0bf2"
+    },
+    "updatedAtUtc": "2026-10-07T07:50:33+00:00"
   }
 }

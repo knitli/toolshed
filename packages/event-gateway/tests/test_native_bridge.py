@@ -213,6 +213,56 @@ class NativeBridgeTests(unittest.TestCase):
         bridge.challenge.assert_called_once_with()
         self.assertTrue(server.release_primary.is_set())
 
+    def test_input_recorded_primary_wait_has_independent_deadline(self):
+        server = SimpleNamespace(release_primary=threading.Event(), model_requests=1,
+                                 request_counts={"primary": 0, "title": 0, "unknown": 0})
+        request, recorded, lookups = {}, {}, []
+        clock = {"monotonic": 0.0, "wall_ms": 0.0, "primary_wait": 0.0}
+
+        def sleep(seconds):
+            clock["monotonic"] += seconds
+            clock["wall_ms"] += seconds * 1000
+            if not server.request_counts["primary"]:
+                clock["primary_wait"] += seconds
+                if clock["monotonic"] >= 10:
+                    server.request_counts["primary"] = 1
+
+        def start(value):
+            request.update(deepcopy(value))
+            recorded.update(status="inputRecorded", turnId=value["clientUserMessageId"],
+                            itemId=str(uuid4()), replayed=True)
+            return {"status": "started", "turnId": value["clientUserMessageId"],
+                    "replayed": False}
+
+        def receipt(value):
+            self.assertEqual(value, request)
+            lookups.append(deepcopy(value))
+            if len(lookups) == 1:
+                # Let the receipt poll return after the initial 10s deadline.
+                clock["monotonic"] = 10.1
+            return dict(recorded)
+
+        bridge = SimpleNamespace(start=Mock(side_effect=start), receipt=Mock(side_effect=receipt),
+                                 challenge=Mock(side_effect=lambda: {
+                                     "eligible": server.request_counts["primary"] == 0}))
+        process = Mock(poll=Mock(return_value=None))
+        with patch.object(native.time, "sleep", side_effect=sleep), \
+             patch.object(native.time, "monotonic", side_effect=lambda: clock["monotonic"]), \
+             patch.object(native.time, "time_ns",
+                          side_effect=lambda: int(clock["wall_ms"] * 1_000_000)):
+            try:
+                result = native.qualify_input_recorded(bridge, server, process, witness())
+            except native.BridgeError as error:
+                self.fail(f"primary-request wait inherited the stale receipt deadline: {error}")
+
+        self.assertEqual(result["outcome"], "inputRecorded")
+        self.assertEqual(server.request_counts["primary"], 1)
+        self.assertGreater(clock["primary_wait"], 0)
+        self.assertEqual(len(lookups), 3)
+        bridge.start.assert_called_once()
+        bridge.challenge.assert_called_once_with()
+        self.assertTrue(server.release_primary.is_set())
+
     def test_terminal_retry_qualification_preserves_delivery_and_exact_receipts(self):
         initial = witness()
         renewed = dict(initial, generation=3, sequence=2)
