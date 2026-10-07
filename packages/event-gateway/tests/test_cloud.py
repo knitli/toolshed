@@ -7,7 +7,8 @@ import json
 import os
 from pathlib import Path
 import shutil
-import subprocess
+# Test-only subprocesses invoke fixed git/node source-pin probes.
+import subprocess  # nosec B404
 import tempfile
 import unittest
 
@@ -26,6 +27,10 @@ JSON_HEADERS = {"content-type": "application/json"}
 
 class ExportPinTests(unittest.TestCase):
     def test_modified_source_refused_before_evaluation(self):
+        git = shutil.which("git")
+        node = shutil.which("node")
+        self.assertIsNotNone(git, "git executable is required for the source pin test")
+        self.assertIsNotNone(node, "node executable is required for the source pin test")
         # A local fixture under this checkout lets git identify the real revision
         # without creating commits or requiring another repository in CI.
         with tempfile.TemporaryDirectory(prefix="cloud-pin-test-", dir=ROOT) as directory:
@@ -36,7 +41,8 @@ class ExportPinTests(unittest.TestCase):
             exporter = scratch / "export.mjs"
             shutil.copyfile(contract / "export.mjs", exporter)
             pin = json.loads((contract / "manifest.json").read_text())
-            pin["revision"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+            # Resolved executable, fixed arguments, no shell; read this checkout revision.
+            pin["revision"] = subprocess.check_output([git, "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()  # nosec B603
             for name in pin["sources"]:
                 (source / Path(name).name).write_text("export const harmless = true;\n")
                 pin["sources"][name] = hashlib.sha256((source / Path(name).name).read_bytes()).hexdigest()
@@ -50,8 +56,9 @@ class ExportPinTests(unittest.TestCase):
                 "import {writeFileSync} from 'node:fs';\n"
                 "writeFileSync(process.env.EVENT_EXPORT_TEST_MARKER, 'executed');\n"
             )
-            result = subprocess.run(
-                ["node", str(exporter), str(scratch), str(dependency / "index.js"), "--check"],
+            # Resolved executable, fixed arguments, no shell; isolated source-pin fixture.
+            result = subprocess.run(  # nosec B603
+                [node, str(exporter), str(scratch), str(dependency / "index.js"), "--check"],
                 capture_output=True, text=True, timeout=10,
                 env={**os.environ, "EVENT_EXPORT_TEST_MARKER": str(marker)},
             )
@@ -308,6 +315,7 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         self.client._send = fails
         with self.assertRaisesRegex(CloudError, "^unavailable$"):
             await self.client.claim(FIXTURE["original"])
+
         async def bad_credentials():
             raise RuntimeError("secret-secret-secret")
         self.client._credentials = bad_credentials
@@ -316,6 +324,7 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_deadline_includes_credentials(self):
         cancelled = asyncio.Event()
+
         async def hangs():
             try:
                 await asyncio.sleep(60)
@@ -330,18 +339,28 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
     async def test_credential_cloud_error_is_sanitized(self):
         async def fails():
             raise CloudError("synthetic-provider-detail")
-        self.client._credentials = fails
-        with self.assertRaisesRegex(CloudError, "^unavailable$") as caught:
-            await self.client.claim(FIXTURE["original"])
-        self.assertEqual(caught.exception.code, "unavailable")
+
+        def fails_synchronously():
+            raise CloudError("synthetic-provider-detail")
+
+        for callback in (fails, fails_synchronously):
+            self.client._credentials = callback
+            with self.subTest(callback=callback.__name__), self.assertRaisesRegex(CloudError, "^unavailable$") as caught:
+                await self.client.claim(FIXTURE["original"])
+            self.assertEqual(caught.exception.code, "unavailable")
 
     async def test_transport_cloud_error_is_sanitized(self):
         async def fails(**_):
             raise CloudError("synthetic-transport-detail")
-        self.client._send = fails
-        with self.assertRaisesRegex(CloudError, "^unavailable$") as caught:
-            await self.client.claim(FIXTURE["original"])
-        self.assertEqual(caught.exception.code, "unavailable")
+
+        def fails_synchronously(**_):
+            raise CloudError("synthetic-transport-detail")
+
+        for callback in (fails, fails_synchronously):
+            self.client._send = callback
+            with self.subTest(callback=callback.__name__), self.assertRaisesRegex(CloudError, "^unavailable$") as caught:
+                await self.client.claim(FIXTURE["original"])
+            self.assertEqual(caught.exception.code, "unavailable")
 
     async def test_external_timeouts_and_cancellation_remain_truthful(self):
         for port in ("_credentials", "_send"):

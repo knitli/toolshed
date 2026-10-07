@@ -24,6 +24,7 @@ class CloudError(ValueError):
     """Only fixed local/server codes escape the credential boundary."""
 
     def __init__(self, code):
+        """Store the error code."""
         self.code = code
         super().__init__(code)
 
@@ -43,17 +44,31 @@ def _closed(value, keys, *, code="invalid_response"):
         raise CloudError(code)
 
 
-def _response(raw):
-    if not isinstance(raw, bytes) or len(raw) > 8192:
+def _response(status, headers, raw):
+    # HTTP status must be an integer, never Python's bool subtype.
+    if type(status) is not int or not isinstance(headers, dict):  # pylint: disable=unidiomatic-typecheck
         raise CloudError("invalid_response")
+    if 300 <= status < 400:
+        raise CloudError("redirect_refused")
+    content_type = headers.get("content-type", "")
+    if (not isinstance(content_type, str) or content_type.split(";")[0].strip().lower() != "application/json"
+            or "content-encoding" in headers or not isinstance(raw, bytes) or len(raw) > 8192):
+        raise CloudError("invalid_response")
+
     def reject_constant(_):
         raise CloudError("invalid_response")
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs, parse_constant=reject_constant)
         _depth(value)
-        return value
     except (ValueError, RecursionError):
         raise CloudError("invalid_response") from None
+    if status != 200:
+        _closed(value, ("error",))
+        code = value["error"]
+        if isinstance(code, str) and code in _ERRORS.get(status, set()):
+            raise CloudError(code)
+        raise CloudError("unavailable")
+    return value
 
 
 def _uuid(value):
@@ -63,7 +78,8 @@ def _uuid(value):
 
 
 def _generation(value):
-    return type(value) is int and 0 < value <= 9007199254740991
+    # bool is an int subtype but cannot identify a generation.
+    return type(value) is int and 0 < value <= 9007199254740991  # pylint: disable=unidiomatic-typecheck
 
 
 _PRINCIPAL_SCHEMA = _SCHEMA["anyOf"][0]["anyOf"][0]["properties"]["principal"]
@@ -76,6 +92,15 @@ def _principal(value):
 
 def _iso(seconds):
     return datetime.fromtimestamp(seconds, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+async def _call(port, **kwargs):
+    try:
+        return await port(**kwargs)
+    except TimeoutError:
+        raise
+    except Exception:
+        raise CloudError("unavailable") from None
 
 
 def canonical_node_proof(principal, audience, path, body, proof):
@@ -97,7 +122,8 @@ _ERRORS = {
 
 
 class CloudClient:
-    """Ports: credentials() -> Credentials; send(**kwargs) -> (status, headers, bytes).
+    """
+    Ports: credentials() -> Credentials; send(**kwargs) -> (status, headers, bytes).
 
     send must honor timeout, max_response_bytes and follow_redirects=False before
     reading bytes or following any response. No default network port is installed.
@@ -106,6 +132,7 @@ class CloudClient:
 
     def __init__(self, *, origin, principal, agent, node_id, node_generation,
                  private_key, credentials, send, clock=time.time, nonce=uuid.uuid4):
+        """Validate an immutable identity binding and inject its credential/HTTP ports."""
         if not isinstance(origin, str) or not isinstance(agent, str):
             raise CloudError("invalid_configuration")
         try:
@@ -133,12 +160,7 @@ class CloudClient:
                 body = _json(value)
                 if len(body) > 4096:
                     raise CloudError("invalid_request")
-                try:
-                    credential = await self._credentials()
-                except TimeoutError:
-                    raise
-                except Exception:
-                    raise CloudError("unavailable") from None
+                credential = await _call(self._credentials)
                 if not isinstance(credential, Credentials) or any(
                     not isinstance(token, str) or not token or len(token) > 16384
                     or re.search(r"\s", token)
@@ -154,31 +176,11 @@ class CloudClient:
                         raise CloudError("invalid_configuration")
                     proof["signature"] = self._sign(canonical_node_proof(self.principal, self.origin, path, body, proof))
                     headers["x-event-node-proof"] = _json(proof).decode()
-                try:
-                    status, response_headers, raw = await self._send(
-                        method="POST", url=self.origin + path, headers=headers, body=body,
-                        timeout=5, max_response_bytes=8192, follow_redirects=False,
-                    )
-                except TimeoutError:
-                    raise
-                except Exception:
-                    raise CloudError("unavailable") from None
-                if type(status) is not int or not isinstance(response_headers, dict):
-                    raise CloudError("invalid_response")
-                if 300 <= status < 400:
-                    raise CloudError("redirect_refused")
-                content_type = response_headers.get("content-type", "")
-                if (not isinstance(content_type, str) or content_type.split(";")[0].strip().lower() != "application/json"
-                        or "content-encoding" in response_headers or not isinstance(raw, bytes)):
-                    raise CloudError("invalid_response")
-                result = _response(raw)
-                if status != 200:
-                    _closed(result, ("error",))
-                    code = result["error"]
-                    if isinstance(code, str) and code in _ERRORS.get(status, set()):
-                        raise CloudError(code)
-                    raise CloudError("unavailable")
-                return result
+                status, response_headers, raw = await _call(
+                    self._send, method="POST", url=self.origin + path, headers=headers, body=body,
+                    timeout=5, max_response_bytes=8192, follow_redirects=False,
+                )
+                return _response(status, response_headers, raw)
         except CloudError:
             raise
         except TimeoutError:
@@ -208,7 +210,8 @@ class CloudClient:
             _closed(result, ("status", "budget"))
             budget = result["budget"]
             _closed(budget, ("used", "remaining", "limit", "windowMs"))
-            if (any(type(budget[key]) is not int or budget[key] < 0 for key in budget)
+            # Budget counters reject booleans even though isinstance(True, int).
+            if (any(type(budget[key]) is not int or budget[key] < 0 for key in budget)  # pylint: disable=unidiomatic-typecheck
                     or budget["limit"] != 10 or budget["windowMs"] != 3600000
                     or budget["used"] < budget["limit"]
                     or budget["remaining"] != max(0, 10 - budget["used"])):
@@ -225,6 +228,7 @@ class CloudClient:
             raise CloudError("permit_expired")
         admitted = self._envelope(result["envelope"])
         # Only transport lifetime may refresh at admission. All semantic fields bind.
+
         def semantic(item):
             return {key: value for key, value in item.items() if key not in ("issuedAt", "expiresAt")}
         if (semantic(admitted) != semantic(expected) or _timestamp(admitted["issuedAt"]) > issued
@@ -243,7 +247,8 @@ class CloudClient:
             raise CloudError("identity_mismatch")
         result = await self._post("/v1/ack", ack)
         _closed(result, ("status", "current"))
-        if (result["status"] != ack["status"] or type(result["current"]) is not bool
+        # A watermark flag must be a JSON boolean, not a truthy integer.
+        if (result["status"] != ack["status"] or not isinstance(result["current"], bool)
                 or (result["status"] == "submitted" and result["current"])):
             raise CloudError("invalid_response")
         return result
@@ -259,7 +264,8 @@ class CloudClient:
                 raise ValueError()
             mesh_address = ipaddress.IPv4Address(mesh_ip)
             if (mesh_address not in ipaddress.IPv4Network("100.64.0.0/10")
-                    or type(mesh_port) is not int or not 1 <= mesh_port <= 65535
+                    # Reject bool despite its integer inheritance.
+                    or type(mesh_port) is not int or not 1 <= mesh_port <= 65535  # pylint: disable=unidiomatic-typecheck
                     or not isinstance(agents, list) or not 1 <= len(agents) <= 128
                     or any(not isinstance(agent, str) or not re.fullmatch(r"[a-z0-9-]{1,32}", agent) for agent in agents)
                     or len(set(agents)) != len(agents) or self.agent not in agents):
