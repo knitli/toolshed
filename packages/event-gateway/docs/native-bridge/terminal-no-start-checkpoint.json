@@ -116,6 +116,8 @@
     "Incarnation-local native receipts can be lost on restart; absence remains unknown.",
     "Real binary qualification is native-only with a loopback mock model; it does not prove cloud settlement or busy refusal.",
     "Positive native-start cloud ACK remains unqualified; no queued ID is fabricated.",
-    "Linux-only PTY branch is not runtime tested on this macOS host."
+    "Linux-only PTY branch is not runtime tested on this macOS host.",
+    "Interactive delayed-ACK UX was not runtime-tested in this checkpoint.",
+    "The local TUI AttemptLedger 256-to-257 capacity boundary was not runtime-tested; the app-server receipt-capacity test covers a separate ledger."
   ]
 }

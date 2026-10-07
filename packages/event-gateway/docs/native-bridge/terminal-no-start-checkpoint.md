@@ -73,6 +73,10 @@ Tool and compilation failures are excluded from those pairs.
   attempt, permit and message. It proves native-only replay/recovery, not a
   Core busy refusal or cloud settlement. Unknown mock request count is zero.
 
+- Interactive delayed-ACK UX was not runtime-tested in this checkpoint.
+- The local TUI `AttemptLedger` 256-to-257 capacity boundary was not
+  runtime-tested; the app-server receipt-capacity test covers a separate ledger.
+
 A positive direct Core start still needs a separately reviewed cloud ACK
 correlation extension. Do not fabricate a queued submission ID, infer user-input
 observation, release delivery capacity, or enable production binding from this
