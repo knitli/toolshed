@@ -89,6 +89,17 @@ class ContractWorkflowTests(unittest.TestCase):
             verify_control()
         self.assertEqual(self.reads, control_paths)
 
+        malformed_head_reads = []
+
+        def read_malformed_head(path, ref, token):
+            malformed_head_reads.append((path, ref, token))
+            return self.blobs[path]
+
+        with patch.dict(POLICY, {"read_blob": read_malformed_head}):
+            with self.assertRaises(ValueError):
+                POLICY["verify_control_contract"]("main", "test-token")
+        self.assertEqual(malformed_head_reads, [])
+
         fixture_path = POLICY["CONTROL_SNAPSHOT"] + "fixtures.json"
         manifest_path = POLICY["CONTROL_SNAPSHOT"] + "manifest.json"
         self.reads.clear()
