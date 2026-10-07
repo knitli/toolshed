@@ -119,7 +119,7 @@ jobs:
                   raise ValueError("invalid head")
               hashes = {
                   name: hashlib.sha256(read_blob(CONTROL_SNAPSHOT + name, head, pr_token)).hexdigest()
-                  for name in ("fixtures.json", "manifest.json")
+                  for name in CONTROL_PINS
               }
               if hashes not in (CONTROL_PINS, CONTROL_NEXT_PINS):
                   raise ValueError("control contract differs")
