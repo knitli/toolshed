@@ -25,7 +25,7 @@ START_SECONDS = 2.0
 NOT_STARTED_REASONS = frozenset(
     (
         "busy serverDraining selectionExpired selectionChanged permitExpired "
-        "permitInvalid duplicateConflict receiptCapacity threadUnavailable inputInvalid"
+        "permitInvalid duplicateConflict receiptCapacity connectionClosed threadUnavailable inputInvalid"
     ).split()
 )
 IDENTITY = (

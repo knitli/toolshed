@@ -1,0 +1,364 @@
+{
+  "currentSummary": "Summary [ 153.432s] 5629 tests run: 5585 passed (7 slow), 44 failed, 8 skipped",
+  "priorBaselineSourcePin": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "comparison": "Current full TUI failures compared by exact test name and normalized assertion/snapshot diff against prior full run, whose 44 signatures were proven on clean baseline",
+  "failed": 44,
+  "baselineConfirmed": 44,
+  "newFailures": [],
+  "resolvedPriorFailures": [],
+  "changedFailureSignatures": [],
+  "results": [
+    {
+      "test": "app::daemon_menu::tests::daemon_menu_is_read_only_and_confirmation_can_cancel_or_handoff",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 342,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "860453573a6678e4a3a30c543239276ba5f6f6ff09955232310233f6ec32d4c2"
+    },
+    {
+      "test": "app::owned_transcript::empty_state_animation_tests::empty_state_animation_preserves_header_cursor_and_footer",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 451,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "168657904b7d7791df3ea2fda6a968893dc4d7b0566045e0ece6df1d846e893a"
+    },
+    {
+      "test": "app::tests::active_reconnect::reconnect_allows_slow_hydration_but_bounds_a_stalled_server",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 790,
+      "category": "release_version_notice_snapshot",
+      "failureSignatureSha256": "fc59503bc9ae966bc350fab49d8566e4b2e0dc429d1a5e28c5a812069dff52f8"
+    },
+    {
+      "test": "app::tests::app_server_thread_replacement_clears_previous_transcript_before_replay",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 836,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "app::tests::navigation_reconnect::reconnect_daemon_command_center_after_socket_replacement_without_a_conversation",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 1115,
+      "category": "release_version_notice_snapshot",
+      "failureSignatureSha256": "0b7c3728ae71a23222dfdfef0e65a2484c3be02669dc9051339d042730cfe8e5"
+    },
+    {
+      "test": "app::tests::realtime_requests::buffered_voice_items_reconcile_captions_after_thread_switch",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 1221,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "app::tests::realtime_requests::completed_voice_caption_survives_repeated_thread_replacement",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 1305,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "app::tests::realtime_requests::replay_reconciles_only_matching_voice_captions_one_for_one",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 1399,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "app::tests::realtime_requests::switching_threads_keeps_the_source_voice_partial_only_on_reattach",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 1493,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "app::tests::startup_frame_tests::owned_startup_hides_tip_in_transcript",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 1755,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "168657904b7d7791df3ea2fda6a968893dc4d7b0566045e0ece6df1d846e893a"
+    },
+    {
+      "test": "custom_terminal::tests::cursor::terminal_draw_omits_cursor_style_without_an_owned_glyph",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 4613,
+      "category": "terminal_color_environment",
+      "failureSignatureSha256": "ed120d4d3cd5bb073c70e3bfc7a24e698f072ffee16286c58b02ab109e9700c8"
+    },
+    {
+      "test": "custom_terminal::tests::cursor::terminal_draw_repairs_owned_wide_hyperlink_after_skipped_glyphs",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 4638,
+      "category": "terminal_color_environment",
+      "failureSignatureSha256": "55701dc3fbbd46a056e13856c36555077b3c9e70bdb2dd6cae547fe76b35c157"
+    },
+    {
+      "test": "custom_terminal::tests::cursor::terminal_draw_repairs_single_column_without_scrolling",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 4676,
+      "category": "terminal_color_environment",
+      "failureSignatureSha256": "9b1ad592cd3614ca955daf05856a7a2e87dabb92dc42daba4a86cda314147c36"
+    },
+    {
+      "test": "custom_terminal::tests::cursor::terminal_draw_repairs_styled_anchor_on_cursor_only_frames",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 4583,
+      "category": "terminal_color_environment",
+      "failureSignatureSha256": "8fda882f3d8571231d32b09923aa625bde086b3f049eaef2b6876d72fdbbe75d"
+    },
+    {
+      "test": "get_git_diff::tests::get_git_diff_does_not_execute_configured_filters_fsmonitor_or_hooks",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 5013,
+      "category": "git_fixture_signing_environment",
+      "failureSignatureSha256": "ff54a4af1551cf546f7912cf1428ed5686534b54a429cbfa76cfc24d43cc5b4c"
+    },
+    {
+      "test": "get_git_diff::tests::get_git_diff_does_not_execute_helpers_while_checking_dirty_submodules",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 5048,
+      "category": "git_fixture_signing_environment",
+      "failureSignatureSha256": "ff54a4af1551cf546f7912cf1428ed5686534b54a429cbfa76cfc24d43cc5b4c"
+    },
+    {
+      "test": "history_cell::tests::pnpm_update_available_history_cell_snapshot",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 5165,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "a37e5e1c041ad8089755a6e9b682833d94f838b517b1652991e90c93a7107e0b"
+    },
+    {
+      "test": "history_cell::tests::session_info_availability_nux_tooltip_snapshot",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 5606,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "history_cell::tests::standalone_unix_update_available_history_cell_snapshot",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 5307,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "7c1c44a47f85e686226d866c57c315463bc5de537aec479d77c3a2b4ee49ed0e"
+    },
+    {
+      "test": "history_cell::tests::standalone_windows_update_available_history_cell_snapshot",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 5347,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "7f59fe095dbda373e7b0696100140ff60d1a5c1ded71c66ef3156179866d9356"
+    },
+    {
+      "test": "history_cell::tests::vite_plus_update_available_history_cell_snapshot",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 5510,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "a37e5e1c041ad8089755a6e9b682833d94f838b517b1652991e90c93a7107e0b"
+    },
+    {
+      "test": "startup_draft::layout::tests::owned_startup_keeps_the_live_bottom_geometry",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 6525,
+      "category": "release_version_normalized_spacing_snapshot",
+      "failureSignatureSha256": "a54bd3b834e51821c339fe55084317185028ef45f461f3139c92f0296a9188c7"
+    },
+    {
+      "test": "status::tests::status_snapshot_cached_limits_hide_credits_without_flag",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7258,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_includes_credits_and_limits",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7094,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_includes_enterprise_monthly_credit_limit",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 8271,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_includes_forked_from",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7463,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_includes_monthly_limit",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7135,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_includes_reasoning_details",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7217,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_active_user_defined_profile",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7340,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_auto_review_permissions",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7422,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_chatgpt_plan_without_email",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 8382,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_missing_limits_message",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7545,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_refreshing_limits_notice",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7504,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_stale_limits_message",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7587,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_unavailable_limits_message",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7713,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_treats_refreshing_empty_limits_as_unavailable",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7672,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_uses_default_reasoning_when_config_empty",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7950,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_uses_generic_limit_labels_for_unsupported_windows",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 7999,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_wraps_halfwidth_kana_in_narrow_terminal",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 8082,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_snapshot_wraps_in_narrow_terminal",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 8123,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::status_uses_server_provider_id_and_auth_requirement",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 8040,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841"
+    },
+    {
+      "test": "status::tests::transcript_overlay_remeasures_status_after_rate_limit_refresh",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 8214,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "168657904b7d7791df3ea2fda6a968893dc4d7b0566045e0ece6df1d846e893a"
+    },
+    {
+      "test": "update_prompt::tests::long_update_command_keeps_selected_skip_visible_in_a_short_viewport",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 9073,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "cc0c8637066376c5e7ec2a12989ebca2aee83cacb68b5ecfb5637a681e4c9a94"
+    },
+    {
+      "test": "update_prompt::tests::update_prompt_snapshot",
+      "samePriorFailureSignature": true,
+      "baselineConfirmed": true,
+      "currentLogLine": 9120,
+      "category": "release_version_snapshot",
+      "failureSignatureSha256": "a2b482fceff592fdde36f9072da63a54f7f930a9398a151cf5c29060c0ec1453"
+    }
+  ]
+}

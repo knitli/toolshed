@@ -1,0 +1,18 @@
+Clean pin a956835d020762cb2b570053af06f643a11c0ecc
+Patched sandboxed: Summary [   1.504s] 62 tests run: 60 passed, 2 failed, 1 skipped
+Clean sandboxed: Summary [   0.031s] 2 tests run: 0 passed, 2 failed, 54 skipped
+Clean escalated: Summary [   0.015s] 2 tests run: 2 passed, 54 skipped
+Control sandboxed stderr: /bin/sh: /dev/fd/4: Operation not permitted
+Control escalated: exit 0; empty stderr
+tests::pipe_spawn_no_stdin_can_preserve_inherited_fds
+assertion failed: `(left == right)`: expected preserved-fd pipe child to exit cleanly
+
+Diff < left / right > :
+<1
+>0
+tests::pty_spawn_can_preserve_inherited_fds
+assertion failed: `(left == right)`: expected preserved-fd PTY child to exit cleanly
+
+Diff < left / right > :
+<1
+>0

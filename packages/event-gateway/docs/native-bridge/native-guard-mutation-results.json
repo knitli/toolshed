@@ -203,5 +203,67 @@
       "source_or_dependency_changes": false,
       "log_file": "v8-helper-build.log"
     }
-  ]
+  ],
+  "review_r1": {
+    "source_stage": "Review fixes after c800be8; original proofs above remain historical and retain their original source hashes.",
+    "proofs": [
+      {
+        "name": "expiry",
+        "file": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+        "test": "permit_deadline_keeps_initial_monotonic_anchor_across_preparation_delay",
+        "mutation": "Move monotonic/wall-clock sampling and deadline calculation after asynchronous preparation.",
+        "red_assertion": "assertion failed: permit_deadline <= Instant::now()",
+        "mutant_red_exit": 100,
+        "restored_green_exit": 0,
+        "red_failure_type": "test assertion; no compile error",
+        "restored_sha256": "3955be37a0cd1b92bc7d8df9714550fb4c92cfcf18622a3fefb972792727e15a",
+        "red_log_sha256": "76b419fe51a3b8a25e02124d0d3cb138a2fe5b71708198da2715fa4682868087"
+      },
+      {
+        "name": "permit-preflight",
+        "file": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+        "test": "one_permit_id_cannot_commit_distinct_start_identities",
+        "mutation": "Remove the shared receipt scan for reused permit IDs in preflight.",
+        "red_assertion": "A distinct delivery with the same permit no longer returns duplicateConflict in preflight.",
+        "mutant_red_exit": 100,
+        "restored_green_exit": 0,
+        "red_failure_type": "test assertion; no compile error",
+        "restored_sha256": "3955be37a0cd1b92bc7d8df9714550fb4c92cfcf18622a3fefb972792727e15a",
+        "red_log_sha256": "29a765010dd126658eb6a3c28f2a7f38440d41e255cb21eb5002425c43a75372"
+      },
+      {
+        "name": "permit-commit",
+        "file": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+        "test": "one_permit_id_cannot_commit_distinct_start_identities",
+        "mutation": "Remove the permit-ID check under the receipt commit lock.",
+        "red_assertion": "A distinct delivery with the same permit commits instead of being rejected.",
+        "mutant_red_exit": 100,
+        "restored_green_exit": 0,
+        "red_failure_type": "test assertion; no compile error",
+        "restored_sha256": "3955be37a0cd1b92bc7d8df9714550fb4c92cfcf18622a3fefb972792727e15a",
+        "red_log_sha256": "1d6e7887e51f3a4440e1d2dd631886b3b17822ca35a1b77c3ea76fe657d5b537"
+      }
+    ],
+    "focused_tests": {
+      "command": "just test -p codex-app-server --cargo-profile dev-small native_selection_processor",
+      "passed": 9,
+      "failed": 0
+    },
+    "full_app_server": {
+      "command": "just test -p codex-app-server --cargo-profile dev-small",
+      "exit_code": 100,
+      "tests_run": 1835,
+      "passed": 1819,
+      "failed": 16,
+      "skipped": 1,
+      "baseline_comparison": "The 16 failing selectors exactly match app-server-baseline-16.log: 12 missing code-mode helper and four MCP initialize HTTP 404 failures.",
+      "process_only_git_signing_override": true,
+      "unresolved_patch_specific_failures": 0
+    },
+    "lint_format": {
+      "just_fix_codex_app_server": "passed",
+      "scoped_cargo_fmt": "passed",
+      "tests_precede_automatic_lint_fix_and_format": true
+    }
+  }
 }

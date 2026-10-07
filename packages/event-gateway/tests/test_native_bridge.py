@@ -81,8 +81,13 @@ def peer(handler):
 
 class NativeBridgeTests(unittest.TestCase):
     def test_exact_start_receipt_and_no_replay(self):
-        for outcome in ("started", "notStarted", "unknown"):
-            with self.subTest(outcome=outcome):
+        for outcome, reason in (
+            ("started", None),
+            ("notStarted", "busy"),
+            ("notStarted", "connectionClosed"),
+            ("unknown", None),
+        ):
+            with self.subTest(outcome=outcome, reason=reason):
                 requests = []
 
                 def handler(channel):
@@ -101,7 +106,7 @@ class NativeBridgeTests(unittest.TestCase):
                             turnId=request["clientUserMessageId"], replayed=False
                         )
                     elif outcome == "notStarted":
-                        result["reason"] = "busy"
+                        result["reason"] = reason
                     send(
                         channel,
                         {
@@ -150,7 +155,10 @@ class NativeBridgeTests(unittest.TestCase):
                         with self.assertRaises(native.BridgeError):
                             client.receipt(request)
                         exchange.assert_not_called()
-                    self.assertEqual(client.start(request)["status"], outcome)
+                    response = client.start(request)
+                    self.assertEqual(response["status"], outcome)
+                    if reason is not None:
+                        self.assertEqual(response, {"status": outcome, "reason": reason})
                     original = deepcopy(request)
                     for container, key, value in (
                         (request, "generation", request["generation"] + 1),

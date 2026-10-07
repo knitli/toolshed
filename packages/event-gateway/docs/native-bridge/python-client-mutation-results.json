@@ -152,5 +152,19 @@
     "changes": "Distinct peer callback names and spacing; optimization-safe peer termination check. Production source and causal assertion bodies unchanged.",
     "focusedModulesTestsPassed": 17,
     "fullGatewayTestsPassed": 88
+  },
+  "nativeRefusalContractFollowup": {
+    "sourceSHA256": "28e88df861ae993d5e23a2f4f244672f3effc7f4f2f2613fe73cfb3d2048a0ef",
+    "testSHA256": "6459fef6df952e702a55044128e746a9001f9b344b38c2545ece26b2634d9cfb",
+    "regression": "Preserve native connectionClosed as an explicit notStarted reason; formerly collapsed to unknown.",
+    "beforeFixSourceSHA256": "a2174b69a3ad9e77509bd33e7451521e3dd2efe1dc2211937f8a95531376316e",
+    "redAssertion": "'unknown' != 'notStarted' for reason connectionClosed",
+    "redExit": 1,
+    "redFailures": 1,
+    "redErrors": 0,
+    "greenExit": 0,
+    "greenFocusedTestsPassed": 6,
+    "fullGatewayTestsPassed": 88,
+    "historicalCausalPairsRetained": 14
   }
 }

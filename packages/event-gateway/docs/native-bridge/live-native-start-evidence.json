@@ -1,14 +1,14 @@
 {
-  "qualifiedAt": "2026-10-07T02:40:48Z",
+  "qualifiedAt": "2026-10-07T03:20:14Z",
   "sourceRevision": "a956835d020762cb2b570053af06f643a11c0ecc",
-  "binarySha256": "24ddb4150de43d8a6add30a5c098392d4994b8030d414db1ba1c769cf4354caf",
-  "patchSha256": "e8671a6b304fd117eb24741be7a2d7b91bd1a477ef33a29a2fee1e364c580ae4",
-  "qualifierSha256": "a2174b69a3ad9e77509bd33e7451521e3dd2efe1dc2211937f8a95531376316e",
-  "qualifierTestsSha256": "a641c376f3e9f34d8fb7ee2bf7475b8e72c846292ee1e3be8acfc74adef7053d",
+  "binarySha256": "50a348dffc703d72e5c23f1453edd116334be73c89fd87a6fce00e2a4a757f55",
+  "patchSha256": "fef316821243a49c6b586247534981e4ceab53ed6e154a69904b9d66fed3df66",
+  "qualifierSha256": "28e88df861ae993d5e23a2f4f244672f3effc7f4f2f2613fe73cfb3d2048a0ef",
+  "qualifierTestsSha256": "6459fef6df952e702a55044128e746a9001f9b344b38c2545ece26b2634d9cfb",
   "qualification": "synthetic-native-start",
   "outcome": "started",
-  "threadId": "01a1143b-4bad-7cb2-bdaa-f534c6a0980e",
-  "turnId": "3367997f-f27e-4d6e-b3a3-e0820948c64e",
+  "threadId": "01a1145f-cfc1-7751-bc8c-f6ff9e1a2f0a",
+  "turnId": "89558e85-7eed-4a34-87a6-6ed59b77bc5b",
   "exactReceiptRecovered": true,
   "mockModelRequests": 2,
   "primaryModelRequests": 1,
@@ -16,5 +16,7 @@
   "unknownModelRequests": 0,
   "realModelCalls": 0,
   "productionWakeEnabled": false,
-  "scope": "Disposable Codex home and inherited Unix socket; loopback mock only. One primary response and one recognized automatic TUI title request. No cloud event, real credentials, real model, owner client install, restart recovery, or production canary."
+  "scope": "Disposable Codex home and inherited Unix socket; loopback mock only. One primary response and one recognized automatic TUI title request. No cloud event, real credentials, real model, owner client install, restart recovery, or production canary.",
+  "sourceStage": "review-r1; all three initial Codex findings and internal-helper channel cleanup fixed",
+  "excludedAttempt": "One prior invocation failed during startup amid disk-full errors; no start/outcome proof was counted. Completed disposable build targets were removed before this successful run."
 }

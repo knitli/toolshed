@@ -17,9 +17,13 @@ connection identity, creates a fresh incarnation on boot, and owns selection
 generations and expiry. The private inherited socket is the launcher's TUI
 channel, not an independent daemon identity or cloud authority proof. Processes
 running as the same OS user remain trusted local principals.
+The launcher descriptor is adopted at process entry, before startup children;
+close-on-exec and removal of its environment markers prevent accidental inheritance.
+Non-TUI commands and internal helpers drop the unused channel before entering their work.
 The native selection lease lasts 750 ms and renews at most 250 ms apart.
 The five-second cloud permit is a separate limit; both must remain live at
 registration. A freshness gap requires generation resynchronization.
+Permit expiry is anchored to a monotonic deadline before asynchronous preparation.
 
 Keep busy events in the existing Event Gateway SQLite spool. Do not put them
 in Codex's unfenced native queue, and do not use `turn/start`, which can steer an
@@ -48,7 +52,8 @@ This first native patch uses a bounded in-memory receipt cache. It does not add
 a native SQLite schema. Recover an exact retained receipt before checking
 transient lease expiry: a lost response followed by expiry must not turn a
 committed start into a false no-start. Distinct deliveries must not reuse one
-native turn ID.
+native turn ID or consume one permit twice. Permit conflicts are checked again
+under the shared receipt commit lock; exact committed replay still recovers its receipt.
 
 An explicit Core refusal proves that particular call did not start. Errors, lost replies, and
 timeouts remain unknown unless an exact committed receipt exists. A daemon

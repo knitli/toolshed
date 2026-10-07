@@ -1,9 +1,9 @@
 {
   "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
   "rustVersion": "1.95.0 (59807616e 2026-04-14)",
-  "binarySha256": "24ddb4150de43d8a6add30a5c098392d4994b8030d414db1ba1c769cf4354caf",
-  "patchSha256": "e8671a6b304fd117eb24741be7a2d7b91bd1a477ef33a29a2fee1e364c580ae4",
-  "sourceFileCount": 31,
+  "binarySha256": "50a348dffc703d72e5c23f1453edd116334be73c89fd87a6fce00e2a4a757f55",
+  "patchSha256": "fef316821243a49c6b586247534981e4ceab53ed6e154a69904b9d66fed3df66",
+  "sourceFileCount": 39,
   "cleanPinnedApplyCheck": true,
   "allPatchedFilesByteMatchSource": true,
   "lockNormalization": {
@@ -14,18 +14,18 @@
     "externalPackagesAndDependencyListsUnchanged": true
   },
   "clippy": {
-    "command": "just clippy -p codex-tui --profile dev-small",
+    "command": "just clippy -p codex-arg0 -p codex-utils-pty -p codex-tui --profile dev-small",
     "passed": true,
-    "warnings": [
-      "pre-existing core ToolCallSource unused import"
-    ]
+    "host": "aarch64-apple-darwin",
+    "linuxConditionalHook": "source inspected only; not cross-target compiled or runtime tested"
   },
   "focusedTests": {
     "command": "just test -p codex-tui --cargo-profile dev-small selection_witness",
-    "passed": 14,
+    "passed": 18,
     "failed": 0,
     "skipped": 5619,
-    "rustMinStackBytes": 8388608
+    "rustMinStackBytes": 8388608,
+    "sourceStage": "final R1 source including helper dispatch cleanup"
   },
   "causalProof": {
     "assertionRedRestoredGreenPairs": 14,
@@ -34,17 +34,16 @@
   },
   "fullTuiProject": {
     "command": "just test -p codex-tui --cargo-profile dev-small",
-    "passed": 5581,
+    "passed": 5585,
     "failed": 44,
     "skipped": 8,
     "baselineComparison": {
       "identicalFailures": 44,
       "unresolved": 0,
-      "artifact": "tui-project-baseline-results.json",
-      "cleanBaselineTrackedBlobsVerified": 8775,
-      "onlyBaselineDifference": "Cargo.lock workspace version normalization"
+      "artifact": "review-r1-tui-baseline-comparison.json",
+      "cleanBaselineArtifact": "tui-project-baseline-results.json"
     },
-    "sourceStage": "before final Core lint-only/fail-closed closure correction"
+    "sourceStage": "R1 descriptor adoption before final arg0 helper cleanup; final focused and integration checks recorded separately"
   },
   "patchedHostCases": {
     "passed": 6,
@@ -56,13 +55,13 @@
       "GIT_CONFIG_KEY_0": "commit.gpgsign",
       "GIT_CONFIG_VALUE_0": "false"
     },
-    "sourceStage": "final patched source"
+    "sourceStage": "earlier pre-R1 patched source"
   },
   "build": {
-    "command": "cargo build --locked -p codex-cli --bin codex --profile dev-small",
+    "command": "cargo build --locked -p codex-cli --bin codex -p codex-tui --bin codex-tui --profile dev-small",
     "passed": true
   },
-  "format": "Pinned rustfmt check passed for changed TUI modules after justfix; final binary rebuilt after formatting",
+  "format": "Scoped pinned rustfmt plus git diff --check passed; combined patch validated by clean pinned apply and byte comparison",
   "schemaGeneration": "Rust JSON/TS and compressed exports generated; Python SDK generated and 5 schema tests passed per native owner/root evidence",
   "runtimeQualification": "See root-owned live qualification artifact for this binary SHA; unit and build checks alone do not establish runtime qualification",
   "fullWorkspaceSuite": {
@@ -82,7 +81,7 @@
   "productionNativeEnabled": false,
   "focusedNativeChecks": {
     "coreGuardedTestsPassed": 2,
-    "appServerBindingTestsPassed": 7,
+    "appServerBindingTestsPassed": 9,
     "protocolTestsPassed": 313,
     "protocolTestsSkipped": 1,
     "pythonSdkGenerationTestsPassed": 5,
@@ -122,21 +121,90 @@
     "log_file": "core-full-escalated.log"
   },
   "fullAppServerProject": {
-    "id": "codex-app-server-full-escalated",
     "command": "just test -p codex-app-server --cargo-profile dev-small",
-    "runner": "Rust 1.95.0, nextest local, RUST_MIN_STACK=8388608; require_escalated for mock sockets",
     "exit_code": 100,
-    "tests_run": 1833,
-    "passed": 1809,
-    "failed": 24,
+    "tests_run": 1835,
+    "passed": 1819,
+    "failed": 16,
     "skipped": 1,
-    "failure_classification": {
-      "git_fixture_failures_fixed_by_process_only_signing_override": 8,
-      "code_mode_host_unavailable_due_v8_helper_build": 12,
-      "codex_apps_mcp_initialize_http_404_reproduced_on_baseline": 4,
-      "unresolved_patch_specific_failures": 0
-    },
-    "log_file": "app-server-full-escalated-postbaseline.log"
+    "baseline_comparison": "The 16 failing selectors exactly match app-server-baseline-16.log: 12 missing code-mode helper and four MCP initialize HTTP 404 failures.",
+    "process_only_git_signing_override": true,
+    "unresolved_patch_specific_failures": 0
   },
-  "nativeDetailedEvidence": "native-guard-mutation-results.json"
+  "nativeDetailedEvidence": "native-guard-mutation-results.json",
+  "previousBindingBuild": {
+    "binarySha256": "24ddb4150de43d8a6add30a5c098392d4994b8030d414db1ba1c769cf4354caf",
+    "patchSha256": "e8671a6b304fd117eb24741be7a2d7b91bd1a477ef33a29a2fee1e364c580ae4",
+    "sourceFileCount": 31,
+    "fullTuiProject": {
+      "command": "just test -p codex-tui --cargo-profile dev-small",
+      "passed": 5581,
+      "failed": 44,
+      "skipped": 8,
+      "baselineComparison": {
+        "identicalFailures": 44,
+        "unresolved": 0,
+        "artifact": "tui-project-baseline-results.json",
+        "cleanBaselineTrackedBlobsVerified": 8775,
+        "onlyBaselineDifference": "Cargo.lock workspace version normalization"
+      },
+      "sourceStage": "before final Core lint-only/fail-closed closure correction"
+    },
+    "fullAppServerProject": {
+      "id": "codex-app-server-full-escalated",
+      "command": "just test -p codex-app-server --cargo-profile dev-small",
+      "runner": "Rust 1.95.0, nextest local, RUST_MIN_STACK=8388608; require_escalated for mock sockets",
+      "exit_code": 100,
+      "tests_run": 1833,
+      "passed": 1809,
+      "failed": 24,
+      "skipped": 1,
+      "failure_classification": {
+        "git_fixture_failures_fixed_by_process_only_signing_override": 8,
+        "code_mode_host_unavailable_due_v8_helper_build": 12,
+        "codex_apps_mcp_initialize_http_404_reproduced_on_baseline": 4,
+        "unresolved_patch_specific_failures": 0
+      },
+      "log_file": "app-server-full-escalated-postbaseline.log"
+    }
+  },
+  "standaloneTuiBinarySha256": "ab4332e8e874e39f1970bf0be65a89ef2e98ebbcc9c7865bd0c10f1934ddcaa5",
+  "reviewR1DescriptorProof": {
+    "adoptionTests": 4,
+    "adoptionMutationPairs": 8,
+    "adoptionArtifact": "review-r1-fd-mutation-results.json",
+    "helperCases": 4,
+    "helperMutationPairs": 4,
+    "helperArtifact": "review-r1-helper-causal-results.json"
+  },
+  "helperProjectChecks": {
+    "sandboxed": {
+      "passed": 60,
+      "failed": 2,
+      "skipped": 1
+    },
+    "failureCause": "sandbox denies shell reopen of /dev/fd; both failures reproduce clean baseline sandboxed and both pass escalated",
+    "artifact": "review-r1-helper-baseline-results.json",
+    "linuxConditionalHook": "not compiled or runtime tested on macOS",
+    "finalEscalated": {
+      "passed": 62,
+      "failed": 0,
+      "skipped": 1
+    }
+  },
+  "finalTuiIntegration": {
+    "command": "just test -p codex-tui --cargo-profile dev-small --test all",
+    "exitCode": 0,
+    "passed": 23,
+    "failed": 0,
+    "skipped": 4,
+    "leakyTest": "suite::screen_reader::startup_records_screen_reader_detection",
+    "sourceStage": "final R1 restored source; CLI binary byte-identical to immutable qualified50a348 build"
+  },
+  "reviewR1ServerProof": {
+    "additionalMutationPairs": 3,
+    "additionalTests": 2,
+    "artifact": "native-guard-mutation-results.json",
+    "section": "review_r1"
+  }
 }
