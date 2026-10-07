@@ -3,22 +3,32 @@ import { signedEventRequest } from 'fixture-event-runtime/delivery.ts';
 import { eventFetch } from 'fixture-event-runtime/api.ts';
 import { AgentCoordinator } from 'fixture-event-runtime/coordinator.ts';
 import { OwnerRegistry, ownerRegistryName } from 'fixture-event-runtime/registry.ts';
-import { coordinatorName } from 'fixture-event-runtime/contracts.ts';
+import { coordinatorName, type EventApiEnvironment } from 'fixture-event-runtime/contracts.ts';
+type Auth = { accessAssertion: string; agentToken: string };
+type AttemptAuth = Auth & { attemptId: string };
+type FixtureSetup = { runtimeId: string; nodeId: string; transportPrivateKey: string };
+type CoordinatorContext = ConstructorParameters<typeof AgentCoordinator>[0];
+type CoordinatorEnv = ConstructorParameters<typeof AgentCoordinator>[1];
+type FixtureEnv = Omit<EventApiEnvironment, 'OWNER_REGISTRY' | 'AGENT_COORDINATOR'> & {
+  FIXTURE_SECRET: string;
+  OWNER_REGISTRY: DurableObjectNamespace<FixtureRegistry>;
+  AGENT_COORDINATOR: DurableObjectNamespace<FixtureCoordinator>;
+};
 const principal = 'qualification@example.com', agent = 'pilot';
 const reservations = new Set<string>();
 const budget = () => ({ used: reservations.size, remaining: 10-reservations.size, limit: 10, windowMs: 3600000 });
-const valid = (x:any) => x.accessAssertion === 'fixture-access' && x.agentToken === 'fixture-agent';
+const valid = (x:Auth) => x.accessAssertion === 'fixture-access' && x.agentToken === 'fixture-agent';
 const authority = {
   async registeredOwnerAgent() { return { status:'denied' }; },
-  async currentAuth(x:any) { return valid(x) ? { status:'authorized', identity:{ principal,agent,keyThumbprint:'fixture' } } : { status:'denied' }; },
-  async nativeAttemptStatus(x:any) { return valid(x) ? { status:reservations.has(x.attemptId)?'reserved':'unknown', attemptId:x.attemptId,reservedAt:null,budget:budget() } : { status:'denied' }; },
-  async reserveNativeAttempt(x:any) { if (!valid(x)) return { status:'denied' }; const idempotent=reservations.has(x.attemptId); reservations.add(x.attemptId); return { status:'reserved',attemptId:x.attemptId,reservedAt:Date.now(),idempotent,budget:budget() }; },
+  async currentAuth(x:Auth) { return valid(x) ? { status:'authorized', identity:{ principal,agent,keyThumbprint:'fixture' } } : { status:'denied' }; },
+  async nativeAttemptStatus(x:AttemptAuth) { return valid(x) ? { status:reservations.has(x.attemptId)?'reserved':'unknown', attemptId:x.attemptId,reservedAt:null,budget:budget() } : { status:'denied' }; },
+  async reserveNativeAttempt(x:AttemptAuth) { if (!valid(x)) return { status:'denied' }; const idempotent=reservations.has(x.attemptId); reservations.add(x.attemptId); return { status:'reserved',attemptId:x.attemptId,reservedAt:Date.now(),idempotent,budget:budget() }; },
 };
 const metadata = { metrics:{ backlogCount:0,backlogBytes:0 } };
 const queue = { async send(){return {metadata};}, async sendBatch(){return {metadata};}, async metrics(){return metadata.metrics;} };
 export class FixtureCoordinator extends AgentCoordinator {
-  constructor(ctx:any,env:any) { super(ctx,{...env,MESSAGE_AUTHORITY:authority,DELIVERY_QUEUE:queue}); }
-  async fixtureSetup(x:any) {
+  constructor(ctx:CoordinatorContext,env:CoordinatorEnv) { super(ctx,{...env,MESSAGE_AUTHORITY:authority as unknown as CoordinatorEnv['MESSAGE_AUTHORITY'],DELIVERY_QUEUE:queue as unknown as CoordinatorEnv['DELIVERY_QUEUE']}); }
+  async fixtureSetup(x:FixtureSetup) {
     this.ctx.storage.sql.exec('INSERT INTO runtimes VALUES (?,1,?,1,1,?,1)',x.runtimeId,x.nodeId,Date.now()+90000);
     await this.setEnabled({enabled:true});
     const job={principal,agent,...await this.publishManual({runtimeId:x.runtimeId,subjectId:'fixture-manual-source'})};
@@ -37,7 +47,7 @@ export class FixtureCoordinator extends AgentCoordinator {
 export class FixtureRegistry extends OwnerRegistry {
   async fixtureRead() { return this.ctx.storage.sql.exec('SELECT * FROM slots').toArray(); }
 }
-export default { async fetch(request:Request,env:any) {
+export default { async fetch(request:Request,env:FixtureEnv) {
   if (request.headers.get('x-fixture-secret')!==env.FIXTURE_SECRET) return new Response(null,{status:403});
   const path=new URL(request.url).pathname;
   const registry=env.OWNER_REGISTRY.getByName(ownerRegistryName(principal));
@@ -51,5 +61,5 @@ export default { async fetch(request:Request,env:any) {
     const headers=new Headers(request.headers); headers.set('cf-access-jwt-assertion','fixture-access');
     request=new Request(request,{headers});
   }
-  return eventFetch(request,{...env,MESSAGE_AUTHORITY:authority});
+  return eventFetch(request,{...env,MESSAGE_AUTHORITY:authority as unknown as EventApiEnvironment['MESSAGE_AUTHORITY']});
 } };

@@ -10,7 +10,7 @@ import importlib.util
 import json
 from pathlib import Path
 import select
-import subprocess
+import subprocess  # nosec B404 - Controlled fixture launches the explicit Node executable.
 import sys
 import tempfile
 import time
@@ -170,7 +170,8 @@ def main():
     launcher = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(launcher)
     with open(str(OUTPUT) + '.broker.log', 'w') as log:
-        broker = subprocess.Popen([NODE, str(BROKER)], stdout=subprocess.PIPE, stderr=log, text=True,
+        # Trusted resolved CLI Node path, fixed broker, argument array, synthetic environment.
+        broker = subprocess.Popen([NODE, str(BROKER)], stdout=subprocess.PIPE, stderr=log, text=True,  # nosec B603
             env={'PATH': '/usr/bin:/bin', 'HOME': tempfile.gettempdir(),
                  'FIXTURE_CLOUD_SOURCE': str(Path(args.cloud_source).resolve(strict=True)),
                  'FIXTURE_ESBUILD': str(Path(args.esbuild).resolve(strict=True)),
@@ -178,6 +179,7 @@ def main():
         try:
             require(select.select([broker.stdout], [], [], 30)[0], 'broker startup deadline')
             address = json.loads(broker.stdout.readline())
+
             def callback(bridge, model, process, witness):
                 try:
                     return asyncio.run(exercise(bridge, model, process, witness, address))

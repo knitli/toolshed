@@ -6,7 +6,7 @@ This is fixture-qualified integration evidence. Production admission is **not pr
 
 ## Recorded evidence
 
-[Historical proof](coupled-workerd-proof.json) is the original JSON, copied byte-for-byte. Its absolute paths identify the historical inputs, not required checkout locations. The separately parameterized [Python runner](coupled-workerd.py), [broker](coupled-workerd-broker.mjs), and [Worker fixture](coupled-workerd-worker.ts) retain the original assertions and authority mocks. Only paths, output location, and module resolution were rebound. One reproduction of these exact exported sources passed, exit 0.
+[Historical proof](coupled-workerd-proof.json) is the original JSON, copied byte-for-byte. Its absolute paths identify the historical inputs, not required checkout locations. The separately parameterized [Python runner](coupled-workerd.py), [broker](coupled-workerd-broker.mjs), and [Worker fixture](coupled-workerd-worker.ts) retain the original assertions and authority mocks. The initial export changed only paths, output location, and module resolution. Its reproduction passed, exit 0. The subsequent fixture-only static-analysis cleanup and exact-source reproduction are recorded below.
 
 | Input | Pin |
 | --- | --- |
@@ -65,7 +65,7 @@ The output is fresh proof JSON plus `<output>.broker.log`. A passing run exits 0
 
 The single exported-source reproduction used `/private/tmp/event-native-observed-corrected-wheel-consumer/venv/bin/python` (3.13.14), the existing pinned checkouts, and the existing Node/package paths. Its full result is `/private/tmp/event-coupled-workerd-reproduction.json`; its source trace is `/private/tmp/event-coupled-workerd-reproduction-manifest.json`. These local paths are archival references, not bundled prerequisites.
 
-## Exported source hashes
+## Initial exported source hashes
 
 | File | SHA-256 |
 | --- | --- |
@@ -81,7 +81,7 @@ A scratch copy of the exported harness changed only `FixtureRegistry.fixtureRead
 
 Restoring the exact original Worker fixture bytes produced PASS (exit 0), using the same pinned native/local/cloud inputs. The exported repository files were never mutated. This demonstrates sensitivity of the retained-slot harness assertion; it is **harness-assertion mutation coverage**, not a product-causal mutation test or full harness coverage. Product-causal checks are separate evidence.
 
-The scratch artifacts are under `/private/tmp/coupled-harness-assertion-check/`. Source hashes match the exported-source table above. The exact mutation is reproducible by replacing the registry method body with `return [];` while leaving the coordinator readback unchanged.
+The scratch artifacts are under `/private/tmp/coupled-harness-assertion-check/`. Source hashes match the initial exported-source table above. The exact mutation is reproducible by replacing the registry method body with `return [];` while leaving the coordinator readback unchanged.
 
 | Artifact | SHA-256 |
 | --- | --- |
@@ -91,3 +91,23 @@ The scratch artifacts are under `/private/tmp/coupled-harness-assertion-check/`.
 | `green.log` | `f53949af1756e66ea8a5569b7049d71adf132cedb28db46ffc942d42cf4d9efc` |
 | `green.json` | `e6b076210b7b5b36cb36e57726140289115b85e5035ee7c29ece0afab8e64907` |
 | `manifest.json` | `9c09b4a3d1d059f98f40792fd7e48ea1f7cb6a80ae772b3d74c63a6996d4e5d8` |
+
+## Fixture static-analysis cleanup and current-source reproduction
+
+Review cleanup retains the original runtime assertions and synthetic authority behavior. The Python AST is identical to the initial committed export: only the E306 blank line and narrow Bandit `B404`/`B603` comments changed. These specific subprocess warnings cover the explicit operator-selected Node executable and fixed broker argument array, with the existing synthetic environment; no broad security-rule suppression was added. Rule mapping was checked against the [Bandit import rules](https://bandit.readthedocs.io/en/latest/blacklists/blacklist_imports.html#b404-import-subprocess) and [B603 reference](https://bandit.readthedocs.io/en/latest/plugins/b603_subprocess_without_shell_equals_true.html). GitHub's Codacy annotations themselves omitted rule IDs.
+
+The broker now uses constant `esbuild` and `miniflare` module names with separate `createRequire` resolvers anchored at each explicitly supplied package's `package.json`; supplied package paths remain trusted operator inputs. Two string concatenations became equivalent template strings. Worker fixture inputs have concrete credential/attempt/setup types and reuse production constructor/environment types. Explicit type assertions at the partial service/queue mock boundary preserve the original deliberately incomplete fixtures. This is not new production authority evidence or a full TypeScript project typecheck.
+
+The fixed restrictive PATH and exact route/query allowlist remain intentional. They are not broadened by the review suggestions.
+
+The corrected current-source run passed, exit 0, with the same native/local/cloud/qualifier pins and all original checks. It again recorded primary=1, title=1, unknown=0; four successful wire requests; identical observed ACK bytes with a fresh nonce; actual slot release; and no native restart or production admission. An earlier comment-edit error prevented the broker handshake and was corrected before this run; that startup error is excluded from qualification and mutation evidence.
+
+Current proof: `/private/tmp/event-coupled-workerd-codacy-reproduction.json`. Current trace: `/private/tmp/event-coupled-workerd-codacy-reproduction-manifest.json` (all 15 current source hashes and 14 cloud module hashes verified). Historical JSON and earlier mutation evidence remain unchanged.
+
+| Current artifact | SHA-256 |
+| --- | --- |
+| `coupled-workerd.py` | `f369f435e297c6f36243b5b559bc3b5c9be9468206d32d91edd617b66feed388` |
+| `coupled-workerd-broker.mjs` | `d191955e1cb1fced4f9e0987f6f4a0cfc9bd96c0e3fb86d077dadb39eba9b472` |
+| `coupled-workerd-worker.ts` | `a16957cfe80389cc6e4bca733caa87057b00289f30024fc856f976778f340f65` |
+| Current proof JSON | `133ec61cda117afbad904b88ee9002c0bed8fa9421275eaec52b341d3425cbea` |
+| Current trace manifest | `4e94b431b641748dc50bad4d91a95c3e0013758346611b788506bafd38c7779b` |
