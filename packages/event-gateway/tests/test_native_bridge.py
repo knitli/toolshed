@@ -845,7 +845,8 @@ class NativeBridgeTests(unittest.TestCase):
 
                 with (
                     peer(handler) as client,
-                    patch.object(native, "START_SECONDS", 0.025),
+                    patch.object(native, "START_SECONDS", 0.025)
+                    if fault == "deadline" else contextlib.nullcontext(),
                 ):
                     request = native.synthetic_request(client.challenge())
                     self.assertEqual(client.start(request), {"status": "unknown"})
