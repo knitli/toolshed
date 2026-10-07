@@ -1,5 +1,6 @@
 """Exercise the trusted verifier with candidate bytes, without credentials/network."""
 import base64
+from contextlib import redirect_stdout
 import hashlib
 import io
 import json
@@ -156,7 +157,8 @@ class ContractWorkflowTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.read_response(json.dumps(valid | change).encode())
 
-    def refresh(self, heads=(HEAD,), during_verification=None, event_name="push", event=None):
+    def refresh(self, heads=(HEAD,), during_verification=None, event_name="push", event=None,
+                before_request=None):
         if event is None:
             event = {"ref": "refs/heads/main"}
         workflow_sha = "c" * 40
@@ -164,13 +166,15 @@ class ContractWorkflowTests(unittest.TestCase):
         workflow_source = b"trusted workflow bytes"
         self.current_policy = workflow_source
         self.current_heads = dict(enumerate(heads, 1))
-        posts = []
-        candidate_reads = []
+        posts = self.runner_posts = []
+        candidate_reads = self.runner_candidate_reads = []
         self.runner_api_reads = []
 
         def request(endpoint, token, payload=None):
             self.assertEqual(token, "test-token")
             self.runner_api_reads.append(endpoint)
+            if before_request is not None:
+                before_request(endpoint, payload)
             if endpoint.startswith("git/trees/"):
                 self.assertIn(endpoint, [f"git/trees/{head}?recursive=1" for head in heads])
                 return self.tree
@@ -325,3 +329,42 @@ class ContractWorkflowTests(unittest.TestCase):
                         POLICY["request_json"]("statuses/" + HEAD, "test-token", {"state": "success"})
                     self.assertEqual(opener.return_value.open.call_count, 1)
                     sleep.assert_not_called()
+
+
+    def test_publication_failure_continues_batch_and_reports_partial_failure(self):
+        later_head = "b" * 40
+        for failure in (OSError("temporary publication outage"),
+                        json.JSONDecodeError("malformed API response", "", 0),
+                        KeyError("missing API field"), TypeError("invalid API shape")):
+            for failed_endpoint, failed_state in (
+                ("statuses/" + HEAD, "pending"),
+                ("statuses/" + HEAD, "success"),
+                ("pulls/1", None),
+            ):
+                with self.subTest(error=type(failure).__name__, endpoint=failed_endpoint,
+                                  state=failed_state):
+                    failed_requests = []
+
+                    def unavailable(endpoint, payload):
+                        state = payload["state"] if payload is not None else None
+                        if (endpoint, state) == (failed_endpoint, failed_state):
+                            failed_requests.append((endpoint, state))
+                            raise failure
+
+                    output = io.StringIO()
+                    with redirect_stdout(output), self.assertRaises(
+                            (ValueError, KeyError, TypeError, OSError)) as raised:
+                        self.refresh((HEAD, later_head), before_request=unavailable)
+                    self.assertEqual(
+                        [(endpoint, payload["state"]) for endpoint, payload in self.runner_posts
+                         if endpoint == "statuses/" + later_head],
+                        [("statuses/" + later_head, "pending"), ("statuses/" + later_head, "success")],
+                    )
+                    self.assertCountEqual(
+                        [path for path, head in self.runner_candidate_reads if head == later_head],
+                        [SNAPSHOT + path for path in PATHS],
+                    )
+                    self.assertEqual(failed_requests, [(failed_endpoint, failed_state)])
+                    self.assertIsInstance(raised.exception, OSError)
+                    self.assertIn(f"PR #1: {type(failure).__name__}", output.getvalue())
+                    self.assertNotIn(str(failure), output.getvalue())
