@@ -154,6 +154,60 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(CloudError):
                     await self.client.claim(FIXTURE["original"])
 
+    async def test_admitted_envelope_must_start_before_permit(self):
+        self.result["envelope"]["issuedAt"] = "2026-10-05T12:00:59.000Z"
+        self.result["envelope"]["expiresAt"] = "2026-10-05T12:01:59.000Z"
+        with self.assertRaisesRegex(CloudError, "^identity_mismatch$"):
+            await self.client.claim(FIXTURE["original"])
+
+    async def test_recursive_inputs_have_stable_errors_before_http(self):
+        nested = None
+        for _ in range(10000):
+            nested = [nested]
+        envelope = copy.deepcopy(FIXTURE["original"])
+        envelope["extra"] = nested
+        for method in (self.client.claim, self.client.acknowledge):
+            args = (envelope,) if method == self.client.claim else (envelope, self.acknowledgment())
+            with self.subTest(method=method.__name__), self.assertRaisesRegex(CloudError, "^invalid_envelope$"):
+                await method(*args)
+        ack = self.acknowledgment()
+        ack["extra"] = nested
+        with self.assertRaisesRegex(CloudError, "^invalid_acknowledgment$"):
+            await self.client.acknowledge(FIXTURE["original"], ack)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.credential_calls, 0)
+
+    async def test_historical_inputs_cannot_have_future_timestamps(self):
+        for timestamps in (
+            {"issuedAt": "2026-10-05T12:01:29.000Z", "expiresAt": "2026-10-05T12:02:29.000Z"},
+            {"issuedAt": "2026-10-05T12:01:28.000Z", "expiresAt": "2026-10-05T12:02:28.000Z",
+             "observedAt": "2026-10-05T12:01:29.000Z"},
+        ):
+            envelope = copy.deepcopy(FIXTURE["original"])
+            envelope.update(timestamps)
+            envelope["deliveryId"] = derive_delivery_id(envelope)
+            for method in (self.client.claim, self.client.acknowledge):
+                args = (envelope,) if method == self.client.claim else (envelope, self.acknowledgment())
+                with self.subTest(timestamps=timestamps, method=method.__name__), self.assertRaisesRegex(CloudError, "^invalid_envelope$"):
+                    await method(*args)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.credential_calls, 0)
+
+    def test_principal_configuration_matches_protocol(self):
+        total_255 = "a" * 64 + "@" + ".".join(("b" * 63, "c" * 63, "d" * 58, "com"))
+        self.assertEqual(len(total_255), 255)
+        for principal in ("a@b", "a..b@example.com", "a" * 65 + "@example.com", total_255, None, 123):
+            with self.subTest(principal=principal), self.assertRaisesRegex(CloudError, "^invalid_configuration$"):
+                CloudClient(origin=self.client.origin, principal=principal, agent=self.client.agent,
+                            node_id=NODE, node_generation=1, private_key=self.key,
+                            credentials=self.credentials, send=self.send)
+        for principal in ("person@example.com", "person+events@example.com"):
+            with self.subTest(principal=principal):
+                client = CloudClient(origin=self.client.origin, principal=principal, agent=self.client.agent,
+                                     node_id=NODE, node_generation=1, private_key=self.key,
+                                     credentials=self.credentials, send=self.send)
+                self.assertEqual(client.principal, principal)
+
     async def test_every_admitted_semantic_field_binds_original(self):
         replacements = {
             "principal": "other@example.com", "agent": "other", "nodeGeneration": 2,
@@ -345,6 +399,17 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             self.result = result
             with self.assertRaises(CloudError):
                 await self.client.complete_enrollment(self.challenge(), mesh_ip="100.96.0.1", mesh_port=8789, agents=[self.client.agent])
+
+    async def test_challenge_shape_errors_are_invalid_challenge_before_http(self):
+        missing = self.challenge()
+        del missing["signingPayload"]
+        extra = {**self.challenge(), "extra": True}
+        for challenge in (missing, extra, [], None):
+            with self.subTest(challenge=challenge), self.assertRaisesRegex(CloudError, "^invalid_challenge$"):
+                await self.client.complete_enrollment(challenge, mesh_ip="100.96.0.1", mesh_port=8789,
+                                                      agents=[self.client.agent])
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.credential_calls, 0)
 
     async def test_clock_shift_cannot_widen_enrollment_window(self):
         challenge = self.challenge()

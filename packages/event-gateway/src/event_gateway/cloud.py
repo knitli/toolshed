@@ -15,7 +15,7 @@ import uuid
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from .protocol import (
-    ProtocolError, _depth, _pairs, _timestamp, acknowledgment_matches_delivery,
+    ProtocolError, _SCHEMA, _depth, _pairs, _timestamp, acknowledgment_matches_delivery,
     matches_delivery_id, parse_acknowledgment, parse_envelope,
 )
 
@@ -38,9 +38,9 @@ def _json(value):
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
 
 
-def _closed(value, keys):
+def _closed(value, keys, *, code="invalid_response"):
     if not isinstance(value, dict) or set(value) != set(keys):
-        raise CloudError("invalid_response")
+        raise CloudError(code)
 
 
 def _response(raw):
@@ -64,6 +64,14 @@ def _uuid(value):
 
 def _generation(value):
     return type(value) is int and 0 < value <= 9007199254740991
+
+
+_PRINCIPAL_SCHEMA = _SCHEMA["anyOf"][0]["anyOf"][0]["properties"]["principal"]
+
+
+def _principal(value):
+    return (isinstance(value, str) and len(value) <= _PRINCIPAL_SCHEMA["maxLength"]
+            and re.fullmatch(_PRINCIPAL_SCHEMA["pattern"], value) is not None)
 
 
 def _iso(seconds):
@@ -101,8 +109,7 @@ class CloudClient:
         parsed = urlsplit(origin)
         if (parsed.scheme != "https" or not parsed.hostname or "." not in parsed.hostname
                 or parsed.netloc != parsed.hostname or parsed.path or parsed.query or parsed.fragment
-                or not re.fullmatch(r"[^@/\s]+@[^@/\s]+", principal)
-                or principal != principal.lower() or not re.fullmatch(r"[a-z0-9-]{1,32}", agent)
+                or not _principal(principal) or not re.fullmatch(r"[a-z0-9-]{1,32}", agent)
                 or not _uuid(node_id) or not _generation(node_generation)
                 or not isinstance(private_key, Ed25519PrivateKey)):
             raise CloudError("invalid_configuration")
@@ -176,9 +183,12 @@ class CloudClient:
 
     def _envelope(self, envelope, *, historical=False):
         try:
-            now_ms = _timestamp(envelope["issuedAt"]) if historical else self._clock() * 1000
+            now_ms = self._clock() * 1000
+            if historical:
+                # Relax expiration for queued work without moving the clock forward.
+                now_ms = min(now_ms, _timestamp(envelope["issuedAt"]))
             parsed = parse_envelope(_json(envelope), now_ms=now_ms)
-        except (ProtocolError, ValueError, TypeError, KeyError):
+        except (ProtocolError, ValueError, TypeError, KeyError, RecursionError):
             raise CloudError("invalid_envelope") from None
         if (not matches_delivery_id(parsed) or parsed["principal"] != self.principal
                 or parsed["agent"] != self.agent or parsed["nodeGeneration"] != self.node_generation):
@@ -210,16 +220,17 @@ class CloudClient:
         # Only transport lifetime may refresh at admission. All semantic fields bind.
         def semantic(item):
             return {key: value for key, value in item.items() if key not in ("issuedAt", "expiresAt")}
-        if semantic(admitted) != semantic(expected) or _timestamp(admitted["expiresAt"]) < expires:
+        if (semantic(admitted) != semantic(expected) or _timestamp(admitted["issuedAt"]) > issued
+                or _timestamp(admitted["expiresAt"]) < expires):
             raise CloudError("identity_mismatch")
         return result
 
     async def acknowledge(self, envelope, acknowledgment):
-        # ACK may outlive transport freshness. Validate at its original issue time.
+        # ACK may outlive transport freshness; future timestamps remain fenced.
         parsed = self._envelope(envelope, historical=True)
         try:
             ack = parse_acknowledgment(_json(acknowledgment), now_ms=self._clock() * 1000)
-        except (ProtocolError, KeyError, TypeError, ValueError):
+        except (ProtocolError, KeyError, TypeError, ValueError, RecursionError):
             raise CloudError("invalid_acknowledgment") from None
         if not acknowledgment_matches_delivery(parsed, ack):
             raise CloudError("identity_mismatch")
@@ -232,7 +243,7 @@ class CloudClient:
 
     async def complete_enrollment(self, challenge, *, mesh_ip, mesh_port, agents):
         # The caller supplies the reviewed owner-approved binding, never raw bytes to sign.
-        _closed(challenge, ("challengeId", "nodeId", "expiresAt", "signingPayload"))
+        _closed(challenge, ("challengeId", "nodeId", "expiresAt", "signingPayload"), code="invalid_challenge")
         try:
             if (ipaddress.IPv4Address(mesh_ip) not in ipaddress.IPv4Network("100.64.0.0/10")
                     or type(mesh_port) is not int or not 1 <= mesh_port <= 65535
