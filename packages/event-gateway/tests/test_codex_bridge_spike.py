@@ -127,6 +127,7 @@ class CodexBridgeSpikeTests(unittest.TestCase):
         async def run():
             parent, child = socket.socketpair()
             child.setblocking(False)
+
             async def respond():
                 loop = asyncio.get_running_loop()
                 challenge = json.loads(await loop.sock_recv(child, 128))
@@ -146,9 +147,11 @@ class CodexBridgeSpikeTests(unittest.TestCase):
     def test_coalesced_replay_revokes_same_read(self):
         observer = self.observer()
         states = []
+
         async def run():
             parent, child = socket.socketpair()
             child.setblocking(False)
+
             async def respond():
                 loop = asyncio.get_running_loop()
                 await loop.sock_recv(child, 128)
@@ -167,6 +170,7 @@ class CodexBridgeSpikeTests(unittest.TestCase):
     def test_socket_silence_has_one_outstanding_challenge(self):
         observer = self.observer()
         states = []
+
         async def run():
             parent, child = socket.socketpair()
             child.setblocking(False)

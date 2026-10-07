@@ -73,7 +73,8 @@ def peer(handler):
     finally:
         client.close()
         thread.join(3)
-        assert not thread.is_alive(), "peer must terminate"
+        if thread.is_alive():
+            raise AssertionError("peer must terminate")
         if errors:
             raise errors[0]
 
@@ -297,12 +298,12 @@ class NativeBridgeTests(unittest.TestCase):
         ):
             with self.subTest(changes=changes):
 
-                def handler(channel):
+                def invalid_witness_peer(channel):
                     receive(channel)
                     send(channel, witness(**changes))
                     self.assertIsNone(receive(channel))
 
-                with peer(handler) as client:
+                with peer(invalid_witness_peer) as client:
                     if changes == {"eligible": False}:
                         request = native.synthetic_request(client.challenge())
                         with self.assertRaises(native.BridgeError):
@@ -311,12 +312,12 @@ class NativeBridgeTests(unittest.TestCase):
                         with self.assertRaises(native.BridgeError):
                             client.challenge()
 
-        def handler(channel):
+        def expired_witness_peer(channel):
             receive(channel)
             send(channel, witness())
             self.assertIsNone(receive(channel))
 
-        with peer(handler) as client:
+        with peer(expired_witness_peer) as client:
             request = native.synthetic_request(client.challenge())
             client.valid_until = time.monotonic() - 0.01
             with self.assertRaises(native.BridgeError):

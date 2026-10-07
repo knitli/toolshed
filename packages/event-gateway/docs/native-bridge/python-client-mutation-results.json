@@ -146,5 +146,11 @@
   "sharedHashesUnchanged": true,
   "isolatedCopiesOnly": true,
   "rawPromptFrameOrLogContentIncluded": false,
-  "allCasesAssertionFailedAndRestored": true
+  "allCasesAssertionFailedAndRestored": true,
+  "testHarnessFollowup": {
+    "testSHA256": "a641c376f3e9f34d8fb7ee2bf7475b8e72c846292ee1e3be8acfc74adef7053d",
+    "changes": "Distinct peer callback names and spacing; optimization-safe peer termination check. Production source and causal assertion bodies unchanged.",
+    "focusedModulesTestsPassed": 17,
+    "fullGatewayTestsPassed": 88
+  }
 }
