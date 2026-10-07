@@ -157,6 +157,7 @@ class NativeBridgeTests(unittest.TestCase):
                     terminal['reason'] = 'busy'
                 server = SimpleNamespace(release_primary=threading.Event(), model_requests=0,
                                          request_counts={'primary': 0, 'title': 0, 'unknown': 0})
+
                 def start(request):
                     if request['permitExpiresAt'] <= time.time_ns() // 1_000_000:
                         return terminal

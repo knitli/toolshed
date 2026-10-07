@@ -15,7 +15,7 @@
     "tests/test_native.py": "e66f787a7607c7504379d512e0e3dc866a5988c22a3b2d4a3199cd04b3fa55b9",
     "tests/test_gateway.py": "7cb40eaa7fee47cb2b07cf2d5daf6dafc01c8dea0ec9ed6b93e38cfa6ab2badf",
     "tests/test_gateway_integration.py": "38f4f456efdf6ab5216b275b8e2678538b7b284457f4a881a8f4b4ce3c303502",
-    "tests/test_native_bridge.py": "5eb0a1917e9196004add1bbd35f8d54b3586e0fb57fc883ead0acf35881c246b"
+    "tests/test_native_bridge.py": "17e48f3c89d05d6267016f26d5c50d0b10e7b319b102be74d186cbebae7dbcec"
   },
   "causalProof": {
     "cloud": [
@@ -889,5 +889,6 @@
     "terminalReceiptId": "01a114b7-238f-7fc2-9e33-69503964a16a",
     "titleModelRequests": 1,
     "unknownModelRequests": 0
-  }
+  },
+  "finalStyleCorrection": "One blank line before a nested test fixture; no behavior change"
 }
