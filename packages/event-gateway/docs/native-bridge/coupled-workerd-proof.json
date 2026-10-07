@@ -1,0 +1,314 @@
+{
+  "result": "PASS",
+  "qualification": "fixture-qualified-native-local-workerd",
+  "binarySha256": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
+  "nativeProcessRestarted": false,
+  "localStoreRestarted": true,
+  "realModelCalls": 0,
+  "modelRequests": {
+    "primary": 1,
+    "title": 1,
+    "unknown": 0
+  },
+  "nativeRequest": {
+    "attemptId": "5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827",
+    "clientId": "c13ef3a7-a8d1-4bdf-8867-6e525eb1deee",
+    "clientUserMessageId": "bbf5884f-bb91-4e77-ac43-e60a879bd17e",
+    "deliveryId": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+    "event": {
+      "canonicalSubject": {
+        "kind": "manual",
+        "subjectId": "fixture-manual-source"
+      },
+      "eventId": "3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21",
+      "eventReference": "ref_3e9bc72d-2ad8-4f90-b293-70e4340ff1aa",
+      "source": "manual",
+      "sourceStateVersion": "v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b"
+    },
+    "generation": 9,
+    "permitExpiresAt": 1791361903985,
+    "permitId": "84a99433-a815-4a21-97e8-9407684d62df",
+    "permitIssuedAt": 1791361898985,
+    "serverGeneration": 7,
+    "serverInstanceId": "01a1157d-58ba-70e2-bc43-838920ae614d",
+    "threadId": "01a1157d-58f2-7af2-8d00-77ed206e057a"
+  },
+  "fullInputRecordedReceipt": {
+    "attemptId": "5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827",
+    "clientId": "c13ef3a7-a8d1-4bdf-8867-6e525eb1deee",
+    "clientUserMessageId": "bbf5884f-bb91-4e77-ac43-e60a879bd17e",
+    "deliveryId": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+    "outcome": {
+      "itemId": "01a1157d-5a45-7233-9d6b-590499f5a9b0",
+      "replayed": true,
+      "status": "inputRecorded",
+      "turnId": "bbf5884f-bb91-4e77-ac43-e60a879bd17e"
+    },
+    "permitExpiresAt": 1791361903985,
+    "permitId": "84a99433-a815-4a21-97e8-9407684d62df",
+    "permitIssuedAt": 1791361898985,
+    "serverGeneration": 7,
+    "serverInstanceId": "01a1157d-58ba-70e2-bc43-838920ae614d",
+    "threadId": "01a1157d-58f2-7af2-8d00-77ed206e057a"
+  },
+  "before": {
+    "cloud": {
+      "attempts": [
+        {
+          "attempt_id": "5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827",
+          "delivery_id": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b\",\"policyRevision\":1,\"observedAt\":\"2026-10-07T08:31:38.930Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_3e9bc72d-2ad8-4f90-b293-70e4340ff1aa\",\"runtimeId\":\"85d7906c-5ac6-47b5-9f44-35f87d9d7431\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e\",\"attemptId\":\"5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827\",\"issuedAt\":\"2026-10-07T08:31:38.932Z\",\"expiresAt\":\"2026-10-07T08:32:38.932Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "state": "submitted",
+          "transport_until": 1791361908932,
+          "permit_id": "84a99433-a815-4a21-97e8-9407684d62df",
+          "permit_until": 1791361903985,
+          "reservation_state": "reserved",
+          "submission_id": null,
+          "turn_id": "bbf5884f-bb91-4e77-ac43-e60a879bd17e",
+          "ack_json": "{\"schemaVersion\":1,\"eventId\":\"3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21\",\"deliveryId\":\"dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e\",\"attemptId\":\"5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"runtimeId\":\"85d7906c-5ac6-47b5-9f44-35f87d9d7431\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveredSourceStateVersion\":\"v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b\",\"acknowledgedAt\":\"2026-10-07T08:31:39.027Z\",\"status\":\"submitted\",\"nativeCorrelation\":{\"kind\":\"native_turn_started\",\"permitId\":\"84a99433-a815-4a21-97e8-9407684d62df\",\"turnId\":\"bbf5884f-bb91-4e77-ac43-e60a879bd17e\"}}",
+          "native_observed_ack_json": null,
+          "transport_status": "sending",
+          "transport_reason": null
+        }
+      ],
+      "deliveries": [
+        {
+          "delivery_id": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+          "event_id": "3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21",
+          "subject_id": "fixture-manual-source",
+          "source_state_version": "v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b",
+          "runtime_id": "85d7906c-5ac6-47b5-9f44-35f87d9d7431",
+          "runtime_generation": 1,
+          "attachment_generation": 1,
+          "node_id": "22d16854-1bcd-4707-a6f7-409dbec9891d",
+          "node_generation": 1,
+          "state": "submitted",
+          "reason": null,
+          "created_at": 1791361898931,
+          "retry_until": 1791448298931,
+          "transport_state": "accepted",
+          "transport_failures": 0,
+          "terminal_at": null
+        }
+      ],
+      "native_claims": [
+        {
+          "delivery_id": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+          "attempt_id": "5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827",
+          "state": "submitted",
+          "permit_id": "84a99433-a815-4a21-97e8-9407684d62df",
+          "permit_issued_at": 1791361898985,
+          "permit_until": 1791361903985,
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b\",\"policyRevision\":1,\"observedAt\":\"2026-10-07T08:31:38.930Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_3e9bc72d-2ad8-4f90-b293-70e4340ff1aa\",\"runtimeId\":\"85d7906c-5ac6-47b5-9f44-35f87d9d7431\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e\",\"attemptId\":\"5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827\",\"issuedAt\":\"2026-10-07T08:31:38.932Z\",\"expiresAt\":\"2026-10-07T08:32:38.932Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "updated_at": 1791361899032
+        }
+      ],
+      "native_correlations": [
+        {
+          "correlation_id": "bbf5884f-bb91-4e77-ac43-e60a879bd17e",
+          "delivery_id": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+          "attempt_id": "5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827",
+          "kind": "turn"
+        }
+      ],
+      "manual_sources": [
+        {
+          "subject_id": "fixture-manual-source",
+          "event_id": "3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21",
+          "source_state_version": "v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b",
+          "event_reference": "ref_3e9bc72d-2ad8-4f90-b293-70e4340ff1aa",
+          "observed_at": "2026-10-07T08:31:38.930Z",
+          "observed_source_state_version": null,
+          "created_at": 1791361898931
+        }
+      ],
+      "slot_intents": [
+        {
+          "delivery_id": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+          "node_id": "22d16854-1bcd-4707-a6f7-409dbec9891d",
+          "node_generation": 1,
+          "state": "reserved",
+          "updated_at": 1791361898932,
+          "attempts": 1,
+          "next_at": 1791361913931
+        }
+      ]
+    },
+    "slots": [
+      {
+        "node_id": "22d16854-1bcd-4707-a6f7-409dbec9891d",
+        "agent": "pilot",
+        "delivery_id": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+        "generation": 1
+      }
+    ],
+    "budget": {
+      "used": 1,
+      "remaining": 9,
+      "limit": 10,
+      "windowMs": 3600000
+    }
+  },
+  "settled": {
+    "cloud": {
+      "attempts": [
+        {
+          "attempt_id": "5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827",
+          "delivery_id": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b\",\"policyRevision\":1,\"observedAt\":\"2026-10-07T08:31:38.930Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_3e9bc72d-2ad8-4f90-b293-70e4340ff1aa\",\"runtimeId\":\"85d7906c-5ac6-47b5-9f44-35f87d9d7431\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e\",\"attemptId\":\"5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827\",\"issuedAt\":\"2026-10-07T08:31:38.932Z\",\"expiresAt\":\"2026-10-07T08:32:38.932Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "state": "observed",
+          "transport_until": 1791361908932,
+          "permit_id": "84a99433-a815-4a21-97e8-9407684d62df",
+          "permit_until": 1791361903985,
+          "reservation_state": "reserved",
+          "submission_id": null,
+          "turn_id": "bbf5884f-bb91-4e77-ac43-e60a879bd17e",
+          "ack_json": "{\"schemaVersion\":1,\"eventId\":\"3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21\",\"deliveryId\":\"dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e\",\"attemptId\":\"5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"runtimeId\":\"85d7906c-5ac6-47b5-9f44-35f87d9d7431\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveredSourceStateVersion\":\"v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b\",\"acknowledgedAt\":\"2026-10-07T08:31:39.027Z\",\"status\":\"submitted\",\"nativeCorrelation\":{\"kind\":\"native_turn_started\",\"permitId\":\"84a99433-a815-4a21-97e8-9407684d62df\",\"turnId\":\"bbf5884f-bb91-4e77-ac43-e60a879bd17e\"}}",
+          "native_observed_ack_json": "{\"schemaVersion\":1,\"eventId\":\"3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21\",\"deliveryId\":\"dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e\",\"attemptId\":\"5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"runtimeId\":\"85d7906c-5ac6-47b5-9f44-35f87d9d7431\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveredSourceStateVersion\":\"v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b\",\"acknowledgedAt\":\"2026-10-07T08:31:39.124Z\",\"status\":\"observed\",\"nativeCorrelation\":{\"kind\":\"native_input_recorded\",\"permitId\":\"84a99433-a815-4a21-97e8-9407684d62df\",\"turnId\":\"bbf5884f-bb91-4e77-ac43-e60a879bd17e\",\"itemId\":\"01a1157d-5a45-7233-9d6b-590499f5a9b0\"}}",
+          "transport_status": "sending",
+          "transport_reason": null
+        }
+      ],
+      "deliveries": [
+        {
+          "delivery_id": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+          "event_id": "3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21",
+          "subject_id": "fixture-manual-source",
+          "source_state_version": "v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b",
+          "runtime_id": "85d7906c-5ac6-47b5-9f44-35f87d9d7431",
+          "runtime_generation": 1,
+          "attachment_generation": 1,
+          "node_id": "22d16854-1bcd-4707-a6f7-409dbec9891d",
+          "node_generation": 1,
+          "state": "observed",
+          "reason": null,
+          "created_at": 1791361898931,
+          "retry_until": 1791448298931,
+          "transport_state": "accepted",
+          "transport_failures": 0,
+          "terminal_at": 1791361899128
+        }
+      ],
+      "native_claims": [
+        {
+          "delivery_id": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+          "attempt_id": "5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827",
+          "state": "observed",
+          "permit_id": "84a99433-a815-4a21-97e8-9407684d62df",
+          "permit_issued_at": 1791361898985,
+          "permit_until": 1791361903985,
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b\",\"policyRevision\":1,\"observedAt\":\"2026-10-07T08:31:38.930Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_3e9bc72d-2ad8-4f90-b293-70e4340ff1aa\",\"runtimeId\":\"85d7906c-5ac6-47b5-9f44-35f87d9d7431\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e\",\"attemptId\":\"5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827\",\"issuedAt\":\"2026-10-07T08:31:38.932Z\",\"expiresAt\":\"2026-10-07T08:32:38.932Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "updated_at": 1791361899128
+        }
+      ],
+      "native_correlations": [
+        {
+          "correlation_id": "bbf5884f-bb91-4e77-ac43-e60a879bd17e",
+          "delivery_id": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+          "attempt_id": "5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827",
+          "kind": "turn"
+        },
+        {
+          "correlation_id": "01a1157d-5a45-7233-9d6b-590499f5a9b0",
+          "delivery_id": "dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e",
+          "attempt_id": "5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827",
+          "kind": "input_item"
+        }
+      ],
+      "manual_sources": [
+        {
+          "subject_id": "fixture-manual-source",
+          "event_id": "3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21",
+          "source_state_version": "v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b",
+          "event_reference": "ref_3e9bc72d-2ad8-4f90-b293-70e4340ff1aa",
+          "observed_at": "2026-10-07T08:31:38.930Z",
+          "observed_source_state_version": "v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b",
+          "created_at": 1791361898931
+        }
+      ],
+      "slot_intents": []
+    },
+    "slots": [],
+    "budget": {
+      "used": 1,
+      "remaining": 9,
+      "limit": 10,
+      "windowMs": 3600000
+    }
+  },
+  "wire": [
+    {
+      "path": "/v1/dispatch/claim",
+      "body": "{\"deliveryId\":\"dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e\",\"attemptId\":\"5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827\"}",
+      "proof": {
+        "nodeId": "22d16854-1bcd-4707-a6f7-409dbec9891d",
+        "nodeGeneration": 1,
+        "issuedAt": "2026-10-07T08:31:38.976Z",
+        "nonce": "abcc7e12-bc39-4152-9a6b-0ca08dd0e141",
+        "signature": "xGo-YwU_5W9bIpiMQcC4aYmAOqPEu7RnpzGG8cK_PjHbd8HZHLzMLmu4sYjJievoztzmjo4xtCPu0RcrhgLQAw"
+      },
+      "responseStatus": 200
+    },
+    {
+      "path": "/v1/ack",
+      "body": "{\"acknowledgedAt\":\"2026-10-07T08:31:39.027Z\",\"agent\":\"pilot\",\"attachmentGeneration\":1,\"attemptId\":\"5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827\",\"deliveredSourceStateVersion\":\"v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b\",\"deliveryId\":\"dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e\",\"eventId\":\"3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21\",\"nativeCorrelation\":{\"kind\":\"native_turn_started\",\"permitId\":\"84a99433-a815-4a21-97e8-9407684d62df\",\"turnId\":\"bbf5884f-bb91-4e77-ac43-e60a879bd17e\"},\"nodeGeneration\":1,\"principal\":\"qualification@example.com\",\"runtimeGeneration\":1,\"runtimeId\":\"85d7906c-5ac6-47b5-9f44-35f87d9d7431\",\"schemaVersion\":1,\"status\":\"submitted\"}",
+      "proof": {
+        "nodeId": "22d16854-1bcd-4707-a6f7-409dbec9891d",
+        "nodeGeneration": 1,
+        "issuedAt": "2026-10-07T08:31:39.028Z",
+        "nonce": "f4aa12c0-5c11-497b-a964-6c59b198776a",
+        "signature": "LzqFk18SfGqEfM03H7-9EZrHV4hjjCtwOZ6K5q8NkL7de4mL8aUly8dNzp9Rhe_tQ-Wt-zzPVFerlpzGuuZyAQ"
+      },
+      "responseStatus": 200
+    },
+    {
+      "path": "/v1/ack",
+      "body": "{\"acknowledgedAt\":\"2026-10-07T08:31:39.124Z\",\"agent\":\"pilot\",\"attachmentGeneration\":1,\"attemptId\":\"5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827\",\"deliveredSourceStateVersion\":\"v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b\",\"deliveryId\":\"dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e\",\"eventId\":\"3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21\",\"nativeCorrelation\":{\"itemId\":\"01a1157d-5a45-7233-9d6b-590499f5a9b0\",\"kind\":\"native_input_recorded\",\"permitId\":\"84a99433-a815-4a21-97e8-9407684d62df\",\"turnId\":\"bbf5884f-bb91-4e77-ac43-e60a879bd17e\"},\"nodeGeneration\":1,\"principal\":\"qualification@example.com\",\"runtimeGeneration\":1,\"runtimeId\":\"85d7906c-5ac6-47b5-9f44-35f87d9d7431\",\"schemaVersion\":1,\"status\":\"observed\"}",
+      "proof": {
+        "nodeId": "22d16854-1bcd-4707-a6f7-409dbec9891d",
+        "nodeGeneration": 1,
+        "issuedAt": "2026-10-07T08:31:39.125Z",
+        "nonce": "58af43af-2250-4f52-9c85-f198fcc06fdb",
+        "signature": "ubxN9Rwu_Ki_-GFCA7_zn15EzqJoNIOQ83amG-nI8A-I0OW-tiOCVcjwGkWFo25_Vv6ks4WXgY1AxjX8GCUKAw"
+      },
+      "responseStatus": 200
+    },
+    {
+      "path": "/v1/ack",
+      "body": "{\"acknowledgedAt\":\"2026-10-07T08:31:39.124Z\",\"agent\":\"pilot\",\"attachmentGeneration\":1,\"attemptId\":\"5d6ee3e3-e1e3-4b57-9c50-dfa0a463a827\",\"deliveredSourceStateVersion\":\"v1-90ca2b29-1976-4e26-b829-07ebdc5e5e7b\",\"deliveryId\":\"dly_9549a3e958bff360d6e4cd7c9b88e65e0f986c7ebb32d720c0c29b69a681bc2e\",\"eventId\":\"3954e0bc-c3ce-47ce-8aa7-fdaa1b38ad21\",\"nativeCorrelation\":{\"itemId\":\"01a1157d-5a45-7233-9d6b-590499f5a9b0\",\"kind\":\"native_input_recorded\",\"permitId\":\"84a99433-a815-4a21-97e8-9407684d62df\",\"turnId\":\"bbf5884f-bb91-4e77-ac43-e60a879bd17e\"},\"nodeGeneration\":1,\"principal\":\"qualification@example.com\",\"runtimeGeneration\":1,\"runtimeId\":\"85d7906c-5ac6-47b5-9f44-35f87d9d7431\",\"schemaVersion\":1,\"status\":\"observed\"}",
+      "proof": {
+        "nodeId": "22d16854-1bcd-4707-a6f7-409dbec9891d",
+        "nodeGeneration": 1,
+        "issuedAt": "2026-10-07T08:31:44.022Z",
+        "nonce": "37a48795-7a44-4f65-9bc9-64f41b2c670f",
+        "signature": "BmyKUyxb59Av83N5ChCyKfvEaGxxP8ZTlkVjFyrLgMZuxy-r-RRSDC9hrXTuuCr7lLbY7yIEt6PbOX0q2cAoCw"
+      },
+      "responseStatus": 200
+    }
+  ],
+  "productionAdmissionProven": false,
+  "mocks": [
+    "qualified runtime/admin setup",
+    "Access edge/ Messaging credentials and budget",
+    "manual source publication",
+    "queue metrics",
+    "loopback instead of Mesh"
+  ],
+  "sourceSha256": {
+    "/private/tmp/event-coupled-native-workerd.py": "628d29aa1157ec0efd67b536350de2b7fb8594e978c52b95045caba732a6b186",
+    "/private/tmp/event-coupled-workerd-proof/broker.mjs": "b254ef784501c356addbb8b0e6c96262fc841c3b7ff5ea0625de833d486d95f5",
+    "/private/tmp/event-coupled-workerd-proof/worker-coupled.ts": "645ee7ef7963d7f7d10a4caaa7da8da3af8ef7c43dcb43314b569932a8770e93",
+    "/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/scripts/qualify_native_bridge.py": "a91a33276c89035ea1e57f02170a2bb31eae5724adc6e10c597e48c335d94e31",
+    "/opt/coder/toolshed/.worktrees/event-native-observed-ack-local/packages/event-gateway/src/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+    "/opt/coder/toolshed/.worktrees/event-native-observed-ack-local/packages/event-gateway/src/event_gateway/cli.py": "08cdfc58623dd667c4ea10e55845958466ffa6a63c1bc96bc4aab1f790964b35",
+    "/opt/coder/toolshed/.worktrees/event-native-observed-ack-local/packages/event-gateway/src/event_gateway/cloud.py": "f970e6b902cb7e893241d0f914a6a4473f26635a0d790f11c6ed4b30679a3ad6",
+    "/opt/coder/toolshed/.worktrees/event-native-observed-ack-local/packages/event-gateway/src/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+    "/opt/coder/toolshed/.worktrees/event-native-observed-ack-local/packages/event-gateway/src/event_gateway/daemon.py": "6b05d73d5ba9382c54ad2abf59d03f70dca465256dc6d103a47b8885da422fd9",
+    "/opt/coder/toolshed/.worktrees/event-native-observed-ack-local/packages/event-gateway/src/event_gateway/gateway.py": "b949efa5184df151357fabf739a6736771672238e87cb60d1c9477ce0dddcc06",
+    "/opt/coder/toolshed/.worktrees/event-native-observed-ack-local/packages/event-gateway/src/event_gateway/listener.py": "565848a5f6047573f9b0b737c8158113b8f6070fb539a63c38553a6460799108",
+    "/opt/coder/toolshed/.worktrees/event-native-observed-ack-local/packages/event-gateway/src/event_gateway/native.py": "ad19fc2c63fbf7cd1dcf15afa8c18586e59f3c60c12c24129578ad78c6180a07",
+    "/opt/coder/toolshed/.worktrees/event-native-observed-ack-local/packages/event-gateway/src/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+    "/opt/coder/toolshed/.worktrees/event-native-observed-ack-local/packages/event-gateway/src/event_gateway/security.py": "8eeb77c10faf2e8f0641a984930394c14fa0e722f16a7784b0324eb1ebde4434",
+    "/opt/coder/toolshed/.worktrees/event-native-observed-ack-local/packages/event-gateway/src/event_gateway/store.py": "0f877d5d581464eb71c431159e420ad7edc67f158d9aeb58e5ece41cf1a3bc7a"
+  }
+}
