@@ -176,6 +176,8 @@ class NativeBridgeTests(unittest.TestCase):
                 with peer(handler, receipt_version=mode) as client:
                     request = native.synthetic_request(client.challenge())
                     adapter = NativeBridgeAdapter({"nativeThreadId": request["threadId"]}, client)
+                    if mode == 3:
+                        request["receiptVersion"] = 3
                     submitted = asyncio.run(adapter.submit(request))
                     self.assertEqual(set(submitted), set(native.IDENTITY) | {"outcome"}
                                      | ({"generation"} if mode == 3 else set()))
@@ -216,6 +218,34 @@ class NativeBridgeTests(unittest.TestCase):
                 finally:
                     client.close()
                     child.close()
+
+    def test_input_recorded_accepts_only_v4_v7_turn_and_item_ids(self):
+        for mode in (2, 3):
+            for field in ("turnId", "itemId"):
+                for version in (0, 1, 3, 4, 5, 7):
+                    with self.subTest(mode=mode, field=field, version=version):
+                        value = ("00000000-0000-0000-0000-000000000000" if version == 0
+                                 else f"12345678-1234-{version}234-8234-123456789abc")
+                        request = native.synthetic_request(witness())
+                        outcome = {"status": "inputRecorded",
+                                   "turnId": request["clientUserMessageId"],
+                                   "itemId": str(uuid4()), "replayed": True}
+                        outcome[field] = value
+                        if field == "turnId":
+                            request["clientUserMessageId"] = value
+                        identity = native.IDENTITY + (("generation",) if mode == 3 else ())
+                        parent, child = socket.socketpair()
+                        client = native.NativeBridge(parent, receipt_version=mode)
+                        try:
+                            with patch.object(client, "exchange", return_value={
+                                "version": mode, "nonce": 1, "receipt": {
+                                    **{key: request[key] for key in identity}, "outcome": outcome}}):
+                                self.assertEqual(client._receipt_exchange("receipt", request),
+                                                 outcome if version in (4, 7) else {"status": "unknown"})
+                            self.assertEqual(client.closed, version not in (4, 7))
+                        finally:
+                            client.close()
+                            child.close()
 
     def test_input_recorded_qualification_requires_stable_observation_without_restart(self):
         for fault in (None, "unknown", "terminalNotStarted", "started", "item_changed",

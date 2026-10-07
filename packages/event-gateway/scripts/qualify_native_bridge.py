@@ -358,9 +358,11 @@ class NativeBridge:
                 require(
                     operation == "receipt"
                     and set(outcome) == {"status", "turnId", "itemId", "replayed"}
-                    and uuid(outcome["turnId"])
+                    and isinstance(outcome["turnId"], str)
+                    and EVENT_UUID.fullmatch(outcome["turnId"])
                     and outcome["turnId"] == request["clientUserMessageId"]
-                    and uuid(outcome["itemId"])
+                    and isinstance(outcome["itemId"], str)
+                    and EVENT_UUID.fullmatch(outcome["itemId"])
                     and outcome["itemId"] != request["clientUserMessageId"]
                     and outcome["replayed"] is True
                 )

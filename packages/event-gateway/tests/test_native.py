@@ -61,6 +61,11 @@ class NativeValidationTests(unittest.TestCase):
         legacy = receipt(item)
         bound = {**legacy, "generation": item["generation"]}
         self.assertEqual(validate_receipt(item, legacy), {"status": "unknown"})
+        with self.assertRaises(NativeError):
+            validate_receipt(item, bound)
+        item["receiptVersion"] = 3
+        with self.assertRaises(NativeError):
+            validate_receipt(item, legacy)
         self.assertEqual(validate_receipt(item, bound), {"status": "unknown"})
         for generation in (True, float(item["generation"]), str(item["generation"]),
                            None, -1, 2**64, item["generation"] + 1):
@@ -72,6 +77,19 @@ class NativeValidationTests(unittest.TestCase):
                                 {**item, "generation": True}):
             with self.subTest(request=invalid_request), self.assertRaises(NativeError):
                 validate_receipt(invalid_request, bound)
+
+    def test_request_receipt_version_metadata_is_strict_and_retained(self):
+        item = request()
+        for version in (2, 3):
+            local = {**item, "receiptVersion": version}
+            self.assertEqual(validate_request(local, ADMISSION), local)
+        for version in (None, True, False, "3", 2.0, 3.0, 0, 4, {}, []):
+            with self.subTest(version=version), self.assertRaises(NativeError):
+                validate_request({**item, "receiptVersion": version}, ADMISSION)
+            with self.subTest(receipt_version=version), self.assertRaises(NativeError):
+                validate_receipt({**item, "receiptVersion": version}, receipt(item))
+        self.assertEqual(validate_request(item, ADMISSION), item)
+        self.assertNotIn("receiptVersion", item)
 
     def test_request_closed_shape_types_and_admission_identity(self):
         item = request()
@@ -246,6 +264,33 @@ class NativeAdapterTests(unittest.IsolatedAsyncioTestCase):
         second = await self.adapter.prepare(ADMISSION)
         self.assertNotEqual(prepared["clientUserMessageId"], second["clientUserMessageId"])
         self.assertEqual(self.bridge.calls, [("challenge", None)])
+
+    async def test_prepare_pins_receipt_mode_and_wire_operations_strip_local_metadata(self):
+        for mode in (2, 3):
+            with self.subTest(mode=mode):
+                bridge = Bridge(self.item)
+                bridge.receipt_version = mode
+                adapter = NativeBridgeAdapter({"nativeThreadId": self.item["threadId"]}, bridge)
+                self.assertEqual(await adapter.check(), "available")
+                local = await adapter.prepare(ADMISSION)
+                self.assertEqual(local.get("receiptVersion", 2), mode)
+                self.assertEqual("receiptVersion" in local, mode == 3)
+                wire = {key: value for key, value in local.items() if key != "receiptVersion"}
+                result = await adapter.submit(local)
+                self.assertEqual("generation" in result, mode == 3)
+                self.assertEqual(await adapter.reconcile(local), result)
+                self.assertEqual(bridge.calls[1:], [("start", wire), ("restore", wire), ("receipt", wire)])
+                before = list(bridge.calls)
+                for incompatible in ({**local, "receiptVersion": 5 - mode},
+                                     {**local, "receiptVersion": True}):
+                    with self.assertRaises(NativeError):
+                        await adapter.submit(incompatible)
+                    with self.assertRaises(NativeError):
+                        await adapter.reconcile(incompatible)
+                bridge.receipt_version = 5 - mode
+                with self.assertRaises(NativeError):
+                    await adapter.reconcile(local)
+                self.assertEqual(bridge.calls, before)
 
     async def test_submit_uses_exact_request_and_validates_outcome(self):
         self.bridge.outcome = {"status": "started", "turnId": self.item["clientUserMessageId"], "replayed": False}
