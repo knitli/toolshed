@@ -106,7 +106,12 @@ class CloudClient:
 
     def __init__(self, *, origin, principal, agent, node_id, node_generation,
                  private_key, credentials, send, clock=time.time, nonce=uuid.uuid4):
-        parsed = urlsplit(origin)
+        if not isinstance(origin, str) or not isinstance(agent, str):
+            raise CloudError("invalid_configuration")
+        try:
+            parsed = urlsplit(origin)
+        except ValueError:
+            raise CloudError("invalid_configuration") from None
         if (parsed.scheme != "https" or not parsed.hostname or "." not in parsed.hostname
                 or parsed.netloc != parsed.hostname or parsed.path or parsed.query or parsed.fragment
                 or not _principal(principal) or not re.fullmatch(r"[a-z0-9-]{1,32}", agent)
@@ -244,8 +249,14 @@ class CloudClient:
     async def complete_enrollment(self, challenge, *, mesh_ip, mesh_port, agents):
         # The caller supplies the reviewed owner-approved binding, never raw bytes to sign.
         _closed(challenge, ("challengeId", "nodeId", "expiresAt", "signingPayload"), code="invalid_challenge")
+        if (not _uuid(challenge["challengeId"]) or challenge["nodeId"] != self.node_id
+                or not isinstance(challenge["signingPayload"], str)):
+            raise CloudError("invalid_challenge")
         try:
-            if (ipaddress.IPv4Address(mesh_ip) not in ipaddress.IPv4Network("100.64.0.0/10")
+            if not isinstance(mesh_ip, str):
+                raise ValueError()
+            mesh_address = ipaddress.IPv4Address(mesh_ip)
+            if (mesh_address not in ipaddress.IPv4Network("100.64.0.0/10")
                     or type(mesh_port) is not int or not 1 <= mesh_port <= 65535
                     or not isinstance(agents, list) or not 1 <= len(agents) <= 128
                     or any(not isinstance(agent, str) or not re.fullmatch(r"[a-z0-9-]{1,32}", agent) for agent in agents)
@@ -256,10 +267,9 @@ class CloudClient:
             raise CloudError("invalid_challenge") from None
         public_x = base64.urlsafe_b64encode(self._key.public_key().public_bytes_raw()).rstrip(b"=").decode()
         expected = _json(["event-node-enrollment-v1", self.principal, challenge["challengeId"],
-                          challenge["expiresAt"], self.node_id, public_x, mesh_ip, mesh_port, sorted(agents)]).decode()
+                          challenge["expiresAt"], self.node_id, public_x, str(mesh_address), mesh_port, sorted(agents)]).decode()
         now_ms = self._clock() * 1000
-        if (not _uuid(challenge["challengeId"]) or challenge["nodeId"] != self.node_id
-                or not now_ms < expires <= now_ms + 300000
+        if (not now_ms < expires <= now_ms + 300000
                 or challenge["signingPayload"] != expected):
             raise CloudError("invalid_challenge")
         result = await self._post("/v1/nodes/complete", {"challengeId": challenge["challengeId"],

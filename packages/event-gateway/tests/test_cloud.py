@@ -2,6 +2,7 @@ import asyncio
 import base64
 import copy
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -208,6 +209,17 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
                                      credentials=self.credentials, send=self.send)
                 self.assertEqual(client.principal, principal)
 
+    def test_origin_and_agent_configuration_errors_are_stable(self):
+        for field, values in (("origin", ("https://[", None, 123, b"https://events.example.com")),
+                              ("agent", (None, 123, []))):
+            for value in values:
+                configuration = {"origin": self.client.origin, "agent": self.client.agent}
+                configuration[field] = value
+                with self.subTest(field=field, value=value), self.assertRaisesRegex(CloudError, "^invalid_configuration$"):
+                    CloudClient(**configuration, principal=self.client.principal,
+                                node_id=NODE, node_generation=1, private_key=self.key,
+                                credentials=self.credentials, send=self.send)
+
     async def test_every_admitted_semantic_field_binds_original(self):
         replacements = {
             "principal": "other@example.com", "agent": "other", "nodeGeneration": 2,
@@ -407,6 +419,33 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         for challenge in (missing, extra, [], None):
             with self.subTest(challenge=challenge), self.assertRaisesRegex(CloudError, "^invalid_challenge$"):
                 await self.client.complete_enrollment(challenge, mesh_ip="100.96.0.1", mesh_port=8789,
+                                                      agents=[self.client.agent])
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.credential_calls, 0)
+
+    async def test_recursive_challenge_is_rejected_before_http(self):
+        nested = None
+        for _ in range(10000):
+            nested = [nested]
+        challenge = self.challenge()
+        challenge["challengeId"] = nested
+        with self.assertRaisesRegex(CloudError, "^invalid_challenge$"):
+            await self.client.complete_enrollment(challenge, mesh_ip="100.96.0.1", mesh_port=8789,
+                                                  agents=[self.client.agent])
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.credential_calls, 0)
+
+    async def test_enrollment_mesh_ip_requires_canonical_string(self):
+        address = ipaddress.IPv4Address("100.96.0.1")
+        self.result = {"nodeId": NODE, "generation": 1}
+        for mesh_ip in (int(address), address.packed):
+            challenge = self.challenge()
+            if isinstance(mesh_ip, int):
+                payload = json.loads(challenge["signingPayload"])
+                payload[6] = mesh_ip
+                challenge["signingPayload"] = json.dumps(payload, separators=(",", ":"))
+            with self.subTest(mesh_ip=mesh_ip), self.assertRaisesRegex(CloudError, "^invalid_challenge$"):
+                await self.client.complete_enrollment(challenge, mesh_ip=mesh_ip, mesh_port=8789,
                                                       agents=[self.client.agent])
         self.assertEqual(self.requests, [])
         self.assertEqual(self.credential_calls, 0)
