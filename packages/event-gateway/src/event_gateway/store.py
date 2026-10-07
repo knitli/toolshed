@@ -566,7 +566,8 @@ class Store:
             reason = (None if state == "observed" else "native_observed_ack_pending" if observed
                       else "native_started_ack_pending")
             self.db.execute(
-                f"UPDATE attempts SET state=?, {column}=?, reason=?, updated=? WHERE delivery_id=? AND attempt_id=?",
+                # column is only input_recorded_receipt or started_receipt; all values are bound.
+                f"UPDATE attempts SET state=?, {column}=?, reason=?, updated=? WHERE delivery_id=? AND attempt_id=?",  # nosec B608
                 (state, encoded, reason, self.clock(), delivery_id, attempt_id),
             )
             self.db.execute(
@@ -648,7 +649,8 @@ class Store:
                     raise StoreError("acknowledgment_conflict")
                 return json.loads(row[column])
             self._spend(row, len(encoded.encode()))
-            self.db.execute(f"UPDATE attempts SET {column}=?, updated=? WHERE delivery_id=? AND attempt_id=?",
+            # column is only native_observed_ack or native_ack; all values are bound.
+            self.db.execute(f"UPDATE attempts SET {column}=?, updated=? WHERE delivery_id=? AND attempt_id=?",  # nosec B608
                             (encoded, self.clock(), delivery_id, attempt_id))
         return json.loads(encoded)
 

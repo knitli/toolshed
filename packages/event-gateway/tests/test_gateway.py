@@ -251,6 +251,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_input_recorded_on_submit_cannot_ack_or_become_observed(self):
         ident = self.accept()['deliveryId']
+
         async def incorrect_start(request):
             return self.receipt(request, 'inputRecorded', replayed=True)
         self.custom_submit = incorrect_start

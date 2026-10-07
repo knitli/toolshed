@@ -12,11 +12,11 @@
     "src/event_gateway/native.py": "ad19fc2c63fbf7cd1dcf15afa8c18586e59f3c60c12c24129578ad78c6180a07",
     "src/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
     "src/event_gateway/security.py": "8eeb77c10faf2e8f0641a984930394c14fa0e722f16a7784b0324eb1ebde4434",
-    "src/event_gateway/store.py": "2082acfe374c4363d104f83da784a5466da1b612d9710707ec31e17147af095d"
+    "src/event_gateway/store.py": "0f877d5d581464eb71c431159e420ad7edc67f158d9aeb58e5ece41cf1a3bc7a"
   },
   "testSha256": {
     "tests/test_cloud.py": "76cd5b8b9b5ff4a3e409e0ed95232468136c9b1ac8600e8429a74a220bbcb6e8",
-    "tests/test_gateway.py": "838aadd7c109f5e41665878f9831e7aea61a580ba7a68d2863d2b1335db6c81e",
+    "tests/test_gateway.py": "2cdbd99af62c4ce6d9c8278da15506a69b16045c7778304ff34a216059256989",
     "tests/test_gateway_integration.py": "58c63e7b6b987c63d7e1349ae5c1f0711741c8e69fce57d0a5125cd592237fe2",
     "tests/test_native.py": "dba9c4c591e6ec62310300004a6100172e554f7135322b082a323dc1812813b5",
     "tests/test_protocol.py": "31566041015ca2e73070289e9da6c8e05437a52aeef596e0ded2c70fad075e00",
@@ -386,10 +386,11 @@
       "closedNativeObservedAckParsed": true,
       "automaticWakeEnabled": false,
       "ownerClientChanged": false,
-      "wheelSha256": "0bad85697973ad21f576f72fdea4d8d11d408e84ab06ae7348f93cb630d2716c",
+      "wheelSha256": "2036bbb1c9e39b3c9a45dfa43004ab55c6459b6dff8e725d9ba4941a3f804d77",
       "installedChecksPassed": 4,
-      "installedTestsLogSha256": "4dcde7585eddbdb2e2ba904b8259daf45d931d68e8dfd955bf4c9acf80039845"
-    }
+      "installedTestsLogSha256": "08481c85ef9d32bb98837c6aa16891bec9c8c4c7e53f670532d9ecb8bf4409b4"
+    },
+    "fullSourceTestsRevision": "d7d8fd57fda35ba1a0bc5405780b47964f2657c3; before AST-identical comments/blank-line correction"
   },
   "controlledNativeQualification": {
     "qualification": "real-native-production-local-MOCK-cloud-observed-ack",
@@ -410,6 +411,48 @@
     "localFinalState": "observed",
     "pendingCapacity": 0
   },
-  "liveProofSha256": "eda16785170f6cdd96578cd30473db565c4f2ddf26ec87ed7758177088668805",
-  "rollback": "Schema4 retains actual full input receipt and both immutable ACKs. Keep compatible dual-phase reader/closed parser; older schema3 code fails closed. No downmigration."
+  "liveProofSha256": "6cca61cf82105bbecdf818e500763a1d05b0a6f6d7ed96b0bd55a09459c9e666",
+  "rollback": "Schema4 retains actual full input receipt and both immutable ACKs. Keep compatible dual-phase reader/closed parser; older schema3 code fails closed. No downmigration.",
+  "causalSourceSha256": {
+    "src/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+    "src/event_gateway/cli.py": "08cdfc58623dd667c4ea10e55845958466ffa6a63c1bc96bc4aab1f790964b35",
+    "src/event_gateway/cloud.py": "f970e6b902cb7e893241d0f914a6a4473f26635a0d790f11c6ed4b30679a3ad6",
+    "src/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+    "src/event_gateway/daemon.py": "6b05d73d5ba9382c54ad2abf59d03f70dca465256dc6d103a47b8885da422fd9",
+    "src/event_gateway/gateway.py": "b949efa5184df151357fabf739a6736771672238e87cb60d1c9477ce0dddcc06",
+    "src/event_gateway/listener.py": "565848a5f6047573f9b0b737c8158113b8f6070fb539a63c38553a6460799108",
+    "src/event_gateway/native.py": "ad19fc2c63fbf7cd1dcf15afa8c18586e59f3c60c12c24129578ad78c6180a07",
+    "src/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+    "src/event_gateway/security.py": "8eeb77c10faf2e8f0641a984930394c14fa0e722f16a7784b0324eb1ebde4434",
+    "src/event_gateway/store.py": "2082acfe374c4363d104f83da784a5466da1b612d9710707ec31e17147af095d"
+  },
+  "causalTestSha256": {
+    "tests/test_cloud.py": "76cd5b8b9b5ff4a3e409e0ed95232468136c9b1ac8600e8429a74a220bbcb6e8",
+    "tests/test_gateway.py": "838aadd7c109f5e41665878f9831e7aea61a580ba7a68d2863d2b1335db6c81e",
+    "tests/test_gateway_integration.py": "58c63e7b6b987c63d7e1349ae5c1f0711741c8e69fce57d0a5125cd592237fe2",
+    "tests/test_native.py": "dba9c4c591e6ec62310300004a6100172e554f7135322b082a323dc1812813b5",
+    "tests/test_protocol.py": "31566041015ca2e73070289e9da6c8e05437a52aeef596e0ded2c70fad075e00",
+    "tests/test_store.py": "a8ea3f0e451b875648758096b85a497f0c505c8ab5bca1f484478f325cc7a7fb"
+  },
+  "reviewCorrection": {
+    "baseline": "d7d8fd57fda35ba1a0bc5405780b47964f2657c3",
+    "files": {
+      "src/event_gateway/store.py": {
+        "ast_equal": true,
+        "before_sha256": "2082acfe374c4363d104f83da784a5466da1b612d9710707ec31e17147af095d",
+        "after_sha256": "0f877d5d581464eb71c431159e420ad7edc67f158d9aeb58e5ece41cf1a3bc7a"
+      },
+      "tests/test_gateway.py": {
+        "ast_equal": true,
+        "before_sha256": "838aadd7c109f5e41665878f9831e7aea61a580ba7a68d2863d2b1335db6c81e",
+        "after_sha256": "2cdbd99af62c4ce6d9c8278da15506a69b16045c7778304ff34a216059256989"
+      }
+    },
+    "causal_proof": "not rerun; comments and blank line only, original proof hashes remain pre-review",
+    "tests": "72 Store/Gateway PASS",
+    "ruff": "PASS",
+    "diff_check": "PASS",
+    "reportSha256": "f8882d66f7b57eac7719101534cc7eaf7c2825cfaf46845662eb276748826c2f",
+    "currentSourceMatchesPreviousBehaviorAst": true
+  }
 }
