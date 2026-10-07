@@ -90,7 +90,17 @@ jobs:
                        'event-v1/protocol-v1.json': '2aa35df5cace7a4c646316cfda44171adecf2ab6eeb4c26124901fb6eb00c90f',
                        'event-v1/manifest.json': 'c2be6695e1b22d1b1e58059f11283d4ad56226fbdac1c611b8dadbb161c659fd',
                        'event-control-v1/fixtures.json': 'a47fa45935463df5a91984e4d2f5f6b5304944d0fcd99872c3bb30bd981908d1',
-                       'event-control-v1/manifest.json': '9d23b546a8516464db44241c90c031b94c5da572168f1e7734dc16532dfa354a'}})
+                       'event-control-v1/manifest.json': '9d23b546a8516464db44241c90c031b94c5da572168f1e7734dc16532dfa354a'}},
+           {'name': 'native-input-recorded',
+            'eventRevision': 'ed23882eac491e26e070e3ef26cf8c0e9e702b38',
+            'controlRevision': 'ed23882eac491e26e070e3ef26cf8c0e9e702b38',
+            'hashes': {'event-v1/protocol.schema.json': '583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38',
+                       'event-v1/protocol.ts': 'c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34',
+                       'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+                       'event-v1/protocol-v1.json': 'bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3',
+                       'event-v1/manifest.json': '87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f',
+                       'event-control-v1/fixtures.json': 'ec99f968bb27a781454a88e92b0002777cff01f02f9126ae22de3e29619393f7',
+                       'event-control-v1/manifest.json': '21212323e2a7e424297904ae10010ea526ff6f6a6dfd7ae58380166cea452366'}})
 
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
