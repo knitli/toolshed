@@ -37,6 +37,10 @@ The unchanged upstream `just test` recipe sets `RUST_MIN_STACK=8388608` (8 MiB)
 and `NEXTEST_PROFILE=local`. Use `--cargo-profile dev-small` for nextest, rather
 than the Cargo build spelling `--profile dev-small`.
 
+The gateway helper probe lives at `scripts/probe_native_helper_lifecycle.py`.
+It accepts only binaries matching the recorded checkpoint digests and uses a
+private child environment. A new rebuild needs its own recorded binary digests.
+
 ## Verification boundaries
 
 - Final nonmutating arg0/PTY/TUI clippy, 18 focused witness tests, and CLI plus

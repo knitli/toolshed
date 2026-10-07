@@ -1,14 +1,26 @@
 """Prove both inherited bridge modes close before a live, blocked fs helper."""
 
+import hashlib
 import json
 import os
+from pathlib import Path
 import socket
 import subprocess
 import sys
 import tempfile
 
+proof = (
+    Path(__file__).resolve().parent.parent
+    / "docs/native-bridge/review-r1-helper-causal-results.json"
+)
+trusted = json.loads(proof.read_text())["immutableBinarySha256"]
 results = []
+if not sys.argv[1:]:
+    raise ValueError("at least one checkpoint binary is required")
 for binary in sys.argv[1:]:
+    binary = Path(binary).resolve(strict=True)
+    if hashlib.sha256(binary.read_bytes()).hexdigest() != trusted.get(binary.name):
+        raise ValueError("binary must match the recorded disposable checkpoint")
     markers = (
         (os.environ["BRIDGE_LIFECYCLE_MARKER"],)
         if "BRIDGE_LIFECYCLE_MARKER" in os.environ
@@ -19,7 +31,7 @@ for binary in sys.argv[1:]:
             parent, child = socket.socketpair()
             parent.settimeout(5)
             env = {
-                **os.environ,
+                "PATH": os.defpath,
                 "HOME": home,
                 "CODEX_HOME": home,
                 marker: str(child.fileno()),
@@ -55,7 +67,11 @@ for binary in sys.argv[1:]:
                 if b"fs sandbox helper failed" not in stderr:
                     raise AssertionError(stderr)
                 results.append(
-                    {"binary": binary, "mode": marker, "closedWhileHelperAlive": True}
+                    {
+                        "binary": str(binary),
+                        "mode": marker,
+                        "closedWhileHelperAlive": True,
+                    }
                 )
             finally:
                 parent.close()

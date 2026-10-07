@@ -18,5 +18,10 @@
   "productionWakeEnabled": false,
   "scope": "Disposable Codex home and inherited Unix socket; loopback mock only. One primary response and one recognized automatic TUI title request. No cloud event, real credentials, real model, owner client install, restart recovery, or production canary.",
   "sourceStage": "review-r1; all three initial Codex findings and internal-helper channel cleanup fixed",
-  "excludedAttempt": "One prior invocation failed during startup amid disk-full errors; no start/outcome proof was counted. Completed disposable build targets were removed before this successful run."
+  "excludedAttempt": "One prior invocation failed during startup amid disk-full errors; no start/outcome proof was counted. Completed disposable build targets were removed before this successful run.",
+  "testHarnessFollowup": {
+    "sha256": "32a4c40b5ed98f9bd307feff3d9e6618b6d64fe7ba27d5e28342ac99e496aad9",
+    "fullGatewayTestsPassed": 89,
+    "scope": "Added probe input rejection checks after live qualification; native binary and runtime qualifier source are unchanged."
+  }
 }

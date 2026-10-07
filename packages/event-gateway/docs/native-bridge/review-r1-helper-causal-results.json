@@ -107,5 +107,21 @@
     "exitCode": 0,
     "passedCases": 4,
     "ruff": "passed"
+  },
+  "probeBoundaryFollowup": {
+    "file": "scripts/probe_native_helper_lifecycle.py",
+    "sha256": "7da9c591ccb04fab906a89b861b9e98e21243e1360eec6d958895fa25d8f36a0",
+    "change": "Place the executable probe alongside existing probe scripts; require recorded binary digest before launch and whitelist the child environment. No quality rules, exclusions, or findings were changed or accepted.",
+    "baselineOptimizedPythonCasesPassed": 4,
+    "negativeInputRegression": "test_helper_probe_rejects_unrecognized_binary_before_launch",
+    "mutant": "Bypass recorded checkpoint digest comparison.",
+    "redExitCode": 1,
+    "redFailures": 1,
+    "redErrors": 0,
+    "redAssertion": "unrecognized binary reached launch",
+    "restoredGreenExitCode": 0,
+    "fullGatewayTestsPassed": 89,
+    "testsSha256": "32a4c40b5ed98f9bd307feff3d9e6618b6d64fe7ba27d5e28342ac99e496aad9",
+    "ruff": "passed"
   }
 }

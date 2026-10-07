@@ -5,7 +5,9 @@ from copy import deepcopy
 import importlib.util
 import json
 from pathlib import Path
+import runpy
 import socket
+import sys
 import threading
 import time
 import unittest
@@ -80,6 +82,18 @@ def peer(handler):
 
 
 class NativeBridgeTests(unittest.TestCase):
+    def test_helper_probe_rejects_unrecognized_binary_before_launch(self):
+        probe = Path(__file__).parents[1] / "scripts" / "probe_native_helper_lifecycle.py"
+        for args in ([], [sys.executable]):
+            with self.subTest(args=args), patch("sys.argv", [str(probe), *args]):
+                with patch(
+                    "subprocess.Popen",
+                    side_effect=AssertionError("unrecognized binary reached launch"),
+                ) as launch:
+                    with self.assertRaises(ValueError):
+                        runpy.run_path(str(probe))
+                    launch.assert_not_called()
+
     def test_exact_start_receipt_and_no_replay(self):
         for outcome, reason in (
             ("started", None),
