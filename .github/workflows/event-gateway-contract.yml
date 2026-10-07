@@ -80,6 +80,7 @@ jobs:
                        'event-v1/manifest.json': 'a51af02f07f569487ae74019498a6732e8e6b399db9800df21dfed48278f4c9d',
                        'event-control-v1/fixtures.json': 'bc3f39d5cde0072f8c3bc52c79daaca801d9aec99ed5d265f87cca832c6e38eb',
                        'event-control-v1/manifest.json': '3935b0be250b3563b1f323800445af03f6d797e3b6e8abf3fa1d90765508e2b5'}},
+          # Both native snapshots come from the same knitli-site commit; apps/os is a directory there.
            {'name': 'native-start',
             'eventRevision': '9b1ab6e2c2cf801fe035c766d03f26f1b2f85790',
             'controlRevision': '9b1ab6e2c2cf801fe035c766d03f26f1b2f85790',
