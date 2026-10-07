@@ -1,0 +1,239 @@
+case: core-exact-completion-positive
+selector: codex-app-server request_processors::native_selection_processor::tests::core_user_message_completion_is_the_input_recorded_proof
+mutation: Disable the exact matching ItemCompleted observation so the committed receipt cannot acquire the generated Core item ID.
+expected: A committed Started receipt remains Started before completion; exact thread, turn, client message ID, and exact plain-text input completion changes the read-only receipt to InputRecorded with that generated item ID.
+red: exit=100 sha256=bd85a66c8363bdc89ac05bfc76aab991ad8ea9e5ca886079d79be955bff47c41
+    thread 'request_processors::native_selection_processor::tests::core_user_message_completion_is_the_input_recorded_proof' (17285933) panicked at app-server/src/request_processors/native_selection_processor_tests.rs:606:5:
+    assertion failed: `(left == right)`
+
+    Diff < left / right > :
+    <Started {
+    >InputRecorded {
+         turn_id: "stable-turn",
+    >    item_id: "01a114f5-e288-7213-9484-3346efb4df5c",
+         replayed: true,
+     }
+
+
+green: exit=0 sha256=487be52083cdfb0a10afd0d3e16a022d403a39828e104280da4843a4ddee6ea1
+     Summary [   0.029s] 1 test run: 1 passed, 1845 skipped
+
+case: core-strict-identity-content-and-no-event
+selector: codex-app-server request_processors::native_selection_processor::tests::nonmatching_core_completion_and_stopped_hook_leave_receipt_started
+mutation: Relax the observer matching guard so a non-exact completion can settle the receipt.
+expected: Wrong thread, turn, client ID, or rewritten input leave the receipt Started; the hook-stop case is represented by no matching completion event and also remains Started. This is a no-event simulation, not an actual hook-stop integration run.
+red: exit=100 sha256=43f75f57dc9329d64016b239ce38b72d00769e4a803a34238d08f0c561955fa0
+    thread 'request_processors::native_selection_processor::tests::nonmatching_core_completion_and_stopped_hook_leave_receipt_started' (17297227) panicked at app-server/src/request_processors/native_selection_processor_tests.rs:654:9:
+    assertion failed: `(left == right)`
+
+    Diff < left / right > :
+    <InputRecorded {
+    >Started {
+         turn_id: "stable-turn",
+    <    item_id: "01a114f6-63c7-79d3-b6c0-78bf2a0c0ad4",
+         replayed: true,
+     }
+
+
+green: exit=0 sha256=7a43c84bee51e6e14feb07cb5bce4fb11400be988bbda0ac77920b9e71d20b37
+     Summary [   0.027s] 1 test run: 1 passed, 1845 skipped
+
+case: core-first-item-id-immutable
+selector: codex-app-server request_processors::native_selection_processor::tests::duplicate_core_completion_keeps_first_recorded_item_id
+mutation: Allow a duplicate matching completion to replace the stored item ID.
+expected: After duplicate completions with distinct IDs, the read-only receipt retains the first generated Core item ID.
+red: exit=100 sha256=af0b288bfe8042e35f497a431dbf376c0db018a33db88b46ad2c346fb0ecc985
+    thread 'request_processors::native_selection_processor::tests::duplicate_core_completion_keeps_first_recorded_item_id' (17308290) panicked at app-server/src/request_processors/native_selection_processor_tests.rs:696:5:
+    assertion failed: `(left == right)`: duplicate or replayed completion events cannot replace the first item ID
+
+    Diff < left / right > :
+     InputRecorded {
+         turn_id: "stable-turn",
+    <    item_id: "01a114f6-dfac-7f83-8176-bbd7b9f01275",
+    >    item_id: "01a114f6-dfac-7f83-8176-bbc4a97b0d23",
+         replayed: true,
+     }
+
+
+green: exit=0 sha256=13a6a24fba52ef641a7f021d6b9e6404563385fa3af445bb2f3f43bdc220c921
+     Summary [   0.028s] 1 test run: 1 passed, 1845 skipped
+
+case: core-full-request-identity
+selector: codex-app-server request_processors::native_selection_processor::tests::input_recorded_lookup_requires_the_full_native_request_identity
+mutation: Drop a full-request identity binding from receipt lookup.
+expected: Changing server instance, generation, attempt, delivery, client message ID, thread, permit ID, permit timestamps, or input yields Unknown rather than InputRecorded.
+red: exit=100 sha256=96a144ed46040cc819e3e27726a2e14ccc82d9c942b786cc43a1ca5037bc9c3d
+    thread 'request_processors::native_selection_processor::tests::input_recorded_lookup_requires_the_full_native_request_identity' (17319787) panicked at app-server/src/request_processors/native_selection_processor_tests.rs:757:9:
+    assertion failed: `(left == right)`: a recorded item is private to the exact full request identity
+
+    Diff < left / right > :
+    <InputRecorded {
+    <    turn_id: "stable-turn",
+    <    item_id: "01a114f7-5a60-78d3-98fb-db9686b3990b",
+    <    replayed: true,
+    <}
+    >Unknown
+
+
+green: exit=0 sha256=07a84c8a390e11123af34412473e9ba0f8a9ec5882bc6f61fc90ac98c1a4c3d0
+     Summary [   0.022s] 1 test run: 1 passed, 1845 skipped
+
+case: core-app-server-integration-positive
+selector: codex-app-server suite::v2::thread_start::native_start_receipt_reports_the_core_recorded_user_message_item
+mutation: Disconnect the production Core ItemCompleted observer from the native receipt store.
+expected: The app-server first returns Started; after Core emits the matching user-message completion, read-only thread/startReceipt returns InputRecorded with the same generated UUIDv7 item ID, distinct from the caller client ID.
+red: exit=100 sha256=74b70fd379a0e2ecdacbb1fbbcb3607a6223e585c7f66f38df82d29795b6782c
+    thread 'suite::v2::thread_start::native_start_receipt_reports_the_core_recorded_user_message_item' (17337630) panicked at app-server/tests/suite/v2/thread_start.rs:167:5:
+    assertion failed: `(left == right)`
+
+    Diff < left / right > :
+    <Started {
+    >InputRecorded {
+         turn_id: "01a114f8-38a2-74a3-9897-f339aab2783d",
+    >    item_id: "01a114f8-3911-7fc3-9185-5f0849ca6f97",
+         replayed: true,
+     }
+
+
+green: exit=0 sha256=a176944ebfbe9a298d43d8e99577997d2cb2fbac2d7e0bea60c64c2f86a6d2de
+     Summary [   2.207s] 1 test run: 1 passed, 1845 skipped
+
+case: tui-started-requires-read-only-poll
+selector: codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+mutation: Treat a locally cached Started attempt as an available receipt instead of requiring the read-only native receipt lookup.
+expected: A cached Started value is not evidence that Core recorded input; receipt() remains empty and exact receipt parameters remain available for polling.
+red: exit=100 sha256=8f58aa8ea0965454d3800bdfc34763caf690f6a4e0d46e26626f74ed139f07aa
+    thread 'app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt' (17397346) panicked at tui/src/app/selection_bridge_tests.rs:78:5:
+    assertion `left == right` failed: a cached start must query the read-only native receipt for later input recording
+      left: Some(Started { turn_id: "31bdd827-1a5d-425c-93db-5d8a78efcedb", replayed: true })
+     right: None
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+  stdout ───
+
+    running 1 test
+    test app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt ... FAILED
+
+green: exit=0 sha256=b8e82bee0608fc580b23081a485227d7cf524de921d2fe626320fc6ebd729785
+     Summary [   0.038s] 1 test run: 1 passed, 5641 skipped
+
+case: tui-input-recorded-replay-turn-item-validation
+selector: codex-tui app::selection_witness::bridge::tests::native_input_recorded_receipt_requires_replay_turn_and_item_identity
+mutation: Accept an InputRecorded receipt without requiring replay=true, expected turn identity, and a canonical UUID item ID.
+expected: Only an explicitly replayed InputRecorded receipt with the expected turn and canonical UUIDv7 item ID becomes InputRecorded; malformed or mismatched variants stay Unknown.
+red: exit=100 sha256=09b5fcbbc130743d82864c2e6b68ee82cbcb229351b2bf377f72d702b27e4a89
+    thread 'app::selection_witness::bridge::tests::native_input_recorded_receipt_requires_replay_turn_and_item_identity' (17411447) panicked at tui/src/app/selection_bridge_tests.rs:262:5:
+    assertion `left == right` failed
+      left: InputRecorded { turn_id: "01a114fc-18a0-7751-95b7-3707cc3908d1", item_id: "01a114fc-18a0-7751-95b7-371806b0ad71", replayed: true }
+     right: Unknown
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  TRY 2 FAIL [   0.039s] (1/1) codex-tui app::selection_witness::bridge::tests::native_input_recorded_receipt_requires_replay_turn_and_item_identity
+  stdout ───
+
+    running 1 test
+    test app::selection_witness::bridge::tests::native_input_recorded_receipt_requires_replay_turn_and_item_identity ... FAILED
+
+green: exit=0 sha256=dd559e14b25a7b6952303dc50b0dedf65a5d3a68f49bfc443baf95ba9d61c3d0
+     Summary [   0.041s] 1 test run: 1 passed, 5641 skipped
+
+case: tui-input-recorded-result-cached
+selector: codex-tui app::selection_witness::bridge::tests::exact_input_recorded_receipt_is_cached_and_replayed
+mutation: Do not cache InputRecorded results returned by the read-only receipt lookup.
+expected: The exact successful read-only InputRecorded result is available for subsequent local exact replay.
+red: exit=100 sha256=ee9c4fee3fe43560e1ec1b2af75359043d50bea3ddddfcaf35943346f1430e2f
+    thread 'app::selection_witness::bridge::tests::exact_input_recorded_receipt_is_cached_and_replayed' (17431743) panicked at tui/src/app/selection_bridge_tests.rs:105:5:
+    assertion `left == right` failed
+      left: None
+     right: Some(InputRecorded { turn_id: "5fd53964-14ba-43a8-b212-f5e2ed160144", item_id: "01a114fc-db13-7493-8400-f4e5e24fa824", replayed: true })
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  TRY 2 FAIL [   0.041s] (1/1) codex-tui app::selection_witness::bridge::tests::exact_input_recorded_receipt_is_cached_and_replayed
+  stdout ───
+
+    running 1 test
+    test app::selection_witness::bridge::tests::exact_input_recorded_receipt_is_cached_and_replayed ... FAILED
+
+green: exit=0 sha256=5b9033082799395118128a2da7600e3f118b7fd4b2543a95cec718644b12911f
+     Summary [   0.045s] 1 test run: 1 passed, 5641 skipped
+
+case: tui-terminal-receipt-survives-server-ledger-loss
+selector: codex-tui app::selection_witness::bridge::tests::terminal_receipt_recovered_after_lost_start_survives_server_ledger_loss
+mutation: Exclude TerminalNotStarted from the local read-only receipt cache.
+expected: After a lost Start reply and a terminal read-only receipt, an exact local replay retains that receipt even if a later server incarnation returns Unknown.
+red: exit=100 sha256=129e448ae5286f2b34f69c55e1d392e2b217cb1cbd3c1d1a98b631b29a1a1eb1
+    thread 'app::selection_witness::bridge::tests::terminal_receipt_recovered_after_lost_start_survives_server_ledger_loss' (17257437) panicked at tui/src/app/selection_bridge_tests.rs:130:5:
+    assertion `left == right` failed: the exact local terminal receipt must survive server-ledger loss
+      left: None
+     right: Some(TerminalNotStarted { reason: Busy, receipt_id: "01a114f4-4ff2-7711-b32d-e6a764a19953", replayed: true })
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  TRY 2 FAIL [   0.038s] (1/1) codex-tui app::selection_witness::bridge::tests::terminal_receipt_recovered_after_lost_start_survives_server_ledger_loss
+  stdout ───
+
+    running 1 test
+    test app::selection_witness::bridge::tests::terminal_receipt_recovered_after_lost_start_survives_server_ledger_loss ... FAILED
+
+green: exit=0 sha256=525fa02b3832942a4b3e4b089995e75b355f3f683258961325d8af569ad2a7e8
+     Summary [   0.038s] 1 test run: 1 passed, 5641 skipped
+
+case: tui-start-normalizes-after-input-recorded
+selector: codex-tui app::selection_witness::bridge::tests::duplicate_start_after_input_recorded_stays_started_while_receipt_keeps_item
+mutation: Replace the Start replay normalizer with identity behavior so the cached InputRecorded value escapes through Start.
+expected: Duplicate Start returns Started with the same turn and replayed=true, while read-only Receipt retains the exact InputRecorded item ID and the ledger has one entry; no Core call is made.
+red: exit=100 sha256=b850a44d8f24ddb1d012b6558e85dbb4fbd5632d7d88551e01f3a97e7a4b9694
+    thread 'app::selection_witness::bridge::tests::duplicate_start_after_input_recorded_stays_started_while_receipt_keeps_item' (17642396) panicked at tui/src/app/selection_bridge_tests.rs:127:5:
+    assertion `left == right` failed
+      left: InputRecorded { turn_id: "347619be-bf76-45d9-8ddd-5aef7379073e", item_id: "01a11506-5e5e-76d3-b786-c098fd46f38c", replayed: true }
+     right: Started { turn_id: "347619be-bf76-45d9-8ddd-5aef7379073e", replayed: true }
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  TRY 2 FAIL [   0.039s] (1/1) codex-tui app::selection_witness::bridge::tests::duplicate_start_after_input_recorded_stays_started_while_receipt_keeps_item
+  stdout ───
+
+    running 1 test
+    test app::selection_witness::bridge::tests::duplicate_start_after_input_recorded_stays_started_while_receipt_keeps_item ... FAILED
+
+green: exit=0 sha256=0ba4cb5578b25b73ed5638f1c9dbf7c5b84a26f8fae12d8dff350f306974af03
+     Summary [   0.046s] 11 tests run: 11 passed, 5632 skipped
+
+case: protocol-experimental-schema-fixture
+selector: codex-app-server-protocol schema_fixtures_tests::experimental_precomputed_exports_match_generated
+mutation: Change the serialized receipt enum status tag so generated output no longer matches the precomputed experimental exports.
+expected: The experimental precomputed export must match generated JSON and TypeScript schema fixtures for the receipt response.
+red: exit=100 sha256=ce75a7c050380d97f4dcb063e96357f345e5a7330377a31ec14b5faadbf36a55
+    thread 'schema_fixtures_tests::experimental_precomputed_exports_match_generated' (17474020) panicked at app-server-protocol/src/schema_fixtures_tests.rs:85:5:
+    assertion failed: `(left == right)`
+
+    Diff < left / right > :
+     {
+         "AbsolutePathBuf.ts": "// GENERATED CODE! DO NOT MODIFY BY HAND!\n\n// This file was generated by [ts-rs](https://github.com/Aleph-Alpha/ts-rs). Do not edit this file manually.\n\n/**\n * A path that is guaranteed to be absolute and normalized (though it is not\n * guaranteed to be canonicalized or exist on the filesystem).\n *\n * IMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set\n * using [AbsolutePathBufGuard::new]. If no base path is set, the\n * deserialization will fail unless the path being deserialized is already\n * absolute.\n */\nexport type AbsolutePathBuf = string;\n",
+         "AgentMessageInputContent.ts": "// GENERATED CODE! DO NOT MODIFY BY HAND!\n\n// This file was generated by [ts-rs](https://github.com/Aleph-Alpha/ts-rs). Do not edit this file manually.\n\nexport type AgentMessageInputContent = { \"type\": \"input_text\", text: string, } | { \"type\": \"encrypted_content\", encrypted_content: string, };\n",
+         "AgentPath.ts": "// GENERATED CODE! DO NOT MODIFY BY HAND!\n\n// This file was generated by [ts-rs](https://github.com/Aleph-Alpha/ts-rs). Do not edit this file manually.\n\nexport type AgentPath = string;\n",
+         "ApplyPatchApprovalParams.ts": "// GENERATED CODE! DO NOT MODIFY BY HAND!\n\n// This file was generated by [ts-rs](https://github.com/Aleph-Alpha/ts-rs). Do not edit this file manually.\nimport type { FileChange } from \"./FileChange\";\nimport type { ThreadId } from \"./ThreadId\";\n\nexport type ApplyPatchApprovalParams = { conversationId: ThreadId,\n/**\n * Use to correlate this with [codex_protocol::protocol::PatchApplyBeginEvent]\n * and [codex_protocol::protocol::PatchApplyEndEvent].\n */\ncallId: string, fileChanges: { [key in string]?: FileChange },\n/**\n * Optional explanatory reason (e.g. request for extra write access).\n */\nreason: string | null,\n/**\n * When set, the agent is asking the user to allow writes under this root\n * for the remainder of the session (unclear if this is honored today).\n */\ngrantRoot: string | null, };\n",
+         "ApplyPatchApprovalResponse.ts": "// GENERATED CODE! DO NOT MODIFY BY HAND!\n\n// This file was generated by [ts-rs](https://github.com/Aleph-Alpha/ts-rs). Do not edit this file manually.\nimport type { ReviewDecision } from \"./ReviewDecision\";\n\nexport type ApplyPatchApprovalResponse = { decision: ReviewDecision, };\n",
+         "AuthMode.ts": "// GENERATED CODE! DO NOT MODIFY BY HAND!\n\n// This file was generated by [ts-rs](https://github.com/Aleph-Alpha/ts-rs). Do not edit this file manually.\n\n/**\n * Authentication mode for OpenAI-backed providers.\n */\nexport type AuthMode = \"apikey\" | \"chatgpt\" | \"chatgptAuthTokens\" | \"headers\" | \"agentIdentity\" | \"personalAccessToken\" | \"bedrockApiKey\" | \"bedrockAccessKeys\";\n",
+         "AutoCompactTokenLimitScope.ts": "// GENERATED CODE! DO NOT MODIFY BY HAND!\n\n// This file was generated by [ts-rs](https://github.com/Aleph-Alpha/ts-rs). Do not edit this file manually.\n\n/**\n * Selects which part of the active context is charged against\n * `model_auto_compact_token_limit`.\n */\nexport type AutoCompactTokenLimitScope = \"total\" | \"body_after_prefix\";\n",
+green: exit=0 sha256=cac3a9039ff1715ce16eba84ab3ec8f9c42522e9973134e51bdffbec5dae9bbf
+     Summary [   4.412s] 1 test run: 1 passed, 313 skipped
+
+
+case: tui-exact-started-survives-receipt-poll-failure
+selector: codex-tui app::selection_witness::bridge::tests::receipt_lookup_failure_preserves_exact_cached_started
+expected: Unknown must return the exact cached Started with replayed=true; keep polling for a stronger receipt, never call Start
+red: exit=100 sha256=e77a77805b9377674f5fbe9f9a1926174de8aa09787b2133ee96f89ae69c8d55
+    thread 'app::selection_witness::bridge::tests::receipt_lookup_failure_preserves_exact_cached_started' (18102240) panicked at tui/src/app/selection_bridge_tests.rs:106:5:
+    assertion `left == right` failed: a failed receipt poll must preserve exact committed-start evidence
+      left: Unknown
+     right: Started { turn_id: "671d1a05-31e9-4941-8c2a-fc4f48558d93", replayed: true }
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::bridge::tests::receipt_lookup_failure_preserves_exact_cached_started
+  stdout ───
+
+    running 1 test
+    test app::selection_witness::bridge::tests::receipt_lookup_failure_preserves_exact_cached_started ... FAILED
+
+green: exit=0 sha256=1af63ed7b66abb3e33429a208ee73fd1792629f2fd92c442d6990327489a511c
+     Summary [   0.043s] 1 test run: 1 passed, 5643 skipped
