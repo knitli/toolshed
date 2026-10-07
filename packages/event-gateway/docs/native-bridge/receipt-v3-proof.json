@@ -1,0 +1,360 @@
+{
+  "scope": "Explicit Python receipt v3 consumer and legacy v2 schema4 recovery; native runtime separately qualified.",
+  "baseCommit": "ef16ac7375b2feac0081cb4d6ba2be5ff025443b",
+  "qualifierBaselineCommit": "c60b5373c238763b1476350c6589b2527cb690eb",
+  "qualifierBaselineSha256": "a91a33276c89035ea1e57f02170a2bb31eae5724adc6e10c597e48c335d94e31",
+  "sourceSha256": {
+    "src/event_gateway/native.py": "0fdf2c9536c359671295e094ba5d5e87a70d2dff68c5975d96d8ec76038b3165",
+    "scripts/qualify_native_bridge.py": "bf649c17c4adbbc0a5ca21195229742e0e5b8420edab0eacc662387252edaa44",
+    "tests/test_native.py": "d4b35b34ac369ce231208f75ccc90eb0e3e270757c1391d66a5352977c8b52e5",
+    "tests/test_native_bridge.py": "eeaac5c64c3d80ae2bc2d2dd63ea50461ede689635bb89b320b77ce54eec5b4c"
+  },
+  "fullPackage": {
+    "tests": 197,
+    "result": "OK",
+    "log": "/private/tmp/native-v3-consumer-mutation-evidence/full-package-escalated.log",
+    "logSha256": "ae9a248dafb6822be50a3e31943fc57e763f177a7fcc668a805525f72b234c06"
+  },
+  "individualCausalPairs": [
+    {
+      "test": "test_native_bridge.NativeBridgeTests.test_receipt_mode_requires_explicit_integer_version",
+      "mutation": {
+        "file": "scripts/qualify_native_bridge.py",
+        "before": "        require(type(receipt_version) is int and receipt_version in (2, 3))\n",
+        "after": ""
+      },
+      "red": {
+        "log": "/private/tmp/native-v3-consumer-mutation-evidence/test_receipt_mode_requires_explicit_integer_version-mutation.log",
+        "sha256": "7bb0e6013a792cae805fb11f1c380a06a4d2bb068be572b4d92d41b629595bf9",
+        "exit": 1
+      },
+      "restoredGreen": {
+        "log": "/private/tmp/native-v3-consumer-mutation-evidence/test_receipt_mode_requires_explicit_integer_version-restored.log",
+        "sha256": "056bb4fab3f0c1a3ae4344514b8fa088c9c369843b4b33c0ccdb4ab1ed6c7b9d",
+        "exit": 0
+      }
+    },
+    {
+      "test": "test_native_bridge.NativeBridgeTests.test_qualifier_pairs_explicit_reader_and_native_environment",
+      "mutation": {
+        "file": "scripts/qualify_native_bridge.py",
+        "before": "env[\"CODEX_NATIVE_BRIDGE_RECEIPT_VERSION\"] = \"3\"",
+        "after": "env[\"CODEX_NATIVE_BRIDGE_RECEIPT_VERSION\"] = \"2\""
+      },
+      "red": {
+        "log": "/private/tmp/native-v3-consumer-mutation-evidence/test_qualifier_pairs_explicit_reader_and_native_environment-mutation.log",
+        "sha256": "a504eb9fca269a9dbf5f5bea5e7454fdcdd4cda902dabdfc4308133e97ad7ac0",
+        "exit": 1
+      },
+      "restoredGreen": {
+        "log": "/private/tmp/native-v3-consumer-mutation-evidence/test_qualifier_pairs_explicit_reader_and_native_environment-restored.log",
+        "sha256": "80742f223d1ea30c10c8a0c4cefc36b38830514d112ae6609b2cc4264dc0dfde",
+        "exit": 0
+      }
+    },
+    {
+      "test": "test_native_bridge.NativeBridgeTests.test_receipt_modes_bind_exact_frame_and_generation",
+      "mutation": {
+        "file": "scripts/qualify_native_bridge.py",
+        "before": "and row[\"version\"] == (self.receipt_version if \"start\" in body or \"receipt\" in body else 2)",
+        "after": "and row[\"version\"] == 2"
+      },
+      "red": {
+        "log": "/private/tmp/native-v3-consumer-mutation-evidence/test_receipt_modes_bind_exact_frame_and_generation-mutation.log",
+        "sha256": "c7b23d7e60728510ac1bbf6aeadf9b64f7f8e16c50e778680fabc4c455b93be8",
+        "exit": 1
+      },
+      "restoredGreen": {
+        "log": "/private/tmp/native-v3-consumer-mutation-evidence/test_receipt_modes_bind_exact_frame_and_generation-restored.log",
+        "sha256": "19ac698fb007993c03c2fd5708219e397c205b4e0e0df908b14a5f0cedaf4fe8",
+        "exit": 0
+      }
+    },
+    {
+      "test": "test_native_bridge.NativeBridgeTests.test_real_v3_adapter_preserves_mode_and_rejects_unbound_outcome",
+      "mutation": {
+        "file": "src/event_gateway/native.py",
+        "before": "        if getattr(self.bridge, \"receipt_version\", 2) == 3:\n            receipt[\"generation\"] = request[\"generation\"]\n",
+        "after": ""
+      },
+      "red": {
+        "log": "/private/tmp/native-v3-consumer-mutation-evidence/test_real_v3_adapter_preserves_mode_and_rejects_unbound_outcome-mutation.log",
+        "sha256": "28682290b9611d73ca43f54b081c725f2dc7aba381f8de9be25fa7144e383052",
+        "exit": 1
+      },
+      "restoredGreen": {
+        "log": "/private/tmp/native-v3-consumer-mutation-evidence/test_real_v3_adapter_preserves_mode_and_rejects_unbound_outcome-restored.log",
+        "sha256": "12e5495c2ba56cfce6e4199e8033aabfdafea1bfb9f4dac39ba1ea1b78d2d861",
+        "exit": 0
+      }
+    },
+    {
+      "test": "test_native.NativeValidationTests.test_receipt_v3_generation_is_exact_and_legacy_shape_stays_valid",
+      "mutation": {
+        "file": "src/event_gateway/native.py",
+        "before": "           for key in identity):",
+        "after": "           for key in IDENTITY):"
+      },
+      "red": {
+        "log": "/private/tmp/native-v3-consumer-mutation-evidence/test_receipt_v3_generation_is_exact_and_legacy_shape_stays_valid-mutation.log",
+        "sha256": "59385f09ebbe66f0e55e6fa1f92e8aef9d30a8b3172004adb47f878779a96a80",
+        "exit": 1
+      },
+      "restoredGreen": {
+        "log": "/private/tmp/native-v3-consumer-mutation-evidence/test_receipt_v3_generation_is_exact_and_legacy_shape_stays_valid-restored.log",
+        "sha256": "9ee795c44cf07bbad83a218b6cb8b78240c0a39d20c96ae8e5fc347c1cc88985",
+        "exit": 0
+      }
+    },
+    {
+      "test": "test_input_recorded_closed_schema_and_readonly_operation",
+      "mutation": {
+        "old": "operation == \"receipt\"\n                    and set(outcome)",
+        "new": "operation in (\"receipt\", \"start\")\n                    and set(outcome)"
+      },
+      "copiedFrom": "c60b5373c238763b1476350c6589b2527cb690eb",
+      "red": {
+        "log": "/private/tmp/native-receipt-v3-qualifier-baseline/test_input_recorded_closed_schema_and_readonly_operation.red.log",
+        "sha256": "15055f988199de67afa51682b986e0006dafd4aba21f1c8c667121f1f0972d1d",
+        "exit": 1
+      },
+      "restoredGreen": {
+        "log": "/private/tmp/native-receipt-v3-qualifier-baseline/test_input_recorded_closed_schema_and_readonly_operation.restored-green.log",
+        "sha256": "2be35af5dcb2067e23705fd0ddb8eb893b6e03c136b652903e0dc6e6fb7de509",
+        "exit": 0
+      }
+    },
+    {
+      "test": "test_input_recorded_qualification_requires_stable_observation_without_restart",
+      "mutation": {
+        "old": "require(bridge.receipt(request) == recorded)\n        require(bridge.receipt(request) == recorded)",
+        "new": "bridge.receipt(request)\n        bridge.receipt(request)"
+      },
+      "copiedFrom": "c60b5373c238763b1476350c6589b2527cb690eb",
+      "red": {
+        "log": "/private/tmp/native-receipt-v3-qualifier-baseline/test_input_recorded_qualification_requires_stable_observation_without_restart.red.log",
+        "sha256": "18a59d0b327f94c7adb6676b6d3b50152394c7af7f54a59f0154454b61906e34",
+        "exit": 1
+      },
+      "restoredGreen": {
+        "log": "/private/tmp/native-receipt-v3-qualifier-baseline/test_input_recorded_qualification_requires_stable_observation_without_restart.restored-green.log",
+        "sha256": "fd92cbd53f2002c30ba98d5d0d3466cae3d33face516e90d5dd25eeea536e9c9",
+        "exit": 0
+      }
+    },
+    {
+      "test": "test_input_recorded_expiry_wait_has_independent_deadline",
+      "mutation": {
+        "old": "# Read-only recovery needs neither a fresh lease nor a live permit.\n        deadline = time.monotonic() + 10",
+        "new": "# Read-only recovery needs neither a fresh lease nor a live permit.\n        deadline = 10"
+      },
+      "copiedFrom": "c60b5373c238763b1476350c6589b2527cb690eb",
+      "red": {
+        "log": "/private/tmp/native-receipt-v3-qualifier-baseline/test_input_recorded_expiry_wait_has_independent_deadline.red.log",
+        "sha256": "2f47a0de1d3b811baef0378269e16c17ca59b897d74046de6136b80482e07148",
+        "exit": 1
+      },
+      "restoredGreen": {
+        "log": "/private/tmp/native-receipt-v3-qualifier-baseline/test_input_recorded_expiry_wait_has_independent_deadline.restored-green.log",
+        "sha256": "1d4fad0683dd1ec2e239feb14f2ba2f65fae8c20a579fc92ed5eb8e0ab951c58",
+        "exit": 0
+      }
+    },
+    {
+      "test": "test_input_recorded_primary_wait_has_independent_deadline",
+      "mutation": {
+        "old": "deadline = time.monotonic() + 10\n        while not server.request_counts[\"primary\"]",
+        "new": "deadline = 10\n        while not server.request_counts[\"primary\"]"
+      },
+      "copiedFrom": "c60b5373c238763b1476350c6589b2527cb690eb",
+      "red": {
+        "log": "/private/tmp/native-receipt-v3-qualifier-baseline/test_input_recorded_primary_wait_has_independent_deadline.red.log",
+        "sha256": "025b91b44fd8fb93c43ec637b261a1c1d914869d48e7f84da884b5536575a8df",
+        "exit": 1
+      },
+      "restoredGreen": {
+        "log": "/private/tmp/native-receipt-v3-qualifier-baseline/test_input_recorded_primary_wait_has_independent_deadline.restored-green.log",
+        "sha256": "2d4cdaa0dbd29885484c205ce14ca83ab10aadfafd878db94ee46d669ba85067",
+        "exit": 0
+      }
+    },
+    {
+      "test": "test_native.LegacyStoredReceiptRecoveryTests.test_schema4_v2_receipt_bytes_and_pending_ack_survive_restart",
+      "mutation": "Scratch recovery rewrites the existing JSON bytes; intended byte-for-byte preservation assertion fails.",
+      "red": {
+        "log": "/private/tmp/native-v3-legacy-recovery-evidence/mutation.log",
+        "sha256": "3783d267f1930f0e0bc7e6836fa694684da2572cca3012b2996da6c9f00708dc",
+        "exit": 1
+      },
+      "restoredGreen": {
+        "log": "/private/tmp/native-v3-legacy-recovery-evidence/restored.log",
+        "sha256": "54aa6c64cfb08e21f456442c35ab517ed5e0b9036d87621ba5134185a952bd66",
+        "exit": 0
+      }
+    }
+  ],
+  "installedWheel": {
+    "wheelSha256": "b1aa3b44dd96f8737717a9de50cc7dd63dcf2112e8e165c4255d6582ba7fa5ae",
+    "installedPackage": "/private/tmp/native-v3-consumer-wheel/venv/lib/python3.13/site-packages/event_gateway",
+    "sourceRoot": "/opt/coder/toolshed/.worktrees/native-receipt-v3/packages/event-gateway",
+    "allProductionModulesByteMatch": 11,
+    "moduleSha256": {
+      "__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+      "cli.py": "08cdfc58623dd667c4ea10e55845958466ffa6a63c1bc96bc4aab1f790964b35",
+      "cloud.py": "f970e6b902cb7e893241d0f914a6a4473f26635a0d790f11c6ed4b30679a3ad6",
+      "codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+      "daemon.py": "6b05d73d5ba9382c54ad2abf59d03f70dca465256dc6d103a47b8885da422fd9",
+      "gateway.py": "b949efa5184df151357fabf739a6736771672238e87cb60d1c9477ce0dddcc06",
+      "listener.py": "565848a5f6047573f9b0b737c8158113b8f6070fb539a63c38553a6460799108",
+      "native.py": "0fdf2c9536c359671295e094ba5d5e87a70d2dff68c5975d96d8ec76038b3165",
+      "protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+      "security.py": "8eeb77c10faf2e8f0641a984930394c14fa0e722f16a7784b0324eb1ebde4434",
+      "store.py": "0f877d5d581464eb71c431159e420ad7edc67f158d9aeb58e5ece41cf1a3bc7a"
+    },
+    "canonicalContractFilesByteMatch": 5,
+    "contractSha256": {
+      "manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
+      "policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+      "protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
+      "protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
+      "protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34"
+    },
+    "automaticWakeEnabled": false,
+    "installedChecksPassed": 6,
+    "tests": [
+      "test_native_bridge.NativeBridgeTests.test_receipt_mode_requires_explicit_integer_version",
+      "test_native_bridge.NativeBridgeTests.test_qualifier_pairs_explicit_reader_and_native_environment",
+      "test_native_bridge.NativeBridgeTests.test_receipt_modes_bind_exact_frame_and_generation",
+      "test_native_bridge.NativeBridgeTests.test_real_v3_adapter_preserves_mode_and_rejects_unbound_outcome",
+      "test_native.NativeValidationTests.test_receipt_v3_generation_is_exact_and_legacy_shape_stays_valid",
+      "test_native.LegacyStoredReceiptRecoveryTests.test_schema4_v2_receipt_bytes_and_pending_ack_survive_restart"
+    ],
+    "privateReaderSource": "/opt/coder/toolshed/.worktrees/native-receipt-v3/packages/event-gateway/scripts/qualify_native_bridge.py",
+    "privateReaderSha256": "bf649c17c4adbbc0a5ca21195229742e0e5b8420edab0eacc662387252edaa44",
+    "privateReaderBundledInWheel": false,
+    "nativeRuntimeProven": false,
+    "log": "/private/tmp/native-v3-consumer-wheel/installed-checks.log",
+    "logSha256": "cb9465dd46e8c603d2c6cbbc2bb7406c77277943bc1607f195125501fda7c893"
+  },
+  "independentAudit": {
+    "path": "/private/tmp/native-v3-consumer-independent-audit.md",
+    "sha256": "723e04acf3ed781ba4387fc55e973c9bf1597836b18d0bfedf26755309fc1351",
+    "result": "CLOSED; no P1/P2 findings; source/evidence review only"
+  },
+  "nativeRuntimeProven": true,
+  "productionWakeEnabled": false,
+  "pairedNativeRuntime": {
+    "result": "PASS",
+    "proof": "/private/tmp/native-v3-tui-restart-result.json",
+    "proofSha256": "03f78030c23b4f60c4feed73f8042662d13096193bdefb13fa7c19e121dbf464",
+    "helper": "/private/tmp/native-v3-tui-restart-qualifier.py",
+    "helperSha256": "ef88eaa8442ad55ddebdf34c96ee73727ef2bb5a95df8a60940fe7617f2daea3",
+    "binary": "/private/tmp/codex-native-durable-restart-v3-spike/codex-native-v3-cli-final",
+    "binarySha256": "2dcd17b33116eebe7026443b85e35be0fce85912c4a675d96c3af6a0456d9a61",
+    "summary": {
+      "binarySha256": "2dcd17b33116eebe7026443b85e35be0fce85912c4a675d96c3af6a0456d9a61",
+      "cloudSettlementProven": false,
+      "exactReceiptRecoveredTwice": true,
+      "installedAdapterModule": "/private/tmp/native-v3-consumer-wheel/venv/lib/python3.13/site-packages/event_gateway/native.py",
+      "installedAdapterProven": true,
+      "installedAdapterSha256": "0fdf2c9536c359671295e094ba5d5e87a70d2dff68c5975d96d8ec76038b3165",
+      "modelRequestCounts": {
+        "primary": 1,
+        "title": 1,
+        "unknown": 0
+      },
+      "mutatedFieldsRejected": [
+        "clientId",
+        "serverInstanceId",
+        "serverGeneration",
+        "threadId",
+        "attemptId",
+        "deliveryId",
+        "clientUserMessageId",
+        "permitId",
+        "permitIssuedAt+permitExpiresAt",
+        "generation",
+        "event.canonicalSubject",
+        "event.eventId",
+        "event.eventReference",
+        "event.source+event.canonicalSubject",
+        "event.sourceStateVersion"
+      ],
+      "nativeOnly": true,
+      "newSelectedThreadId": "01a115be-e1db-7121-abdd-e052589d4fff",
+      "newWitness": {
+        "backendPid": 55209,
+        "cause": "heartbeat",
+        "clientId": "19daa6ef-39c4-48bc-bfe9-95830afdcab7",
+        "connectionId": "6bd7ec4c-da1f-4d8f-9bce-7e012e51140b",
+        "eligible": true,
+        "generation": 11,
+        "leaseMs": 750,
+        "nonce": 3,
+        "sequence": 3,
+        "serverGeneration": 9,
+        "serverInstanceId": "01a115be-e1b0-7580-a812-6901e197310b",
+        "threadId": "01a115be-e1db-7121-abdd-e052589d4fff",
+        "version": 2
+      },
+      "oldProcessesStopped": true,
+      "oldRequest": {
+        "attemptId": "318f544c-1dc0-4daa-8c83-aa861ce61cc6",
+        "clientId": "28abb82c-40b1-4b91-b50d-73110bd524b7",
+        "clientUserMessageId": "cbf15b55-e3ef-485d-81f1-d917d429d3ba",
+        "deliveryId": "dly_9fcd6c774eb1456d9ab040ba473dde5f2f2dfc1274774afc90a4c019028f515a",
+        "event": {
+          "canonicalSubject": {
+            "kind": "manual",
+            "subjectId": "native-qualification"
+          },
+          "eventId": "06df1c8d-4f06-432a-bb67-c0340a81ca9f",
+          "eventReference": "ref_a5123e98-4164-4840-a6f0-b834d3ef0913",
+          "source": "manual",
+          "sourceStateVersion": "qualification-1"
+        },
+        "generation": 9,
+        "permitExpiresAt": 1791366193130,
+        "permitId": "783548fa-8675-4157-85bb-e639bdcdeb9a",
+        "permitIssuedAt": 1791366188130,
+        "serverGeneration": 7,
+        "serverInstanceId": "01a115be-cbb6-7bc0-b6cd-79b414f811d9",
+        "threadId": "01a115be-cbde-7542-8952-17eee541ea80"
+      },
+      "oldStartLocallyRefused": true,
+      "oldStartNoStartSettlementProven": false,
+      "originalAttachmentUnavailable": true,
+      "permitExpired": true,
+      "qualification": "synthetic-native-v3-two-tui-restart",
+      "readerSha256": "bf649c17c4adbbc0a5ca21195229742e0e5b8420edab0eacc662387252edaa44",
+      "realModelCalls": 0,
+      "recorded": {
+        "itemId": "01a115be-ccb4-76e3-8298-5cc4c9e90490",
+        "replayed": true,
+        "status": "inputRecorded",
+        "turnId": "cbf15b55-e3ef-485d-81f1-d917d429d3ba"
+      }
+    },
+    "boundaries": [
+      "Disposable native and loopback mock model only; cloud settlement not exercised here.",
+      "Old mapping unavailable; restarted TUI selects a different thread. Historical proof does not alter that selection.",
+      "FD old Start is a local selectionChanged refusal, not prior-attempt no-start settlement; direct app-server old-incarnation Unknown is separately tested.",
+      "InputRecorded proves Core item completion plus a committed StateDB receipt; does not establish model success or transcript materialization."
+    ],
+    "excludedAttempts": [
+      {
+        "log": "/private/tmp/native-v3-tui-restart-run.log",
+        "reason": "One-shot witness ineligibility assumption; witness availability is asynchronous and is not an idle admission signal.",
+        "sha256": "53ae79e4d7426d82a6ce39bcf7714f6dd0da22ae7af7ea1569b3bdaad2fefbbf"
+      },
+      {
+        "log": "/private/tmp/native-v3-tui-restart-bounded-run.log",
+        "reason": "agents route requires shared daemon; failed before phase2 FD handshake, no restart qualification.",
+        "sha256": "92cde87f82b45faf369572a4ca5b50edaa6bee12f29f7caddd639247952a5a74"
+      }
+    ],
+    "log": "/private/tmp/native-v3-tui-restart-embedded-run.log",
+    "logSha256": "55636eaa88283c47a6f63339adba7b2895ff2871f3d1c7deadcd929411669c40"
+  },
+  "productionAdmissionProven": false
+}

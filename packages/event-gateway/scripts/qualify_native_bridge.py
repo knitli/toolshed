@@ -149,7 +149,9 @@ def validate_start(start):
 class NativeBridge:
     """One synchronous request at a time. Start attempts are never resent, even after refusal."""
 
-    def __init__(self, channel):
+    def __init__(self, channel, *, receipt_version=2):
+        require(type(receipt_version) is int and receipt_version in (2, 3))
+        self.receipt_version = receipt_version
         require(channel.family == socket.AF_UNIX and channel.type == socket.SOCK_STREAM)
         channel.getpeername()
         channel.set_inheritable(False)
@@ -206,7 +208,7 @@ class NativeBridge:
             require(
                 isinstance(row, dict)
                 and type(row.get("version")) is int
-                and row["version"] == 2
+                and row["version"] == (self.receipt_version if "start" in body or "receipt" in body else 2)
                 and type(row.get("nonce")) is int
                 and row["nonce"] == self.nonce
             )
@@ -332,11 +334,12 @@ class NativeBridge:
             row = self.exchange({operation: request}, START_SECONDS)
             require(set(row) == {"version", "nonce", "receipt"})
             receipt = row["receipt"]
+            identity = IDENTITY + (("generation",) if self.receipt_version == 3 else ())
             require(
                 isinstance(receipt, dict)
-                and set(receipt) == set(IDENTITY) | {"outcome"}
+                and set(receipt) == set(identity) | {"outcome"}
             )
-            for key in IDENTITY:
+            for key in identity:
                 require(
                     type(receipt[key]) is type(request[key])
                     and receipt[key] == request[key]
@@ -611,8 +614,9 @@ def qualify_input_recorded(bridge, server, process, witness):
         server.release_primary.set()
 
 
-def qualify(binary, *, terminal_retry=False, input_recorded=False):
+def qualify(binary, *, terminal_retry=False, input_recorded=False, receipt_version=2):
     """Launch only a disposable TUI; never inherit auth, configuration, or proxy settings."""
+    require(type(receipt_version) is int and receipt_version in (2, 3))
     require(not (terminal_retry and input_recorded))
     binary = Path(binary).resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="native-qualification-") as directory:
@@ -667,8 +671,10 @@ def qualify(binary, *, terminal_retry=False, input_recorded=False):
             "TERM": "xterm-256color",
             "CODEX_NATIVE_BRIDGE_FD": str(child.fileno()),
         }
+        if receipt_version == 3:
+            env["CODEX_NATIVE_BRIDGE_RECEIPT_VERSION"] = "3"
         process = None
-        bridge = NativeBridge(parent)
+        bridge = NativeBridge(parent, receipt_version=receipt_version)
         stop = threading.Event()
         drain_thread = None
 
@@ -776,6 +782,7 @@ def qualify(binary, *, terminal_retry=False, input_recorded=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
+    parser.add_argument("--receipt-version", type=int, choices=(2, 3), default=2)
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--input-recorded", action="store_true",
                        help="Prove native Core input observation through read-only receipts")
@@ -784,7 +791,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     try:
         print(json.dumps(qualify(args.binary, terminal_retry=args.terminal_retry,
-                                 input_recorded=args.input_recorded), sort_keys=True))
+                                 input_recorded=args.input_recorded,
+                                 receipt_version=args.receipt_version), sort_keys=True))
     except (BridgeError, OSError, subprocess.SubprocessError):
         print(
             json.dumps(

@@ -56,6 +56,23 @@ class Bridge:
 
 
 class NativeValidationTests(unittest.TestCase):
+    def test_receipt_v3_generation_is_exact_and_legacy_shape_stays_valid(self):
+        item = request()
+        legacy = receipt(item)
+        bound = {**legacy, "generation": item["generation"]}
+        self.assertEqual(validate_receipt(item, legacy), {"status": "unknown"})
+        self.assertEqual(validate_receipt(item, bound), {"status": "unknown"})
+        for generation in (True, float(item["generation"]), str(item["generation"]),
+                           None, -1, 2**64, item["generation"] + 1):
+            with self.subTest(generation=generation), self.assertRaises(NativeError):
+                validate_receipt(item, {**bound, "generation": generation})
+        with self.assertRaises(NativeError):
+            validate_receipt(item, {**bound, "clientGeneration": item["generation"]})
+        for invalid_request in ({key: value for key, value in item.items() if key != "generation"},
+                                {**item, "generation": True}):
+            with self.subTest(request=invalid_request), self.assertRaises(NativeError):
+                validate_receipt(invalid_request, bound)
+
     def test_request_closed_shape_types_and_admission_identity(self):
         item = request()
         self.assertEqual(validate_request(item, ADMISSION), item)
@@ -264,6 +281,51 @@ class NativeAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.outcome = {"status": "unknown"}
         self.assertEqual(await self.adapter.reconcile(self.item), receipt(self.item))
         self.assertTrue(all(call[0] in ("restore", "receipt") for call in self.bridge.calls))
+
+
+class LegacyStoredReceiptRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_schema4_v2_receipt_bytes_and_pending_ack_survive_restart(self):
+        from test_gateway import GatewayTests
+
+        fixture = GatewayTests(methodName="runTest")
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        delivery_id = fixture.accept()["deliveryId"]
+        fixture.drop_acknowledgment = True
+        await fixture.gateway.dispatch(delivery_id)
+        attempt = fixture.store.current_attempt(delivery_id)
+        self.assertNotIn("generation", attempt["started_receipt"])
+        self.assertTrue(fixture.store.native_receipt(delivery_id)["ack_pending"])
+        # Seed existing v2 JSON with noncanonical whitespace to detect any rewrite.
+        legacy_bytes = json.dumps(attempt["started_receipt"], indent=2).encode()
+        with fixture.store.db:
+            fixture.store.db.execute(
+                "UPDATE attempts SET started_receipt=? WHERE delivery_id=?",
+                (legacy_bytes.decode(), delivery_id),
+            )
+        query = "SELECT CAST(started_receipt AS BLOB), CAST(native_ack AS BLOB) FROM attempts WHERE delivery_id=?"
+        before = tuple(fixture.store.db.execute(query, (delivery_id,)).fetchone())
+        schema = fixture.store.db.execute("SELECT sql FROM sqlite_master ORDER BY name").fetchall()
+        self.assertEqual(fixture.store.db.execute("PRAGMA user_version").fetchone()[0], 4)
+
+        fixture.restart()
+        self.assertEqual(fixture.store.db.execute("PRAGMA user_version").fetchone()[0], 4)
+        self.assertEqual(fixture.store.db.execute("SELECT sql FROM sqlite_master ORDER BY name").fetchall(), schema)
+        self.assertEqual(tuple(fixture.store.db.execute(query, (delivery_id,)).fetchone()), before)
+        self.assertEqual(validate_receipt(attempt["native_request"],
+                                          fixture.store.current_attempt(delivery_id)["started_receipt"]),
+                         attempt["started_receipt"]["outcome"])
+        fixture.recovered_outcome = "started"
+        await fixture.gateway.reconcile(delivery_id)
+        self.assertFalse(fixture.store.native_receipt(delivery_id)["ack_pending"])
+        self.assertEqual(fixture.acknowledgments, [attempt["native_ack"], attempt["native_ack"]])
+        self.assertEqual(fixture.lookups, fixture.submissions)
+        self.assertEqual(len(fixture.submissions), 1)
+        self.assertEqual(fixture.settlements, [])
+        after = tuple(fixture.store.db.execute(query, (delivery_id,)).fetchone())
+        self.assertEqual(after, before)
+        self.assertEqual(after[0], legacy_bytes)
+        self.assertNotIn("generation", json.loads(after[0]))
 
 
 if __name__ == "__main__":

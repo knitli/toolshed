@@ -90,10 +90,14 @@ def validate_receipt(request, receipt, *, allow_input_recorded=False):
     if not isinstance(request, dict) or not set(IDENTITY) <= set(request):
         raise NativeError()
     receipt = _copy(receipt)
-    if not isinstance(receipt, dict) or set(receipt) != set(IDENTITY) | {"outcome"}:
+    if not isinstance(receipt, dict):
+        raise NativeError()
+    identity = IDENTITY + (("generation",) if "generation" in receipt else ())
+    if (set(receipt) != set(identity) | {"outcome"}
+            or ("generation" in receipt and not _uint(request.get("generation")))):
         raise NativeError()
     if any(type(receipt[key]) is not type(request[key]) or receipt[key] != request[key]
-           for key in IDENTITY):
+           for key in identity):
         raise NativeError()
     outcome = receipt["outcome"]
     if not isinstance(outcome, dict):
@@ -175,6 +179,8 @@ class NativeBridgeAdapter:
     async def submit(self, request):
         outcome = await asyncio.to_thread(self.bridge.start, request)
         receipt = {**{key: request[key] for key in IDENTITY}, "outcome": outcome}
+        if getattr(self.bridge, "receipt_version", 2) == 3:
+            receipt["generation"] = request["generation"]
         validate_receipt(request, receipt)
         return receipt
 
@@ -184,6 +190,8 @@ class NativeBridgeAdapter:
         self.bridge.restore_attempt(request)
         outcome = await asyncio.to_thread(self.bridge.receipt, request)
         receipt = {**{key: request[key] for key in IDENTITY}, "outcome": outcome}
+        if getattr(self.bridge, "receipt_version", 2) == 3:
+            receipt["generation"] = request["generation"]
         validate_receipt(request, receipt, allow_input_recorded=True)
         if outcome.get("status") in ("started", "terminalNotStarted") and not outcome["replayed"]:
             raise NativeError()
