@@ -51,11 +51,27 @@ def _uint(value):
     return type(value) is int and 0 <= value <= 2**64 - 1  # pylint: disable=unidiomatic-typecheck
 
 
+def _receipt_version(request):
+    version = request.get("receiptVersion", 2)
+    if type(version) is not int or version not in (2, 3):  # pylint: disable=unidiomatic-typecheck
+        raise NativeError()
+    return version
+
+
 def validate_request(request, admission):
     """Bind the complete native start request to its exact cloud admission."""
     request = _copy(request)
-    if not isinstance(request, dict) or set(request) != set(IDENTITY) | {"generation", "event"}:
+    if not isinstance(request, dict):
         raise NativeError("invalid_native_request")
+    expected = set(IDENTITY) | {"generation", "event"}
+    if "receiptVersion" in request:
+        expected.add("receiptVersion")
+    if set(request) != expected:
+        raise NativeError("invalid_native_request")
+    try:
+        _receipt_version(request)
+    except NativeError:
+        raise NativeError("invalid_native_request") from None
     # A started turn ID must satisfy the v4/v7 grammar of its submitted ACK.
     if (
         any(not _native_uuid(request[key]) for key in ("clientId", "serverInstanceId", "threadId"))
@@ -90,10 +106,14 @@ def validate_receipt(request, receipt, *, allow_input_recorded=False):
     if not isinstance(request, dict) or not set(IDENTITY) <= set(request):
         raise NativeError()
     receipt = _copy(receipt)
-    if not isinstance(receipt, dict) or set(receipt) != set(IDENTITY) | {"outcome"}:
+    if not isinstance(receipt, dict):
+        raise NativeError()
+    identity = IDENTITY + (("generation",) if _receipt_version(request) == 3 else ())
+    if (set(receipt) != set(identity) | {"outcome"}
+            or ("generation" in receipt and not _uint(request.get("generation")))):
         raise NativeError()
     if any(type(receipt[key]) is not type(request[key]) or receipt[key] != request[key]
-           for key in IDENTITY):
+           for key in identity):
         raise NativeError()
     outcome = receipt["outcome"]
     if not isinstance(outcome, dict):
@@ -140,6 +160,7 @@ class NativeBridgeAdapter:
         if not _native_uuid(self.thread_id):
             raise NativeError("invalid_native_mapping")
         self.bridge, self.witness = bridge, None
+        self.receipt_version = _receipt_version({"receiptVersion": getattr(bridge, "receipt_version", 2)})
 
     async def check(self):
         self.witness = None
@@ -170,20 +191,35 @@ class NativeBridgeAdapter:
             "permitExpiresAt": _timestamp(admission["permitExpiresAt"]),
             "event": {key: envelope[key] for key in EVENT_FIELDS},
         }
+        if self.receipt_version == 3:
+            request["receiptVersion"] = 3
         return validate_request(request, admission)
 
+    def _wire_request(self, request):
+        # The expected reader mode is durable before Start, but is not a wire field.
+        current = getattr(self.bridge, "receipt_version", 2)
+        if (type(current) is not int or current != self.receipt_version  # pylint: disable=unidiomatic-typecheck
+                or _receipt_version(request) != self.receipt_version):
+            raise NativeError("native_receipt_version_mismatch")
+        return {key: value for key, value in request.items() if key != "receiptVersion"}
+
     async def submit(self, request):
-        outcome = await asyncio.to_thread(self.bridge.start, request)
+        outcome = await asyncio.to_thread(self.bridge.start, self._wire_request(request))
         receipt = {**{key: request[key] for key in IDENTITY}, "outcome": outcome}
+        if self.receipt_version == 3:
+            receipt["generation"] = request["generation"]
         validate_receipt(request, receipt)
         return receipt
 
     async def reconcile(self, request):
         # Restoring this identity permits only an exact read-only lookup. It also
         # consumes the bridge's start-once ledger so recovery cannot start it.
-        self.bridge.restore_attempt(request)
-        outcome = await asyncio.to_thread(self.bridge.receipt, request)
+        wire_request = self._wire_request(request)
+        self.bridge.restore_attempt(wire_request)
+        outcome = await asyncio.to_thread(self.bridge.receipt, wire_request)
         receipt = {**{key: request[key] for key in IDENTITY}, "outcome": outcome}
+        if self.receipt_version == 3:
+            receipt["generation"] = request["generation"]
         validate_receipt(request, receipt, allow_input_recorded=True)
         if outcome.get("status") in ("started", "terminalNotStarted") and not outcome["replayed"]:
             raise NativeError()

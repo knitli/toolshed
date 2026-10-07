@@ -1,5 +1,6 @@
 """Socketpair causal checks; no native binary, account, model, or service access."""
 
+import asyncio
 import contextlib
 from copy import deepcopy
 import importlib.util
@@ -56,7 +57,7 @@ def receive(channel):
 
 
 @contextlib.contextmanager
-def peer(handler):
+def peer(handler, *, receipt_version=2):
     parent, child = socket.socketpair()
     child.settimeout(2)
     errors = []
@@ -71,7 +72,7 @@ def peer(handler):
 
     thread = threading.Thread(target=run)
     thread.start()
-    client = native.NativeBridge(parent)
+    client = native.NativeBridge(parent, receipt_version=receipt_version)
     try:
         yield client
     finally:
@@ -84,6 +85,113 @@ def peer(handler):
 
 
 class NativeBridgeTests(unittest.TestCase):
+    def test_receipt_mode_requires_explicit_integer_version(self):
+        for mode in (None, True, False, "3", 3.0, 0, 1, 4):
+            with self.subTest(mode=mode):
+                parent, child = socket.socketpair()
+                try:
+                    with self.assertRaises(native.BridgeError):
+                        native.NativeBridge(parent, receipt_version=mode)
+                finally:
+                    parent.close()
+                    child.close()
+        parent, child = socket.socketpair()
+        try:
+            client = native.NativeBridge(parent)
+            self.assertEqual(client.receipt_version, 2)
+            client.close()
+        finally:
+            parent.close()
+            child.close()
+
+    def test_qualifier_pairs_explicit_reader_and_native_environment(self):
+        for mode in (2, 3):
+            with self.subTest(mode=mode), patch.object(native, "ThreadingHTTPServer") as server:
+                server.return_value.server_port = 12345
+                with (patch.object(native, "NativeBridge", wraps=native.NativeBridge) as reader,
+                      patch.object(native.subprocess, "Popen", side_effect=RuntimeError("launch intercepted")) as launch,
+                      patch.dict(native.os.environ, {"CODEX_NATIVE_BRIDGE_RECEIPT_VERSION": "invalid"})):
+                    with self.assertRaisesRegex(RuntimeError, "launch intercepted"):
+                        native.qualify(sys.executable, receipt_version=mode)
+                    self.assertEqual(reader.call_args.kwargs, {"receipt_version": mode})
+                    env = launch.call_args.kwargs["env"]
+                    self.assertEqual(env.get("CODEX_NATIVE_BRIDGE_RECEIPT_VERSION"), "3" if mode == 3 else None)
+
+    def test_receipt_modes_bind_exact_frame_and_generation(self):
+        for mode, fault in ((2, None), (3, None), (2, "version"), (3, "version"),
+                            (2, "extra-generation"), (3, "missing"), (3, "wrong"),
+                            (3, "bool"), (3, "float"), (3, "string"), (3, "extra")):
+            with self.subTest(mode=mode, fault=fault):
+                def handler(channel):
+                    self.assertEqual(receive(channel), {"nonce": 1})
+                    send(channel, witness())  # Witnesses stay v2 in either mode.
+                    row = receive(channel)
+                    request = row["start"]
+                    result = {**{key: request[key] for key in native.IDENTITY},
+                              "outcome": {"status": "started",
+                                          "turnId": request["clientUserMessageId"], "replayed": False}}
+                    if mode == 3 or fault == "extra-generation":
+                        result["generation"] = request["generation"]
+                    if fault == "missing":
+                        del result["generation"]
+                    if fault in ("wrong", "bool", "float", "string"):
+                        result["generation"] = {"wrong": request["generation"] + 1, "bool": True,
+                                                "float": float(request["generation"]),
+                                                "string": str(request["generation"])}[fault]
+                    if fault == "extra":
+                        result["clientGeneration"] = request["generation"]
+                    send(channel, {"version": 5 - mode if fault == "version" else mode,
+                                   "nonce": row["nonce"], "receipt": result})
+                    self.assertIsNone(receive(channel))
+
+                with peer(handler, receipt_version=mode) as client:
+                    request = native.synthetic_request(client.challenge())
+                    outcome = client.start(request)
+                    self.assertEqual(outcome, {"status": "unknown"} if fault else {
+                        "status": "started", "turnId": request["clientUserMessageId"], "replayed": False})
+                    self.assertEqual(client.closed, fault is not None)
+
+    def test_real_v3_adapter_preserves_mode_and_rejects_unbound_outcome(self):
+        from event_gateway.native import NativeBridgeAdapter
+
+        for mode, invalid in ((2, False), (3, False), (3, True)):
+            with self.subTest(mode=mode, invalid=invalid):
+                def handler(channel):
+                    receive(channel)
+                    send(channel, witness())
+                    for operation in ("start", "receipt"):
+                        row = receive(channel)
+                        if row is None:
+                            return
+                        self.assertEqual(set(row), {"nonce", operation})
+                        request = row[operation]
+                        result = {**{key: request[key] for key in native.IDENTITY},
+                                  "outcome": {"status": "started", "turnId": request["clientUserMessageId"],
+                                              "replayed": operation == "receipt"}}
+                        if mode == 3:
+                            result["generation"] = request["generation"] + int(invalid)
+                        send(channel, {"version": mode, "nonce": row["nonce"], "receipt": result})
+                    self.assertIsNone(receive(channel))
+
+                with peer(handler, receipt_version=mode) as client:
+                    request = native.synthetic_request(client.challenge())
+                    adapter = NativeBridgeAdapter({"nativeThreadId": request["threadId"]}, client)
+                    if mode == 3:
+                        request["receiptVersion"] = 3
+                    submitted = asyncio.run(adapter.submit(request))
+                    self.assertEqual(set(submitted), set(native.IDENTITY) | {"outcome"}
+                                     | ({"generation"} if mode == 3 else set()))
+                    if invalid:
+                        self.assertEqual(submitted["outcome"], {"status": "unknown"})
+                        self.assertTrue(client.closed)
+                    else:
+                        recovered = asyncio.run(adapter.reconcile(request))
+                        self.assertEqual(recovered, {**submitted, "outcome": {
+                            **submitted["outcome"], "replayed": True}})
+                        if mode == 3:
+                            self.assertEqual(recovered["generation"], request["generation"])
+                        self.assertIsNone(adapter.witness)
+
     def test_input_recorded_closed_schema_and_readonly_operation(self):
         request = native.synthetic_request(witness())
         valid = {"status": "inputRecorded", "turnId": request["clientUserMessageId"],
@@ -110,6 +218,34 @@ class NativeBridgeTests(unittest.TestCase):
                 finally:
                     client.close()
                     child.close()
+
+    def test_input_recorded_accepts_only_v4_v7_turn_and_item_ids(self):
+        for mode in (2, 3):
+            for field in ("turnId", "itemId"):
+                for version in (0, 1, 3, 4, 5, 7):
+                    with self.subTest(mode=mode, field=field, version=version):
+                        value = ("00000000-0000-0000-0000-000000000000" if version == 0
+                                 else f"12345678-1234-{version}234-8234-123456789abc")
+                        request = native.synthetic_request(witness())
+                        outcome = {"status": "inputRecorded",
+                                   "turnId": request["clientUserMessageId"],
+                                   "itemId": str(uuid4()), "replayed": True}
+                        outcome[field] = value
+                        if field == "turnId":
+                            request["clientUserMessageId"] = value
+                        identity = native.IDENTITY + (("generation",) if mode == 3 else ())
+                        parent, child = socket.socketpair()
+                        client = native.NativeBridge(parent, receipt_version=mode)
+                        try:
+                            with patch.object(client, "exchange", return_value={
+                                "version": mode, "nonce": 1, "receipt": {
+                                    **{key: request[key] for key in identity}, "outcome": outcome}}):
+                                self.assertEqual(client._receipt_exchange("receipt", request),
+                                                 outcome if version in (4, 7) else {"status": "unknown"})
+                            self.assertEqual(client.closed, version not in (4, 7))
+                        finally:
+                            client.close()
+                            child.close()
 
     def test_input_recorded_qualification_requires_stable_observation_without_restart(self):
         for fault in (None, "unknown", "terminalNotStarted", "started", "item_changed",
