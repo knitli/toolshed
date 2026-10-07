@@ -232,7 +232,7 @@ jobs:
                       if publish_if_current(number, head, state, description, token, run_url, workflow_source):
                           results.append((number, head, state))
                           print(f"PR #{number} {head}: {state}")
-                  except OSError:
+                  except (ValueError, KeyError, TypeError, OSError):
                       publication_failed = True
                       print("Contract status publication failed; continuing with remaining PRs.")
               if publication_failed:

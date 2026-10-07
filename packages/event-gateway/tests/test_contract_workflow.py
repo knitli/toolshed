@@ -332,29 +332,34 @@ class ContractWorkflowTests(unittest.TestCase):
 
     def test_publication_failure_continues_batch_and_reports_partial_failure(self):
         later_head = "b" * 40
-        for failed_endpoint, failed_state in (
-            ("statuses/" + HEAD, "pending"),
-            ("statuses/" + HEAD, "success"),
-            ("pulls/1", None),
-        ):
-            with self.subTest(endpoint=failed_endpoint, state=failed_state):
-                failed_requests = []
+        for failure in (OSError("temporary publication outage"),
+                        json.JSONDecodeError("malformed API response", "", 0),
+                        KeyError("missing API field"), TypeError("invalid API shape")):
+            for failed_endpoint, failed_state in (
+                ("statuses/" + HEAD, "pending"),
+                ("statuses/" + HEAD, "success"),
+                ("pulls/1", None),
+            ):
+                with self.subTest(error=type(failure).__name__, endpoint=failed_endpoint,
+                                  state=failed_state):
+                    failed_requests = []
 
-                def unavailable(endpoint, payload):
-                    state = payload["state"] if payload is not None else None
-                    if (endpoint, state) == (failed_endpoint, failed_state):
-                        failed_requests.append((endpoint, state))
-                        raise OSError("temporary publication outage")
+                    def unavailable(endpoint, payload):
+                        state = payload["state"] if payload is not None else None
+                        if (endpoint, state) == (failed_endpoint, failed_state):
+                            failed_requests.append((endpoint, state))
+                            raise failure
 
-                with self.assertRaises(OSError):
-                    self.refresh((HEAD, later_head), before_request=unavailable)
-                self.assertEqual(
-                    [(endpoint, payload["state"]) for endpoint, payload in self.runner_posts
-                     if endpoint == "statuses/" + later_head],
-                    [("statuses/" + later_head, "pending"), ("statuses/" + later_head, "success")],
-                )
-                self.assertCountEqual(
-                    [path for path, head in self.runner_candidate_reads if head == later_head],
-                    [SNAPSHOT + path for path in PATHS],
-                )
-                self.assertEqual(failed_requests, [(failed_endpoint, failed_state)])
+                    with self.assertRaises((ValueError, KeyError, TypeError, OSError)) as raised:
+                        self.refresh((HEAD, later_head), before_request=unavailable)
+                    self.assertEqual(
+                        [(endpoint, payload["state"]) for endpoint, payload in self.runner_posts
+                         if endpoint == "statuses/" + later_head],
+                        [("statuses/" + later_head, "pending"), ("statuses/" + later_head, "success")],
+                    )
+                    self.assertCountEqual(
+                        [path for path, head in self.runner_candidate_reads if head == later_head],
+                        [SNAPSHOT + path for path in PATHS],
+                    )
+                    self.assertEqual(failed_requests, [(failed_endpoint, failed_state)])
+                    self.assertIsInstance(raised.exception, OSError)
