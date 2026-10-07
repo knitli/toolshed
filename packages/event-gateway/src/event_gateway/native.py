@@ -53,7 +53,7 @@ def _uint(value):
 
 def _receipt_version(request):
     version = request.get("receiptVersion", 2)
-    if type(version) is not int or version not in (2, 3):
+    if type(version) is not int or version not in (2, 3):  # pylint: disable=unidiomatic-typecheck
         raise NativeError()
     return version
 
@@ -198,7 +198,7 @@ class NativeBridgeAdapter:
     def _wire_request(self, request):
         # The expected reader mode is durable before Start, but is not a wire field.
         current = getattr(self.bridge, "receipt_version", 2)
-        if (type(current) is not int or current != self.receipt_version
+        if (type(current) is not int or current != self.receipt_version  # pylint: disable=unidiomatic-typecheck
                 or _receipt_version(request) != self.receipt_version):
             raise NativeError("native_receipt_version_mismatch")
         return {key: value for key, value in request.items() if key != "receiptVersion"}

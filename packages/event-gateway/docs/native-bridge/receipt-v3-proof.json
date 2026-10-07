@@ -4,7 +4,7 @@
   "qualifierBaselineCommit": "c60b5373c238763b1476350c6589b2527cb690eb",
   "qualifierBaselineSha256": "a91a33276c89035ea1e57f02170a2bb31eae5724adc6e10c597e48c335d94e31",
   "sourceSha256": {
-    "src/event_gateway/native.py": "8b14515981be9893fd696c9ae50984fab5f3cc8797e7cb8db01885e91d61b389",
+    "src/event_gateway/native.py": "4ab38f6f5231acda4fee0af5d017ab33c583f3fecfc4e68531000a8dd25c0f85",
     "scripts/qualify_native_bridge.py": "31a630277c0c0a552036233586792c1c04528faf7d2c5fec2eef70d83e270425",
     "tests/test_native.py": "dfa9008fa6b2ff170a1334acdd6c3589a62ab17a8989c3edb861de0e4018dab8",
     "tests/test_native_bridge.py": "373cabaf3785a3d24de9b613b63b13c565b706ffd69dc1e06f4e63bdbedeefa0",
@@ -15,7 +15,14 @@
     "result": "OK",
     "seconds": 8.217,
     "log": "/private/tmp/native-v3-pr50-fix-evidence/full-package.log",
-    "logSha256": "1f20268b84e4315121bb5d573000296f30adce914bb3df7d7fdb4c02dce33d74"
+    "logSha256": "1f20268b84e4315121bb5d573000296f30adce914bb3df7d7fdb4c02dce33d74",
+    "testedSourceSha256": {
+      "src/event_gateway/native.py": "8b14515981be9893fd696c9ae50984fab5f3cc8797e7cb8db01885e91d61b389",
+      "scripts/qualify_native_bridge.py": "31a630277c0c0a552036233586792c1c04528faf7d2c5fec2eef70d83e270425",
+      "tests/test_native.py": "dfa9008fa6b2ff170a1334acdd6c3589a62ab17a8989c3edb861de0e4018dab8",
+      "tests/test_native_bridge.py": "373cabaf3785a3d24de9b613b63b13c565b706ffd69dc1e06f4e63bdbedeefa0",
+      "tests/test_gateway.py": "be0395a39730a17b7ab28b773cf8aa902a87b9b572550150276aeb54552b9b5d"
+    }
   },
   "individualCausalPairs": [
     {
@@ -172,7 +179,9 @@
       "security.py": "8eeb77c10faf2e8f0641a984930394c14fa0e722f16a7784b0324eb1ebde4434",
       "store.py": "0f877d5d581464eb71c431159e420ad7edc67f158d9aeb58e5ece41cf1a3bc7a"
     },
-    "moduleAndContractAudit": "/private/tmp/native-v3-corrected-exported-runtime-handoff.json"
+    "moduleAndContractAudit": "/private/tmp/native-v3-corrected-exported-runtime-handoff.json",
+    "sourceCommit": "b2f55b0e0e476d9667073909bdf45174daa5334c",
+    "scope": "All module/contract bytes match the qualified b2f55b0 source snapshot. Final native.py differs only by the recorded AST-identical pylint annotations."
   },
   "nativeRuntimeProven": true,
   "productionWakeEnabled": false,
@@ -274,7 +283,8 @@
       "assertionASTs": "All six functions identical to corrected root helper; normalizing four mode-metadata Adapter arguments restores historical ef88 baseline.",
       "publishedHelperSha256": "0122a4d6e56b2c750ee2bb557d5db147dc5703d40fde5d688570b908914b3f31",
       "publishedHelperDelta": "Only narrow B404/B603 fixture annotations; whole AST identical to executed d915 helper."
-    }
+    },
+    "qualifiedSourceCommit": "b2f55b0e0e476d9667073909bdf45174daa5334c"
   },
   "productionAdmissionProven": false,
   "initialCandidateEvidence": {
@@ -658,9 +668,16 @@
     "harnessDelta": "Explicit receipt_version=3; ledger assertion compares strict wire request after removing local receiptVersion metadata. Production Worker/broker fixtures unchanged."
   },
   "independentAudit": {
-    "path": "/private/tmp/native-v3-pr50-fix-independent-audit.md",
-    "sha256": "343d8912a34e070eaeb6f271fad143d6f4cb4170dc980fdcb8b7a3344906df29",
+    "path": "/private/tmp/native-v3-pr50-fix-independent-audit-final.md",
+    "sha256": "bd7f2e0403fad4eabff46fc32b48b1167279491cfbfb1e1654572aa61f717a67",
     "result": "CLOSED source and captured-test evidence; no P1/P2 findings. Runtime supplement is separately verified.",
-    "limitation": "UUID causal scratch full test file predates two mode-pinning lines in another test; the targeted UUID method itself is byte-identical to final source."
+    "limitation": "UUID causal scratch full test file predates two mode-pinning lines in another test; the targeted UUID method itself is byte-identical to final source. Gateway regression reopens Store while retaining Gateway/fake bridge; native process restart is proved separately by the corrected installed runtime."
+  },
+  "styleOnlyPublicationDelta": {
+    "qualifiedSourceCommit": "b2f55b0e0e476d9667073909bdf45174daa5334c",
+    "testedNativeSha256": "8b14515981be9893fd696c9ae50984fab5f3cc8797e7cb8db01885e91d61b389",
+    "publishedNativeSha256": "4ab38f6f5231acda4fee0af5d017ab33c583f3fecfc4e68531000a8dd25c0f85",
+    "wholeNativeModuleASTIdentical": true,
+    "change": "Two exact-type pylint annotations matching existing trust-boundary pattern; boolean/subclass rejection preserved."
   }
 }

@@ -33,8 +33,9 @@ historical evidence. The qualifier incorporates the
 input-recorded and independent-deadline fixes from native checkpoint #45; its
 exact baseline commit and hash are recorded separately.
 
-The installed wheel matches all eleven production modules and five canonical
-event-contract files. The corrected installed adapter passes the actual two-TUI restart proof below;
+The qualified installed wheel matches all eleven production modules and five
+canonical event-contract files at SDK snapshot `b2f55b0`. The final source adds
+only two exact-type lint annotations; its native module AST is identical. The corrected installed adapter passes the actual two-TUI restart proof below;
 the earlier six installed checks are retained only as historical evidence. The private reader is
 source-loaded from `scripts/qualify_native_bridge.py`; it is not bundled in the
 wheel. Automatic wake remains disabled.
@@ -59,3 +60,8 @@ InputRecorded proves Core item completion plus a durable receipt anchor; it
 does not establish model success or transcript materialization. Real cloud
 admission remains unproved. No installed owner client, production database or
 deployment changed.
+
+The matching native artifact and portable two-TUI runner are in
+[Toolshed #51](https://github.com/knitli/toolshed/pull/51), based on app-server
+durable checkpoint #49. SDK source remains based on #47; these are sibling
+review tracks with explicit proof pins, rather than a circular branch stack.
