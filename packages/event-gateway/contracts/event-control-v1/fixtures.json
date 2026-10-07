@@ -1,0 +1,89 @@
+{
+  "original": {
+    "schemaVersion": 1,
+    "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+    "source": "manual",
+    "canonicalSubject": {
+      "kind": "manual",
+      "subjectId": "pilot-canary"
+    },
+    "eventKind": "manual",
+    "reasonCode": "owner_canary",
+    "sourceStateVersion": "manual-1",
+    "policyRevision": 1,
+    "observedAt": "2026-10-05T11:59:45.000Z",
+    "principal": "adam@knitli.com",
+    "agent": "pilot-agent",
+    "eventReference": "ref_018e2c70-7c6a-7a04-8000-000000000001",
+    "runtimeId": "018e2c70-7c6a-7a02-8000-000000000001",
+    "nodeGeneration": 1,
+    "runtimeGeneration": 2,
+    "attachmentGeneration": 3,
+    "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+    "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+    "issuedAt": "2026-10-05T12:00:00.000Z",
+    "expiresAt": "2026-10-05T12:01:00.000Z"
+  },
+  "admitted": {
+    "status": "admitted",
+    "permitId": "00000000-0000-4000-8000-000000000002",
+    "nodeId": "00000000-0000-4000-8000-000000000001",
+    "permitIssuedAt": "2026-10-05T12:00:58.000Z",
+    "permitExpiresAt": "2026-10-05T12:01:03.000Z",
+    "envelope": {
+      "schemaVersion": 1,
+      "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+      "source": "manual",
+      "canonicalSubject": {
+        "kind": "manual",
+        "subjectId": "pilot-canary"
+      },
+      "eventKind": "manual",
+      "reasonCode": "owner_canary",
+      "sourceStateVersion": "manual-1",
+      "policyRevision": 1,
+      "observedAt": "2026-10-05T11:59:45.000Z",
+      "principal": "adam@knitli.com",
+      "agent": "pilot-agent",
+      "eventReference": "ref_018e2c70-7c6a-7a04-8000-000000000001",
+      "runtimeId": "018e2c70-7c6a-7a02-8000-000000000001",
+      "nodeGeneration": 1,
+      "runtimeGeneration": 2,
+      "attachmentGeneration": 3,
+      "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+      "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+      "issuedAt": "2026-10-05T12:00:58.000Z",
+      "expiresAt": "2026-10-05T12:01:58.000Z"
+    }
+  },
+  "overBudget": {
+    "status": "over_budget",
+    "budget": {
+      "used": 10,
+      "remaining": 0,
+      "limit": 10,
+      "windowMs": 3600000
+    }
+  },
+  "claim": {
+    "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+    "attemptId": "018e2c70-7c6a-7a03-8000-000000000001"
+  },
+  "nodeProof": {
+    "principal": "adam@knitli.com",
+    "binding": {
+      "audience": "https://events.example.com",
+      "method": "POST",
+      "path": "/v1/dispatch/claim",
+      "bodySha256": "9f943c6e454a4b53feba3acf6c343da136b988dd25fa158b153da89a9a205a43"
+    },
+    "body": "{\"deliveryId\":\"dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217\",\"attemptId\":\"018e2c70-7c6a-7a03-8000-000000000001\"}",
+    "proof": {
+      "nodeId": "00000000-0000-4000-8000-000000000001",
+      "nodeGeneration": 1,
+      "issuedAt": "2026-10-05T12:00:58.000Z",
+      "nonce": "00000000-0000-4000-8000-000000000002"
+    },
+    "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/dispatch/claim\",\"9f943c6e454a4b53feba3acf6c343da136b988dd25fa158b153da89a9a205a43\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-05T12:00:58.000Z\",\"00000000-0000-4000-8000-000000000002\"]"
+  }
+}
