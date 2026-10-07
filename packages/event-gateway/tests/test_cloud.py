@@ -175,7 +175,10 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
     async def test_input_identity_rejected_before_http(self):
         envelope = copy.deepcopy(FIXTURE["original"])
         envelope["agent"] = "different"
-        with self.assertRaises(CloudError):
+        with self.assertRaisesRegex(CloudError, "^identity_mismatch$"):
+            await self.client.claim(envelope)
+        envelope["agent"] = True
+        with self.assertRaisesRegex(CloudError, "^invalid_envelope$"):
             await self.client.claim(envelope)
         self.assertEqual(self.requests, [])
 
@@ -294,8 +297,15 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
                 await self.client.acknowledge(FIXTURE["original"], ack)
         ack["attemptId"] = NODE
         self.requests.clear()
-        with self.assertRaises(CloudError):
+        with self.assertRaisesRegex(CloudError, "^identity_mismatch$"):
             await self.client.acknowledge(FIXTURE["original"], ack)
+        ack["attemptId"] = True
+        with self.assertRaisesRegex(CloudError, "^invalid_acknowledgment$"):
+            await self.client.acknowledge(FIXTURE["original"], ack)
+        envelope = copy.deepcopy(FIXTURE["original"])
+        envelope["agent"] = "different"
+        with self.assertRaisesRegex(CloudError, "^identity_mismatch$"):
+            await self.client.acknowledge(envelope, self.acknowledgment())
         self.assertEqual(self.requests, [])
 
     def challenge(self):
@@ -333,6 +343,19 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             self.result = result
             with self.assertRaises(CloudError):
                 await self.client.complete_enrollment(self.challenge(), mesh_ip="100.96.0.1", mesh_port=8789, agents=[self.client.agent])
+
+    async def test_clock_shift_cannot_widen_enrollment_window(self):
+        challenge = self.challenge()
+        challenge["expiresAt"] = "2026-10-05T12:05:59.000Z"  # 301 seconds after NOW.
+        payload = json.loads(challenge["signingPayload"])
+        payload[3] = challenge["expiresAt"]
+        challenge["signingPayload"] = json.dumps(payload, separators=(",", ":"))
+        readings = iter((NOW, NOW + 2))
+        self.client._clock = lambda: next(readings)
+        self.result = {"nodeId": NODE, "generation": 1}
+        with self.assertRaisesRegex(CloudError, "^invalid_challenge$"):
+            await self.client.complete_enrollment(challenge, mesh_ip="100.96.0.1", mesh_port=8789, agents=[self.client.agent])
+        self.assertEqual(self.requests, [])
 
     async def test_attach_renew_never_qualify(self):
         for method in (self.client.attach, self.client.renew):

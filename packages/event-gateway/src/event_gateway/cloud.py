@@ -177,12 +177,12 @@ class CloudClient:
         try:
             now_ms = _timestamp(envelope["issuedAt"]) if historical else self._clock() * 1000
             parsed = parse_envelope(_json(envelope), now_ms=now_ms)
-            if (not matches_delivery_id(parsed) or parsed["principal"] != self.principal
-                    or parsed["agent"] != self.agent or parsed["nodeGeneration"] != self.node_generation):
-                raise CloudError("identity_mismatch")
-            return parsed
         except (ProtocolError, ValueError, TypeError, KeyError):
             raise CloudError("invalid_envelope") from None
+        if (not matches_delivery_id(parsed) or parsed["principal"] != self.principal
+                or parsed["agent"] != self.agent or parsed["nodeGeneration"] != self.node_generation):
+            raise CloudError("identity_mismatch")
+        return parsed
 
     async def claim(self, envelope):
         expected = self._envelope(envelope, historical=True)
@@ -215,13 +215,13 @@ class CloudClient:
 
     async def acknowledge(self, envelope, acknowledgment):
         # ACK may outlive transport freshness. Validate at its original issue time.
+        parsed = self._envelope(envelope, historical=True)
         try:
-            parsed = self._envelope(envelope, historical=True)
             ack = parse_acknowledgment(_json(acknowledgment), now_ms=self._clock() * 1000)
-            if not acknowledgment_matches_delivery(parsed, ack):
-                raise CloudError("identity_mismatch")
         except (ProtocolError, KeyError, TypeError, ValueError):
             raise CloudError("invalid_acknowledgment") from None
+        if not acknowledgment_matches_delivery(parsed, ack):
+            raise CloudError("identity_mismatch")
         result = await self._post("/v1/ack", ack)
         _closed(result, ("status", "current"))
         if (result["status"] != ack["status"] or type(result["current"]) is not bool
@@ -245,8 +245,9 @@ class CloudClient:
         public_x = base64.urlsafe_b64encode(self._key.public_key().public_bytes_raw()).rstrip(b"=").decode()
         expected = _json(["event-node-enrollment-v1", self.principal, challenge["challengeId"],
                           challenge["expiresAt"], self.node_id, public_x, mesh_ip, mesh_port, sorted(agents)]).decode()
+        now_ms = self._clock() * 1000
         if (not _uuid(challenge["challengeId"]) or challenge["nodeId"] != self.node_id
-                or not self._clock() * 1000 < expires <= self._clock() * 1000 + 300000
+                or not now_ms < expires <= now_ms + 300000
                 or challenge["signingPayload"] != expected):
             raise CloudError("invalid_challenge")
         result = await self._post("/v1/nodes/complete", {"challengeId": challenge["challengeId"],

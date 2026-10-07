@@ -29,6 +29,8 @@ become fixed codes without their original message. Timeouts retain
 `request_timeout`; cancellation propagates.
 Malformed response JSON, UTF-8, duplicate keys and excessive nesting return
 `invalid_response`, distinct from provider/transport `unavailable`.
+Envelope and ACK identity mismatches retain `identity_mismatch`; parse failures
+retain their separate `invalid_envelope` or `invalid_acknowledgment` codes.
 
 `cf-access-token` authenticates to the Access edge, which supplies the original
 `cf-access-jwt-assertion` to Event. `Authorization: Bearer ...` carries the agent
@@ -86,8 +88,8 @@ UV_CACHE_DIR=/private/tmp/event-cloud-uv-cache uv run --frozen python -m unittes
 UV_CACHE_DIR=/private/tmp/event-cloud-uv-cache uv run --frozen ruff check src/event_gateway/cloud.py tests/test_cloud.py
 ```
 
-Qualification used Python 3.13.14, uv 0.12.15 and Node 24.19.0: 20 focused tests
-and all 96 package tests passed, and lint passed. Nineteen isolated production mutations each produced assertion
+Qualification used Python 3.13.14, uv 0.12.15 and Node 24.19.0: 21 focused tests
+and all 97 package tests passed, and lint passed. Twenty-two isolated production mutations each produced assertion
 failures, zero test errors, and passed the same case after restoration:
 
 | Removed or weakened guard | Focused case |
@@ -95,6 +97,9 @@ failures, zero test errors, and passed the same case after restoration:
 | Pre-evaluation source pin verification | Modified source cannot execute a side effect |
 | Historical validation of queued claim input | Expired original gets fresh admission |
 | Deterministic response decode refusal | Invalid UTF-8, JSON, duplicate keys and nesting |
+| Envelope identity reason preserved | Wrong agent differs from malformed envelope |
+| ACK identity reason preserved | Wrong delivery differs from malformed acknowledgment |
+| Single enrollment clock snapshot | Clock advance cannot widen the five-minute window |
 | Credential provider exception sanitization | Credential `CloudError` regression |
 | HTTP transport exception sanitization | Transport `CloudError` regression |
 | Closed response fields | Claim DTO fences |
