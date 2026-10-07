@@ -1,0 +1,418 @@
+{
+  "baseline": {
+    "comparison": "Frozen app-server 29-file durable candidate plus frozen native input-observation 47-file candidate, composed on the same upstream commit.",
+    "inheritedEvidenceArtifacts": [
+      {
+        "artifact": "durable-restart-method-causals.json",
+        "reportedCausalPairCount": 21,
+        "reportedMethodCount": 19
+      },
+      {
+        "artifact": "terminal-no-start-test-proof.json",
+        "reportedCausalPairCount": 9
+      }
+    ],
+    "mechanicalOnlyMethods": 7,
+    "methodsWithNoIndependentV3SubcasePair": [
+      "input_recorded_lookup_requires_the_full_native_request_identity"
+    ],
+    "newMethods": 6,
+    "strengthenedMethods": 6,
+    "substantiveDeltaMethods": 12,
+    "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+    "v3SpecificSemanticCausalPairs": 11
+  },
+  "excludedTrials": [
+    {
+      "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/migration-0060-mutant-red.log",
+      "mutation": "Remove bridge_client_generation column from migration 0060",
+      "reason": "SQLite no-such-column setup failure preceded the intended proof assertion; superseded by valid-schema semantic mutation."
+    },
+    {
+      "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/db-failure-receipt-mutant.log",
+      "mutation": "Earlier DB-failure receipt fallback trial",
+      "reason": "That trial passed and is not causal evidence; the semantic mutation is recorded for native_start_stays_unknown_when_core_registration_cannot_be_durably_recorded."
+    }
+  ],
+  "executionBoundary": "Semantic mutations ran only in disposable copy-on-write scratch sources with pinned Rust 1.95 and offline Cargo. Frozen source and immutable CLI were not modified. App-server integration causals used local-loopback escalation. The in-memory full-identity app-server unit v3 candidates are explicitly non-discriminating, not claimed as a v3 proof.",
+  "mechanicalOnlyMethods": [
+    {
+      "assertionsChanged": false,
+      "causalPairRequired": false,
+      "change": "Optional bridge identity fields set to None; assertions unchanged.",
+      "method": "native_start_receipt_reports_the_core_recorded_user_message_item",
+      "testSource": "codex-rs/app-server/tests/suite/v2/thread_start.rs"
+    },
+    {
+      "assertionsChanged": false,
+      "causalPairRequired": false,
+      "change": "Explicit v2 receipt-version fixture; assertions unchanged.",
+      "method": "event_metadata_obeys_pinned_source_and_subject_bounds",
+      "testSource": "codex-rs/tui/src/app/selection_bridge_tests.rs"
+    },
+    {
+      "assertionsChanged": false,
+      "causalPairRequired": false,
+      "change": "Explicit v2 receipt-version fixture; assertions unchanged.",
+      "method": "attempt_ledger_preserves_unknown_and_exact_receipt",
+      "testSource": "codex-rs/tui/src/app/selection_bridge_tests.rs"
+    },
+    {
+      "assertionsChanged": false,
+      "causalPairRequired": false,
+      "change": "Explicit v2 receipt-version fixture; assertions unchanged.",
+      "method": "receipt_lookup_preserves_local_attempt_identity",
+      "testSource": "codex-rs/tui/src/app/selection_bridge_tests.rs"
+    },
+    {
+      "assertionsChanged": false,
+      "causalPairRequired": false,
+      "change": "Explicit v2 receipt-version fixture; assertions unchanged.",
+      "method": "fragmented_challenge_survives_state_burst",
+      "testSource": "codex-rs/tui/src/app/selection_witness_tests.rs"
+    },
+    {
+      "assertionsChanged": false,
+      "causalPairRequired": false,
+      "change": "Explicit v2 receipt-version fixture; assertions unchanged.",
+      "method": "replayed_challenge_revokes_channel",
+      "testSource": "codex-rs/tui/src/app/selection_witness_tests.rs"
+    },
+    {
+      "assertionsChanged": false,
+      "causalPairRequired": false,
+      "change": "Explicit v2 receipt-version fixture; assertions unchanged.",
+      "method": "expired_pending_response_closes_instead_of_renewing",
+      "testSource": "codex-rs/tui/src/app/selection_witness_tests.rs"
+    }
+  ],
+  "methods": [
+    {
+      "causalStatus": "v3-specific semantic pair",
+      "change": "new",
+      "crate": "codex-state",
+      "method": "native_receipt_proof_requires_the_exact_bridge_identity",
+      "mutation": "Ignore the bridge-client identity pair during persisted-proof lookup.",
+      "selector": "codex-state runtime::native_receipts::tests::native_receipt_proof_requires_the_exact_bridge_identity",
+      "source": "codex-rs/state/src/runtime/native_receipts.rs",
+      "sourceSha256": "ac207a009cb8530747401134dcae29a29385d6a2f016ea421146190f901a294a",
+      "testSource": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "testSourceSha256": "52ae742a86588562082a21dc18c7d3cb5a0bb9a1d9603bb1d9bd37b3cc8562e5",
+      "v3Assertion": "Bridge-bound rows cannot be recovered unbound; historical NULL rows cannot be synthesized into a bridge identity; partial pairs reject.",
+      "v3CausalPair": {
+        "red": {
+          "assertion": "unbound lookup must return None",
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/four-method-causals/native_receipt_proof_requires_the_exact_bridge_identity.mutant-red.log",
+          "logSha256": "352ae543d23e180371acd15d1ede5f18f4c657c773526145d39a6ce1cba0a9ab",
+          "result": "1 selected test failed at intended semantic assertion"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/four-method-causals/native_receipt_proof_requires_the_exact_bridge_identity.restored-green.log",
+          "logSha256": "34c9ff277ea3f38c266340a9fb8912c0ac98ec328f5446944d3a986c895488b4",
+          "result": "1 selected test passed"
+        }
+      }
+    },
+    {
+      "causalStatus": "v3-specific semantic pair",
+      "change": "new",
+      "crate": "codex-state",
+      "method": "native_receipt_0059_row_survives_bridge_identity_migration_as_v2_null_identity",
+      "mutation": "After both v3 columns are added, alter the migration to overwrite legacy receipt input with 'migration-mutant' while retaining valid schema and row.",
+      "selector": "codex-state runtime::native_receipts::tests::native_receipt_0059_row_survives_bridge_identity_migration_as_v2_null_identity",
+      "source": "codex-rs/state/migrations/0060_native_turn_start_bridge_identity.sql",
+      "sourceSha256": "1023de33eb6a31f67f20c12cf0f2d5105abb1ea0cf22867c6e2359f482a5216e",
+      "testSource": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "testSourceSha256": "52ae742a86588562082a21dc18c7d3cb5a0bb9a1d9603bb1d9bd37b3cc8562e5",
+      "v3Assertion": "A real schema-0059 row survives migration 0060 and reopen with both bridge fields NULL and exact Started proof.",
+      "v3CausalPair": {
+        "red": {
+          "assertion": "The legacy proof lookup returned None instead of Some(Started { turn_id }) at the test proof-preservation assertion.",
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/migration-0060-semantic-mutant-red.log",
+          "logSha256": "de4844664c458b10f2a971adbdc9eb5ea2bad3a83313eee1ac37c3cd4a29b3b6",
+          "result": "1 selected test failed at intended semantic assertion"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/migration-0060-semantic-restored-green.log",
+          "logSha256": "9f3d5a1ad7fdcf6f65f86d6d1dfdc1cacc796a3278e6e9f1b43b7ef6ecbffdbc",
+          "result": "1 selected test passed"
+        }
+      }
+    },
+    {
+      "causalStatus": "v3-specific semantic pair",
+      "change": "new",
+      "crate": "codex-state",
+      "method": "native_receipt_retry_allows_reselection_generation_with_explicit_terminal_attempt",
+      "mutation": "Incorrectly require the TUI-local generation to remain equal on a same-client retry after a terminal no-start and reselection.",
+      "selector": "codex-state runtime::native_receipts::tests::native_receipt_retry_allows_reselection_generation_with_explicit_terminal_attempt",
+      "source": "codex-rs/state/src/runtime/native_receipts.rs",
+      "sourceSha256": "ac207a009cb8530747401134dcae29a29385d6a2f016ea421146190f901a294a",
+      "testSource": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "testSourceSha256": "52ae742a86588562082a21dc18c7d3cb5a0bb9a1d9603bb1d9bd37b3cc8562e5",
+      "v3Assertion": "Same-client retry after explicit terminal no-start may advance both generations; changed bridge client conflicts and reads remain exact.",
+      "v3CausalPair": {
+        "red": {
+          "assertion": "The authorized reselection retry returned Conflict instead of Created.",
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/state-retry-generation-mutant-red.log",
+          "logSha256": "61e3148302284cf69c65e2e0952b7971b3469d5052e1f0dffd846a433051c17d",
+          "result": "1 selected test failed at intended semantic assertion"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/state-retry-generation-restored-green.log",
+          "logSha256": "f0f919ff9877a2b90b177221dc79944ccfe231c2e820950f32eee25c3b7348e6",
+          "result": "1 selected test passed"
+        }
+      }
+    },
+    {
+      "causalStatus": "v3-specific semantic pair",
+      "change": "strengthened",
+      "crate": "codex-app-server",
+      "inheritedCausalPair": {
+        "red": {
+          "assertion": "",
+          "logPath": "/private/tmp/codex-native-durable-restart-proof/method-causals/terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery.mutant-red.log",
+          "logSha256": "91846dd49274ccb502a34bf17b1fbab9977c55620bdc0b64729597247047045c",
+          "result": "1 selected test failed at intended semantic assertion"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-proof/method-causals/terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery.restored-green.log",
+          "logSha256": "d2b6ce831b2068daf64fe40d02d792105ae789d95742b645c38c0af3f9adbc52",
+          "result": "1 selected test passed"
+        }
+      },
+      "method": "terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery",
+      "mutation": "Remove the bridge_client_id equality filter in retryable_terminal_attempt_ids.",
+      "selector": "codex-app-server request_processors::native_selection_processor::tests::terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "sourceSha256": "4645b977c8662df5052b65ada45a85fdd6362155717ff5f0b001c85483fba14e",
+      "testSource": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "testSourceSha256": "addfccc107b2ebb7d1174bd2cdb44bda0ece0b7feed0c04c3ba6c34be5229865",
+      "v3Assertion": "Same-client retry advances local generation 7 to 8; another bridge client cannot supply retryable terminal attempt IDs.",
+      "v3CausalPair": {
+        "red": {
+          "assertion": "Changed-client assertion receives terminal attempt IDs instead of an empty list.",
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/appserver-terminal-retry-mutant-red.log",
+          "logSha256": "222771168f8c28e207d54ff8ee41ccdd48489dc96bd12346c47571bf3808ff21",
+          "result": "1 selected test failed at intended semantic assertion"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/appserver-terminal-retry-restored-green.log",
+          "logSha256": "2de844d6ff3da1b104bd894dd76991265ec781786da4f90e4cb8077295b85eb4",
+          "result": "1 selected test passed"
+        }
+      }
+    },
+    {
+      "causalStatus": "inherited method-level pair only; v3 subcases nondiscriminating",
+      "caveat": "These v3 candidate assertions cannot independently make the helper positive because in-memory receipts never prove a turn. Exact v3 identity is causally covered by State identity and app-server restart methods.",
+      "change": "strengthened",
+      "crate": "codex-app-server",
+      "inheritedCausalPair": {
+        "red": {
+          "assertion": "Prior baseline invalid InputRecorded identity assertion failed.",
+          "logPath": "/private/tmp/codex-native-durable-restart-proof/method-causals/input_recorded_lookup_requires_the_full_native_request_identity.mutant-red.log",
+          "logSha256": "495447a94cc7592d91e0b3b976831c34186f30b4909751a0e0665e5b4fe345a5",
+          "result": "1 selected test failed"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-proof/method-causals/input_recorded_lookup_requires_the_full_native_request_identity.restored-green.log",
+          "logSha256": "f7fd180efc180843ba444123db893408c84b00f5f1b4f9bc9fca75407d960dd6",
+          "result": "1 selected test passed"
+        }
+      },
+      "method": "input_recorded_lookup_requires_the_full_native_request_identity",
+      "mutation": "Prior baseline exact-identity mutant from inherited method-level pair.",
+      "selector": "codex-app-server request_processors::native_selection_processor::tests::input_recorded_lookup_requires_the_full_native_request_identity",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "sourceSha256": "4645b977c8662df5052b65ada45a85fdd6362155717ff5f0b001c85483fba14e",
+      "testSource": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "testSourceSha256": "addfccc107b2ebb7d1174bd2cdb44bda0ece0b7feed0c04c3ba6c34be5229865",
+      "v3Assertion": "Adds bridge-client and generation tuple candidates; the in-memory lookup helper must still return Unknown."
+    },
+    {
+      "causalStatus": "v3-specific semantic pair",
+      "change": "strengthened",
+      "crate": "codex-app-server integration",
+      "method": "native_start_receipt_survives_app_server_restart_without_resubmission",
+      "mutation": "Ignore the stored bridge-client generation when reading an exact receipt after restart.",
+      "selector": "codex-app-server suite::v2::thread_start::native_start_receipt_survives_app_server_restart_without_resubmission",
+      "source": "codex-rs/state/src/runtime/native_receipts.rs",
+      "sourceSha256": "ac207a009cb8530747401134dcae29a29385d6a2f016ea421146190f901a294a",
+      "testSource": "codex-rs/app-server/tests/suite/v2/thread_start.rs",
+      "testSourceSha256": "7eb4133f3aa2cf7406a2c83f78e0221cb4a20a014d632f1736cfb828a6003c75",
+      "v3Assertion": "New app-server incarnation recovers exact persisted receipt; changed bridge generation, v2 identity, and stale Start return Unknown.",
+      "v3CausalPair": {
+        "red": {
+          "assertion": "The mutated generation read returned InputRecorded instead of Unknown.",
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/appserver-restart-generation-mutant-red.log",
+          "logSha256": "bafb49c4800b3c1a03df8439f83da5eed1ec5e85ae87266072f77a2750511437",
+          "result": "1 selected test failed at intended semantic assertion"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/appserver-restart-generation-restored-green.log",
+          "logSha256": "1d254d218574a026de422792e709d00125726fda5fe530ae903bc7c93513dec0",
+          "result": "1 selected test passed"
+        }
+      }
+    },
+    {
+      "causalStatus": "v3-specific semantic pair",
+      "change": "strengthened",
+      "crate": "codex-app-server integration",
+      "method": "native_start_stays_unknown_when_core_registration_cannot_be_durably_recorded",
+      "mutation": "Return a positive Started receipt from the matching in-memory Core reservation when the durable receipt stage update fails.",
+      "selector": "codex-app-server suite::v2::thread_start::native_start_stays_unknown_when_core_registration_cannot_be_durably_recorded",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "sourceSha256": "4645b977c8662df5052b65ada45a85fdd6362155717ff5f0b001c85483fba14e",
+      "testSource": "codex-rs/app-server/tests/suite/v2/thread_start.rs",
+      "testSourceSha256": "7eb4133f3aa2cf7406a2c83f78e0221cb4a20a014d632f1736cfb828a6003c75",
+      "v3Assertion": "Receipt RPC remains Unknown after Core completion when StateDB stage write failed, including after ambiguous retry.",
+      "v3CausalPair": {
+        "red": {
+          "assertion": "The completed Core turn was falsely promoted to Started instead of Unknown by the in-memory fallback.",
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/db-failure-semantic-mutant-red.log",
+          "logSha256": "1798c41564cad3d3076f7e96224a8eb01c84e13aa9bb62f7e148259a913df029",
+          "result": "1 selected test failed at intended semantic assertion"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/db-failure-semantic-restored-green.log",
+          "logSha256": "3d654d19cac3b9adb9c01075f1915bc6c5c48eae8d59a44b3c99e47d26a412cc",
+          "result": "1 selected test passed"
+        }
+      }
+    },
+    {
+      "causalStatus": "v3-specific semantic pair",
+      "change": "new",
+      "crate": "codex-tui",
+      "method": "v3_receipt_lookup_uses_full_client_identity_without_attempt_memory",
+      "mutation": "Require local attempt memory for v3 recovery.",
+      "selector": "codex-tui app::selection_witness::bridge::tests::v3_receipt_lookup_uses_full_client_identity_without_attempt_memory",
+      "source": "codex-rs/tui/src/app/selection_bridge.rs",
+      "sourceSha256": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50",
+      "testSource": "codex-rs/tui/src/app/selection_bridge_tests.rs",
+      "testSourceSha256": "8c397acb623d4902567c495a4f93c63487f214c30f1bd2e39c0516ad4b3a0683",
+      "v3Assertion": "Empty-ledger v3 read-only lookup carries original client ID and generation; v2 retains the attempt-memory gate.",
+      "v3CausalPair": {
+        "red": {
+          "assertion": "v3 lookup from empty ledger must produce Some(params)",
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/four-method-causals/v3_receipt_lookup_uses_full_client_identity_without_attempt_memory.mutant-red.log",
+          "logSha256": "83330c9b8398e86f51714ef39399b998400b13383653b3123e1a524730d195f2",
+          "result": "1 selected test failed at intended semantic assertion"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/four-method-causals/v3_receipt_lookup_uses_full_client_identity_without_attempt_memory.restored-green.log",
+          "logSha256": "ca0a0c6ea4edcf1d6e1dc6d803827bb15f69fcf3e9aede9af510dbc572ec4523",
+          "result": "1 selected test passed"
+        }
+      }
+    },
+    {
+      "causalStatus": "v3-specific semantic pair",
+      "change": "new",
+      "crate": "codex-tui",
+      "method": "receipt_wire_version_is_paired_and_v2_stays_unchanged",
+      "mutation": "Emit legacy version for a v3 receipt.",
+      "selector": "codex-tui app::selection_witness::bridge::tests::receipt_wire_version_is_paired_and_v2_stays_unchanged",
+      "source": "codex-rs/tui/src/app/selection_bridge.rs",
+      "sourceSha256": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50",
+      "testSource": "codex-rs/tui/src/app/selection_bridge_tests.rs",
+      "testSourceSha256": "8c397acb623d4902567c495a4f93c63487f214c30f1bd2e39c0516ad4b3a0683",
+      "v3Assertion": "V2 receipt is version 2 without generation; v3 is version 3 with client ID and generation.",
+      "v3CausalPair": {
+        "red": {
+          "assertion": "v3 frame version must equal 3",
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/four-method-causals/receipt_wire_version_is_paired_and_v2_stays_unchanged.mutant-red.log",
+          "logSha256": "876c84f623df14514ac901e4f1daac0266f31d5bf581cd9a2d3c01899cd88d88",
+          "result": "1 selected test failed at intended semantic assertion"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/four-method-causals/receipt_wire_version_is_paired_and_v2_stays_unchanged.restored-green.log",
+          "logSha256": "0eba3a13ab46f138c323d7a9afcede598fba93c7f8a6201ab08ea047d9e09aed",
+          "result": "1 selected test passed"
+        }
+      }
+    },
+    {
+      "causalStatus": "v3-specific semantic pair",
+      "change": "new",
+      "crate": "codex-tui",
+      "method": "receipt_version_environment_defaults_to_v2_and_rejects_unknown_values",
+      "mutation": "Downgrade unsupported receipt-version values to v2.",
+      "selector": "codex-tui app::selection_witness::bridge::tests::receipt_version_environment_defaults_to_v2_and_rejects_unknown_values",
+      "source": "codex-rs/tui/src/app/selection_bridge.rs",
+      "sourceSha256": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50",
+      "testSource": "codex-rs/tui/src/app/selection_bridge_tests.rs",
+      "testSourceSha256": "8c397acb623d4902567c495a4f93c63487f214c30f1bd2e39c0516ad4b3a0683",
+      "v3Assertion": "Absent/2 selects v2, 3 selects v3, empty and unsupported values fail closed.",
+      "v3CausalPair": {
+        "red": {
+          "assertion": "parse(Some(\"4\")) must return None",
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/four-method-causals/receipt_version_environment_defaults_to_v2_and_rejects_unknown_values.mutant-red.log",
+          "logSha256": "f0d61533db8ae2bbe39a7524f4ba6ad977abb4d74a73e5158da265648d6989d8",
+          "result": "1 selected test failed at intended semantic assertion"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/four-method-causals/receipt_version_environment_defaults_to_v2_and_rejects_unknown_values.restored-green.log",
+          "logSha256": "8a73de92af82ea3ae0f2747c67b57332766e2587ecab746ab349a35af69f2650",
+          "result": "1 selected test passed"
+        }
+      }
+    },
+    {
+      "causalStatus": "v3-specific semantic pair",
+      "change": "strengthened",
+      "crate": "codex-tui",
+      "method": "terminal_no_start_replay_is_stable_and_fresh_attempt_needs_a_new_permit",
+      "mutation": "Fence a same-delivery terminal retry when either generation advances.",
+      "selector": "codex-tui app::selection_witness::bridge::tests::terminal_no_start_replay_is_stable_and_fresh_attempt_needs_a_new_permit",
+      "source": "codex-rs/tui/src/app/selection_bridge.rs",
+      "sourceSha256": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50",
+      "testSource": "codex-rs/tui/src/app/selection_bridge_tests.rs",
+      "testSourceSha256": "8c397acb623d4902567c495a4f93c63487f214c30f1bd2e39c0516ad4b3a0683",
+      "v3Assertion": "Same-delivery fresh retry may retain client/delivery IDs while advancing both generations with a fresh permit.",
+      "v3CausalPair": {
+        "red": {
+          "assertion": "The reselection assertion that a fresh attempt is allowed fails under the generation fence.",
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/tui-terminal-retry-mutant-red.log",
+          "logSha256": "52f43509ae10e67b195aea151db5521474b87871c353f52f1e1547f4efabd3df",
+          "result": "1 selected test failed at intended semantic assertion"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/tui-terminal-retry-restored-green.log",
+          "logSha256": "16f2bdd128daf163a84e398f20a60df3839538bf023a5d045ac3b71daa46b680",
+          "result": "1 selected test passed"
+        }
+      }
+    },
+    {
+      "causalStatus": "v3-specific semantic pair",
+      "change": "strengthened",
+      "crate": "codex-tui",
+      "method": "event_requires_the_observed_local_and_server_generations",
+      "mutation": "Invert the local-generation comparator while leaving server-generation matching intact.",
+      "selector": "codex-tui app::selection_witness::bridge::tests::event_requires_the_observed_local_and_server_generations",
+      "source": "codex-rs/tui/src/app/selection_bridge.rs",
+      "sourceSha256": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50",
+      "testSource": "codex-rs/tui/src/app/selection_bridge_tests.rs",
+      "testSourceSha256": "8c397acb623d4902567c495a4f93c63487f214c30f1bd2e39c0516ad4b3a0683",
+      "v3Assertion": "A positive event match is valid when independently tracked local and server generations differ; stale values in either counter reject.",
+      "v3CausalPair": {
+        "red": {
+          "assertion": "Positive match with distinct local and server generation values fails.",
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/tui-generation-independent-mutant-red.log",
+          "logSha256": "93de3d6692e64be98987cf4611a6a8cea65b856401446b586b57282680b2effd",
+          "result": "1 selected test failed at intended semantic assertion"
+        },
+        "restoredGreen": {
+          "logPath": "/private/tmp/codex-native-durable-restart-v3-spike/tui-generation-independent-restored-green.log",
+          "logSha256": "f8ffddcbe5af8e586f361d0692206c1e4520f9c30287109e6ba0cf244ee48f8a",
+          "result": "1 selected test passed"
+        }
+      }
+    }
+  ],
+  "purpose": "Complete v3 test-method delta inventory. A causal pair means an intended semantic assertion red followed by restored-source green; compile/schema/setup failures are excluded."
+}

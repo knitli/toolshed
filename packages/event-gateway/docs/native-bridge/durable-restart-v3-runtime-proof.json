@@ -1,0 +1,84 @@
+{
+  "binarySha256": "2dcd17b33116eebe7026443b85e35be0fce85912c4a675d96c3af6a0456d9a61",
+  "cloudSettlementProven": false,
+  "exactReceiptRecoveredTwice": true,
+  "installedAdapterModule": "/private/tmp/native-v3-corrected-wheel/venv/lib/python3.13/site-packages/event_gateway/native.py",
+  "installedAdapterProven": true,
+  "installedAdapterSha256": "8b14515981be9893fd696c9ae50984fab5f3cc8797e7cb8db01885e91d61b389",
+  "modelRequestCounts": {
+    "primary": 1,
+    "title": 1,
+    "unknown": 0
+  },
+  "mutatedFieldsRejected": [
+    "clientId",
+    "serverInstanceId",
+    "serverGeneration",
+    "threadId",
+    "attemptId",
+    "deliveryId",
+    "clientUserMessageId",
+    "permitId",
+    "permitIssuedAt+permitExpiresAt",
+    "generation",
+    "event.canonicalSubject",
+    "event.eventId",
+    "event.eventReference",
+    "event.source+event.canonicalSubject",
+    "event.sourceStateVersion"
+  ],
+  "nativeOnly": true,
+  "newSelectedThreadId": "01a115da-f970-7bb1-a1ee-a72df19f40c5",
+  "newWitness": {
+    "backendPid": 32023,
+    "cause": "heartbeat",
+    "clientId": "399c16c3-81ac-43a1-8af8-7c8c43d4989a",
+    "connectionId": "2f0659f4-9c99-475c-8f4f-becc90689818",
+    "eligible": true,
+    "generation": 11,
+    "leaseMs": 750,
+    "nonce": 3,
+    "sequence": 3,
+    "serverGeneration": 9,
+    "serverInstanceId": "01a115da-f944-76e1-b715-a1e59574914e",
+    "threadId": "01a115da-f970-7bb1-a1ee-a72df19f40c5",
+    "version": 2
+  },
+  "oldProcessesStopped": true,
+  "oldRequest": {
+    "attemptId": "f4af8e32-654b-49b4-b4d8-8d6256dc71b8",
+    "clientId": "31e77bf1-8871-4c7c-b003-21aacd61c974",
+    "clientUserMessageId": "3ebe7b02-ad7b-49e6-86b4-4abf1fc2cb1b",
+    "deliveryId": "dly_88bb0eeeef7246a3b2db40319d215e38f29c162376994f4689618f1a94e1c9cc",
+    "event": {
+      "canonicalSubject": {
+        "kind": "manual",
+        "subjectId": "native-qualification"
+      },
+      "eventId": "e1fba291-1380-4bba-9f3f-308b378d3633",
+      "eventReference": "ref_017911ba-c1ca-4558-92c4-048449d386fa",
+      "source": "manual",
+      "sourceStateVersion": "qualification-1"
+    },
+    "generation": 9,
+    "permitExpiresAt": 1791368034176,
+    "permitId": "0521d6cd-dff9-4614-9830-1f9e38d1b0ef",
+    "permitIssuedAt": 1791368029176,
+    "serverGeneration": 7,
+    "serverInstanceId": "01a115da-e340-7943-a1a7-c4d7c043a538",
+    "threadId": "01a115da-e372-7000-b7f0-f0e741f3af8e"
+  },
+  "oldStartLocallyRefused": true,
+  "oldStartNoStartSettlementProven": false,
+  "originalAttachmentUnavailable": true,
+  "permitExpired": true,
+  "qualification": "synthetic-native-v3-two-tui-restart",
+  "readerSha256": "31a630277c0c0a552036233586792c1c04528faf7d2c5fec2eef70d83e270425",
+  "realModelCalls": 0,
+  "recorded": {
+    "itemId": "01a115da-e449-75a3-84e4-e5fdf4e8c3a2",
+    "replayed": true,
+    "status": "inputRecorded",
+    "turnId": "3ebe7b02-ad7b-49e6-86b4-4abf1fc2cb1b"
+  }
+}
