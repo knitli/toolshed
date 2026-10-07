@@ -1,8 +1,8 @@
 name: Event Gateway Trusted Contract
 
 # Runs the trusted base workflow. Never check out or execute PR code here.
-# To rotate control pins, merge a constants-only change first, then merge a
-# snapshot update matching those trusted constants.
+# Rotate via a separately reviewed trusted-policy change, then a snapshot
+# update. Temporarily accept both complete old/new pairs during the rotation.
 on:
   pull_request_target:
     branches: [main]
@@ -65,6 +65,11 @@ jobs:
               "manifest.json": "88e5cdb37621417ccc0656932b47f6993f7aaa0d0ac4243391a799461f6ae4d7",
           }
 
+          CONTROL_NEXT_PINS = {
+              "fixtures.json": "bc3f39d5cde0072f8c3bc52c79daaca801d9aec99ed5d265f87cca832c6e38eb",
+              "manifest.json": "3935b0be250b3563b1f323800445af03f6d797e3b6e8abf3fa1d90765508e2b5",
+          }
+
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self, req, fp, code, msg, headers, newurl):
                   raise ValueError("redirect refused")
@@ -112,10 +117,12 @@ jobs:
           def verify_control_contract(head, pr_token):
               if not re.fullmatch(r"[0-9a-f]{40}", head):
                   raise ValueError("invalid head")
-              for name, expected_sha256 in CONTROL_PINS.items():
-                  candidate = read_blob(CONTROL_SNAPSHOT + name, head, pr_token)
-                  if hashlib.sha256(candidate).hexdigest() != expected_sha256:
-                      raise ValueError("control contract differs")
+              hashes = {
+                  name: hashlib.sha256(read_blob(CONTROL_SNAPSHOT + name, head, pr_token)).hexdigest()
+                  for name in ("fixtures.json", "manifest.json")
+              }
+              if hashes not in (CONTROL_PINS, CONTROL_NEXT_PINS):
+                  raise ValueError("control contract differs")
 
           if __name__ == "__main__":
               try:

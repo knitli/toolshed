@@ -71,7 +71,14 @@ class ContractWorkflowTests(unittest.TestCase):
             "manifest.json": "88e5cdb37621417ccc0656932b47f6993f7aaa0d0ac4243391a799461f6ae4d7",
         }
         self.assertEqual(POLICY["CONTROL_PINS"], old_pins)
+        self.assertEqual(POLICY["CONTROL_NEXT_PINS"], {
+            "fixtures.json": "bc3f39d5cde0072f8c3bc52c79daaca801d9aec99ed5d265f87cca832c6e38eb",
+            "manifest.json": "3935b0be250b3563b1f323800445af03f6d797e3b6e8abf3fa1d90765508e2b5",
+        })
         original = {name: (control_directory / name).read_bytes() for name in old_pins}
+        original_pins = {name: hashlib.sha256(value).hexdigest()
+                         for name, value in original.items()}
+        self.assertIn(original_pins, (POLICY["CONTROL_PINS"], POLICY["CONTROL_NEXT_PINS"]))
         control_paths = [
             "packages/event-gateway/contracts/event-control-v1/fixtures.json",
             "packages/event-gateway/contracts/event-control-v1/manifest.json",
@@ -83,8 +90,8 @@ class ContractWorkflowTests(unittest.TestCase):
             with patch.dict(POLICY, {"read_blob": self.read_blob}):
                 POLICY["verify_control_contract"](HEAD, "test-token")
 
-        # The first policy-only PR is evaluated by trusted old pins against the
-        # unchanged candidate snapshot. read_blob also rejects any base ref.
+        # Either approved canonical snapshot passes the trusted policy unchanged.
+        # read_blob also rejects any base ref.
         with patch.dict(POLICY, {"CONTROL_PINS": old_pins}):
             verify_control()
         self.assertEqual(self.reads, control_paths)
@@ -124,27 +131,29 @@ class ContractWorkflowTests(unittest.TestCase):
         rotated_pins = {name: hashlib.sha256(value).hexdigest()
                         for name, value in rotated_snapshot.items()}
 
-        # The new constants and new snapshot are separate reviewed changes:
-        # old policy rejects the new bytes; new policy rejects the old bytes.
+        # Candidate-controlled manifest hashes cannot authorize new bytes.
         self.blobs.update({POLICY["CONTROL_SNAPSHOT"] + name: value
                            for name, value in rotated_snapshot.items()})
-        self.reads.clear()
-        with patch.dict(POLICY, {"CONTROL_PINS": old_pins}):
-            with self.assertRaises(ValueError):
-                verify_control()
-
-        self.blobs.update({POLICY["CONTROL_SNAPSHOT"] + name: value
-                           for name, value in original.items()})
-        with patch.dict(POLICY, {"CONTROL_PINS": rotated_pins}):
-            with self.assertRaises(ValueError):
-                verify_control()
-
-        self.blobs.update({POLICY["CONTROL_SNAPSHOT"] + name: value
-                           for name, value in rotated_snapshot.items()})
-        self.reads.clear()
-        with patch.dict(POLICY, {"CONTROL_PINS": rotated_pins}):
+        with self.assertRaisesRegex(ValueError, "control contract differs"):
             verify_control()
-        self.assertEqual(self.reads, control_paths)
+
+        # A reviewed next pair permits either complete snapshot during rotation.
+        with patch.dict(POLICY, {"CONTROL_PINS": original_pins,
+                                 "CONTROL_NEXT_PINS": rotated_pins}):
+            self.reads.clear()
+            verify_control()
+            self.assertEqual(self.reads, control_paths)
+            self.blobs.update({POLICY["CONTROL_SNAPSHOT"] + name: value
+                               for name, value in original.items()})
+            self.reads.clear()
+            verify_control()
+            self.assertEqual(self.reads, control_paths)
+            for name in original:
+                with self.subTest(crossed_file=name):
+                    self.blobs[POLICY["CONTROL_SNAPSHOT"] + name] = rotated_snapshot[name]
+                    with self.assertRaisesRegex(ValueError, "control contract differs"):
+                        verify_control()
+                    self.blobs[POLICY["CONTROL_SNAPSHOT"] + name] = original[name]
 
     def test_redirects_are_refused(self):
         with self.assertRaises(ValueError):
