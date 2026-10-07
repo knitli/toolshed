@@ -32,6 +32,7 @@ class UnavailableAuthority:
 
 class Gateway:
     def __init__(self, store, authority, adapter_factory, *, audience, keys, clock=time.time):
+        """Bind durable storage to explicitly injected authority and native providers."""
         self.store, self.authority = store, authority
         self.adapter_factory, self.clock = adapter_factory, clock
         self.audience, self.keys = audience, dict(keys)
@@ -126,6 +127,8 @@ class Gateway:
             # An earlier dispatch can settle and rotate the attempt while this
             # caller waits for the runtime lock.
             envelope = self.store.delivery_envelope(delivery_id)
+            if envelope is None:
+                raise Refused("not_found")
             row = self._row(delivery_id)
             if row["status"] != "queued":
                 return row
@@ -146,7 +149,10 @@ class Gateway:
             if admission is None:
                 return self._row(delivery_id, "claim_outcome_unknown")
             try:
-                if (self.store.get_attachment(envelope["runtimeId"]) != mapping
+                current = self.store.get_attachment(envelope["runtimeId"])
+                if (not current or
+                        {key: value for key, value in current.items() if key != "leaseExpiresAt"}
+                        != {key: value for key, value in mapping.items() if key != "leaseExpiresAt"}
                         or not await self._adapter_available(adapter)):
                     return await self._retire_local(delivery_id, "admission_fenced")
                 request = validate_request(await adapter.prepare(admission), admission)
@@ -200,7 +206,7 @@ class Gateway:
             if attempt["state"] not in ("submitting", "ambiguous"):
                 return self._row(delivery_id)
             mapping = self.store.get_attachment(envelope["runtimeId"])
-            if (not mapping or mapping["leaseExpiresAt"] <= self.clock()
+            if (not mapping or attempt["fenced"]
                     or any(mapping.get(key) != envelope.get(key) for key in FENCES[:7])
                     or mapping.get("nativeThreadId") != attempt["native_request"]["threadId"]):
                 return self._row(delivery_id, "attachment_fenced")

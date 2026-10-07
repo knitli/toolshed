@@ -1,5 +1,6 @@
 import base64
 import copy
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -23,6 +24,7 @@ NOW = _timestamp(FIXTURE["admitted"]["permitIssuedAt"]) / 1000
 
 class InjectedBridge:
     def __init__(self, path, thread_id):
+        """Bind the fake bridge to the durable ledger and selected thread."""
         self.path = path
         self.witness = {"eligible": True, "clientId": str(uuid.uuid4()), "generation": 2,
                         "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 1, "threadId": thread_id}
@@ -38,7 +40,7 @@ class InjectedBridge:
         self.calls.append(("start", copy.deepcopy(request)))
         # The real adapter invokes us in another thread: observe committed SQLite
         # state through a separate reader before recording any native outcome.
-        with sqlite3.connect(self.path / "ledger.sqlite") as reader:
+        with closing(sqlite3.connect(self.path / "ledger.sqlite")) as reader:
             row = reader.execute(
                 "SELECT state,native_request,admission FROM attempts WHERE delivery_id=? AND attempt_id=?",
                 (request["deliveryId"], request["attemptId"]),
@@ -65,7 +67,7 @@ class GatewayIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.tmp.cleanup)
         self.now = NOW
         self.store = Store(Path(self.tmp.name).resolve() / "private", clock=lambda: self.now)
-        self.addCleanup(lambda: self.store.close())
+        self.addCleanup(self.close_store)
         self.envelope = copy.deepcopy(FIXTURE["original"])
         self.mapping = {key: self.envelope[key] for key in IDENTITY}
         self.mapping.update(leaseExpiresAt=self.now + 86400, nativeThreadId=str(uuid.uuid4()))
@@ -85,6 +87,9 @@ class GatewayIntegrationTests(unittest.IsolatedAsyncioTestCase):
         body = json.dumps(self.envelope).encode()
         self.ident = self.gateway.accept(body, signature=sign(body, self.key, "integration"),
                                          audience="integration", key_id="test")["deliveryId"]
+
+    def close_store(self):
+        self.store.close()
 
     async def credentials(self):
         self.credential_calls += 1

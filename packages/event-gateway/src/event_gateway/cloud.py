@@ -118,8 +118,10 @@ def validate_admission(admission, expected_envelope, *, now_ms, node_id=None):
         raise CloudError("permit_expired")
     expected = _historical_envelope(expected_envelope, now_ms)
     admitted = _historical_envelope(admission["envelope"], now_ms)
+
     def semantic(item):
         return {key: value for key, value in item.items() if key not in ("issuedAt", "expiresAt")}
+
     if (semantic(admitted) != semantic(expected) or _timestamp(admitted["issuedAt"]) > issued
             or _timestamp(admitted["expiresAt"]) < expires):
         raise CloudError("identity_mismatch")

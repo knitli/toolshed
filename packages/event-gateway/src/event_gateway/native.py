@@ -24,6 +24,7 @@ class NativeError(ValueError):
     """Only a bounded code escapes native validation."""
 
     def __init__(self, code="invalid_native_receipt"):
+        """Expose only a fixed validation code, never native response contents."""
         self.code = code
         super().__init__(code)
 
@@ -46,7 +47,8 @@ def _native_uuid(value):
 
 
 def _uint(value):
-    return type(value) is int and 0 <= value <= 2**64 - 1
+    # JSON integers must exclude booleans and caller-defined integer subclasses.
+    return type(value) is int and 0 <= value <= 2**64 - 1  # pylint: disable=unidiomatic-typecheck
 
 
 def validate_request(request, admission):
@@ -98,14 +100,14 @@ def validate_receipt(request, receipt):
         if (set(outcome) != {"status", "turnId", "replayed"}
                 or not _native_uuid(outcome["turnId"])
                 or outcome["turnId"] != request["clientUserMessageId"]
-                or type(outcome["replayed"]) is not bool):
+                or type(outcome["replayed"]) is not bool):  # pylint: disable=unidiomatic-typecheck
             raise NativeError()
     elif status == "terminalNotStarted":
         if (set(outcome) != {"status", "reason", "receiptId", "replayed"}
                 or not isinstance(outcome["reason"], str)
                 or outcome["reason"] not in TERMINAL_REASONS
                 or not _uuid(outcome["receiptId"])
-                or type(outcome["replayed"]) is not bool):
+                or type(outcome["replayed"]) is not bool):  # pylint: disable=unidiomatic-typecheck
             raise NativeError()
     elif status == "notStarted":
         if (set(outcome) != {"status", "reason"}
@@ -121,6 +123,7 @@ class NativeBridgeAdapter:
     """A caller supplies an already qualified private bridge; no default exists."""
 
     def __init__(self, mapping, bridge):
+        """Use an existing bridge bound to an explicitly mapped native thread."""
         self.thread_id = mapping.get("nativeThreadId") if isinstance(mapping, dict) else None
         if not _native_uuid(self.thread_id):
             raise NativeError("invalid_native_mapping")

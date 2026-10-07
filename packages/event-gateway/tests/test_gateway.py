@@ -15,7 +15,7 @@ from event_gateway.gateway import Gateway, Refused
 from event_gateway.native import EVENT_FIELDS, IDENTITY as NATIVE_IDENTITY
 from event_gateway.protocol import _timestamp, derive_delivery_id
 from event_gateway.security import SecurityError, sign
-from event_gateway.store import Store, StoreError, IDENTITY
+from event_gateway.store import Store, StoreError, IDENTITY, RETENTION
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,7 +30,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.tmp.cleanup)
         self.now = NOW
         self.store = Store(Path(self.tmp.name).resolve() / 'private', clock=lambda: self.now)
-        self.addCleanup(lambda: self.store.close())
+        self.addCleanup(self.close_store)
         self.event = copy.deepcopy(FIXTURES['validEnvelopes'][0])
         self.mapping = {key: self.event[key] for key in IDENTITY}
         self.mapping.update(leaseExpiresAt=NOW + 3600, nativeThreadId=str(uuid.uuid4()))
@@ -46,6 +46,9 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.gateway = Gateway(self.store, self, lambda mapping: self,
                                audience='test-gateway', keys={'test': self.key.public_key()},
                                clock=lambda: self.now)
+
+    def close_store(self):
+        self.store.close()
 
     def accept(self, **overrides):
         body = json.dumps(self.event).encode()
@@ -207,6 +210,45 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.submissions, [])
         self.assertEqual(self.settlements[0][1], {'type': 'local_not_submitted'})
 
+    async def test_claim_lease_renewal_preserves_native_admission(self):
+        ident = self.accept()['deliveryId']
+        renewed = dict(self.mapping, leaseExpiresAt=self.mapping['leaseExpiresAt'] + 3600)
+        self.after_claim = lambda: self.store.put_attachment(renewed)
+        row = await self.gateway.dispatch(ident)
+        self.assertEqual(row['status'], 'submitted')
+        self.assertEqual(len(self.submissions), 1)
+        self.assertEqual(self.submissions[0]['attemptId'], self.event['attemptId'])
+        self.assertEqual(self.store.current_attempt(ident)['admission'],
+                         self.admissions[self.event['attemptId']])
+        self.assertEqual(self.store.get_attachment(self.event['runtimeId']), renewed)
+        self.assertEqual(self.settlements, [])
+
+    async def test_expired_lease_allows_exact_terminal_lookup_and_stale_settlement(self):
+        ident = self.accept()['deliveryId']
+        self.drop_response = True
+        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'ambiguous')
+        request = copy.deepcopy(self.submissions[0])
+        self.now = self.mapping['leaseExpiresAt'] + 1
+        self.recovered_outcome = 'terminalNotStarted'
+        row = await self.gateway.reconcile(ident)
+        self.assertEqual(row['status'], 'stale')
+        self.assertEqual(self.lookups, [request])
+        self.assertEqual(len(self.settlements), 1)
+        self.assertEqual(self.settlements[0][0], self.admissions[self.event['attemptId']])
+        self.assertEqual(self.settlements[0][1]['type'], 'native_terminal_no_start')
+        retired = self.store.db.execute(
+            'SELECT state,receipt,settlement FROM attempts WHERE attempt_id=?',
+            (request['attemptId'],),
+        ).fetchone()
+        self.assertEqual(retired[0], 'settled')
+        self.assertEqual(json.loads(retired[1])['outcome']['receiptId'],
+                         self.settlements[0][1]['receiptId'])
+        self.assertEqual(json.loads(retired[2])['status'], 'not_started')
+        self.assertEqual(self.store.delivery_envelope(ident)['attemptId'], request['attemptId'])
+        await self.gateway.dispatch(ident)
+        self.assertEqual(self.submissions, [request])
+        self.assertEqual(len(self.claims), 1)
+
     async def test_detach_after_claim_retires_without_submit(self):
         ident = self.accept()['deliveryId']
         self.after_claim = lambda: self.store.detach(self.event['runtimeId'])
@@ -221,14 +263,15 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             self.claims.append(copy.deepcopy(envelope))
             return copy.deepcopy(CLOUD_FIXTURES['overBudget'])
 
-        self.claim = over_budget
-        row = await self.gateway.dispatch(ident)
+        with patch.object(self, 'claim', over_budget):
+            row = await self.gateway.dispatch(ident)
         self.assertEqual(row['status'], 'claiming')
         self.assertEqual(row['reason'], 'over_budget')
         self.assertEqual(self.store.current_attempt(ident)['reason'], 'over_budget')
         self.restart()
         self.assertEqual(self.store.delivery(ident)['reason'], 'over_budget')
-        row = await self.gateway.reconcile(ident)
+        with patch.object(self, 'claim', over_budget):
+            row = await self.gateway.reconcile(ident)
         self.assertEqual(row['reason'], 'over_budget')
         self.assertEqual(self.claims, [self.event, self.event])
         self.assertEqual(self.store.current_attempt(ident)['envelope'], self.event)
@@ -263,6 +306,29 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.claims), 1)
         self.assertEqual(len(self.submissions), 1)
         self.assertEqual(self.lookups, [])
+
+    async def test_waiting_dispatch_reports_not_found_when_stale_delivery_pruned(self):
+        ident = self.accept()['deliveryId']
+        self.store.detach(self.event['runtimeId'])
+        lock = asyncio.Lock()
+        await lock.acquire()
+        self.gateway._locks[self.event['runtimeId']] = lock
+        task = asyncio.create_task(self.gateway.dispatch(ident))
+        await asyncio.sleep(0)
+        self.now += 2 * RETENTION
+        try:
+            self.assertEqual(self.store.cleanup(), 1)
+        finally:
+            lock.release()
+        error = None
+        try:
+            await task
+        except Exception as caught:
+            error = caught
+        self.assertIsInstance(error, Refused)
+        self.assertEqual(error.code, 'not_found')
+        self.assertEqual(self.claims, [])
+        self.assertEqual(self.submissions, [])
 
     async def test_waiting_dispatch_refreshes_attempt_after_terminal_retirement(self):
         ident = self.accept()['deliveryId']
@@ -398,8 +464,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         async def invalid(admission):
             return {'permitId': admission['permitId']}
 
-        self.prepare = invalid
-        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'queued')
+        with patch.object(self, 'prepare', invalid):
+            self.assertEqual((await self.gateway.dispatch(ident))['status'], 'queued')
         self.assertEqual(self.submissions, [])
         self.assertEqual(self.settlements[0][1], {'type': 'local_not_submitted'})
 
@@ -443,12 +509,12 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.Event().wait()
             return 'available'
 
-        self.check = pending_check
-        task = asyncio.create_task(self.gateway.dispatch(ident))
-        await asyncio.wait_for(entered.wait(), 1)
-        task.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await task
+        with patch.object(self, 'check', pending_check):
+            task = asyncio.create_task(self.gateway.dispatch(ident))
+            await asyncio.wait_for(entered.wait(), 1)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
         self.assertEqual(self.store.current_attempt(ident)['state'], 'admitted')
         self.restart()
         self.assertEqual((await self.gateway.reconcile(ident))['status'], 'queued')

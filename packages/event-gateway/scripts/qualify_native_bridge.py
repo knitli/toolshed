@@ -492,21 +492,27 @@ class MockModel(BaseHTTPRequestHandler):
 
 def qualify_terminal_retry(bridge, server, process, witness):
     """Native-only proof; distinct synthetic permits do not prove cloud settlement."""
-    first = synthetic_request(witness)
     rejected = synthetic_request(witness)
+    rejected["permitIssuedAt"] -= 10_000
+    rejected["permitExpiresAt"] -= 10_000
     try:
-        started = bridge.start(first)
-        require(started["status"] == "started")
-        # Do not wait for model traffic: both starts use the same 750ms witness.
         terminal = bridge.start(rejected)
         require(terminal["status"] == "terminalNotStarted"
-                and terminal["reason"] in ("busy", "selectionChanged"))
-        require(bridge.receipt(rejected) == {**terminal, "replayed": True})
+                and terminal["reason"] == "permitExpired")
+        require(server.model_requests == 0
+                and all(count == 0 for count in server.request_counts.values()))
+        # Refresh after the terminal reply; its round trip can consume the lease.
+        available = bridge.challenge()
+        require(available["eligible"])
+        first = synthetic_request(available)
+        started = bridge.start(first)
+        require(started["status"] == "started")
         deadline = time.monotonic() + 10
         while not server.request_counts["primary"] and time.monotonic() < deadline:
             time.sleep(0.01)
         require(server.request_counts["primary"] == 1
                 and server.request_counts["unknown"] == 0)
+        require(bridge.receipt(rejected) == {**terminal, "replayed": True})
     finally:
         server.release_primary.set()
     deadline = time.monotonic() + 10
@@ -538,6 +544,7 @@ def qualify_terminal_retry(bridge, server, process, witness):
         "cloudSettlementProven": False, "outcome": retried["status"],
         "terminalReason": terminal["reason"], "terminalReceiptId": terminal["receiptId"],
         "exactTerminalReceiptRecovered": True, "exactReceiptRecovered": True,
+        "busyRefusalProven": False, "retainedTerminalRecoveredWhileBusy": True,
         "retriedDeliverySame": retry["deliveryId"] == rejected["deliveryId"],
         "retryAttemptDistinct": retry["attemptId"] != rejected["attemptId"],
         "retryPermitDistinct": retry["permitId"] != rejected["permitId"],

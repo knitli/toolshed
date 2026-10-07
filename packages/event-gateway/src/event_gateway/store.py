@@ -772,7 +772,9 @@ class Store:
         return [
             self._public(row)
             for row in self.db.execute(
-                "SELECT * FROM deliveries WHERE state IN ('claiming','admitted','settlement_pending','submitted','ambiguous') OR (state='observed' AND ack_state IS NOT state) ORDER BY created,id"
+                "SELECT * FROM deliveries WHERE state IN "
+                "('claiming','admitted','settlement_pending','submitted','ambiguous') "
+                "OR (state='observed' AND ack_state IS NOT state) ORDER BY created,id"
             )
         ]
 

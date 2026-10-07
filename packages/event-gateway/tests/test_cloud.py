@@ -228,7 +228,7 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             "wrong_node": lambda value: value.update(nodeId=FIXTURE["admitted"]["permitId"]),
             "wrong_status": lambda value: value.update(status="allowed"),
             "future": lambda value: value.update(permitIssuedAt="2026-10-05T12:00:59.000Z", permitExpiresAt="2026-10-05T12:01:04.000Z"),
-            "expired": lambda value: value.update(permitIssuedAt="2026-10-05T12:00:53.000Z", permitExpiresAt="2026-10-05T12:00:58.000Z"),
+            "permit_before_envelope": lambda value: value.update(permitIssuedAt="2026-10-05T12:00:53.000Z", permitExpiresAt="2026-10-05T12:00:58.000Z"),
             "too_long": lambda value: value.update(permitExpiresAt="2026-10-05T12:01:04.000Z"),
             "invalid_time": lambda value: value.update(permitIssuedAt=None),
             "old_envelope": lambda value: value.update(envelope=FIXTURE["original"]),
@@ -237,7 +237,10 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(name=name):
                 self.result = copy.deepcopy(FIXTURE["admitted"])
                 mutate(self.result)
-                with self.assertRaises(CloudError):
+                # This tuple is invalid because its envelope starts after its
+                # permit, not because historical permits must remain fresh.
+                expected = "^identity_mismatch$" if name == "permit_before_envelope" else ".*"
+                with self.assertRaisesRegex(CloudError, expected):
                     await self.client.claim(FIXTURE["original"])
 
     async def test_admitted_envelope_must_start_before_permit(self):

@@ -32,6 +32,7 @@ def receipt(item, outcome=None):
 
 class Bridge:
     def __init__(self, item):
+        """Initialize a recording bridge with the supplied request identity."""
         self.witness = {**{key: item[key] for key in (
             "clientId", "generation", "serverInstanceId", "serverGeneration", "threadId",
         )}, "eligible": True}

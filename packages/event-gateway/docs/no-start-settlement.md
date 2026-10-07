@@ -25,7 +25,9 @@ proof. A call-level `notStarted` has no settlement authority; only the retained
 
 Lost settlement replies and restart repeat only the same settlement. The
 response must echo delivery, attempt, permit, node, generation and evidence.
-Closing the old attempt and creating its replacement is atomic. Old replies
+Closing the old attempt and creating its replacement is atomic for a live,
+unchanged destination. An expired or fenced destination remains stale: existing
+policy requires a new attachment generation and newly identified delivery. Old replies
 cannot close a replacement, and cloud retirement retains the original budget
 charge. A native restart or missing receipt leaves ambiguity fenced.
 
@@ -40,12 +42,14 @@ snapshot update's trusted status on main.
 
 ## Proof and remaining gates
 
-The complete local suite passes 162 tests after integrating the canonical
-snapshot and trusted policy; Ruff passes. Sixty-four distinct new or repaired
+The complete local suite passes 165 tests after integrating the canonical
+snapshot, trusted policy and review corrections; Ruff passes. New and repaired
 cases have individual causal assertion-red/restored-green evidence, including
 two real defects found in the independent audit: concurrent dispatch used an
 attempt captured before its lock, and successful admission retained a stale
-budget refusal reason. Both fixes passed independent reinspection. The renewed
+budget refusal reason. Both fixes passed independent reinspection. Further review corrections preserve
+read-only receipt recovery after lease expiry, ignore harmless live lease renewal,
+and report a delivery pruned during lock wait without claiming or starting it. The renewed
 settlement-vector proof also catches a shared signer/verifier using the wrong
 path. Final source hashes and case results are retained in
 [the local proof record](no-start-settlement-proof.json).
@@ -56,10 +60,12 @@ SQLite writes before native operations, terminal settlement and lost-response
 recovery. Those tests do not prove a deployed Access session, production Mesh
 delivery or an installed native client.
 
-The native qualifier's additive `--terminal-retry` mode holds one loopback mock
-model response, obtains and recovers a retained terminal refusal for another
-event, then retries that same delivery with a fresh attempt and permit. It uses
-the disposable patched TUI and explicitly reports cloud settlement unproven.
+The native qualifier's additive `--terminal-retry` mode obtains a retained
+terminal receipt using an expired synthetic permit while idle. It recovers that
+receipt while an unrelated mock turn is held busy, then retries the refused
+delivery with a fresh attempt and permit. The actual disposable TUI proof passes:
+two primary mock calls, one title call, zero unknown or real-model calls. It
+explicitly reports cloud settlement and a busy-race refusal unproven.
 Run it with the new immutable binary named in the terminal checkpoint:
 
 ```sh

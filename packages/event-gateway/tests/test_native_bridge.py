@@ -93,9 +93,14 @@ class NativeBridgeTests(unittest.TestCase):
 
         def start(request):
             requests.append(deepcopy(request))
-            if len(requests) == 2:
+            if len(requests) == 1:
+                self.assertLessEqual(request['permitExpiresAt'], time.time_ns() // 1_000_000,
+                                     'the first attempt must use an already expired permit')
+            if request['permitExpiresAt'] <= time.time_ns() // 1_000_000:
+                self.assertEqual(request['permitExpiresAt'] - request['permitIssuedAt'], 5000)
+                self.assertEqual(server.model_requests, 0)
                 self.assertFalse(server.release_primary.is_set())
-                outcome = {'status': 'terminalNotStarted', 'reason': 'busy',
+                outcome = {'status': 'terminalNotStarted', 'reason': 'permitExpired',
                            'receiptId': str(uuid4()), 'replayed': False}
             else:
                 server.request_counts['primary'] += 1
@@ -106,31 +111,36 @@ class NativeBridgeTests(unittest.TestCase):
             return outcome
 
         def receipt(request):
+            if not lookups:
+                self.assertEqual(server.request_counts['primary'], 1)
+                self.assertFalse(server.release_primary.is_set())
             lookups.append(deepcopy(request))
             self.assertIn(request, requests)
             return {**outcomes[request['attemptId']], 'replayed': True}
 
         def challenge():
-            self.assertTrue(server.release_primary.is_set())
+            self.assertEqual(server.release_primary.is_set(), len(requests) == 2)
             return renewed
 
         bridge = SimpleNamespace(start=start, receipt=receipt, challenge=Mock(side_effect=challenge))
         with patch.object(native.time, 'sleep'):
             result = native.qualify_terminal_retry(bridge, server, Mock(poll=lambda: None), initial)
         self.assertEqual(len(requests), 3)
-        first, rejected, retry = requests
+        rejected, first, retry = requests
         self.assertNotEqual(first['deliveryId'], rejected['deliveryId'])
-        self.assertEqual(first['generation'], rejected['generation'])
+        self.assertEqual(first['generation'], renewed['generation'])
         self.assertEqual(retry['generation'], renewed['generation'])
         self.assertEqual(retry['deliveryId'], rejected['deliveryId'])
         self.assertEqual(retry['event'], rejected['event'])
         for field in ('attemptId', 'permitId', 'clientUserMessageId'):
             self.assertEqual(len({request[field] for request in requests}), 3)
         self.assertEqual(lookups, [rejected, first, retry, rejected])
-        bridge.challenge.assert_called_once()
+        self.assertEqual(bridge.challenge.call_count, 2)
         self.assertEqual(result['qualification'], 'synthetic-native-terminal-retry')
         self.assertTrue(result['nativeOnly'])
         self.assertFalse(result['cloudSettlementProven'])
+        self.assertFalse(result['busyRefusalProven'])
+        self.assertTrue(result['retainedTerminalRecoveredWhileBusy'])
         self.assertEqual(result['primaryModelRequests'], 2)
         self.assertEqual(result['unknownModelRequests'], 0)
         self.assertTrue(result['exactTerminalReceiptRecovered'])
@@ -139,26 +149,35 @@ class NativeBridgeTests(unittest.TestCase):
     def test_terminal_retry_refuses_uncertain_proof_and_releases_held_primary(self):
         for fault in ('unknown', 'notStarted', 'wrong_reason', 'wrong_receipt', 'start_error'):
             with self.subTest(fault=fault):
-                terminal = {'status': 'terminalNotStarted', 'reason': 'busy',
+                terminal = {'status': 'terminalNotStarted', 'reason': 'permitExpired',
                             'receiptId': str(uuid4()), 'replayed': False}
                 if fault in ('unknown', 'notStarted'):
                     terminal['status'] = fault
                 elif fault == 'wrong_reason':
-                    terminal['reason'] = 'permitExpired'
-                server = SimpleNamespace(release_primary=threading.Event(), model_requests=1,
-                                         request_counts={'primary': 1, 'title': 0, 'unknown': 0})
-                results = [{'status': 'started', 'turnId': str(uuid4()), 'replayed': False},
-                           native.BridgeError() if fault == 'start_error' else terminal]
+                    terminal['reason'] = 'busy'
+                server = SimpleNamespace(release_primary=threading.Event(), model_requests=0,
+                                         request_counts={'primary': 0, 'title': 0, 'unknown': 0})
+                def start(request):
+                    if request['permitExpiresAt'] <= time.time_ns() // 1_000_000:
+                        return terminal
+                    if fault == 'start_error':
+                        raise native.BridgeError()
+                    server.request_counts['primary'] += 1
+                    server.model_requests += 1
+                    return {'status': 'started', 'turnId': request['clientUserMessageId'],
+                            'replayed': False}
                 recovered = {**terminal, 'replayed': True}
                 if fault == 'wrong_receipt':
                     recovered['receiptId'] = str(uuid4())
-                bridge = SimpleNamespace(start=Mock(side_effect=results),
-                                         receipt=Mock(return_value=recovered), challenge=Mock())
+                bridge = SimpleNamespace(start=Mock(side_effect=start),
+                                         receipt=Mock(return_value=recovered),
+                                         challenge=Mock(return_value=witness()))
                 with self.assertRaises(native.BridgeError), patch.object(native.time, 'sleep'):
                     native.qualify_terminal_retry(bridge, server, Mock(poll=lambda: None), witness())
                 self.assertTrue(server.release_primary.is_set())
-                self.assertEqual(bridge.start.call_count, 2)
-                bridge.challenge.assert_not_called()
+                expected_starts = 2 if fault in ('wrong_receipt', 'start_error') else 1
+                self.assertEqual(bridge.start.call_count, expected_starts)
+                self.assertEqual(bridge.challenge.call_count, expected_starts - 1)
 
     def test_mock_primary_hold_precedes_response_and_times_out_closed(self):
         body = b'{"model":"mock-model","input":[]}'
@@ -210,9 +229,12 @@ class NativeBridgeTests(unittest.TestCase):
                     receipt = {key: request[key] for key in native.IDENTITY}
                     if mismatch:
                         receipt[mismatch] = None
-                    with patch.object(client, "exchange", return_value={
-                        "version": 2, "nonce": 1,
-                        "receipt": {**receipt, "outcome": outcome}}):
+                    with patch.object(
+                        client, "exchange", return_value={
+                            "version": 2, "nonce": 1,
+                            "receipt": {**receipt, "outcome": outcome},
+                        },
+                    ):
                         self.assertEqual(client.receipt(request), outcome if accepted else {"status": "unknown"})
                     self.assertEqual(client.closed, not accepted)
                 finally:
@@ -222,6 +244,7 @@ class NativeBridgeTests(unittest.TestCase):
     def test_restore_is_readonly_exact_and_consumes_start_once(self):
         binding = witness()
         request = native.synthetic_request(binding)
+
         def handler(channel):
             row = receive(channel)
             self.assertEqual(row, {"nonce": 1, "receipt": request})

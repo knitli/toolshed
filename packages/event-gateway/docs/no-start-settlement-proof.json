@@ -1,21 +1,21 @@
 {
   "suite": {
-    "tests": 162,
-    "passed": 162,
-    "afterCanonicalSnapshotAndTrustedPolicyIntegration": true
+    "tests": 165,
+    "passed": 165,
+    "afterCanonicalSnapshotTrustedPolicyAndReviewCorrections": true
   },
   "sourceSha256": {
-    "src/event_gateway/cloud.py": "7a7e68a919f55ff8da58f19f933b833d226052334fa6775892f60b28bd11a6ad",
-    "src/event_gateway/store.py": "849234cc32ecad78fa1048896094f43aad44de283fa8efe7101aec859c65010e",
-    "src/event_gateway/native.py": "76b6655faa5683159cbcbf6b1b7fbdef258964e718e950488a20872bee1f8676",
-    "src/event_gateway/gateway.py": "e41a464ee21cf6f3c69ea7578c8f2687befd04253763386b32836ce89e9f8e0a",
-    "scripts/qualify_native_bridge.py": "0bb07213f81e69931cf96994c9098450447d583bc3bae546faa095a22481a8b0",
-    "tests/test_cloud.py": "aff3c58a2c9d2947c7d009ab40bace542d3afbb0e8fbba89283a1eedbd63987a",
+    "src/event_gateway/cloud.py": "f970e6b902cb7e893241d0f914a6a4473f26635a0d790f11c6ed4b30679a3ad6",
+    "src/event_gateway/store.py": "025b4937e8d7949fd26d494259bcaca9d6680221bea31bcb23f235071c95cd0b",
+    "src/event_gateway/native.py": "2f972798fdb29095aa30ca12332c43d7aa1ad4ea186d02d8122b2bc430ffbbb2",
+    "src/event_gateway/gateway.py": "8d0449e161c206cb2469ed12c0fe6a90a797dc677a3c4bb202f36643c5c20ce4",
+    "scripts/qualify_native_bridge.py": "835f900edb9800687473551b24ea291c03b7102a88313a753c84519f434a656a",
+    "tests/test_cloud.py": "cf66bc1d448470f6fdf7e7f92a20414c9a24acfc2008f3e00c3d5908468b21b3",
     "tests/test_store.py": "307b684c93fa0882f07f38c0915c830f398cc70c9a5a3a97d451a165ffccd3b8",
-    "tests/test_native.py": "0ed2bd10fe6bd16dbe24dcee5d202d928bb1fd4abeb166e0f8ebe106a09df6b5",
-    "tests/test_gateway.py": "b19bf052bdd1a7f9cc3316fb9ca122652cd098c0eb327d6d9d4a3e10209d93d3",
-    "tests/test_gateway_integration.py": "02185dc1c41ec0bd55edfb7e8f2d3bcb9ed6aa1f3529bd829dc3a3f3ddeedcff",
-    "tests/test_native_bridge.py": "4a7e2a049a287f6fc0404799120d786743a16a46e7f9842d7f4dad6c21234c3f"
+    "tests/test_native.py": "e66f787a7607c7504379d512e0e3dc866a5988c22a3b2d4a3199cd04b3fa55b9",
+    "tests/test_gateway.py": "7cb40eaa7fee47cb2b07cf2d5daf6dafc01c8dea0ec9ed6b93e38cfa6ab2badf",
+    "tests/test_gateway_integration.py": "38f4f456efdf6ab5216b275b8e2678538b7b284457f4a881a8f4b4ce3c303502",
+    "tests/test_native_bridge.py": "5eb0a1917e9196004add1bbd35f8d54b3586e0fb57fc883ead0acf35881c246b"
   },
   "causalProof": {
     "cloud": [
@@ -788,6 +788,77 @@
     "qualifierReceiptUuidRenewed": {
       "assertionRed": true,
       "restoredGreen": true
+    },
+    "reviewRegressions": [
+      {
+        "case": "pruned-dispatch",
+        "productionAssertionRed": true,
+        "fixedGreen": true
+      },
+      {
+        "case": "lease-renewal",
+        "productionAssertionRed": true,
+        "fixedGreen": true
+      },
+      {
+        "case": "lease-terminal",
+        "productionAssertionRed": true,
+        "fixedGreen": true
+      }
+    ],
+    "fixtureRepairs": [
+      {
+        "test": "test_cancelled_post_admission_check_recovers_local_settlement",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "return await self._retire_local(delivery_id, \"recovered_admission_not_submitted\")",
+          "new": "return self._row(delivery_id)"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_invalid_prepared_request_settles_local_without_submission",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "return await self._retire_local(delivery_id, \"native_preparation_failed\")",
+          "new": "return self._row(delivery_id)"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_over_budget_claim_preserves_original_attempt_for_recovery",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "self.store.note_claim_budget(delivery_id, attempt[\"attempt_id\"])",
+          "new": "pass"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      }
+    ],
+    "permitEnvelopeBoundary": {
+      "red": "intended envelope coverage assertion",
+      "green": "passed",
+      "mutation": "remove admission envelope start-before-permit guard"
+    },
+    "deterministicQualifier": {
+      "repairedExistingCases": true,
+      "individualAssertionRedLogs": [
+        "notStarted-red.txt",
+        "notStarted-refusal-red.txt",
+        "positive-red.txt",
+        "start_error-red.txt",
+        "unknown-red.txt",
+        "unknown-refusal-red.txt",
+        "wrong_reason-red.txt",
+        "wrong_reason-refusal-red.txt",
+        "wrong_receipt-red.txt",
+        "wrong_receipt-refusal-red.txt"
+      ],
+      "restoredGreen": true,
+      "reason": "previous busy-race harness received an ordinary TUI selection refusal; deterministic expired-permit evidence replaces timing assumption"
     }
   },
   "packaging": {
@@ -795,6 +866,28 @@
     "automaticWakeEnabled": false,
     "newNativeModuleIncluded": true,
     "fourProductionModulesByteMatch": true,
-    "wheelSha256": "2afa748daf52f851cff003b82301259e698cde52ed38e7e7ee7ce2fd4bc8f394"
+    "wheelSha256": "028b5f0cedfa25b8187ba976f300f1748ffdf2825de8c113d3832ea9cf61ab8a",
+    "sourceStage": "post-review corrections"
+  },
+  "nativeSyntheticQualification": {
+    "busyRefusalProven": false,
+    "cloudSettlementProven": false,
+    "exactReceiptRecovered": true,
+    "exactTerminalReceiptRecovered": true,
+    "mockModelRequests": 3,
+    "nativeOnly": true,
+    "outcome": "started",
+    "primaryModelRequests": 2,
+    "qualification": "synthetic-native-terminal-retry",
+    "realModelCalls": 0,
+    "retainedTerminalRecoveredWhileBusy": true,
+    "retriedDeliverySame": true,
+    "retryAttemptDistinct": true,
+    "retryMessageDistinct": true,
+    "retryPermitDistinct": true,
+    "terminalReason": "permitExpired",
+    "terminalReceiptId": "01a114b7-238f-7fc2-9e33-69503964a16a",
+    "titleModelRequests": 1,
+    "unknownModelRequests": 0
   }
 }
