@@ -1,0 +1,174 @@
+{
+  "eightNewOrRepairedTests": true,
+  "mutationPairs": [
+    {
+      "mutation": "terminal-replay",
+      "intendedAssertionRed": true,
+      "restoredGreen": true,
+      "redLogSha256": "c87687044e1acb551ffce8a6992f11fe274fe9b49f8d239dc2dabfaf06cc61ba",
+      "greenLogSha256": "ecc0d987f531347ae0e324ffd34d0ccabd9e559bd15daee68cee8fc5d5696f1a",
+      "testSelector": "codex-app-server request_processors::native_selection_processor::tests::terminal_no_start_replays_and_lookup_requires_the_exact_request"
+    },
+    {
+      "mutation": "terminal-status",
+      "intendedAssertionRed": true,
+      "restoredGreen": true,
+      "redLogSha256": "50f04f79c3505654ac187c1adf695738cdd7dfdecaa1e5a6cbe378d7db31a5c4",
+      "greenLogSha256": "282a2986534964f3ff8f3615f658cace28abb22f18c1373af59816dbc4ff4088",
+      "testSelector": "codex-app-server request_processors::native_selection_processor::tests::terminal_no_start_wire_status_is_distinct_from_call_refusal"
+    },
+    {
+      "mutation": "terminal-attempt",
+      "intendedAssertionRed": true,
+      "restoredGreen": true,
+      "redLogSha256": "9fc4bd06db67985223bf2e73bd036b9e57bad65fc874522d3f27426ec15cafa5",
+      "greenLogSha256": "78d647813297f20d8ad9d9732c8b74d0a136e2b0f140b2aae1cb94876d770b5d",
+      "testSelector": "codex-app-server request_processors::native_selection_processor::tests::terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery"
+    },
+    {
+      "mutation": "terminal-race",
+      "intendedAssertionRed": true,
+      "restoredGreen": true,
+      "redLogSha256": "44715108e25a503c8046a033d14a7508e9f97524c553e288e520bcd3274d5adc",
+      "greenLogSha256": "f394e203711102cd1368a67acfc356123a44fb6528da3599ff535b9186931064",
+      "testSelector": "codex-app-server request_processors::native_selection_processor::tests::terminal_refusal_and_core_commit_arbitrate_on_the_receipt_lock"
+    },
+    {
+      "mutation": "terminal-capacity",
+      "intendedAssertionRed": true,
+      "restoredGreen": true,
+      "redLogSha256": "c269465c0e6e6c071f55f525175ec8ec2fecd28b251c42cc3ce9142debede159",
+      "greenLogSha256": "0c53fb39f0a519f70eb98bd30b1ede6a9054c9be0a8800f807b2c8ec3060a8e0",
+      "testSelector": "codex-app-server request_processors::native_selection_processor::tests::terminal_and_started_receipts_share_the_bounded_capacity"
+    },
+    {
+      "mutation": "tui-start-replay",
+      "intendedAssertionRed": true,
+      "restoredGreen": true,
+      "redLogSha256": "c6d3664b1b10058f57095f7ee564fd3ab241d9347ffbd295f5fbd61a9d89638a",
+      "greenLogSha256": "b318e720910c6e36abcb064d0faf631a8f419feefc6956fbe52b08e64584a0d2",
+      "testSelector": "codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt"
+    },
+    {
+      "mutation": "tui-terminal-replay",
+      "intendedAssertionRed": true,
+      "restoredGreen": true,
+      "redLogSha256": "5292d75be7b1032f02adc5e26fe04e60e11251e765baec5f5002aafbbe24c2e5",
+      "greenLogSha256": "41907bce3255387f3a5b32314afb78e8bd52babbf556c8fe5b1ed1387536fd74",
+      "testSelector": "codex-tui app::selection_witness::bridge::tests::terminal_no_start_replay_is_stable_and_fresh_attempt_needs_a_new_permit"
+    },
+    {
+      "mutation": "tui-native-terminal-receipt",
+      "intendedAssertionRed": true,
+      "restoredGreen": true,
+      "redLogSha256": "4b7af34968bf0dc85403f89950d43634fe017a0d5cfce00f2a586df720a1d4ae",
+      "greenLogSha256": "0459b4a73c928e99579e74c8e666e85f8912bb22c8a7b1a918d1235c171bfb59",
+      "testSelector": "codex-tui app::selection_witness::bridge::tests::native_terminal_receipt_requires_replay_and_canonical_uuid"
+    },
+    {
+      "mutation": "tui-terminal-uuid",
+      "intendedAssertionRed": true,
+      "restoredGreen": true,
+      "redLogSha256": "24e9eeca795d87d1a03acf75e68aac4abac77b11f6a826f5c440b30d69a20389",
+      "greenLogSha256": "ea607884b6a04f85bd182a1a58a1d936e26cdb8d98b12d751424f225c15e4666",
+      "testSelector": "codex-tui app::selection_witness::bridge::tests::native_terminal_receipt_requires_replay_and_canonical_uuid"
+    }
+  ],
+  "fullPackageBaselineComparisons": {
+    "appServer": {
+      "failureSelectorsIdentical": true,
+      "uniqueFailureCount": 24,
+      "baselineLogSha256": "45ca215bd80658d08599ccca37a24dc8a06bc77e660690cc3b5f7e3656f03268",
+      "currentLogSha256": "e503a135d2877620645cbcd1b136a7ea3eaf07cfc20bd6b5b5cd110de126b9dd",
+      "failureSelectors": [
+        "codex-app-server::all suite::v2::code_mode_host::app_server_shares_flag_selected_grpc_code_mode_host_across_threads",
+        "codex-app-server::all suite::v2::code_mode_host::code_mode_model_output_uses_structured_host_timing::exec_grpc_host_only",
+        "codex-app-server::all suite::v2::code_mode_host::code_mode_model_output_uses_structured_host_timing::exec_grpc_with_overhead",
+        "codex-app-server::all suite::v2::code_mode_host::code_mode_model_output_uses_structured_host_timing::exec_stdio_host_only",
+        "codex-app-server::all suite::v2::code_mode_host::code_mode_model_output_uses_structured_host_timing::exec_stdio_with_overhead",
+        "codex-app-server::all suite::v2::code_mode_host::code_mode_model_output_uses_structured_host_timing::wait_grpc_host_only",
+        "codex-app-server::all suite::v2::code_mode_host::code_mode_model_output_uses_structured_host_timing::wait_grpc_with_overhead",
+        "codex-app-server::all suite::v2::code_mode_host::code_mode_model_output_uses_structured_host_timing::wait_stdio_host_only",
+        "codex-app-server::all suite::v2::code_mode_host::code_mode_model_output_uses_structured_host_timing::wait_stdio_with_overhead",
+        "codex-app-server::all suite::v2::curated_mcp_sync::existing_thread_loads_api_curated_mcp_after_auth_switch_sync",
+        "codex-app-server::all suite::v2::hooks_list::automatic_marketplace_upgrade_refreshes_hook_runtime_for_loaded_session",
+        "codex-app-server::all suite::v2::imagegen_extension::standalone_image_generation_is_callable_from_code_mode_only::omitted_defaults_to_opaque",
+        "codex-app-server::all suite::v2::imagegen_extension::standalone_image_generation_is_callable_from_code_mode_only::opaque",
+        "codex-app-server::all suite::v2::imagegen_extension::standalone_image_generation_is_callable_from_code_mode_only::transparent",
+        "codex-app-server::all suite::v2::marketplace_upgrade::automatic_upgrade_isolates_git_while_explicit_install_preserves_configuration::invalid_user_config_fallback",
+        "codex-app-server::all suite::v2::marketplace_upgrade::automatic_upgrade_isolates_git_while_explicit_install_preserves_configuration::user_config",
+        "codex-app-server::all suite::v2::marketplace_upgrade::marketplace_upgrade_all_configured_git_marketplaces",
+        "codex-app-server::all suite::v2::marketplace_upgrade::marketplace_upgrade_named_marketplace_only",
+        "codex-app-server::all suite::v2::marketplace_upgrade::marketplace_upgrade_returns_empty_roots_when_already_up_to_date",
+        "codex-app-server::all suite::v2::request_permissions::code_mode_uses_permissions_approved_in_the_same_cell::session",
+        "codex-app-server::all suite::v2::request_permissions::code_mode_uses_permissions_approved_in_the_same_cell::strict_review",
+        "codex-app-server::all suite::v2::request_permissions::code_mode_uses_permissions_approved_in_the_same_cell::turn",
+        "codex-app-server::all suite::v2::thread_resume::thread_resume_prefers_persisted_git_metadata_for_local_threads",
+        "codex-app-server::all suite::v2::turn_start::code_mode_exec_emits_correlated_production_analytics"
+      ]
+    },
+    "tui": {
+      "failureSelectorsIdentical": true,
+      "uniqueFailureCount": 44,
+      "baselineLogSha256": "c24aecdbb6becdbc137ed088a46c3229f5a96d296f030ce4a86e28c0205ebfdc",
+      "currentLogSha256": "853602e567a8bd4839cc5e8a6d7ff94a10b9951f12b234d4565676903fb23be7",
+      "failureSelectors": [
+        "codex-tui app::daemon_menu::tests::daemon_menu_is_read_only_and_confirmation_can_cancel_or_handoff",
+        "codex-tui app::owned_transcript::empty_state_animation_tests::empty_state_animation_preserves_header_cursor_and_footer",
+        "codex-tui app::tests::active_reconnect::reconnect_allows_slow_hydration_but_bounds_a_stalled_server",
+        "codex-tui app::tests::app_server_thread_replacement_clears_previous_transcript_before_replay",
+        "codex-tui app::tests::navigation_reconnect::reconnect_daemon_command_center_after_socket_replacement_without_a_conversation",
+        "codex-tui app::tests::realtime_requests::buffered_voice_items_reconcile_captions_after_thread_switch",
+        "codex-tui app::tests::realtime_requests::completed_voice_caption_survives_repeated_thread_replacement",
+        "codex-tui app::tests::realtime_requests::replay_reconciles_only_matching_voice_captions_one_for_one",
+        "codex-tui app::tests::realtime_requests::switching_threads_keeps_the_source_voice_partial_only_on_reattach",
+        "codex-tui app::tests::startup_frame_tests::owned_startup_hides_tip_in_transcript",
+        "codex-tui custom_terminal::tests::cursor::terminal_draw_omits_cursor_style_without_an_owned_glyph",
+        "codex-tui custom_terminal::tests::cursor::terminal_draw_repairs_owned_wide_hyperlink_after_skipped_glyphs",
+        "codex-tui custom_terminal::tests::cursor::terminal_draw_repairs_single_column_without_scrolling",
+        "codex-tui custom_terminal::tests::cursor::terminal_draw_repairs_styled_anchor_on_cursor_only_frames",
+        "codex-tui get_git_diff::tests::get_git_diff_does_not_execute_configured_filters_fsmonitor_or_hooks",
+        "codex-tui get_git_diff::tests::get_git_diff_does_not_execute_helpers_while_checking_dirty_submodules",
+        "codex-tui history_cell::tests::pnpm_update_available_history_cell_snapshot",
+        "codex-tui history_cell::tests::session_info_availability_nux_tooltip_snapshot",
+        "codex-tui history_cell::tests::standalone_unix_update_available_history_cell_snapshot",
+        "codex-tui history_cell::tests::standalone_windows_update_available_history_cell_snapshot",
+        "codex-tui history_cell::tests::vite_plus_update_available_history_cell_snapshot",
+        "codex-tui startup_draft::layout::tests::owned_startup_keeps_the_live_bottom_geometry",
+        "codex-tui status::tests::status_snapshot_cached_limits_hide_credits_without_flag",
+        "codex-tui status::tests::status_snapshot_includes_credits_and_limits",
+        "codex-tui status::tests::status_snapshot_includes_enterprise_monthly_credit_limit",
+        "codex-tui status::tests::status_snapshot_includes_forked_from",
+        "codex-tui status::tests::status_snapshot_includes_monthly_limit",
+        "codex-tui status::tests::status_snapshot_includes_reasoning_details",
+        "codex-tui status::tests::status_snapshot_shows_active_user_defined_profile",
+        "codex-tui status::tests::status_snapshot_shows_auto_review_permissions",
+        "codex-tui status::tests::status_snapshot_shows_chatgpt_plan_without_email",
+        "codex-tui status::tests::status_snapshot_shows_missing_limits_message",
+        "codex-tui status::tests::status_snapshot_shows_refreshing_limits_notice",
+        "codex-tui status::tests::status_snapshot_shows_stale_limits_message",
+        "codex-tui status::tests::status_snapshot_shows_unavailable_limits_message",
+        "codex-tui status::tests::status_snapshot_treats_refreshing_empty_limits_as_unavailable",
+        "codex-tui status::tests::status_snapshot_uses_default_reasoning_when_config_empty",
+        "codex-tui status::tests::status_snapshot_uses_generic_limit_labels_for_unsupported_windows",
+        "codex-tui status::tests::status_snapshot_wraps_halfwidth_kana_in_narrow_terminal",
+        "codex-tui status::tests::status_snapshot_wraps_in_narrow_terminal",
+        "codex-tui status::tests::status_uses_server_provider_id_and_auth_requirement",
+        "codex-tui status::tests::transcript_overlay_remeasures_status_after_rate_limit_refresh",
+        "codex-tui update_prompt::tests::long_update_command_keeps_selected_skip_visible_in_a_short_viewport",
+        "codex-tui update_prompt::tests::update_prompt_snapshot"
+      ]
+    }
+  },
+  "newOrRepairedTestSelectors": [
+    "codex-app-server request_processors::native_selection_processor::tests::terminal_and_started_receipts_share_the_bounded_capacity",
+    "codex-app-server request_processors::native_selection_processor::tests::terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery",
+    "codex-app-server request_processors::native_selection_processor::tests::terminal_no_start_replays_and_lookup_requires_the_exact_request",
+    "codex-app-server request_processors::native_selection_processor::tests::terminal_no_start_wire_status_is_distinct_from_call_refusal",
+    "codex-app-server request_processors::native_selection_processor::tests::terminal_refusal_and_core_commit_arbitrate_on_the_receipt_lock",
+    "codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt",
+    "codex-tui app::selection_witness::bridge::tests::native_terminal_receipt_requires_replay_and_canonical_uuid",
+    "codex-tui app::selection_witness::bridge::tests::terminal_no_start_replay_is_stable_and_fresh_attempt_needs_a_new_permit"
+  ],
+  "sourceStage": "Causal and package tests completed before the two lint-only just-fix rewrites; final binary qualified separately."
+}

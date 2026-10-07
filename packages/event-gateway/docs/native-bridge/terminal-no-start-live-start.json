@@ -1,0 +1,16 @@
+{
+  "exactReceiptRecovered": true,
+  "mockModelRequests": 2,
+  "outcome": "started",
+  "primaryModelRequests": 1,
+  "qualification": "synthetic-native-start",
+  "realModelCalls": 0,
+  "threadId": "01a114c5-8b68-7bf2-a6bc-aa61d983aae0",
+  "titleModelRequests": 1,
+  "turnId": "071d82cc-5b53-4e96-823b-cdc7009ccf40",
+  "unknownModelRequests": 0,
+  "binarySha256": "116b8a07327aca819844b1e1da012a075772e8681822cf161b39b14fbd12cd90",
+  "patchSha256": "ff636007ae00fc7c65d99f28384ffe32def696d26f66e2ff998df0928d18262e",
+  "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "productionNativeEnabled": false
+}

@@ -63,6 +63,9 @@ proves non-submission.
 
 ## Terminal no-start settlement
 
+The [terminal no-start checkpoint](native-bridge/terminal-no-start-checkpoint.md)
+records the cumulative patch, final binary and native-only synthetic evidence.
+
 The follow-up patch records terminal no-start outcomes under the same lock as
 committed starts. `terminalNotStarted` carries a retained UUID and exact replay
 identity; an ordinary `notStarted` response carries no settlement authority.
