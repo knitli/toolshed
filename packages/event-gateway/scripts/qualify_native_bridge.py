@@ -351,6 +351,16 @@ class NativeBridge:
                     and type(outcome["replayed"]) is bool
                 )
                 require(operation == "start" or outcome["replayed"])
+            elif outcome.get("status") == "inputRecorded":
+                require(
+                    operation == "receipt"
+                    and set(outcome) == {"status", "turnId", "itemId", "replayed"}
+                    and uuid(outcome["turnId"])
+                    and outcome["turnId"] == request["clientUserMessageId"]
+                    and uuid(outcome["itemId"])
+                    and outcome["itemId"] != request["clientUserMessageId"]
+                    and outcome["replayed"] is True
+                )
             elif outcome.get("status") == "terminalNotStarted":
                 require(
                     set(outcome) == {"status", "reason", "receiptId", "replayed"}
@@ -556,8 +566,54 @@ def qualify_terminal_retry(bridge, server, process, witness):
     }
 
 
-def qualify(binary, *, terminal_retry=False):
+def qualify_input_recorded(bridge, server, process, witness):
+    """Core input observation is native-only; Started remains registration only."""
+    request = synthetic_request(witness)
+    try:
+        require(bridge.start(request)["status"] == "started")
+        deadline = time.monotonic() + 10
+        while True:
+            require(process.poll() is None and time.monotonic() < deadline)
+            recorded = bridge.receipt(request)
+            if recorded["status"] == "inputRecorded":
+                break
+            require(recorded["status"] == "started")
+            time.sleep(0.05)
+        deadline = time.monotonic() + 10
+        while not server.request_counts["primary"] and time.monotonic() < deadline:
+            time.sleep(0.01)
+        busy = bridge.challenge()
+        require(busy["eligible"] is False)
+        # Read-only recovery needs neither a fresh lease nor a live permit.
+        deadline = time.monotonic() + 10
+        while time.time_ns() // 1_000_000 <= request["permitExpiresAt"]:
+            require(process.poll() is None and time.monotonic() < deadline)
+            time.sleep(0.05)
+        require(bridge.receipt(request) == recorded)
+        require(bridge.receipt(request) == recorded)
+        require(server.request_counts["primary"] == 1
+                and server.request_counts["title"] <= 1
+                and server.request_counts["unknown"] == 0
+                and server.model_requests == sum(server.request_counts.values())
+                and process.poll() is None)
+        return {
+            "qualification": "synthetic-native-input-recorded", "nativeOnly": True,
+            "cloudSettlementProven": False, "outcome": recorded["status"],
+            "turnId": recorded["turnId"], "itemId": recorded["itemId"],
+            "threadId": witness["threadId"], "exactReceiptRecovered": True,
+            "recoveredWhileIneligibleAfterPermitExpiry": True,
+            "mockModelRequests": server.model_requests,
+            "primaryModelRequests": server.request_counts["primary"],
+            "titleModelRequests": server.request_counts["title"],
+            "unknownModelRequests": server.request_counts["unknown"], "realModelCalls": 0,
+        }
+    finally:
+        server.release_primary.set()
+
+
+def qualify(binary, *, terminal_retry=False, input_recorded=False):
     """Launch only a disposable TUI; never inherit auth, configuration, or proxy settings."""
+    require(not (terminal_retry and input_recorded))
     binary = Path(binary).resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="native-qualification-") as directory:
         root = Path(directory)
@@ -569,7 +625,7 @@ def qualify(binary, *, terminal_retry=False):
         server = ThreadingHTTPServer(("127.0.0.1", 0), MockModel)
         server.model_requests = 0
         server.request_counts = {"primary": 0, "title": 0, "unknown": 0}
-        if terminal_retry:
+        if terminal_retry or input_recorded:
             server.release_primary = threading.Event()
         threading.Thread(target=server.serve_forever, daemon=True).start()
         parent, child = socket.socketpair()
@@ -654,6 +710,8 @@ def qualify(binary, *, terminal_retry=False):
                 require(process.poll() is None and time.monotonic() < deadline)
                 time.sleep(0.1)
             require(server.model_requests == 0)
+            if input_recorded:
+                return qualify_input_recorded(bridge, server, process, witness)
             if terminal_retry:
                 return qualify_terminal_retry(bridge, server, process, witness)
             request = synthetic_request(witness)
@@ -694,7 +752,7 @@ def qualify(binary, *, terminal_retry=False):
                 "realModelCalls": 0,
             }
         finally:
-            if terminal_retry:
+            if terminal_retry or input_recorded:
                 server.release_primary.set()
             stop.set()
             bridge.close()
@@ -718,11 +776,15 @@ def qualify(binary, *, terminal_retry=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
-    parser.add_argument("--terminal-retry", action="store_true",
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--input-recorded", action="store_true",
+                       help="Prove native Core input observation through read-only receipts")
+    modes.add_argument("--terminal-retry", action="store_true",
                         help="Prove native terminal refusal/retry; does not prove cloud settlement")
     args = parser.parse_args()
     try:
-        print(json.dumps(qualify(args.binary, terminal_retry=args.terminal_retry), sort_keys=True))
+        print(json.dumps(qualify(args.binary, terminal_retry=args.terminal_retry,
+                                 input_recorded=args.input_recorded), sort_keys=True))
     except (BridgeError, OSError, subprocess.SubprocessError):
         print(
             json.dumps(

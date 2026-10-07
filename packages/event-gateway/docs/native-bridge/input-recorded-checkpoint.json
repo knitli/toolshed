@@ -1,0 +1,401 @@
+{
+  "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "rustVersion": "1.95.0",
+  "binarySha256": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
+  "patchSha256": "0aeec9c1e63f867d95f531c65d6ac5b5618b40079028a64b22467af7e856f8da",
+  "sourceFileCount": 42,
+  "cleanPinnedApplyCheck": true,
+  "allPatchedFilesByteMatchSource": true,
+  "historicalArtifactsUnchanged": true,
+  "productionNativeEnabled": false,
+  "ownerClientInstalled": false,
+  "scopedTests": [
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/final-native-receipt-unit.log",
+      "logSha256": "d777fa968a985c55ca06028ba6c426979ad17d07afefcad80a67d0346872d5bd",
+      "name": "native receipt unit tests",
+      "passed": 18,
+      "run": 18,
+      "selector": "codex-app-server request_processors::native_selection_processor::tests",
+      "skipped": 1828,
+      "stage": "before just fix"
+    },
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/final-core-integration-post-uuid.log",
+      "logSha256": "3050d923d377710c3212faa5f77fae59cb7c9f5649b460ceebce622cc5de609e",
+      "name": "actual Core/app-server integration",
+      "passed": 1,
+      "proofType": "actual TestAppServer/Core ItemCompleted event and receipt readback",
+      "run": 1,
+      "selector": "codex-app-server suite::v2::thread_start::native_start_receipt_reports_the_core_recorded_user_message_item",
+      "stage": "before just fix"
+    },
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/start-normalization-green.log",
+      "logSha256": "0ba4cb5578b25b73ed5638f1c9dbf7c5b84a26f8fae12d8dff350f306974af03",
+      "name": "TUI receipt bridge suite after duplicate-Start fix",
+      "passed": 11,
+      "run": 11,
+      "selector": "codex-tui app::selection_witness::bridge::tests",
+      "skipped": 5632,
+      "stage": "before just fix"
+    },
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/final-protocol.log",
+      "logSha256": "f94576bbd3be3b7b6ad5877cd605413af12274902763a0a49cb30b435240272c",
+      "name": "full app-server-protocol package",
+      "passed": 313,
+      "run": 313,
+      "skipped": 1,
+      "stage": "before just fix"
+    },
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/protocol-input-recorded-schema-green.log",
+      "logSha256": "cac3a9039ff1715ce16eba84ab3ec8f9c42522e9973134e51bdffbec5dae9bbf",
+      "name": "experimental schema fixture causal green",
+      "passed": 1,
+      "run": 1,
+      "selector": "codex-app-server-protocol schema_fixtures_tests::experimental_precomputed_exports_match_generated",
+      "skipped": 313,
+      "stage": "before just fix"
+    },
+    {
+      "package": "codex-tui",
+      "selector": "app::selection_witness::bridge::tests",
+      "run": 12,
+      "passed": 12,
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/tui-bridge-12-post-format.log",
+      "logSha256": "02b9c1442e0d86ed3f4e189e377b4d1f809f467e94cd7fbdbe413b313cc7b361",
+      "stage": "after review correction, before scoped just fix"
+    },
+    {
+      "package": "codex-app-server",
+      "selector": "request_processors::native_selection_processor::tests",
+      "run": 18,
+      "passed": 18,
+      "failed": 0,
+      "nextestLeaky": 1,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/app-server-receipt-18-post-format.log",
+      "logSha256": "a612787ecb80e3876923e57fd05037193a294416ce8e6210b0c2eb3107544889",
+      "stage": "after review correction, before scoped just fix"
+    }
+  ],
+  "individualNativeAssertionRedRestoredGreenPairs": 12,
+  "harnessTests": 17,
+  "individualHarnessGuardPairs": 18,
+  "syntheticQualification": {
+    "cloudSettlementProven": false,
+    "exactReceiptRecovered": true,
+    "itemId": "01a11556-61be-7792-a267-e95573366ce1",
+    "mockModelRequests": 2,
+    "nativeOnly": true,
+    "outcome": "inputRecorded",
+    "primaryModelRequests": 1,
+    "qualification": "synthetic-native-input-recorded",
+    "realModelCalls": 0,
+    "recoveredWhileIneligibleAfterPermitExpiry": true,
+    "threadId": "01a11556-60ec-73d2-afff-d56f8a56a087",
+    "titleModelRequests": 1,
+    "turnId": "44b7ef21-4ab1-4427-95b6-340574a1be56",
+    "unknownModelRequests": 0,
+    "evidencePath": "/private/tmp/native-input-recorded-primary-deadline-fix/live-qualification.json",
+    "evidenceSha256": "63f99e3be95d5720fd02a76ad6a98af16946e5c2b18a6fb3d0dea23c3c3c9416"
+  },
+  "proof": "input-recorded-test-proof.json",
+  "harnessProof": "input-recorded-harness-proof.json",
+  "limits": [
+    "The stopped-hook case is a unit simulation where no completion event is emitted; no actual Core hook-stop runtime integration was run.",
+    "The actual positive TestAppServer integration observed the Core-produced UserMessage completion and recovered its generated item ID.",
+    "No persisted-history fallback or restart recovery was claimed; loss of the in-memory native receipt remains Unknown.",
+    "No full workspace suite was rerun; the prior attempt failed before tests because system GLib metadata was absent.",
+    "Cloud settlement, production activation, owner client install, and real model calls are not established by this synthetic proof.",
+    "Initial causal pairs precede two clone-only test lint edits; review-fix 12 TUI/18 receipt tests precede its just fix, which made no source edits. Protocol and actual Core integration are prior successful runs with unchanged protocol/Core observer source."
+  ],
+  "harnessFocusedTests": {
+    "passed": 17,
+    "failed": 0,
+    "selector": "test_native_bridge.NativeBridgeTests",
+    "stage": "after independent primary-request deadline correction",
+    "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/qualifier-tests.log",
+    "logSha256": "a7ce1abc505dfc087754d40313ad47d1ce6eee98888be59ba0a536ec171ac9e9"
+  },
+  "priorCandidate": {
+    "binarySha256": "6ae0cb3accb4dedfcd5963d04ccfe61e65cd1795bec86e5f02aff696e72f1e8c",
+    "patchSha256": "fdf8807f88bc70898d83e0a2a0c89ba1d2deeac7dd46f28e6c50cbd698720e03",
+    "stage": "Initial candidate before PR45 poll-failure review correction; preserved binary and Git history"
+  },
+  "initialRequiredJustFix": {
+    "generatedAtUtc": "2026-10-07T06:38:50.896196+00:00",
+    "postFixExport": {
+      "allPatchedFilesByteMatchManifest": true,
+      "fileCount": 42,
+      "manifestPath": "/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/docs/native-bridge/input-recorded-source-manifest.json",
+      "manifestSha256": "86c32e708e196a867421beffcd92019af23b4f3f21596c9a8d2f77c482d22ab9",
+      "patchPath": "/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/docs/native-bridge/input-recorded-codex-v0.160.0.patch",
+      "patchSha256": "fdf8807f88bc70898d83e0a2a0c89ba1d2deeac7dd46f28e6c50cbd698720e03",
+      "sourceRevision": "a956835d020762cb2b570053af06f643a11c0ecc",
+      "twoExportedFilesChangedByLintOnlyRewrites": true
+    },
+    "postFixTestsRerun": false,
+    "result": {
+      "command": "/private/tmp/codex-native-selection-spike/tools/bin/just fix -p codex-app-server-protocol -p codex-app-server -p codex-core -p codex-tui",
+      "environment": {
+        "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+        "cargoNextestAvailable": "0.9.128",
+        "just": "1.40.0",
+        "offline": true,
+        "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+      },
+      "exportedLintOnlyRewrites": [
+        {
+          "afterSha256": "972678a47f714bf35c1eedd51bc75c07491ce03d8f5eee532121d16c1b6b504a",
+          "beforeSha256": "95a9dcfd8de44672d8b8bff033d92feabd145037a137aed7cbcd415a15508add",
+          "change": "Removed unnecessary final params.clone() before mutating the final identity candidate.",
+          "path": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs"
+        },
+        {
+          "afterSha256": "602b553cb0b9b6415c3a2ddd643e6e358c89a61a7b91552be33060cc6081772e",
+          "beforeSha256": "caf416054cf7c0890be6fe7a135be2c839664c08dd29d9432ae3198ce67da91d",
+          "change": "Removed unnecessary item_id.clone() when constructing the final invalid-receipt candidate.",
+          "path": "codex-rs/tui/src/app/selection_bridge_tests.rs"
+        }
+      ],
+      "postFixTestsRerun": false,
+      "remainingNonFixableWarnings": [
+        {
+          "lint": "clippy::type_complexity",
+          "path": "codex-rs/app-server/src/thread_state.rs:361",
+          "status": "warning; no auto-fix applied"
+        },
+        {
+          "lint": "await_holding_lock",
+          "path": "codex-rs/core/src/session/turn_input_tests.rs:255",
+          "status": "warning emitted for existing test; no auto-fix applied"
+        }
+      ],
+      "requiredBy": {
+        "lines": "70-71",
+        "path": "/private/tmp/codex-native-input-observation-spike/source/AGENTS.md",
+        "requirement": "Before finalizing a large codex-rs change run just fix -p <project>; do not rerun tests after fix/fmt."
+      },
+      "result": {
+        "exitCode": 0,
+        "logPath": "/private/tmp/codex-native-input-observation-spike/observer-scoped-fix-escalated.log",
+        "logSha256": "0c7f6e7f92b601dee1c1ed77909ef0492c109d43b547cdea9fb0220193de32b7"
+      },
+      "sandboxRetry": {
+        "firstAttemptExitCode": 101,
+        "reason": "Sandbox denied Cargo local lock-listener bind (EPERM).",
+        "retry": "Same offline package-scoped command with local socket access; no network, installs, or dependency changes."
+      },
+      "testRerunReason": "AGENTS.md says not to re-run tests after fix or fmt. The successful focused test evidence below predates these two clone-only test rewrites.",
+      "unrelatedAutoFixesReverted": [
+        "codex-rs/core/src/tools/registry.rs",
+        "codex-rs/core/tests/suite/openai_file_mcp.rs",
+        "codex-rs/core/tests/suite/scenarios.rs",
+        "codex-rs/Cargo.lock"
+      ]
+    },
+    "schemaVersion": 1
+  },
+  "requiredJustFix": {
+    "command": "just fix -p codex-tui --profile dev-small --offline",
+    "exitCode": 0,
+    "escalatedForLocalCargoLockSocket": true,
+    "sourceChanges": 0,
+    "warnings": [
+      "pre-existing codex-core unused import",
+      "pre-existing codex-tui test unnecessary_literal_unwrap"
+    ],
+    "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/just-fix-escalated.log",
+    "logSha256": "f04bf125227ac79fd62d62a399194e67ddfd86638223b08c881f038fb48ba3d6"
+  },
+  "reviewCorrection": {
+    "finding": {
+      "pr": "https://github.com/knitli/toolshed/pull/45",
+      "reviewedHead": "bb49271b1df0709f5703abcc20578c76de91ef49",
+      "finding": "If exact read-only native receipt lookup fails, Operation::Receipt returned Unknown despite retaining exact cached Started evidence.",
+      "scope": "One response could be downgraded; local Started remains and a later receipt lookup can retry. No blind start/replay occurred."
+    },
+    "source": {
+      "root": "/private/tmp/codex-native-input-observation-spike/source/codex-rs",
+      "pinnedUpstreamHead": "a956835d020762cb2b570053af06f643a11c0ecc",
+      "files": {
+        "tui/src/app/selection_bridge.rs": "39c4eb7c91e35ad5cc6b81e785269e2ef9618932a158a9da931c1c593086eaf5",
+        "tui/src/app/selection_bridge_tests.rs": "524b65a876bad880c28700c9ac46b4a932d22d1b0fdf00da7a009543f9302dc4"
+      },
+      "behavior": "Continue the read-only receipt lookup. Only when its outcome is Unknown, return an exact cached Started with replayed=true; successful InputRecorded or terminal receipts take precedence. No Start RPC is added."
+    },
+    "causalTest": {
+      "selector": "codex-tui app::selection_witness::bridge::tests::receipt_lookup_failure_preserves_exact_cached_started",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/receipt-start-fallback-red.log",
+        "logSha256": "e77a77805b9377674f5fbe9f9a1926174de8aa09787b2133ee96f89ae69c8d55"
+      },
+      "green": {
+        "exitCode": 0,
+        "passed": 1,
+        "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/receipt-start-fallback-green.log",
+        "logSha256": "1af63ed7b66abb3e33429a208ee73fd1792629f2fd92c442d6990327489a511c"
+      }
+    },
+    "focusedSuites": [
+      {
+        "package": "codex-tui",
+        "selector": "app::selection_witness::bridge::tests",
+        "run": 12,
+        "passed": 12,
+        "failed": 0,
+        "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/tui-bridge-12-post-format.log",
+        "logSha256": "02b9c1442e0d86ed3f4e189e377b4d1f809f467e94cd7fbdbe413b313cc7b361"
+      },
+      {
+        "package": "codex-app-server",
+        "selector": "request_processors::native_selection_processor::tests",
+        "run": 18,
+        "passed": 18,
+        "failed": 0,
+        "nextestLeaky": 1,
+        "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/app-server-receipt-18-post-format.log",
+        "logSha256": "a612787ecb80e3876923e57fd05037193a294416ce8e6210b0c2eb3107544889"
+      }
+    ],
+    "protocolTests": "Not rerun; no protocol/schema files changed by this patch.",
+    "format": {
+      "rustfmtCheck": "pass",
+      "gitDiffCheck": "pass",
+      "trailingWhitespaceCheck": "pass"
+    },
+    "justFix": {
+      "command": "just fix -p codex-tui --profile dev-small --offline",
+      "exitCode": 0,
+      "escalatedForLocalCargoLockSocket": true,
+      "sourceChanges": 0,
+      "warnings": [
+        "pre-existing codex-core unused import",
+        "pre-existing codex-tui test unnecessary_literal_unwrap"
+      ],
+      "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/just-fix-escalated.log",
+      "logSha256": "f04bf125227ac79fd62d62a399194e67ddfd86638223b08c881f038fb48ba3d6"
+    },
+    "build": {
+      "command": "cargo build --offline -p codex-cli --bin codex --profile dev-small",
+      "toolchain": "rustc 1.95.0 (59807616e 2026-04-14)",
+      "exitCode": 0,
+      "buildLogPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/observer-cli-build.log",
+      "buildLogSha256": "773d2b5622a2118bd612fe92597c9d080bd274aa1717c0ec35450fb023b404fa",
+      "candidatePath": "/private/tmp/codex-native-input-observation-spike/codex-native-input-observer-bin-pr45-p2-fallback",
+      "candidateSha256": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
+      "candidateMode": "0o555",
+      "candidateSize": 389375744
+    },
+    "postFixTestsRerun": false,
+    "cargoLock": {
+      "buildResolutionChurnRestoredToHead": true,
+      "restoredSha256": "5553f06583159ed64666b6eb4beea3154e06b612e6312528131bdc226a6a860c"
+    },
+    "exportedOrPushed": false,
+    "manualReviewRequest": false
+  },
+  "reviewCorrectionAudit": {
+    "result": "No concrete P1/P2; exact cache identity, read-only polling and stronger receipt precedence verified",
+    "reportSha256": "2b06d64f313b99e6e149a341c01a8b2048656578941418862bdcb3d2f1ee51ea"
+  },
+  "expiryDeadlineCorrection": {
+    "behavior": "The permit-expiry wait now owns a fresh monotonic deadline after earlier receipt and primary-request phases.",
+    "test": "test_input_recorded_expiry_wait_has_independent_deadline",
+    "scenario": "A backward realtime adjustment leaves the permit unexpired while monotonic elapsed time has already consumed eight seconds of the prior budget.",
+    "red": {
+      "exitCode": 1,
+      "kind": "assertion",
+      "logPath": "/private/tmp/native-input-recorded-deadline-fix/deadline-isolation-red.log",
+      "logSha256": "95fca0ed83e62bc39b54e7edca0b2f7f37793c9498aefc8ad0d9e8f3444d0b57"
+    },
+    "green": {
+      "exitCode": 0,
+      "logPath": "/private/tmp/native-input-recorded-deadline-fix/deadline-isolation-green.log",
+      "logSha256": "1d4fad0683dd1ec2e239feb14f2ba2f65fae8c20a579fc92ed5eb8e0ab951c58"
+    },
+    "ruff": {
+      "tool": "ruff 0.16.10",
+      "command": "ruff check src tests scripts",
+      "passed": true,
+      "logPath": "/private/tmp/native-input-recorded-deadline-fix/ruff.log",
+      "logSha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "nativePatchChanged": false,
+    "updatedAtUtc": "2026-10-07T07:34:15+00:00",
+    "liveQualification": {
+      "path": "/private/tmp/native-input-recorded-deadline-fix/live-qualification.json",
+      "sha256": "0df6c5b2cb56c3033626b6f5ca256ff3b283d247f4779acbf6f2a5ee9a6cbb5a",
+      "logPath": "/private/tmp/native-input-recorded-deadline-fix/live-qualification.log",
+      "logSha256": "f1264442066de6974265280e21bfcc0e855300cbdfb0ced66776aa78aa222f5a",
+      "gitHead": "438d9739bc558a8c7808768f588706561a4f7a54",
+      "qualifierScriptSha256": "10944a16bcdad3af48528f1c174adef1fab3cecca2073b372ccc92d5db8ddb6c",
+      "testFileSha256": "986516515ec6854779fa7a3cce645033e0a9e080ea4aa0ea6de9faf0eb441448",
+      "nativePatchSha256": "0aeec9c1e63f867d95f531c65d6ac5b5618b40079028a64b22467af7e856f8da",
+      "binaryPath": "/private/tmp/codex-native-input-observation-spike/codex-native-input-observer-bin-pr45-p2-fallback",
+      "binarySha256Before": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
+      "binarySha256After": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
+      "nativeBinaryRebuilt": false,
+      "outcome": "inputRecorded",
+      "exactReceiptRecovered": true,
+      "recoveredWhileIneligibleAfterPermitExpiry": true,
+      "primaryModelRequests": 1,
+      "titleModelRequests": 1,
+      "unknownModelRequests": 0,
+      "realModelCalls": 0
+    }
+  },
+  "primaryWaitDeadlineCorrection": {
+    "behavior": "The wait for the mock primary request now owns its own fresh 10-second monotonic deadline after InputRecorded is observed.",
+    "test": "test_input_recorded_primary_wait_has_independent_deadline",
+    "scenario": "The first receipt lookup returns InputRecorded at monotonic 10.1s, after the original 10s budget; the mock primary request arrives only when the subsequent wait advances time. A fresh phase budget must wait for the request before challenging eligibility.",
+    "red": {
+      "exitCode": 1,
+      "kind": "assertion",
+      "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/primary-deadline-red.log",
+      "logSha256": "5cb24ddb5db81c81b3e7f91102ca6baa784811ec7194ebb634d5eedf0230706a"
+    },
+    "green": {
+      "exitCode": 0,
+      "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/primary-deadline-green.log",
+      "logSha256": "2d4cdaa0dbd29885484c205ce14ca83ab10aadfafd878db94ee46d669ba85067"
+    },
+    "focusedTests": {
+      "passed": 17,
+      "failed": 0,
+      "selector": "test_native_bridge.NativeBridgeTests",
+      "stage": "after independent primary-request deadline correction",
+      "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/qualifier-tests.log",
+      "logSha256": "a7ce1abc505dfc087754d40313ad47d1ce6eee98888be59ba0a536ec171ac9e9"
+    },
+    "ruff": {
+      "tool": "ruff 0.16.10",
+      "command": "ruff check src tests scripts",
+      "passed": true,
+      "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/ruff.log",
+      "logSha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "qualifierScriptSha256": "a91a33276c89035ea1e57f02170a2bb31eae5724adc6e10c597e48c335d94e31",
+    "testFileSha256": "6e11a2363e9700e202d98845a4df0f8e6271a38ef324bb4678d4b1ed2f05551c",
+    "nativePatchChanged": false,
+    "nativeBinaryRebuilt": false,
+    "binarySha256": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
+    "liveQualification": {
+      "path": "/private/tmp/native-input-recorded-primary-deadline-fix/live-qualification.json",
+      "sha256": "63f99e3be95d5720fd02a76ad6a98af16946e5c2b18a6fb3d0dea23c3c3c9416",
+      "logPath": "/private/tmp/native-input-recorded-primary-deadline-fix/live-qualification.log",
+      "logSha256": "ed7882e43666f16cd5ebb8157e3d6f74189fc2fadca6aa8e0ef019ab585d0bf2"
+    },
+    "updatedAtUtc": "2026-10-07T07:50:33+00:00"
+  }
+}

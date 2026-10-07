@@ -114,6 +114,11 @@ authorized full workspace attempt stops at missing macOS GLib, and the separate
 code-mode helper cannot download its pinned V8 artifact (HTTP 404). The checkpoint
 records those limits; this is not a green full-workspace result.
 
+The separate [input-recording checkpoint](native-bridge/input-recorded-checkpoint.md)
+proves that an actual Core user-message event can produce a fully bound, read-only
+receipt with its generated item ID. It preserves `started` for registration and
+does not enable production wake or infer observation from start alone.
+
 After terminal no-start settlement spans native/local/cloud, coupled qualification
 and an authorized manual canary can proceed. Mesh delivery and three-session
 acceptance remain later gates.
