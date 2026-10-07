@@ -1,0 +1,321 @@
+{
+  "scope": "Isolated production sabotage; no model or live traffic",
+  "distinctTests": 12,
+  "mutationPairs": 14,
+  "assertionRed": 14,
+  "restoredGreen": 14,
+  "excludedCompileAttempts": 1,
+  "results": [
+    {
+      "test": "stale_native_ack_cannot_publish_eligibility",
+      "file": "selection_binding.rs",
+      "productionMutation": {
+        "from": "response.status == ClientSelectionUpdateStatus::Updated\n                && response.ready",
+        "to": "response.ready"
+      },
+      "assertion": "stale acknowledgment must not qualify native selection",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "stale_native_ack_cannot_publish_eligibility"
+      ],
+      "productionSourceSha256": "2eb6f70169b00e61492d0426528c3eb6962688ac8f6732de82520c2ad998cb25"
+    },
+    {
+      "test": "binding_deadline_is_measured_from_request_send",
+      "file": "selection_binding.rs",
+      "productionMutation": {
+        "from": "response.lease_ms.min(750)",
+        "to": "response.lease_ms.min(15_000)"
+      },
+      "assertion": "native eligibility cannot exceed the 750ms local deadline",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "binding_deadline_is_measured_from_request_send"
+      ],
+      "productionSourceSha256": "2eb6f70169b00e61492d0426528c3eb6962688ac8f6732de82520c2ad998cb25"
+    },
+    {
+      "test": "event_metadata_obeys_pinned_source_and_subject_bounds",
+      "file": "selection_bridge.rs",
+      "productionMutation": {
+        "from": "_ => false,",
+        "to": "_ => true,"
+      },
+      "assertion": "source and canonical subject must agree",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "event_metadata_obeys_pinned_source_and_subject_bounds"
+      ],
+      "productionSourceSha256": "d97f4d05aa6b68145ff8de9041ddba8b85b58bb70c4e27adbbf68f28e92b98f1"
+    },
+    {
+      "test": "attempt_ledger_preserves_unknown_and_exact_receipt",
+      "file": "selection_bridge.rs",
+      "productionMutation": {
+        "from": "self.0.push((event.clone(), Outcome::Unknown));",
+        "to": "self.0.push((event.clone(), Outcome::NotStarted { reason: Reason::Busy }));"
+      },
+      "assertion": "reserve must record unknown before RPC send",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "attempt_ledger_preserves_unknown_and_exact_receipt"
+      ],
+      "productionSourceSha256": "d97f4d05aa6b68145ff8de9041ddba8b85b58bb70c4e27adbbf68f28e92b98f1"
+    },
+    {
+      "test": "event_requires_the_observed_local_and_server_generations",
+      "file": "selection_bridge.rs",
+      "productionMutation": {
+        "from": "self.generation == witness.state.generation",
+        "to": "self.generation <= witness.state.generation"
+      },
+      "assertion": "stale local selection generation must not reach native start",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "event_requires_the_observed_local_and_server_generations"
+      ],
+      "productionSourceSha256": "d97f4d05aa6b68145ff8de9041ddba8b85b58bb70c4e27adbbf68f28e92b98f1"
+    },
+    {
+      "test": "fragmented_challenge_survives_state_burst",
+      "file": "selection_witness.rs",
+      "productionMutation": {
+        "from": "if newline.is_none() {\n            return Ok(());\n        }",
+        "to": "if newline.is_none() {\n            return Err(TransportFailure {stage: \"mutant\", error: io::Error::from(io::ErrorKind::InvalidData)});\n        }"
+      },
+      "assertion": "fragmented challenge must remain open",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "fragmented_challenge_survives_state_burst"
+      ],
+      "productionSourceSha256": "c83d3448b45978caf1c4684b11ad82438534c35ba248371ebd293a4bc9ab7b4b"
+    },
+    {
+      "test": "replayed_challenge_revokes_channel",
+      "file": "selection_witness.rs",
+      "productionMutation": {
+        "from": "if challenge.nonce <= self.last_nonce {",
+        "to": "if challenge.nonce < self.last_nonce {"
+      },
+      "assertion": "replayed challenge must close capability",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "replayed_challenge_revokes_channel"
+      ],
+      "productionSourceSha256": "c83d3448b45978caf1c4684b11ad82438534c35ba248371ebd293a4bc9ab7b4b"
+    },
+    {
+      "test": "pending_write_retains_partial_bytes_on_backpressure",
+      "file": "selection_witness.rs",
+      "productionMutation": {
+        "from": "io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted",
+        "to": "io::ErrorKind::Interrupted"
+      },
+      "assertion": "temporary backpressure must retain pending response",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "pending_write_retains_partial_bytes_on_backpressure"
+      ],
+      "productionSourceSha256": "c83d3448b45978caf1c4684b11ad82438534c35ba248371ebd293a4bc9ab7b4b"
+    },
+    {
+      "test": "write_failure_retains_exact_os_error",
+      "file": "selection_witness.rs",
+      "productionMutation": {
+        "from": "Err(error) => Err(error),",
+        "to": "Err(error) => Err(io::Error::from(error.kind())),"
+      },
+      "assertion": "diagnostics must retain exact errno",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "write_failure_retains_exact_os_error"
+      ],
+      "productionSourceSha256": "c83d3448b45978caf1c4684b11ad82438534c35ba248371ebd293a4bc9ab7b4b"
+    },
+    {
+      "test": "expired_pending_response_closes_instead_of_renewing",
+      "file": "selection_witness.rs",
+      "productionMutation": {
+        "from": "if pending.created.elapsed() >= Duration::from_millis(/*millis*/ 750) {",
+        "to": "if pending.created.elapsed() >= Duration::from_millis(/*millis*/ u64::MAX) {"
+      },
+      "assertion": "expired pending response must close capability",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "expired_pending_response_closes_instead_of_renewing"
+      ],
+      "productionSourceSha256": "c83d3448b45978caf1c4684b11ad82438534c35ba248371ebd293a4bc9ab7b4b"
+    },
+    {
+      "test": "attempt_ledger_preserves_unknown_and_exact_receipt",
+      "file": "selection_bridge.rs",
+      "productionMutation": {
+        "from": "replayed: true,",
+        "to": "replayed: false,"
+      },
+      "assertion": "cached receipt must report a replay without another start",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "attempt_ledger_preserves_unknown_and_exact_receipt"
+      ],
+      "productionSourceSha256": "d97f4d05aa6b68145ff8de9041ddba8b85b58bb70c4e27adbbf68f28e92b98f1"
+    },
+    {
+      "test": "receipt_lookup_preserves_local_attempt_identity",
+      "file": "selection_bridge.rs",
+      "productionMutation": {
+        "from": ".any(|(old, _)| old == event)",
+        "to": ".any(|(old, _)| old.attempt_id == event.attempt_id)"
+      },
+      "assertion": "changed local receipt identity must not reach native lookup",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "receipt_lookup_preserves_local_attempt_identity"
+      ],
+      "productionSourceSha256": "4137ec1dc4be3278dc14a641c9b441791ae5d6a1b192eed390781a1d5d61ed59"
+    },
+    {
+      "test": "native_receipt_must_explicitly_be_replayed",
+      "file": "selection_bridge.rs",
+      "productionMutation": {
+        "from": "replayed: true,\n        } => Outcome::Started",
+        "to": "replayed: _,\n        } => Outcome::Started"
+      },
+      "assertion": "unreplayed native receipt must remain unknown",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "native_receipt_must_explicitly_be_replayed"
+      ],
+      "productionSourceSha256": "4137ec1dc4be3278dc14a641c9b441791ae5d6a1b192eed390781a1d5d61ed59"
+    },
+    {
+      "test": "native_receipt_must_explicitly_be_replayed",
+      "file": "selection_bridge.rs",
+      "productionMutation": {
+        "from": "if turn_id != expected_turn_id",
+        "to": "if false && turn_id != expected_turn_id"
+      },
+      "assertion": "wrong native turn identity must remain unknown",
+      "redExit": 100,
+      "greenExit": 0,
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "native_receipt_must_explicitly_be_replayed"
+      ],
+      "productionSourceSha256": "a259ddc544081d76cbe8bdd2785df1c5147ada015b2208ab54f0de5aeb685344"
+    }
+  ],
+  "finalRestoredSourceSha256": {
+    "selection_bridge.rs": "17de0cd4caccbc9e5df57e2b3ec3cc1442fd41e1dbbb0ba200eecd27a74fff00",
+    "selection_bridge_tests.rs": "65405d64c146c50a5944de94883c3bd9554de9c583c18ef96346074d9df236e2"
+  },
+  "finalRestoredValidation": {
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-tui",
+      "--cargo-profile",
+      "dev-small",
+      "selection_witness::bridge::tests"
+    ],
+    "summary": "Summary [   0.054s] 5 tests run: 5 passed, 5628 skipped",
+    "exit": 0
+  }
+}

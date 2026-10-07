@@ -1,0 +1,2245 @@
+diff --git a/codex-rs/Cargo.lock b/codex-rs/Cargo.lock
+index 19885ae..baab9c0 100644
+--- a/codex-rs/Cargo.lock
++++ b/codex-rs/Cargo.lock
+@@ -268,7 +268,7 @@ checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
+ 
+ [[package]]
+ name = "app_test_support"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -1893,7 +1893,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-agent-extension"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-core",
+@@ -1905,7 +1905,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-agent-graph-store"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-state",
+@@ -1920,7 +1920,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-agent-identity"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -1940,7 +1940,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-agent-message-board-client"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -1960,7 +1960,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-agent-message-board-extension"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "base64 0.22.1",
+  "caseless",
+@@ -1983,7 +1983,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-agent-roles"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-config",
+  "codex-file-system",
+@@ -1996,7 +1996,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-analytics"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-app-server-protocol",
+  "codex-git-utils",
+@@ -2018,7 +2018,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-ansi-escape"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "ansi-to-tui",
+  "ratatui",
+@@ -2027,7 +2027,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-api"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "assert_matches",
+@@ -2065,7 +2065,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-app-server"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -2177,7 +2177,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-app-server-client"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-app-server",
+  "codex-app-server-protocol",
+@@ -2204,7 +2204,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-app-server-daemon"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "blake3",
+@@ -2229,7 +2229,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-app-server-protocol"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-app-server-protocol-noop-macros",
+@@ -2263,11 +2263,11 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-app-server-protocol-noop-macros"
+-version = "0.0.0"
++version = "0.160.0"
+ 
+ [[package]]
+ name = "codex-app-server-test-client"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2289,7 +2289,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-app-server-transport"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "axum",
+  "base64 0.22.1",
+@@ -2331,7 +2331,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-apply-patch"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",
+@@ -2351,7 +2351,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-arg0"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-apply-patch",
+@@ -2374,7 +2374,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-async-utils"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "pretty_assertions",
+  "rand 0.9.3",
+@@ -2384,7 +2384,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-attachment-store"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "pretty_assertions",
+  "serde",
+@@ -2394,7 +2394,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-aws-auth"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "aws-config",
+  "aws-credential-types",
+@@ -2420,7 +2420,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-backend-client"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-api",
+@@ -2440,7 +2440,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-backend-openapi-models"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "serde",
+  "serde_json",
+@@ -2449,7 +2449,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-build-info"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-install-context",
+  "pretty_assertions",
+@@ -2462,7 +2462,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-bwrap"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "cc",
+  "libc",
+@@ -2471,7 +2471,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-chatgpt"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2493,7 +2493,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-cli"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -2594,7 +2594,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-client"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-http-client",
+  "eventsource-stream",
+@@ -2608,7 +2608,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-cloud-config"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "base64 0.22.1",
+  "chrono",
+@@ -2634,7 +2634,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-cloud-tasks"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -2667,7 +2667,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-cloud-tasks-client"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -2682,7 +2682,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-cloud-tasks-mock-client"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "chrono",
+  "codex-cloud-tasks-client",
+@@ -2691,7 +2691,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-code-mode"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-code-mode-protocol",
+  "codex-http-client",
+@@ -2714,7 +2714,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-code-mode-host"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -2743,7 +2743,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-code-mode-protocol"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-protocol",
+  "glob",
+@@ -2761,7 +2761,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-code-mode-runtime"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-code-mode-protocol",
+@@ -2779,11 +2779,11 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-collaboration-mode-templates"
+-version = "0.0.0"
++version = "0.160.0"
+ 
+ [[package]]
+ name = "codex-config"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -2833,7 +2833,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-config-schema"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2842,7 +2842,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-connectors"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -2864,7 +2864,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-connectors-extension"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-connectors",
+  "codex-core-plugins",
+@@ -2878,7 +2878,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-context-fragments"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-string",
+@@ -2888,7 +2888,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-core"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -3026,7 +3026,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-core-api"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-analytics",
+  "codex-app-server-protocol",
+@@ -3049,7 +3049,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-core-plugin-common"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "semver",
+@@ -3060,7 +3060,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-core-plugins"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3116,7 +3116,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-diagnostics"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "libc",
+  "pretty_assertions",
+@@ -3124,7 +3124,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-exec"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",
+@@ -3176,7 +3176,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-exec-server"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -3244,7 +3244,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-exec-server-protocol"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-file-system",
+@@ -3260,7 +3260,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-exec-server-test-support"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-exec-server",
+@@ -3275,7 +3275,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-execpolicy"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -3293,7 +3293,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-experimental-api-macros"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+@@ -3302,7 +3302,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-extension-api"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-api",
+  "codex-config",
+@@ -3324,7 +3324,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-extension-items"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "pretty_assertions",
+@@ -3336,7 +3336,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-external-agent-migration"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "chrono",
+  "codex-analytics",
+@@ -3366,7 +3366,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-features"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-network-proxy",
+  "codex-protocol",
+@@ -3379,7 +3379,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-feedback"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "bytes",
+@@ -3404,7 +3404,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-file-search"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -3420,7 +3420,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-file-system"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "bytes",
+  "codex-protocol",
+@@ -3432,7 +3432,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-file-watcher"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "notify",
+  "pretty_assertions",
+@@ -3443,7 +3443,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-git-attribution"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-backend-client",
+  "codex-extension-api",
+@@ -3456,7 +3456,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-git-utils"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3483,7 +3483,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-goal-extension"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3508,7 +3508,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-guardian-context"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-context-fragments",
+  "codex-history",
+@@ -3519,7 +3519,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-guardian-reviewer"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-analytics",
+@@ -3544,7 +3544,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-guardian-v2"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-analytics",
+@@ -3580,7 +3580,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-history"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-protocol",
+@@ -3592,7 +3592,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-history-notes-extension"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-analytics",
+  "codex-client",
+@@ -3617,7 +3617,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-home"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-extension-api",
+  "codex-utils-absolute-path",
+@@ -3629,7 +3629,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-hooks"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "async-channel",
+@@ -3657,7 +3657,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-http-client"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "bytes",
+  "codex-utils-cargo-bin",
+@@ -3693,7 +3693,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-image-generation-extension"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-api",
+@@ -3721,7 +3721,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-install-context"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "codex-utils-home-dir",
+@@ -3734,7 +3734,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-keyring-store"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "keyring",
+  "pretty_assertions",
+@@ -3745,7 +3745,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-linux-sandbox"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "clap",
+  "codex-core",
+@@ -3773,7 +3773,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-lmstudio"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-core",
+  "codex-http-client",
+@@ -3787,7 +3787,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-login"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -3831,7 +3831,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-mcp"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -3871,7 +3871,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-mcp-extension"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -3904,7 +3904,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-memories-extension"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-core",
+  "codex-extension-api",
+@@ -3926,7 +3926,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-memories-read"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-shell-command",
+@@ -3936,7 +3936,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-memories-write"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3973,7 +3973,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-mermaid"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "insta",
+  "pretty_assertions",
+@@ -3982,7 +3982,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-message-history"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-config",
+  "memchr",
+@@ -3996,7 +3996,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-model-provider"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "base64 0.22.1",
+  "chrono",
+@@ -4029,7 +4029,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-model-provider-info"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-client",
+  "codex-protocol",
+@@ -4047,7 +4047,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-models-manager"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "chrono",
+  "codex-http-client",
+@@ -4066,7 +4066,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-mxc-sandbox"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "appcontainer_common",
+@@ -4088,7 +4088,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-network-proxy"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -4137,7 +4137,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-ollama"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "assert_matches",
+  "async-stream",
+@@ -4157,7 +4157,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-otel"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "bytes",
+  "chrono",
+@@ -4194,7 +4194,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-otel-trace-websocket"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -4205,7 +4205,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-plugin"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-config",
+  "codex-core-plugin-common",
+@@ -4220,7 +4220,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-process-hardening"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "libc",
+  "pretty_assertions",
+@@ -4228,7 +4228,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-prompts"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-collaboration-mode-templates",
+@@ -4245,7 +4245,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-protocol"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "chardetng",
+@@ -4289,7 +4289,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-queue-extension"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-core",
+@@ -4310,7 +4310,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-realtime-webrtc"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-build-info",
+@@ -4328,7 +4328,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-response-debug-context"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-api",
+@@ -4339,7 +4339,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-responses-api-proxy"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -4356,7 +4356,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-rmcp-client"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -4405,7 +4405,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-rollout"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -4433,7 +4433,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-rollout-trace"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-code-mode",
+@@ -4449,7 +4449,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-sandboxing"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-mxc-sandbox",
+@@ -4476,7 +4476,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-secrets"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "age",
+  "anyhow",
+@@ -4497,7 +4497,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-shell-command"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -4520,7 +4520,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-shell-escalation"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -4540,7 +4540,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-skills"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-shell-command",
+@@ -4557,7 +4557,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-skills-extension"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "assert_matches",
+  "blake3",
+@@ -4594,7 +4594,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-state"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -4620,7 +4620,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-stdio-to-uds"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-uds",
+@@ -4632,7 +4632,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-tcp-tunnel"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "bytes",
+@@ -4653,7 +4653,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-terminal-detection"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "pretty_assertions",
+  "tracing",
+@@ -4661,7 +4661,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-test-binary-support"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-arg0",
+  "tempfile",
+@@ -4669,7 +4669,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-thread-manager-sample"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -4680,7 +4680,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-thread-store"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "chrono",
+  "codex-app-server-protocol",
+@@ -4711,7 +4711,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-tools"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "bitflags 2.13.1",
+  "codex-code-mode",
+@@ -4737,7 +4737,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-tui"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -4863,7 +4863,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-uds"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "async-io",
+  "libc",
+@@ -4877,7 +4877,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-user-verification"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "base64 0.22.1",
+  "core-foundation 0.10.1",
+@@ -4897,7 +4897,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-absolute-path"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "dirs",
+  "dunce",
+@@ -4911,14 +4911,14 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-approval-presets"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-protocol",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-audio"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-protocol",
+@@ -4932,7 +4932,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-cache"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "lru",
+  "sha1 0.10.6",
+@@ -4941,7 +4941,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-cargo-bin"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "assert_cmd",
+  "runfiles",
+@@ -4950,7 +4950,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-cli"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "clap",
+  "codex-protocol",
+@@ -4962,15 +4962,15 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-elapsed"
+-version = "0.0.0"
++version = "0.160.0"
+ 
+ [[package]]
+ name = "codex-utils-fuzzy-match"
+-version = "0.0.0"
++version = "0.160.0"
+ 
+ [[package]]
+ name = "codex-utils-git-discovery"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-git-utils",
+  "codex-utils-absolute-path",
+@@ -4983,7 +4983,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-home-dir"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "dirs",
+@@ -4993,7 +4993,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-image"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-utils-cache",
+@@ -5007,7 +5007,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-json-to-toml"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "pretty_assertions",
+  "serde_json",
+@@ -5016,7 +5016,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-oss"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-core",
+  "codex-lmstudio",
+@@ -5026,7 +5026,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-output-truncation"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-string",
+@@ -5035,7 +5035,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-path"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "dunce",
+@@ -5046,7 +5046,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-path-uri"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-utils-absolute-path",
+@@ -5062,7 +5062,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-plugins"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-exec-server",
+  "codex-exec-server-protocol",
+@@ -5076,7 +5076,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-process"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "pretty_assertions",
+  "tokio",
+@@ -5084,7 +5084,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-pty"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "ctor 0.6.3",
+@@ -5102,7 +5102,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-readiness"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "assert_matches",
+  "thiserror 2.0.18",
+@@ -5112,7 +5112,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-redacted-string"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "schemars 0.8.22",
+  "serde",
+@@ -5120,14 +5120,14 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-rustls-provider"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "rustls",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-sandbox-summary"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-absolute-path",
+@@ -5137,7 +5137,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-sleep-inhibitor"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "core-foundation 0.9.4",
+  "libc",
+@@ -5147,14 +5147,14 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-stream-parser"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "pretty_assertions",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-string"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "pretty_assertions",
+  "regex-lite",
+@@ -5164,14 +5164,14 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-utils-template"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "pretty_assertions",
+ ]
+ 
+ [[package]]
+ name = "codex-v8-poc"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "pretty_assertions",
+  "v8",
+@@ -5179,7 +5179,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-voice-host"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-install-context",
+@@ -5206,7 +5206,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-web-search-extension"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-api",
+  "codex-core",
+@@ -5228,7 +5228,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-websocket-auth"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -5247,7 +5247,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-websocket-client"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-http-client",
+  "codex-utils-rustls-provider",
+@@ -5263,7 +5263,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-windows-sandbox"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -5291,7 +5291,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-windows-sandbox-service"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-cloud-config",
+@@ -5308,7 +5308,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-workload-identity"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "codex-http-client",
+  "pretty_assertions",
+@@ -5323,7 +5323,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "codex-worktree"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "codex-git-utils",
+@@ -5563,7 +5563,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "core_test_support"
+-version = "0.0.0"
++version = "0.160.0"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",
+diff --git a/codex-rs/tui/src/app.rs b/codex-rs/tui/src/app.rs
+index 37b5c78..02d3389 100644
+--- a/codex-rs/tui/src/app.rs
++++ b/codex-rs/tui/src/app.rs
+@@ -256,6 +256,7 @@ mod safety_buffering;
+ mod server_version_notice;
+ mod session_lifecycle;
+ mod session_picker;
++mod selection_witness;
+ mod side;
+ mod startup;
+ mod startup_prompts;
+diff --git a/codex-rs/tui/src/app/startup.rs b/codex-rs/tui/src/app/startup.rs
+index 37add4b..3766afc 100644
+--- a/codex-rs/tui/src/app/startup.rs
++++ b/codex-rs/tui/src/app/startup.rs
+@@ -1065,10 +1065,17 @@ See the Codex keymap documentation for supported actions and examples."
+         #[cfg(debug_assertions)]
+         let pre_loop_exit_reason: Option<ExitReason> = None;
+ 
++        let mut selection_witness = super::selection_witness::SelectionWitness::from_env();
++        selection_witness.connected(&app_server).await;
++        let mut selection_heartbeat = tokio::time::interval(selection_witness.poll_interval());
++        selection_heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+         let exit_reason_result = if let Some(exit_reason) = pre_loop_exit_reason {
+             Ok(exit_reason)
+         } else {
+             loop {
++                if !app.selection_witness_ready() {
++                    selection_witness.revoke("pending-transition");
++                }
+                 // Reconnect can dismiss an overlay from the server-event path.
+                 if app.overlay.is_none() {
+                     if !tui.is_owned_screen() && tui.is_alt_screen_active() {
+@@ -1146,8 +1153,24 @@ See the Codex keymap documentation for supported actions and examples."
+                     .chat_widget
+                     .rate_limit_refresh_interval()
+                     .and_then(|interval| app.rate_limit_refresh_state.poll_deadline(interval));
++                selection_witness.publish(
++                    app.active_thread_id,
++                    app.selection_witness_ready()
++                        && reconnect.is_none()
++                        && !has_pending_app_events
++                        && !block_terminal_input_for_pending_startup_events
++                        && !waiting_for_initial_session_configured
++                        && !waiting_for_initial_session_header
++                        && pending_startup_draft.is_none()
++                        && !pending_startup_submission,
++                );
+                 let control = select! {
++                    _ = selection_heartbeat.tick() => {
++                        selection_witness.emit("heartbeat");
++                        AppRunControl::Continue
++                    }
+                     Some(event) = app_event_rx.recv() => {
++                        selection_witness.revoke("app-event");
+                         let is_initial_session_header = matches!(
+                             &event,
+                             AppEvent::InsertHistoryCell(cell)
+@@ -1182,6 +1205,7 @@ See the Codex keymap documentation for supported actions and examples."
+                         waiting_for_initial_session_configured,
+                         app.active_thread_rx.is_some()
+                     ) && !has_pending_app_events && !app.reconnect.offline => {
++                        selection_witness.revoke("thread-event");
+                         if let Some(event) = active {
+                             if let Err(err) = app.handle_active_thread_event(tui, &mut app_server, event).await {
+                                 break Err(err);
+@@ -1193,6 +1217,7 @@ See the Codex keymap documentation for supported actions and examples."
+                     }
+                     event = tui_events.next(), if app.pending_thread_switch_resets == 0
+                         && (app.reconnect.offline || !block_terminal_input_for_pending_startup_events) => {
++                        selection_witness.revoke("tui-event");
+                         if let Some(event) = event {
+                             if (matches!(
+                                 &event,
+@@ -1226,6 +1251,7 @@ See the Codex keymap documentation for supported actions and examples."
+                     }
+                     app_server_event = app_server.next_event(), if listen_for_app_server_events && !app.reconnect.offline
+                         && (matches!(app.app_server_target, AppServerTarget::Embedded) || !has_pending_app_events) => {
++                        selection_witness.revoke("server-event");
+                         match app_server_event {
+                             Some(event) => app.handle_app_server_event(&app_server, event).await,
+                             None => {
+@@ -1237,10 +1263,12 @@ See the Codex keymap documentation for supported actions and examples."
+                         AppRunControl::Continue
+                     }
+                     result = async { match reconnect.as_mut() { Some(future) => future.await, None => std::future::pending().await } }, if reconnect.is_some() && !has_pending_app_events => {
++                        selection_witness.revoke("reconnect");
+                         reconnect = None;
+                         match result {
+                             Ok(connected) => {
+                                 app.finish_reconnect(tui, &mut app_server, &mut app_event_rx, connected, CODEX_CLI_VERSION).await?;
++                                selection_witness.connected(&app_server).await;
+                                 listen_for_app_server_events = true;
+                                 waiting_for_initial_session_configured = false;
+                             }
+@@ -1263,6 +1291,7 @@ See the Codex keymap documentation for supported actions and examples."
+                             None => std::future::pending().await,
+                         }
+                     }, if listen_for_app_server_events => {
++                        selection_witness.revoke("rate-limit-event");
+                         app.refresh_rate_limits(&app_server, RateLimitRefreshOrigin::Periodic);
+                         AppRunControl::Continue
+                     }
+@@ -1274,6 +1303,7 @@ See the Codex keymap documentation for supported actions and examples."
+                             None => std::future::pending().await,
+                         }
+                     } => {
++                        selection_witness.revoke("title-event");
+                         app.chat_widget.refresh_goal_status_indicator_for_time_tick();
+                         app.chat_widget.refresh_thread_title_progress_for_time_tick();
+                         app.chat_widget.refresh_terminal_title();
+@@ -1287,6 +1317,7 @@ See the Codex keymap documentation for supported actions and examples."
+                             None => std::future::pending().await,
+                         }
+                     }, if !has_pending_app_events => {
++                        selection_witness.revoke("commit-event");
+                         crate::session_log::log_commit_tick();
+                         app.chat_widget.on_commit_tick();
+                         AppRunControl::Continue
+@@ -1298,6 +1329,7 @@ See the Codex keymap documentation for supported actions and examples."
+                 ) {
+                     waiting_for_initial_session_configured = false;
+                     let had_active_modal = app.chat_widget.has_active_modal();
++                    selection_witness.revoke("startup-drain");
+                     if let Err(err) = app.drain_active_thread_events(tui).await {
+                         break Err(err);
+                     }
+@@ -1332,6 +1364,7 @@ See the Codex keymap documentation for supported actions and examples."
+                 }
+             }
+         };
++        selection_witness.revoke("shutdown");
+         if let Err(err) = app_server.shutdown().await {
+             tracing::warn!(error = %err, "failed to shut down embedded app server");
+         }
+diff --git a/codex-rs/tui/src/chatwidget/input_restore.rs b/codex-rs/tui/src/chatwidget/input_restore.rs
+index e1a798b..c18fbbf 100644
+--- a/codex-rs/tui/src/chatwidget/input_restore.rs
++++ b/codex-rs/tui/src/chatwidget/input_restore.rs
+@@ -99,6 +99,15 @@ impl ChatWidget {
+         crate::startup_recovery::handed_off(|| self.bottom_pane.composer_recovery_snapshot());
+     }
+ 
++    pub(crate) fn selection_witness_ready(&self) -> bool {
++        self.is_session_configured()
++            && !self.blocks_direct_input
++            && self.bottom_pane.composer_input_enabled()
++            && self.no_modal_or_popup_active()
++            && !self.shortcut_overlay_visible()
++            && !self.has_pending_protected_request()
++    }
++
+     /// Includes protected prompts deferred by streaming or the approval idle timer.
+     pub(crate) fn has_pending_protected_request(&self) -> bool {
+         self.bottom_pane.has_pending_approval() || self.interrupts.has_pending_prompt()
+diff --git a/codex-rs/tui/src/app/selection_witness.rs b/codex-rs/tui/src/app/selection_witness.rs
+new file mode 100644
+index 0000000..495dd88
+--- /dev/null
++++ b/codex-rs/tui/src/app/selection_witness.rs
+@@ -0,0 +1,438 @@
++//! Unix-only private launcher/TUI observation capability, not daemon or execution authority.
++//! Only the UI loop answers challenges; hostile same-user processes are out of scope.
++
++use super::*;
++use serde::Serialize;
++use std::io::{self, Read, Write};
++use std::os::fd::{AsRawFd, FromRawFd};
++use std::os::unix::net::UnixStream;
++use uuid::Uuid;
++
++#[derive(Serialize)]
++#[serde(rename_all = "camelCase")]
++struct SelectionState {
++    client_id: Uuid,
++    backend_pid: Option<u32>,
++    connection_id: Option<Uuid>,
++    thread_id: Option<ThreadId>,
++    generation: u64,
++    eligible: bool,
++    sequence: u64,
++    cause: &'static str,
++}
++
++impl SelectionState {
++    fn new() -> Self {
++        Self {
++            client_id: Uuid::new_v4(),
++            backend_pid: None,
++            connection_id: None,
++            thread_id: None,
++            generation: 0,
++            eligible: false,
++            sequence: 0,
++            cause: "startup",
++        }
++    }
++
++    fn select(&mut self, thread: Option<ThreadId>, ready: bool) -> bool {
++        let eligible = ready && thread.is_some() && self.backend_pid.is_some();
++        if self.thread_id == thread && self.eligible == eligible {
++            return false;
++        }
++        self.generation += 1;
++        self.thread_id = thread;
++        self.eligible = eligible;
++        true
++    }
++
++    fn expire_after_loop_gap(&mut self, elapsed: Duration) -> bool {
++        if elapsed >= Duration::from_millis(/*millis*/ 750) {
++            return self.select(self.thread_id, false);
++        }
++        false
++    }
++
++    fn connected(&mut self, pid: Option<u32>) {
++        self.generation += 1;
++        self.backend_pid = pid;
++        self.connection_id = Some(Uuid::new_v4());
++        self.eligible = false;
++    }
++}
++
++#[derive(serde::Deserialize)]
++#[serde(deny_unknown_fields)]
++struct Challenge {
++    nonce: u64,
++}
++
++#[derive(Serialize)]
++struct Response<'a> {
++    version: u8,
++    nonce: u64,
++    #[serde(flatten)]
++    selection: &'a SelectionState,
++}
++
++struct PendingWrite {
++    bytes: Vec<u8>,
++    offset: usize,
++    created: Instant,
++}
++
++impl PendingWrite {
++    fn flush(&mut self, writer: &mut impl Write) -> io::Result<bool> {
++        match writer.write(&self.bytes[self.offset..]) {
++            Ok(0) => Err(io::Error::from(io::ErrorKind::WriteZero)),
++            Ok(count) => {
++                self.offset += count;
++                Ok(self.offset == self.bytes.len())
++            }
++            Err(error)
++                if matches!(
++                    error.kind(),
++                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
++                ) =>
++            {
++                Ok(false)
++            }
++            Err(error) => Err(error),
++        }
++    }
++}
++
++struct TransportFailure {
++    stage: &'static str,
++    error: io::Error,
++}
++
++struct Transport {
++    stream: UnixStream,
++    input: Vec<u8>,
++    pending: Option<PendingWrite>,
++    last_nonce: u64,
++}
++
++impl Transport {
++    fn from_inherited_fd(fd: i32) -> io::Result<Self> {
++        if fd < 3 || unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
++            return Err(io::Error::from(io::ErrorKind::InvalidInput));
++        }
++        // The launcher transfers this endpoint only to its intended child. Taking ownership
++        // and setting CLOEXEC prevents later exec children from inheriting the capability.
++        let stream = unsafe { UnixStream::from_raw_fd(fd) };
++        let flags = unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_GETFD) };
++        if unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_SETFD, flags | libc::FD_CLOEXEC) } == -1
++        {
++            return Err(io::Error::last_os_error());
++        }
++        let mut socket_type: libc::c_int = 0;
++        let mut length = std::mem::size_of_val(&socket_type) as libc::socklen_t;
++        if unsafe {
++            libc::getsockopt(
++                stream.as_raw_fd(),
++                libc::SOL_SOCKET,
++                libc::SO_TYPE,
++                (&mut socket_type as *mut libc::c_int).cast(),
++                &mut length,
++            )
++        } == -1
++        {
++            return Err(io::Error::last_os_error());
++        }
++        if socket_type != libc::SOCK_STREAM {
++            return Err(io::Error::from(io::ErrorKind::InvalidInput));
++        }
++        stream.peer_addr()?; // Requires a connected Unix-domain endpoint.
++        validate_peer_uid(&stream)?;
++        stream.set_nonblocking(true)?;
++        Ok(Self {
++            stream,
++            input: Vec::new(),
++            pending: None,
++            last_nonce: 0,
++        })
++    }
++
++    fn poll(&mut self, state: &mut SelectionState) -> Result<(), TransportFailure> {
++        if let Some(pending) = self.pending.as_mut() {
++            if pending.created.elapsed() >= Duration::from_millis(/*millis*/ 750) {
++                return Err(TransportFailure {
++                    stage: "write-deadline",
++                    error: io::Error::from(io::ErrorKind::TimedOut),
++                });
++            }
++            if !pending
++                .flush(&mut self.stream)
++                .map_err(|error| TransportFailure {
++                    stage: "write",
++                    error,
++                })?
++            {
++                return Ok(());
++            }
++            self.pending = None;
++        }
++        let mut chunk = [0u8; 128];
++        let count = match self.stream.read(&mut chunk) {
++            Ok(0) => {
++                return Err(TransportFailure {
++                    stage: "read",
++                    error: io::Error::from(io::ErrorKind::UnexpectedEof),
++                });
++            }
++            Ok(count) => count,
++            Err(error)
++                if matches!(
++                    error.kind(),
++                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
++                ) =>
++            {
++                return Ok(());
++            }
++            Err(error) => {
++                return Err(TransportFailure {
++                    stage: "read",
++                    error,
++                });
++            }
++        };
++        self.input.extend_from_slice(&chunk[..count]);
++        let newline = self.input.iter().position(|byte| *byte == b'\n');
++        if self.input.len() > 128
++            || newline.is_some_and(|index| index + 1 != self.input.len())
++            || (self.input.len() == 128 && newline.is_none())
++        {
++            return Err(TransportFailure {
++                stage: "challenge-size",
++                error: io::Error::from(io::ErrorKind::InvalidData),
++            });
++        }
++        if newline.is_none() {
++            return Ok(());
++        }
++        let challenge: Challenge =
++            serde_json::from_slice(&self.input).map_err(|_| TransportFailure {
++                stage: "challenge-json",
++                error: io::Error::from(io::ErrorKind::InvalidData),
++            })?;
++        self.input.clear();
++        if challenge.nonce <= self.last_nonce {
++            return Err(TransportFailure {
++                stage: "challenge-nonce",
++                error: io::Error::from(io::ErrorKind::InvalidData),
++            });
++        }
++        self.last_nonce = challenge.nonce;
++        state.sequence += 1;
++        let mut bytes = serde_json::to_vec(&Response {
++            version: 1,
++            nonce: challenge.nonce,
++            selection: state,
++        })
++        .map_err(|_| TransportFailure {
++            stage: "serialize",
++            error: io::Error::from(io::ErrorKind::InvalidData),
++        })?;
++        bytes.push(b'\n');
++        if bytes.len() > 2048 {
++            return Err(TransportFailure {
++                stage: "response-size",
++                error: io::Error::from(io::ErrorKind::InvalidData),
++            });
++        }
++        let mut pending = PendingWrite {
++            bytes,
++            offset: 0,
++            created: Instant::now(),
++        };
++        if !pending
++            .flush(&mut self.stream)
++            .map_err(|error| TransportFailure {
++                stage: "write",
++                error,
++            })?
++        {
++            self.pending = Some(pending);
++        }
++        Ok(())
++    }
++}
++
++fn validate_peer_uid(stream: &UnixStream) -> io::Result<()> {
++    #[cfg(target_os = "linux")]
++    let peer_uid = {
++        let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
++        let mut length = std::mem::size_of_val(&credentials) as libc::socklen_t;
++        if unsafe {
++            libc::getsockopt(
++                stream.as_raw_fd(),
++                libc::SOL_SOCKET,
++                libc::SO_PEERCRED,
++                (&mut credentials as *mut libc::ucred).cast(),
++                &mut length,
++            )
++        } == -1
++        {
++            return Err(io::Error::last_os_error());
++        }
++        credentials.uid
++    };
++    #[cfg(target_os = "macos")]
++    let peer_uid = {
++        let mut uid = 0;
++        let mut gid = 0;
++        if unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } == -1 {
++            return Err(io::Error::last_os_error());
++        }
++        uid
++    };
++    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
++    return Err(io::Error::from(io::ErrorKind::Unsupported));
++    #[cfg(any(target_os = "linux", target_os = "macos"))]
++    if peer_uid != unsafe { libc::getuid() } {
++        return Err(io::Error::from(io::ErrorKind::PermissionDenied));
++    }
++    Ok(())
++}
++
++pub(super) struct SelectionWitness {
++    transport: Option<Transport>,
++    state: SelectionState,
++    last_poll: Instant,
++}
++
++impl SelectionWitness {
++    pub(super) fn from_env() -> Self {
++        let transport = std::env::var_os("CODEX_SELECTION_WITNESS_FD").and_then(|value| {
++            let result = value.to_str().and_then(|value| value.parse::<i32>().ok())
++                .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))
++                .and_then(Transport::from_inherited_fd);
++            match result {
++                Ok(transport) => Some(transport),
++                Err(error) => {
++                    tracing::warn!(target: "codex_selection_witness", stage = "adopt", error_kind = ?error.kind(), raw_errno = error.raw_os_error(), "native witness unavailable");
++                    None
++                }
++            }
++        });
++        Self {
++            transport,
++            state: SelectionState::new(),
++            last_poll: Instant::now(),
++        }
++    }
++
++    pub(super) fn poll_interval(&self) -> Duration {
++        if self.transport.is_some() {
++            Duration::from_millis(/*millis*/ 25)
++        } else {
++            Duration::from_secs(/*secs*/ 3600)
++        }
++    }
++
++    pub(super) async fn connected(&mut self, server: &AppServerSession) {
++        self.revoke("connecting");
++        if self.transport.is_none() {
++            return;
++        }
++        let handle = server.request_handle();
++        let request = codex_app_server_protocol::ClientRequest::ServerDiagnostics {
++            request_id: codex_app_server_protocol::RequestId::String(format!(
++                "selection-witness-{}",
++                Uuid::new_v4()
++            )),
++            params: codex_app_server_protocol::ServerDiagnosticsParams::default(),
++        };
++        let response: Result<codex_app_server_protocol::ServerDiagnosticsResponse, _> =
++            match tokio::time::timeout(
++                Duration::from_secs(/*secs*/ 2),
++                handle.request_typed(request),
++            )
++            .await
++            {
++                Ok(result) => result,
++                Err(_) => {
++                    self.state.connected(None);
++                    self.emit("diagnostics-timeout");
++                    return;
++                }
++            };
++        self.state
++            .connected(response.ok().map(|response| response.process.id));
++        self.emit("connected");
++    }
++
++    pub(super) fn publish(&mut self, thread: Option<ThreadId>, ready: bool) {
++        if self.state.select(thread, ready) {
++            self.emit("state");
++        }
++    }
++
++    pub(super) fn revoke(&mut self, cause: &'static str) {
++        if self.state.select(self.state.thread_id, false) {
++            self.emit(cause);
++        }
++    }
++
++    pub(super) fn emit(&mut self, cause: &'static str) {
++        let cause = if self.state.expire_after_loop_gap(self.last_poll.elapsed()) {
++            "loop-gap"
++        } else {
++            cause
++        };
++        self.last_poll = Instant::now();
++        self.state.cause = cause;
++        let Some(transport) = self.transport.as_mut() else {
++            return;
++        };
++        if let Err(failure) = transport.poll(&mut self.state) {
++            tracing::warn!(target: "codex_selection_witness", stage = failure.stage, error_kind = ?failure.error.kind(), raw_errno = failure.error.raw_os_error(), sequence = self.state.sequence, generation = self.state.generation, "native witness unavailable");
++            self.state.select(self.state.thread_id, false);
++            self.transport = None;
++        }
++    }
++}
++
++impl Drop for SelectionWitness {
++    fn drop(&mut self) {
++        self.revoke("exit");
++    }
++}
++
++impl App {
++    pub(super) fn selection_witness_ready(&self) -> bool {
++        self.active_thread_id.is_some_and(|id| {
++            self.chat_widget.thread_id() == Some(id)
++                && self
++                    .thread_event_channels
++                    .get(&id)
++                    .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::Live)
++        }) && self
++            .active_thread_rx
++            .as_ref()
++            .is_some_and(tokio::sync::mpsc::Receiver::is_empty)
++            && self.chat_widget.selection_witness_ready()
++            && self.overlay.is_none()
++            && !self.reconnect.offline
++            && !self.reconnect.failed
++            && self.pending_thread_switch_resets == 0
++            && !self.pending_open_resume_picker
++            && self.pending_working_directory_change.is_none()
++            && self.pending_start_managed_worktree.is_none()
++            && !self.pending_managed_worktree_creation
++            && self.pending_managed_worktree_created.is_none()
++            && self.pending_managed_worktree_transition.is_none()
++            && self.pending_managed_worktree_attach.is_none()
++            && self.pending_shutdown_exit_thread_id.is_none()
++            && !self.pending_startup_thread_start
++            && !self.startup_pending_protected_request
++            && !self.has_queued_startup_protected_request()
++            && self.pending_primary_events.is_empty()
++    }
++}
++
++#[cfg(test)]
++#[path = "selection_witness_tests.rs"]
++mod tests;
+diff --git a/codex-rs/tui/src/app/selection_witness_tests.rs b/codex-rs/tui/src/app/selection_witness_tests.rs
+new file mode 100644
+index 0000000..25efea7
+--- /dev/null
++++ b/codex-rs/tui/src/app/selection_witness_tests.rs
+@@ -0,0 +1,224 @@
++use super::*;
++
++#[test]
++fn delayed_loop_revokes_before_renewal() {
++    let mut state = SelectionState::new();
++    let thread = Some(ThreadId::new());
++    state.connected(Some(123));
++    state.select(thread, true);
++    let selected = state.generation;
++    assert!(!state.expire_after_loop_gap(Duration::from_millis(/*millis*/ 749)));
++    assert!(state.eligible);
++    assert!(
++        state.expire_after_loop_gap(Duration::from_millis(/*millis*/ 750)),
++        "delayed loop must revoke before renewing"
++    );
++    assert!(!state.eligible, "delayed loop must revoke before renewing");
++    assert!(state.generation > selected);
++    let revoked = state.generation;
++    state.select(thread, true);
++    assert!(state.eligible && state.generation > revoked);
++}
++
++#[test]
++fn revocation_and_reconnect_never_reuse_selection_generation() {
++    let mut state = SelectionState::new();
++    let thread = Some(ThreadId::new());
++    state.select(thread, true);
++    assert!(!state.eligible, "no backend identity means unavailable");
++    state.connected(Some(123));
++    let connection = state.connection_id;
++    state.select(thread, true);
++    let selected = state.generation;
++    assert!(state.eligible);
++    state.select(thread, false);
++    assert!(!state.eligible, "revocation must clear eligibility");
++    assert!(state.generation > selected);
++    let revoked = state.generation;
++    state.select(thread, true);
++    assert!(state.eligible && state.generation > revoked);
++    state.connected(Some(123));
++    assert!(
++        !state.eligible,
++        "reconnect never inherits selected authority"
++    );
++    assert_ne!(state.connection_id, connection);
++    state.select(None, true);
++    assert!(!state.eligible, "no selected thread means unavailable");
++}
++
++#[test]
++fn fragmented_challenge_survives_state_burst() {
++    use std::os::fd::IntoRawFd;
++    let (mut parent, child) = UnixStream::pair().expect("private channel");
++    let transport = Transport::from_inherited_fd(child.into_raw_fd()).expect("adopt capability");
++    let flags = unsafe { libc::fcntl(transport.stream.as_raw_fd(), libc::F_GETFD) };
++    assert_ne!(
++        flags & libc::FD_CLOEXEC,
++        0,
++        "descendants must not inherit witness capability"
++    );
++    let mut witness = SelectionWitness {
++        transport: Some(transport),
++        state: SelectionState::new(),
++        last_poll: Instant::now(),
++    };
++    witness.state.connected(Some(123));
++    let thread = Some(ThreadId::new());
++    for _ in 0..10_000 {
++        witness.publish(thread, true);
++        witness.revoke("test-transition");
++    }
++    witness.publish(thread, true);
++    assert!(
++        witness.transport.is_some(),
++        "state bursts cannot exhaust an output queue"
++    );
++    assert_eq!(
++        witness.state.sequence, 0,
++        "no unsolicited heartbeat responses"
++    );
++    parent.write_all(b"{\"no").expect("challenge prefix");
++    witness.emit("poll");
++    assert!(
++        witness.transport.is_some(),
++        "fragmented challenge must remain open"
++    );
++    parent.write_all(b"nce\":1}\n").expect("challenge suffix");
++    witness.emit("poll");
++    let mut response = [0; 2048];
++    parent.set_nonblocking(true).expect("nonblocking parent");
++    let count = parent.read(&mut response).expect("challenge response");
++    let row: serde_json::Value = serde_json::from_slice(&response[..count]).expect("response JSON");
++    assert_eq!(row["nonce"], 1);
++    assert_eq!(row["sequence"], 1);
++    assert_eq!(row["eligible"], true);
++    assert_eq!(row["generation"], witness.state.generation);
++    assert_eq!(
++        row["threadId"],
++        serde_json::json!(thread.map(|id| id.to_string()))
++    );
++}
++
++#[test]
++fn replayed_challenge_revokes_channel() {
++    use std::os::fd::IntoRawFd;
++    let (mut parent, child) = UnixStream::pair().expect("private channel");
++    let transport = Transport::from_inherited_fd(child.into_raw_fd()).expect("adopt capability");
++    let mut witness = SelectionWitness {
++        transport: Some(transport),
++        state: SelectionState::new(),
++        last_poll: Instant::now(),
++    };
++    witness.state.connected(Some(123));
++    witness.publish(Some(ThreadId::new()), true);
++    parent
++        .write_all(b"{\"nonce\":1}\n")
++        .expect("first challenge");
++    witness.emit("poll");
++    assert!(witness.transport.is_some());
++    parent
++        .write_all(b"{\"nonce\":1}\n")
++        .expect("replayed challenge");
++    witness.emit("poll");
++    assert!(
++        witness.transport.is_none(),
++        "replayed challenge must close capability"
++    );
++    assert!(!witness.state.eligible);
++}
++
++#[test]
++fn pending_write_retains_partial_bytes_on_backpressure() {
++    struct PausingWriter {
++        calls: usize,
++        bytes: Vec<u8>,
++    }
++    impl Write for PausingWriter {
++        fn write(&mut self, input: &[u8]) -> io::Result<usize> {
++            self.calls += 1;
++            if self.calls == 2 {
++                return Err(io::Error::from(io::ErrorKind::WouldBlock));
++            }
++            let count = if self.calls == 1 { 3 } else { input.len() };
++            self.bytes.extend_from_slice(&input[..count]);
++            Ok(count)
++        }
++        fn flush(&mut self) -> io::Result<()> {
++            Ok(())
++        }
++    }
++    let bytes = b"response-record\n".to_vec();
++    let mut pending = PendingWrite {
++        bytes: bytes.clone(),
++        offset: 0,
++        created: Instant::now(),
++    };
++    let mut writer = PausingWriter {
++        calls: 0,
++        bytes: Vec::new(),
++    };
++    assert!(!pending.flush(&mut writer).expect("partial write"));
++    assert!(
++        matches!(pending.flush(&mut writer), Ok(false)),
++        "temporary backpressure must retain pending response"
++    );
++    assert_eq!(pending.offset, 3);
++    assert!(pending.flush(&mut writer).expect("completed write"));
++    assert_eq!(
++        writer.bytes, bytes,
++        "partial response must be delivered exactly once"
++    );
++}
++
++#[test]
++fn write_failure_retains_exact_os_error() {
++    struct BrokenWriter;
++    impl Write for BrokenWriter {
++        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
++            Err(io::Error::from_raw_os_error(libc::EPIPE))
++        }
++        fn flush(&mut self) -> io::Result<()> {
++            Ok(())
++        }
++    }
++    let mut pending = PendingWrite {
++        bytes: vec![1],
++        offset: 0,
++        created: Instant::now(),
++    };
++    let error = pending
++        .flush(&mut BrokenWriter)
++        .expect_err("permanent write error");
++    assert_eq!(
++        error.raw_os_error(),
++        Some(libc::EPIPE),
++        "diagnostics must retain exact errno"
++    );
++}
++
++#[test]
++fn expired_pending_response_closes_instead_of_renewing() {
++    use std::os::fd::IntoRawFd;
++    let (_parent, child) = UnixStream::pair().expect("private channel");
++    let mut transport =
++        Transport::from_inherited_fd(child.into_raw_fd()).expect("adopt capability");
++    transport.pending = Some(PendingWrite {
++        bytes: b"stale-response\n".to_vec(),
++        offset: 1,
++        created: Instant::now() - Duration::from_millis(/*millis*/ 750),
++    });
++    let mut witness = SelectionWitness {
++        transport: Some(transport),
++        state: SelectionState::new(),
++        last_poll: Instant::now(),
++    };
++    witness.state.connected(Some(123));
++    witness.state.select(Some(ThreadId::new()), true);
++    witness.emit("poll");
++    assert!(
++        witness.transport.is_none(),
++        "expired pending response must close capability"
++    );
++    assert!(!witness.state.eligible);
++}

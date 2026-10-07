@@ -1,0 +1,206 @@
+{
+  "scope": "Isolated production mutation proof; subprocess/local Unix socket fixtures; no model or live traffic",
+  "toolchain": "1.95.0-aarch64-apple-darwin",
+  "baselineTestsPassed": 4,
+  "mutationPairs": 8,
+  "assertionRed": 8,
+  "restoredGreen": 8,
+  "excludedFixtureBaselineAttempts": 2,
+  "results": [
+    {
+      "mutation": "cloexec",
+      "test": "early_adoption_excludes_exec_children_and_hands_off_once",
+      "file": "codex-rs/tui/src/inherited_bridge.rs",
+      "productionMutation": {
+        "from": "flags | libc::FD_CLOEXEC",
+        "to": "flags & !libc::FD_CLOEXEC"
+      },
+      "assertion": "exec descendants must not inherit the bridge descriptor before TUI startup",
+      "redExit": 100,
+      "greenExit": 0,
+      "restoredSourceSha256": "a2d6fadea1f5058ea9072cf65f65212162a83ed00a63e64cac1b956f95782d25",
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "early_adoption_excludes_exec_children_and_hands_off_once"
+      ]
+    },
+    {
+      "mutation": "environment",
+      "test": "early_adoption_excludes_exec_children_and_hands_off_once",
+      "file": "codex-rs/tui/src/inherited_bridge.rs",
+      "productionMutation": {
+        "from": "std::env::remove_var(NATIVE_FD);",
+        "to": "// mutation: native marker retained"
+      },
+      "assertion": "exec descendants must not inherit stale bridge environment markers",
+      "redExit": 100,
+      "greenExit": 0,
+      "restoredSourceSha256": "a2d6fadea1f5058ea9072cf65f65212162a83ed00a63e64cac1b956f95782d25",
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "early_adoption_excludes_exec_children_and_hands_off_once"
+      ]
+    },
+    {
+      "mutation": "handoff",
+      "test": "early_adoption_excludes_exec_children_and_hands_off_once",
+      "file": "codex-rs/tui/src/inherited_bridge.rs",
+      "productionMutation": {
+        "from": "adopted.stream.take()",
+        "to": "adopted.stream.as_ref().and_then(|s| s.try_clone().ok())"
+      },
+      "assertion": "the retained endpoint must be consumed once",
+      "redExit": 100,
+      "greenExit": 0,
+      "restoredSourceSha256": "a2d6fadea1f5058ea9072cf65f65212162a83ed00a63e64cac1b956f95782d25",
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "early_adoption_excludes_exec_children_and_hands_off_once"
+      ]
+    },
+    {
+      "mutation": "ambiguous",
+      "test": "ambiguous_entry_adoption_closes_once_and_never_reopens_a_reused_fd",
+      "file": "codex-rs/tui/src/inherited_bridge.rs",
+      "productionMutation": {
+        "from": "if invalid || ambiguous {",
+        "to": "if invalid {"
+      },
+      "assertion": "two bridge modes must fail closed",
+      "redExit": 100,
+      "greenExit": 0,
+      "restoredSourceSha256": "a2d6fadea1f5058ea9072cf65f65212162a83ed00a63e64cac1b956f95782d25",
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "ambiguous_entry_adoption_closes_once_and_never_reopens_a_reused_fd"
+      ]
+    },
+    {
+      "mutation": "drop",
+      "test": "early_startup_failure_drops_the_unconsumed_endpoint",
+      "file": "codex-rs/tui/src/inherited_bridge.rs",
+      "productionMutation": {
+        "from": "if self.owns_slot",
+        "to": "if false && self.owns_slot"
+      },
+      "assertion": "startup failure must close the unconsumed bridge endpoint",
+      "redExit": 100,
+      "greenExit": 0,
+      "restoredSourceSha256": "a2d6fadea1f5058ea9072cf65f65212162a83ed00a63e64cac1b956f95782d25",
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "early_startup_failure_drops_the_unconsumed_endpoint"
+      ]
+    },
+    {
+      "mutation": "invalid",
+      "test": "invalid_descriptors_are_not_owned_or_closed",
+      "file": "codex-rs/tui/src/inherited_bridge.rs",
+      "productionMutation": {
+        "from": "    } == -1\n    {\n        return Err(io::Error::last_os_error());\n    }\n    let mut address: libc::sockaddr_storage",
+        "to": "    } == -1\n    {\n        unsafe { libc::close(fd); }\n        return Err(io::Error::last_os_error());\n    }\n    let mut address: libc::sockaddr_storage"
+      },
+      "assertion": "invalid non-socket descriptor must not be closed",
+      "redExit": 100,
+      "greenExit": 0,
+      "restoredSourceSha256": "a2d6fadea1f5058ea9072cf65f65212162a83ed00a63e64cac1b956f95782d25",
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "invalid_descriptors_are_not_owned_or_closed"
+      ]
+    },
+    {
+      "mutation": "library_marker",
+      "test": "early_adoption_excludes_exec_children_and_hands_off_once",
+      "file": "codex-rs/tui/src/inherited_bridge.rs",
+      "productionMutation": {
+        "from": "if std::env::var_os(NATIVE_FD).is_some() || std::env::var_os(OBSERVATION_FD).is_some() {",
+        "to": "if ADOPTED.get().is_none() && (std::env::var_os(NATIVE_FD).is_some() || std::env::var_os(OBSERVATION_FD).is_some()) {"
+      },
+      "assertion": "library bootstrap must reject any leftover bridge marker",
+      "redExit": 100,
+      "greenExit": 0,
+      "restoredSourceSha256": "c764c770c090a7fc88ba1e74337c049cbfc5424db8c132613696a26dbfe2b9ef",
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "early_adoption_excludes_exec_children_and_hands_off_once"
+      ]
+    },
+    {
+      "mutation": "repeat_marker",
+      "test": "early_adoption_excludes_exec_children_and_hands_off_once",
+      "file": "codex-rs/tui/src/inherited_bridge.rs",
+      "productionMutation": {
+        "from": "        ensure_entry_adoption()?;",
+        "to": "        // mutation: accept reintroduced marker"
+      },
+      "assertion": "repeated adoption must reject a newly introduced marker",
+      "redExit": 100,
+      "greenExit": 0,
+      "restoredSourceSha256": "c764c770c090a7fc88ba1e74337c049cbfc5424db8c132613696a26dbfe2b9ef",
+      "command": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--cargo-profile",
+        "dev-small",
+        "early_adoption_excludes_exec_children_and_hands_off_once"
+      ]
+    }
+  ],
+  "finalRestoredSourceSha256": {
+    "codex-rs/tui/src/inherited_bridge.rs": "c764c770c090a7fc88ba1e74337c049cbfc5424db8c132613696a26dbfe2b9ef",
+    "codex-rs/tui/src/app/selection_witness.rs": "63a90373728990cee2178f51dc0f5ac7306598fba3a43f1ebe48ff9d077bc1a8",
+    "codex-rs/tui/src/app/selection_adoption_tests.rs": "5c432b4e7ac233549b0455e7e2aef3ec6f0944ff97c71850ed45ee1441ada196"
+  },
+  "finalBaselineSummary": "Summary [   0.588s] 4 tests run: 4 passed, 5633 skipped",
+  "finalRestoredValidation": {
+    "summary": "Summary [   0.483s] 4 tests run: 4 passed, 5633 skipped",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-tui",
+      "--cargo-profile",
+      "dev-small",
+      "selection_witness::adoption_tests"
+    ],
+    "exit": 0
+  }
+}

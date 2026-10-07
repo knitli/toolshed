@@ -1,0 +1,40 @@
+{
+  "sourcePin": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "sourcePreparation": "Isolated clean baseline plus authorized normalized Cargo.lock; separate target directory",
+  "toolchain": "1.95.0-aarch64-apple-darwin",
+  "platform": "macOS aarch64",
+  "patchedScopedSummary": "Summary [   1.504s] 62 tests run: 60 passed, 2 failed, 1 skipped",
+  "sandboxedBaselineSummary": "Summary [   0.031s] 2 tests run: 0 passed, 2 failed, 54 skipped",
+  "escalatedBaselineSummary": "Summary [   0.015s] 2 tests run: 2 passed, 54 skipped",
+  "cause": "Filesystem sandbox denies shell reopening inherited pipe through /dev/fd; fixture children exit 1 before writing sentinel",
+  "directControl": {
+    "operation": "/bin/sh printf to /dev/fd/<inherited-pipe>",
+    "sandboxed": {
+      "exit": 1,
+      "stderr": "/bin/sh: /dev/fd/4: Operation not permitted"
+    },
+    "escalated": {
+      "exit": 0,
+      "stderr": ""
+    }
+  },
+  "scopeLimit": "Escalated pass is on clean baseline, not a patched-source rerun; changed PTY helper code is cfg(target_os = linux) and excluded on this host",
+  "results": [
+    {
+      "test": "tests::pipe_spawn_no_stdin_can_preserve_inherited_fds",
+      "patchSandboxed": "FAIL",
+      "baselineSandboxed": "FAIL",
+      "sameFailureSignature": true,
+      "baselineEscalated": "PASS",
+      "assertion": "assertion failed: `(left == right)`: expected preserved-fd pipe child to exit cleanly\n\nDiff < left / right > :\n<1\n>0"
+    },
+    {
+      "test": "tests::pty_spawn_can_preserve_inherited_fds",
+      "patchSandboxed": "FAIL",
+      "baselineSandboxed": "FAIL",
+      "sameFailureSignature": true,
+      "baselineEscalated": "PASS",
+      "assertion": "assertion failed: `(left == right)`: expected preserved-fd PTY child to exit cleanly\n\nDiff < left / right > :\n<1\n>0"
+    }
+  ]
+}

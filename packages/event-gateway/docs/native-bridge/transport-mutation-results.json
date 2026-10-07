@@ -1,0 +1,52 @@
+[
+  {
+    "test": "fragmented_challenge_survives_state_burst",
+    "productionMutation": {
+      "from": "if newline.is_none() {\n            return Ok(());\n        }",
+      "to": "if newline.is_none() {\n            return Err(TransportFailure {stage: \"mutant\", error: io::Error::from(io::ErrorKind::InvalidData)});\n        }"
+    },
+    "assertion": "fragmented challenge must remain open",
+    "redExit": 100,
+    "greenExit": 0
+  },
+  {
+    "test": "replayed_challenge_revokes_channel",
+    "productionMutation": {
+      "from": "if challenge.nonce <= self.last_nonce {",
+      "to": "if challenge.nonce < self.last_nonce {"
+    },
+    "assertion": "replayed challenge must close capability",
+    "redExit": 100,
+    "greenExit": 0
+  },
+  {
+    "test": "pending_write_retains_partial_bytes_on_backpressure",
+    "productionMutation": {
+      "from": "io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted",
+      "to": "io::ErrorKind::Interrupted"
+    },
+    "assertion": "temporary backpressure must retain pending response",
+    "redExit": 100,
+    "greenExit": 0
+  },
+  {
+    "test": "write_failure_retains_exact_os_error",
+    "productionMutation": {
+      "from": "Err(error) => Err(error),",
+      "to": "Err(error) => Err(io::Error::from(error.kind())),"
+    },
+    "assertion": "diagnostics must retain exact errno",
+    "redExit": 100,
+    "greenExit": 0
+  },
+  {
+    "test": "expired_pending_response_closes_instead_of_renewing",
+    "productionMutation": {
+      "from": "if pending.created.elapsed() >= Duration::from_millis(/*millis*/ 750) {",
+      "to": "if pending.created.elapsed() >= Duration::from_millis(/*millis*/ u64::MAX) {"
+    },
+    "assertion": "expired pending response must close capability",
+    "redExit": 100,
+    "greenExit": 0
+  }
+]

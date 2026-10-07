@@ -1,0 +1,217 @@
+=== stale_native_ack_cannot_publish_eligibility red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.06s
+    thread 'app::selection_witness::binding::tests::stale_native_ack_cannot_publish_eligibility' (11158876) panicked at tui/src/app/selection_binding_tests.rs:20:5:
+    stale acknowledgment must not qualify native selection
+  TRY 2 FAIL [   0.044s] (1/1) codex-tui app::selection_witness::binding::tests::stale_native_ack_cannot_publish_eligibility
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.03s
+    thread 'app::selection_witness::binding::tests::stale_native_ack_cannot_publish_eligibility' (11158950) panicked at tui/src/app/selection_binding_tests.rs:20:5:
+    stale acknowledgment must not qualify native selection
+     Summary [   0.147s] 1 test run: 0 passed, 1 failed, 5630 skipped
+  TRY 2 FAIL [   0.044s] (1/1) codex-tui app::selection_witness::binding::tests::stale_native_ack_cannot_publish_eligibility
+
+=== stale_native_ack_cannot_publish_eligibility green ===
+        PASS [   0.031s] (1/1) codex-tui app::selection_witness::binding::tests::stale_native_ack_cannot_publish_eligibility
+     Summary [   0.085s] 1 test run: 1 passed, 5630 skipped
+
+=== binding_deadline_is_measured_from_request_send red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.06s
+    thread 'app::selection_witness::binding::tests::binding_deadline_is_measured_from_request_send' (11191021) panicked at tui/src/app/selection_binding_tests.rs:41:5:
+    native eligibility cannot exceed the 750ms local deadline
+  TRY 2 FAIL [   0.064s] (1/1) codex-tui app::selection_witness::binding::tests::binding_deadline_is_measured_from_request_send
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.03s
+    thread 'app::selection_witness::binding::tests::binding_deadline_is_measured_from_request_send' (11191026) panicked at tui/src/app/selection_binding_tests.rs:41:5:
+    native eligibility cannot exceed the 750ms local deadline
+     Summary [   0.186s] 1 test run: 0 passed, 1 failed, 5630 skipped
+  TRY 2 FAIL [   0.064s] (1/1) codex-tui app::selection_witness::binding::tests::binding_deadline_is_measured_from_request_send
+
+=== binding_deadline_is_measured_from_request_send green ===
+        PASS [   0.017s] (1/1) codex-tui app::selection_witness::binding::tests::binding_deadline_is_measured_from_request_send
+     Summary [   0.046s] 1 test run: 1 passed, 5630 skipped
+
+=== event_metadata_obeys_pinned_source_and_subject_bounds red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.05s
+    thread 'app::selection_witness::bridge::tests::event_metadata_obeys_pinned_source_and_subject_bounds' (11212029) panicked at tui/src/app/selection_bridge_tests.rs:37:5:
+    source and canonical subject must agree
+  TRY 2 FAIL [   0.039s] (1/1) codex-tui app::selection_witness::bridge::tests::event_metadata_obeys_pinned_source_and_subject_bounds
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.03s
+    thread 'app::selection_witness::bridge::tests::event_metadata_obeys_pinned_source_and_subject_bounds' (11212032) panicked at tui/src/app/selection_bridge_tests.rs:37:5:
+    source and canonical subject must agree
+     Summary [   0.132s] 1 test run: 0 passed, 1 failed, 5630 skipped
+  TRY 2 FAIL [   0.039s] (1/1) codex-tui app::selection_witness::bridge::tests::event_metadata_obeys_pinned_source_and_subject_bounds
+
+=== event_metadata_obeys_pinned_source_and_subject_bounds green ===
+        PASS [   0.018s] (1/1) codex-tui app::selection_witness::bridge::tests::event_metadata_obeys_pinned_source_and_subject_bounds
+     Summary [   0.048s] 1 test run: 1 passed, 5630 skipped
+
+=== attempt_ledger_preserves_unknown_and_exact_receipt red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.05s
+    thread 'app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt' (11227393) panicked at tui/src/app/selection_bridge_tests.rs:55:5:
+    reserve must record unknown before RPC send
+  TRY 2 FAIL [   0.042s] (1/1) codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.03s
+    thread 'app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt' (11227464) panicked at tui/src/app/selection_bridge_tests.rs:55:5:
+    reserve must record unknown before RPC send
+     Summary [   0.138s] 1 test run: 0 passed, 1 failed, 5630 skipped
+  TRY 2 FAIL [   0.042s] (1/1) codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+
+=== attempt_ledger_preserves_unknown_and_exact_receipt green ===
+        PASS [   0.016s] (1/1) codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+     Summary [   0.042s] 1 test run: 1 passed, 5630 skipped
+
+=== event_requires_the_observed_local_and_server_generations red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.05s
+    thread 'app::selection_witness::bridge::tests::event_requires_the_observed_local_and_server_generations' (11246411) panicked at tui/src/app/selection_bridge_tests.rs:114:5:
+    stale local selection generation must not reach native start
+  TRY 2 FAIL [   0.039s] (1/1) codex-tui app::selection_witness::bridge::tests::event_requires_the_observed_local_and_server_generations
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.02s
+    thread 'app::selection_witness::bridge::tests::event_requires_the_observed_local_and_server_generations' (11246418) panicked at tui/src/app/selection_bridge_tests.rs:114:5:
+    stale local selection generation must not reach native start
+     Summary [   0.136s] 1 test run: 0 passed, 1 failed, 5630 skipped
+  TRY 2 FAIL [   0.039s] (1/1) codex-tui app::selection_witness::bridge::tests::event_requires_the_observed_local_and_server_generations
+
+=== event_requires_the_observed_local_and_server_generations green ===
+        PASS [   0.020s] (1/1) codex-tui app::selection_witness::bridge::tests::event_requires_the_observed_local_and_server_generations
+     Summary [   0.049s] 1 test run: 1 passed, 5630 skipped
+
+=== fragmented_challenge_survives_state_burst red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.07s
+    thread 'app::selection_witness::tests::fragmented_challenge_survives_state_burst' (11269124) panicked at tui/src/app/selection_witness_tests.rs:85:5:
+    fragmented challenge must remain open
+  TRY 2 FAIL [   0.061s] (1/1) codex-tui app::selection_witness::tests::fragmented_challenge_survives_state_burst
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.04s
+    thread 'app::selection_witness::tests::fragmented_challenge_survives_state_burst' (11269264) panicked at tui/src/app/selection_witness_tests.rs:85:5:
+    fragmented challenge must remain open
+     Summary [   0.184s] 1 test run: 0 passed, 1 failed, 5630 skipped
+  TRY 2 FAIL [   0.061s] (1/1) codex-tui app::selection_witness::tests::fragmented_challenge_survives_state_burst
+
+=== fragmented_challenge_survives_state_burst green ===
+        PASS [   0.023s] (1/1) codex-tui app::selection_witness::tests::fragmented_challenge_survives_state_burst
+     Summary [   0.048s] 1 test run: 1 passed, 5630 skipped
+
+=== replayed_challenge_revokes_channel red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.06s
+    thread 'app::selection_witness::tests::replayed_challenge_revokes_channel' (11282946) panicked at tui/src/app/selection_witness_tests.rs:128:5:
+    replayed challenge must close capability
+  TRY 2 FAIL [   0.041s] (1/1) codex-tui app::selection_witness::tests::replayed_challenge_revokes_channel
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.03s
+    thread 'app::selection_witness::tests::replayed_challenge_revokes_channel' (11282952) panicked at tui/src/app/selection_witness_tests.rs:128:5:
+    replayed challenge must close capability
+     Summary [   0.147s] 1 test run: 0 passed, 1 failed, 5630 skipped
+  TRY 2 FAIL [   0.041s] (1/1) codex-tui app::selection_witness::tests::replayed_challenge_revokes_channel
+
+=== replayed_challenge_revokes_channel green ===
+        PASS [   0.020s] (1/1) codex-tui app::selection_witness::tests::replayed_challenge_revokes_channel
+     Summary [   0.050s] 1 test run: 1 passed, 5630 skipped
+
+=== pending_write_retains_partial_bytes_on_backpressure red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.05s
+    thread 'app::selection_witness::tests::pending_write_retains_partial_bytes_on_backpressure' (11303199) panicked at tui/src/app/selection_witness_tests.rs:166:5:
+    temporary backpressure must retain pending response
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::tests::pending_write_retains_partial_bytes_on_backpressure
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.02s
+    thread 'app::selection_witness::tests::pending_write_retains_partial_bytes_on_backpressure' (11303202) panicked at tui/src/app/selection_witness_tests.rs:166:5:
+    temporary backpressure must retain pending response
+     Summary [   0.133s] 1 test run: 0 passed, 1 failed, 5630 skipped
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::tests::pending_write_retains_partial_bytes_on_backpressure
+
+=== pending_write_retains_partial_bytes_on_backpressure green ===
+        PASS [   0.015s] (1/1) codex-tui app::selection_witness::tests::pending_write_retains_partial_bytes_on_backpressure
+     Summary [   0.049s] 1 test run: 1 passed, 5630 skipped
+
+=== write_failure_retains_exact_os_error red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.06s
+    thread 'app::selection_witness::tests::write_failure_retains_exact_os_error' (11327017) panicked at tui/src/app/selection_witness_tests.rs:197:5:
+    assertion `left == right` failed: diagnostics must retain exact errno
+  TRY 2 FAIL [   0.045s] (1/1) codex-tui app::selection_witness::tests::write_failure_retains_exact_os_error
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.03s
+    thread 'app::selection_witness::tests::write_failure_retains_exact_os_error' (11327020) panicked at tui/src/app/selection_witness_tests.rs:197:5:
+    assertion `left == right` failed: diagnostics must retain exact errno
+     Summary [   0.144s] 1 test run: 0 passed, 1 failed, 5630 skipped
+  TRY 2 FAIL [   0.045s] (1/1) codex-tui app::selection_witness::tests::write_failure_retains_exact_os_error
+
+=== write_failure_retains_exact_os_error green ===
+        PASS [   0.016s] (1/1) codex-tui app::selection_witness::tests::write_failure_retains_exact_os_error
+     Summary [   0.044s] 1 test run: 1 passed, 5630 skipped
+
+=== expired_pending_response_closes_instead_of_renewing red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.05s
+    thread 'app::selection_witness::tests::expired_pending_response_closes_instead_of_renewing' (11350173) panicked at tui/src/app/selection_witness_tests.rs:225:5:
+    expired pending response must close capability
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::tests::expired_pending_response_closes_instead_of_renewing
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.02s
+    thread 'app::selection_witness::tests::expired_pending_response_closes_instead_of_renewing' (11350178) panicked at tui/src/app/selection_witness_tests.rs:225:5:
+    expired pending response must close capability
+     Summary [   0.139s] 1 test run: 0 passed, 1 failed, 5630 skipped
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::tests::expired_pending_response_closes_instead_of_renewing
+
+=== expired_pending_response_closes_instead_of_renewing green ===
+        PASS [   0.016s] (1/1) codex-tui app::selection_witness::tests::expired_pending_response_closes_instead_of_renewing
+     Summary [   0.050s] 1 test run: 1 passed, 5630 skipped
+
+=== attempt_ledger_preserves_unknown_and_exact_receipt-receipt-replay red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.06s
+    thread 'app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt' (11365147) panicked at tui/src/app/selection_bridge_tests.rs:72:5:
+    assertion `left == right` failed: cached receipt must report a replay without another start
+  TRY 2 FAIL [   0.044s] (1/1) codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5602 filtered out; finished in 0.03s
+    thread 'app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt' (11365163) panicked at tui/src/app/selection_bridge_tests.rs:72:5:
+    assertion `left == right` failed: cached receipt must report a replay without another start
+     Summary [   0.146s] 1 test run: 0 passed, 1 failed, 5630 skipped
+  TRY 2 FAIL [   0.044s] (1/1) codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+
+=== attempt_ledger_preserves_unknown_and_exact_receipt-receipt-replay green ===
+        PASS [   0.019s] (1/1) codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+     Summary [   0.052s] 1 test run: 1 passed, 5630 skipped
+
+=== receipt_lookup_preserves_local_attempt_identity red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5604 filtered out; finished in 0.05s
+    thread 'app::selection_witness::bridge::tests::receipt_lookup_preserves_local_attempt_identity' (11646000) panicked at tui/src/app/selection_bridge_tests.rs:103:9:
+    changed local receipt identity must not reach native lookup
+  TRY 2 FAIL [   0.039s] (1/1) codex-tui app::selection_witness::bridge::tests::receipt_lookup_preserves_local_attempt_identity
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5604 filtered out; finished in 0.02s
+    thread 'app::selection_witness::bridge::tests::receipt_lookup_preserves_local_attempt_identity' (11646009) panicked at tui/src/app/selection_bridge_tests.rs:103:9:
+    changed local receipt identity must not reach native lookup
+     Summary [   0.136s] 1 test run: 0 passed, 1 failed, 5632 skipped
+  TRY 2 FAIL [   0.039s] (1/1) codex-tui app::selection_witness::bridge::tests::receipt_lookup_preserves_local_attempt_identity
+
+=== receipt_lookup_preserves_local_attempt_identity green ===
+        PASS [   0.019s] (1/1) codex-tui app::selection_witness::bridge::tests::receipt_lookup_preserves_local_attempt_identity
+     Summary [   0.059s] 1 test run: 1 passed, 5632 skipped
+
+=== native_receipt_must_explicitly_be_replayed red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5604 filtered out; finished in 0.06s
+    thread 'app::selection_witness::bridge::tests::native_receipt_must_explicitly_be_replayed' (11664740) panicked at tui/src/app/selection_bridge_tests.rs:121:5:
+    assertion `left == right` failed: unreplayed native receipt must remain unknown
+  TRY 2 FAIL [   0.045s] (1/1) codex-tui app::selection_witness::bridge::tests::native_receipt_must_explicitly_be_replayed
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5604 filtered out; finished in 0.03s
+    thread 'app::selection_witness::bridge::tests::native_receipt_must_explicitly_be_replayed' (11664879) panicked at tui/src/app/selection_bridge_tests.rs:121:5:
+    assertion `left == right` failed: unreplayed native receipt must remain unknown
+     Summary [   0.143s] 1 test run: 0 passed, 1 failed, 5632 skipped
+  TRY 2 FAIL [   0.045s] (1/1) codex-tui app::selection_witness::bridge::tests::native_receipt_must_explicitly_be_replayed
+
+=== native_receipt_must_explicitly_be_replayed green ===
+        PASS [   0.020s] (1/1) codex-tui app::selection_witness::bridge::tests::native_receipt_must_explicitly_be_replayed
+     Summary [   0.051s] 1 test run: 1 passed, 5632 skipped
+
+=== native_receipt_must_explicitly_be_replayed-turn-id red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5604 filtered out; finished in 0.06s
+    thread 'app::selection_witness::bridge::tests::native_receipt_must_explicitly_be_replayed' (11693184) panicked at tui/src/app/selection_bridge_tests.rs:126:5:
+    assertion `left == right` failed: wrong native turn identity must remain unknown
+  TRY 2 FAIL [   0.044s] (1/1) codex-tui app::selection_witness::bridge::tests::native_receipt_must_explicitly_be_replayed
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5604 filtered out; finished in 0.03s
+    thread 'app::selection_witness::bridge::tests::native_receipt_must_explicitly_be_replayed' (11693193) panicked at tui/src/app/selection_bridge_tests.rs:126:5:
+    assertion `left == right` failed: wrong native turn identity must remain unknown
+     Summary [   0.148s] 1 test run: 0 passed, 1 failed, 5632 skipped
+  TRY 2 FAIL [   0.044s] (1/1) codex-tui app::selection_witness::bridge::tests::native_receipt_must_explicitly_be_replayed
+
+=== native_receipt_must_explicitly_be_replayed-turn-id green ===
+        PASS [   0.018s] (1/1) codex-tui app::selection_witness::bridge::tests::native_receipt_must_explicitly_be_replayed
+     Summary [   0.046s] 1 test run: 1 passed, 5632 skipped
+
+=== latest restored bridge source ===
+        PASS [   0.017s] (1/5) codex-tui app::selection_witness::bridge::tests::native_receipt_must_explicitly_be_replayed
+        PASS [   0.021s] (2/5) codex-tui app::selection_witness::bridge::tests::event_requires_the_observed_local_and_server_generations
+        PASS [   0.020s] (3/5) codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+        PASS [   0.022s] (4/5) codex-tui app::selection_witness::bridge::tests::receipt_lookup_preserves_local_attempt_identity
+        PASS [   0.030s] (5/5) codex-tui app::selection_witness::bridge::tests::event_metadata_obeys_pinned_source_and_subject_bounds
+     Summary [   0.054s] 5 tests run: 5 passed, 5628 skipped

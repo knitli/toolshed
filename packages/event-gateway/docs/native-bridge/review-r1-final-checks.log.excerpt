@@ -1,0 +1,51 @@
+R1 final stage (39-file fef316 patch; immutable CLI50a348; full hashes in checkpoint/manifest).
+## helper-clippy
+    Checking codex-external-agent-migration v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/external-agent-migration)
+    Checking core_test_support v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/core/tests/common)
+    Checking codex-app-server-daemon v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/app-server-daemon)
+    Checking codex-app-server v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/app-server)
+    Checking app_test_support v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/app-server/tests/common)
+    Checking codex-app-server-client v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/app-server-client)
+    Checking codex-tui v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/tui)
+    Finished `dev-small` profile [unoptimized] target(s) in 34.96s
+
+## focused-final
+        PASS [   0.031s] (13/18) codex-tui app::selection_witness::bridge::tests::event_metadata_obeys_pinned_source_and_subject_bounds
+        PASS [   0.035s] (14/18) codex-tui app::selection_witness::tests::fragmented_challenge_survives_state_burst
+        PASS [   0.035s] (15/18) codex-tui app::selection_witness::adoption_tests::invalid_descriptors_are_not_owned_or_closed
+        PASS [   0.114s] (16/18) codex-tui app::selection_witness::adoption_tests::early_startup_failure_drops_the_unconsumed_endpoint
+        PASS [   0.187s] (17/18) codex-tui app::selection_witness::adoption_tests::ambiguous_entry_adoption_closes_once_and_never_reopens_a_reused_fd
+        PASS [   0.459s] (18/18) codex-tui app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once
+────────────
+     Summary [   0.485s] 18 tests run: 18 passed, 5619 skipped
+
+## build
+warning: `codex-core` (lib) generated 1 warning (run `cargo fix --lib -p codex-core` to apply 1 suggestion)
+   Compiling codex-app-server-daemon v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/app-server-daemon)
+   Compiling codex-app-server v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/app-server)
+   Compiling codex-app-server-client v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/app-server-client)
+   Compiling codex-tui v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/tui)
+   Compiling codex-exec v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/exec)
+   Compiling codex-cloud-tasks v0.160.0 (/private/tmp/codex-native-selection-spike/source/codex-rs/cloud-tasks)
+    Finished `dev-small` profile [unoptimized] target(s) in 48.96s
+
+## helper-escalated
+        PASS [   0.216s] (57/62) codex-utils-pty tests::pipe_process_detaches_from_parent_session
+        PASS [   0.226s] (58/62) codex-utils-pty tests::pty_preserving_inherited_fds_keeps_python_repl_running
+        PASS [   0.223s] (59/62) codex-utils-pty tests::pty_python_repl_emits_output_and_exits
+        PASS [   0.235s] (60/62) codex-utils-pty tests::pty_dropped_output_receiver_keeps_draining_child
+        PASS [   0.836s] (61/62) codex-utils-pty tests::pty_close_stdin_preserves_large_input_and_delivers_eof
+        PASS [   1.408s] (62/62) codex-utils-pty tests::pty_terminate_allows_runtime_shutdown_with_full_output_channel
+────────────
+     Summary [   1.502s] 62 tests run: 62 passed, 1 skipped
+
+## integration-final
+        PASS [   4.471s] (18/23) codex-tui::all suite::provider_defaults::history_lookup_uses_server_provider_with_local_and_embedded_servers
+        PASS [   4.812s] (19/23) codex-tui::all suite::worktree_stack::picker_side_worktree_fork_and_cd_run_on_the_production_stack
+        PASS [   5.313s] (20/23) codex-tui::all suite::daemon_compatibility::incompatible_daemon_falls_back_for_default_and_explicit_features
+        PASS [   5.537s] (21/23) codex-tui::all suite::focus_palette::external_editor::external_editors_keep_the_screen_and_return_the_draft
+        PASS [   9.922s] (22/23) codex-tui::all suite::directory_trust::connected_trust_cancellation_and_acceptance_control_task_creation
+        PASS [  25.754s] (23/23) codex-tui::all suite::reconnect::automatic_reconnect_restores_draft_and_routes_new_notifications
+────────────
+     Summary [  25.755s] 23 tests run: 23 passed (1 leaky), 4 skipped
+

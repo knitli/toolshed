@@ -1,0 +1,70 @@
+R1 helper callback: 4 intended assertion-red/restored-green pairs; final source and binary hashes match immutable qualified build.
+Excluded infrastructure attempt: disk-full mutant build; not counted as assertion-red.
+
+## codex CODEX_NATIVE_BRIDGE_FD red exit=1
+Traceback (most recent call last):
+  File "/private/tmp/codex-native-selection-spike/review-r1-helper-lifecycle.py", line 25, in <module>
+    raise AssertionError(f'{marker}: endpoint retained by blocked fs helper') from None
+AssertionError: CODEX_NATIVE_BRIDGE_FD: endpoint retained by blocked fs helper
+
+
+## codex CODEX_SELECTION_WITNESS_FD red exit=1
+Traceback (most recent call last):
+  File "/private/tmp/codex-native-selection-spike/review-r1-helper-lifecycle.py", line 25, in <module>
+    raise AssertionError(f'{marker}: endpoint retained by blocked fs helper') from None
+AssertionError: CODEX_SELECTION_WITNESS_FD: endpoint retained by blocked fs helper
+
+
+## codex-tui CODEX_NATIVE_BRIDGE_FD red exit=1
+Traceback (most recent call last):
+  File "/private/tmp/codex-native-selection-spike/review-r1-helper-lifecycle.py", line 25, in <module>
+    raise AssertionError(f'{marker}: endpoint retained by blocked fs helper') from None
+AssertionError: CODEX_NATIVE_BRIDGE_FD: endpoint retained by blocked fs helper
+
+
+## codex-tui CODEX_SELECTION_WITNESS_FD red exit=1
+Traceback (most recent call last):
+  File "/private/tmp/codex-native-selection-spike/review-r1-helper-lifecycle.py", line 25, in <module>
+    raise AssertionError(f'{marker}: endpoint retained by blocked fs helper') from None
+AssertionError: CODEX_SELECTION_WITNESS_FD: endpoint retained by blocked fs helper
+
+
+## codex CODEX_NATIVE_BRIDGE_FD restored exit=0
+[
+  {
+    "binary": "/private/tmp/codex-native-selection-spike/target195/dev-small/codex",
+    "mode": "CODEX_NATIVE_BRIDGE_FD",
+    "closedWhileHelperAlive": true
+  }
+]
+
+
+## codex CODEX_SELECTION_WITNESS_FD restored exit=0
+[
+  {
+    "binary": "/private/tmp/codex-native-selection-spike/target195/dev-small/codex",
+    "mode": "CODEX_SELECTION_WITNESS_FD",
+    "closedWhileHelperAlive": true
+  }
+]
+
+
+## codex-tui CODEX_NATIVE_BRIDGE_FD restored exit=0
+[
+  {
+    "binary": "/private/tmp/codex-native-selection-spike/target195/dev-small/codex-tui",
+    "mode": "CODEX_NATIVE_BRIDGE_FD",
+    "closedWhileHelperAlive": true
+  }
+]
+
+
+## codex-tui CODEX_SELECTION_WITNESS_FD restored exit=0
+[
+  {
+    "binary": "/private/tmp/codex-native-selection-spike/target195/dev-small/codex-tui",
+    "mode": "CODEX_SELECTION_WITNESS_FD",
+    "closedWhileHelperAlive": true
+  }
+]
+

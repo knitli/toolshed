@@ -1,0 +1,65 @@
+Clean pinned baseline comparison
+sourcePin=a956835d020762cb2b570053af06f643a11c0ecc
+Summary [   0.563s] 44 tests run: 0 passed, 44 failed, 5575 skipped
+Failure reasons:
+release-version snapshots: expected 0.0.0; observed 0.160.0 (including wrapping and normalized spacing)
+release-version notices: local 0.0.0 mismatch warning absent for release 0.160.0 versus server 2.0.0
+terminal colors: empty versus 39m49m; Default versus Rgb(80,80,80); missing color escapes
+Git setup: commit -qm initial; error: Couldn't get agent socket?; fatal: failed to write commit object; exit 128
+
+app::daemon_menu::tests::daemon_menu_is_read_only_and_confirmation_can_cancel_or_handoff: patch=FAIL baseline=FAIL identical_failure=True
+app::owned_transcript::empty_state_animation_tests::empty_state_animation_preserves_header_cursor_and_footer: patch=FAIL baseline=FAIL identical_failure=True
+app::tests::active_reconnect::reconnect_allows_slow_hydration_but_bounds_a_stalled_server: patch=FAIL baseline=FAIL identical_failure=True
+app::tests::app_server_thread_replacement_clears_previous_transcript_before_replay: patch=FAIL baseline=FAIL identical_failure=True
+app::tests::navigation_reconnect::reconnect_daemon_command_center_after_socket_replacement_without_a_conversation: patch=FAIL baseline=FAIL identical_failure=True
+app::tests::realtime_requests::buffered_voice_items_reconcile_captions_after_thread_switch: patch=FAIL baseline=FAIL identical_failure=True
+app::tests::realtime_requests::completed_voice_caption_survives_repeated_thread_replacement: patch=FAIL baseline=FAIL identical_failure=True
+app::tests::realtime_requests::replay_reconciles_only_matching_voice_captions_one_for_one: patch=FAIL baseline=FAIL identical_failure=True
+app::tests::realtime_requests::switching_threads_keeps_the_source_voice_partial_only_on_reattach: patch=FAIL baseline=FAIL identical_failure=True
+app::tests::startup_frame_tests::owned_startup_hides_tip_in_transcript: patch=FAIL baseline=FAIL identical_failure=True
+custom_terminal::tests::cursor::terminal_draw_omits_cursor_style_without_an_owned_glyph: patch=FAIL baseline=FAIL identical_failure=True
+custom_terminal::tests::cursor::terminal_draw_repairs_styled_anchor_on_cursor_only_frames: patch=FAIL baseline=FAIL identical_failure=True
+custom_terminal::tests::cursor::terminal_draw_repairs_owned_wide_hyperlink_after_skipped_glyphs: patch=FAIL baseline=FAIL identical_failure=True
+custom_terminal::tests::cursor::terminal_draw_repairs_single_column_without_scrolling: patch=FAIL baseline=FAIL identical_failure=True
+get_git_diff::tests::get_git_diff_does_not_execute_configured_filters_fsmonitor_or_hooks: patch=FAIL baseline=FAIL identical_failure=True
+get_git_diff::tests::get_git_diff_does_not_execute_helpers_while_checking_dirty_submodules: patch=FAIL baseline=FAIL identical_failure=True
+history_cell::tests::pnpm_update_available_history_cell_snapshot: patch=FAIL baseline=FAIL identical_failure=True
+history_cell::tests::standalone_windows_update_available_history_cell_snapshot: patch=FAIL baseline=FAIL identical_failure=True
+history_cell::tests::standalone_unix_update_available_history_cell_snapshot: patch=FAIL baseline=FAIL identical_failure=True
+history_cell::tests::vite_plus_update_available_history_cell_snapshot: patch=FAIL baseline=FAIL identical_failure=True
+history_cell::tests::session_info_availability_nux_tooltip_snapshot: patch=FAIL baseline=FAIL identical_failure=True
+startup_draft::layout::tests::owned_startup_keeps_the_live_bottom_geometry: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_includes_credits_and_limits: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_includes_reasoning_details: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_shows_active_user_defined_profile: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_includes_forked_from: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_cached_limits_hide_credits_without_flag: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_includes_monthly_limit: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_shows_auto_review_permissions: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_shows_missing_limits_message: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_shows_refreshing_limits_notice: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_treats_refreshing_empty_limits_as_unavailable: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_shows_unavailable_limits_message: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_shows_stale_limits_message: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_uses_default_reasoning_when_config_empty: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_includes_enterprise_monthly_credit_limit: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_uses_generic_limit_labels_for_unsupported_windows: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_wraps_in_narrow_terminal: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_uses_server_provider_id_and_auth_requirement: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_wraps_halfwidth_kana_in_narrow_terminal: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::transcript_overlay_remeasures_status_after_rate_limit_refresh: patch=FAIL baseline=FAIL identical_failure=True
+status::tests::status_snapshot_shows_chatgpt_plan_without_email: patch=FAIL baseline=FAIL identical_failure=True
+update_prompt::tests::long_update_command_keeps_selected_skip_visible_in_a_short_viewport: patch=FAIL baseline=FAIL identical_failure=True
+update_prompt::tests::update_prompt_snapshot: patch=FAIL baseline=FAIL identical_failure=True
+
+Local-socket retry: initial sandbox EPERM excluded for 3 tests; permitted local-socket retry reproduced identical failures.
+Summary [   2.298s] 3 tests run: 0 passed, 3 failed, 5616 skipped
+
+Process-only environment correction on clean baseline: NO_COLOR removed; GIT_CONFIG_COUNT=1; GIT_CONFIG_KEY_0=commit.gpgsign; GIT_CONFIG_VALUE_0=false.
+Summary [   1.293s] 6 tests run: 6 passed, 5613 skipped
+PASS custom_terminal::tests::cursor::terminal_draw_omits_cursor_style_without_an_owned_glyph
+PASS custom_terminal::tests::cursor::terminal_draw_repairs_single_column_without_scrolling
+PASS custom_terminal::tests::cursor::terminal_draw_repairs_styled_anchor_on_cursor_only_frames
+PASS custom_terminal::tests::cursor::terminal_draw_repairs_owned_wide_hyperlink_after_skipped_glyphs
+PASS get_git_diff::tests::get_git_diff_does_not_execute_configured_filters_fsmonitor_or_hooks
+PASS get_git_diff::tests::get_git_diff_does_not_execute_helpers_while_checking_dirty_submodules

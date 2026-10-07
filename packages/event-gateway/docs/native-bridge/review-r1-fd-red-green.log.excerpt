@@ -1,0 +1,145 @@
+=== unmodified adoption baseline ===
+        PASS [   0.021s] (1/4) codex-tui app::selection_witness::adoption_tests::invalid_descriptors_are_not_owned_or_closed
+        PASS [   0.115s] (2/4) codex-tui app::selection_witness::adoption_tests::early_startup_failure_drops_the_unconsumed_endpoint
+        PASS [   0.194s] (3/4) codex-tui app::selection_witness::adoption_tests::ambiguous_entry_adoption_closes_once_and_never_reopens_a_reused_fd
+        PASS [   0.471s] (4/4) codex-tui app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once
+     Summary [   0.496s] 4 tests run: 4 passed, 5633 skipped
+
+=== cloexec red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.32s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (13825946) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.19s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (13826049) panicked at tui/src/app/selection_adoption_tests.rs:150:21:
+    assertion `left == right` failed: exec descendants must not inherit the bridge descriptor before TUI startup
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.26s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (13826164) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.16s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (13826174) panicked at tui/src/app/selection_adoption_tests.rs:150:21:
+    assertion `left == right` failed: exec descendants must not inherit the bridge descriptor before TUI startup
+     Summary [   0.636s] 1 test run: 0 passed, 1 failed, 5636 skipped
+
+=== cloexec green ===
+        PASS [   0.469s] (1/1) codex-tui app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once
+     Summary [   0.498s] 1 test run: 1 passed, 5636 skipped
+
+=== environment red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.30s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (13842517) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.19s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (13842531) panicked at tui/src/app/selection_adoption_tests.rs:154:21:
+    exec descendants must not inherit stale bridge environment markers
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.27s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (13842554) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.16s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (13842564) panicked at tui/src/app/selection_adoption_tests.rs:154:21:
+    exec descendants must not inherit stale bridge environment markers
+     Summary [   0.632s] 1 test run: 0 passed, 1 failed, 5636 skipped
+
+=== environment green ===
+        PASS [   0.447s] (1/1) codex-tui app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once
+     Summary [   0.472s] 1 test run: 1 passed, 5636 skipped
+
+=== handoff red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.30s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (13858545) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.18s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (13858637) panicked at tui/src/app/selection_adoption_tests.rs:166:17:
+    the retained endpoint must be consumed once
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.25s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (13858651) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.15s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (13858659) panicked at tui/src/app/selection_adoption_tests.rs:166:17:
+    the retained endpoint must be consumed once
+     Summary [   0.610s] 1 test run: 0 passed, 1 failed, 5636 skipped
+
+=== handoff green ===
+        PASS [   0.455s] (1/1) codex-tui app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once
+     Summary [   0.481s] 1 test run: 1 passed, 5636 skipped
+
+=== ambiguous red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.17s
+    thread 'app::selection_witness::adoption_tests::ambiguous_entry_adoption_closes_once_and_never_reopens_a_reused_fd' (13877679) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.05s
+    thread 'app::selection_witness::adoption_tests::ambiguous_entry_adoption_closes_once_and_never_reopens_a_reused_fd' (13877689) panicked at tui/src/app/selection_adoption_tests.rs:191:17:
+    two bridge modes must fail closed
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.13s
+    thread 'app::selection_witness::adoption_tests::ambiguous_entry_adoption_closes_once_and_never_reopens_a_reused_fd' (13877726) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.03s
+    thread 'app::selection_witness::adoption_tests::ambiguous_entry_adoption_closes_once_and_never_reopens_a_reused_fd' (13877747) panicked at tui/src/app/selection_adoption_tests.rs:191:17:
+    two bridge modes must fail closed
+     Summary [   0.370s] 1 test run: 0 passed, 1 failed, 5636 skipped
+
+=== ambiguous green ===
+        PASS [   0.197s] (1/1) codex-tui app::selection_witness::adoption_tests::ambiguous_entry_adoption_closes_once_and_never_reopens_a_reused_fd
+     Summary [   0.223s] 1 test run: 1 passed, 5636 skipped
+
+=== drop red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.18s
+    thread 'app::selection_witness::adoption_tests::early_startup_failure_drops_the_unconsumed_endpoint' (13894974) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.05s
+    thread 'app::selection_witness::adoption_tests::early_startup_failure_drops_the_unconsumed_endpoint' (13894994) panicked at tui/src/app/selection_adoption_tests.rs:233:13:
+    assertion `left == right` failed: startup failure must close the unconsumed bridge endpoint
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.13s
+    thread 'app::selection_witness::adoption_tests::early_startup_failure_drops_the_unconsumed_endpoint' (13895029) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.03s
+    thread 'app::selection_witness::adoption_tests::early_startup_failure_drops_the_unconsumed_endpoint' (13895119) panicked at tui/src/app/selection_adoption_tests.rs:233:13:
+    assertion `left == right` failed: startup failure must close the unconsumed bridge endpoint
+     Summary [   0.384s] 1 test run: 0 passed, 1 failed, 5636 skipped
+
+=== drop green ===
+        PASS [   0.123s] (1/1) codex-tui app::selection_witness::adoption_tests::early_startup_failure_drops_the_unconsumed_endpoint
+     Summary [   0.151s] 1 test run: 1 passed, 5636 skipped
+
+=== invalid red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.06s
+    thread 'app::selection_witness::adoption_tests::invalid_descriptors_are_not_owned_or_closed' (13913840) panicked at tui/src/app/selection_adoption_tests.rs:250:5:
+    assertion `left != right` failed: invalid non-socket descriptor must not be closed
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.03s
+    thread 'app::selection_witness::adoption_tests::invalid_descriptors_are_not_owned_or_closed' (13913847) panicked at tui/src/app/selection_adoption_tests.rs:250:5:
+    assertion `left != right` failed: invalid non-socket descriptor must not be closed
+     Summary [   0.150s] 1 test run: 0 passed, 1 failed, 5636 skipped
+
+=== invalid green ===
+        PASS [   0.022s] (1/1) codex-tui app::selection_witness::adoption_tests::invalid_descriptors_are_not_owned_or_closed
+     Summary [   0.051s] 1 test run: 1 passed, 5636 skipped
+
+=== library_marker red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.55s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (14078636) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.34s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (14078789) panicked at tui/src/app/selection_adoption_tests.rs:173:17:
+    library bootstrap must reject any leftover bridge marker
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.51s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (14079262) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.31s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (14079412) panicked at tui/src/app/selection_adoption_tests.rs:173:17:
+    library bootstrap must reject any leftover bridge marker
+     Summary [   1.164s] 1 test run: 0 passed, 1 failed, 5636 skipped
+
+=== library_marker green ===
+        PASS [   0.482s] (1/1) codex-tui app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once
+     Summary [   0.517s] 1 test run: 1 passed, 5636 skipped
+
+=== repeat_marker red ===
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.31s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (14140432) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.19s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (14140442) panicked at tui/src/app/selection_adoption_tests.rs:177:17:
+    repeated adoption must reject a newly introduced marker
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.25s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (14140647) panicked at tui/src/app/selection_adoption_tests.rs:114:5:
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5608 filtered out; finished in 0.15s
+    thread 'app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once' (14140655) panicked at tui/src/app/selection_adoption_tests.rs:177:17:
+    repeated adoption must reject a newly introduced marker
+     Summary [   0.628s] 1 test run: 0 passed, 1 failed, 5636 skipped
+
+=== repeat_marker green ===
+        PASS [   0.448s] (1/1) codex-tui app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once
+     Summary [   0.478s] 1 test run: 1 passed, 5636 skipped
+
+=== final restored adoption tests ===
+        PASS [   0.019s] (1/4) codex-tui app::selection_witness::adoption_tests::invalid_descriptors_are_not_owned_or_closed
+        PASS [   0.107s] (2/4) codex-tui app::selection_witness::adoption_tests::early_startup_failure_drops_the_unconsumed_endpoint
+        PASS [   0.189s] (3/4) codex-tui app::selection_witness::adoption_tests::ambiguous_entry_adoption_closes_once_and_never_reopens_a_reused_fd
+        PASS [   0.459s] (4/4) codex-tui app::selection_witness::adoption_tests::early_adoption_excludes_exec_children_and_hands_off_once
+     Summary [   0.483s] 4 tests run: 4 passed, 5633 skipped

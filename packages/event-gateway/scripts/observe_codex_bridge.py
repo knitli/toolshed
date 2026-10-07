@@ -8,6 +8,8 @@ from pathlib import Path
 import pty
 import shutil
 import signal
+import socket
+import sys
 import time
 from uuid import UUID
 import struct
@@ -51,62 +53,103 @@ def check():
 
 
 class Witness:
-    """Disposable fail-closed observation lease, never production authority."""
+    """Private launcher/TUI freshness only; backend identity is not authenticated."""
 
     def __init__(self):
         self.row = None
-        self.seen = 0.0
         self.client_id = None
-        self.sequence = 0
+        self.sequence = self.nonce = 0
+        self.outstanding = None
+        self.deadline = self.accepted_deadline = 0.0
         self.reason = 'unavailable'
+        self.failed = False
+
+    def challenge(self, now):
+        if self.failed or self.outstanding is not None:
+            return None
+        if self.nonce == 2**64 - 1:
+            self.fail('nonce-exhausted')
+            return None
+        self.nonce += 1
+        self.outstanding = self.nonce
+        self.deadline = now + .750
+        return json.dumps({'nonce': self.nonce}, separators=(',', ':')).encode() + b'\n'
+
+    def fail(self, reason):
+        self.row = None
+        self.reason = reason
+        self.failed = True
 
     def receive(self, raw, backend_pid, now):
-        self.row = None
-        self.reason = 'malformed'
+        if self.failed:
+            return
         try:
-            row = json.loads(raw)
+            # Reject duplicate keys as well as unexpected fields.
+            def unique(pairs):
+                result = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError('duplicate')
+                    result[key] = value
+                return result
+
+            row = json.loads(raw, object_pairs_hook=unique)
             fields = {'clientId', 'backendPid', 'connectionId', 'threadId',
-                      'generation', 'eligible', 'sequence', 'cause'}
-            if not isinstance(row, dict) or set(row) != fields:
-                return
+                      'generation', 'eligible', 'sequence', 'cause', 'version', 'nonce'}
+            if len(raw) > 2047 or not isinstance(row, dict) or set(row) != fields:
+                raise ValueError('fields')
             for field in ('clientId', 'connectionId', 'threadId'):
                 value = row[field]
                 if value is None and field != 'clientId':
                     continue
                 if not isinstance(value, str) or str(UUID(value)) != value:
-                    return
+                    raise ValueError('uuid')
             if (type(row['eligible']) is not bool
-                    or type(row['generation']) is not int or row['generation'] < 0
-                    or type(row['sequence']) is not int or row['sequence'] <= self.sequence
+                    or type(row['version']) is not int or row['version'] != 1
+                    or type(row['nonce']) is not int or not 0 < row['nonce'] < 2**64
+                    or type(row['generation']) is not int or not 0 <= row['generation'] < 2**64
+                    or type(row['sequence']) is not int or not self.sequence < row['sequence'] < 2**64
                     or not isinstance(row['cause'], str) or len(row['cause']) > 128
-                    or (row['backendPid'] is not None and type(row['backendPid']) is not int)
+                    or (row['backendPid'] is not None and
+                        (type(row['backendPid']) is not int or not 0 < row['backendPid'] < 2**32))
                     or (self.client_id is not None and row['clientId'] != self.client_id)):
+                raise ValueError('schema')
+            if self.outstanding is None or row['nonce'] != self.outstanding:
+                self.fail('unexpected-nonce')
                 return
+            self.outstanding = None
             self.client_id = row['clientId']
             self.sequence = row['sequence']
-            self.row, self.seen = row, now
+            if now >= self.deadline:
+                self.row = None
+                self.reason = 'deadline'
+                return
+            self.row = row
+            self.accepted_deadline = self.deadline
             self.reason = 'native'
         except (ValueError, TypeError, UnicodeError):
-            return
+            self.fail('malformed')
 
     def status(self, backend_pid, now):
+        if self.outstanding is not None and now >= self.deadline and not self.failed:
+            self.row = None
+            self.reason = 'deadline'
         if self.row is None:
             return False, self.reason
+        if now >= self.accepted_deadline:
+            return False, 'expired'
         if backend_pid is None or self.row['backendPid'] != backend_pid:
             return False, 'unknown-backend'
-        if now - self.seen >= 1.0:
-            return False, 'expired'
         if self.row['connectionId'] is None or self.row['threadId'] is None:
             return False, 'unavailable'
         return self.row['eligible'], 'native'
 
     def eof(self):
-        self.row = None
-        self.reason = 'eof'
+        self.fail('eof')
 
 
 def witness_frames(pending, data, discarding):
-    """Bound individual JSON lines; an empty frame revokes a malformed lease."""
+    """Bound each response including newline, independently of read batching."""
     if discarding:
         if b'\n' not in data:
             return b'', True, []
@@ -115,43 +158,73 @@ def witness_frames(pending, data, discarding):
     frames = []
     while b'\n' in pending:
         raw, pending = pending.split(b'\n', 1)
-        frames.append(raw if len(raw) <= 4096 else b'')
-    discarding = len(pending) > 4096
+        frames.append(raw if len(raw) <= 2047 else b'')
+    discarding = len(pending) > 2047
     if discarding:
         frames.append(b'')
         pending = b''
     return pending, discarding, frames
 
 
-async def read_witness(descriptor, backend_pid, client_alive, emit):
+def transport_error(stage, error):
+    print(json.dumps({'stage': stage, 'errorKind': 'os-error', 'errno': error.errno}),
+          file=sys.stderr, flush=True)
+
+
+async def read_witness(channel, backend_pid, client_alive, emit):
     witness, pending, previous = Witness(), b'', None
-    discarding = connected = False
-    while True:
-        pid, now = backend_pid(), time.monotonic()
-        changed = False
-        try:
-            data = os.read(descriptor, 4096)
-        except BlockingIOError:
-            data = None
-            connected = True  # A writer exists, but has no bytes ready.
-        if data == b'':
-            witness.eof()
-            if connected or not client_alive():
+    discarding, outbound, next_challenge = False, b'', 0.0
+    channel.setblocking(False)
+    try:
+        while True:
+            pid, now = backend_pid(), time.monotonic()
+            # Drain before issuing another challenge: queued unsolicited data is never fresh.
+            try:
+                data = channel.recv(4096)
+            except BlockingIOError:
+                data = None
+            except OSError as error:
+                transport_error('receive', error)
+                witness.fail('transport')
+                data = None
+            if data == b'':
+                witness.eof()
+            elif data:
+                pending, discarding, frames = witness_frames(pending, data, discarding)
+                for raw in frames:
+                    witness.receive(raw, pid, now)
+                    emit(witness, pid, now)
+            state = witness.status(pid, now)
+            if state != previous:
+                emit(witness, pid, now)
+            previous = state
+            if witness.failed:
+                return
+            if not client_alive():
+                witness.eof()
                 emit(witness, pid, now)
                 return
-            # A nonblocking FIFO reports EOF before the child opens its writer.
-        elif data:
-            connected = True
-            pending, discarding, frames = witness_frames(pending, data, discarding)
-            for raw in frames:
-                witness.receive(raw, pid, now)
-                emit(witness, pid, now)
-                changed = True
-        state = witness.status(pid, now)
-        if state != previous and not changed:
-            emit(witness, pid, now)
-        previous = state
-        await asyncio.sleep(.025)
+            if data is None and not pending and now >= next_challenge and not outbound:
+                outbound = witness.challenge(now) or b''
+                if outbound:
+                    next_challenge = now + .100
+            if outbound:
+                try:
+                    sent = channel.send(outbound)
+                    if sent == 0:
+                        witness.fail('transport')
+                    outbound = outbound[sent:]
+                except BlockingIOError:
+                    pass
+                except OSError as error:
+                    transport_error('send', error)
+                    witness.fail('transport')
+                if witness.failed:
+                    emit(witness, pid, now)
+                    return
+            await asyncio.sleep(.025)
+    finally:
+        channel.close()
 
 
 async def observe(binary, root, client_binary=None):
@@ -166,7 +239,7 @@ async def observe(binary, root, client_binary=None):
     env = {'PATH': os.defpath, 'HOME': str(root), 'CODEX_HOME': str(home), 'TERM': 'xterm-256color'}
     children, peers, ui, sockets = [], {}, {}, {}
     order = connection = 0
-    owned_connections, fifo_paths, fifo_fds, tasks = set(), [], [], []
+    owned_connections, witness_channels, tasks = set(), [], []
     back = None
     native_log = (root / 'native.jsonl').open('w') if client_binary else None
     log = (root / 'wire.jsonl').open('w')
@@ -240,22 +313,32 @@ async def observe(binary, root, client_binary=None):
         if name in peers:
             raise ValueError('use a new client name for each launch')
         child_env = dict(env)
+        child_channel = None
         if client_binary:
-            fifo = root / f'witness-{len(fifo_paths)}.fifo'
-            os.mkfifo(fifo, 0o600)
-            fifo_paths.append(fifo)
-            descriptor = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
-            fifo_fds.append(descriptor)
-            child_env['CODEX_SELECTION_WITNESS_PIPE'] = str(fifo)
+            channel, child_channel = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+            if child_channel.fileno() < 3:
+                descriptor = fcntl.fcntl(child_channel.fileno(), fcntl.F_DUPFD_CLOEXEC, 3)
+                child_channel.close()
+                child_channel = socket.socket(fileno=descriptor)
+            witness_channels.append(channel)
+            child_env['CODEX_SELECTION_WITNESS_FD'] = str(child_channel.fileno())
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 120, 0, 0))
         args = [] if thread == 'new' else ['resume', thread]
-        process = subprocess.Popen([str(client_binary or binary), *flags, *args, '--remote',
-                                    f'unix://{root}/proxy.sock', '--no-alt-screen', '-C', str(root)],
-                                   env=child_env, cwd=root, stdin=slave, stdout=slave, stderr=slave,
-                                   start_new_session=True)
+        try:
+            process = subprocess.Popen([str(client_binary or binary), *flags, *args, '--remote',
+                                        f'unix://{root}/proxy.sock', '--no-alt-screen', '-C', str(root)],
+                                       env=child_env, cwd=root, stdin=slave, stdout=slave, stderr=slave,
+                                       pass_fds=(child_channel.fileno(),) if child_channel else (),
+                                       start_new_session=True)
+        except BaseException:
+            os.close(master)
+            raise
+        finally:
+            os.close(slave)
+            if child_channel:
+                child_channel.close()
         children.append(process)
-        os.close(slave)
         os.set_blocking(master, False)
         peers[name] = process, master
 
@@ -280,13 +363,13 @@ async def observe(binary, root, client_binary=None):
                 native_log.write(json.dumps(row) + '\n')
                 native_log.flush()
                 state = {key: value for key, value in row.items()
-                         if key not in ('order', 'sequence', 'cause', 'observedMonotonic')}
+                         if key not in ('order', 'sequence', 'nonce', 'cause', 'observedMonotonic')}
                 if row.get('cause') != 'heartbeat' or state != last_native_state:
                     print(json.dumps(row), flush=True)
                 last_native_state = state
 
             tasks.append(asyncio.create_task(read_witness(
-                descriptor, lambda: back.pid if back is not None and back.poll() is None else None,
+                channel, lambda: back.pid if back is not None and back.poll() is None else None,
                 lambda: process.poll() is None, emit)))
 
     try:
@@ -332,19 +415,17 @@ async def observe(binary, root, client_binary=None):
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            for descriptor in fifo_fds:
-                os.close(descriptor)
-            for fifo in fifo_paths:
-                fifo.unlink(missing_ok=True)
+            for channel in witness_channels:
+                channel.close()
             for process in children:
                 stop(process)
             for _, descriptor in peers.values():
                 os.close(descriptor)
-            for socket, identity in sockets.items():
+            for socket_path, identity in sockets.items():
                 try:
-                    stat = socket.stat()
+                    stat = socket_path.stat()
                     if (stat.st_dev, stat.st_ino) == identity:
-                        socket.unlink(missing_ok=True)
+                        socket_path.unlink(missing_ok=True)
                 except FileNotFoundError:
                     pass  # The owned backend may already have removed its socket.
             for alias in ('backend.sock', 'proxy.sock'):

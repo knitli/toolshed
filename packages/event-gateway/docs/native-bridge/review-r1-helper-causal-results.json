@@ -1,0 +1,127 @@
+{
+  "mutation": "remove before_helper callback only at fs-helper branch",
+  "sourceRestored": true,
+  "pairs": 4,
+  "results": [
+    {
+      "binary": "codex",
+      "marker": "CODEX_NATIVE_BRIDGE_FD",
+      "stage": "baseline",
+      "exitCode": 0,
+      "log": "review-r1-helper-codex-CODEX_NATIVE_BRIDGE_FD-baseline.log"
+    },
+    {
+      "binary": "codex",
+      "marker": "CODEX_SELECTION_WITNESS_FD",
+      "stage": "baseline",
+      "exitCode": 0,
+      "log": "review-r1-helper-codex-CODEX_SELECTION_WITNESS_FD-baseline.log"
+    },
+    {
+      "binary": "codex-tui",
+      "marker": "CODEX_NATIVE_BRIDGE_FD",
+      "stage": "baseline",
+      "exitCode": 0,
+      "log": "review-r1-helper-codex-tui-CODEX_NATIVE_BRIDGE_FD-baseline.log"
+    },
+    {
+      "binary": "codex-tui",
+      "marker": "CODEX_SELECTION_WITNESS_FD",
+      "stage": "baseline",
+      "exitCode": 0,
+      "log": "review-r1-helper-codex-tui-CODEX_SELECTION_WITNESS_FD-baseline.log"
+    },
+    {
+      "binary": "codex",
+      "marker": "CODEX_NATIVE_BRIDGE_FD",
+      "stage": "red",
+      "exitCode": 1,
+      "log": "review-r1-helper-codex-CODEX_NATIVE_BRIDGE_FD-red.log"
+    },
+    {
+      "binary": "codex",
+      "marker": "CODEX_SELECTION_WITNESS_FD",
+      "stage": "red",
+      "exitCode": 1,
+      "log": "review-r1-helper-codex-CODEX_SELECTION_WITNESS_FD-red.log"
+    },
+    {
+      "binary": "codex-tui",
+      "marker": "CODEX_NATIVE_BRIDGE_FD",
+      "stage": "red",
+      "exitCode": 1,
+      "log": "review-r1-helper-codex-tui-CODEX_NATIVE_BRIDGE_FD-red.log"
+    },
+    {
+      "binary": "codex-tui",
+      "marker": "CODEX_SELECTION_WITNESS_FD",
+      "stage": "red",
+      "exitCode": 1,
+      "log": "review-r1-helper-codex-tui-CODEX_SELECTION_WITNESS_FD-red.log"
+    },
+    {
+      "binary": "codex",
+      "marker": "CODEX_NATIVE_BRIDGE_FD",
+      "stage": "restored",
+      "exitCode": 0,
+      "log": "review-r1-helper-codex-CODEX_NATIVE_BRIDGE_FD-restored.log"
+    },
+    {
+      "binary": "codex",
+      "marker": "CODEX_SELECTION_WITNESS_FD",
+      "stage": "restored",
+      "exitCode": 0,
+      "log": "review-r1-helper-codex-CODEX_SELECTION_WITNESS_FD-restored.log"
+    },
+    {
+      "binary": "codex-tui",
+      "marker": "CODEX_NATIVE_BRIDGE_FD",
+      "stage": "restored",
+      "exitCode": 0,
+      "log": "review-r1-helper-codex-tui-CODEX_NATIVE_BRIDGE_FD-restored.log"
+    },
+    {
+      "binary": "codex-tui",
+      "marker": "CODEX_SELECTION_WITNESS_FD",
+      "stage": "restored",
+      "exitCode": 0,
+      "log": "review-r1-helper-codex-tui-CODEX_SELECTION_WITNESS_FD-restored.log"
+    }
+  ],
+  "allFinalSourceFilesMatchManifest": true,
+  "excludedInfrastructureFailure": "First mutant build failed because disk was full; excluded from assertion-red count. Source was restored from validated applied patch before retry.",
+  "patchSha256": "fef316821243a49c6b586247534981e4ceab53ed6e154a69904b9d66fed3df66",
+  "immutableBinarySha256": {
+    "codex": "50a348dffc703d72e5c23f1453edd116334be73c89fd87a6fce00e2a4a757f55",
+    "codex-tui": "ab4332e8e874e39f1970bf0be65a89ef2e98ebbcc9c7865bd0c10f1934ddcaa5"
+  },
+  "restoredBinarySha256": {
+    "codex": "50a348dffc703d72e5c23f1453edd116334be73c89fd87a6fce00e2a4a757f55",
+    "codex-tui": "ab4332e8e874e39f1970bf0be65a89ef2e98ebbcc9c7865bd0c10f1934ddcaa5"
+  },
+  "historicalCausalHarnessSha256": "91c4c50aa154502d32d007c7269d7f5fcdeb14cebac308e0b876b261db366d85",
+  "finalHarnessFollowup": {
+    "sha256": "d0d40679d5c52bca5fac149b364d386dbdb71d6957ec6eedc3097dbb862b13eb",
+    "change": "Ruff formatting and explicit AssertionError checks remain active under optimized Python. Native source and immutable binaries are unchanged.",
+    "command": "python -O review-r1-helper-lifecycle.py <immutable-codex> <immutable-codex-tui>",
+    "exitCode": 0,
+    "passedCases": 4,
+    "ruff": "passed"
+  },
+  "probeBoundaryFollowup": {
+    "file": "scripts/probe_native_helper_lifecycle.py",
+    "sha256": "7da9c591ccb04fab906a89b861b9e98e21243e1360eec6d958895fa25d8f36a0",
+    "change": "Place the executable probe alongside existing probe scripts; require recorded binary digest before launch and whitelist the child environment. No quality rules, exclusions, or findings were changed or accepted.",
+    "baselineOptimizedPythonCasesPassed": 4,
+    "negativeInputRegression": "test_helper_probe_rejects_unrecognized_binary_before_launch",
+    "mutant": "Bypass recorded checkpoint digest comparison.",
+    "redExitCode": 1,
+    "redFailures": 1,
+    "redErrors": 0,
+    "redAssertion": "unrecognized binary reached launch",
+    "restoredGreenExitCode": 0,
+    "fullGatewayTestsPassed": 89,
+    "testsSha256": "32a4c40b5ed98f9bd307feff3d9e6618b6d64fe7ba27d5e28342ac99e496aad9",
+    "ruff": "passed"
+  }
+}
