@@ -63,13 +63,21 @@ uv run --frozen python -m unittest discover -s tests -v
 An update requires an explicit reviewed 40-character commit; never a branch or
 tag. Ordinary Linux/macOS PR CI checks the local manifest hashes offline, runs
 the shared corpus and local fault tests, and installs the wheel outside the
-repository. It receives no App key. A separate trusted-base workflow compares
-five fixed candidate blobs with the reviewed pin and source hashes, treating
-all candidate files as data and publishing a status against the exact head SHA.
-Those hashes were independently verified against the immutable upstream Git
-blobs. Updating this trusted policy requires a reviewed base change before a
-new snapshot can pass. The new trusted workflow first activates after this
-introducing PR merges; its inline verifier is tested locally for this bootstrap.
+repository. It receives no App key. A trusted-main workflow matches all seven
+event/control snapshot files, including both manifests, against one complete
+reviewed family. Candidate paths must be regular Git blobs; candidate code is
+never checked out or executed. Rotations add policy data rather than verifier
+branches or fixture-specific tests. Keep reviewed immutable source pins through
+unrelated upstream changes; new snapshot bytes require a reviewed policy change
+on main before the consumer can pass.
+
+Policy merges automatically revalidate all open PR heads. Retargeting and
+gateway CI completion revalidate the affected head, including stacked PRs.
+Queued runs remain serialized; publication rechecks the current head and main
+policy so obsolete runs cannot overwrite newer results. Transient reads retry
+within a bounded budget, and unavailable evidence reports an error rather than
+claiming contract drift. Policy-only PRs retain the existing snapshots and can
+pass before the policy lands; dependent consumers remain gated until it lands.
 Snapshot verification does not prove that every Python semantic
 edge matches TypeScript: the canonical corpus still lacks portable semantic
 boundary vectors. Expanding that corpus and running both validators is an open
