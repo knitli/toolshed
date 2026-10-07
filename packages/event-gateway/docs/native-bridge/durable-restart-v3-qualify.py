@@ -78,8 +78,13 @@ def stop_process(process, backend_pid):
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=5)
+        pass
+    # The leader may exit while a descendant survives SIGTERM.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait(timeout=5)
     if backend_pid is None:
         return
     deadline = time.monotonic() + 5
@@ -245,14 +250,16 @@ def restart_callback(first, server, process, witness):
             parent.close()
         if child is not None:
             child.close()
-        if second is not None:
-            stop_process(second, new_witness['backendPid'] if new_witness else None)
-        if thread:
-            thread.join(timeout=1)
-        if slave is not None:
-            os.close(slave)
-        if master is not None:
-            os.close(master)
+        try:
+            if second is not None:
+                stop_process(second, new_witness['backendPid'] if new_witness else None)
+        finally:
+            if thread:
+                thread.join(timeout=1)
+            if slave is not None:
+                os.close(slave)
+            if master is not None:
+                os.close(master)
 
 
 if __name__ == '__main__':
