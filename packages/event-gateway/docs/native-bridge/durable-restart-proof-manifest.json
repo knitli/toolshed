@@ -1,0 +1,328 @@
+{
+  "scope": "app-server-only durable native Start anchor; exact old request receipt can be read after app-server restart using same codex_home; old-incarnation Start is Unknown and does not submit",
+  "final_source_manifest": "durable-restart-source-manifest.json",
+  "source_checkout": "/private/tmp/codex-native-durable-restart-spike/source",
+  "final_source_files": [
+    {
+      "path": "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json",
+      "sha256": "cdb5512b033565c4322f3f7b20b34e45fbbc641d061d10dbf8d2c12dbcf788c3",
+      "bytes": 713289
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json",
+      "sha256": "722bb44139cd436422ee0eec79b8d865265b8b774eecee824ef7f7c0a8603052",
+      "bytes": 612089
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst",
+      "sha256": "480bb6ad5f84025bed5472dfcf732d068d9b336f90891bb3b27dc2ec8fabb22d",
+      "bytes": 162064
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst",
+      "sha256": "fd00211c425bf0c2a482fb80b0b910dbd26ce9efbed0dcea43ae78926940b451",
+      "bytes": 156529
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/index.ts",
+      "sha256": "d1bc8d1fef56a4f1205594cd0757178bde740e09680d41bf313081ca3c2ead90",
+      "bytes": 47317
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/ClientSelectionUpdateStatus.ts",
+      "sha256": "9f70edf230a0fde8b1b714b69ec1cf1e2e2c03f74bcb5926d94b54b8dd687f0c",
+      "bytes": 229
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartIfIdleNotStartedReason.ts",
+      "sha256": "6e3e400e8a68f25219e873ffbf63e53ff068f4f98d9ecd731bbbafffe2f1faae",
+      "bytes": 408
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/common.rs",
+      "sha256": "63e02847f7819f62a3d3167931a3b202445740aadf52c60d90cd31183da20f0f",
+      "bytes": 174267
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+      "sha256": "519a6ecfdcb7cc80832d09526c61f4b6ac098d91613702fe19492489176aabb8",
+      "bytes": 81878
+    },
+    {
+      "path": "codex-rs/app-server/src/lib.rs",
+      "sha256": "46321d34235f5feffd33231a7390624720dcbfb627ba4222585a96ada3936ed8",
+      "bytes": 66088
+    },
+    {
+      "path": "codex-rs/app-server/src/message_processor.rs",
+      "sha256": "a47dc09bd9fccc83536dda784010dcc9f8ef16dd586071edbcc47d9f53619c8c",
+      "bytes": 83127
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors.rs",
+      "sha256": "eb4235cd2d56d6a5ab09e99d21ced2f720c4c454ff106ca597b928c35b675df2",
+      "bytes": 34980
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/thread_lifecycle.rs",
+      "sha256": "286694f95faaf1419caabfe764b8392c4690ee529bc134f9b73c4091b2160ab9",
+      "bytes": 34443
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "bytes": 40854
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+      "bytes": 30908
+    },
+    {
+      "path": "codex-rs/app-server/src/thread_state.rs",
+      "sha256": "9c9006531cc814599f84fd26a82eb946ae3a9c8a1b2869d40a086f689a4bcbb4",
+      "bytes": 24405
+    },
+    {
+      "path": "codex-rs/app-server/tests/suite/v2/thread_start.rs",
+      "sha256": "f09c38301ac5ed3e24b614548c7f1f9c6beb554e9cef50e5c4fff16aa465a0a7",
+      "bytes": 77858
+    },
+    {
+      "path": "codex-rs/core/src/session/mod.rs",
+      "sha256": "d4363e380ff2fe9e537c15a26330c497886d566c9cb14531c89db19c019b918c",
+      "bytes": 210839
+    },
+    {
+      "path": "codex-rs/core/src/session/turn_input.rs",
+      "sha256": "06a1138f66cc9b93302ae2af04de412a978b9db2943e88b9e82a6b6dbb7eae65",
+      "bytes": 30657
+    },
+    {
+      "path": "codex-rs/core/src/session/turn_input_tests.rs",
+      "sha256": "4accd9f9d8b749e11d53f9f329e568790b403102f2cee81bdf0bb28a667c82d2",
+      "bytes": 42665
+    },
+    {
+      "path": "codex-rs/core/src/tasks/mod.rs",
+      "sha256": "4167a59e4d411329c62a970015bea3f59bcce8a1ade62e1294a504f7ce464e73",
+      "bytes": 38553
+    },
+    {
+      "path": "codex-rs/core/src/tasks/guarded_start.rs",
+      "sha256": "381b171a096088a389ca7891cce0a3cf1066da7b8d814e55b828606c5445fb8f",
+      "bytes": 10918
+    },
+    {
+      "path": "codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs",
+      "sha256": "b352df6700d4547951860df6347d4d21a03a546994f6e284f88fccbe5a77083b",
+      "bytes": 2933
+    },
+    {
+      "path": "codex-rs/protocol/src/turn_input.rs",
+      "sha256": "4355925606639fd7f4c05252485d5d53b520ec0c9729a827c09b0f70edb8658b",
+      "bytes": 10904
+    },
+    {
+      "path": "codex-rs/state/src/lib.rs",
+      "sha256": "59544ce0db3de101c005799af99e11897a1c46ec4246e2c4dd4b91561b469bb0",
+      "bytes": 6480
+    },
+    {
+      "path": "codex-rs/state/src/runtime.rs",
+      "sha256": "76878304339e662224abf8e1d6dc652c397bf43f95286b9f1896be430d782fad",
+      "bytes": 27630
+    },
+    {
+      "path": "codex-rs/state/migrations/0059_native_turn_start_receipts.sql",
+      "sha256": "6a16875992277a8477c1b6a9f378604b7ccbefb8df847b2717234bbcb7dbca9b",
+      "bytes": 996
+    },
+    {
+      "path": "codex-rs/state/src/runtime/native_receipts.rs",
+      "sha256": "663d5353e4ddc17ce540c4ef5008ea44edb7870d05a70517a315ee8b9258d9c4",
+      "bytes": 13449
+    },
+    {
+      "path": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "sha256": "62483ffddcd55c81ddcc87b101af36c9c0b02338835b6567d11328676b55a1f6",
+      "bytes": 13458
+    }
+  ],
+  "proof_logs": [
+    {
+      "result": "213/213 passed",
+      "sha256": "762c1378d728861e9c71274704e5db555c430a137508e5c5ee34d17396dc11f9",
+      "path": "/private/tmp/codex-native-durable-restart-proof/state-final.log"
+    },
+    {
+      "result": "21/21 passed; includes Core durable receipt, DB-write failure, and same-codex_home app-server restart tests",
+      "sha256": "83b7608037a4e141a7b306b4ad6d8fba3fe6d3d99fdd8abd8da1784279bfab4e",
+      "path": "/private/tmp/codex-native-durable-restart-proof/app-native-final.log"
+    },
+    {
+      "result": "1/1 passed; fresh same-delivery attempt after current-process terminal no-start and a new selection generation",
+      "sha256": "44290d0ce068cd46a25b8779b06e6f45459d6f25b277ae749b0a17dc6b98a7b2",
+      "path": "/private/tmp/codex-native-durable-restart-proof/fresh-generation-final.log"
+    },
+    {
+      "result": "assertion-red: scratch mutant advertised Started after the durable stage write failed; expected Unknown",
+      "sha256": "718eaedf9b317cf3752cad77abed5e66bf95ad9cd6be94c95df2f7991ee65ad2",
+      "path": "/private/tmp/codex-native-durable-restart-proof/core-db-failure-started-mutant-red.log"
+    },
+    {
+      "result": "1/1 passed after restoring source",
+      "sha256": "3eac5ef1679b85e71ca0d8a21e17053ce0830be789d7acf09e2225d42649ec0e",
+      "path": "/private/tmp/codex-native-durable-restart-proof/core-db-failure-restored-green.log"
+    },
+    {
+      "result": "assertion-red: scratch mutant bypassed incarnation guard, replayed Started after restart; expected Unknown",
+      "sha256": "31fe82e34099ab73c5119c6408e2135446f6027647e49ce45426e38708a81700",
+      "path": "/private/tmp/codex-native-durable-restart-proof/old-incarnation-start-lookup-mutant-red.log"
+    },
+    {
+      "result": "1/1 passed after restoring source",
+      "sha256": "c4bbe3b79bc787a12a438ba07d6e1fdaecc2e86a81f3b1bfe4fdbd02cf134e09",
+      "path": "/private/tmp/codex-native-durable-restart-proof/old-incarnation-start-lookup-restored-green.log"
+    },
+    {
+      "result": "assertion-red: removed current-process terminal lineage authorization for a fresh attempt",
+      "sha256": "b6ca47dda0676593615296e738a7e4b857a85c7496027b6e67b36930d3842965",
+      "path": "/private/tmp/codex-native-durable-restart-proof/fresh-retry-newgen-mutant-red.log"
+    },
+    {
+      "result": "assertion-green after restoring source",
+      "sha256": "e96900e735406e489158278f64bf9d29e87b0750a303dd670986e65d7024694a",
+      "path": "/private/tmp/codex-native-durable-restart-proof/fresh-retry-newgen-restored-green.log"
+    },
+    {
+      "result": "assertion-red: late Started update demoted persisted InputRecorded evidence",
+      "sha256": "8de72c04cf6b2dc7252a6bec1834cba6120afe822962af100fd59fda89012a32",
+      "path": "/private/tmp/codex-native-durable-restart-proof/late-started-mutant-red.log"
+    },
+    {
+      "result": "assertion-green after restoring source",
+      "sha256": "04f8e23c8014be6240b96f843e761368049cf5873b6fede8869a6a990fb8cbc6",
+      "path": "/private/tmp/codex-native-durable-restart-proof/late-started-restored-green.log"
+    },
+    {
+      "result": "assertion-red: off-by-one mutation exceeded permanent receipt cap",
+      "sha256": "20584338b835283a242f53f2a0cfa5bd527e2ccaa579ffeab0802473543c65af",
+      "path": "/private/tmp/codex-native-durable-restart-proof/capacity-mutant-red.log"
+    },
+    {
+      "result": "assertion-green after restoring source",
+      "sha256": "bdf2c9e6345f47d5b08f007c39ea84d35f63b21a9ba84fc94b4315ea3355a349",
+      "path": "/private/tmp/codex-native-durable-restart-proof/capacity-restored-green.log"
+    },
+    {
+      "result": "assertion-red: identity lookup accepted a mismatched full request tuple",
+      "sha256": "493625776f450db6fb2d07f00dc037d99a7eb3d9fa597046d1e2c4ce80a0ed54",
+      "path": "/private/tmp/codex-native-durable-restart-proof/full-tuple-mutant-red.log"
+    },
+    {
+      "result": "assertion-green after restoring source",
+      "sha256": "b2086c8c764d685ea83bb1e57d8f57f4128fd5fc0d2f33d295cc630ae6e8b1e6",
+      "path": "/private/tmp/codex-native-durable-restart-proof/full-tuple-restored-green.log"
+    },
+    {
+      "result": "assertion-red: proof read accepted a turn ID that differed from the reserved submission ID",
+      "sha256": "2bb7d3db6b0980c6c9a3826599f39fd94778ceb3afa758ba12662e85bc957f25",
+      "path": "/private/tmp/codex-native-durable-restart-proof/invalid-turn-proof-mutant-red.log"
+    },
+    {
+      "result": "assertion-green after restoring source",
+      "sha256": "2ddb79008db7e86601ae89e3261512a7c88c78a85d16a59895a39a48211dfd8c",
+      "path": "/private/tmp/codex-native-durable-restart-proof/invalid-turn-proof-restored-green.log"
+    },
+    {
+      "result": "assertion-red: proof read accepted malformed Core item ID",
+      "sha256": "2ba6f61f008d211b09dda06146d9653d91eb3d2bc77dd34932835891283e79d5",
+      "path": "/private/tmp/codex-native-durable-restart-proof/invalid-item-proof-mutant-red.log"
+    },
+    {
+      "result": "assertion-green after restoring source",
+      "sha256": "ae42a61b517176284ddd5d8d07df386da65089b746a7cadf485fa47b94d3ccb7",
+      "path": "/private/tmp/codex-native-durable-restart-proof/invalid-item-proof-restored-green.log"
+    },
+    {
+      "result": "exit 0; clippy completed for codex-state and codex-app-server; warnings include question_mark and direct SqlitePool connect_with in test",
+      "sha256": "e606d22d311518383a4b47b73674135f7b020c15273298fb4b4fb28ce2aebc54",
+      "path": "/private/tmp/codex-native-durable-restart-proof/just-fix-escalated.log"
+    }
+  ],
+  "runtime_artifacts": [
+    {
+      "role": "codex-app-server child binary used by app-server integration tests",
+      "path": "/private/tmp/codex-native-durable-restart-spike/target/debug/codex-app-server",
+      "sha256": "dfa734eaaf66259f69b9aa2c8c33d7956360d3ba86c4fb7e00745bc4615bb89e",
+      "immutable_copy": "/private/tmp/event-native-durable-restart-frozen/codex-app-server",
+      "immutable_copy_sha256": "dfa734eaaf66259f69b9aa2c8c33d7956360d3ba86c4fb7e00745bc4615bb89e"
+    },
+    {
+      "role": "app-server integration test harness binary (suite::v2::thread_start)",
+      "path": "/private/tmp/codex-native-durable-restart-spike/target/debug/deps/all-8c02af0459dd5939",
+      "sha256": "50d1f95c9eca1e199e43ac0a505ca5cddd49ebc340f54a4242dab854ea170e26",
+      "immutable_copy": "/private/tmp/event-native-durable-restart-frozen/app-server-integration-tests",
+      "immutable_copy_sha256": "50d1f95c9eca1e199e43ac0a505ca5cddd49ebc340f54a4242dab854ea170e26"
+    }
+  ],
+  "core_commit_evidence": {
+    "test": "suite::v2::thread_start::native_start_stays_unknown_when_core_registration_cannot_be_durably_recorded",
+    "source": "codex-rs/app-server/tests/suite/v2/thread_start.rs:295",
+    "assertions": [
+      "injected SQLite trigger rejects persisted stage update",
+      "client Start response is Unknown",
+      "test waits for turn/completed",
+      "mock Responses server receives exactly one request, proving real Core turn reached provider",
+      "same exact retry remains Unknown",
+      "request count remains exactly one"
+    ],
+    "meaning": "Core committed/submitted one actual model request despite receipt persistence failure; app-server does not advertise Started and never resubmits on retry.",
+    "read_only_failure_boundary": "The actual Core DB-failure integration checks initial/retry Start Unknown. Read-only receipt Unknown after write failure is source/unit-covered, not asserted in that same integration."
+  },
+  "just_fix": {
+    "command": "just fix -p codex-state -p codex-app-server",
+    "result": "exit 0 after approved local Cargo listener escalation; no subsequent tests in the frozen owner source checkout per upstream AGENTS.md. Additional individual method causals ran in a separate exact-source scratch checkout and isolated target.",
+    "rewrite_check": "No clippy rewrite observed. native_selection_processor.rs hash remained 8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6, identical immediately before and after; final git diff --check was clean."
+  },
+  "limitations": [
+    "This proves app-server process restart only when reusing the same codex_home. It does not prove CLI/TUI or the local native process can recover after restart; local TUI event/client identity is not persisted by this prototype.",
+    "No power-loss, filesystem corruption, or SQLite durability-mode qualification is claimed.",
+    "The complete app-server suite was not rerun on final source. A prior broad run reported 1792 passed, 54 failed, 1 skipped before current focused fixes; failures included unavailable helper binaries, SSH-agent dependence, and an outdated expectation then corrected. Do not treat that run as final classification.",
+    "Full just fmt did not complete because dotslash was unavailable and pinned Ruff tooling could not be fetched in offline DNS conditions; the Rust formatter group passed."
+  ],
+  "independent_audits": [
+    {
+      "scope": "state",
+      "path": "/private/tmp/event-native-durable-restart-state-independent-audit.md",
+      "sha256": "570e4d767d71c6465c463c4a8a20651f234ed0053931e77e32d2440e52a5ec11",
+      "result": "CLOSED; read-only, no P1/P2"
+    },
+    {
+      "scope": "core-tui",
+      "path": "/private/tmp/event-native-durable-restart-core-tui-audit.md",
+      "sha256": "316e98a066d0484b09e0681eb64404a8cf65c6e3575c87a0f408f9ea8c7612c6",
+      "result": "CLOSED; read-only, no P1/P2"
+    }
+  ],
+  "method_causal_evidence": {
+    "path": "durable-restart-method-causals.json",
+    "sha256": "e7b4442776d05aefaeced7a6e051767686e37e1e86432ef1a6fdfc31bf06109f",
+    "changed_test_methods": 19,
+    "causal_pairs": 21,
+    "breakdown": {
+      "app_server_processor_unit": 10,
+      "state": 6,
+      "core_app_server_integration": 3
+    }
+  },
+  "individual_method_campaign": {
+    "methods": 19,
+    "pairs": 21,
+    "manifest": "durable-restart-method-causals.json",
+    "source": "/private/tmp/codex-native-durable-restart-method-causals/source",
+    "target": "/private/tmp/codex-native-durable-restart-method-causals/target-v3",
+    "frozenSourceRerun": false
+  }
+}
