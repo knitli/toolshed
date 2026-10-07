@@ -154,7 +154,8 @@ class CloudClient:
                     raise CloudError("invalid_response")
                 if 300 <= status < 400:
                     raise CloudError("redirect_refused")
-                if (response_headers.get("content-type", "").split(";")[0].strip().lower() != "application/json"
+                content_type = response_headers.get("content-type", "")
+                if (not isinstance(content_type, str) or content_type.split(";")[0].strip().lower() != "application/json"
                         or "content-encoding" in response_headers or not isinstance(raw, bytes)):
                     raise CloudError("invalid_response")
                 result = _response(raw)

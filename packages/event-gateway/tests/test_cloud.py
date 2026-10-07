@@ -203,6 +203,8 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_untrusted_wire_body_is_closed_bounded_and_unambiguous(self):
         for raw, headers in ((b" " * 8193 + json.dumps(FIXTURE["admitted"]).encode(), JSON_HEADERS), (b'{}', {"content-type": "text/html"}),
+                             (b'{}', {"content-type": None}), (b'{}', {"content-type": 1}),
+                             (b'{}', {"content-type": b"application/json"}),
                              (b'{}', {"content-type": "application/json", "content-encoding": "gzip"}),
                              (b'{"status":1,"status":2}', JSON_HEADERS),
                              (b'\xff', JSON_HEADERS), (b'NaN', JSON_HEADERS), (b'[]', JSON_HEADERS),
