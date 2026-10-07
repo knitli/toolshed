@@ -28,6 +28,7 @@ NOT_STARTED_REASONS = frozenset(
         "permitInvalid duplicateConflict receiptCapacity connectionClosed threadUnavailable inputInvalid"
     ).split()
 )
+TERMINAL_REASONS = NOT_STARTED_REASONS - {"permitInvalid", "duplicateConflict", "receiptCapacity"}
 IDENTITY = (
     "clientId",
     "serverInstanceId",
@@ -158,7 +159,8 @@ class NativeBridge:
         self.valid_until = 0
         self.closed = False
         self.exchange_lock = threading.Lock()
-        self.attempts, self.deliveries, self.messages = {}, set(), set()
+        self.attempts, self.deliveries, self.messages = {}, {}, set()
+        self.terminal_attempts = set()
 
     def close(self):
         self.closed = True
@@ -277,10 +279,10 @@ class NativeBridge:
             require(request[key] == self.witness[key])
         for key, seen in (
             ("attemptId", self.attempts),
-            ("deliveryId", self.deliveries),
             ("clientUserMessageId", self.messages),
         ):
             require(request[key] not in seen)
+        self._check_delivery(request)
         require(
             len(
                 json.dumps(
@@ -291,9 +293,33 @@ class NativeBridge:
             <= MAX_FRAME
         )
         self.attempts[request["attemptId"]] = deepcopy(request)
-        self.deliveries.add(request["deliveryId"])
+        self.deliveries[request["deliveryId"]] = request["attemptId"]
         self.messages.add(request["clientUserMessageId"])
         return self._receipt_exchange("start", request)
+
+    def _check_delivery(self, request):
+        previous = self.deliveries.get(request["deliveryId"])
+        if previous is not None:
+            require(previous in self.terminal_attempts)
+            require(all(
+                attempt["permitId"] != request["permitId"]
+                for attempt in self.attempts.values()
+                if attempt["deliveryId"] == request["deliveryId"]
+            ))
+
+    def restore_attempt(self, request):
+        """Restore durable identity for read-only recovery, consuming start-once IDs."""
+        validate_start(request)
+        require(not self.closed)
+        previous = self.attempts.get(request["attemptId"])
+        if previous is not None:
+            require(previous == request)
+            return
+        require(request["clientUserMessageId"] not in self.messages)
+        self._check_delivery(request)
+        self.attempts[request["attemptId"]] = deepcopy(request)
+        self.deliveries[request["deliveryId"]] = request["attemptId"]
+        self.messages.add(request["clientUserMessageId"])
 
     def receipt(self, request):
         """Read-only exact receipt recovery; never sends an event or renews a witness."""
@@ -325,6 +351,16 @@ class NativeBridge:
                     and type(outcome["replayed"]) is bool
                 )
                 require(operation == "start" or outcome["replayed"])
+            elif outcome.get("status") == "terminalNotStarted":
+                require(
+                    set(outcome) == {"status", "reason", "receiptId", "replayed"}
+                    and isinstance(outcome["reason"], str)
+                    and outcome["reason"] in TERMINAL_REASONS
+                    and uuid(outcome["receiptId"])
+                    and UUID(outcome["receiptId"]).version in (4, 7)
+                    and type(outcome["replayed"]) is bool
+                    and (operation == "start" or outcome["replayed"])
+                )
             elif outcome.get("status") == "notStarted":
                 require(
                     operation == "start"
@@ -334,6 +370,9 @@ class NativeBridge:
                 )
             else:
                 require(outcome == {"status": "unknown"})
+            self.terminal_attempts.discard(request["attemptId"])
+            if outcome["status"] == "terminalNotStarted":
+                self.terminal_attempts.add(request["attemptId"])
             return dict(outcome)
         except (ValueError, TypeError, KeyError):
             self.close()
@@ -412,6 +451,11 @@ class MockModel(BaseHTTPRequestHandler):
         if kind == "unknown":
             self.send_error(400)
             return
+        release = getattr(self.server, "release_primary", None)
+        if kind == "primary" and self.server.request_counts["primary"] == 1 and release is not None:
+            if not release.wait(30):
+                self.send_error(504)
+                return
         response_text = (
             '{"title":"Qualify native bridge"}'
             if kind == "title"
@@ -446,7 +490,73 @@ class MockModel(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
-def qualify(binary):
+def qualify_terminal_retry(bridge, server, process, witness):
+    """Native-only proof; distinct synthetic permits do not prove cloud settlement."""
+    rejected = synthetic_request(witness)
+    rejected["permitIssuedAt"] -= 10_000
+    rejected["permitExpiresAt"] -= 10_000
+    try:
+        terminal = bridge.start(rejected)
+        require(terminal["status"] == "terminalNotStarted"
+                and terminal["reason"] == "permitExpired")
+        require(server.model_requests == 0
+                and all(count == 0 for count in server.request_counts.values()))
+        # Refresh after the terminal reply; its round trip can consume the lease.
+        available = bridge.challenge()
+        require(available["eligible"])
+        first = synthetic_request(available)
+        started = bridge.start(first)
+        require(started["status"] == "started")
+        deadline = time.monotonic() + 10
+        while not server.request_counts["primary"] and time.monotonic() < deadline:
+            time.sleep(0.01)
+        require(server.request_counts["primary"] == 1
+                and server.request_counts["unknown"] == 0)
+        require(bridge.receipt(rejected) == {**terminal, "replayed": True})
+    finally:
+        server.release_primary.set()
+    deadline = time.monotonic() + 10
+    while True:
+        renewed = bridge.challenge()
+        if renewed["eligible"]:
+            break
+        require(process.poll() is None and time.monotonic() < deadline)
+        time.sleep(0.05)
+    retry = synthetic_request(renewed)
+    retry["deliveryId"], retry["event"] = rejected["deliveryId"], deepcopy(rejected["event"])
+    require(retry["threadId"] == rejected["threadId"]
+            and all(retry[key] != rejected[key]
+                    for key in ("attemptId", "permitId", "clientUserMessageId")))
+    retried = bridge.start(retry)
+    require(retried["status"] == "started")
+    for request, outcome in ((first, started), (retry, retried)):
+        require(bridge.receipt(request) == {**outcome, "replayed": True})
+    require(bridge.receipt(rejected) == {**terminal, "replayed": True})
+    deadline = time.monotonic() + 10
+    while server.request_counts["primary"] < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    time.sleep(2)
+    require(server.request_counts["primary"] == 2
+            and server.request_counts["title"] <= 2
+            and server.request_counts["unknown"] == 0 and process.poll() is None)
+    return {
+        "qualification": "synthetic-native-terminal-retry", "nativeOnly": True,
+        "cloudSettlementProven": False, "outcome": retried["status"],
+        "terminalReason": terminal["reason"], "terminalReceiptId": terminal["receiptId"],
+        "exactTerminalReceiptRecovered": True, "exactReceiptRecovered": True,
+        "busyRefusalProven": False, "retainedTerminalRecoveredWhileBusy": True,
+        "retriedDeliverySame": retry["deliveryId"] == rejected["deliveryId"],
+        "retryAttemptDistinct": retry["attemptId"] != rejected["attemptId"],
+        "retryPermitDistinct": retry["permitId"] != rejected["permitId"],
+        "retryMessageDistinct": retry["clientUserMessageId"] != rejected["clientUserMessageId"],
+        "mockModelRequests": server.model_requests,
+        "primaryModelRequests": server.request_counts["primary"],
+        "titleModelRequests": server.request_counts["title"],
+        "unknownModelRequests": server.request_counts["unknown"], "realModelCalls": 0,
+    }
+
+
+def qualify(binary, *, terminal_retry=False):
     """Launch only a disposable TUI; never inherit auth, configuration, or proxy settings."""
     binary = Path(binary).resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="native-qualification-") as directory:
@@ -459,6 +569,8 @@ def qualify(binary):
         server = ThreadingHTTPServer(("127.0.0.1", 0), MockModel)
         server.model_requests = 0
         server.request_counts = {"primary": 0, "title": 0, "unknown": 0}
+        if terminal_retry:
+            server.release_primary = threading.Event()
         threading.Thread(target=server.serve_forever, daemon=True).start()
         parent, child = socket.socketpair()
         master, slave = pty.openpty()
@@ -542,6 +654,8 @@ def qualify(binary):
                 require(process.poll() is None and time.monotonic() < deadline)
                 time.sleep(0.1)
             require(server.model_requests == 0)
+            if terminal_retry:
+                return qualify_terminal_retry(bridge, server, process, witness)
             request = synthetic_request(witness)
             outcome = bridge.start(request)
             require(outcome["status"] == "started")
@@ -580,6 +694,8 @@ def qualify(binary):
                 "realModelCalls": 0,
             }
         finally:
+            if terminal_retry:
+                server.release_primary.set()
             stop.set()
             bridge.close()
             child.close()
@@ -602,9 +718,11 @@ def qualify(binary):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
+    parser.add_argument("--terminal-retry", action="store_true",
+                        help="Prove native terminal refusal/retry; does not prove cloud settlement")
     args = parser.parse_args()
     try:
-        print(json.dumps(qualify(args.binary), sort_keys=True))
+        print(json.dumps(qualify(args.binary, terminal_retry=args.terminal_retry), sort_keys=True))
     except (BridgeError, OSError, subprocess.SubprocessError):
         print(
             json.dumps(

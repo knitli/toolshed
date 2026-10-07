@@ -61,28 +61,31 @@ restart invalidates bindings and can lose these receipts; the gateway's durable
 submission ledger must retain ambiguity and forbid replay. No absence scan
 proves non-submission.
 
-## Cloud integration still required
+## Terminal no-start settlement
 
-The current cloud claim can replay its original five-second permit only within
-that window. After admission, its ACK protocol accepts authentic submitted or
-observed receipts, not a definite no-start. Expiry eventually makes the attempt
-ambiguous and retains its pending slot. Locally, `submitting → queued` is also
-forbidden. Therefore a busy race after admission cannot yet be retried safely.
+The [terminal no-start checkpoint](native-bridge/terminal-no-start-checkpoint.md)
+records the cumulative patch, final binary and native-only synthetic evidence.
 
-The integration needs an authenticated, idempotent settlement for the exact
-attempt and permit's definite no-start, followed by a durable local return to
-waiting. Close the old execution authority before issuing another claim.
-Retain the original budget charge rather than adding a refund mechanism.
-Unknown outcomes remain fenced. This is planned work, not a shipped endpoint
-or an exception to the current closed authority.
+The follow-up patch records terminal no-start outcomes under the same lock as
+committed starts. `terminalNotStarted` carries a retained UUID and exact replay
+identity; an ordinary `notStarted` response carries no settlement authority.
+The bounded ledger shares the existing 256-entry capacity with starts and never
+evicts live evidence. Capacity failure returns unknown when proof cannot be
+retained. Restart can lose this ledger, so the durable gateway retains ambiguity.
 
-The minimum follow-up spans all three layers: native records a terminal refusal
-before replying, local storage retains the permit and pending settlement, and
-cloud settles the exact old attempt before permitting a new attempt ID. A busy
-refusal currently leaves the native permit replayable within its window, so
-the refusal alone cannot authorize retry. Lost settlement replies retry only
-settlement. A cloud admission followed by a local availability or capacity
-failure needs the same retirement path, even if no native call occurred.
+The local gateway stores claim intent, admission and the entire native request
+before issuing the event operation. It accepts either an exact native terminal
+receipt or an atomic proof that the admitted attempt was never submitted. Lost
+settlement replies repeat only the same cloud settlement. An exact echoed cloud
+result closes the old attempt and creates one fresh attempt; neither timeout nor
+an unknown native receipt authorizes retry. The original budget charge remains.
+
+Cloud PR [#683](https://github.com/knitli/knitli-site/pull/683) implements exact
+permit retirement and immutable historical admission recovery. The local and
+native changes require their own review and coupled qualification. This does
+not enable production wake. A separate ACK correlation extension is also needed:
+the existing `queued` native ACK cannot truthfully represent a direct Core start.
+Authentic direct starts remain durably submitted with ACK pending.
 
 The prototype checks stale/expired/wrong-thread/disconnected refusal, busy
 refusal, revoke/start ordering, post-commit cancellation, and exact retained

@@ -44,6 +44,289 @@ class StoreTests(unittest.TestCase):
         event["deliveryId"] = derive_delivery_id(event)
         return event
 
+    def admission(self, envelope=None):
+        from event_gateway.cloud import _iso
+        envelope = copy.deepcopy(envelope or self.event)
+        envelope.update(issuedAt=_iso(self.now), expiresAt=_iso(self.now + 60))
+        return {"status": "admitted", "permitId": str(uuid.uuid4()), "nodeId": str(uuid.uuid4()),
+                "permitIssuedAt": _iso(self.now), "permitExpiresAt": _iso(self.now + 5), "envelope": envelope}
+
+    def admitted(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        self.assertTrue(self.store.begin_claim(ident))
+        admission = self.admission()
+        self.store.record_admission(ident, admission)
+        return ident, admission
+
+    def request(self, admission):
+        from event_gateway.native import EVENT_FIELDS
+        from event_gateway.protocol import _timestamp
+        return {"clientId": str(uuid.uuid4()), "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 1,
+                "threadId": str(uuid.uuid4()), "generation": 2, "clientUserMessageId": str(uuid.uuid4()),
+                "deliveryId": admission["envelope"]["deliveryId"], "attemptId": admission["envelope"]["attemptId"],
+                "permitId": admission["permitId"], "permitIssuedAt": _timestamp(admission["permitIssuedAt"]),
+                "permitExpiresAt": _timestamp(admission["permitExpiresAt"]),
+                "event": {key: admission["envelope"][key] for key in EVENT_FIELDS}}
+
+    def receipt(self, request):
+        from event_gateway.native import IDENTITY as NATIVE_IDENTITY
+        return {**{key: request[key] for key in NATIVE_IDENTITY},
+                "outcome": {"status": "terminalNotStarted", "reason": "busy", "receiptId": str(uuid.uuid4()), "replayed": False}}
+
+    def settlement(self, admission, evidence):
+        return {**{key: admission["envelope"][key] for key in ("deliveryId", "attemptId", "nodeGeneration")},
+                "status": "not_started", "permitId": admission["permitId"], "nodeId": admission["nodeId"], "evidence": evidence}
+
+    def test_claim_intent_restarts_exact_and_reserves_capacity(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        self.assertTrue(self.store.begin_claim(ident))
+        self.assertFalse(self.store.begin_claim(ident))
+        pending = self.store.current_attempt(ident)
+        self.assertEqual(pending["envelope"], self.event)
+        self.assertGreater(pending["reserved_bytes"], 0)
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertEqual(self.store.current_attempt(ident), pending)
+        self.assertEqual(self.store.get(ident)["status"], "claiming")
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.assertEqual([row["deliveryId"] for row in self.store.list_reconcilable()], [ident])
+        self.store.max_bytes = self.store._size() + pending["reserved_bytes"] + 10000
+        with self.assertRaisesRegex(StoreError, "storage_capacity"):
+            self.store.put_attachment(dict(self.mapping, leaseExpiresAt=NOW + 7200))
+        self.store.record_admission(ident, self.admission())
+        self.assertEqual(self.store.get(ident)["status"], "admitted")
+
+    def test_claim_capacity_failure_leaves_original_queued(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        self.store.max_bytes = self.store._size() + 10000
+        with self.assertRaisesRegex(StoreError, "storage_capacity"):
+            self.store.begin_claim(ident)
+        self.assertEqual(self.store.get(ident)["status"], "queued")
+        self.assertIsNone(self.store.current_attempt(ident))
+        self.assertEqual(self.store.delivery_envelope(ident), self.event)
+
+    def test_admission_snapshot_is_validated_immutable_and_historical(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        self.store.begin_claim(ident)
+        admission = self.admission()
+        bad = copy.deepcopy(admission)
+        bad["envelope"]["policyRevision"] += 1
+        bad["envelope"]["deliveryId"] = derive_delivery_id(bad["envelope"])
+        with self.assertRaisesRegex(StoreError, "invalid_admission"):
+            self.store.record_admission(ident, bad)
+        self.assertEqual(self.store.get(ident)["status"], "claiming")
+        self.now += 3600
+        self.assertEqual(self.store.record_admission(ident, admission), admission)
+        self.assertEqual(self.store.record_admission(ident, admission), admission)
+        bad = dict(admission, permitId=str(uuid.uuid4()))
+        with self.assertRaisesRegex(StoreError, "admission_conflict"):
+            self.store.record_admission(ident, bad)
+        detached = self.store.current_attempt(ident)
+        detached["admission"]["permitId"] = "mutated"
+        self.assertEqual(self.store.current_attempt(ident)["admission"], admission)
+        self.assertEqual(self.store.delivery_envelope(ident), admission["envelope"])
+        self.assertFalse(self.store.begin_native(ident, self.event["attemptId"], self.request(admission)))
+
+    def test_admission_storage_failure_keeps_durable_claim_for_exact_recovery(self):
+        import sqlite3
+        ident = self.store.accept(self.event)["deliveryId"]
+        self.store.begin_claim(ident)
+        before = self.store.current_attempt(ident)
+        admission = self.admission()
+        self.store.db.execute("CREATE TRIGGER fail_admit BEFORE UPDATE ON deliveries WHEN NEW.state='admitted' BEGIN SELECT RAISE(ABORT,'disk fault'); END")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.record_admission(ident, admission)
+        self.assertEqual(self.store.current_attempt(ident), before)
+        self.assertEqual(self.store.get(ident)["status"], "claiming")
+        self.store.db.execute("DROP TRIGGER fail_admit")
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.now += 120
+        self.assertEqual(self.store.record_admission(ident, admission), admission)
+        self.assertEqual(self.store.current_attempt(ident)["envelope"], self.event)
+        self.assertEqual(self.store.current_attempt(ident)["admission"], admission)
+
+    def test_native_request_is_durable_before_submission_and_restart_ambiguous(self):
+        ident, admission = self.admitted()
+        request = self.request(admission)
+        bad = dict(request, permitId=str(uuid.uuid4()))
+        with self.assertRaisesRegex(StoreError, "invalid_native_request"):
+            self.store.begin_native(ident, self.event["attemptId"], bad)
+        self.assertTrue(self.store.begin_native(ident, self.event["attemptId"], request))
+        self.assertEqual(self.store.current_attempt(ident)["native_request"], request)
+        self.assertFalse(self.store.begin_native(ident, self.event["attemptId"], request))
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertEqual(self.store.current_attempt(ident)["state"], "ambiguous")
+        self.assertEqual(self.store.current_attempt(ident)["native_request"], request)
+        with self.assertRaisesRegex(StoreError, "invalid_transition"):
+            self.store.begin_settlement(ident, self.event["attemptId"], {"type": "local_not_submitted"})
+        self.assertFalse(self.store.begin_submit(ident))
+
+    def test_local_settlement_survives_restart_rotates_once_and_fences_old_responses(self):
+        ident, admission = self.admitted()
+        attempt = self.event["attemptId"]
+        evidence = {"type": "local_not_submitted"}
+        self.assertTrue(self.store.begin_settlement(ident, attempt, evidence))
+        self.assertFalse(self.store.begin_native(ident, attempt, self.request(admission)))
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        current = self.store.current_attempt(ident)
+        self.assertEqual(current["state"], "settlement_pending")
+        self.assertEqual(current["evidence"], evidence)
+        self.assertEqual(current["admission"], admission)
+        self.assertEqual(self.store.status()["pending"], 1)
+        result = self.settlement(admission, evidence)
+        self.assertTrue(self.store.complete_settlement(ident, attempt, result))
+        rotated = self.store.delivery_envelope(ident)
+        self.assertNotEqual(rotated["attemptId"], attempt)
+        self.assertEqual({k: v for k, v in rotated.items() if k != "attemptId"},
+                         {k: v for k, v in admission["envelope"].items() if k != "attemptId"})
+        self.assertEqual(self.store.get(ident)["status"], "queued")
+        self.assertFalse(self.store.complete_settlement(ident, attempt, result))
+        self.assertEqual(self.store.delivery_envelope(ident), rotated)
+        self.assertTrue(self.store.begin_claim(ident))
+        with self.assertRaisesRegex(StoreError, "invalid_admission"):
+            self.store.record_admission(ident, admission)
+        with self.assertRaisesRegex(StoreError, "attempt_conflict"):
+            self.store.finish(ident, "ambiguous", attempt_id=attempt)
+        self.assertFalse(self.store.mark_acknowledged(ident, "observed", attempt_id=attempt))
+        old = self.store.db.execute("SELECT state,settlement,reserved_bytes FROM attempts WHERE attempt_id=?", (attempt,)).fetchone()
+        self.assertEqual(tuple(old), ("settled", json.dumps(result, sort_keys=True, separators=(",", ":")), 0))
+
+    def test_native_terminal_settlement_requires_exact_receipt_and_no_positive_correlation(self):
+        ident, admission = self.admitted()
+        attempt = self.event["attemptId"]
+        request = self.request(admission)
+        self.store.begin_native(ident, attempt, request)
+        receipt = self.receipt(request)
+        evidence = {"type": "native_terminal_no_start", "receiptId": receipt["outcome"]["receiptId"]}
+        for bad in (dict(receipt, permitId=str(uuid.uuid4())), dict(receipt, extra=True),
+                    dict(receipt, outcome={"status": "unknown"}),
+                    dict(receipt, outcome={"status": "started", "turnId": request["clientUserMessageId"], "replayed": False})):
+            with self.subTest(receipt=bad), self.assertRaisesRegex(StoreError, "invalid_receipt"):
+                self.store.begin_settlement(ident, attempt, evidence, receipt=bad)
+        self.assertTrue(self.store.begin_settlement(ident, attempt, evidence, receipt=receipt))
+        self.assertTrue(self.store.begin_settlement(ident, attempt, evidence, receipt=receipt))
+        self.assertEqual(self.store.current_attempt(ident)["receipt"], receipt)
+        with self.assertRaisesRegex(StoreError, "invalid_transition"):
+            self.store.finish(ident, "observed", submission_id="positive", turn_id="positive", attempt_id=attempt)
+        # Even a preexisting positive correlation cannot be downgraded by a negative receipt.
+        self.store.db.execute("UPDATE deliveries SET submission='positive' WHERE id=?", (ident,))
+        self.store.db.commit()
+        with self.assertRaisesRegex(StoreError, "receipt_conflict"):
+            self.store.begin_settlement(ident, attempt, evidence, receipt=receipt)
+        with self.assertRaisesRegex(StoreError, "receipt_conflict"):
+            self.store.complete_settlement(ident, attempt, self.settlement(admission, evidence))
+
+    def test_started_receipt_is_preserved_and_ack_remains_unqualified(self):
+        ident, admission = self.admitted()
+        attempt = self.event["attemptId"]
+        request = self.request(admission)
+        self.store.begin_native(ident, attempt, request)
+        receipt = self.receipt(request)
+        with self.assertRaisesRegex(StoreError, "invalid_receipt"):
+            self.store.record_started(ident, attempt, receipt)
+        receipt["outcome"] = {"status": "started", "turnId": request["clientUserMessageId"], "replayed": False}
+        bad = dict(receipt, permitId=str(uuid.uuid4()))
+        with self.assertRaisesRegex(StoreError, "invalid_receipt"):
+            self.store.record_started(ident, attempt, bad)
+        result = self.store.record_started(ident, attempt, receipt)
+        self.assertEqual(result["status"], "submitted")
+        self.assertEqual(result["reason"], "native_started_ack_unqualified")
+        self.assertEqual(self.store.current_attempt(ident)["started_receipt"], receipt)
+        self.assertEqual(self.store.native_receipt(ident), {"submission_id": request["clientUserMessageId"],
+                         "turn_id": request["clientUserMessageId"], "ack_pending": True})
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertEqual(self.store.current_attempt(ident)["started_receipt"], receipt)
+        with self.assertRaisesRegex(StoreError, "receipt_conflict"):
+            self.store.begin_settlement(ident, attempt, {"type": "local_not_submitted"})
+
+    def test_started_contradiction_cancels_pending_negative_settlement(self):
+        ident, admission = self.admitted()
+        attempt = self.event["attemptId"]
+        request = self.request(admission)
+        self.store.begin_native(ident, attempt, request)
+        negative = self.receipt(request)
+        evidence = {"type": "native_terminal_no_start", "receiptId": negative["outcome"]["receiptId"]}
+        self.store.begin_settlement(ident, attempt, evidence, receipt=negative)
+        started = dict(negative, outcome={"status": "started", "turnId": request["clientUserMessageId"], "replayed": True})
+        result = self.store.record_started(ident, attempt, started)
+        self.assertEqual(result["status"], "ambiguous")
+        current = self.store.current_attempt(ident)
+        self.assertEqual(current["receipt"], negative)
+        self.assertEqual(current["started_receipt"], started)
+        self.assertFalse(self.store.complete_settlement(ident, attempt, self.settlement(admission, evidence)))
+        self.assertEqual(self.store.delivery_envelope(ident)["attemptId"], attempt)
+        self.assertEqual(self.store.list_pending(), [])
+
+    def test_settlement_rejects_echo_tampering_and_rolls_back_storage_failure(self):
+        import sqlite3
+        ident, admission = self.admitted()
+        attempt = self.event["attemptId"]
+        evidence = {"type": "local_not_submitted"}
+        self.store.begin_settlement(ident, attempt, evidence)
+        result = self.settlement(admission, evidence)
+        for key, value in (("permitId", str(uuid.uuid4())), ("nodeId", str(uuid.uuid4())), ("nodeGeneration", True),
+                           ("evidence", {"type": "native_terminal_no_start", "receiptId": str(uuid.uuid4())}), ("extra", True)):
+            with self.subTest(key=key), self.assertRaisesRegex(StoreError, "invalid_settlement"):
+                self.store.complete_settlement(ident, attempt, {**result, key: value})
+        before = self.store.current_attempt(ident)
+        self.store.db.execute("CREATE TRIGGER fail_settle BEFORE UPDATE ON deliveries WHEN NEW.state='queued' BEGIN SELECT RAISE(ABORT,'disk fault'); END")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.complete_settlement(ident, attempt, result)
+        self.assertEqual(self.store.current_attempt(ident), before)
+        self.assertEqual(self.store.get(ident)["status"], "settlement_pending")
+        self.store.db.execute("DROP TRIGGER fail_settle")
+        self.assertTrue(self.store.complete_settlement(ident, attempt, result))
+
+    def test_detached_claim_keeps_grant_for_settlement_but_never_requeues(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        self.store.begin_claim(ident)
+        self.store.detach(self.mapping["runtimeId"])
+        admission = self.admission()
+        self.store.record_admission(ident, admission)
+        self.assertEqual(self.store.current_attempt(ident)["admission"], admission)
+        self.assertFalse(self.store.begin_native(ident, self.event["attemptId"], self.request(admission)))
+        evidence = {"type": "local_not_submitted"}
+        self.store.begin_settlement(ident, self.event["attemptId"], evidence)
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertTrue(self.store.complete_settlement(ident, self.event["attemptId"], self.settlement(admission, evidence)))
+        self.assertEqual(self.store.get(ident)["status"], "stale")
+        self.assertEqual(self.store.list_pending(), [])
+
+    def test_pending_settlement_is_retained_and_expired_attachment_cannot_retry(self):
+        ident, admission = self.admitted()
+        evidence = {"type": "local_not_submitted"}
+        self.store.begin_settlement(ident, self.event["attemptId"], evidence)
+        self.now += RETENTION * 2
+        self.assertEqual(self.store.cleanup(), 0)
+        self.assertIsNotNone(self.store.current_attempt(ident))
+        self.assertEqual(self.store.current_attempt(ident)["state"], "settlement_pending")
+        self.assertEqual(len(self.store.list_reconcilable()), 1)
+        self.store.complete_settlement(ident, self.event["attemptId"], self.settlement(admission, evidence))
+        self.assertEqual(self.store.get(ident)["status"], "stale")
+        self.now += RETENTION + 1
+        self.assertEqual(self.store.cleanup(), 1)
+        self.assertEqual(self.store.db.execute("SELECT COUNT(*) FROM attempts").fetchone()[0], 0)
+
+    def test_schema_zero_and_one_migrate_without_requeueing_native_work(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        self.store.begin_submit(ident)
+        for version in (0, 1):
+            self.store.db.execute("DROP TABLE attempts")
+            self.store.db.execute(f"PRAGMA user_version={version}")
+            self.store.db.commit()
+            self.store.close()
+            self.store = Store(self.path, clock=self.clock)
+            self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(self.store.get(ident)["status"], "ambiguous")
+            self.assertIsNone(self.store.current_attempt(ident))
+            self.assertFalse(self.store.begin_claim(ident))
+            self.assertEqual(self.store.delivery_envelope(ident), self.event)
+
     def test_consumer_generation_fences_acceptance_and_transfer(self):
         mapping = dict(
             self.mapping,

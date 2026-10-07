@@ -1,0 +1,162 @@
+# Terminal no-start mutation red/green excerpts
+# Source directory: /private/tmp/codex-native-selection-spike
+# SHA-256 values cover complete source logs and match terminal-no-start-test-proof.json.
+# Exact source lines below retain the first assertion panic, test outcomes, and summaries;
+# compilation output, retry duplicates, and backtrace hints are omitted.
+
+## terminal-replay
+# Selector: codex-app-server request_processors::native_selection_processor::tests::terminal_no_start_replays_and_lookup_requires_the_exact_request
+# RED source: mutation-terminal-replay-red.log
+# SHA-256: c87687044e1acb551ffce8a6992f11fe274fe9b49f8d239dc2dabfaf06cc61ba
+  TRY 1 FAIL [   0.055s] (─────────) codex-app-server request_processors::native_selection_processor::tests::terminal_no_start_replays_and_lookup_requires_the_exact_request
+    thread 'request_processors::native_selection_processor::tests::terminal_no_start_replays_and_lookup_requires_the_exact_request' (15681229) panicked at app-server/src/request_processors/native_selection_processor_tests.rs:220:5:
+    assertion failed: `(left == right)`
+
+    Diff < left / right > :
+     Some(
+         TerminalNotStarted {
+             reason: PermitExpired,
+             receipt_id: "01a114a3-75e7-73f3-8d7e-ef805881f736",
+    <        replayed: false,
+    >        replayed: true,
+         },
+     )
+     Summary [   0.098s] 1 test run: 0 passed, 1 failed, 1840 skipped
+# RESTORED GREEN source: mutation-terminal-replay-green.log
+# SHA-256: ecc0d987f531347ae0e324ffd34d0ccabd9e559bd15daee68cee8fc5d5696f1a
+        PASS [   0.016s] (1/1) codex-app-server request_processors::native_selection_processor::tests::terminal_no_start_replays_and_lookup_requires_the_exact_request
+     Summary [   0.028s] 1 test run: 1 passed, 1840 skipped
+
+## terminal-status
+# Selector: codex-app-server request_processors::native_selection_processor::tests::terminal_no_start_wire_status_is_distinct_from_call_refusal
+# RED source: mutation-terminal-status-red.log
+# SHA-256: 50f04f79c3505654ac187c1adf695738cdd7dfdecaa1e5a6cbe378d7db31a5c4
+  TRY 1 FAIL [   0.055s] (─────────) codex-app-server request_processors::native_selection_processor::tests::terminal_no_start_wire_status_is_distinct_from_call_refusal
+    thread 'request_processors::native_selection_processor::tests::terminal_no_start_wire_status_is_distinct_from_call_refusal' (15716526) panicked at app-server/src/request_processors/native_selection_processor_tests.rs:255:5:
+    assertion failed: `(left == right)`
+
+    Diff < left / right > :
+    <String("terminal_not_started")
+    >"terminalNotStarted"
+     Summary [   0.100s] 1 test run: 0 passed, 1 failed, 1840 skipped
+# RESTORED GREEN source: mutation-terminal-status-green.log
+# SHA-256: 282a2986534964f3ff8f3615f658cace28abb22f18c1373af59816dbc4ff4088
+        PASS [   0.014s] (1/1) codex-app-server request_processors::native_selection_processor::tests::terminal_no_start_wire_status_is_distinct_from_call_refusal
+     Summary [   0.022s] 1 test run: 1 passed, 1840 skipped
+
+## terminal-attempt
+# Selector: codex-app-server request_processors::native_selection_processor::tests::terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery
+# RED source: mutation-terminal-attempt-red.log
+# SHA-256: 9fc4bd06db67985223bf2e73bd036b9e57bad65fc874522d3f27426ec15cafa5
+  TRY 1 FAIL [   0.052s] (─────────) codex-app-server request_processors::native_selection_processor::tests::terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery
+    thread 'request_processors::native_selection_processor::tests::terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery' (15752197) panicked at app-server/src/request_processors/native_selection_processor_tests.rs:310:5:
+    assertion failed: `(left == right)`
+
+    Diff < left / right > :
+    <Rejected
+    >Committed
+     Summary [   0.097s] 1 test run: 0 passed, 1 failed, 1840 skipped
+# RESTORED GREEN source: mutation-terminal-attempt-green.log
+# SHA-256: 78d647813297f20d8ad9d9732c8b74d0a136e2b0f140b2aae1cb94876d770b5d
+        PASS [   0.013s] (1/1) codex-app-server request_processors::native_selection_processor::tests::terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery
+     Summary [   0.022s] 1 test run: 1 passed, 1840 skipped
+
+## terminal-race
+# Selector: codex-app-server request_processors::native_selection_processor::tests::terminal_refusal_and_core_commit_arbitrate_on_the_receipt_lock
+# RED source: mutation-terminal-race-red.log
+# SHA-256: 44715108e25a503c8046a033d14a7508e9f97524c553e288e520bcd3274d5adc
+  TRY 1 FAIL [   0.062s] (─────────) codex-app-server request_processors::native_selection_processor::tests::terminal_refusal_and_core_commit_arbitrate_on_the_receipt_lock
+    thread 'request_processors::native_selection_processor::tests::terminal_refusal_and_core_commit_arbitrate_on_the_receipt_lock' (15770514) panicked at app-server/src/request_processors/native_selection_processor_tests.rs:346:5:
+    assertion failed: `(left == right)`: a committed positive receipt wins over a later refusal
+
+    Diff < left / right > :
+    <NotStarted {
+    <    reason: DuplicateConflict,
+    >Started {
+    >    turn_id: "started-turn",
+    >    replayed: true,
+     }
+     Summary [   0.103s] 1 test run: 0 passed, 1 failed, 1840 skipped
+# RESTORED GREEN source: mutation-terminal-race-green.log
+# SHA-256: f394e203711102cd1368a67acfc356123a44fb6528da3599ff535b9186931064
+        PASS [   0.013s] (1/1) codex-app-server request_processors::native_selection_processor::tests::terminal_refusal_and_core_commit_arbitrate_on_the_receipt_lock
+     Summary [   0.024s] 1 test run: 1 passed, 1840 skipped
+
+## terminal-capacity
+# Selector: codex-app-server request_processors::native_selection_processor::tests::terminal_and_started_receipts_share_the_bounded_capacity
+# RED source: mutation-terminal-capacity-red.log
+# SHA-256: c269465c0e6e6c071f55f525175ec8ec2fecd28b251c42cc3ce9142debede159
+  TRY 1 FAIL [   0.054s] (─────────) codex-app-server request_processors::native_selection_processor::tests::terminal_and_started_receipts_share_the_bounded_capacity
+    thread 'request_processors::native_selection_processor::tests::terminal_and_started_receipts_share_the_bounded_capacity' (15785953) panicked at app-server/src/request_processors/native_selection_processor_tests.rs:429:5:
+    assertion failed: `(left == right)`
+
+    Diff < left / right > :
+    <TerminalNotStarted {
+    <    reason: Busy,
+    <    receipt_id: "01a114a7-f927-7593-a9f2-e371f2ab7ee7",
+    <    replayed: false,
+    <}
+    >Unknown
+     Summary [   0.103s] 1 test run: 0 passed, 1 failed, 1840 skipped
+# RESTORED GREEN source: mutation-terminal-capacity-green.log
+# SHA-256: 0c53fb39f0a519f70eb98bd30b1ede6a9054c9be0a8800f807b2c8ec3060a8e0
+        PASS [   0.015s] (1/1) codex-app-server request_processors::native_selection_processor::tests::terminal_and_started_receipts_share_the_bounded_capacity
+     Summary [   0.026s] 1 test run: 1 passed, 1840 skipped
+
+## tui-start-replay
+# Selector: codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+# RED source: mutation-tui-start-replay-red.log
+# SHA-256: c6d3664b1b10058f57095f7ee564fd3ab241d9347ffbd295f5fbd61a9d89638a
+  TRY 1 FAIL [   0.068s] (─────────) codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+    thread 'app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt' (15882432) panicked at tui/src/app/selection_bridge_tests.rs:71:5:
+    assertion `left == right` failed
+      left: Some(Started { turn_id: "c88b271a-ed19-440f-b25c-23a2ef2a0abb", replayed: false })
+     right: Some(Started { turn_id: "c88b271a-ed19-440f-b25c-23a2ef2a0abb", replayed: true })
+     Summary [   0.137s] 1 test run: 0 passed, 1 failed, 5638 skipped
+# RESTORED GREEN source: mutation-tui-start-replay-green.log
+# SHA-256: b318e720910c6e36abcb064d0faf631a8f419feefc6956fbe52b08e64584a0d2
+        PASS [   0.015s] (1/1) codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+     Summary [   0.042s] 1 test run: 1 passed, 5638 skipped
+
+## tui-terminal-replay
+# Selector: codex-tui app::selection_witness::bridge::tests::terminal_no_start_replay_is_stable_and_fresh_attempt_needs_a_new_permit
+# RED source: mutation-tui-terminal-replay-red.log
+# SHA-256: 5292d75be7b1032f02adc5e26fe04e60e11251e765baec5f5002aafbbe24c2e5
+  TRY 1 FAIL [   0.071s] (─────────) codex-tui app::selection_witness::bridge::tests::terminal_no_start_replay_is_stable_and_fresh_attempt_needs_a_new_permit
+    thread 'app::selection_witness::bridge::tests::terminal_no_start_replay_is_stable_and_fresh_attempt_needs_a_new_permit' (15902005) panicked at tui/src/app/selection_bridge_tests.rs:126:5:
+    assertion failed: replayed
+     Summary [   0.139s] 1 test run: 0 passed, 1 failed, 5638 skipped
+# RESTORED GREEN source: mutation-tui-terminal-replay-green.log
+# SHA-256: 41907bce3255387f3a5b32314afb78e8bd52babbf556c8fe5b1ed1387536fd74
+        PASS [   0.016s] (1/1) codex-tui app::selection_witness::bridge::tests::terminal_no_start_replay_is_stable_and_fresh_attempt_needs_a_new_permit
+     Summary [   0.045s] 1 test run: 1 passed, 5638 skipped
+
+## tui-native-terminal-receipt
+# Selector: codex-tui app::selection_witness::bridge::tests::native_terminal_receipt_requires_replay_and_canonical_uuid
+# RED source: mutation-tui-native-terminal-receipt-red.log
+# SHA-256: 4b7af34968bf0dc85403f89950d43634fe017a0d5cfce00f2a586df720a1d4ae
+  TRY 1 FAIL [   0.067s] (─────────) codex-tui app::selection_witness::bridge::tests::native_terminal_receipt_requires_replay_and_canonical_uuid
+    thread 'app::selection_witness::bridge::tests::native_terminal_receipt_requires_replay_and_canonical_uuid' (15925818) panicked at tui/src/app/selection_bridge_tests.rs:218:5:
+    assertion `left == right` failed: terminal lookup must be explicitly replayed
+      left: TerminalNotStarted { reason: Busy, receipt_id: "01a114ae-089d-78b2-8782-4fd0bed93f4c", replayed: false }
+     right: Unknown
+     Summary [   0.130s] 1 test run: 0 passed, 1 failed, 5638 skipped
+# RESTORED GREEN source: mutation-tui-native-terminal-receipt-green.log
+# SHA-256: 0459b4a73c928e99579e74c8e666e85f8912bb22c8a7b1a918d1235c171bfb59
+        PASS [   0.014s] (1/1) codex-tui app::selection_witness::bridge::tests::native_terminal_receipt_requires_replay_and_canonical_uuid
+     Summary [   0.045s] 1 test run: 1 passed, 5638 skipped
+
+## tui-terminal-uuid
+# Selector: codex-tui app::selection_witness::bridge::tests::native_terminal_receipt_requires_replay_and_canonical_uuid
+# RED source: mutation-tui-terminal-uuid-red.log
+# SHA-256: 24e9eeca795d87d1a03acf75e68aac4abac77b11f6a826f5c440b30d69a20389
+  TRY 1 FAIL [   0.068s] (─────────) codex-tui app::selection_witness::bridge::tests::native_terminal_receipt_requires_replay_and_canonical_uuid
+    thread 'app::selection_witness::bridge::tests::native_terminal_receipt_requires_replay_and_canonical_uuid' (15949217) panicked at tui/src/app/selection_bridge_tests.rs:223:5:
+    assertion `left == right` failed: receipt provenance must be a canonical UUID
+      left: TerminalNotStarted { reason: Busy, receipt_id: "not-a-uuid", replayed: true }
+     right: Unknown
+     Summary [   0.136s] 1 test run: 0 passed, 1 failed, 5638 skipped
+# RESTORED GREEN source: mutation-tui-terminal-uuid-green.log
+# SHA-256: ea607884b6a04f85bd182a1a58a1d936e26cdb8d98b12d751424f225c15e4666
+        PASS [   0.015s] (1/1) codex-tui app::selection_witness::bridge::tests::native_terminal_receipt_requires_replay_and_canonical_uuid
+     Summary [   0.043s] 1 test run: 1 passed, 5638 skipped

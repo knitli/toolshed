@@ -1,0 +1,123 @@
+{
+  "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "rustVersion": "1.95.0",
+  "binarySha256": "116b8a07327aca819844b1e1da012a075772e8681822cf161b39b14fbd12cd90",
+  "patchSha256": "ff636007ae00fc7c65d99f28384ffe32def696d26f66e2ff998df0928d18262e",
+  "sourceFileCount": 39,
+  "cleanPinnedApplyCheck": true,
+  "allPatchedFilesByteMatchSource": true,
+  "historicalArtifactsUnchanged": true,
+  "productionNativeEnabled": false,
+  "ownerClientInstalled": false,
+  "build": {
+    "command": "cargo build -p codex-cli --bin codex --profile dev-small",
+    "passed": true
+  },
+  "requiredJustFix": {
+    "just_fix": {
+      "command": "just fix -p codex-app-server -p codex-app-server-protocol -p codex-tui",
+      "cwd": "/private/tmp/codex-native-selection-spike/source/codex-rs",
+      "toolchain": "Rust 1.95.0",
+      "cargo_target_dir": "/private/tmp/codex-native-selection-spike/target195",
+      "exit_code": 0,
+      "duration": "3m 13s",
+      "log_path": "/private/tmp/codex-native-selection-spike/terminal-no-start-just-fix.log",
+      "log_sha256": "368937463b6a53708bfbc99041d081cdc88ed14cf0690a9574206ebc23199ab4",
+      "automatic_fixes": [
+        {
+          "path": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+          "before_sha256": "d758d292aadd81ba32689da5d52bf14813b06e93c75084e311a297275b8881b9",
+          "after_sha256": "cd8b8343109df13833a10d708da65b1fcea2af842f37d57df92f1c2f61890a10",
+          "classification": "lint-only; Clippy collapsible-if rewrite into a let-chain; equivalent control flow"
+        },
+        {
+          "path": "codex-rs/tui/src/app/selection_bridge_tests.rs",
+          "before_sha256": "ac8118631679b4b82fd7e470570936dfde08d1ca6ef95097a785f43e7c1639c8",
+          "after_sha256": "71ea3157971733b3b56ab9def330d5e4a22f892c16d32c65f163497bfe60840e",
+          "classification": "lint-only; removed a redundant String clone in a test"
+        }
+      ],
+      "other_source_changes": [],
+      "warning": "Clippy emitted an unrelated unused-import warning in codex-core/src/tools/registry.rs while checking a dependency; codex-core was not selected or modified.",
+      "post_fix_tests": "Not run, per repository AGENTS guidance not to rerun tests after just fix/fmt.",
+      "diff_check": "git diff --check for affected project paths passed."
+    },
+    "rust_source_manifest": {
+      "scope": "20 modified or untracked Rust files under app-server, app-server-protocol, and TUI; sorted path+SHA-256 manifest",
+      "before_sha256": "558ed464176d731de8fa1f3615868e8ef155141f0bac4815b68f8d7c302c1ea2",
+      "after_just_fix_sha256": "c92fe3d480e4660c5a0f1bd5c3c5ab60de9dbdcdedf05d8a8c35a96d2d845ffb",
+      "current_after_build_sha256": "c92fe3d480e4660c5a0f1bd5c3c5ab60de9dbdcdedf05d8a8c35a96d2d845ffb"
+    },
+    "build": {
+      "command": "cargo build -p codex-cli --bin codex --profile dev-small --locked",
+      "toolchain": "Rust 1.95.0",
+      "exit_code": 0,
+      "log_path": "/private/tmp/codex-native-selection-spike/terminal-no-start-final-cli-build.log",
+      "log_sha256": "229eb8bebadf7952986e05e515a1cd88afae2aa3441d703f8bc595ad8a1b56b3",
+      "new_binary_path": "/private/tmp/codex-native-selection-spike/terminal-no-start-final-bin",
+      "new_binary_sha256": "116b8a07327aca819844b1e1da012a075772e8681822cf161b39b14fbd12cd90",
+      "new_binary_mode": "0o555",
+      "version_exit_code": 0,
+      "version": "codex-cli 0.160.0"
+    },
+    "preserved_historical_artifacts": {
+      "old_binary_path": "/private/tmp/codex-native-selection-spike/terminal-no-start-bin",
+      "old_binary_sha256_before": "139847de512d82c612dc84ec997f01d527a9071867a85ed839377afac4b27216",
+      "old_binary_sha256_after": "139847de512d82c612dc84ec997f01d527a9071867a85ed839377afac4b27216",
+      "exported_patch_path": "/opt/coder/toolshed/.worktrees/event-native-bridge/packages/event-gateway/docs/native-bridge/native-binding-codex-v0.160.0.patch",
+      "exported_patch_sha256_before": "fef316821243a49c6b586247534981e4ceab53ed6e154a69904b9d66fed3df66",
+      "exported_patch_sha256_after": "fef316821243a49c6b586247534981e4ceab53ed6e154a69904b9d66fed3df66"
+    }
+  },
+  "protocolTests": {
+    "passed": 313,
+    "failed": 0,
+    "skipped": 1
+  },
+  "pythonGeneratedSdkTests": {
+    "passed": 5,
+    "failed": 0
+  },
+  "fullAppServer": {
+    "run": 1840,
+    "passed": 1816,
+    "failed": 24,
+    "skipped": 1,
+    "sameFailureSelectorsAsPreviousBaseline": true,
+    "green": false
+  },
+  "fullTui": {
+    "run": 5631,
+    "passed": 5587,
+    "failed": 44,
+    "skipped": 8,
+    "sameFailureSelectorsAsPreviousBaseline": true,
+    "green": false
+  },
+  "newOrRepairedNativeTests": 8,
+  "individualAssertionRedRestoredGreenPairs": 9,
+  "proof": "terminal-no-start-test-proof.json",
+  "causalExcerpt": "terminal-no-start-red-green.log.excerpt",
+  "syntheticQualification": [
+    "terminal-no-start-live-start.json",
+    "terminal-no-start-live-retry.json"
+  ],
+  "fullWorkspace": {
+    "green": false,
+    "testsStarted": false,
+    "blocker": "macOS glib-2.0.pc absent"
+  },
+  "codeModeHelper": {
+    "built": false,
+    "blocker": "Pinned aarch64-apple-darwin V8 archive HTTP404"
+  },
+  "buildOnlyCargoLockNormalizationIncluded": false,
+  "limits": [
+    "Incarnation-local native receipts can be lost on restart; absence remains unknown.",
+    "Real binary qualification is native-only with a loopback mock model; it does not prove cloud settlement or busy refusal.",
+    "Positive native-start cloud ACK remains unqualified; no queued ID is fabricated.",
+    "Linux-only PTY branch is not runtime tested on this macOS host.",
+    "Interactive delayed-ACK UX was not runtime-tested in this checkpoint.",
+    "The local TUI AttemptLedger 256-to-257 capacity boundary was not runtime-tested; the app-server receipt-capacity test covers a separate ledger."
+  ]
+}

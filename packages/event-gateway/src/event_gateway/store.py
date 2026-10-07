@@ -9,6 +9,7 @@ from pathlib import Path
 import sqlite3
 import stat
 import time
+import uuid
 from datetime import datetime
 
 
@@ -28,6 +29,7 @@ IDENTITY = (
     "attachmentGeneration",
 )
 RETENTION = 7 * 86400
+CLAIM_RESERVE = 262144
 
 
 def _json(value):
@@ -79,7 +81,7 @@ class Store:
             pages = max(1, (max_bytes - 65536) // (3 * 4096))
             self.db.execute(f"PRAGMA max_page_count={pages}")
             version = self.db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
                 raise StoreError("unsupported_schema")
             with self.db:
                 self.db.execute("BEGIN IMMEDIATE")
@@ -94,7 +96,20 @@ class Store:
                 self.db.execute(
                     "CREATE INDEX IF NOT EXISTS delivery_state ON deliveries(state)"
                 )
-                self.db.execute("PRAGMA user_version=1")
+                self.db.execute("""CREATE TABLE IF NOT EXISTS attempts (
+                    delivery_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+                    state TEXT NOT NULL, envelope TEXT NOT NULL, admission TEXT,
+                    native_request TEXT, evidence TEXT, receipt TEXT, settlement TEXT, started_receipt TEXT,
+                    reason TEXT, fenced INTEGER NOT NULL DEFAULT 0,
+                    reserved_bytes INTEGER NOT NULL, updated REAL NOT NULL,
+                    PRIMARY KEY(delivery_id,attempt_id))""")
+                if "started_receipt" not in {row[1] for row in self.db.execute("PRAGMA table_info(attempts)")}:
+                    self.db.execute("ALTER TABLE attempts ADD COLUMN started_receipt TEXT")
+                self.db.execute("PRAGMA user_version=2")
+                self.db.execute(
+                    "UPDATE attempts SET state='ambiguous', reason='restart_during_submit', updated=? WHERE state='submitting'",
+                    (self.clock(),),
+                )
                 self.db.execute(
                     "UPDATE deliveries SET state='ambiguous', reason='restart_during_submit', updated=? WHERE state='submitting'",
                     (self.clock(),),
@@ -129,7 +144,10 @@ class Store:
             total += file.stat().st_size
         return total
 
-    def _capacity(self, reserve=0):
+    def _capacity(self, reserve=0, *, credit=0):
+        # All writers account for durable claim reservations, including after restart.
+        reserved = self.db.execute("SELECT COALESCE(SUM(reserved_bytes),0) FROM attempts").fetchone()[0]
+        reserve += max(0, reserved - credit)
         # Reserve pages for WAL + checkpoint copy before committing new data.
         pages = self.db.execute("PRAGMA page_count").fetchone()[0]
         free = self.db.execute("PRAGMA freelist_count").fetchone()[0]
@@ -240,6 +258,17 @@ class Store:
 
     def _fence(self, runtime_id):
         self.db.execute(
+            """UPDATE attempts SET fenced=1,
+               state=CASE WHEN state IN ('submitting','submitted') THEN 'ambiguous' ELSE state END,
+               reason='attachment_detached', updated=?
+               WHERE delivery_id IN (SELECT id FROM deliveries WHERE runtime=?) AND state!='settled'""",
+            (self.clock(), runtime_id),
+        )
+        self.db.execute(
+            "UPDATE deliveries SET reason='attachment_detached', updated=? WHERE runtime=? AND state IN ('claiming','admitted','settlement_pending')",
+            (self.clock(), runtime_id),
+        )
+        self.db.execute(
             """UPDATE deliveries
                SET state=CASE WHEN state='queued' THEN 'stale' ELSE 'ambiguous' END,
                    reason='attachment_detached', updated=?
@@ -308,7 +337,7 @@ class Store:
             return result
         self.cleanup()
         count = self.db.execute("""SELECT COUNT(*) FROM deliveries
-                 WHERE state IN ('queued','submitting','submitted','ambiguous')
+                 WHERE state IN ('queued','claiming','admitted','settlement_pending','submitting','submitted','ambiguous')
                     OR (state='observed' AND ack_state IS NOT state)""").fetchone()[0]
         if count >= self.max_rows:
             self.blocked_reason = "pending_capacity"
@@ -342,6 +371,238 @@ class Store:
         result["duplicate"] = False
         return result
 
+    def _attempt(self, delivery_id, attempt_id=None):
+        envelope = self.delivery_envelope(delivery_id)
+        if not envelope or (attempt_id is not None and envelope["attemptId"] != attempt_id):
+            return None
+        return self.db.execute(
+            "SELECT * FROM attempts WHERE delivery_id=? AND attempt_id=?",
+            (delivery_id, envelope["attemptId"]),
+        ).fetchone()
+
+    def current_attempt(self, delivery_id):
+        """Detached recovery metadata, including exact started_receipt; positive evidence forbids settlement."""
+        row = self._attempt(delivery_id)
+        if row is None:
+            return None
+        result = dict(row)
+        for key in ("envelope", "admission", "native_request", "evidence", "receipt", "settlement", "started_receipt"):
+            result[key] = json.loads(result[key]) if result[key] is not None else None
+        return result
+
+    def _spend(self, row, size=0):
+        cost = 32768 + size * 6
+        credit = min(cost, row["reserved_bytes"])
+        self._capacity(cost, credit=credit)
+        self.db.execute(
+            "UPDATE attempts SET reserved_bytes=reserved_bytes-? WHERE delivery_id=? AND attempt_id=?",
+            (credit, row["delivery_id"], row["attempt_id"]),
+        )
+
+    def begin_claim(self, delivery_id):
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+            if row is None or row["state"] != "queued":
+                return False
+            envelope = json.loads(row["envelope"])
+            try:
+                self._matches(envelope)
+            except StoreError:
+                self.db.execute("UPDATE deliveries SET state='stale', reason='attachment_or_event_expired', updated=? WHERE id=?",
+                                (self.clock(), delivery_id))
+                return False
+            self._capacity(CLAIM_RESERVE + 32768 + len(row["envelope"].encode()) * 6)
+            self.db.execute(
+                "INSERT INTO attempts (delivery_id,attempt_id,state,envelope,reserved_bytes,updated) VALUES (?,?,'claiming',?,?,?)",
+                (delivery_id, envelope["attemptId"], row["envelope"], CLAIM_RESERVE, self.clock()),
+            )
+            self.db.execute("UPDATE deliveries SET state='claiming', updated=? WHERE id=?", (self.clock(), delivery_id))
+        return True
+
+    def note_claim_budget(self, delivery_id, attempt_id):
+        """Retain the exact claim intent while exposing a known budget refusal."""
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id, attempt_id)
+            if row is None or row["state"] != "claiming":
+                return False
+            self.db.execute("UPDATE attempts SET reason='over_budget', updated=? WHERE delivery_id=? AND attempt_id=?",
+                            (self.clock(), delivery_id, attempt_id))
+            self.db.execute("UPDATE deliveries SET reason='over_budget', updated=? WHERE id=?",
+                            (self.clock(), delivery_id))
+        return True
+
+    def record_admission(self, delivery_id, admission):
+        from .cloud import CloudError, validate_admission
+
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id)
+            if row is None:
+                raise StoreError("invalid_transition")
+            try:
+                admitted = validate_admission(admission, json.loads(row["envelope"]), now_ms=self.clock() * 1000)
+            except CloudError as exc:
+                raise StoreError("invalid_admission") from exc
+            encoded = _json(admitted)
+            if row["admission"] is not None:
+                if row["admission"] != encoded:
+                    raise StoreError("admission_conflict")
+                return admitted
+            if row["state"] != "claiming":
+                raise StoreError("invalid_transition")
+            self._spend(row, len(encoded.encode()))
+            self.db.execute(
+                "UPDATE attempts SET state='admitted', admission=?, reason=NULL, updated=? WHERE delivery_id=? AND attempt_id=?",
+                (encoded, self.clock(), delivery_id, row["attempt_id"]),
+            )
+            self.db.execute("UPDATE deliveries SET state='admitted', envelope=?, reason=NULL, updated=? WHERE id=?",
+                            (_json(admitted["envelope"]), self.clock(), delivery_id))
+        return admitted
+
+    def begin_native(self, delivery_id, attempt_id, request):
+        from .native import NativeError, validate_request
+        from .protocol import _timestamp
+
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id, attempt_id)
+            if row is None or row["state"] != "admitted" or row["fenced"]:
+                return False
+            admission = json.loads(row["admission"])
+            if not _timestamp(admission["permitIssuedAt"]) <= self.clock() * 1000 < _timestamp(admission["permitExpiresAt"]):
+                return False
+            try:
+                self._matches(admission["envelope"])
+            except StoreError:
+                return False
+            try:
+                encoded = _json(validate_request(request, admission))
+            except NativeError as exc:
+                raise StoreError("invalid_native_request") from exc
+            self._spend(row, len(encoded.encode()))
+            self.db.execute(
+                "UPDATE attempts SET state='submitting', native_request=?, updated=? WHERE delivery_id=? AND attempt_id=?",
+                (encoded, self.clock(), delivery_id, attempt_id),
+            )
+            self.db.execute("UPDATE deliveries SET state='submitting', updated=? WHERE id=?", (self.clock(), delivery_id))
+        return True
+
+    def record_started(self, delivery_id, attempt_id, receipt):
+        from .native import NativeError, validate_receipt
+
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id, attempt_id)
+            if row is None or row["native_request"] is None or row["state"] not in ("submitting", "submitted", "ambiguous", "settlement_pending"):
+                raise StoreError("invalid_transition")
+            try:
+                outcome = validate_receipt(json.loads(row["native_request"]), receipt)
+            except NativeError as exc:
+                raise StoreError("invalid_receipt") from exc
+            if outcome["status"] != "started":
+                raise StoreError("invalid_receipt")
+            turn = outcome["turnId"]
+            positive = self.native_receipt(delivery_id)
+            if any(value is not None and value != turn for value in (positive["submission_id"], positive["turn_id"])):
+                raise StoreError("receipt_conflict")
+            encoded = _json(receipt)
+            self._spend(row, len(encoded.encode()))
+            state = "ambiguous" if row["state"] in ("ambiguous", "settlement_pending") else "submitted"
+            self.db.execute(
+                "UPDATE attempts SET state=?, started_receipt=?, reason='native_started_ack_unqualified', updated=? WHERE delivery_id=? AND attempt_id=?",
+                (state, encoded, self.clock(), delivery_id, attempt_id),
+            )
+            self.db.execute(
+                "UPDATE deliveries SET state=?, submission=?, turn=?, reason='native_started_ack_unqualified', updated=? WHERE id=?",
+                (state, turn, turn, self.clock(), delivery_id),
+            )
+        return self.delivery(delivery_id)
+
+    def begin_settlement(self, delivery_id, attempt_id, evidence, *, receipt=None, reason=None):
+        from .cloud import CloudError, _no_start_evidence
+        from .native import NativeError, validate_receipt
+
+        try:
+            _no_start_evidence(evidence, code="invalid_evidence")
+        except CloudError as exc:
+            raise StoreError("invalid_evidence") from exc
+        if reason is not None and (not isinstance(reason, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,95}", reason)):
+            raise StoreError("invalid_reason")
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id, attempt_id)
+            if row is None or row["admission"] is None:
+                raise StoreError("invalid_transition")
+            positive = self.native_receipt(delivery_id)
+            if positive["submission_id"] is not None or positive["turn_id"] is not None:
+                raise StoreError("receipt_conflict")
+            encoded_evidence = _json(evidence)
+            encoded_receipt = None
+            if evidence["type"] == "local_not_submitted":
+                if row["native_request"] is not None or receipt is not None or row["state"] not in ("admitted", "settlement_pending"):
+                    raise StoreError("invalid_transition")
+            else:
+                if row["state"] not in ("submitting", "ambiguous", "settlement_pending") or row["native_request"] is None:
+                    raise StoreError("invalid_transition")
+                try:
+                    outcome = validate_receipt(json.loads(row["native_request"]), receipt)
+                except NativeError as exc:
+                    raise StoreError("invalid_receipt") from exc
+                if outcome["status"] != "terminalNotStarted" or outcome["receiptId"] != evidence["receiptId"]:
+                    raise StoreError("invalid_receipt")
+                encoded_receipt = _json(receipt)
+            if row["state"] == "settlement_pending":
+                if row["evidence"] != encoded_evidence or row["receipt"] != encoded_receipt:
+                    raise StoreError("receipt_conflict")
+                return True
+            self._spend(row, len(encoded_evidence.encode()) + len((encoded_receipt or "").encode()))
+            self.db.execute(
+                "UPDATE attempts SET state='settlement_pending', evidence=?, receipt=?, reason=?, updated=? WHERE delivery_id=? AND attempt_id=?",
+                (encoded_evidence, encoded_receipt, reason, self.clock(), delivery_id, attempt_id),
+            )
+            self.db.execute("UPDATE deliveries SET state='settlement_pending', reason=?, updated=? WHERE id=?",
+                            (reason, self.clock(), delivery_id))
+        return True
+
+    def complete_settlement(self, delivery_id, attempt_id, result):
+        from .cloud import _generation
+
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id, attempt_id)
+            if row is None or row["state"] != "settlement_pending":
+                return False
+            admission, evidence = json.loads(row["admission"]), json.loads(row["evidence"])
+            expected = {key: admission["envelope"][key] for key in ("deliveryId", "attemptId", "nodeGeneration")}
+            expected.update(status="not_started", permitId=admission["permitId"], nodeId=admission["nodeId"], evidence=evidence)
+            if not isinstance(result, dict) or not _generation(result.get("nodeGeneration")) or result != expected:
+                raise StoreError("invalid_settlement")
+            positive = self.native_receipt(delivery_id)
+            if positive["submission_id"] is not None or positive["turn_id"] is not None:
+                raise StoreError("receipt_conflict")
+            envelope = dict(admission["envelope"])
+            stale = bool(row["fenced"])
+            try:
+                self._matches(envelope)
+            except StoreError:
+                stale = True
+            if not stale:
+                envelope["attemptId"] = str(uuid.uuid4())
+            encoded = _json(result)
+            self._spend(row, len(encoded.encode()) + len(_json(envelope).encode()))
+            self.db.execute(
+                "UPDATE attempts SET state='settled', settlement=?, reserved_bytes=0, updated=? WHERE delivery_id=? AND attempt_id=?",
+                (encoded, self.clock(), delivery_id, attempt_id),
+            )
+            self.db.execute(
+                "UPDATE deliveries SET state=?, envelope=?, reason=?, submission=NULL, turn=NULL, ack_state=NULL, updated=?, retain_until=? WHERE id=?",
+                ("stale" if stale else "queued", _json(envelope), "attachment_or_event_expired" if stale else None,
+                 self.clock(), max(self.clock(), self._expires(envelope)) + RETENTION, delivery_id),
+            )
+        return True
+
     def begin_submit(self, delivery_id):
         row = self.db.execute(
             "SELECT * FROM deliveries WHERE id=?", (delivery_id,)
@@ -365,7 +626,7 @@ class Store:
             )
 
     def finish(
-        self, delivery_id, status, submission_id=None, turn_id=None, reason=None
+        self, delivery_id, status, submission_id=None, turn_id=None, reason=None, *, attempt_id=None
     ):
         if reason is not None and (
             not isinstance(reason, str)
@@ -383,6 +644,9 @@ class Store:
             raise StoreError("invalid_native_id")
         transitions = {
             "queued": {"stale"},
+            "claiming": {"ambiguous"},
+            "admitted": set(),
+            "settlement_pending": set(),
             "submitting": {"submitted", "observed", "ambiguous"},
             "submitted": {"observed", "ambiguous"},
             "ambiguous": {"observed"},
@@ -394,6 +658,10 @@ class Store:
         ).fetchone()
         if not row:
             raise StoreError("not_found")
+        if attempt_id is not None and json.loads(row["envelope"])["attemptId"] != attempt_id:
+            raise StoreError("attempt_conflict")
+        if row["state"] == "settlement_pending" and (submission_id is not None or turn_id is not None):
+            raise StoreError("invalid_transition")
         if status != row["state"] and status not in transitions[row["state"]]:
             raise StoreError("invalid_transition")
         if any(
@@ -408,9 +676,18 @@ class Store:
         ):
             raise StoreError("missing_native_receipt")
         with self.db:
+            attempt = self._attempt(delivery_id)
+            if attempt:
+                self._spend(attempt)
+            else:
+                self._capacity(32768)
             self.db.execute(
                 "UPDATE deliveries SET state=?, updated=?, submission=COALESCE(?,submission), turn=COALESCE(?,turn), reason=? WHERE id=?",
                 (status, self.clock(), submission_id, turn_id, reason, delivery_id),
+            )
+            self.db.execute(
+                "UPDATE attempts SET state=?, reason=?, updated=? WHERE delivery_id=? AND attempt_id=?",
+                (status, reason, self.clock(), delivery_id, json.loads(row["envelope"])["attemptId"]),
             )
         return self.delivery(delivery_id)
 
@@ -436,31 +713,46 @@ class Store:
     def native_receipt(self, delivery_id):
         """Internal reconciliation evidence; never include in public status."""
         row = self.db.execute(
-            "SELECT submission,turn,state,ack_state FROM deliveries WHERE id=?",
+            """SELECT submission,turn,state,ack_state,
+               EXISTS(SELECT 1 FROM attempts WHERE delivery_id=deliveries.id
+                      AND started_receipt IS NOT NULL AND state!='settled') AS native_started
+               FROM deliveries WHERE id=?""",
             (delivery_id,),
         ).fetchone()
         return (
             {
                 "submission_id": row["submission"],
                 "turn_id": row["turn"],
-                "ack_pending": row["state"] in ("submitted", "observed")
-                and row["ack_state"] != row["state"],
+                "ack_pending": bool(row["native_started"]) or (
+                    row["state"] in ("submitted", "observed")
+                    and row["ack_state"] != row["state"]
+                ),
             }
             if row
             else None
         )
 
-    def mark_acknowledged(self, delivery_id, expected_state):
+    def mark_acknowledged(self, delivery_id, expected_state, *, attempt_id=None):
+        if attempt_id is not None:
+            envelope = self.delivery_envelope(delivery_id)
+            if not envelope or envelope["attemptId"] != attempt_id:
+                return False
         if expected_state not in ("submitted", "observed"):
             return False
         with self.db:
-            return (
-                self.db.execute(
-                    "UPDATE deliveries SET ack_state=? WHERE id=? AND state=?",
-                    (expected_state, delivery_id, expected_state),
-                ).rowcount
-                == 1
-            )
+            attempt = self._attempt(delivery_id)
+            if attempt:
+                self._spend(attempt)
+            else:
+                self._capacity(32768)
+            changed = self.db.execute(
+                "UPDATE deliveries SET ack_state=? WHERE id=? AND state=?",
+                (expected_state, delivery_id, expected_state),
+            ).rowcount == 1
+            if changed and expected_state == "observed" and attempt:
+                self.db.execute("UPDATE attempts SET reserved_bytes=0 WHERE delivery_id=? AND attempt_id=?",
+                                (delivery_id, attempt["attempt_id"]))
+            return changed
 
     def delivery_envelope(self, delivery_id):
         row = self.db.execute(
@@ -480,16 +772,24 @@ class Store:
         return [
             self._public(row)
             for row in self.db.execute(
-                "SELECT * FROM deliveries WHERE state IN ('submitted','ambiguous') OR (state='observed' AND ack_state IS NOT state) ORDER BY created,id"
+                "SELECT * FROM deliveries WHERE state IN "
+                "('claiming','admitted','settlement_pending','submitted','ambiguous') "
+                "OR (state='observed' AND ack_state IS NOT state) ORDER BY created,id"
             )
         ]
 
     def cleanup(self):
         with self.db:
-            return self.db.execute(
+            self.db.execute(
+                "DELETE FROM attempts WHERE state='settled' AND updated<?",
+                (self.clock() - RETENTION,),
+            )
+            removed = self.db.execute(
                 "DELETE FROM deliveries WHERE (state='stale' OR (state='observed' AND ack_state=state)) AND retain_until<? AND updated<?",
                 (self.clock(), self.clock() - RETENTION),
             ).rowcount
+            self.db.execute("DELETE FROM attempts WHERE delivery_id NOT IN (SELECT id FROM deliveries)")
+            return removed
 
     def status(self):
         size = self._size()
@@ -500,7 +800,7 @@ class Store:
             )
         }
         pending = self.db.execute("""SELECT COUNT(*) FROM deliveries
-                 WHERE state IN ('queued','submitting','submitted','ambiguous')
+                 WHERE state IN ('queued','claiming','admitted','settlement_pending','submitting','submitted','ambiguous')
                     OR (state='observed' AND ack_state IS NOT state)""").fetchone()[0]
         try:
             self._capacity(32768)

@@ -50,7 +50,23 @@ const proof = { nodeId, nodeGeneration: 1, issuedAt, nonce: permitId };
 const binding = { audience: 'https://events.example.com', method: 'POST', path: '/v1/dispatch/claim', bodySha256: createHash('sha256').update(body).digest('hex') };
 const overBudget = { status: 'over_budget', budget: { used: 10, remaining: 0, limit: 10, windowMs: 3600000 } };
 contracts.DispatchClaimResultSchema.parse(overBudget);
-const fixture = { original, admitted, overBudget, claim, nodeProof: { principal: original.principal, binding, body, proof, canonical: canonicalNodeProof(original.principal, proof, binding) } };
+const noStart = { deliveryId: original.deliveryId, attemptId: original.attemptId, permitId,
+  nodeGeneration: original.nodeGeneration, evidence: { type: 'native_terminal_no_start', receiptId: nodeId } };
+const localNoStart = { ...noStart, evidence: { type: 'local_not_submitted' } };
+contracts.DispatchNoStartRequestSchema.parse(noStart);
+contracts.DispatchNoStartRequestSchema.parse(localNoStart);
+const noStartResult = { ...noStart, nodeId, status: 'not_started' };
+const localNoStartResult = { ...localNoStart, nodeId, status: 'not_started' };
+contracts.DispatchNoStartResultSchema.parse(noStartResult);
+contracts.DispatchNoStartResultSchema.parse(localNoStartResult);
+const noStartBody = JSON.stringify(noStart);
+const noStartBinding = { ...binding, path: '/v1/dispatch/settle-no-start',
+  bodySha256: createHash('sha256').update(noStartBody).digest('hex') };
+const fixture = { original, admitted, overBudget, claim,
+  nodeProof: { principal: original.principal, binding, body, proof, canonical: canonicalNodeProof(original.principal, proof, binding) },
+  noStart, localNoStart, noStartResult, localNoStartResult,
+  noStartNodeProof: { principal: original.principal, binding: noStartBinding, body: noStartBody, proof,
+    canonical: canonicalNodeProof(original.principal, proof, noStartBinding) } };
 const json = value => JSON.stringify(value, null, 2) + '\n';
 const fixtureText = json(fixture);
 const manifest = {

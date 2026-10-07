@@ -94,6 +94,53 @@ def _iso(seconds):
     return datetime.fromtimestamp(seconds, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _historical_envelope(envelope, now_ms):
+    try:
+        parsed = parse_envelope(_json(envelope), now_ms=min(now_ms, _timestamp(envelope["issuedAt"])))
+    except (ProtocolError, ValueError, TypeError, KeyError, RecursionError):
+        raise CloudError("invalid_envelope") from None
+    if not matches_delivery_id(parsed):
+        raise CloudError("identity_mismatch")
+    return parsed
+
+
+def validate_admission(admission, expected_envelope, *, now_ms, node_id=None):
+    """Validate recovery identity, not permission to start; expired permits stay immutable."""
+    _closed(admission, ("status", "permitId", "nodeId", "permitIssuedAt", "permitExpiresAt", "envelope"))
+    if (admission["status"] != "admitted" or not _uuid(admission["permitId"])
+            or not _uuid(admission["nodeId"]) or (node_id is not None and admission["nodeId"] != node_id)):
+        raise CloudError("invalid_response")
+    try:
+        issued, expires = _timestamp(admission["permitIssuedAt"]), _timestamp(admission["permitExpiresAt"])
+    except (ProtocolError, TypeError):
+        raise CloudError("invalid_response") from None
+    if expires - issued != 5000 or issued > now_ms:
+        raise CloudError("permit_expired")
+    expected = _historical_envelope(expected_envelope, now_ms)
+    admitted = _historical_envelope(admission["envelope"], now_ms)
+
+    def semantic(item):
+        return {key: value for key, value in item.items() if key not in ("issuedAt", "expiresAt")}
+
+    if (semantic(admitted) != semantic(expected) or _timestamp(admitted["issuedAt"]) > issued
+            or _timestamp(admitted["expiresAt"]) < expires):
+        raise CloudError("identity_mismatch")
+    return json.loads(_json(admission))
+
+
+def _no_start_evidence(evidence, *, code):
+    if not isinstance(evidence, dict):
+        raise CloudError(code)
+    if evidence.get("type") == "local_not_submitted":
+        _closed(evidence, ("type",), code=code)
+    elif evidence.get("type") == "native_terminal_no_start":
+        _closed(evidence, ("type", "receiptId"), code=code)
+        if not _uuid(evidence["receiptId"]):
+            raise CloudError(code)
+    else:
+        raise CloudError(code)
+
+
 async def _call(port, **kwargs):
     try:
         return await port(**kwargs)
@@ -216,23 +263,21 @@ class CloudClient:
                     or budget["remaining"] != max(0, 10 - budget["used"])):
                 raise CloudError("invalid_response")
             return result
-        _closed(result, ("status", "permitId", "nodeId", "permitIssuedAt", "permitExpiresAt", "envelope"))
-        if result["status"] != "admitted" or not _uuid(result["permitId"]) or result["nodeId"] != self.node_id:
-            raise CloudError("invalid_response")
-        try:
-            issued, expires = _timestamp(result["permitIssuedAt"]), _timestamp(result["permitExpiresAt"])
-        except (ProtocolError, TypeError):
-            raise CloudError("invalid_response") from None
-        if expires - issued != 5000 or not issued <= self._clock() * 1000 < expires:
-            raise CloudError("permit_expired")
-        admitted = self._envelope(result["envelope"])
-        # Only transport lifetime may refresh at admission. All semantic fields bind.
+        return validate_admission(result, expected, now_ms=self._clock() * 1000, node_id=self.node_id)
 
-        def semantic(item):
-            return {key: value for key, value in item.items() if key not in ("issuedAt", "expiresAt")}
-        if (semantic(admitted) != semantic(expected) or _timestamp(admitted["issuedAt"]) > issued
-                or _timestamp(admitted["expiresAt"]) < expires):
-            raise CloudError("identity_mismatch")
+    async def settle_no_start(self, admission, evidence):
+        _closed(admission, ("status", "permitId", "nodeId", "permitIssuedAt", "permitExpiresAt", "envelope"))
+        expected = self._envelope(admission["envelope"], historical=True)
+        admitted = validate_admission(admission, expected, now_ms=self._clock() * 1000, node_id=self.node_id)
+        _no_start_evidence(evidence, code="invalid_request")
+        body = {key: admitted["envelope"][key] for key in ("deliveryId", "attemptId", "nodeGeneration")}
+        body.update(permitId=admitted["permitId"], evidence=json.loads(_json(evidence)))
+        result = await self._post("/v1/dispatch/settle-no-start", body)
+        _closed(result, ("status", "deliveryId", "attemptId", "permitId", "nodeId", "nodeGeneration", "evidence"))
+        _no_start_evidence(result["evidence"], code="invalid_response")
+        if (not _generation(result["nodeGeneration"])
+                or result != {**body, "status": "not_started", "nodeId": self.node_id}):
+            raise CloudError("invalid_response")
         return result
 
     async def acknowledge(self, envelope, acknowledgment):

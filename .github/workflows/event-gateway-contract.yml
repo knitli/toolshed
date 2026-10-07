@@ -79,7 +79,18 @@ jobs:
                        'event-v1/protocol-v1.json': '4c2889c69c913f723e6a5005a8582ee5cc9559e3c095b689c23d4aa28104a064',
                        'event-v1/manifest.json': 'a51af02f07f569487ae74019498a6732e8e6b399db9800df21dfed48278f4c9d',
                        'event-control-v1/fixtures.json': 'bc3f39d5cde0072f8c3bc52c79daaca801d9aec99ed5d265f87cca832c6e38eb',
-                       'event-control-v1/manifest.json': '3935b0be250b3563b1f323800445af03f6d797e3b6e8abf3fa1d90765508e2b5'}})
+                       'event-control-v1/manifest.json': '3935b0be250b3563b1f323800445af03f6d797e3b6e8abf3fa1d90765508e2b5'}},
+          # Both native snapshots come from the same knitli-site commit; apps/os is a directory there.
+           {'name': 'native-start',
+            'eventRevision': '9b1ab6e2c2cf801fe035c766d03f26f1b2f85790',
+            'controlRevision': '9b1ab6e2c2cf801fe035c766d03f26f1b2f85790',
+            'hashes': {'event-v1/protocol.schema.json': '7326d3815b9be28448f47f1e3db5a038c6064ebf39a9f9bed07e452142a710d4',
+                       'event-v1/protocol.ts': '076f63539abfe9c78a870a89779178c8b62029dccc1cc8ef0bc51f0c1c6c7917',
+                       'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+                       'event-v1/protocol-v1.json': '2aa35df5cace7a4c646316cfda44171adecf2ab6eeb4c26124901fb6eb00c90f',
+                       'event-v1/manifest.json': 'c2be6695e1b22d1b1e58059f11283d4ad56226fbdac1c611b8dadbb161c659fd',
+                       'event-control-v1/fixtures.json': 'a47fa45935463df5a91984e4d2f5f6b5304944d0fcd99872c3bb30bd981908d1',
+                       'event-control-v1/manifest.json': '9d23b546a8516464db44241c90c031b94c5da572168f1e7734dc16532dfa354a'}})
 
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):

@@ -1,14 +1,10 @@
-"""Delivery state machine with fail-closed authority and presence seams."""
-
-# This is a local integration interface, not a cloud API frozen by PR1. No
-# production authority or qualified Codex presence provider ships in this stage.
+"""Durable cloud admission and native no-start settlement state machine."""
 
 import asyncio
-from dataclasses import dataclass
 import time
-import re
 
 from .codex import CodexError
+from .native import NativeError, validate_request, validate_receipt
 from .protocol import parse_envelope, matches_delivery_id
 from .security import verify
 from .store import StoreError
@@ -16,59 +12,27 @@ from .store import StoreError
 
 class Refused(ValueError):
     def __init__(self, code):
-        """Expose a bounded refusal code without payload details."""
         self.code = code
         super().__init__(code)
 
 
-@dataclass(frozen=True)
-class Permit:
-    """A freshly authenticated, single-use admission; never cached offline."""
-
-    delivery_id: str
-    attempt_id: str
-    issued_at: float
-    expires_at: float
-    identity: tuple
-
-
 FENCES = (
-    "principal",
-    "agent",
-    "runtimeId",
-    "nodeGeneration",
-    "runtimeGeneration",
-    "attachmentGeneration",
-    "consumerGeneration",
-    "sourceStateVersion",
-    "policyRevision",
+    "principal", "agent", "runtimeId", "nodeGeneration", "runtimeGeneration",
+    "attachmentGeneration", "consumerGeneration", "sourceStateVersion", "policyRevision",
 )
 
 
-def identity(envelope):
-    return tuple(envelope.get(key) for key in FENCES)
-
-
-def valid_native_id(value):
-    return (
-        isinstance(value, str)
-        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value) is not None
-    )
-
-
 class UnavailableAuthority:
-    async def admit(self, envelope):
+    async def claim(self, envelope):
         raise Refused("authority_unavailable")
 
-    async def acknowledge(self, envelope, evidence):
+    async def settle_no_start(self, admission, evidence):
         raise Refused("authority_unavailable")
 
 
 class Gateway:
-    def __init__(
-        self, store, authority, adapter_factory, *, audience, keys, clock=time.time
-    ):
-        """Bind local storage to explicit trusted integration providers."""
+    def __init__(self, store, authority, adapter_factory, *, audience, keys, clock=time.time):
+        """Bind durable storage to explicitly injected authority and native providers."""
         self.store, self.authority = store, authority
         self.adapter_factory, self.clock = adapter_factory, clock
         self.audience, self.keys = audience, dict(keys)
@@ -91,176 +55,167 @@ class Gateway:
             raise Refused("attachment_fenced")
         return self.store.accept(envelope)
 
-    def _permit_valid(self, permit, envelope):
-        now = self.clock()
-        return (
-            isinstance(permit, Permit)
-            and permit.delivery_id == envelope["deliveryId"]
-            and permit.attempt_id == envelope["attemptId"]
-            and permit.identity == identity(envelope)
-            and permit.issued_at <= now < permit.expires_at
-            and 0 < permit.expires_at - permit.issued_at <= 5
-        )
+    def _row(self, delivery_id, reason=None):
+        row = self.store.delivery(delivery_id)
+        return {**row, "reason": reason} if reason else row
 
     async def _adapter_available(self, adapter):
         try:
-            return await adapter.check() == "available"
-        except (Refused, CodexError, OSError):
+            return await asyncio.wait_for(adapter.check(), 8) == "available"
+        except (Refused, CodexError, NativeError, OSError, TimeoutError):
             return False
 
     async def _available_adapter(self, mapping):
         try:
             adapter = self.adapter_factory(mapping)
-        except (Refused, CodexError, OSError):
+        except (Refused, CodexError, NativeError, OSError):
             return None
         return adapter if await self._adapter_available(adapter) else None
 
-    def _begin_submission(self, delivery_id):
+    async def _claim(self, delivery_id):
+        attempt = self.store.current_attempt(delivery_id)
         try:
-            if self.store.begin_submit(delivery_id):
-                return None
-            return self.store.delivery(delivery_id)
-        except StoreError as exc:
-            if exc.code != "capacity":
-                raise
-            return {**self.store.delivery(delivery_id), "reason": self.store.blocked_reason}
+            admission = await asyncio.wait_for(self.authority.claim(attempt["envelope"]), 8)
+            if isinstance(admission, dict) and admission.get("status") == "over_budget":
+                self.store.note_claim_budget(delivery_id, attempt["attempt_id"])
+                return "over_budget"
+            # No await or post-admission gate may precede this durable write.
+            return self.store.record_admission(delivery_id, admission)
+        except Exception:
+            # Claim intent survives every uncertain response/storage failure.
+            return None
+
+    async def _settle(self, delivery_id):
+        attempt = self.store.current_attempt(delivery_id)
+        if not attempt or attempt["state"] != "settlement_pending":
+            return self._row(delivery_id)
+        try:
+            result = await asyncio.wait_for(self.authority.settle_no_start(
+                attempt["admission"], attempt["evidence"]), 8)
+            self.store.complete_settlement(delivery_id, attempt["attempt_id"], result)
+        except Exception:
+            return self._row(delivery_id, "settlement_pending")
+        return self._row(delivery_id)
+
+    async def _retire_local(self, delivery_id, reason):
+        attempt = self.store.current_attempt(delivery_id)
+        try:
+            self.store.begin_settlement(delivery_id, attempt["attempt_id"],
+                                        {"type": "local_not_submitted"}, reason=reason)
+        except StoreError:
+            return self._row(delivery_id, "local_retirement_pending")
+        return await self._settle(delivery_id)
+
+    async def _receipt(self, delivery_id, attempt, receipt):
+        outcome = validate_receipt(attempt["native_request"], receipt)
+        if outcome["status"] == "started":
+            # Direct started evidence is authentic, but has no qualified cloud ACK DTO.
+            return self.store.record_started(delivery_id, attempt["attempt_id"], receipt)
+        if outcome["status"] == "terminalNotStarted":
+            self.store.begin_settlement(delivery_id, attempt["attempt_id"],
+                {"type": "native_terminal_no_start", "receiptId": outcome["receiptId"]},
+                receipt=receipt, reason="native_terminal_no_start")
+            return await self._settle(delivery_id)
+        return self.store.finish(delivery_id, "ambiguous", reason="native_outcome_unknown",
+                                 attempt_id=attempt["attempt_id"])
 
     async def dispatch(self, delivery_id):
         envelope = self.store.delivery_envelope(delivery_id)
         if envelope is None:
             raise Refused("not_found")
-        runtime = envelope["runtimeId"]
-        lock = self._locks.setdefault(runtime, asyncio.Lock())
-        async with lock:
-            row = self.store.delivery(delivery_id)
+        async with self._locks.setdefault(envelope["runtimeId"], asyncio.Lock()):
+            # An earlier dispatch can settle and rotate the attempt while this
+            # caller waits for the runtime lock.
+            envelope = self.store.delivery_envelope(delivery_id)
+            if envelope is None:
+                raise Refused("not_found")
+            row = self._row(delivery_id)
             if row["status"] != "queued":
                 return row
-            mapping = self.store.get_attachment(runtime)
+            mapping = self.store.get_attachment(envelope["runtimeId"])
             if not mapping or mapping["leaseExpiresAt"] <= self.clock():
-                return {**row, "reason": "client_unavailable"}
+                return self._row(delivery_id, "client_unavailable")
             adapter = await self._available_adapter(mapping)
             if adapter is None:
-                return {**row, "reason": "client_unavailable_or_busy"}
+                return self._row(delivery_id, "client_unavailable_or_busy")
             try:
-                permit = await asyncio.wait_for(self.authority.admit(envelope), 8)
-            except (Refused, TimeoutError, OSError):
-                return {**row, "reason": "authority_unavailable"}
-            # Remote awaits may race detach, transfer, expiration, and client exit.
-            current = self.store.get_attachment(runtime)
-            if (
-                current != mapping
-                or not self._permit_valid(permit, envelope)
-                or not await self._adapter_available(adapter)
-            ):
-                return {**row, "reason": "admission_fenced"}
-            if not self._permit_valid(permit, envelope):
-                return {**row, "reason": "admission_expired"}
-            refused = self._begin_submission(delivery_id)
-            if refused is not None:
-                return refused
+                if not self.store.begin_claim(delivery_id):
+                    return self._row(delivery_id)
+            except StoreError:
+                return self._row(delivery_id, "capacity")
+            admission = await self._claim(delivery_id)
+            if admission == "over_budget":
+                return self._row(delivery_id, "over_budget")
+            if admission is None:
+                return self._row(delivery_id, "claim_outcome_unknown")
             try:
-                # Submission already durably started: EVERY error is uncertain.
-                result = await asyncio.wait_for(adapter.submit(envelope), 10)
-                submission_id = result["submission_id"]
-                if not valid_native_id(submission_id):
-                    raise Refused("invalid_native_receipt")
-                # Detach/transfer can fence the in-flight native call. Retain
-                # its authentic receipt without undoing the ambiguous state.
-                state = self.store.delivery(delivery_id)["status"]
-                row = self.store.finish(
-                    delivery_id,
-                    "ambiguous" if state == "ambiguous" else "submitted",
-                    submission_id=submission_id,
-                )
+                current = self.store.get_attachment(envelope["runtimeId"])
+                if (not current or
+                        {key: value for key, value in current.items() if key != "leaseExpiresAt"}
+                        != {key: value for key, value in mapping.items() if key != "leaseExpiresAt"}
+                        or not await self._adapter_available(adapter)):
+                    return await self._retire_local(delivery_id, "admission_fenced")
+                request = validate_request(await adapter.prepare(admission), admission)
+                if request["threadId"] != mapping.get("nativeThreadId"):
+                    raise NativeError("invalid_native_mapping")
+                if not self.store.begin_native(delivery_id, envelope["attemptId"], request):
+                    return await self._retire_local(delivery_id, "admission_expired_or_fenced")
             except asyncio.CancelledError:
-                self.store.finish(
-                    delivery_id, "ambiguous", reason="native_outcome_unknown"
-                )
+                # Still admitted: reconcile can prove that no event operation began.
                 raise
             except Exception:
-                return self.store.finish(
-                    delivery_id, "ambiguous", reason="native_outcome_unknown"
-                )
-            if row["status"] == "submitted":
-                await self._acknowledge(envelope, result)
-            return row
-
-    async def _acknowledge(self, envelope, evidence):
-        expected_state = self.store.delivery(envelope["deliveryId"])["status"]
-        try:
-            await asyncio.wait_for(self.authority.acknowledge(envelope, evidence), 8)
-        except (Refused, TimeoutError, OSError):
-            # Durable row owns ACK recovery; never retry the native submission.
-            return False
-        self.store.mark_acknowledged(envelope["deliveryId"], expected_state)
-        return True
+                return await self._retire_local(delivery_id, "native_preparation_failed")
+            attempt = self.store.current_attempt(delivery_id)
+            try:
+                receipt = await asyncio.wait_for(adapter.submit(request), 10)
+                return await self._receipt(delivery_id, attempt, receipt)
+            except asyncio.CancelledError:
+                # Settlement cancellation preserves pending proof; only an unresolved
+                # native operation transitions to ambiguity.
+                if self.store.current_attempt(delivery_id)["state"] == "submitting":
+                    self.store.finish(delivery_id, "ambiguous", reason="native_outcome_unknown",
+                                      attempt_id=attempt["attempt_id"])
+                raise
+            except Exception:
+                if self.store.current_attempt(delivery_id)["state"] == "submitting":
+                    return self.store.finish(delivery_id, "ambiguous", reason="native_outcome_unknown",
+                                             attempt_id=attempt["attempt_id"])
+                return self._row(delivery_id, "native_outcome_unknown")
 
     async def reconcile(self, delivery_id):
         envelope = self.store.delivery_envelope(delivery_id)
         if envelope is None:
             return None
-        lock = self._locks.setdefault(envelope["runtimeId"], asyncio.Lock())
-        async with lock:
-            row = self.store.delivery(delivery_id)
-            if not row or row["status"] not in ("submitted", "ambiguous", "observed"):
-                return row
-            receipt = self.store.native_receipt(delivery_id) or {}
-            # Stored receipts can retry historical ACKs even after client exit.
-            if receipt.get("ack_pending"):
-                await self._acknowledge(envelope, {**receipt, "status": row["status"]})
-            row = self.store.delivery(delivery_id)
-            if row["status"] == "observed":
-                return row
+        async with self._locks.setdefault(envelope["runtimeId"], asyncio.Lock()):
+            attempt = self.store.current_attempt(delivery_id)
+            if not attempt:
+                return self._row(delivery_id)
+            if attempt["state"] == "claiming":
+                admission = await self._claim(delivery_id)
+                if admission == "over_budget":
+                    return self._row(delivery_id, "over_budget")
+                if admission is None:
+                    return self._row(delivery_id, "claim_outcome_unknown")
+                return await self._retire_local(delivery_id, "recovered_claim_not_submitted")
+            if attempt["state"] == "admitted":
+                return await self._retire_local(delivery_id, "recovered_admission_not_submitted")
+            if attempt["state"] == "settlement_pending":
+                return await self._settle(delivery_id)
+            if attempt.get("started_receipt"):
+                return self._row(delivery_id, "native_started_ack_unqualified")
+            if attempt["state"] not in ("submitting", "ambiguous"):
+                return self._row(delivery_id)
             mapping = self.store.get_attachment(envelope["runtimeId"])
-            if (
-                not mapping
-                or mapping["leaseExpiresAt"] <= self.clock()
-                or any(mapping.get(key) != envelope.get(key) for key in FENCES[:7])
-            ):
-                return {**row, "reason": "attachment_fenced"}
+            if (not mapping or attempt["fenced"]
+                    or any(mapping.get(key) != envelope.get(key) for key in FENCES[:7])
+                    or mapping.get("nativeThreadId") != attempt["native_request"]["threadId"]):
+                return self._row(delivery_id, "attachment_fenced")
             try:
                 adapter = self.adapter_factory(mapping)
-                result = await asyncio.wait_for(
-                    adapter.reconcile(
-                        delivery_id, known_submission_id=receipt.get("submission_id")
-                    ),
-                    10,
-                )
+                receipt = await asyncio.wait_for(adapter.reconcile(attempt["native_request"]), 10)
+                outcome = validate_receipt(attempt["native_request"], receipt)
+                if outcome["status"] in ("started", "terminalNotStarted") and not outcome["replayed"]:
+                    raise NativeError()
+                return await self._receipt(delivery_id, attempt, receipt)
             except Exception:
-                return {**row, "reason": "reconciliation_unknown"}
-            # Native evidence belongs only to the unchanged, live destination.
-            current = self.store.get_attachment(envelope["runtimeId"])
-            if current != mapping or current["leaseExpiresAt"] <= self.clock():
-                return {**self.store.delivery(delivery_id), "reason": "attachment_fenced"}
-            if result.get("status") in ("submitted", "observed") and not valid_native_id(
-                result.get("submission_id")
-            ):
-                return {**row, "reason": "invalid_native_receipt"}
-            if (
-                receipt.get("submission_id") is not None
-                and result.get("status") in ("submitted", "observed")
-                and result.get("submission_id") != receipt["submission_id"]
-            ):
-                return {**row, "reason": "native_receipt_conflict"}
-            if result.get("status") == "observed" and not valid_native_id(
-                result.get("turn_id")
-            ):
-                return {**row, "reason": "invalid_native_receipt"}
-            if result.get("status") == "observed":
-                row = self.store.finish(
-                    delivery_id,
-                    "observed",
-                    submission_id=result.get("submission_id"),
-                    turn_id=result["turn_id"],
-                )
-            elif result.get("status") == "submitted":
-                # Queue evidence can recover a lost response's authentic receipt;
-                # preserve ambiguity until a native turn is correlated.
-                self.store.finish(
-                    delivery_id, row["status"], submission_id=result["submission_id"]
-                )
-            # Known queued evidence settles submitted only; ambiguity stays fenced
-            # until consumption is correlated. No absent-history retry.
-            if result.get("status") in ("submitted", "observed"):
-                await self._acknowledge(envelope, result)
-            return row
+                return self._row(delivery_id, "reconciliation_unknown")
