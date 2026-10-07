@@ -64,6 +64,77 @@ class ContractWorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.verify()
 
+    def test_control_pins_reject_drift_and_allow_staged_rotation(self):
+        control_directory = PACKAGE / "contracts/event-control-v1"
+        old_pins = {
+            "fixtures.json": "1f803540d102cecce15a134ff29cc4fa62a83483e07112a3f33036b111b4473c",
+            "manifest.json": "88e5cdb37621417ccc0656932b47f6993f7aaa0d0ac4243391a799461f6ae4d7",
+        }
+        self.assertEqual(POLICY["CONTROL_PINS"], old_pins)
+        original = {name: (control_directory / name).read_bytes() for name in old_pins}
+        control_paths = [
+            "packages/event-gateway/contracts/event-control-v1/fixtures.json",
+            "packages/event-gateway/contracts/event-control-v1/manifest.json",
+        ]
+        self.blobs.update({POLICY["CONTROL_SNAPSHOT"] + name: value
+                           for name, value in original.items()})
+
+        def verify_control():
+            with patch.dict(POLICY, {"read_blob": self.read_blob}):
+                POLICY["verify_control_contract"](HEAD, "test-token")
+
+        # The first policy-only PR is evaluated by trusted old pins against the
+        # unchanged candidate snapshot. read_blob also rejects any base ref.
+        with patch.dict(POLICY, {"CONTROL_PINS": old_pins}):
+            verify_control()
+        self.assertEqual(self.reads, control_paths)
+
+        fixture_path = POLICY["CONTROL_SNAPSHOT"] + "fixtures.json"
+        manifest_path = POLICY["CONTROL_SNAPSHOT"] + "manifest.json"
+        self.reads.clear()
+        self.blobs[fixture_path] = original["fixtures.json"] + b"\n"
+        with patch.dict(POLICY, {"CONTROL_PINS": old_pins}):
+            with self.assertRaises(ValueError):
+                verify_control()
+
+        self.reads.clear()
+        self.blobs[fixture_path] = original["fixtures.json"]
+        del self.blobs[manifest_path]
+        with patch.dict(POLICY, {"CONTROL_PINS": old_pins}):
+            with self.assertRaises(KeyError):
+                verify_control()
+
+        rotated_fixtures = original["fixtures.json"] + b"\n"
+        rotated_manifest_value = json.loads(original["manifest.json"])
+        rotated_manifest_value["fixturesSha256"] = hashlib.sha256(rotated_fixtures).hexdigest()
+        rotated_manifest = (json.dumps(rotated_manifest_value, indent=2) + "\n").encode()
+        rotated_snapshot = {"fixtures.json": rotated_fixtures,
+                            "manifest.json": rotated_manifest}
+        rotated_pins = {name: hashlib.sha256(value).hexdigest()
+                        for name, value in rotated_snapshot.items()}
+
+        # The new constants and new snapshot are separate reviewed changes:
+        # old policy rejects the new bytes; new policy rejects the old bytes.
+        self.blobs.update({POLICY["CONTROL_SNAPSHOT"] + name: value
+                           for name, value in rotated_snapshot.items()})
+        self.reads.clear()
+        with patch.dict(POLICY, {"CONTROL_PINS": old_pins}):
+            with self.assertRaises(ValueError):
+                verify_control()
+
+        self.blobs.update({POLICY["CONTROL_SNAPSHOT"] + name: value
+                           for name, value in original.items()})
+        with patch.dict(POLICY, {"CONTROL_PINS": rotated_pins}):
+            with self.assertRaises(ValueError):
+                verify_control()
+
+        self.blobs.update({POLICY["CONTROL_SNAPSHOT"] + name: value
+                           for name, value in rotated_snapshot.items()})
+        self.reads.clear()
+        with patch.dict(POLICY, {"CONTROL_PINS": rotated_pins}):
+            verify_control()
+        self.assertEqual(self.reads, control_paths)
+
     def test_redirects_are_refused(self):
         with self.assertRaises(ValueError):
             POLICY["NoRedirect"]().redirect_request(None, None, 302, "", {}, "https://attacker.invalid")
