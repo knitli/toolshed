@@ -1,0 +1,555 @@
+{
+  "purpose": "Per-test causal evidence for the app-server durable native Start anchor. Every mapped test has an isolated production-source mutant that fails by assertion and a restored-source pass.",
+  "baseline": {
+    "observer_source": "/private/tmp/codex-native-input-observation-spike/source",
+    "candidate_source": "/private/tmp/codex-native-durable-restart-spike/source",
+    "source_checkout_commit": "a956835d020762cb2b570053af06f643a11c0ecc",
+    "test_method_scope": {
+      "app_server_processor_unit": 10,
+      "state": 6,
+      "core_app_server_integration": 3,
+      "total": 19
+    },
+    "count_note": "Count covers changed or new methods in the durable restart patch relative to the native input-observation baseline; multiple independent semantic assertions in one method have separate causal pairs.",
+    "comparison": {
+      "method_count_basis": "Function-body comparison against the frozen native input-observation source at the same git commit; 10 app-server processor test methods are changed/new, 6 State test methods are new in a previously absent file, and 3 thread_start integration methods are changed/new.",
+      "baseline_commit": "a956835d020762cb2b570053af06f643a11c0ecc",
+      "test_files": [
+        {
+          "path": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+          "baseline_sha256": "972678a47f714bf35c1eedd51bc75c07491ce03d8f5eee532121d16c1b6b504a",
+          "candidate_sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+          "changed_or_new_methods": [
+            "in_memory_core_commit_is_not_durable_positive_evidence",
+            "missing_receipt_after_core_error_stays_unknown",
+            "terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery",
+            "terminal_refusal_does_not_promote_memory_only_core_commit_to_positive_proof",
+            "read_only_receipt_lookup_requires_exact_identity_and_input",
+            "matching_core_user_message_completion_produces_persistable_evidence",
+            "nonmatching_core_completion_and_stopped_hook_leave_receipt_started",
+            "duplicate_core_completion_events_are_left_to_monotone_state_transition",
+            "input_recorded_lookup_requires_the_full_native_request_identity",
+            "committed_receipt_remains_readable_after_permit_expiry"
+          ],
+          "renamed_from": {
+            "in_memory_core_commit_is_not_durable_positive_evidence": "lost_core_reply_reconciles_from_committed_receipt",
+            "terminal_refusal_does_not_promote_memory_only_core_commit_to_positive_proof": "terminal_refusal_and_core_commit_arbitrate_on_the_receipt_lock",
+            "matching_core_user_message_completion_produces_persistable_evidence": "core_user_message_completion_is_the_input_recorded_proof",
+            "duplicate_core_completion_events_are_left_to_monotone_state_transition": "duplicate_core_completion_keeps_first_recorded_item_id"
+          }
+        },
+        {
+          "path": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+          "baseline_sha256": null,
+          "candidate_sha256": "62483ffddcd55c81ddcc87b101af36c9c0b02338835b6567d11328676b55a1f6",
+          "changed_or_new_methods": [
+            "native_receipt_reopens_exact_identity_and_keeps_input_recorded_ahead_of_started",
+            "native_receipt_write_failure_keeps_pending_unknown_and_duplicate_reservation",
+            "native_receipt_rejects_structurally_invalid_positive_proof_data",
+            "native_receipt_capacity_is_permanent_and_fails_closed_without_eviction",
+            "native_receipt_conflicts_on_any_reused_unique_identifier",
+            "native_receipt_allows_fresh_delivery_attempt_only_with_explicit_terminal_attempts"
+          ],
+          "status": "new test file"
+        },
+        {
+          "path": "codex-rs/app-server/tests/suite/v2/thread_start.rs",
+          "baseline_sha256": "f24d6b8f24a3e26749f27d0046a1583c727d4ff3b31382d885482d6a5c7a9f34",
+          "candidate_sha256": "f09c38301ac5ed3e24b614548c7f1f9c6beb554e9cef50e5c4fff16aa465a0a7",
+          "changed_or_new_methods": [
+            "native_start_receipt_reports_the_core_recorded_user_message_item",
+            "native_start_receipt_survives_app_server_restart_without_resubmission",
+            "native_start_stays_unknown_when_core_registration_cannot_be_durably_recorded"
+          ],
+          "new_methods": [
+            "native_start_receipt_survives_app_server_restart_without_resubmission",
+            "native_start_stays_unknown_when_core_registration_cannot_be_durably_recorded"
+          ],
+          "changed_methods": [
+            "native_start_receipt_reports_the_core_recorded_user_message_item"
+          ]
+        }
+      ]
+    }
+  },
+  "method_count": 19,
+  "methods": [
+    {
+      "method": "in_memory_core_commit_is_not_durable_positive_evidence",
+      "crate": "codex-app-server",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "test_source_sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+      "causal_pairs": [
+        {
+          "mutation": "return Started for an exact in-memory delivery receipt",
+          "mutant_source_sha256": "13412d21e44b0d7fa81c31ee229a7065cbe586a949e930887e9d918662af665a",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/in_memory_core_commit_is_not_durable_positive_evidence.mutant-red.log",
+            "sha256": "1ca97564fa45b353e6a109553b723de6624b44f7138b109c82cc782e173e4ad1"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/in_memory_core_commit_is_not_durable_positive_evidence.restored-green.log",
+            "sha256": "155f3ce7f5cf1881c13e08e0906edeb124fb63affff536aacf509270a9c4c94a"
+          }
+        }
+      ]
+    },
+    {
+      "method": "read_only_receipt_lookup_requires_exact_identity_and_input",
+      "crate": "codex-app-server",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "test_source_sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+      "causal_pairs": [
+        {
+          "mutation": "return Started for an exact in-memory delivery receipt",
+          "mutant_source_sha256": "13412d21e44b0d7fa81c31ee229a7065cbe586a949e930887e9d918662af665a",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/read_only_receipt_lookup_requires_exact_identity_and_input.mutant-red.log",
+            "sha256": "868d8e1d9d849bf7e7d111344c64da56b8bee4e44e80afe2c4083bd2c0abde14"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/read_only_receipt_lookup_requires_exact_identity_and_input.restored-green.log",
+            "sha256": "7fe5c5424d7ff9f6980ff209d725565b97a90103325da201c0a7bdf71cb84e64"
+          }
+        }
+      ]
+    },
+    {
+      "method": "committed_receipt_remains_readable_after_permit_expiry",
+      "crate": "codex-app-server",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "test_source_sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+      "causal_pairs": [
+        {
+          "mutation": "return Started for an exact in-memory delivery receipt",
+          "mutant_source_sha256": "13412d21e44b0d7fa81c31ee229a7065cbe586a949e930887e9d918662af665a",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/committed_receipt_remains_readable_after_permit_expiry.mutant-red.log",
+            "sha256": "197dff3e506def6d8050e44b8c6c4f1e0b37695671c2f40689092029c1a76505"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/committed_receipt_remains_readable_after_permit_expiry.restored-green.log",
+            "sha256": "7c708f5a72d44d9f0a110d67460843484c8486f191da800230b109c16cb8cf1c"
+          }
+        }
+      ]
+    },
+    {
+      "method": "missing_receipt_after_core_error_stays_unknown",
+      "crate": "codex-app-server",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "test_source_sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+      "causal_pairs": [
+        {
+          "mutation": "synthesize a positive receipt when there is no durable or in-memory evidence",
+          "mutant_source_sha256": "3c9dcc48c675c471a464a7187a94046ceba31e8a6c5951d26dbb41273349b06b",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/missing_receipt_after_core_error_stays_unknown.mutant-red.log",
+            "sha256": "71bd307bf3b792a2e72862c4e21cbd3a1a1be922ab5cc13116b7e39292a0c152"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/missing_receipt_after_core_error_stays_unknown.restored-green.log",
+            "sha256": "dbe59c1212bcda3cfe6272ed2cd94fd88ecd737d3f3c408a1b8be68942fa089d"
+          }
+        }
+      ]
+    },
+    {
+      "method": "terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery",
+      "crate": "codex-app-server",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "test_source_sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+      "causal_pairs": [
+        {
+          "mutation": "drop explicit terminal-delivery retry lineage",
+          "mutant_source_sha256": "58168c2c4775f42761759a5a792bc548d71a70fc6b4144f6555366ae2212e0fe",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery.mutant-red.log",
+            "sha256": "91846dd49274ccb502a34bf17b1fbab9977c55620bdc0b64729597247047045c"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/terminal_attempt_retires_its_permit_but_allows_fresh_attempt_for_delivery.restored-green.log",
+            "sha256": "d2b6ce831b2068daf64fe40d02d792105ae789d95742b645c38c0af3f9adbc52"
+          }
+        }
+      ]
+    },
+    {
+      "method": "terminal_refusal_does_not_promote_memory_only_core_commit_to_positive_proof",
+      "crate": "codex-app-server",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "test_source_sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+      "causal_pairs": [
+        {
+          "mutation": "allow terminal refusal to advertise an in-memory Core receipt as Started",
+          "mutant_source_sha256": "3f71bb444703d8094053ae58ba605d64d9ae2c46479bbeee5f46370e606590e8",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/terminal_refusal_does_not_promote_memory_only_core_commit_to_positive_proof.mutant-red.log",
+            "sha256": "ff12fb5eb374e48bd3d8d445f391cd0432bd6ae363dd90387836b5ee036bae88"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/terminal_refusal_does_not_promote_memory_only_core_commit_to_positive_proof.restored-green.log",
+            "sha256": "4912a528fde09a3458bbbb7a59846ae15efe01800e6780d9d288aee5c0e69d8b"
+          }
+        }
+      ]
+    },
+    {
+      "method": "matching_core_user_message_completion_produces_persistable_evidence",
+      "crate": "codex-app-server",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "test_source_sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+      "causal_pairs": [
+        {
+          "mutation": "return no candidate even for exact matching Core ItemCompleted evidence",
+          "mutant_source_sha256": "d5e1d66fb534660756e3f20d44ad1493f323612c45447bf82d78dc253b777ee1",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/matching_core_user_message_completion_produces_persistable_evidence.mutant-red.log",
+            "sha256": "ae2ab1170635d15ef0e2912b166582db40f3f7cb3de712a3a4c67747b29a8d22"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/matching_core_user_message_completion_produces_persistable_evidence.restored-green.log",
+            "sha256": "0053ee67bdf17f116383dd8023ccafb5ee782d50120a23b16d70ae1507a87e3f"
+          }
+        }
+      ]
+    },
+    {
+      "method": "duplicate_core_completion_events_are_left_to_monotone_state_transition",
+      "crate": "codex-app-server",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "test_source_sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+      "causal_pairs": [
+        {
+          "mutation": "return no candidate even for exact matching Core ItemCompleted evidence",
+          "mutant_source_sha256": "d5e1d66fb534660756e3f20d44ad1493f323612c45447bf82d78dc253b777ee1",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/duplicate_core_completion_events_are_left_to_monotone_state_transition.mutant-red.log",
+            "sha256": "140ff5a045fcb4ded59a3801e6116d3639118f9b655a19178a5f5910bf426e9a"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/duplicate_core_completion_events_are_left_to_monotone_state_transition.restored-green.log",
+            "sha256": "79217ab73d2df55ed314cf338c85d6c06d136dea21e8fbb2a72fac0a2b03f196"
+          }
+        }
+      ]
+    },
+    {
+      "method": "input_recorded_lookup_requires_the_full_native_request_identity",
+      "crate": "codex-app-server",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "test_source_sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+      "causal_pairs": [
+        {
+          "mutation": "return no candidate even for exact matching Core ItemCompleted evidence",
+          "mutant_source_sha256": "d5e1d66fb534660756e3f20d44ad1493f323612c45447bf82d78dc253b777ee1",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/input_recorded_lookup_requires_the_full_native_request_identity.mutant-red.log",
+            "sha256": "495447a94cc7592d91e0b3b976831c34186f30b4909751a0e0665e5b4fe345a5"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/input_recorded_lookup_requires_the_full_native_request_identity.restored-green.log",
+            "sha256": "f7fd180efc180843ba444123db893408c84b00f5f1b4f9bc9fca75407d960dd6"
+          }
+        }
+      ]
+    },
+    {
+      "method": "nonmatching_core_completion_and_stopped_hook_leave_receipt_started",
+      "crate": "codex-app-server",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "test_source_sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+      "causal_pairs": [
+        {
+          "mutation": "bypass all Core event-to-receipt candidate binding predicates",
+          "mutant_source_sha256": "93a6321b5a7b92a8cac10217a302165922e8509f9d4dedeaf32fb36f46bc5e57",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/nonmatching_core_completion_and_stopped_hook_leave_receipt_started.mutant-red.log",
+            "sha256": "f4aabd7c3b1a1704d359ceafcb2f117f873e080bcefc3b7775d2713c59e7bc77"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/nonmatching_core_completion_and_stopped_hook_leave_receipt_started.restored-green.log",
+            "sha256": "d289b1a3d02e221352c4b0c7e48df4a9ad1c27c0245e36baec41dd913cf557d4"
+          }
+        }
+      ]
+    },
+    {
+      "method": "native_receipt_write_failure_keeps_pending_unknown_and_duplicate_reservation",
+      "crate": "codex-state",
+      "source": "codex-rs/state/src/runtime/native_receipts.rs",
+      "source_sha256": "663d5353e4ddc17ce540c4ef5008ea44edb7870d05a70517a315ee8b9258d9c4",
+      "test_source": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "test_source_sha256": "62483ffddcd55c81ddcc87b101af36c9c0b02338835b6567d11328676b55a1f6",
+      "causal_pairs": [
+        {
+          "mutation": "suppress the failed SQLite stage update and return a positive Started result",
+          "mutant_source_sha256": "81193982a3a34fae1a419e7fe1c0f59f5b164aae9043d1bfb2935391d8bf687e",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/native_receipt_write_failure_keeps_pending_unknown_and_duplicate_reservation.mutant-red.log",
+            "sha256": "56918571c4f7d648bd842584eef81811b60420140c218c04ec1ce8c19a57a3d0"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/native_receipt_write_failure_keeps_pending_unknown_and_duplicate_reservation.restored-green.log",
+            "sha256": "2e1fb9f4b028f0eac9b7243a58c0323317f4288681e544476269aaf4734f5f90"
+          }
+        }
+      ]
+    },
+    {
+      "method": "native_receipt_conflicts_on_any_reused_unique_identifier",
+      "crate": "codex-state",
+      "source": "codex-rs/state/src/runtime/native_receipts.rs",
+      "source_sha256": "663d5353e4ddc17ce540c4ef5008ea44edb7870d05a70517a315ee8b9258d9c4",
+      "test_source": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "test_source_sha256": "62483ffddcd55c81ddcc87b101af36c9c0b02338835b6567d11328676b55a1f6",
+      "causal_pairs": [
+        {
+          "mutation": "misclassify a reused attempt identifier as permission to start without inserting",
+          "mutant_source_sha256": "ba4aeaa16fc98f7d5ac9a597e849f023cf408215188a51387ac7f2b08cdd7bf0",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/native_receipt_conflicts_on_any_reused_unique_identifier.mutant-red.log",
+            "sha256": "f495337cd8ca705bc0e14e5f13135c6397823eaa9d69d6931ba3f40e5bf32081"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/native_receipt_conflicts_on_any_reused_unique_identifier.restored-green.log",
+            "sha256": "6753b50e00c13431417c333b4dfb0f486411d8a1652cdf4bcb40fd6c61c6896b"
+          }
+        }
+      ]
+    },
+    {
+      "method": "native_start_receipt_reports_the_core_recorded_user_message_item",
+      "crate": "codex-app-server",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/tests/suite/v2/thread_start.rs",
+      "test_source_sha256": "f09c38301ac5ed3e24b614548c7f1f9c6beb554e9cef50e5c4fff16aa465a0a7",
+      "causal_pairs": [
+        {
+          "mutation": "do not persist matching Core ItemCompleted as InputRecorded; repeat the Started transition so the read-only receipt remains Started",
+          "mutant_source_sha256": "70d07f7f0a887d316802a3e26fd75e4e695159e0aa6ed79efedc3c36f15e5df9",
+          "red": {
+            "result": "assertion-red",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/native_start_receipt_reports_the_core_recorded_user_message_item.mutant-red.log",
+            "sha256": "5c57ab92d8a8cd1b3230a41a8a59eb5fab8e6c14936064b7388a7acf32985e84"
+          },
+          "restored_green": {
+            "result": "1 test run: 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/method-causals/native_start_receipt_reports_the_core_recorded_user_message_item.restored-green.log",
+            "sha256": "6d77c7508d5b5a737411a2ca10e584df33d060cc8603a27d0730039604e1232d"
+          }
+        }
+      ]
+    },
+    {
+      "method": "native_receipt_reopens_exact_identity_and_keeps_input_recorded_ahead_of_started",
+      "crate": "codex-state",
+      "source": "codex-rs/state/src/runtime/native_receipts.rs",
+      "source_sha256": "663d5353e4ddc17ce540c4ef5008ea44edb7870d05a70517a315ee8b9258d9c4",
+      "test_source": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "test_source_sha256": "62483ffddcd55c81ddcc87b101af36c9c0b02338835b6567d11328676b55a1f6",
+      "causal_pairs": [
+        {
+          "mutation": "bypass full identity tuple check so mismatched request identity reads positive proof",
+          "red": {
+            "result": "assertion-red; 0 passed, 1 failed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/full-tuple-mutant-red.log",
+            "sha256": "493625776f450db6fb2d07f00dc037d99a7eb3d9fa597046d1e2c4ce80a0ed54"
+          },
+          "restored_green": {
+            "result": "restored source; 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/full-tuple-restored-green.log",
+            "sha256": "b2086c8c764d685ea83bb1e57d8f57f4128fd5fc0d2f33d295cc630ae6e8b1e6"
+          }
+        },
+        {
+          "mutation": "permit a late Started update to demote InputRecorded proof",
+          "red": {
+            "result": "assertion-red; 0 passed, 1 failed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/late-started-mutant-red.log",
+            "sha256": "8de72c04cf6b2dc7252a6bec1834cba6120afe822962af100fd59fda89012a32"
+          },
+          "restored_green": {
+            "result": "restored source; 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/late-started-restored-green.log",
+            "sha256": "04f8e23c8014be6240b96f843e761368049cf5873b6fede8869a6a990fb8cbc6"
+          }
+        }
+      ]
+    },
+    {
+      "method": "native_receipt_rejects_structurally_invalid_positive_proof_data",
+      "crate": "codex-state",
+      "source": "codex-rs/state/src/runtime/native_receipts.rs",
+      "source_sha256": "663d5353e4ddc17ce540c4ef5008ea44edb7870d05a70517a315ee8b9258d9c4",
+      "test_source": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "test_source_sha256": "62483ffddcd55c81ddcc87b101af36c9c0b02338835b6567d11328676b55a1f6",
+      "causal_pairs": [
+        {
+          "mutation": "remove turn_id == reserved client_user_message_id validation on proof read",
+          "red": {
+            "result": "assertion-red; 0 passed, 1 failed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/invalid-turn-proof-mutant-red.log",
+            "sha256": "2bb7d3db6b0980c6c9a3826599f39fd94778ceb3afa758ba12662e85bc957f25"
+          },
+          "restored_green": {
+            "result": "restored source; 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/invalid-turn-proof-restored-green.log",
+            "sha256": "2ddb79008db7e86601ae89e3261512a7c88c78a85d16a59895a39a48211dfd8c"
+          }
+        },
+        {
+          "mutation": "remove Core item UUIDv7/distinct-from-turn validation on proof read",
+          "red": {
+            "result": "assertion-red; 0 passed, 1 failed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/invalid-item-proof-mutant-red.log",
+            "sha256": "2ba6f61f008d211b09dda06146d9653d91eb3d2bc77dd34932835891283e79d5"
+          },
+          "restored_green": {
+            "result": "restored source; 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/invalid-item-proof-restored-green.log",
+            "sha256": "ae42a61b517176284ddd5d8d07df386da65089b746a7cadf485fa47b94d3ccb7"
+          }
+        }
+      ]
+    },
+    {
+      "method": "native_receipt_capacity_is_permanent_and_fails_closed_without_eviction",
+      "crate": "codex-state",
+      "source": "codex-rs/state/src/runtime/native_receipts.rs",
+      "source_sha256": "663d5353e4ddc17ce540c4ef5008ea44edb7870d05a70517a315ee8b9258d9c4",
+      "test_source": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "test_source_sha256": "62483ffddcd55c81ddcc87b101af36c9c0b02338835b6567d11328676b55a1f6",
+      "causal_pairs": [
+        {
+          "mutation": "raise the permanent receipt cap by one so overflow incorrectly creates a new receipt",
+          "red": {
+            "result": "assertion-red; 0 passed, 1 failed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/capacity-mutant-red.log",
+            "sha256": "20584338b835283a242f53f2a0cfa5bd527e2ccaa579ffeab0802473543c65af"
+          },
+          "restored_green": {
+            "result": "restored source; 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/capacity-restored-green.log",
+            "sha256": "bdf2c9e6345f47d5b08f007c39ea84d35f63b21a9ba84fc94b4315ea3355a349"
+          }
+        }
+      ]
+    },
+    {
+      "method": "native_receipt_allows_fresh_delivery_attempt_only_with_explicit_terminal_attempts",
+      "crate": "codex-state",
+      "source": "codex-rs/state/src/runtime/native_receipts.rs",
+      "source_sha256": "663d5353e4ddc17ce540c4ef5008ea44edb7870d05a70517a315ee8b9258d9c4",
+      "test_source": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "test_source_sha256": "62483ffddcd55c81ddcc87b101af36c9c0b02338835b6567d11328676b55a1f6",
+      "causal_pairs": [
+        {
+          "mutation": "drop same-delivery terminal attempt lineage authorization after selection generation refresh",
+          "red": {
+            "result": "assertion-red; 0 passed, 1 failed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/fresh-retry-newgen-mutant-red.log",
+            "sha256": "b6ca47dda0676593615296e738a7e4b857a85c7496027b6e67b36930d3842965"
+          },
+          "restored_green": {
+            "result": "restored source; 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/fresh-retry-newgen-restored-green.log",
+            "sha256": "e96900e735406e489158278f64bf9d29e87b0750a303dd670986e65d7024694a"
+          }
+        }
+      ]
+    },
+    {
+      "method": "native_start_stays_unknown_when_core_registration_cannot_be_durably_recorded",
+      "crate": "codex-app-server integration",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/tests/suite/v2/thread_start.rs",
+      "test_source_sha256": "f09c38301ac5ed3e24b614548c7f1f9c6beb554e9cef50e5c4fff16aa465a0a7",
+      "causal_pairs": [
+        {
+          "mutation": "force Started when the durable receipt stage write fails after real Core submission",
+          "red": {
+            "result": "assertion-red; 0 passed, 1 failed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/core-db-failure-started-mutant-red.log",
+            "sha256": "718eaedf9b317cf3752cad77abed5e66bf95ad9cd6be94c95df2f7991ee65ad2"
+          },
+          "restored_green": {
+            "result": "restored source; 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/core-db-failure-restored-green.log",
+            "sha256": "3eac5ef1679b85e71ca0d8a21e17053ce0830be789d7acf09e2225d42649ec0e"
+          }
+        }
+      ]
+    },
+    {
+      "method": "native_start_receipt_survives_app_server_restart_without_resubmission",
+      "crate": "codex-app-server integration",
+      "source": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "source_sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "test_source": "codex-rs/app-server/tests/suite/v2/thread_start.rs",
+      "test_source_sha256": "f09c38301ac5ed3e24b614548c7f1f9c6beb554e9cef50e5c4fff16aa465a0a7",
+      "causal_pairs": [
+        {
+          "mutation": "bypass the app-server incarnation guard so old Start incorrectly replays a positive receipt",
+          "red": {
+            "result": "assertion-red; 0 passed, 1 failed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/old-incarnation-start-lookup-mutant-red.log",
+            "sha256": "31fe82e34099ab73c5119c6408e2135446f6027647e49ce45426e38708a81700"
+          },
+          "restored_green": {
+            "result": "restored source; 1 passed",
+            "path": "/private/tmp/codex-native-durable-restart-proof/old-incarnation-start-lookup-restored-green.log",
+            "sha256": "c4bbe3b79bc787a12a438ba07d6e1fdaecc2e86a81f3b1bfe4fdbd02cf134e09"
+          }
+        }
+      ]
+    }
+  ],
+  "execution_boundary": "All production mutants and tests ran only in the isolated scratch copy-on-write source/target described in the referenced log paths. The frozen observer and durable candidate sources were not mutated by the causal campaign."
+}

@@ -1,0 +1,165 @@
+{
+  "source_checkout": "/private/tmp/codex-native-durable-restart-spike/source",
+  "base_commit": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "scope": "app-server anchored native Start recovery across app-server restart; protocol, Core guarded-start integration, and SQLite State receipt support",
+  "excluded_from_this_patch": [
+    "TUI/local native process restart recovery",
+    "CLI and local process restart recovery",
+    "event-gateway production integration",
+    "Cargo.lock and justfile environment edits"
+  ],
+  "files": [
+    {
+      "path": "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json",
+      "sha256": "cdb5512b033565c4322f3f7b20b34e45fbbc641d061d10dbf8d2c12dbcf788c3",
+      "bytes": 713289
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json",
+      "sha256": "722bb44139cd436422ee0eec79b8d865265b8b774eecee824ef7f7c0a8603052",
+      "bytes": 612089
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst",
+      "sha256": "480bb6ad5f84025bed5472dfcf732d068d9b336f90891bb3b27dc2ec8fabb22d",
+      "bytes": 162064
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst",
+      "sha256": "fd00211c425bf0c2a482fb80b0b910dbd26ce9efbed0dcea43ae78926940b451",
+      "bytes": 156529
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/index.ts",
+      "sha256": "d1bc8d1fef56a4f1205594cd0757178bde740e09680d41bf313081ca3c2ead90",
+      "bytes": 47317
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/ClientSelectionUpdateStatus.ts",
+      "sha256": "9f70edf230a0fde8b1b714b69ec1cf1e2e2c03f74bcb5926d94b54b8dd687f0c",
+      "bytes": 229
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartIfIdleNotStartedReason.ts",
+      "sha256": "6e3e400e8a68f25219e873ffbf63e53ff068f4f98d9ecd731bbbafffe2f1faae",
+      "bytes": 408
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/common.rs",
+      "sha256": "63e02847f7819f62a3d3167931a3b202445740aadf52c60d90cd31183da20f0f",
+      "bytes": 174267
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+      "sha256": "519a6ecfdcb7cc80832d09526c61f4b6ac098d91613702fe19492489176aabb8",
+      "bytes": 81878
+    },
+    {
+      "path": "codex-rs/app-server/src/lib.rs",
+      "sha256": "46321d34235f5feffd33231a7390624720dcbfb627ba4222585a96ada3936ed8",
+      "bytes": 66088
+    },
+    {
+      "path": "codex-rs/app-server/src/message_processor.rs",
+      "sha256": "a47dc09bd9fccc83536dda784010dcc9f8ef16dd586071edbcc47d9f53619c8c",
+      "bytes": 83127
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors.rs",
+      "sha256": "eb4235cd2d56d6a5ab09e99d21ced2f720c4c454ff106ca597b928c35b675df2",
+      "bytes": 34980
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/thread_lifecycle.rs",
+      "sha256": "286694f95faaf1419caabfe764b8392c4690ee529bc134f9b73c4091b2160ab9",
+      "bytes": 34443
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "sha256": "8642834522a1a7e1eb7db215902e3ff9eca86e1a72144d91831ba4d02e0dc5f6",
+      "bytes": 40854
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "sha256": "861721d9292e667ba851964be7492080b072aba31601ed947ac0b1effdfe70a9",
+      "bytes": 30908
+    },
+    {
+      "path": "codex-rs/app-server/src/thread_state.rs",
+      "sha256": "9c9006531cc814599f84fd26a82eb946ae3a9c8a1b2869d40a086f689a4bcbb4",
+      "bytes": 24405
+    },
+    {
+      "path": "codex-rs/app-server/tests/suite/v2/thread_start.rs",
+      "sha256": "f09c38301ac5ed3e24b614548c7f1f9c6beb554e9cef50e5c4fff16aa465a0a7",
+      "bytes": 77858
+    },
+    {
+      "path": "codex-rs/core/src/session/mod.rs",
+      "sha256": "d4363e380ff2fe9e537c15a26330c497886d566c9cb14531c89db19c019b918c",
+      "bytes": 210839
+    },
+    {
+      "path": "codex-rs/core/src/session/turn_input.rs",
+      "sha256": "06a1138f66cc9b93302ae2af04de412a978b9db2943e88b9e82a6b6dbb7eae65",
+      "bytes": 30657
+    },
+    {
+      "path": "codex-rs/core/src/session/turn_input_tests.rs",
+      "sha256": "4accd9f9d8b749e11d53f9f329e568790b403102f2cee81bdf0bb28a667c82d2",
+      "bytes": 42665
+    },
+    {
+      "path": "codex-rs/core/src/tasks/mod.rs",
+      "sha256": "4167a59e4d411329c62a970015bea3f59bcce8a1ade62e1294a504f7ce464e73",
+      "bytes": 38553
+    },
+    {
+      "path": "codex-rs/core/src/tasks/guarded_start.rs",
+      "sha256": "381b171a096088a389ca7891cce0a3cf1066da7b8d814e55b828606c5445fb8f",
+      "bytes": 10918
+    },
+    {
+      "path": "codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs",
+      "sha256": "b352df6700d4547951860df6347d4d21a03a546994f6e284f88fccbe5a77083b",
+      "bytes": 2933
+    },
+    {
+      "path": "codex-rs/protocol/src/turn_input.rs",
+      "sha256": "4355925606639fd7f4c05252485d5d53b520ec0c9729a827c09b0f70edb8658b",
+      "bytes": 10904
+    },
+    {
+      "path": "codex-rs/state/src/lib.rs",
+      "sha256": "59544ce0db3de101c005799af99e11897a1c46ec4246e2c4dd4b91561b469bb0",
+      "bytes": 6480
+    },
+    {
+      "path": "codex-rs/state/src/runtime.rs",
+      "sha256": "76878304339e662224abf8e1d6dc652c397bf43f95286b9f1896be430d782fad",
+      "bytes": 27630
+    },
+    {
+      "path": "codex-rs/state/migrations/0059_native_turn_start_receipts.sql",
+      "sha256": "6a16875992277a8477c1b6a9f378604b7ccbefb8df847b2717234bbcb7dbca9b",
+      "bytes": 996
+    },
+    {
+      "path": "codex-rs/state/src/runtime/native_receipts.rs",
+      "sha256": "663d5353e4ddc17ce540c4ef5008ea44edb7870d05a70517a315ee8b9258d9c4",
+      "bytes": 13449
+    },
+    {
+      "path": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "sha256": "62483ffddcd55c81ddcc87b101af36c9c0b02338835b6567d11328676b55a1f6",
+      "bytes": 13458
+    }
+  ],
+  "clean_pinned_apply": {
+    "base": "a956835d020762cb2b570053af06f643a11c0ecc",
+    "fileCount": 29,
+    "cleanApply": "PASS",
+    "patchedBytesMatch": "PASS",
+    "patchSha256": "8e1609b553b5708eb6e713470532399d333531d7c6dfc745b15a7d1f27c3f0d1"
+  }
+}
