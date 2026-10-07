@@ -84,6 +84,89 @@ def peer(handler):
 
 
 class NativeBridgeTests(unittest.TestCase):
+    def test_input_recorded_closed_schema_and_readonly_operation(self):
+        request = native.synthetic_request(witness())
+        valid = {"status": "inputRecorded", "turnId": request["clientUserMessageId"],
+                 "itemId": str(uuid4()), "replayed": True}
+        cases = [(valid, "receipt", True), (valid, "start", False)]
+        cases += [(dict(valid, **change), "receipt", False) for change in (
+            {"turnId": str(uuid4())}, {"turnId": valid["turnId"].upper()},
+            {"itemId": request["clientUserMessageId"]}, {"itemId": "bad"},
+            {"itemId": valid["itemId"].upper()}, {"itemId": 1},
+            {"replayed": 1}, {"replayed": False}, {"extra": True})]
+        cases += [({k: v for k, v in valid.items() if k != field}, "receipt", False)
+                  for field in valid]
+        for outcome, operation, accepted in cases:
+            with self.subTest(outcome=outcome, operation=operation):
+                parent, child = socket.socketpair()
+                client = native.NativeBridge(parent)
+                try:
+                    with patch.object(client, "exchange", return_value={
+                        "version": 2, "nonce": 1, "receipt": {
+                            **{key: request[key] for key in native.IDENTITY}, "outcome": outcome}}):
+                        self.assertEqual(client._receipt_exchange(operation, request),
+                                         outcome if accepted else {"status": "unknown"})
+                    self.assertEqual(client.closed, not accepted)
+                finally:
+                    client.close()
+                    child.close()
+
+    def test_input_recorded_qualification_requires_stable_observation_without_restart(self):
+        for fault in (None, "unknown", "terminalNotStarted", "started", "item_changed",
+                      "extra_primary", "unknown_model", "extra_title", "eligible", "stopped"):
+            with self.subTest(fault=fault):
+                server = SimpleNamespace(release_primary=threading.Event(), model_requests=1,
+                                         request_counts={"primary": 1, "title": 0, "unknown": 0})
+                request, recorded, lookups = {}, {}, []
+                clock = [0.0]
+
+                def sleep(seconds):
+                    clock[0] += seconds
+
+                def start(value):
+                    request.update(deepcopy(value))
+                    recorded.update(status="inputRecorded", turnId=value["clientUserMessageId"],
+                                    itemId=str(uuid4()), replayed=True)
+                    return {"status": "started", "turnId": value["clientUserMessageId"],
+                            "replayed": False}
+
+                def receipt(value):
+                    self.assertEqual(value, request)
+                    self.assertFalse(server.release_primary.is_set())
+                    lookups.append(deepcopy(value))
+                    if fault in ("unknown", "terminalNotStarted", "started"):
+                        return {"status": fault}
+                    if len(lookups) > 1:
+                        self.assertGreater(clock[0] * 1000, request["permitExpiresAt"])
+                        if fault == "item_changed":
+                            return dict(recorded, itemId=str(uuid4()))
+                    return dict(recorded)
+
+                if fault in ("extra_primary", "unknown_model", "extra_title"):
+                    server.request_counts[{"extra_primary": "primary", "unknown_model": "unknown",
+                                           "extra_title": "title"}[fault]] += 2
+                    server.model_requests += 2
+                bridge = SimpleNamespace(start=Mock(side_effect=start), receipt=Mock(side_effect=receipt),
+                                         challenge=Mock(return_value={"eligible": fault == "eligible"}))
+                process = Mock(poll=lambda: 1 if fault == "stopped" else None)
+                with patch.object(native.time, "sleep", side_effect=sleep), \
+                     patch.object(native.time, "monotonic", side_effect=lambda: clock[0]), \
+                     patch.object(native.time, "time_ns", side_effect=lambda: int(clock[0] * 1e9)):
+                    if fault:
+                        with self.assertRaises(native.BridgeError):
+                            native.qualify_input_recorded(bridge, server, process, witness())
+                    else:
+                        result = native.qualify_input_recorded(bridge, server, process, witness())
+                        self.assertEqual(result["outcome"], "inputRecorded")
+                        self.assertEqual(result["itemId"], recorded["itemId"])
+                        self.assertEqual(result["primaryModelRequests"], 1)
+                        self.assertEqual(result["realModelCalls"], 0)
+                        self.assertEqual(lookups, [request] * 3)
+                        bridge.challenge.assert_called_once_with()
+                bridge.start.assert_called_once()
+                self.assertTrue(server.release_primary.is_set())
+                self.assertLessEqual(clock[0], 10.1)
+
     def test_terminal_retry_qualification_preserves_delivery_and_exact_receipts(self):
         initial = witness()
         renewed = dict(initial, generation=3, sequence=2)

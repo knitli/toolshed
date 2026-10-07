@@ -1,0 +1,176 @@
+{
+  "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "rustVersion": "1.95.0",
+  "binarySha256": "6ae0cb3accb4dedfcd5963d04ccfe61e65cd1795bec86e5f02aff696e72f1e8c",
+  "patchSha256": "fdf8807f88bc70898d83e0a2a0c89ba1d2deeac7dd46f28e6c50cbd698720e03",
+  "sourceFileCount": 42,
+  "cleanPinnedApplyCheck": true,
+  "allPatchedFilesByteMatchSource": true,
+  "historicalArtifactsUnchanged": true,
+  "productionNativeEnabled": false,
+  "ownerClientInstalled": false,
+  "requiredJustFix": {
+    "generatedAtUtc": "2026-10-07T06:38:50.896196+00:00",
+    "postFixExport": {
+      "allPatchedFilesByteMatchManifest": true,
+      "fileCount": 42,
+      "manifestPath": "/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/docs/native-bridge/input-recorded-source-manifest.json",
+      "manifestSha256": "86c32e708e196a867421beffcd92019af23b4f3f21596c9a8d2f77c482d22ab9",
+      "patchPath": "/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/docs/native-bridge/input-recorded-codex-v0.160.0.patch",
+      "patchSha256": "fdf8807f88bc70898d83e0a2a0c89ba1d2deeac7dd46f28e6c50cbd698720e03",
+      "sourceRevision": "a956835d020762cb2b570053af06f643a11c0ecc",
+      "twoExportedFilesChangedByLintOnlyRewrites": true
+    },
+    "postFixTestsRerun": false,
+    "result": {
+      "command": "/private/tmp/codex-native-selection-spike/tools/bin/just fix -p codex-app-server-protocol -p codex-app-server -p codex-core -p codex-tui",
+      "environment": {
+        "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+        "cargoNextestAvailable": "0.9.128",
+        "just": "1.40.0",
+        "offline": true,
+        "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+      },
+      "exportedLintOnlyRewrites": [
+        {
+          "afterSha256": "972678a47f714bf35c1eedd51bc75c07491ce03d8f5eee532121d16c1b6b504a",
+          "beforeSha256": "95a9dcfd8de44672d8b8bff033d92feabd145037a137aed7cbcd415a15508add",
+          "change": "Removed unnecessary final params.clone() before mutating the final identity candidate.",
+          "path": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs"
+        },
+        {
+          "afterSha256": "602b553cb0b9b6415c3a2ddd643e6e358c89a61a7b91552be33060cc6081772e",
+          "beforeSha256": "caf416054cf7c0890be6fe7a135be2c839664c08dd29d9432ae3198ce67da91d",
+          "change": "Removed unnecessary item_id.clone() when constructing the final invalid-receipt candidate.",
+          "path": "codex-rs/tui/src/app/selection_bridge_tests.rs"
+        }
+      ],
+      "postFixTestsRerun": false,
+      "remainingNonFixableWarnings": [
+        {
+          "lint": "clippy::type_complexity",
+          "path": "codex-rs/app-server/src/thread_state.rs:361",
+          "status": "warning; no auto-fix applied"
+        },
+        {
+          "lint": "await_holding_lock",
+          "path": "codex-rs/core/src/session/turn_input_tests.rs:255",
+          "status": "warning emitted for existing test; no auto-fix applied"
+        }
+      ],
+      "requiredBy": {
+        "lines": "70-71",
+        "path": "/private/tmp/codex-native-input-observation-spike/source/AGENTS.md",
+        "requirement": "Before finalizing a large codex-rs change run just fix -p <project>; do not rerun tests after fix/fmt."
+      },
+      "result": {
+        "exitCode": 0,
+        "logPath": "/private/tmp/codex-native-input-observation-spike/observer-scoped-fix-escalated.log",
+        "logSha256": "0c7f6e7f92b601dee1c1ed77909ef0492c109d43b547cdea9fb0220193de32b7"
+      },
+      "sandboxRetry": {
+        "firstAttemptExitCode": 101,
+        "reason": "Sandbox denied Cargo local lock-listener bind (EPERM).",
+        "retry": "Same offline package-scoped command with local socket access; no network, installs, or dependency changes."
+      },
+      "testRerunReason": "AGENTS.md says not to re-run tests after fix or fmt. The successful focused test evidence below predates these two clone-only test rewrites.",
+      "unrelatedAutoFixesReverted": [
+        "codex-rs/core/src/tools/registry.rs",
+        "codex-rs/core/tests/suite/openai_file_mcp.rs",
+        "codex-rs/core/tests/suite/scenarios.rs",
+        "codex-rs/Cargo.lock"
+      ]
+    },
+    "schemaVersion": 1
+  },
+  "scopedTests": [
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/final-native-receipt-unit.log",
+      "logSha256": "d777fa968a985c55ca06028ba6c426979ad17d07afefcad80a67d0346872d5bd",
+      "name": "native receipt unit tests",
+      "passed": 18,
+      "run": 18,
+      "selector": "codex-app-server request_processors::native_selection_processor::tests",
+      "skipped": 1828,
+      "stage": "before just fix"
+    },
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/final-core-integration-post-uuid.log",
+      "logSha256": "3050d923d377710c3212faa5f77fae59cb7c9f5649b460ceebce622cc5de609e",
+      "name": "actual Core/app-server integration",
+      "passed": 1,
+      "proofType": "actual TestAppServer/Core ItemCompleted event and receipt readback",
+      "run": 1,
+      "selector": "codex-app-server suite::v2::thread_start::native_start_receipt_reports_the_core_recorded_user_message_item",
+      "stage": "before just fix"
+    },
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/start-normalization-green.log",
+      "logSha256": "0ba4cb5578b25b73ed5638f1c9dbf7c5b84a26f8fae12d8dff350f306974af03",
+      "name": "TUI receipt bridge suite after duplicate-Start fix",
+      "passed": 11,
+      "run": 11,
+      "selector": "codex-tui app::selection_witness::bridge::tests",
+      "skipped": 5632,
+      "stage": "before just fix"
+    },
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/final-protocol.log",
+      "logSha256": "f94576bbd3be3b7b6ad5877cd605413af12274902763a0a49cb30b435240272c",
+      "name": "full app-server-protocol package",
+      "passed": 313,
+      "run": 313,
+      "skipped": 1,
+      "stage": "before just fix"
+    },
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/protocol-input-recorded-schema-green.log",
+      "logSha256": "cac3a9039ff1715ce16eba84ab3ec8f9c42522e9973134e51bdffbec5dae9bbf",
+      "name": "experimental schema fixture causal green",
+      "passed": 1,
+      "run": 1,
+      "selector": "codex-app-server-protocol schema_fixtures_tests::experimental_precomputed_exports_match_generated",
+      "skipped": 313,
+      "stage": "before just fix"
+    }
+  ],
+  "individualNativeAssertionRedRestoredGreenPairs": 11,
+  "harnessTests": 15,
+  "individualHarnessGuardPairs": 16,
+  "syntheticQualification": {
+    "cloudSettlementProven": false,
+    "exactReceiptRecovered": true,
+    "itemId": "01a11514-99c0-7d71-b969-6a559b90e4ae",
+    "mockModelRequests": 2,
+    "nativeOnly": true,
+    "outcome": "inputRecorded",
+    "primaryModelRequests": 1,
+    "qualification": "synthetic-native-input-recorded",
+    "realModelCalls": 0,
+    "recoveredWhileIneligibleAfterPermitExpiry": true,
+    "threadId": "01a11514-98db-7d90-968b-c25090233047",
+    "titleModelRequests": 1,
+    "turnId": "f8c6a37c-0c1f-46a5-9bdf-2d94c772faa0",
+    "unknownModelRequests": 0
+  },
+  "proof": "input-recorded-test-proof.json",
+  "harnessProof": "input-recorded-harness-proof.json",
+  "limits": [
+    "The stopped-hook case is a unit simulation where no completion event is emitted; no actual Core hook-stop runtime integration was run.",
+    "The actual positive TestAppServer integration observed the Core-produced UserMessage completion and recovered its generated item ID.",
+    "No persisted-history fallback or restart recovery was claimed; loss of the in-memory native receipt remains Unknown.",
+    "All focused tests predate the two just-fix clone-only edits; tests were not rerun after just fix per AGENTS.md.",
+    "No full workspace suite was rerun; the prior attempt failed before tests because system GLib metadata was absent.",
+    "Cloud settlement, production activation, owner client install, and real model calls are not established by this synthetic proof."
+  ],
+  "harnessFocusedTests": {
+    "passed": 15,
+    "failed": 0,
+    "logSha256": "e45929de0d8066830c9fe49831633940c64c4cebb4b00989ab72b09b3f652eae"
+  }
+}

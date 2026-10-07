@@ -1,0 +1,470 @@
+{
+  "broadBaselineContext": {
+    "appServerFullPackage": {
+      "baselineFailureSelectorsIdentical": true,
+      "baselineLogSha256": "45ca215bd80658d08599ccca37a24dc8a06bc77e660690cc3b5f7e3656f03268",
+      "currentLogSha256": "e503a135d2877620645cbcd1b136a7ea3eaf07cfc20bd6b5b5cd110de126b9dd",
+      "failed": 24,
+      "passed": 1816,
+      "proofArtifactPath": "/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/docs/native-bridge/terminal-no-start-test-proof.json",
+      "proofArtifactSha256": "77d9df45bd6ab8aa5a2c513d13d2fa508e238f9dbea0033962c6859d4e0cf86a",
+      "run": 1840,
+      "skipped": 1
+    },
+    "coreFullPackageHistorical": {
+      "cleanBaseline21Filter": {
+        "failed": 18,
+        "logPath": "/private/tmp/codex-native-selection-spike/core-baseline-21.log",
+        "logSha256": "4afc0d2b66edd85081b16ec7dddcd7e1a787b724e899ee9a8a853b6c441bd910",
+        "passed": 3,
+        "sameFailureSelectorsReproduced": 18
+      },
+      "failed": 21,
+      "logPath": "/private/tmp/codex-native-selection-spike/core-full-escalated.log",
+      "logSha256": "ad12c4eddff353f498c2a9f35eb512275063650825ab7bda4e569f634f99bb5b",
+      "passed": 4835,
+      "run": 4856,
+      "skipped": 27
+    },
+    "scopeNote": "Broad app-server/TUI counts are historical package runs with exact clean-baseline failure-selector equality. No full workspace test was rerun for this observer report.",
+    "tuiFullPackage": {
+      "baselineFailureSelectorsIdentical": true,
+      "baselineLogSha256": "c24aecdbb6becdbc137ed088a46c3229f5a96d296f030ce4a86e28c0205ebfdc",
+      "currentLogSha256": "853602e567a8bd4839cc5e8a6d7ff94a10b9951f12b234d4565676903fb23be7",
+      "failed": 44,
+      "passed": 5587,
+      "proofArtifactPath": "/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/docs/native-bridge/terminal-no-start-test-proof.json",
+      "proofArtifactSha256": "77d9df45bd6ab8aa5a2c513d13d2fa508e238f9dbea0033962c6859d4e0cf86a",
+      "run": 5631,
+      "skipped": 8
+    },
+    "workspaceSuite": {
+      "noInstallAttempted": true,
+      "priorAttemptExitCode": 101,
+      "priorFailure": "glib-sys could not find glib-2.0.pc (glib-2.0 >= 2.56), before tests started.",
+      "priorLogPath": "/private/tmp/codex-native-selection-spike/workspace-full-escalated.log",
+      "priorLogSha256": "0bc2344fdfc75fc3413a35fddd03f7734e6a2358148d07f9a6a31c82d5aa2c83",
+      "rerunForThisReport": false
+    }
+  },
+  "causalMutationProofs": [
+    {
+      "green": {
+        "exitCode": 0,
+        "kind": "pass",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/observer-positive_core_event-green.log",
+        "logSha256": "487be52083cdfb0a10afd0d3e16a022d403a39828e104280da4843a4ddee6ea1"
+      },
+      "id": "core-exact-completion-positive",
+      "intendedAssertion": "A committed Started receipt remains Started before completion; exact thread, turn, client message ID, and exact plain-text input completion changes the read-only receipt to InputRecorded with that generated item ID.",
+      "layer": "app-server unit / Core event observer",
+      "mutation": "Disable the exact matching ItemCompleted observation so the committed receipt cannot acquire the generated Core item ID.",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/observer-positive_core_event-red.log",
+        "logSha256": "bd85a66c8363bdc89ac05bfc76aab991ad8ea9e5ca886079d79be955bff47c41"
+      },
+      "selector": "codex-app-server request_processors::native_selection_processor::tests::core_user_message_completion_is_the_input_recorded_proof"
+    },
+    {
+      "green": {
+        "exitCode": 0,
+        "kind": "pass",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/observer-strict_content_match-green.log",
+        "logSha256": "7a43c84bee51e6e14feb07cb5bce4fb11400be988bbda0ac77920b9e71d20b37"
+      },
+      "id": "core-strict-identity-content-and-no-event",
+      "intendedAssertion": "Wrong thread, turn, client ID, or rewritten input leave the receipt Started; the hook-stop case is represented by no matching completion event and also remains Started. This is a no-event simulation, not an actual hook-stop integration run.",
+      "layer": "app-server unit / Core event observer",
+      "mutation": "Relax the observer matching guard so a non-exact completion can settle the receipt.",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/observer-strict_content_match-red.log",
+        "logSha256": "43f75f57dc9329d64016b239ce38b72d00769e4a803a34238d08f0c561955fa0"
+      },
+      "selector": "codex-app-server request_processors::native_selection_processor::tests::nonmatching_core_completion_and_stopped_hook_leave_receipt_started"
+    },
+    {
+      "green": {
+        "exitCode": 0,
+        "kind": "pass",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/observer-first_item_id_immutable-green.log",
+        "logSha256": "13a6a24fba52ef641a7f021d6b9e6404563385fa3af445bb2f3f43bdc220c921"
+      },
+      "id": "core-first-item-id-immutable",
+      "intendedAssertion": "After duplicate completions with distinct IDs, the read-only receipt retains the first generated Core item ID.",
+      "layer": "app-server unit / Core event observer",
+      "mutation": "Allow a duplicate matching completion to replace the stored item ID.",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/observer-first_item_id_immutable-red.log",
+        "logSha256": "af0b288bfe8042e35f497a431dbf376c0db018a33db88b46ad2c346fb0ecc985"
+      },
+      "selector": "codex-app-server request_processors::native_selection_processor::tests::duplicate_core_completion_keeps_first_recorded_item_id"
+    },
+    {
+      "green": {
+        "exitCode": 0,
+        "kind": "pass",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/observer-full_request_identity-green.log",
+        "logSha256": "07a84c8a390e11123af34412473e9ba0f8a9ec5882bc6f61fc90ac98c1a4c3d0"
+      },
+      "id": "core-full-request-identity",
+      "intendedAssertion": "Changing server instance, generation, attempt, delivery, client message ID, thread, permit ID, permit timestamps, or input yields Unknown rather than InputRecorded.",
+      "layer": "app-server unit / Core event observer",
+      "mutation": "Drop a full-request identity binding from receipt lookup.",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/observer-full_request_identity-red.log",
+        "logSha256": "96a144ed46040cc819e3e27726a2e14ccc82d9c942b786cc43a1ca5037bc9c3d"
+      },
+      "selector": "codex-app-server request_processors::native_selection_processor::tests::input_recorded_lookup_requires_the_full_native_request_identity"
+    },
+    {
+      "green": {
+        "exitCode": 0,
+        "kind": "pass",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/observer-core-integration-green.log",
+        "logSha256": "a176944ebfbe9a298d43d8e99577997d2cb2fbac2d7e0bea60c64c2f86a6d2de"
+      },
+      "id": "core-app-server-integration-positive",
+      "intendedAssertion": "The app-server first returns Started; after Core emits the matching user-message completion, read-only thread/startReceipt returns InputRecorded with the same generated UUIDv7 item ID, distinct from the caller client ID.",
+      "layer": "TestAppServer / actual Core integration",
+      "mutation": "Disconnect the production Core ItemCompleted observer from the native receipt store.",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/observer-core-integration-red.log",
+        "logSha256": "74b70fd379a0e2ecdacbb1fbbcb3607a6223e585c7f66f38df82d29795b6782c"
+      },
+      "selector": "codex-app-server suite::v2::thread_start::native_start_receipt_reports_the_core_recorded_user_message_item"
+    },
+    {
+      "green": {
+        "exitCode": 0,
+        "kind": "pass",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/tui-started-must-poll-green.log",
+        "logSha256": "b8e82bee0608fc580b23081a485227d7cf524de921d2fe626320fc6ebd729785"
+      },
+      "id": "tui-started-requires-read-only-poll",
+      "intendedAssertion": "A cached Started value is not evidence that Core recorded input; receipt() remains empty and exact receipt parameters remain available for polling.",
+      "layer": "TUI bridge",
+      "mutation": "Treat a locally cached Started attempt as an available receipt instead of requiring the read-only native receipt lookup.",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/tui-started-poll-red-debug.log",
+        "logSha256": "8f58aa8ea0965454d3800bdfc34763caf690f6a4e0d46e26626f74ed139f07aa"
+      },
+      "selector": "codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt"
+    },
+    {
+      "green": {
+        "exitCode": 0,
+        "kind": "pass",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/tui-receipt_requires_replay-green.log",
+        "logSha256": "dd559e14b25a7b6952303dc50b0dedf65a5d3a68f49bfc443baf95ba9d61c3d0"
+      },
+      "id": "tui-input-recorded-replay-turn-item-validation",
+      "intendedAssertion": "Only an explicitly replayed InputRecorded receipt with the expected turn and canonical UUIDv7 item ID becomes InputRecorded; malformed or mismatched variants stay Unknown.",
+      "layer": "TUI bridge",
+      "mutation": "Accept an InputRecorded receipt without requiring replay=true, expected turn identity, and a canonical UUID item ID.",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/tui-receipt_requires_replay-red.log",
+        "logSha256": "09b5fcbbc130743d82864c2e6b68ee82cbcb229351b2bf377f72d702b27e4a89"
+      },
+      "selector": "codex-tui app::selection_witness::bridge::tests::native_input_recorded_receipt_requires_replay_turn_and_item_identity"
+    },
+    {
+      "green": {
+        "exitCode": 0,
+        "kind": "pass",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/tui-input_recorded_lookup_is_cached-green.log",
+        "logSha256": "5b9033082799395118128a2da7600e3f118b7fd4b2543a95cec718644b12911f"
+      },
+      "id": "tui-input-recorded-result-cached",
+      "intendedAssertion": "The exact successful read-only InputRecorded result is available for subsequent local exact replay.",
+      "layer": "TUI bridge",
+      "mutation": "Do not cache InputRecorded results returned by the read-only receipt lookup.",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/tui-input_recorded_lookup_is_cached-red.log",
+        "logSha256": "ee9c4fee3fe43560e1ec1b2af75359043d50bea3ddddfcaf35943346f1430e2f"
+      },
+      "selector": "codex-tui app::selection_witness::bridge::tests::exact_input_recorded_receipt_is_cached_and_replayed"
+    },
+    {
+      "green": {
+        "exitCode": 0,
+        "kind": "pass",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/terminal-receipt-cache-green.log",
+        "logSha256": "525fa02b3832942a4b3e4b089995e75b355f3f683258961325d8af569ad2a7e8"
+      },
+      "id": "tui-terminal-receipt-survives-server-ledger-loss",
+      "intendedAssertion": "After a lost Start reply and a terminal read-only receipt, an exact local replay retains that receipt even if a later server incarnation returns Unknown.",
+      "layer": "TUI bridge / independent audit repair",
+      "mutation": "Exclude TerminalNotStarted from the local read-only receipt cache.",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/terminal-receipt-cache-red.log",
+        "logSha256": "129e448ae5286f2b34f69c55e1d392e2b217cb1cbd3c1d1a98b631b29a1a1eb1"
+      },
+      "selector": "codex-tui app::selection_witness::bridge::tests::terminal_receipt_recovered_after_lost_start_survives_server_ledger_loss"
+    },
+    {
+      "green": {
+        "exitCode": 0,
+        "kind": "pass",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/start-normalization-green.log",
+        "logSha256": "0ba4cb5578b25b73ed5638f1c9dbf7c5b84a26f8fae12d8dff350f306974af03"
+      },
+      "id": "tui-start-normalizes-after-input-recorded",
+      "intendedAssertion": "Duplicate Start returns Started with the same turn and replayed=true, while read-only Receipt retains the exact InputRecorded item ID and the ledger has one entry; no Core call is made.",
+      "layer": "TUI bridge / independent audit repair",
+      "mutation": "Replace the Start replay normalizer with identity behavior so the cached InputRecorded value escapes through Start.",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/start-normalization-red.log",
+        "logSha256": "b850a44d8f24ddb1d012b6558e85dbb4fbd5632d7d88551e01f3a97e7a4b9694"
+      },
+      "selector": "codex-tui app::selection_witness::bridge::tests::duplicate_start_after_input_recorded_stays_started_while_receipt_keeps_item"
+    },
+    {
+      "green": {
+        "exitCode": 0,
+        "kind": "pass",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/protocol-input-recorded-schema-green.log",
+        "logSha256": "cac3a9039ff1715ce16eba84ab3ec8f9c42522e9973134e51bdffbec5dae9bbf"
+      },
+      "id": "protocol-experimental-schema-fixture",
+      "intendedAssertion": "The experimental precomputed export must match generated JSON and TypeScript schema fixtures for the receipt response.",
+      "layer": "app-server protocol fixture",
+      "mutation": "Change the serialized receipt enum status tag so generated output no longer matches the precomputed experimental exports.",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/protocol-input-recorded-schema-red.log",
+        "logSha256": "ce75a7c050380d97f4dcb063e96357f345e5a7330377a31ec14b5faadbf36a55"
+      },
+      "selector": "codex-app-server-protocol schema_fixtures_tests::experimental_precomputed_exports_match_generated"
+    }
+  ],
+  "finalBuild": {
+    "binaryMode": "0555",
+    "binaryPath": "/private/tmp/codex-native-input-observation-spike/codex-native-input-observer-bin-post-fix",
+    "binarySha256": "6ae0cb3accb4dedfcd5963d04ccfe61e65cd1795bec86e5f02aff696e72f1e8c",
+    "buildLogPath": "/private/tmp/codex-native-input-observation-spike/observer-cli-post-fix-build.log",
+    "buildLogSha256": "08f6e790f289734c0ec7b31227fbbdf392ac660da1ac19c938da112e30db20b7",
+    "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+    "cargoNextest": "0.9.128 (96bc6d4f4 2026-02-19)",
+    "command": "cargo build --offline -p codex-cli --bin codex --profile dev-small",
+    "exitCode": 0,
+    "just": "1.40.0",
+    "offline": true,
+    "postFixTuiQualification": "Passed; input-recorded-live.json records exact actual counts.",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "sameDigestAsHistoricalPreFixBinary": true,
+    "sourceRevision": "a956835d020762cb2b570053af06f643a11c0ecc",
+    "target": "aarch64-apple-darwin"
+  },
+  "finalExport": {
+    "allPatchedFilesByteMatchManifest": true,
+    "fileCount": 42,
+    "historicalPreFixExport": {
+      "all42FilesMatchedBeforeJustFix": true,
+      "manifestSha256": "9e2d79a57f15a13cfd092a956968defb75bcfa2697a9ef979546381f1a771a2b",
+      "patchSha256": "03ea54f56d35fb919ce7c8b1ae59909831372d022d23e70ee1c3382e079caf72",
+      "supersededByFinalExport": true
+    },
+    "manifestMismatchCount": 0,
+    "patchAppliesCleanlyToPinnedRevision": true,
+    "patchIncludesBinaryPatchRecords": true,
+    "patchPath": "/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/docs/native-bridge/input-recorded-codex-v0.160.0.patch",
+    "patchSha256": "fdf8807f88bc70898d83e0a2a0c89ba1d2deeac7dd46f28e6c50cbd698720e03",
+    "sourceManifestPath": "/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/docs/native-bridge/input-recorded-source-manifest.json",
+    "sourceManifestSha256": "86c32e708e196a867421beffcd92019af23b4f3f21596c9a8d2f77c482d22ab9"
+  },
+  "formatChecks": {
+    "postFixGitDiffCheck": {
+      "command": "git diff --check",
+      "passed": true
+    },
+    "postFixScopedRustfmt": {
+      "command": "rustfmt --check --edition 2024 app-server/src/request_processors/native_selection_processor_tests.rs tui/src/app/selection_bridge_tests.rs",
+      "passed": true,
+      "warning": "stable rustfmt reports nightly-only imports_granularity option"
+    },
+    "repositoryJustFmtPriorResult": {
+      "noSourceOrDependencyInstall": true,
+      "remainingBlockers": [
+        "missing dotslash for Bazel/Starlark formatting",
+        "Ruff 0.15.13 fetch failed because DNS was unavailable"
+      ],
+      "rustFormatter": "passed",
+      "sdkPythonFormatter": "passed using existing disposable SDK venv",
+      "status": "partial"
+    }
+  },
+  "generatedAtUtc": "2026-10-07T06:38:50.896196+00:00",
+  "proofLimitations": [
+    "The stopped-hook case is a unit simulation where no completion event is emitted; no actual Core hook-stop runtime integration was run.",
+    "The actual positive TestAppServer integration observed the Core-produced UserMessage completion and recovered its generated item ID.",
+    "No persisted-history fallback or restart recovery was claimed; loss of the in-memory native receipt remains Unknown.",
+    "All focused tests predate the two just-fix clone-only edits; tests were not rerun after just fix per AGENTS.md.",
+    "No full workspace suite was rerun; the prior attempt failed before tests because system GLib metadata was absent.",
+    "Cloud settlement, production activation, owner client install, and real model calls are not established by this synthetic proof."
+  ],
+  "purpose": "Causal native/Core InputRecorded receipt proof for the cumulative Codex v0.160.0 native input-observation patch.",
+  "requiredJustFix": {
+    "command": "/private/tmp/codex-native-selection-spike/tools/bin/just fix -p codex-app-server-protocol -p codex-app-server -p codex-core -p codex-tui",
+    "environment": {
+      "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+      "cargoNextestAvailable": "0.9.128",
+      "just": "1.40.0",
+      "offline": true,
+      "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+    },
+    "exportedLintOnlyRewrites": [
+      {
+        "afterSha256": "972678a47f714bf35c1eedd51bc75c07491ce03d8f5eee532121d16c1b6b504a",
+        "beforeSha256": "95a9dcfd8de44672d8b8bff033d92feabd145037a137aed7cbcd415a15508add",
+        "change": "Removed unnecessary final params.clone() before mutating the final identity candidate.",
+        "path": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs"
+      },
+      {
+        "afterSha256": "602b553cb0b9b6415c3a2ddd643e6e358c89a61a7b91552be33060cc6081772e",
+        "beforeSha256": "caf416054cf7c0890be6fe7a135be2c839664c08dd29d9432ae3198ce67da91d",
+        "change": "Removed unnecessary item_id.clone() when constructing the final invalid-receipt candidate.",
+        "path": "codex-rs/tui/src/app/selection_bridge_tests.rs"
+      }
+    ],
+    "postFixTestsRerun": false,
+    "remainingNonFixableWarnings": [
+      {
+        "lint": "clippy::type_complexity",
+        "path": "codex-rs/app-server/src/thread_state.rs:361",
+        "status": "warning; no auto-fix applied"
+      },
+      {
+        "lint": "await_holding_lock",
+        "path": "codex-rs/core/src/session/turn_input_tests.rs:255",
+        "status": "warning emitted for existing test; no auto-fix applied"
+      }
+    ],
+    "requiredBy": {
+      "lines": "70-71",
+      "path": "/private/tmp/codex-native-input-observation-spike/source/AGENTS.md",
+      "requirement": "Before finalizing a large codex-rs change run just fix -p <project>; do not rerun tests after fix/fmt."
+    },
+    "result": {
+      "exitCode": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/observer-scoped-fix-escalated.log",
+      "logSha256": "0c7f6e7f92b601dee1c1ed77909ef0492c109d43b547cdea9fb0220193de32b7"
+    },
+    "sandboxRetry": {
+      "firstAttemptExitCode": 101,
+      "reason": "Sandbox denied Cargo local lock-listener bind (EPERM).",
+      "retry": "Same offline package-scoped command with local socket access; no network, installs, or dependency changes."
+    },
+    "testRerunReason": "AGENTS.md says not to re-run tests after fix or fmt. The successful focused test evidence below predates these two clone-only test rewrites.",
+    "unrelatedAutoFixesReverted": [
+      "codex-rs/core/src/tools/registry.rs",
+      "codex-rs/core/tests/suite/openai_file_mcp.rs",
+      "codex-rs/core/tests/suite/scenarios.rs",
+      "codex-rs/Cargo.lock"
+    ]
+  },
+  "rootRunLiveTuiEvidence": {
+    "cloudSettlementProven": false,
+    "exactReceiptRecovered": true,
+    "itemId": "01a11514-99c0-7d71-b969-6a559b90e4ae",
+    "mockModelRequests": 2,
+    "nativeOnly": true,
+    "outcome": "inputRecorded",
+    "primaryModelRequests": 1,
+    "qualification": "synthetic-native-input-recorded",
+    "realModelCalls": 0,
+    "recoveredWhileIneligibleAfterPermitExpiry": true,
+    "threadId": "01a11514-98db-7d90-968b-c25090233047",
+    "titleModelRequests": 1,
+    "turnId": "f8c6a37c-0c1f-46a5-9bdf-2d94c772faa0",
+    "unknownModelRequests": 0,
+    "path": "input-recorded-live.json",
+    "sha256": "c41da523ba4b6270e376f61b80b8356bf72306680328d029a2acb3d3c984100c",
+    "stage": "after just fix and final binary build",
+    "itemIsUuidV7AndDistinctFromTurn": true
+  },
+  "schemaVersion": 1,
+  "scope": {
+    "noProductionActivationOrOwnerInstall": true,
+    "rootOwnsExportAndPR": true,
+    "sourceRevision": "a956835d020762cb2b570053af06f643a11c0ecc",
+    "sourceWasDisposableClone": true,
+    "sourceWorkspace": "/private/tmp/codex-native-input-observation-spike/source"
+  },
+  "scopedTestExecutions": [
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/final-native-receipt-unit.log",
+      "logSha256": "d777fa968a985c55ca06028ba6c426979ad17d07afefcad80a67d0346872d5bd",
+      "name": "native receipt unit tests",
+      "passed": 18,
+      "run": 18,
+      "selector": "codex-app-server request_processors::native_selection_processor::tests",
+      "skipped": 1828,
+      "stage": "before just fix"
+    },
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/final-core-integration-post-uuid.log",
+      "logSha256": "3050d923d377710c3212faa5f77fae59cb7c9f5649b460ceebce622cc5de609e",
+      "name": "actual Core/app-server integration",
+      "passed": 1,
+      "proofType": "actual TestAppServer/Core ItemCompleted event and receipt readback",
+      "run": 1,
+      "selector": "codex-app-server suite::v2::thread_start::native_start_receipt_reports_the_core_recorded_user_message_item",
+      "stage": "before just fix"
+    },
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/start-normalization-green.log",
+      "logSha256": "0ba4cb5578b25b73ed5638f1c9dbf7c5b84a26f8fae12d8dff350f306974af03",
+      "name": "TUI receipt bridge suite after duplicate-Start fix",
+      "passed": 11,
+      "run": 11,
+      "selector": "codex-tui app::selection_witness::bridge::tests",
+      "skipped": 5632,
+      "stage": "before just fix"
+    },
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/final-protocol.log",
+      "logSha256": "f94576bbd3be3b7b6ad5877cd605413af12274902763a0a49cb30b435240272c",
+      "name": "full app-server-protocol package",
+      "passed": 313,
+      "run": 313,
+      "skipped": 1,
+      "stage": "before just fix"
+    },
+    {
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/protocol-input-recorded-schema-green.log",
+      "logSha256": "cac3a9039ff1715ce16eba84ab3ec8f9c42522e9973134e51bdffbec5dae9bbf",
+      "name": "experimental schema fixture causal green",
+      "passed": 1,
+      "run": 1,
+      "selector": "codex-app-server-protocol schema_fixtures_tests::experimental_precomputed_exports_match_generated",
+      "skipped": 313,
+      "stage": "before just fix"
+    }
+  ]
+}
