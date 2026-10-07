@@ -122,13 +122,12 @@ _ERRORS = {
 
 
 class CloudClient:
-    """
-    Ports: credentials() -> Credentials; send(**kwargs) -> (status, headers, bytes).
+    """Closed Event API client with injected credential and HTTP ports."""
 
-    send must honor timeout, max_response_bytes and follow_redirects=False before
-    reading bytes or following any response. No default network port is installed.
-    Node generation is an immutable snapshot: construct anew after reenrollment.
-    """
+    # Ports: credentials() -> Credentials; send(**kwargs) -> (status, headers, bytes).
+    # send must honor timeout, max_response_bytes and follow_redirects=False before
+    # reading bytes or following any response. No default network port is installed.
+    # Node generation is an immutable snapshot: construct anew after reenrollment.
 
     def __init__(self, *, origin, principal, agent, node_id, node_generation,
                  private_key, credentials, send, clock=time.time, nonce=uuid.uuid4):
