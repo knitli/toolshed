@@ -40,13 +40,20 @@ occur in signed node-proof JSON.
 
 - `claim(envelope)` returns the closed `admitted` or `over_budget` DTO. An
   original queued envelope is validated at its issuance time so transport expiry
-  cannot prevent fresh cloud admission. The admitted reply is validated against
-  the current clock. An
-  admitted reply includes UUID `permitId`, matching `nodeId`, an unexpired exact
-  five-second window, and the returned envelope. Only transport `issuedAt` and
+  cannot prevent fresh cloud admission. An admitted reply includes UUID `permitId`, matching `nodeId`, an exact
+  five-second window, and the returned envelope. An authentic historical reply
+  may contain an expired original permit; durable recovery stores it for
+  settlement, and the final submission transaction rejects its use for a start. Only transport `issuedAt` and
   `expiresAt` may differ from the requested envelope. All semantic fields,
   including runtime, attempt and generation identity, remain bound. The returned
   envelope must cover the permit lifetime. No conversion discards refreshed data.
+- `settle_no_start(admission, evidence)` sends the exact admitted delivery,
+  attempt, permit and node generation to `/v1/dispatch/settle-no-start`. Evidence
+  is a retained native terminal receipt UUID or durable `local_not_submitted`
+  proof. The closed response must echo the entire tuple, evidence and node ID
+  with `status: "not_started"`. A retry obtains fresh credentials and node proof
+  while retaining the same settlement identity. Expiry does not prevent
+  reconciliation. This method does not claim or submit a native turn.
 - `acknowledge(envelope, acknowledgment)` validates the pinned ACK protocol and
   delivery identity, then sends only `/v1/ack`. A caller retry keeps those bytes
   and native IDs while obtaining fresh credentials/node proof. It neither claims
@@ -72,7 +79,7 @@ OS commit `737dca25de52ae39e2aa293c878521d02adacf60`, plus the Zod version and
 fixture SHA-256. It does not modify the earlier frozen `event-v1` transport pin.
 In `--check` mode, the exporter verifies the committed revision, every source
 hash and installed Zod version before evaluating source. A mismatch stops before
-any data-module import. It then executes the source's actual Zod claim schemas
+any data-module import. It then executes the source's actual Zod claim and settlement schemas
 and `canonicalNodeProof()` to check the cross-language fixture. Generation
 without `--check` is an explicit operation on reviewed, fully trusted local
 source and an installed trusted Zod dependency; it executes that code and writes
@@ -116,6 +123,10 @@ failures, zero test errors, and passed the same case after restoration:
 | Exact challenge payload | Challenge tampering |
 | Attach qualification fence | Attach and renew |
 | Timeout outcome code | Credential deadline |
+
+The results above describe the earlier cloud adapter checkpoint. The current
+settlement implementation and its separate trusted policy rotation are recorded
+in [no-start settlement](no-start-settlement.md).
 
 These are local injected-port and cross-source conformance proofs. They do not
 establish a live Access session, production enrollment, or native delivery.

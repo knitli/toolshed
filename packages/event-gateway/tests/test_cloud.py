@@ -14,7 +14,7 @@ import unittest
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from event_gateway.cloud import CloudClient, CloudError, Credentials, canonical_node_proof
+from event_gateway.cloud import CloudClient, CloudError, Credentials, canonical_node_proof, validate_admission
 from event_gateway.protocol import _timestamp, derive_delivery_id
 
 
@@ -123,7 +123,7 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
                             json.loads(second["x-event-node-proof"])["nonce"])
         self.assertNotIn("secret", repr(Credentials("secret", "secret")))
 
-    async def test_delayed_claim_refreshes_transport_but_rejects_stale_reply(self):
+    async def test_delayed_claim_preserves_original_expired_admission(self):
         self.now += 3600
         self.result["permitIssuedAt"] = "2026-10-05T13:00:58.000Z"
         self.result["permitExpiresAt"] = "2026-10-05T13:01:03.000Z"
@@ -136,11 +136,89 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, self.result)
         self.assertEqual(len(self.requests), 1)
         self.result["envelope"] = copy.deepcopy(FIXTURE["original"])
-        with self.assertRaisesRegex(CloudError, "^invalid_envelope$"):
+        with self.assertRaisesRegex(CloudError, "^identity_mismatch$"):
             await self.client.claim(FIXTURE["original"])
         self.result = copy.deepcopy(FIXTURE["admitted"])
-        with self.assertRaisesRegex(CloudError, "^permit_expired$"):
-            await self.client.claim(FIXTURE["original"])
+        try:
+            recovered = await self.client.claim(FIXTURE["original"])
+        except CloudError as error:
+            self.fail("expired recovery was rejected: " + error.code)
+        self.assertEqual(recovered, FIXTURE["admitted"])
+
+    def test_shared_admission_validator_detaches_and_binds_semantics(self):
+        admission = copy.deepcopy(FIXTURE["admitted"])
+        result = validate_admission(admission, FIXTURE["original"], now_ms=(NOW + 3600) * 1000)
+        self.assertEqual(result, admission)
+        result["envelope"]["reasonCode"] = "changed"
+        self.assertNotEqual(result, admission)
+        admission["envelope"]["policyRevision"] = 2
+        admission["envelope"]["deliveryId"] = derive_delivery_id(admission["envelope"])
+        with self.assertRaisesRegex(CloudError, "^identity_mismatch$"):
+            validate_admission(admission, FIXTURE["original"], now_ms=NOW * 1000)
+
+    async def test_settle_no_start_exact_signed_wire_and_retry(self):
+        vector = FIXTURE["noStartNodeProof"]
+        self.assertEqual(canonical_node_proof(
+            vector["principal"], vector["binding"]["audience"], vector["binding"]["path"],
+            vector["body"].encode(), vector["proof"]), vector["canonical"].encode())
+        self.assertEqual(json.loads(vector["body"]), FIXTURE["noStart"])
+        admission = copy.deepcopy(FIXTURE["admitted"])
+        self.now += 3600
+        for request_fixture, response_fixture in (("localNoStart", "localNoStartResult"),
+                                                   ("noStart", "noStartResult")):
+            body = FIXTURE[request_fixture]
+            evidence = body["evidence"]
+            self.result = copy.deepcopy(FIXTURE[response_fixture])
+            for _ in range(2):
+                self.assertEqual(await self.client.settle_no_start(admission, evidence), self.result)
+                request = self.requests[-1]
+                self.assertEqual(request["url"], self.client.origin + "/v1/dispatch/settle-no-start")
+                self.assertEqual(json.loads(request["body"]), body)
+                proof = json.loads(request["headers"]["x-event-node-proof"])
+                self.key.public_key().verify(base64.urlsafe_b64decode(proof["signature"] + "=="),
+                    canonical_node_proof(self.client.principal, self.client.origin,
+                                         "/v1/dispatch/settle-no-start", request["body"], proof))
+            self.assertNotEqual(self.requests[-1]["headers"], self.requests[-2]["headers"])
+        self.assertEqual(admission, FIXTURE["admitted"])
+
+    async def test_settle_no_start_rejects_invalid_admission_before_http(self):
+        mutations = (
+            lambda value: value.update(nodeId=value["permitId"]),
+            lambda value: value.update(extra=True),
+            lambda value: value["envelope"].update(nodeGeneration=2),
+            lambda value: value["envelope"].update(agent="other"),
+            lambda value: value.update(permitIssuedAt="2026-10-05T12:00:59.000Z",
+                                      permitExpiresAt="2026-10-05T12:01:04.000Z"),
+        )
+        for mutate in mutations:
+            admission = copy.deepcopy(FIXTURE["admitted"])
+            mutate(admission)
+            with self.assertRaises(CloudError):
+                await self.client.settle_no_start(admission, {"type": "local_not_submitted"})
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.credential_calls, 0)
+
+    async def test_settle_no_start_rejects_invalid_evidence_before_http(self):
+        for evidence in (None, [], {}, {"type": "other"}, {"type": "local_not_submitted", "receiptId": NODE},
+                         {"type": "native_terminal_no_start"},
+                         {"type": "native_terminal_no_start", "receiptId": "bad"},
+                         {"type": "native_terminal_no_start", "receiptId": NODE, "extra": True}):
+            with self.subTest(evidence=evidence), self.assertRaisesRegex(CloudError, "^invalid_request$"):
+                await self.client.settle_no_start(FIXTURE["admitted"], evidence)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.credential_calls, 0)
+
+    async def test_settle_no_start_rejects_response_tuple_or_evidence_changes(self):
+        admission = FIXTURE["admitted"]
+        evidence = {"type": "native_terminal_no_start", "receiptId": NODE}
+        valid = {key: admission["envelope"][key] for key in ("deliveryId", "attemptId", "nodeGeneration")}
+        valid.update(status="not_started", permitId=admission["permitId"], nodeId=NODE, evidence=evidence)
+        for field, value in (("status", "admitted"), ("deliveryId", NODE), ("attemptId", NODE),
+                             ("permitId", NODE), ("nodeId", admission["permitId"]), ("nodeGeneration", True),
+                             ("evidence", {"type": "local_not_submitted"}), ("extra", True)):
+            self.result = {**valid, field: value}
+            with self.subTest(field=field), self.assertRaisesRegex(CloudError, "^invalid_response$"):
+                await self.client.settle_no_start(admission, evidence)
 
     async def test_closed_claim_response_and_permit_fences(self):
         mutations = {

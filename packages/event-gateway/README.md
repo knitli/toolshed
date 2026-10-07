@@ -10,11 +10,16 @@ working directory, loaded thread, or session-tree ID.
 
 ```text
 signed metadata → bounded listener → private SQLite spool
-  queued → fresh authority + proven client → submitting → submitted → observed
-                                              └→ ambiguous (no blind replay)
+  queued → durable claim → admitted → durable native request → submitted (ACK pending)
+                           └→ never written       └→ retained terminal no-start
+                                  └──── exact cloud settlement ────┘ → new attempt
+  uncertain native outcome → ambiguous (exact receipt recovery; no blind replay)
 ```
 
-The dispatcher exposes injected integration seams for tests. The shipped CLI
+The dispatcher uses the injected cloud claim DTO and private native bridge.
+It persists claim intent before network access and the complete native request
+before submission. Definite no-start proof retires only the original permit;
+unknown outcomes remain fenced. The integrations have no production defaults. The shipped CLI
 cannot configure a production authority, admit clients, enable the Mesh listener,
 or submit native turns. `attach` visibly refuses; `enroll` creates a local key
 and prepares an owner request without claiming cloud enrollment. The private
@@ -84,11 +89,13 @@ boundary vectors. Expanding that corpus and running both validators is an open
 cross-repository qualification gate.
 
 `security.py` documents a **proposed local** Ed25519 transport seam (exact bytes,
-recipient audience, configured public-key ID). `gateway.Permit` is an injected
-admission interface, not a deployed cloud DTO. PR3 must freeze and implement
-authenticated owner enrollment, key rotation/revocation, single-use claims,
-current authority/source/attachment fences, and acknowledgment recovery. No
-offline or cached authority is accepted.
+recipient audience, configured public-key ID). The dispatcher retains the exact cloud admission DTO. Recovery of an expired
+original permit can authorize its retirement, never a native start. Cloud
+settlement must confirm the complete attempt, permit and evidence before one
+fresh attempt returns to waiting; the original budget charge remains. No offline
+or cached authority is accepted. Direct native starts carry authentic turn IDs
+but remain pending ACK until the cloud protocol qualifies that correlation.
+See [no-start settlement](docs/no-start-settlement.md) for the current scope.
 
 The spool retains accepted metadata, private attachment mappings, deduplication,
 and ambiguity. It fences generations, stops at capacity, and never evicts live

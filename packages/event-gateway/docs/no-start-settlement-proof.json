@@ -1,0 +1,800 @@
+{
+  "suite": {
+    "tests": 162,
+    "passed": 162,
+    "afterCanonicalSnapshotAndTrustedPolicyIntegration": true
+  },
+  "sourceSha256": {
+    "src/event_gateway/cloud.py": "7a7e68a919f55ff8da58f19f933b833d226052334fa6775892f60b28bd11a6ad",
+    "src/event_gateway/store.py": "849234cc32ecad78fa1048896094f43aad44de283fa8efe7101aec859c65010e",
+    "src/event_gateway/native.py": "76b6655faa5683159cbcbf6b1b7fbdef258964e718e950488a20872bee1f8676",
+    "src/event_gateway/gateway.py": "e41a464ee21cf6f3c69ea7578c8f2687befd04253763386b32836ce89e9f8e0a",
+    "scripts/qualify_native_bridge.py": "0bb07213f81e69931cf96994c9098450447d583bc3bae546faa095a22481a8b0",
+    "tests/test_cloud.py": "aff3c58a2c9d2947c7d009ab40bace542d3afbb0e8fbba89283a1eedbd63987a",
+    "tests/test_store.py": "307b684c93fa0882f07f38c0915c830f398cc70c9a5a3a97d451a165ffccd3b8",
+    "tests/test_native.py": "0ed2bd10fe6bd16dbe24dcee5d202d928bb1fd4abeb166e0f8ebe106a09df6b5",
+    "tests/test_gateway.py": "b19bf052bdd1a7f9cc3316fb9ca122652cd098c0eb327d6d9d4a3e10209d93d3",
+    "tests/test_gateway_integration.py": "02185dc1c41ec0bd55edfb7e8f2d3bcb9ed6aa1f3529bd829dc3a3f3ddeedcff",
+    "tests/test_native_bridge.py": "4a7e2a049a287f6fc0404799120d786743a16a46e7f9842d7f4dad6c21234c3f"
+  },
+  "causalProof": {
+    "cloud": [
+      {
+        "test": "test_delayed_claim_preserves_original_expired_admission",
+        "mutation": "issued > now_ms: -> not issued <= now_ms < expires:",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_delayed_claim_preserves_original_expired_admission.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_delayed_claim_preserves_original_expired_admission.green.log"
+        }
+      },
+      {
+        "test": "test_shared_admission_validator_detaches_and_binds_semantics",
+        "mutation": "return json.loads(_json(admission)) -> return admission",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_shared_admission_validator_detaches_and_binds_semantics.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_shared_admission_validator_detaches_and_binds_semantics.green.log"
+        }
+      },
+      {
+        "test": "test_settle_no_start_exact_signed_wire_and_retry",
+        "mutation": "\"/v1/dispatch/settle-no-start\", body) -> \"/v1/dispatch/claim\", body)",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_settle_no_start_exact_signed_wire_and_retry.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_settle_no_start_exact_signed_wire_and_retry.green.log"
+        }
+      },
+      {
+        "test": "test_settle_no_start_rejects_invalid_admission_before_http",
+        "mutation": "(node_id is not None and admission[\"nodeId\"] != node_id) -> False",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_settle_no_start_rejects_invalid_admission_before_http.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_settle_no_start_rejects_invalid_admission_before_http.green.log"
+        }
+      },
+      {
+        "test": "test_settle_no_start_rejects_invalid_evidence_before_http",
+        "mutation": "_no_start_evidence(evidence, code=\"invalid_request\") -> pass  # mutation: bypass input evidence validation",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_settle_no_start_rejects_invalid_evidence_before_http.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_settle_no_start_rejects_invalid_evidence_before_http.green.log"
+        }
+      },
+      {
+        "test": "test_settle_no_start_rejects_response_tuple_or_evidence_changes",
+        "mutation": "or result != {**body, \"status\": \"not_started\", \"nodeId\": self.node_id} -> or False",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_settle_no_start_rejects_response_tuple_or_evidence_changes.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_settle_no_start_rejects_response_tuple_or_evidence_changes.green.log"
+        }
+      }
+    ],
+    "store": [
+      {
+        "test": "test_admission_storage_failure_keeps_durable_claim_for_exact_recovery",
+        "mutation": "self.db.execute(\"UPDATE deliveries SET state='admitted', envelope=?, updated=? WHERE id=?\", -> self.db.commit()\n            self.db.execute(\"UPDATE deliveries SET state='admitted', envelope=?, updated=? WHERE id=?\",",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_admission_storage_failure_keeps_durable_claim_for_exact_recovery.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_admission_storage_failure_keeps_durable_claim_for_exact_recovery.green.log"
+        }
+      },
+      {
+        "test": "test_claim_intent_restarts_exact_and_reserves_capacity",
+        "mutation": "reserve += max(0, reserved - credit) -> reserve += 0",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_claim_intent_restarts_exact_and_reserves_capacity.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_claim_intent_restarts_exact_and_reserves_capacity.green.log"
+        }
+      },
+      {
+        "test": "test_claim_capacity_failure_leaves_original_queued",
+        "mutation": "self._capacity(CLAIM_RESERVE + 32768 + len(row[\"envelope\"].encode()) * 6) -> self._capacity(0)",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_claim_capacity_failure_leaves_original_queued.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_claim_capacity_failure_leaves_original_queued.green.log"
+        }
+      },
+      {
+        "test": "test_admission_snapshot_is_validated_immutable_and_historical",
+        "mutation": "validate_admission(admission, json.loads(row[\"envelope\"]), now_ms=self.clock() * 1000) -> validate_admission(admission, admission[\"envelope\"], now_ms=self.clock() * 1000)",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_admission_snapshot_is_validated_immutable_and_historical.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_admission_snapshot_is_validated_immutable_and_historical.green.log"
+        }
+      },
+      {
+        "test": "test_native_request_is_durable_before_submission_and_restart_ambiguous",
+        "mutation": "(encoded, self.clock(), delivery_id, attempt_id), -> (None, self.clock(), delivery_id, attempt_id),",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_native_request_is_durable_before_submission_and_restart_ambiguous.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_native_request_is_durable_before_submission_and_restart_ambiguous.green.log"
+        }
+      },
+      {
+        "test": "test_local_settlement_survives_restart_rotates_once_and_fences_old_responses",
+        "mutation": "envelope[\"attemptId\"] = str(uuid.uuid4()) -> envelope[\"attemptId\"] = attempt_id",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_local_settlement_survives_restart_rotates_once_and_fences_old_responses.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_local_settlement_survives_restart_rotates_once_and_fences_old_responses.green.log"
+        }
+      },
+      {
+        "test": "test_native_terminal_settlement_requires_exact_receipt_and_no_positive_correlation",
+        "mutation": "outcome = validate_receipt(json.loads(row[\"native_request\"]), receipt) -> outcome = receipt[\"outcome\"]",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_native_terminal_settlement_requires_exact_receipt_and_no_positive_correlation.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_native_terminal_settlement_requires_exact_receipt_and_no_positive_correlation.green.log"
+        }
+      },
+      {
+        "test": "test_settlement_rejects_echo_tampering_and_rolls_back_storage_failure",
+        "mutation": "self._spend(row, len(encoded.encode()) + len(_json(envelope).encode())) -> self._spend(row, len(encoded.encode()) + len(_json(envelope).encode()))\n            self.db.commit()",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_settlement_rejects_echo_tampering_and_rolls_back_storage_failure.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_settlement_rejects_echo_tampering_and_rolls_back_storage_failure.green.log"
+        }
+      },
+      {
+        "test": "test_detached_claim_keeps_grant_for_settlement_but_never_requeues",
+        "mutation": "\"stale\" if stale else \"queued\", _json(envelope) -> \"queued\", _json(envelope)",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_detached_claim_keeps_grant_for_settlement_but_never_requeues.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_detached_claim_keeps_grant_for_settlement_but_never_requeues.green.log"
+        }
+      },
+      {
+        "test": "test_pending_settlement_is_retained_and_expired_attachment_cannot_retry",
+        "mutation": "DELETE FROM attempts WHERE state='settled' AND updated<? -> DELETE FROM attempts WHERE state IN ('settled','settlement_pending') AND updated<?",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_pending_settlement_is_retained_and_expired_attachment_cannot_retry.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_pending_settlement_is_retained_and_expired_attachment_cannot_retry.green.log"
+        }
+      },
+      {
+        "test": "test_schema_zero_and_one_migrate_without_requeueing_native_work",
+        "mutation": "self.db.execute(\"PRAGMA user_version=2\") -> self.db.execute(\"PRAGMA user_version=1\")",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_schema_zero_and_one_migrate_without_requeueing_native_work.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_schema_zero_and_one_migrate_without_requeueing_native_work.green.log"
+        }
+      },
+      {
+        "test": "test_started_receipt_is_preserved_and_ack_remains_unqualified",
+        "mutation": "(state, encoded, self.clock(), delivery_id, attempt_id), -> (state, None, self.clock(), delivery_id, attempt_id),",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_started_receipt_is_preserved_and_ack_remains_unqualified.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_started_receipt_is_preserved_and_ack_remains_unqualified.green.log"
+        }
+      },
+      {
+        "test": "test_started_contradiction_cancels_pending_negative_settlement",
+        "mutation": "state = \"ambiguous\" if row[\"state\"] in (\"ambiguous\", \"settlement_pending\") else \"submitted\" -> state = \"ambiguous\" if row[\"state\"] == \"ambiguous\" else \"submitted\"",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_started_contradiction_cancels_pending_negative_settlement.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_started_contradiction_cancels_pending_negative_settlement.green.log"
+        }
+      }
+    ],
+    "native": [
+      {
+        "test": "NativeAdapterTests.test_check_sanitizes_bridge_errors_and_invalidates_old_witness",
+        "mutation": "raise NativeError(\"native_unavailable\") from None -> raise NativeError(\"private_bridge_detail\") from None",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "NativeAdapterTests.test_check_sanitizes_bridge_errors_and_invalidates_old_witness.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "NativeAdapterTests.test_check_sanitizes_bridge_errors_and_invalidates_old_witness.green.log"
+        }
+      },
+      {
+        "test": "NativeValidationTests.test_request_closed_shape_types_and_admission_identity",
+        "mutation": "if any(request[key] != value for key, value in expected.items()): -> if False:",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "NativeValidationTests.test_request_closed_shape_types_and_admission_identity.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "NativeValidationTests.test_request_closed_shape_types_and_admission_identity.green.log"
+        }
+      },
+      {
+        "test": "NativeValidationTests.test_request_is_detached_bounded_and_json_safe",
+        "mutation": "if len(encoded.encode()) > 4096: -> if False:",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "NativeValidationTests.test_request_is_detached_bounded_and_json_safe.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "NativeValidationTests.test_request_is_detached_bounded_and_json_safe.green.log"
+        }
+      },
+      {
+        "test": "NativeValidationTests.test_receipt_echo_is_closed_and_type_exact",
+        "mutation": "if any(type(receipt[key]) is not type(request[key]) or receipt[key] != request[key]\n           for key in IDENTITY): -> if False:",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "NativeValidationTests.test_receipt_echo_is_closed_and_type_exact.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "NativeValidationTests.test_receipt_echo_is_closed_and_type_exact.green.log"
+        }
+      },
+      {
+        "test": "NativeValidationTests.test_terminal_receipt_excludes_nonretained_refusals",
+        "mutation": "TERMINAL_REASONS = NOT_STARTED_REASONS - {\"permitInvalid\", \"duplicateConflict\", \"receiptCapacity\"} -> TERMINAL_REASONS = NOT_STARTED_REASONS",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "NativeValidationTests.test_terminal_receipt_excludes_nonretained_refusals.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "NativeValidationTests.test_terminal_receipt_excludes_nonretained_refusals.green.log"
+        }
+      },
+      {
+        "test": "NativeValidationTests.test_started_requires_exact_turn_correlation_and_replay_boolean",
+        "mutation": "or outcome[\"turnId\"] != request[\"clientUserMessageId\"] -> or False",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "NativeValidationTests.test_started_requires_exact_turn_correlation_and_replay_boolean.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "NativeValidationTests.test_started_requires_exact_turn_correlation_and_replay_boolean.green.log"
+        }
+      },
+      {
+        "test": "NativeAdapterTests.test_check_requires_eligible_selected_thread_and_clears_old_witness",
+        "mutation": "or witness.get(\"threadId\") != self.thread_id -> or False",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "NativeAdapterTests.test_check_requires_eligible_selected_thread_and_clears_old_witness.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "NativeAdapterTests.test_check_requires_eligible_selected_thread_and_clears_old_witness.green.log"
+        }
+      },
+      {
+        "test": "NativeAdapterTests.test_invalid_mapping_and_incomplete_witness_are_bounded",
+        "mutation": "or any(not _uint(witness.get(key)) for key in (\"generation\", \"serverGeneration\")) -> or False",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "NativeAdapterTests.test_invalid_mapping_and_incomplete_witness_are_bounded.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "NativeAdapterTests.test_invalid_mapping_and_incomplete_witness_are_bounded.green.log"
+        }
+      },
+      {
+        "test": "NativeAdapterTests.test_prepare_binds_witness_and_admission_without_starting",
+        "mutation": "        return validate_request(request, admission) ->         await self.submit(request)\n        return validate_request(request, admission)",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "NativeAdapterTests.test_prepare_binds_witness_and_admission_without_starting.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "NativeAdapterTests.test_prepare_binds_witness_and_admission_without_starting.green.log"
+        }
+      },
+      {
+        "test": "NativeAdapterTests.test_submit_uses_exact_request_and_validates_outcome",
+        "mutation": "        validate_receipt(request, receipt)\n        return receipt\n\n    async def reconcile ->         return receipt\n\n    async def reconcile",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "NativeAdapterTests.test_submit_uses_exact_request_and_validates_outcome.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "NativeAdapterTests.test_submit_uses_exact_request_and_validates_outcome.green.log"
+        }
+      },
+      {
+        "test": "NativeAdapterTests.test_reconcile_restores_exact_request_and_only_reads_receipt",
+        "mutation": "        self.bridge.restore_attempt(request) ->         pass  # mutation: omit restoring exact recovery identity",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "NativeAdapterTests.test_reconcile_restores_exact_request_and_only_reads_receipt.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "NativeAdapterTests.test_reconcile_restores_exact_request_and_only_reads_receipt.green.log"
+        }
+      },
+      {
+        "test": "NativeAdapterTests.test_reconcile_rejects_nonreplayed_terminal_outcomes",
+        "mutation": "and not outcome[\"replayed\"]: -> and False:",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "NativeAdapterTests.test_reconcile_rejects_nonreplayed_terminal_outcomes.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "NativeAdapterTests.test_reconcile_rejects_nonreplayed_terminal_outcomes.green.log"
+        }
+      }
+    ],
+    "gateway": [
+      {
+        "test": "test_authentication_and_current_attachment_before_dedup",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "verify(body, signature, self.keys[key_id], audience)",
+          "new": "pass # omitted transport signature verification"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_optional_consumer_generation_is_a_destination_fence",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "raise Refused(\"attachment_fenced\")",
+          "new": "return {\"status\": \"queued\"}"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_busy_transport_expiry_then_fresh_admission",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "return adapter if await self._adapter_available(adapter) else None",
+          "new": "return adapter"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_claim_capacity_failure_stays_queued_without_authority_call",
+        "file": "store.py",
+        "mutation": {
+          "old": "self._capacity(CLAIM_RESERVE + 32768 + len(row[\"envelope\"].encode()) * 6)",
+          "new": "pass"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_admission_persisted_before_post_admission_check",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "return self.store.record_admission(delivery_id, admission)",
+          "new": "return admission"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_native_request_writeahead_before_submit",
+        "file": "store.py",
+        "mutation": {
+          "old": "(encoded, self.clock(), delivery_id, attempt_id),",
+          "new": "(None, self.clock(), delivery_id, attempt_id),"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_post_admission_client_failure_settles_local_no_start",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "return await self._retire_local(delivery_id, \"admission_fenced\")",
+          "new": "return self._row(delivery_id)"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_permit_expiry_during_final_check_settles_without_submit",
+        "file": "store.py",
+        "mutation": {
+          "old": "if not _timestamp(admission[\"permitIssuedAt\"]) <= self.clock() * 1000 < _timestamp(admission[\"permitExpiresAt\"]):",
+          "new": "if False:"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_detach_after_claim_retires_without_submit",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "return await self._retire_local(delivery_id, \"admission_fenced\")",
+          "new": "return self._row(delivery_id)"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_lost_claim_restarts_with_exact_original_then_retires",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "if attempt[\"state\"] == \"claiming\":",
+          "new": "if False:"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_lost_settlement_restarts_and_replays_only_settlement",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "if attempt[\"state\"] == \"settlement_pending\":\n                return await self._settle(delivery_id)",
+          "new": "if attempt[\"state\"] == \"settlement_pending\":\n                return self._row(delivery_id)"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_terminal_receipt_retires_then_allows_new_attempt",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "if outcome[\"status\"] == \"terminalNotStarted\":",
+          "new": "if False:"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_started_receipt_quarantines_authentic_turn_without_cloud_ack",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "return self.store.record_started(delivery_id, attempt[\"attempt_id\"], receipt)",
+          "new": "return self._row(delivery_id)"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_ordinary_not_started_and_unknown_never_retire",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "return self.store.finish(delivery_id, \"ambiguous\", reason=\"native_outcome_unknown\",\n                                 attempt_id=attempt[\"attempt_id\"])",
+          "new": "return self._row(delivery_id)"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_malformed_and_mismatched_receipts_stay_unknown",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "return self.store.finish(delivery_id, \"ambiguous\", reason=\"native_outcome_unknown\",\n                                             attempt_id=attempt[\"attempt_id\"])",
+          "new": "return self._row(delivery_id)"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_lost_native_response_restarts_read_only_then_recovers_terminal",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "receipt = await asyncio.wait_for(adapter.reconcile(attempt[\"native_request\"]), 10)",
+          "new": "return self._row(delivery_id)"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_reconciliation_rejects_replacement_destination",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "or any(mapping.get(key) != envelope.get(key) for key in FENCES[:7])",
+          "new": "or False"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_cancelled_native_submission_is_retained_as_ambiguous",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "self.store.finish(delivery_id, \"ambiguous\", reason=\"native_outcome_unknown\",\n                                      attempt_id=attempt[\"attempt_id\"])",
+          "new": "pass"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_cancelled_post_admission_check_recovers_local_settlement",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "return await self._retire_local(delivery_id, \"recovered_admission_not_submitted\")",
+          "new": "return self._row(delivery_id)"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_detach_during_submit_preserves_authentic_positive",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "return self.store.record_started(delivery_id, attempt[\"attempt_id\"], receipt)",
+          "new": "return self._row(delivery_id)"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_recovered_positive_is_immutable_and_never_resubmitted",
+        "file": "store.py",
+        "mutation": {
+          "old": "bool(row[\"native_started\"]) or ",
+          "new": ""
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_invalid_prepared_request_settles_local_without_submission",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "return await self._retire_local(delivery_id, \"native_preparation_failed\")",
+          "new": "return self._row(delivery_id)"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_over_budget_claim_preserves_original_attempt_for_recovery",
+        "file": "gateway.py",
+        "mutation": {
+          "old": "self.store.note_claim_budget(delivery_id, attempt[\"attempt_id\"])",
+          "new": "pass"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      }
+    ],
+    "integration": [
+      {
+        "test": "test_real_clients_retire_terminal_no_start_then_preserve_started_without_ack",
+        "production_file": "gateway.py",
+        "mutation": "if outcome[\"status\"] == \"terminalNotStarted\": -> if False:",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_real_clients_retire_terminal_no_start_then_preserve_started_without_ack.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_real_clients_retire_terminal_no_start_then_preserve_started_without_ack.green.log"
+        }
+      },
+      {
+        "test": "test_lost_settlement_response_retries_exact_signed_retirement_without_native_replay",
+        "production_file": "cloud.py",
+        "mutation": "if expires - issued != 5000 or issued > now_ms: -> if expires - issued != 5000 or not issued <= now_ms < expires:",
+        "red": {
+          "exit": 1,
+          "assertion_failure": true,
+          "log": "test_lost_settlement_response_retries_exact_signed_retirement_without_native_replay.red.log"
+        },
+        "green": {
+          "exit": 0,
+          "assertion_failure": false,
+          "log": "test_lost_settlement_response_retries_exact_signed_retirement_without_native_replay.green.log"
+        }
+      }
+    ],
+    "qualifier": [
+      {
+        "test": "test_delivery_retry_requires_terminal_proof_and_distinct_permit",
+        "assertionRed": true,
+        "restoredGreen": true
+      },
+      {
+        "test": "test_restore_is_readonly_exact_and_consumes_start_once",
+        "assertionRed": true,
+        "restoredGreen": true
+      },
+      {
+        "test": "test_terminal_receipt_schema_identity_and_recovery",
+        "assertionRed": true,
+        "restoredGreen": true
+      }
+    ],
+    "qualification": [
+      {
+        "test": "test_terminal_retry_qualification_preserves_delivery_and_exact_receipts",
+        "mutation": {
+          "old": "retry[\"deliveryId\"], retry[\"event\"] = rejected[\"deliveryId\"], deepcopy(rejected[\"event\"])",
+          "new": "pass"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_terminal_retry_refuses_uncertain_proof_and_releases_held_primary",
+        "mutation": {
+          "old": "finally:\n        server.release_primary.set()",
+          "new": "finally:\n        pass"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      },
+      {
+        "test": "test_mock_primary_hold_precedes_response_and_times_out_closed",
+        "mutation": {
+          "old": "if not release.wait(30):",
+          "new": "if False:"
+        },
+        "assertion_red": true,
+        "restored_green": true
+      }
+    ],
+    "audit_regressions": [
+      {
+        "case": "concurrent-dispatch",
+        "production_assertion_red": true,
+        "fixed_green": true
+      },
+      {
+        "case": "admission-budget",
+        "production_assertion_red": true,
+        "fixed_green": true
+      }
+    ],
+    "shared_settlement_vector": {
+      "red": "intended canonical bytes assertion",
+      "green": "passed",
+      "mutation": "canonical_node_proof signs claim path for settlement; external canonical vector kills shared signer/verifier bug"
+    },
+    "qualifierReceiptUuidRenewed": {
+      "assertionRed": true,
+      "restoredGreen": true
+    }
+  },
+  "packaging": {
+    "isolatedWheelInstalled": true,
+    "automaticWakeEnabled": false,
+    "newNativeModuleIncluded": true,
+    "fourProductionModulesByteMatch": true,
+    "wheelSha256": "2afa748daf52f851cff003b82301259e698cde52ed38e7e7ee7ce2fd4bc8f394"
+  }
+}

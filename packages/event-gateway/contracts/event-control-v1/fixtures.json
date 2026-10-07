@@ -85,5 +85,64 @@
       "nonce": "00000000-0000-4000-8000-000000000002"
     },
     "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/dispatch/claim\",\"9f943c6e454a4b53feba3acf6c343da136b988dd25fa158b153da89a9a205a43\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-05T12:00:58.000Z\",\"00000000-0000-4000-8000-000000000002\"]"
+  },
+  "noStart": {
+    "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+    "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+    "permitId": "00000000-0000-4000-8000-000000000002",
+    "nodeGeneration": 1,
+    "evidence": {
+      "type": "native_terminal_no_start",
+      "receiptId": "00000000-0000-4000-8000-000000000001"
+    }
+  },
+  "localNoStart": {
+    "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+    "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+    "permitId": "00000000-0000-4000-8000-000000000002",
+    "nodeGeneration": 1,
+    "evidence": {
+      "type": "local_not_submitted"
+    }
+  },
+  "noStartResult": {
+    "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+    "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+    "permitId": "00000000-0000-4000-8000-000000000002",
+    "nodeGeneration": 1,
+    "evidence": {
+      "type": "native_terminal_no_start",
+      "receiptId": "00000000-0000-4000-8000-000000000001"
+    },
+    "nodeId": "00000000-0000-4000-8000-000000000001",
+    "status": "not_started"
+  },
+  "localNoStartResult": {
+    "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
+    "attemptId": "018e2c70-7c6a-7a03-8000-000000000001",
+    "permitId": "00000000-0000-4000-8000-000000000002",
+    "nodeGeneration": 1,
+    "evidence": {
+      "type": "local_not_submitted"
+    },
+    "nodeId": "00000000-0000-4000-8000-000000000001",
+    "status": "not_started"
+  },
+  "noStartNodeProof": {
+    "principal": "adam@knitli.com",
+    "binding": {
+      "audience": "https://events.example.com",
+      "method": "POST",
+      "path": "/v1/dispatch/settle-no-start",
+      "bodySha256": "a78703b1506acd36938c1b77c798dddb2b26feb3dc454ef38f6ff9bed46ca09b"
+    },
+    "body": "{\"deliveryId\":\"dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217\",\"attemptId\":\"018e2c70-7c6a-7a03-8000-000000000001\",\"permitId\":\"00000000-0000-4000-8000-000000000002\",\"nodeGeneration\":1,\"evidence\":{\"type\":\"native_terminal_no_start\",\"receiptId\":\"00000000-0000-4000-8000-000000000001\"}}",
+    "proof": {
+      "nodeId": "00000000-0000-4000-8000-000000000001",
+      "nodeGeneration": 1,
+      "issuedAt": "2026-10-05T12:00:58.000Z",
+      "nonce": "00000000-0000-4000-8000-000000000002"
+    },
+    "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/dispatch/settle-no-start\",\"a78703b1506acd36938c1b77c798dddb2b26feb3dc454ef38f6ff9bed46ca09b\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-05T12:00:58.000Z\",\"00000000-0000-4000-8000-000000000002\"]"
   }
 }
