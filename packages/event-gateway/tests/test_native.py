@@ -64,11 +64,15 @@ class NativeValidationTests(unittest.TestCase):
                 validate_request(bad, ADMISSION)
         for field, value in (("generation", True), ("serverGeneration", -1), ("generation", 2**64),
                              ("clientId", "not-uuid"), ("threadId", 1), ("attemptId", str(uuid.uuid4())),
+                             ("clientUserMessageId", str(uuid.uuid1())),
                              ("deliveryId", "dly_" + "0" * 64), ("permitId", str(uuid.uuid4())),
                              ("permitExpiresAt", item["permitExpiresAt"] + 1),
                              ("event", {**item["event"], "eventReference": "changed"})):
             with self.subTest(field=field, value=value), self.assertRaises(NativeError):
                 validate_request({**item, field: value}, ADMISSION)
+        v7_turn_id = "018e2c70-7c6a-7a06-8000-000000000001"
+        self.assertEqual(validate_request({**item, "clientUserMessageId": v7_turn_id}, ADMISSION)
+                         ["clientUserMessageId"], v7_turn_id)
         for admission in (None, {}, {**ADMISSION, "permitIssuedAt": None}):
             with self.subTest(admission=admission), self.assertRaises(NativeError):
                 validate_request(item, admission)

@@ -56,11 +56,14 @@ def validate_request(request, admission):
     request = _copy(request)
     if not isinstance(request, dict) or set(request) != set(IDENTITY) | {"generation", "event"}:
         raise NativeError("invalid_native_request")
-    if any(not _native_uuid(request[key]) for key in (
-        "clientId", "serverInstanceId", "threadId", "clientUserMessageId",
-    )) or any(not _uint(request[key]) for key in (
-        "generation", "serverGeneration", "permitIssuedAt", "permitExpiresAt",
-    )):
+    # A started turn ID must satisfy the v4/v7 grammar of its submitted ACK.
+    if (
+        any(not _native_uuid(request[key]) for key in ("clientId", "serverInstanceId", "threadId"))
+        or not _uuid(request["clientUserMessageId"])
+        or any(not _uint(request[key]) for key in (
+            "generation", "serverGeneration", "permitIssuedAt", "permitExpiresAt",
+        ))
+    ):
         raise NativeError("invalid_native_request")
     try:
         envelope = admission["envelope"]

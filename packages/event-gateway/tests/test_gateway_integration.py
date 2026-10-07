@@ -75,7 +75,7 @@ class GatewayIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.key = Ed25519PrivateKey.generate()
         self.requests, self.admissions, self.settled = [], {}, {}
         self.credential_calls = 0
-        self.drop_settlement = False
+        self.drop_settlement = self.drop_ack = False
         self.bridge = InjectedBridge(self.store.path, self.mapping["nativeThreadId"])
         self.client = CloudClient(
             origin="https://events.example.com", principal=self.envelope["principal"], agent=self.envelope["agent"],
@@ -131,11 +131,21 @@ class GatewayIntegrationTests(unittest.IsolatedAsyncioTestCase):
             if self.drop_settlement:
                 self.drop_settlement = False
                 raise TimeoutError("settlement accepted; response lost")
+        elif path == "/v1/ack":
+            self.assertEqual(attempt["native_ack"], body)
+            self.assertEqual(attempt["started_receipt"]["outcome"]["turnId"],
+                             body["nativeCorrelation"]["turnId"])
+            self.assertEqual(body["nativeCorrelation"]["permitId"], attempt["admission"]["permitId"])
+            self.assertEqual(body["status"], "submitted")
+            result = {"status": "submitted", "current": False}
+            if self.drop_ack:
+                self.drop_ack = False
+                raise TimeoutError("ACK accepted; response lost")
         else:
-            self.fail("Unexpected cloud path, including unqualified ACK: " + path)
+            self.fail("Unexpected cloud path: " + path)
         return 200, {"content-type": "application/json"}, json.dumps(result).encode()
 
-    async def test_real_clients_retire_terminal_no_start_then_preserve_started_without_ack(self):
+    async def test_real_clients_retire_terminal_no_start_then_ack_started_receipt(self):
         first_attempt = self.envelope["attemptId"]
         self.assertEqual((await self.gateway.dispatch(self.ident))["status"], "queued")
         second_attempt = self.store.delivery_envelope(self.ident)["attemptId"]
@@ -146,19 +156,34 @@ class GatewayIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "type": "native_terminal_no_start", "receiptId": self.bridge.retained[first_attempt]["receiptId"],
         })
         self.bridge.outcome = "started"
+        self.drop_ack = True
         started = await self.gateway.dispatch(self.ident)
         self.assertEqual(started["status"], "submitted")
-        self.assertEqual(started["reason"], "native_started_ack_unqualified")
+        self.assertEqual(started["reason"], "native_started_ack_pending")
         current = self.store.current_attempt(self.ident)
         native = current["native_request"]
+        acknowledgment = current["native_ack"]
         self.assertEqual(current["started_receipt"]["outcome"]["turnId"], native["clientUserMessageId"])
         self.assertEqual(self.bridge.at_start[-1], ("submitting", native, self.admissions[second_attempt]))
+        self.assertTrue(self.store.native_receipt(self.ident)["ack_pending"])
+        native_calls_before_retry = copy.deepcopy(self.bridge.calls)
+        self.store.close()
+        self.store = Store(self.bridge.path, clock=lambda: self.now)
+        self.gateway.store = self.store
+        self.now += 3600
+        self.assertEqual((await self.gateway.reconcile(self.ident))["status"], "submitted")
+        acks = self.requests[-2:]
+        self.assertEqual(acks[0]["body"], acks[1]["body"])
+        self.assertEqual(self.bridge.calls, native_calls_before_retry)
+        self.assertEqual(self.store.current_attempt(self.ident)["native_ack"], acknowledgment)
+        self.assertFalse(self.store.native_receipt(self.ident)["ack_pending"])
         before = len(self.requests), len(self.bridge.calls)
-        self.assertEqual((await self.gateway.reconcile(self.ident))["reason"], "native_started_ack_unqualified")
+        self.assertEqual((await self.gateway.reconcile(self.ident))["status"], "submitted")
         self.assertEqual((len(self.requests), len(self.bridge.calls)), before)
         self.assertEqual([item["url"].removeprefix(self.client.origin) for item in self.requests],
-                         ["/v1/dispatch/claim", "/v1/dispatch/settle-no-start", "/v1/dispatch/claim"])
-        self.assertTrue(self.store.native_receipt(self.ident)["ack_pending"])
+                         ["/v1/dispatch/claim", "/v1/dispatch/settle-no-start", "/v1/dispatch/claim", "/v1/ack", "/v1/ack"])
+        self.assertNotEqual(acks[0]["headers"]["x-event-node-proof"], acks[1]["headers"]["x-event-node-proof"])
+        self.assertNotEqual(acks[0]["headers"]["authorization"], acks[1]["headers"]["authorization"])
 
     async def test_lost_settlement_response_retries_exact_signed_retirement_without_native_replay(self):
         self.drop_settlement = True

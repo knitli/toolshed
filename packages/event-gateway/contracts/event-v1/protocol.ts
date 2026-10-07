@@ -146,10 +146,17 @@ const commonAcknowledgmentShape = {
 const submittedAcknowledgmentSchema = z.strictObject({
   ...commonAcknowledgmentShape,
   status: z.literal("submitted"),
-  nativeCorrelation: z.strictObject({
-    kind: z.literal("queued"),
-    submissionId: nativeIdSchema,
-  }),
+  nativeCorrelation: z.union([
+    z.strictObject({
+      kind: z.literal("queued"),
+      submissionId: nativeIdSchema,
+    }),
+    z.strictObject({
+      kind: z.literal("native_turn_started"),
+      permitId: uuidV4OrV7Schema,
+      turnId: uuidV4OrV7Schema,
+    }),
+  ]),
 });
 
 const observedAcknowledgmentSchema = z.strictObject({
@@ -163,7 +170,8 @@ const observedAcknowledgmentSchema = z.strictObject({
 });
 
 /**
- * A queue receipt is `submitted`; `observed` requires a correlated native turn.
+ * A queue receipt or direct native-turn registration is `submitted`; it does
+ * not prove input observation. `observed` requires a queue-correlated turn.
  * The version is the one delivered to this runtime, never a mutable watermark.
  */
 export const EventObservationAckSchema = z.union([

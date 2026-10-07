@@ -19,7 +19,9 @@ class ProtocolTests(unittest.TestCase):
             for case in FIXTURES['invalid' + key]:
                 with self.subTest(case=case['case']), self.assertRaises(ProtocolError):
                     parser(json.dumps(case['value']).encode(), NOW)
-        for envelope, ack in zip(FIXTURES['validEnvelopes'], FIXTURES['validAcknowledgments']):
+        envelopes = {envelope['deliveryId']: envelope for envelope in FIXTURES['validEnvelopes']}
+        for ack in FIXTURES['validAcknowledgments']:
+            envelope = envelopes[ack['deliveryId']]
             self.assertTrue(matches_delivery_id(envelope))
             self.assertTrue(acknowledgment_matches_delivery(envelope, ack))
             self.assertEqual(acknowledgment_advances_current_watermark(envelope, ack, envelope['sourceStateVersion']), ack['status'] == 'observed')
