@@ -3,6 +3,7 @@ import asyncio
 import importlib.util
 import json
 from pathlib import Path
+import socket
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -16,96 +17,170 @@ class CodexBridgeSpikeTests(unittest.TestCase):
         spec.loader.exec_module(observer)
         observer.check()
 
-    def test_native_witness_fails_closed(self):
+    def observer(self):
         path = Path(__file__).parents[1] / 'scripts' / 'observe_codex_bridge.py'
         spec = importlib.util.spec_from_file_location('observe_codex_bridge', path)
         observer = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(observer)
-        row = {'clientId': '11111111-1111-4111-8111-111111111111',
-               'connectionId': '22222222-2222-4222-8222-222222222222',
-               'threadId': '33333333-3333-4333-8333-333333333333',
-               'backendPid': 123, 'generation': 0, 'sequence': 1,
-               'eligible': True, 'cause': 'heartbeat'}
-        witness = observer.Witness()
-        witness.receive(json.dumps(row), 123, 10.0)
-        self.assertEqual(witness.status(123, 10.999), (True, 'native'))
-        self.assertEqual(witness.status(123, 11.0), (False, 'expired'))
-        self.assertEqual(witness.status(456, 10.1), (False, 'unknown-backend'))
-        self.assertEqual(witness.status(None, 10.1), (False, 'unknown-backend'))
-        witness.eof()
-        self.assertEqual(witness.status(123, 10.1), (False, 'eof'))
+        return observer
+
+    def row(self, **changes):
+        return json.dumps({'clientId': '11111111-1111-4111-8111-111111111111',
+                           'connectionId': '22222222-2222-4222-8222-222222222222',
+                           'threadId': '33333333-3333-4333-8333-333333333333',
+                           'backendPid': 123, 'generation': 0, 'sequence': 1,
+                           'eligible': True, 'cause': 'heartbeat', 'version': 1,
+                           'nonce': 1} | changes).encode()
+
+    def test_matching_challenge_and_absolute_freshness(self):
+        witness = self.observer().Witness()
+        self.assertEqual(json.loads(witness.challenge(10)), {'nonce': 1})
+        self.assertIsNone(witness.challenge(10.1))
+        witness.receive(self.row(), 123, 10.2)
+        self.assertEqual(witness.status(123, 10.749), (True, 'native'))
+        self.assertEqual(witness.status(456, 10.2), (False, 'unknown-backend'))
+        self.assertEqual(witness.status(None, 10.2), (False, 'unknown-backend'))
+        witness.challenge(10.3)
+        self.assertEqual(witness.status(123, 10.750), (False, 'expired'))
+
+    def test_unsolicited_and_replay_cannot_renew(self):
+        for challenge, records in [(False, [self.row()]),
+                                   (True, [self.row(nonce=2)]),
+                                   (True, [self.row(), self.row(sequence=2)])]:
+            witness = self.observer().Witness()
+            if challenge:
+                witness.challenge(10)
+            for raw in records:
+                witness.receive(raw, 123, 10.1)
+            self.assertEqual(witness.status(123, 10.2), (False, 'unexpected-nonce'))
+            self.assertTrue(witness.failed)
+            self.assertIsNone(witness.challenge(11))
+
+    def test_late_matching_response_drains_without_renewal(self):
+        witness = self.observer().Witness()
+        witness.challenge(10)
+        self.assertEqual(witness.status(123, 10.75), (False, 'deadline'))
+        self.assertIsNone(witness.challenge(11))
+        witness.receive(self.row(), 123, 12)
+        self.assertEqual(witness.status(123, 12), (False, 'deadline'))
+        self.assertEqual(json.loads(witness.challenge(12)), {'nonce': 2})
+        witness.receive(self.row(nonce=2, sequence=2, generation=1), 123, 12.1)
+        self.assertEqual(witness.status(123, 12.1), (True, 'native'))
+
+    def test_native_schema_fails_closed(self):
         for field, value in [('clientId', 'not-uuid'), ('generation', -1),
-                             ('generation', True), ('eligible', 1), ('sequence', 0),
-                             ('backendPid', True), ('cause', 'x' * 129),
-                             ('prompt', 'SECRET')]:
+                             ('generation', True), ('generation', 2**64),
+                             ('eligible', 1), ('sequence', 0), ('sequence', 2**64),
+                             ('backendPid', True), ('backendPid', 2**32),
+                             ('cause', 'x' * 129), ('prompt', 'SECRET'),
+                             ('version', True), ('version', 2), ('nonce', True)]:
             with self.subTest(field=field, value=value):
-                witness = observer.Witness()
-                witness.receive(json.dumps(row | {field: value}), 123, 10.0)
+                witness = self.observer().Witness()
+                witness.challenge(10)
+                witness.receive(self.row(**{field: value}), 123, 10.1)
                 self.assertEqual(witness.status(123, 10.1), (False, 'malformed'))
                 self.assertIsNone(witness.row)
-        for raw in [b'bad JSON', b'\xff', b'[]']:
-            witness.receive(raw, 123, 10.0)
+        for raw in [b'bad JSON', b'\xff', b'[]', b'{"nonce":1,"nonce":1}',
+                    b' ' * 2048 + self.row()]:
+            witness = self.observer().Witness()
+            witness.challenge(10)
+            witness.receive(raw, 123, 10.1)
             self.assertEqual(witness.status(123, 10.1), (False, 'malformed'))
-        witness = observer.Witness()
-        witness.receive(json.dumps(row), 123, 10.0)
-        witness.receive(json.dumps(row), 123, 10.1)
-        self.assertEqual(witness.status(123, 10.1), (False, 'malformed'))
-        witness.receive(json.dumps(row | {'sequence': 2, 'clientId': row['threadId']}), 123, 10.2)
-        self.assertEqual(witness.status(123, 10.2), (False, 'malformed'))
-        witness.receive(json.dumps(row | {'sequence': 2, 'threadId': None}), 123, 10.3)
-        self.assertEqual(witness.status(123, 10.3), (False, 'unavailable'))
-        witness.receive(json.dumps(row | {'sequence': 3, 'backendPid': None}), 123, 10.4)
-        self.assertEqual(witness.status(123, 10.4), (False, 'unknown-backend'))
-        self.assertTrue(observer.permitted('client', {'method': 'server/diagnostics'}))
 
-    def test_native_fifo_limits_individual_frames_not_read_batches(self):
-        path = Path(__file__).parents[1] / 'scripts' / 'observe_codex_bridge.py'
-        spec = importlib.util.spec_from_file_location('observe_codex_bridge', path)
-        observer = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(observer)
-        expected = [json.dumps({'sequence': i, 'cause': 'x' * 128}).encode()
-                    for i in range(100)]
+    def test_client_identity_and_sequence_are_stable(self):
+        for changes in [{'clientId': '33333333-3333-4333-8333-333333333333', 'sequence': 2},
+                        {'sequence': 1}]:
+            witness = self.observer().Witness()
+            witness.challenge(10)
+            witness.receive(self.row(), 123, 10.1)
+            witness.challenge(10.2)
+            witness.receive(self.row(nonce=2, **changes), 123, 10.3)
+            self.assertEqual(witness.status(123, 10.3), (False, 'malformed'))
+
+    def test_native_stream_limits_individual_frames_not_read_batches(self):
+        observer = self.observer()
+        expected = [self.row(sequence=i) for i in range(1, 101)]
         stream = b'\n'.join(expected) + b'\n'
         pending, discarding, received = b'', False, []
         for offset in range(0, len(stream), 4096):
             pending, discarding, frames = observer.witness_frames(
                 pending, stream[offset:offset + 4096], discarding)
             received.extend(frames)
-            self.assertLessEqual(len(pending), 4096)
+            self.assertLessEqual(len(pending), 2047)
         self.assertEqual(received, expected)
         self.assertEqual((pending, discarding), (b'', False))
-        # Oversized partial records revoke once, discard through newline, then recover.
-        pending, discarding, frames = observer.witness_frames(b'x' * 4096, b'x', False)
-        self.assertEqual((pending, discarding, frames), (b'', True, [b'']))
-        self.assertEqual(observer.witness_frames(pending, b'x' * 4096, discarding),
+        self.assertEqual(observer.witness_frames(b'x' * 2047, b'\n', False),
+                         (b'', False, [b'x' * 2047]))
+        self.assertEqual(observer.witness_frames(b'x' * 2047, b'x', False),
+                         (b'', True, [b'']))
+        self.assertEqual(observer.witness_frames(b'', b'x' * 4096, True),
                          (b'', True, []))
         self.assertEqual(observer.witness_frames(b'', b'tail\nvalid\n', True),
                          (b'', False, [b'valid']))
-        self.assertEqual(observer.witness_frames(b'x' * 4096, b'x\nvalid\n', False),
+        self.assertEqual(observer.witness_frames(b'x' * 2047, b'x\nvalid\n', False),
                          (b'', False, [b'', b'valid']))
 
-    def test_native_fifo_waits_for_writer_then_stops_at_eof(self):
-        path = Path(__file__).parents[1] / 'scripts' / 'observe_codex_bridge.py'
-        spec = importlib.util.spec_from_file_location('observe_codex_bridge', path)
-        observer = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(observer)
+    def test_socket_challenge_reply_and_eof(self):
+        observer = self.observer()
         states = []
-        reads = [b'', b'{}\n', b'']
 
-        def read(*_):
-            self.assertTrue(reads, 'reader must stop after connected writer EOF')
-            return reads.pop(0)
+        async def run():
+            parent, child = socket.socketpair()
+            child.setblocking(False)
+            async def respond():
+                loop = asyncio.get_running_loop()
+                challenge = json.loads(await loop.sock_recv(child, 128))
+                await loop.sock_sendall(child, self.row(nonce=challenge['nonce']) + b'\n')
+                await asyncio.sleep(.060)
+                child.close()
+            responder = asyncio.create_task(respond())
+            await asyncio.wait_for(observer.read_witness(
+                parent, lambda: 123, lambda: True,
+                lambda witness, pid, now: states.append(witness.status(pid, now))), 1)
+            await responder
+            self.assertEqual(parent.fileno(), -1)
+        asyncio.run(run())
+        self.assertIn((True, 'native'), states)
+        self.assertEqual(states[-1], (False, 'eof'))
 
-        async def no_sleep(_):
-            pass
+    def test_coalesced_replay_revokes_same_read(self):
+        observer = self.observer()
+        states = []
+        async def run():
+            parent, child = socket.socketpair()
+            child.setblocking(False)
+            async def respond():
+                loop = asyncio.get_running_loop()
+                await loop.sock_recv(child, 128)
+                await loop.sock_sendall(child, self.row() + b'\n' + self.row(sequence=2) + b'\n')
+            responder = asyncio.create_task(respond())
+            try:
+                await asyncio.wait_for(observer.read_witness(
+                    parent, lambda: 123, lambda: True,
+                    lambda witness, pid, now: states.append(witness.status(pid, now))), .5)
+                await responder
+            finally:
+                child.close()
+        asyncio.run(run())
+        self.assertEqual(states[-1], (False, 'unexpected-nonce'))
 
-        with patch.object(observer.os, 'read', side_effect=read), \
-                patch.object(observer.asyncio, 'sleep', side_effect=no_sleep):
-            asyncio.run(observer.read_witness(
-                123, lambda: 456, lambda: True,
+    def test_socket_silence_has_one_outstanding_challenge(self):
+        observer = self.observer()
+        states = []
+        async def run():
+            parent, child = socket.socketpair()
+            child.setblocking(False)
+            task = asyncio.create_task(observer.read_witness(
+                parent, lambda: 123, lambda: True,
                 lambda witness, pid, now: states.append(witness.status(pid, now))))
-        self.assertEqual(reads, [], 'reader must wait for the initial writer')
-        self.assertEqual(states, [(False, 'eof'), (False, 'malformed'), (False, 'eof')])
+            await asyncio.sleep(.85)
+            wire = child.recv(4096)
+            self.assertEqual(wire, b'{"nonce":1}\n')
+            child.close()
+            await asyncio.wait_for(task, .2)
+        asyncio.run(run())
+        self.assertIn((False, 'deadline'), states)
+        self.assertFalse(any(eligible for eligible, _ in states))
 
     def test_observer_closes_logs_when_cleanup_fails(self):
         path = Path(__file__).parents[1] / 'scripts' / 'observe_codex_bridge.py'

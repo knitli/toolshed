@@ -1,0 +1,20 @@
+{
+  "qualifiedAt": "2026-10-07T02:07:13Z",
+  "sourceRevision": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "binarySha256": "24ddb4150de43d8a6add30a5c098392d4994b8030d414db1ba1c769cf4354caf",
+  "patchSha256": "e8671a6b304fd117eb24741be7a2d7b91bd1a477ef33a29a2fee1e364c580ae4",
+  "qualifierSha256": "a2174b69a3ad9e77509bd33e7451521e3dd2efe1dc2211937f8a95531376316e",
+  "qualifierTestsSha256": "6352870df54f7733bf20e6db147f45d85a78410874e3e295f9cd213c05ddd9bc",
+  "qualification": "synthetic-native-start",
+  "outcome": "started",
+  "threadId": "01a1141c-651a-7d41-af0f-611cac0082b1",
+  "turnId": "385ab2a3-fe15-4919-96df-86988ba12c30",
+  "exactReceiptRecovered": true,
+  "mockModelRequests": 2,
+  "primaryModelRequests": 1,
+  "titleModelRequests": 1,
+  "unknownModelRequests": 0,
+  "realModelCalls": 0,
+  "productionWakeEnabled": false,
+  "scope": "Disposable Codex home and inherited Unix socket; loopback mock only. One primary response and one recognized automatic TUI title request. No cloud event, real credentials, real model, owner client install, restart recovery, or production canary."
+}

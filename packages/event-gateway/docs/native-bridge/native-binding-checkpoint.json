@@ -1,0 +1,142 @@
+{
+  "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "rustVersion": "1.95.0 (59807616e 2026-04-14)",
+  "binarySha256": "24ddb4150de43d8a6add30a5c098392d4994b8030d414db1ba1c769cf4354caf",
+  "patchSha256": "e8671a6b304fd117eb24741be7a2d7b91bd1a477ef33a29a2fee1e364c580ae4",
+  "sourceFileCount": 31,
+  "cleanPinnedApplyCheck": true,
+  "allPatchedFilesByteMatchSource": true,
+  "lockNormalization": {
+    "includedInPatch": false,
+    "localWorkspaceVersionsChanged": 159,
+    "from": "0.0.0",
+    "to": "0.160.0",
+    "externalPackagesAndDependencyListsUnchanged": true
+  },
+  "clippy": {
+    "command": "just clippy -p codex-tui --profile dev-small",
+    "passed": true,
+    "warnings": [
+      "pre-existing core ToolCallSource unused import"
+    ]
+  },
+  "focusedTests": {
+    "command": "just test -p codex-tui --cargo-profile dev-small selection_witness",
+    "passed": 14,
+    "failed": 0,
+    "skipped": 5619,
+    "rustMinStackBytes": 8388608
+  },
+  "causalProof": {
+    "assertionRedRestoredGreenPairs": 14,
+    "distinctTests": 12,
+    "artifact": "tui-binding-mutation-results.json"
+  },
+  "fullTuiProject": {
+    "command": "just test -p codex-tui --cargo-profile dev-small",
+    "passed": 5581,
+    "failed": 44,
+    "skipped": 8,
+    "baselineComparison": {
+      "identicalFailures": 44,
+      "unresolved": 0,
+      "artifact": "tui-project-baseline-results.json",
+      "cleanBaselineTrackedBlobsVerified": 8775,
+      "onlyBaselineDifference": "Cargo.lock workspace version normalization"
+    },
+    "sourceStage": "before final Core lint-only/fail-closed closure correction"
+  },
+  "patchedHostCases": {
+    "passed": 6,
+    "failed": 0,
+    "skipped": 5627,
+    "processOnlyEnvironment": {
+      "NO_COLOR": "unset",
+      "GIT_CONFIG_COUNT": "1",
+      "GIT_CONFIG_KEY_0": "commit.gpgsign",
+      "GIT_CONFIG_VALUE_0": "false"
+    },
+    "sourceStage": "final patched source"
+  },
+  "build": {
+    "command": "cargo build --locked -p codex-cli --bin codex --profile dev-small",
+    "passed": true
+  },
+  "format": "Pinned rustfmt check passed for changed TUI modules after justfix; final binary rebuilt after formatting",
+  "schemaGeneration": "Rust JSON/TS and compressed exports generated; Python SDK generated and 5 schema tests passed per native owner/root evidence",
+  "runtimeQualification": "See root-owned live qualification artifact for this binary SHA; unit and build checks alone do not establish runtime qualification",
+  "fullWorkspaceSuite": {
+    "id": "codex-native-workspace-full-attempt",
+    "command": "just test --cargo-profile dev-small",
+    "runner": "Rust 1.95.0, require_escalated",
+    "exit_code": 101,
+    "tests_started": false,
+    "blocker": {
+      "crate": "glib-sys v0.22.8",
+      "command": "pkg-config --libs --cflags glib-2.0 'glib-2.0 >= 2.56'",
+      "reason": "glib-2.0.pc is absent and glib-2.0 is not installed in the searched Homebrew Cellar/opt paths.",
+      "installation_attempted": false
+    },
+    "log_file": "workspace-full-escalated.log"
+  },
+  "productionNativeEnabled": false,
+  "focusedNativeChecks": {
+    "coreGuardedTestsPassed": 2,
+    "appServerBindingTestsPassed": 7,
+    "protocolTestsPassed": 313,
+    "protocolTestsSkipped": 1,
+    "pythonSdkGenerationTestsPassed": 5,
+    "coreServerCausalPairs": 3
+  },
+  "fullCoreProject": {
+    "id": "codex-core-full-escalated",
+    "command": "just test -p codex-core --cargo-profile dev-small",
+    "runner": "Rust 1.95.0, nextest local, RUST_MIN_STACK=8388608; require_escalated for mock sockets",
+    "exit_code": 100,
+    "tests_run": 4856,
+    "passed": 4835,
+    "failed": 21,
+    "skipped": 27,
+    "classification": {
+      "baseline_reproduced_failures": 18,
+      "environment_controls_passed": 2,
+      "missing_code_mode_host": 8,
+      "current_only_missing_test_stdio_server": 3,
+      "unresolved_baseline_reproduced": 8,
+      "unresolved_tests": [
+        "turn_metadata::tests::detached_memory_responses_metadata_starts_an_independent_root_turn",
+        "turn_metadata::tests::turn_metadata_state_coalesces_concurrent_git_enrichment",
+        "suite::code_mode::code_mode_exec_holds_captured_result_during_elicitation",
+        "suite::tool_lifecycle::observations::code_mode_reports_host_timing_without_nested_dispatch_timing",
+        "suite::skills_extension::production_turn_keeps_rebalanced_catalogs_stable_after_compaction_and_resume",
+        "suite::pending_input::input_preempts_response_and_yields_running_code_mode_call",
+        "suite::pending_input::steers_yield_exec_and_wait_without_stopping_the_cell::disabled",
+        "suite::pending_input::steers_yield_exec_and_wait_without_stopping_the_cell::enabled"
+      ],
+      "notes": [
+        "The 8 code-mode-host tests fail because codex-code-mode-host is absent; its pinned V8 helper dependency could not be built (see v8-helper-build).",
+        "The 2 process-only controls were git_info_tests::test_recent_commits_orders_and_limits and user_shell_command_does_not_set_network_sandbox_env_var; they pass with commit.gpgsign=false and CODEX_SANDBOX_NETWORK_DISABLED unset.",
+        "The 3 current-only failures were two rmcp_client tests and worktree_trust; all three pass after building test_stdio_server."
+      ]
+    },
+    "log_file": "core-full-escalated.log"
+  },
+  "fullAppServerProject": {
+    "id": "codex-app-server-full-escalated",
+    "command": "just test -p codex-app-server --cargo-profile dev-small",
+    "runner": "Rust 1.95.0, nextest local, RUST_MIN_STACK=8388608; require_escalated for mock sockets",
+    "exit_code": 100,
+    "tests_run": 1833,
+    "passed": 1809,
+    "failed": 24,
+    "skipped": 1,
+    "failure_classification": {
+      "git_fixture_failures_fixed_by_process_only_signing_override": 8,
+      "code_mode_host_unavailable_due_v8_helper_build": 12,
+      "codex_apps_mcp_initialize_http_404_reproduced_on_baseline": 4,
+      "unresolved_patch_specific_failures": 0
+    },
+    "log_file": "app-server-full-escalated-postbaseline.log"
+  },
+  "nativeDetailedEvidence": "native-guard-mutation-results.json"
+}

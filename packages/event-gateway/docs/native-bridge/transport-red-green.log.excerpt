@@ -1,0 +1,94 @@
+TEST fragmented_challenge_survives_state_burst
+PRODUCTION MUTATION {"from": "if newline.is_none() {\n            return Ok(());\n        }", "to": "if newline.is_none() {\n            return Err(TransportFailure {stage: \"mutant\", error: io::Error::from(io::ErrorKind::InvalidData)});\n        }"}
+
+RED
+  TRY 1 FAIL [   0.080s] (─────────) codex-tui app::selection_witness::tests::fragmented_challenge_survives_state_burst
+    test app::selection_witness::tests::fragmented_challenge_survives_state_burst ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5597 filtered out; finished in 0.06s
+    fragmented challenge must remain open
+  TRY 2 FAIL [   0.047s] (1/1) codex-tui app::selection_witness::tests::fragmented_challenge_survives_state_burst
+    test app::selection_witness::tests::fragmented_challenge_survives_state_burst ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5597 filtered out; finished in 0.03s
+    fragmented challenge must remain open
+     Summary [   0.161s] 1 test run: 0 passed, 1 failed, 5625 skipped
+  TRY 2 FAIL [   0.047s] (1/1) codex-tui app::selection_witness::tests::fragmented_challenge_survives_state_burst
+
+GREEN
+        PASS [   0.021s] (1/1) codex-tui app::selection_witness::tests::fragmented_challenge_survives_state_burst
+     Summary [   0.052s] 1 test run: 1 passed, 5625 skipped
+
+TEST replayed_challenge_revokes_channel
+PRODUCTION MUTATION {"from": "if challenge.nonce <= self.last_nonce {", "to": "if challenge.nonce < self.last_nonce {"}
+
+RED
+  TRY 1 FAIL [   0.068s] (─────────) codex-tui app::selection_witness::tests::replayed_challenge_revokes_channel
+    test app::selection_witness::tests::replayed_challenge_revokes_channel ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5597 filtered out; finished in 0.05s
+    replayed challenge must close capability
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::tests::replayed_challenge_revokes_channel
+    test app::selection_witness::tests::replayed_challenge_revokes_channel ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5597 filtered out; finished in 0.02s
+    replayed challenge must close capability
+     Summary [   0.139s] 1 test run: 0 passed, 1 failed, 5625 skipped
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::tests::replayed_challenge_revokes_channel
+
+GREEN
+        PASS [   0.015s] (1/1) codex-tui app::selection_witness::tests::replayed_challenge_revokes_channel
+     Summary [   0.041s] 1 test run: 1 passed, 5625 skipped
+
+TEST pending_write_retains_partial_bytes_on_backpressure
+PRODUCTION MUTATION {"from": "io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted", "to": "io::ErrorKind::Interrupted"}
+
+RED
+  TRY 1 FAIL [   0.066s] (─────────) codex-tui app::selection_witness::tests::pending_write_retains_partial_bytes_on_backpressure
+    test app::selection_witness::tests::pending_write_retains_partial_bytes_on_backpressure ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5597 filtered out; finished in 0.05s
+    temporary backpressure must retain pending response
+  TRY 2 FAIL [   0.039s] (1/1) codex-tui app::selection_witness::tests::pending_write_retains_partial_bytes_on_backpressure
+    test app::selection_witness::tests::pending_write_retains_partial_bytes_on_backpressure ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5597 filtered out; finished in 0.02s
+    temporary backpressure must retain pending response
+     Summary [   0.138s] 1 test run: 0 passed, 1 failed, 5625 skipped
+  TRY 2 FAIL [   0.039s] (1/1) codex-tui app::selection_witness::tests::pending_write_retains_partial_bytes_on_backpressure
+
+GREEN
+        PASS [   0.015s] (1/1) codex-tui app::selection_witness::tests::pending_write_retains_partial_bytes_on_backpressure
+     Summary [   0.042s] 1 test run: 1 passed, 5625 skipped
+
+TEST write_failure_retains_exact_os_error
+PRODUCTION MUTATION {"from": "Err(error) => Err(error),", "to": "Err(error) => Err(io::Error::from(error.kind())),"}
+
+RED
+  TRY 1 FAIL [   0.071s] (─────────) codex-tui app::selection_witness::tests::write_failure_retains_exact_os_error
+    test app::selection_witness::tests::write_failure_retains_exact_os_error ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5597 filtered out; finished in 0.05s
+    assertion `left == right` failed: diagnostics must retain exact errno
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::tests::write_failure_retains_exact_os_error
+    test app::selection_witness::tests::write_failure_retains_exact_os_error ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5597 filtered out; finished in 0.02s
+    assertion `left == right` failed: diagnostics must retain exact errno
+     Summary [   0.145s] 1 test run: 0 passed, 1 failed, 5625 skipped
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::tests::write_failure_retains_exact_os_error
+
+GREEN
+        PASS [   0.014s] (1/1) codex-tui app::selection_witness::tests::write_failure_retains_exact_os_error
+     Summary [   0.039s] 1 test run: 1 passed, 5625 skipped
+
+TEST expired_pending_response_closes_instead_of_renewing
+PRODUCTION MUTATION {"from": "if pending.created.elapsed() >= Duration::from_millis(/*millis*/ 750) {", "to": "if pending.created.elapsed() >= Duration::from_millis(/*millis*/ u64::MAX) {"}
+
+RED
+  TRY 1 FAIL [   0.067s] (─────────) codex-tui app::selection_witness::tests::expired_pending_response_closes_instead_of_renewing
+    test app::selection_witness::tests::expired_pending_response_closes_instead_of_renewing ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5597 filtered out; finished in 0.05s
+    expired pending response must close capability
+  TRY 2 FAIL [   0.039s] (1/1) codex-tui app::selection_witness::tests::expired_pending_response_closes_instead_of_renewing
+    test app::selection_witness::tests::expired_pending_response_closes_instead_of_renewing ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5597 filtered out; finished in 0.02s
+    expired pending response must close capability
+     Summary [   0.134s] 1 test run: 0 passed, 1 failed, 5625 skipped
+  TRY 2 FAIL [   0.039s] (1/1) codex-tui app::selection_witness::tests::expired_pending_response_closes_instead_of_renewing
+
+GREEN
+        PASS [   0.015s] (1/1) codex-tui app::selection_witness::tests::expired_pending_response_closes_instead_of_renewing
+     Summary [   0.044s] 1 test run: 1 passed, 5625 skipped

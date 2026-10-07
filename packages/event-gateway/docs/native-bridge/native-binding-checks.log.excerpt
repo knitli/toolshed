@@ -1,0 +1,37 @@
+[recheck-clippy]
+Finished `dev-small` profile [unoptimized] target(s) in 2m 09s
+
+[recheck-tests]
+Finished `dev-small` profile [unoptimized] target(s) in 46.80s
+PASS [   0.037s] ( 1/14) codex-tui app::selection_witness::binding::tests::stale_native_ack_cannot_publish_eligibility
+PASS [   0.039s] ( 2/14) codex-tui app::selection_witness::bridge::tests::receipt_lookup_preserves_local_attempt_identity
+PASS [   0.039s] ( 3/14) codex-tui app::selection_witness::binding::tests::binding_deadline_is_measured_from_request_send
+PASS [   0.040s] ( 4/14) codex-tui app::selection_witness::tests::revocation_and_reconnect_never_reuse_selection_generation
+PASS [   0.041s] ( 5/14) codex-tui app::selection_witness::tests::pending_write_retains_partial_bytes_on_backpressure
+PASS [   0.043s] ( 6/14) codex-tui app::selection_witness::tests::expired_pending_response_closes_instead_of_renewing
+PASS [   0.043s] ( 7/14) codex-tui app::selection_witness::bridge::tests::event_requires_the_observed_local_and_server_generations
+PASS [   0.045s] ( 8/14) codex-tui app::selection_witness::bridge::tests::event_metadata_obeys_pinned_source_and_subject_bounds
+PASS [   0.044s] ( 9/14) codex-tui app::selection_witness::tests::replayed_challenge_revokes_channel
+PASS [   0.045s] (10/14) codex-tui app::selection_witness::tests::write_failure_retains_exact_os_error
+PASS [   0.046s] (11/14) codex-tui app::selection_witness::bridge::tests::native_receipt_must_explicitly_be_replayed
+PASS [   0.046s] (12/14) codex-tui app::selection_witness::bridge::tests::attempt_ledger_preserves_unknown_and_exact_receipt
+PASS [   0.048s] (13/14) codex-tui app::selection_witness::tests::fragmented_challenge_survives_state_burst
+PASS [   0.050s] (14/14) codex-tui app::selection_witness::tests::delayed_loop_revokes_before_renewal
+Summary [   0.085s] 14 tests run: 14 passed, 5619 skipped
+
+[recheck-build]
+Finished `dev-small` profile [unoptimized] target(s) in 40.38s
+
+[host-cases]
+Finished `dev-small` profile [unoptimized] target(s) in 0.92s
+PASS [   0.027s] (1/6) codex-tui custom_terminal::tests::cursor::terminal_draw_omits_cursor_style_without_an_owned_glyph
+PASS [   0.031s] (2/6) codex-tui custom_terminal::tests::cursor::terminal_draw_repairs_single_column_without_scrolling
+PASS [   0.031s] (3/6) codex-tui custom_terminal::tests::cursor::terminal_draw_repairs_owned_wide_hyperlink_after_skipped_glyphs
+PASS [   0.031s] (4/6) codex-tui custom_terminal::tests::cursor::terminal_draw_repairs_styled_anchor_on_cursor_only_frames
+PASS [   1.213s] (5/6) codex-tui get_git_diff::tests::get_git_diff_does_not_execute_configured_filters_fsmonitor_or_hooks
+PASS [   1.375s] (6/6) codex-tui get_git_diff::tests::get_git_diff_does_not_execute_helpers_while_checking_dirty_submodules
+Summary [   1.400s] 6 tests run: 6 passed, 5627 skipped
+
+[full-tui-project]
+5625 tests run: 5581 passed, 44 failed, 8 skipped
+Full-project failures require baseline comparison; no green full-suite claim.

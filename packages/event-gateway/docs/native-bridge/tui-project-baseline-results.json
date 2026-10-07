@@ -1,0 +1,613 @@
+{
+  "sourcePin": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "sourcePreparation": "Clean git archive; only Cargo.lock copied from patched source to retain 159 local package version normalizations",
+  "cargoLockSha256": "f0ea6b033508c394980bfc011907947beffcb7f7b1a56addbff90196617c14a4",
+  "rustToolchain": "1.95.0-aarch64-apple-darwin",
+  "scope": "Exact 44 failing test names selected with nextest exact-name expressions; no model or live traffic",
+  "environment": {
+    "NO_COLOR": "1",
+    "commit.gpgsign": "true",
+    "gpg.format": "ssh"
+  },
+  "baselineSummary": "Summary [   0.563s] 44 tests run: 0 passed, 44 failed, 5575 skipped",
+  "selectedTests": 44,
+  "baselineConfirmed": 44,
+  "unresolved": 0,
+  "categories": {
+    "release_version_snapshot": 35,
+    "release_version_notice_snapshot": 2,
+    "terminal_color_environment": 4,
+    "git_fixture_signing_environment": 2,
+    "release_version_normalized_spacing_snapshot": 1
+  },
+  "results": [
+    {
+      "test": "app::daemon_menu::tests::daemon_menu_is_read_only_and_confirmation_can_cancel_or_handoff",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 343,
+      "baselineLogLine": 1711,
+      "failureSignatureSha256": "860453573a6678e4a3a30c543239276ba5f6f6ff09955232310233f6ec32d4c2",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "app::owned_transcript::empty_state_animation_tests::empty_state_animation_preserves_header_cursor_and_footer",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 451,
+      "baselineLogLine": 1962,
+      "failureSignatureSha256": "168657904b7d7791df3ea2fda6a968893dc4d7b0566045e0ece6df1d846e893a",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "app::tests::active_reconnect::reconnect_allows_slow_hydration_but_bounds_a_stalled_server",
+      "category": "release_version_notice_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 787,
+      "baselineLogLine": 139,
+      "failureSignatureSha256": "fc59503bc9ae966bc350fab49d8566e4b2e0dc429d1a5e28c5a812069dff52f8",
+      "baselineEvidenceRun": "local_socket_retry"
+    },
+    {
+      "test": "app::tests::app_server_thread_replacement_clears_previous_transcript_before_replay",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 833,
+      "baselineLogLine": 3542,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "app::tests::navigation_reconnect::reconnect_daemon_command_center_after_socket_replacement_without_a_conversation",
+      "category": "release_version_notice_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 1117,
+      "baselineLogLine": 181,
+      "failureSignatureSha256": "0b7c3728ae71a23222dfdfef0e65a2484c3be02669dc9051339d042730cfe8e5",
+      "baselineEvidenceRun": "local_socket_retry"
+    },
+    {
+      "test": "app::tests::realtime_requests::buffered_voice_items_reconcile_captions_after_thread_switch",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 1258,
+      "baselineLogLine": 1455,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "app::tests::realtime_requests::completed_voice_caption_survives_repeated_thread_replacement",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 1298,
+      "baselineLogLine": 1753,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "app::tests::realtime_requests::replay_reconciles_only_matching_voice_captions_one_for_one",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 1448,
+      "baselineLogLine": 1311,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "app::tests::realtime_requests::switching_threads_keeps_the_source_voice_partial_only_on_reattach",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 1490,
+      "baselineLogLine": 1352,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "app::tests::startup_frame_tests::owned_startup_hides_tip_in_transcript",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 1757,
+      "baselineLogLine": 1402,
+      "failureSignatureSha256": "168657904b7d7791df3ea2fda6a968893dc4d7b0566045e0ece6df1d846e893a",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "custom_terminal::tests::cursor::terminal_draw_omits_cursor_style_without_an_owned_glyph",
+      "category": "terminal_color_environment",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 4541,
+      "baselineLogLine": 461,
+      "failureSignatureSha256": "ed120d4d3cd5bb073c70e3bfc7a24e698f072ffee16286c58b02ab109e9700c8",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "custom_terminal::tests::cursor::terminal_draw_repairs_styled_anchor_on_cursor_only_frames",
+      "category": "terminal_color_environment",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 4568,
+      "baselineLogLine": 971,
+      "failureSignatureSha256": "8fda882f3d8571231d32b09923aa625bde086b3f049eaef2b6876d72fdbbe75d",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "custom_terminal::tests::cursor::terminal_draw_repairs_owned_wide_hyperlink_after_skipped_glyphs",
+      "category": "terminal_color_environment",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 4613,
+      "baselineLogLine": 876,
+      "failureSignatureSha256": "55701dc3fbbd46a056e13856c36555077b3c9e70bdb2dd6cae547fe76b35c157",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "custom_terminal::tests::cursor::terminal_draw_repairs_single_column_without_scrolling",
+      "category": "terminal_color_environment",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 4650,
+      "baselineLogLine": 795,
+      "failureSignatureSha256": "9b1ad592cd3614ca955daf05856a7a2e87dabb92dc42daba4a86cda314147c36",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "get_git_diff::tests::get_git_diff_does_not_execute_configured_filters_fsmonitor_or_hooks",
+      "category": "git_fixture_signing_environment",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 5008,
+      "baselineLogLine": 1559,
+      "failureSignatureSha256": "ff54a4af1551cf546f7912cf1428ed5686534b54a429cbfa76cfc24d43cc5b4c",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "get_git_diff::tests::get_git_diff_does_not_execute_helpers_while_checking_dirty_submodules",
+      "category": "git_fixture_signing_environment",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 5042,
+      "baselineLogLine": 1635,
+      "failureSignatureSha256": "ff54a4af1551cf546f7912cf1428ed5686534b54a429cbfa76cfc24d43cc5b4c",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "history_cell::tests::pnpm_update_available_history_cell_snapshot",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 5158,
+      "baselineLogLine": 835,
+      "failureSignatureSha256": "a37e5e1c041ad8089755a6e9b682833d94f838b517b1652991e90c93a7107e0b",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "history_cell::tests::standalone_windows_update_available_history_cell_snapshot",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 5305,
+      "baselineLogLine": 1670,
+      "failureSignatureSha256": "7f59fe095dbda373e7b0696100140ff60d1a5c1ded71c66ef3156179866d9356",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "history_cell::tests::standalone_unix_update_available_history_cell_snapshot",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 5346,
+      "baselineLogLine": 1594,
+      "failureSignatureSha256": "7c1c44a47f85e686226d866c57c315463bc5de537aec479d77c3a2b4ee49ed0e",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "history_cell::tests::vite_plus_update_available_history_cell_snapshot",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 5504,
+      "baselineLogLine": 1837,
+      "failureSignatureSha256": "a37e5e1c041ad8089755a6e9b682833d94f838b517b1652991e90c93a7107e0b",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "history_cell::tests::session_info_availability_nux_tooltip_snapshot",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 5577,
+      "baselineLogLine": 1001,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "startup_draft::layout::tests::owned_startup_keeps_the_live_bottom_geometry",
+      "category": "release_version_normalized_spacing_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 6516,
+      "baselineLogLine": 1794,
+      "failureSignatureSha256": "a54bd3b834e51821c339fe55084317185028ef45f461f3139c92f0296a9188c7",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_includes_credits_and_limits",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7166,
+      "baselineLogLine": 2061,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_includes_reasoning_details",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7207,
+      "baselineLogLine": 2941,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_active_user_defined_profile",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7248,
+      "baselineLogLine": 2899,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_includes_forked_from",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7289,
+      "baselineLogLine": 2605,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_cached_limits_hide_credits_without_flag",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7330,
+      "baselineLogLine": 2019,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_includes_monthly_limit",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7371,
+      "baselineLogLine": 2857,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_auto_review_permissions",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7454,
+      "baselineLogLine": 2815,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_missing_limits_message",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7495,
+      "baselineLogLine": 2983,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_refreshing_limits_notice",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7536,
+      "baselineLogLine": 3067,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_treats_refreshing_empty_limits_as_unavailable",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7625,
+      "baselineLogLine": 3025,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_unavailable_limits_message",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7790,
+      "baselineLogLine": 3109,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_stale_limits_message",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7889,
+      "baselineLogLine": 3151,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_uses_default_reasoning_when_config_empty",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7931,
+      "baselineLogLine": 3278,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_includes_enterprise_monthly_credit_limit",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 7981,
+      "baselineLogLine": 2689,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_uses_generic_limit_labels_for_unsupported_windows",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 8072,
+      "baselineLogLine": 3236,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_wraps_in_narrow_terminal",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 8115,
+      "baselineLogLine": 3500,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_uses_server_provider_id_and_auth_requirement",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 8157,
+      "baselineLogLine": 3458,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_wraps_halfwidth_kana_in_narrow_terminal",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 8199,
+      "baselineLogLine": 3375,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::transcript_overlay_remeasures_status_after_rate_limit_refresh",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 8241,
+      "baselineLogLine": 3689,
+      "failureSignatureSha256": "168657904b7d7791df3ea2fda6a968893dc4d7b0566045e0ece6df1d846e893a",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "status::tests::status_snapshot_shows_chatgpt_plan_without_email",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 8360,
+      "baselineLogLine": 98,
+      "failureSignatureSha256": "79cbcba884c186f4c7f60d6fb2bf1a607d3663a61a2141e1efa6df46f77b3841",
+      "baselineEvidenceRun": "local_socket_retry"
+    },
+    {
+      "test": "update_prompt::tests::long_update_command_keeps_selected_skip_visible_in_a_short_viewport",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 9065,
+      "baselineLogLine": 3605,
+      "failureSignatureSha256": "cc0c8637066376c5e7ec2a12989ebca2aee83cacb68b5ecfb5637a681e4c9a94",
+      "baselineEvidenceRun": "initial_44"
+    },
+    {
+      "test": "update_prompt::tests::update_prompt_snapshot",
+      "category": "release_version_snapshot",
+      "patchStatus": "FAIL",
+      "baselineStatus": "FAIL",
+      "sameFailureSignature": true,
+      "baselineConfirmed": true,
+      "patchLogLine": 9113,
+      "baselineLogLine": 3648,
+      "failureSignatureSha256": "a2b482fceff592fdde36f9072da63a54f7f930a9398a151cf5c29060c0ec1453",
+      "baselineEvidenceRun": "initial_44"
+    }
+  ],
+  "sourceIntegrity": {
+    "trackedBlobFilesVerified": 8775,
+    "changedTrackedFiles": [
+      "codex-rs/Cargo.lock"
+    ]
+  },
+  "localSocketRetry": {
+    "tests": [
+      "app::tests::active_reconnect::reconnect_allows_slow_hydration_but_bounds_a_stalled_server",
+      "app::tests::navigation_reconnect::reconnect_daemon_command_center_after_socket_replacement_without_a_conversation",
+      "status::tests::status_snapshot_shows_chatgpt_plan_without_email"
+    ],
+    "reason": "Initial sandbox denied local test sockets with EPERM; rerun with local socket access reproduced identical patched failure signatures",
+    "summary": "Summary [   2.298s] 3 tests run: 0 passed, 3 failed, 5616 skipped"
+  },
+  "excludedBuildAttempts": [
+    {
+      "reason": "Archive mtimes reused patched protocol cache; local source mtimes refreshed and all local crates rebuilt before baseline tests",
+      "count": 1
+    }
+  ],
+  "environmentCorrectionProof": {
+    "sourcePin": "a956835d020762cb2b570053af06f643a11c0ecc",
+    "sourcePreparation": "Clean git archive; only Cargo.lock copied from patched source to retain 159 local package version normalizations",
+    "processOnlyEnvironment": {
+      "NO_COLOR": "removed",
+      "GIT_CONFIG_COUNT": "1",
+      "GIT_CONFIG_KEY_0": "commit.gpgsign",
+      "GIT_CONFIG_VALUE_0": "false"
+    },
+    "globalConfigurationChanged": false,
+    "summary": "Summary [   1.293s] 6 tests run: 6 passed, 5613 skipped",
+    "results": [
+      {
+        "test": "custom_terminal::tests::cursor::terminal_draw_omits_cursor_style_without_an_owned_glyph",
+        "status": "PASS"
+      },
+      {
+        "test": "custom_terminal::tests::cursor::terminal_draw_repairs_single_column_without_scrolling",
+        "status": "PASS"
+      },
+      {
+        "test": "custom_terminal::tests::cursor::terminal_draw_repairs_styled_anchor_on_cursor_only_frames",
+        "status": "PASS"
+      },
+      {
+        "test": "custom_terminal::tests::cursor::terminal_draw_repairs_owned_wide_hyperlink_after_skipped_glyphs",
+        "status": "PASS"
+      },
+      {
+        "test": "get_git_diff::tests::get_git_diff_does_not_execute_configured_filters_fsmonitor_or_hooks",
+        "status": "PASS"
+      },
+      {
+        "test": "get_git_diff::tests::get_git_diff_does_not_execute_helpers_while_checking_dirty_submodules",
+        "status": "PASS"
+      }
+    ],
+    "scope": "Clean baseline only; no patched-source corrected-environment run"
+  }
+}

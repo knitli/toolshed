@@ -1,0 +1,18 @@
+{
+  "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "binarySha256": "076822c4575d370b3a1913f0ad14e655c5f04bbfa341bc9832a1f55886b59169",
+  "patchSha256": "bfa1af2b551162d52bb90bc538b48d2d0373f642db802622601826489bcd0217",
+  "productionModuleSha256": "e89e163a3e8eddf3d5e21ff5bb8f03e197c17e901e057bb1e7439038c6f4bd51",
+  "targetedTests": {
+    "passed": 7,
+    "failed": 0,
+    "skipped": 5619
+  },
+  "isolatedMutationTests": 5,
+  "clippy": "just fix -p codex-tui --profile dev-small passed; pre-existing core unused import warning",
+  "build": "cargo build --locked -p codex-cli --bin codex --profile dev-small passed",
+  "format": "pinned Rust 1.95 rustfmt check passed on scoped source; final test-only formatting after mutation runs",
+  "runtimeQualification": "not established by these unit/build checks",
+  "productionNativeEnabled": false,
+  "fullRepositoryFormatter": "just fmt attempted in isolated source copy; failed because dotslash was unavailable and unrelated Python Ruff downloads could not resolve files.pythonhosted.org"
+}

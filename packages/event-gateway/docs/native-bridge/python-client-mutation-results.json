@@ -1,0 +1,150 @@
+{
+  "createdAtUtc": "2026-10-07T01:49:31.340710+00:00",
+  "sourceSHA256": "a2174b69a3ad9e77509bd33e7451521e3dd2efe1dc2211937f8a95531376316e",
+  "testSHA256": "6352870df54f7733bf20e6db147f45d85a78410874e3e295f9cd213c05ddd9bc",
+  "caseCount": 14,
+  "cases": [
+    {
+      "case": "one_start_per_identity_after_fresh_witness",
+      "test": "test_exact_start_receipt_and_no_replay",
+      "mutantSourceSHA256": "6845b9ac2a680758acba8aff860439490f444b0fc48a8b406fe4037459bbfd9b",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "read_only_exact_receipt_lookup",
+      "test": "test_exact_start_receipt_and_no_replay",
+      "mutantSourceSHA256": "2f4168c5b0257310c1be7ce7236ba0d6ace46c242015f1e2830025db7f0663de",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "matching_nonce",
+      "test": "test_lost_mismatched_malformed_late_receipt_stays_unknown",
+      "mutantSourceSHA256": "d6ab44c48c034bbfa56af02f9909fa3e6ff34f358a8dea0d314ce6e1b45b45e3",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "exact_receipt_identity",
+      "test": "test_lost_mismatched_malformed_late_receipt_stays_unknown",
+      "mutantSourceSHA256": "ff47b1d64eda4994d789624eb79d0fcd93c843b09bed73a3ad2f0240fd3d80fc",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "send_error_remains_unknown",
+      "test": "test_lost_mismatched_malformed_late_receipt_stays_unknown",
+      "mutantSourceSHA256": "d33ae45de729c583ef6fd9762573a9831ff0fa234671faa5a3a8f79f30b9547b",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "eligible_and_fresh_witness",
+      "test": "test_unfresh_or_unbound_witness_never_writes_start",
+      "mutantSourceSHA256": "cadfa78e92f1c5665c4da762c23f0618eb3cecd11fc40418c4a18b92e2972e9a",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "local_event_and_binding_validation",
+      "test": "test_arbitrary_input_invalid_event_and_binding_mismatch_are_local_refusals",
+      "mutantSourceSHA256": "38390acbdba702237c39c42e268607d2a56877301478320d276cdcec0db9f566",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "absolute_witness_deadline",
+      "test": "test_fragmented_frame_and_absolute_witness_deadline",
+      "mutantSourceSHA256": "d7cbb50654d945403e255eb5f1cb0d588395e93e2ec10195e0e184f499df44ba",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "loopback_request_count",
+      "test": "test_loopback_mock_returns_synthetic_sse",
+      "mutantSourceSHA256": "e7ac98cecc93f4c065e37523ff797b983e723b84cc2f9c87e6c9ec5222d898b9",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "readonly_started_requires_replayed_true",
+      "test": "test_lost_mismatched_malformed_late_receipt_stays_unknown",
+      "mutantSourceSHA256": "b7afdeeb873f2d22aa8d4f52b3ed46392efe7b90bbaa15fd3d58de33c552b893",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "warmup_never_grants_before_fresh",
+      "test": "test_fragmented_frame_and_absolute_witness_deadline",
+      "mutantSourceSHA256": "767ca87cae5d2dcc268a233e35a69f59d086ed5ddc5a7a76d5e1e682633895a6",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "exact_title_schema_vs_unknown",
+      "test": "test_loopback_mock_returns_synthetic_sse",
+      "mutantSourceSHA256": "085db298628794db6534a9d6c0223716f616fdc8c6054e6388aebd0371e262bf",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "readonly_requires_exact_retained_start",
+      "test": "test_exact_start_receipt_and_no_replay",
+      "mutantSourceSHA256": "9e071e31556f2397c1350ec02d46170ebb9920bbd93d877d58491188e24bbffe",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    },
+    {
+      "case": "retained_start_nested_metadata_is_immutable",
+      "test": "test_exact_start_receipt_and_no_replay",
+      "mutantSourceSHA256": "3a59906e307290b4e7d3294763d80f0406444a828bfe997d1a58f49cfc4987f8",
+      "mutantExit": 1,
+      "assertionFailed": true,
+      "errors": false,
+      "restoredExit": 0
+    }
+  ],
+  "baseline": {
+    "exit": 0,
+    "assertionFailed": false,
+    "errors": false,
+    "testCount": 6
+  },
+  "restored": {
+    "exit": 0,
+    "assertionFailed": false,
+    "errors": false,
+    "testCount": 6
+  },
+  "sharedHashesUnchanged": true,
+  "isolatedCopiesOnly": true,
+  "rawPromptFrameOrLogContentIncluded": false,
+  "allCasesAssertionFailedAndRestored": true
+}

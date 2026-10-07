@@ -1,0 +1,207 @@
+{
+  "schema_version": 1,
+  "proof_source": "isolated APFS clone of the frozen native-selection source; each mutant was restored byte-for-byte before the restored-green run",
+  "runner": {
+    "command_pattern": "just test -p <crate> --cargo-profile dev-small <test-filter>",
+    "rust_toolchain": "1.95.0",
+    "nextest_profile": "local",
+    "rust_min_stack_bytes": 8388608
+  },
+  "proofs": [
+    {
+      "name": "guarded-start cancellation isolation",
+      "file": "codex-rs/core/src/tasks/guarded_start.rs",
+      "test": "aborted_guarded_start_cancels_blocked_lifecycle_before_replacement",
+      "mutation": "Replaced the cancellation-select around BeforeTaskRegistration lifecycle with an unconditional await.",
+      "red_assertion": "the old contributor must not mutate extension stores after abort and replacement",
+      "baseline_green_exit": 0,
+      "mutant_red_exit": 100,
+      "restored_green_exit": 0,
+      "red_failure_type": "test assertion; no compile error",
+      "baseline_sha256": "381b171a096088a389ca7891cce0a3cf1066da7b8d814e55b828606c5445fb8f",
+      "restored_sha256": "381b171a096088a389ca7891cce0a3cf1066da7b8d814e55b828606c5445fb8f"
+    },
+    {
+      "name": "final guard refusal",
+      "file": "codex-rs/core/src/tasks/guarded_start.rs",
+      "test": "rejected_guarded_start_has_no_user_or_turn_started_event",
+      "mutation": "When the guard returned Rejected, invoked the dormant-task commit callback and treated the result as Committed.",
+      "red_assertion": "actual Started { turn_id: rejected-native-start } differed from expected NotSubmitted { reason: NotIdle }",
+      "baseline_green_exit": 0,
+      "mutant_red_exit": 100,
+      "restored_green_exit": 0,
+      "red_failure_type": "test assertion; no compile error",
+      "assertion_scope_note": "The status assertion fails before the test's no-event assertions execute.",
+      "baseline_sha256": "381b171a096088a389ca7891cce0a3cf1066da7b8d814e55b828606c5445fb8f",
+      "restored_sha256": "381b171a096088a389ca7891cce0a3cf1066da7b8d814e55b828606c5445fb8f"
+    },
+    {
+      "name": "disconnect tombstone blocks late update and start commit",
+      "file": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "test": "native_selection_processor::tests::closed_connection_tombstone_blocks_late_update_and_start_commit",
+      "mutation": "Changed the close transition from selection.closed = true to selection.closed = false.",
+      "red_assertion": "assertion failed: lock(&late_update_selection).closed",
+      "baseline_green_exit": 0,
+      "mutant_red_exit": 100,
+      "restored_green_exit": 0,
+      "red_failure_type": "test assertion; no compile error",
+      "baseline_sha256": "09a50654df2f7cb0ad7d34149acd6baec3cc6f5706ecbd2f2d2e5192763e7d1f",
+      "restored_sha256": "09a50654df2f7cb0ad7d34149acd6baec3cc6f5706ecbd2f2d2e5192763e7d1f"
+    }
+  ],
+  "inspection_only": [
+    {
+      "behavior": "The TransportEvent::ConnectionClosed branch calls native_selection_connection_closed(connection_id) before awaiting rpc_gate.close().",
+      "file": "codex-rs/app-server/src/lib.rs",
+      "evidence_type": "code inspection only; dispatcher ordering was not independently mutation-tested"
+    }
+  ],
+  "raw_test_logs_included": false,
+  "validation_runs": [
+    {
+      "id": "codex-core-full-escalated",
+      "command": "just test -p codex-core --cargo-profile dev-small",
+      "runner": "Rust 1.95.0, nextest local, RUST_MIN_STACK=8388608; require_escalated for mock sockets",
+      "exit_code": 100,
+      "tests_run": 4856,
+      "passed": 4835,
+      "failed": 21,
+      "skipped": 27,
+      "classification": {
+        "baseline_reproduced_failures": 18,
+        "environment_controls_passed": 2,
+        "missing_code_mode_host": 8,
+        "current_only_missing_test_stdio_server": 3,
+        "unresolved_baseline_reproduced": 8,
+        "unresolved_tests": [
+          "turn_metadata::tests::detached_memory_responses_metadata_starts_an_independent_root_turn",
+          "turn_metadata::tests::turn_metadata_state_coalesces_concurrent_git_enrichment",
+          "suite::code_mode::code_mode_exec_holds_captured_result_during_elicitation",
+          "suite::tool_lifecycle::observations::code_mode_reports_host_timing_without_nested_dispatch_timing",
+          "suite::skills_extension::production_turn_keeps_rebalanced_catalogs_stable_after_compaction_and_resume",
+          "suite::pending_input::input_preempts_response_and_yields_running_code_mode_call",
+          "suite::pending_input::steers_yield_exec_and_wait_without_stopping_the_cell::disabled",
+          "suite::pending_input::steers_yield_exec_and_wait_without_stopping_the_cell::enabled"
+        ],
+        "notes": [
+          "The 8 code-mode-host tests fail because codex-code-mode-host is absent; its pinned V8 helper dependency could not be built (see v8-helper-build).",
+          "The 2 process-only controls were git_info_tests::test_recent_commits_orders_and_limits and user_shell_command_does_not_set_network_sandbox_env_var; they pass with commit.gpgsign=false and CODEX_SANDBOX_NETWORK_DISABLED unset.",
+          "The 3 current-only failures were two rmcp_client tests and worktree_trust; all three pass after building test_stdio_server."
+        ]
+      },
+      "log_file": "core-full-escalated.log"
+    },
+    {
+      "id": "codex-core-clean-baseline-selectors",
+      "command": "just test -p codex-core --cargo-profile dev-small -E <21-failure-filter>",
+      "source": "clean pinned codex-rs baseline at a956835d020762cb2b570053af06f643a11c0ecc",
+      "exit_code": 100,
+      "tests_run": 21,
+      "passed": 3,
+      "failed": 18,
+      "skipped": 4860,
+      "result": "All 18 remaining failures match the current-source failure set; 3 tests pass with test_stdio_server available.",
+      "log_file": "core-baseline-21.log"
+    },
+    {
+      "id": "codex-core-process-controls",
+      "command": "just test -p codex-core --cargo-profile dev-small -E <git-and-network-flag-controls>",
+      "exit_code": 0,
+      "tests_run": 2,
+      "passed": 2,
+      "failed": 0,
+      "process_only_overrides": {
+        "unset": [
+          "NO_COLOR",
+          "CODEX_SANDBOX_NETWORK_DISABLED"
+        ],
+        "git_config": "GIT_CONFIG_COUNT=1, GIT_CONFIG_KEY_0=commit.gpgsign, GIT_CONFIG_VALUE_0=false"
+      },
+      "global_configuration_changed": false,
+      "log_file": "core-env-controls.log"
+    },
+    {
+      "id": "codex-core-test-stdio-helper-controls",
+      "command": "just test -p codex-core --cargo-profile dev-small -E <three-helper-dependent-tests>",
+      "exit_code": 0,
+      "tests_run": 3,
+      "passed": 3,
+      "failed": 0,
+      "helper": "test_stdio_server built from current pinned source into target195/dev-small",
+      "log_file": "core-helper-controls.log"
+    },
+    {
+      "id": "codex-app-server-full-escalated",
+      "command": "just test -p codex-app-server --cargo-profile dev-small",
+      "runner": "Rust 1.95.0, nextest local, RUST_MIN_STACK=8388608; require_escalated for mock sockets",
+      "exit_code": 100,
+      "tests_run": 1833,
+      "passed": 1809,
+      "failed": 24,
+      "skipped": 1,
+      "failure_classification": {
+        "git_fixture_failures_fixed_by_process_only_signing_override": 8,
+        "code_mode_host_unavailable_due_v8_helper_build": 12,
+        "codex_apps_mcp_initialize_http_404_reproduced_on_baseline": 4,
+        "unresolved_patch_specific_failures": 0
+      },
+      "log_file": "app-server-full-escalated-postbaseline.log"
+    },
+    {
+      "id": "codex-app-server-git-process-controls",
+      "command": "just test -p codex-app-server --cargo-profile dev-small -E <eight-git-fixture-failures>",
+      "exit_code": 0,
+      "tests_run": 8,
+      "passed": 8,
+      "failed": 0,
+      "process_only_overrides": {
+        "unset": [
+          "NO_COLOR"
+        ],
+        "git_config": "GIT_CONFIG_COUNT=1, GIT_CONFIG_KEY_0=commit.gpgsign, GIT_CONFIG_VALUE_0=false"
+      },
+      "global_configuration_changed": false,
+      "log_file": "app-server-git-controls.log"
+    },
+    {
+      "id": "codex-app-server-clean-baseline-selectors",
+      "command": "just test -p codex-app-server --cargo-profile dev-small -E <16-remaining-failure-filter>",
+      "source": "clean pinned codex-rs baseline at a956835d020762cb2b570053af06f643a11c0ecc",
+      "exit_code": 100,
+      "tests_run": 16,
+      "passed": 0,
+      "failed": 16,
+      "skipped": 1811,
+      "result": "All 16 remaining current-source failures reproduce on baseline: 12 code-mode-host unavailable and 4 codex_apps MCP initialize HTTP 404.",
+      "log_file": "app-server-baseline-16.log"
+    },
+    {
+      "id": "codex-native-workspace-full-attempt",
+      "command": "just test --cargo-profile dev-small",
+      "runner": "Rust 1.95.0, require_escalated",
+      "exit_code": 101,
+      "tests_started": false,
+      "blocker": {
+        "crate": "glib-sys v0.22.8",
+        "command": "pkg-config --libs --cflags glib-2.0 'glib-2.0 >= 2.56'",
+        "reason": "glib-2.0.pc is absent and glib-2.0 is not installed in the searched Homebrew Cellar/opt paths.",
+        "installation_attempted": false
+      },
+      "log_file": "workspace-full-escalated.log"
+    },
+    {
+      "id": "v8-helper-build",
+      "command": "cargo build --profile dev-small -p codex-code-mode-host --bin codex-code-mode-host",
+      "exit_code": 101,
+      "blocker": {
+        "crate": "v8 v150.4.0",
+        "target": "aarch64-apple-darwin",
+        "url": "https://github.com/denoland/rusty_v8/releases/download/v150.4.0/librusty_v8_ptrcomp_sandbox_release_aarch64-apple-darwin.a.gz",
+        "result": "HTTP 404 after escalated retry; an earlier restricted attempt failed DNS resolution."
+      },
+      "source_build_assessment": "V8_FROM_SOURCE is supported, but the pinned crate README describes a >600,000-line C++ build often taking about 30 minutes and requiring Chromium gn+ninja; neither executable is installed. Not attempted within this spike.",
+      "source_or_dependency_changes": false,
+      "log_file": "v8-helper-build.log"
+    }
+  ]
+}

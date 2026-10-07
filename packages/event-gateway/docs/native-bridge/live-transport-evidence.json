@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-07T00:35:20.075359+00:00",
+  "scope": "Disposable no-turn parent/native-TUI socketpair transport interoperability; not daemon authentication, binding qualification, conditional submission, or production delivery proof.",
+  "binary": {
+    "path": "/private/tmp/codex-native-selection-spike/codex-transport-checkpoint",
+    "sha256": "076822c4575d370b3a1913f0ad14e655c5f04bbfa341bc9832a1f55886b59169",
+    "upstreamRevision": "a956835d",
+    "version": "0.160.0"
+  },
+  "observerSha256": "48e641befef8691ec8b8f7c959de8df5924d231ceaf3141b41ee3d8fab94e43b",
+  "isolation": {
+    "root": "/private/tmp/codex-bridge-yw1pqvn0",
+    "privateCodexHome": true,
+    "modelProviderBaseUrl": "http://127.0.0.1:9",
+    "proxyNoTurnGuard": true,
+    "realHistoryOrSharedConfigRead": false,
+    "rawTerminalTranscriptPersisted": false,
+    "cleanupVerified": [
+      "home removed",
+      "backend.sock removed",
+      "proxy.sock removed",
+      "observer exited 0"
+    ]
+  },
+  "wire": {
+    "transport": "inherited AF_UNIX SOCK_STREAM socketpair",
+    "environment": "CODEX_SELECTION_WITNESS_FD",
+    "challengeIntervalMs": 100,
+    "challengeDeadlineMs": 750,
+    "nativeUiPollMs": 25,
+    "parentPollMs": 25,
+    "requestMaxBytesIncludingNewline": 128,
+    "responseMaxBytesIncludingNewline": 2048,
+    "clientMethods": [
+      "account/read",
+      "collaborationMode/list",
+      "config/read",
+      "configRequirements/read",
+      "hooks/list",
+      "initialize",
+      "initialized",
+      "model/list",
+      "plugin/list",
+      "server/diagnostics",
+      "skills/list",
+      "thread/list",
+      "thread/loaded/list",
+      "thread/read",
+      "thread/resume",
+      "thread/start",
+      "thread/turns/list"
+    ],
+    "turnOrQueueRequestCount": 0,
+    "turnStartedNotificationCount": 0,
+    "wireRows": 151,
+    "nativeRows": 1105
+  },
+  "cases": {
+    "startupRecovery": {
+      "passed": true,
+      "method": "Pause second client immediately after launch, wait for deadline, resume; late nonce 1 is discarded before nonce 3 becomes eligible.",
+      "startupUnavailableSeconds": 7.167866
+    },
+    "modelMenu": {
+      "passed": true,
+      "method": "Enter /model; separate Enter after paste-burst settling opens picker; ESC dismisses without selecting a model.",
+      "idleGeneration": 13,
+      "menuGeneration": 34,
+      "escapeGeneration": 37
+    },
+    "suspendResume": {
+      "passed": true,
+      "priorNonce": 340,
+      "freshNonce": 342,
+      "priorGeneration": 37,
+      "freshGeneration": 39,
+      "lateMatchingReplyEligible": false,
+      "resumeLateToFreshSeconds": 0.052308
+    },
+    "eof": {
+      "passed": true,
+      "clients": [
+        "one",
+        "two"
+      ],
+      "terminalCause": "eof"
+    },
+    "disconnect": {
+      "passed": true,
+      "connectionChanged": true,
+      "generationAdvanced": true,
+      "remainedUnavailable": true
+    },
+    "backendRestart": {
+      "passed": true,
+      "oldBackendPid": 15434,
+      "newBackendPid": 25516,
+      "oldBackendRejected": true,
+      "remainedUnavailable": true,
+      "requalificationProven": false
+    }
+  },
+  "checkpointOrders": {
+    "initialIdle": 47,
+    "menuUnavailable": 271,
+    "escapeFresh": 333,
+    "beforeSuspend": 394,
+    "suspendExpired": 396,
+    "suspendDeadline": 397,
+    "lateResumeRejected": 399,
+    "resumeFresh": 400,
+    "startupUnavailable": 501,
+    "startupDeadline": 509,
+    "startupLateRejected": 620,
+    "startupFresh": 628,
+    "clientOneEof": 796,
+    "disconnectUnavailable": 917,
+    "newBackendUnavailable": 1033,
+    "clientTwoEof": 1256
+  },
+  "safeLogExcerpt": {
+    "file": "live-transport.log.excerpt",
+    "rows": 49,
+    "sha256": "818d2ef4d496cb9b20b9d53d2799703ed2d91fcb16f40b9fea4e67811a605002"
+  },
+  "limitations": [
+    "Backend PID is observation metadata, not daemon identity proof.",
+    "No model turn, queue submission, native conditional-start RPC, cloud authority, or real service was invoked.",
+    "Disconnect/restart proves continued withholding and changed connection/generation, not automatic requalification.",
+    "Initial timeout recovery was induced by SIGSTOP at startup; normal first-client startup completed before its first deadline."
+  ]
+}
