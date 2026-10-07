@@ -215,21 +215,28 @@ jobs:
                   raise ValueError("invalid workflow revision")
               workflow_source = read_blob(WORKFLOW_PATH, workflow_sha, token)
               results = []
+              publication_failed = False
               for pull in selected_pulls(event_name, event, token):
                   number, head = pull["number"], pull["head"]["sha"]
-                  if not publish_if_current(number, head, "pending", "Checking complete canonical contract family",
-                                            token, run_url, workflow_source):
-                      continue
                   try:
-                      family = verify_contract(head, token)
-                      state, description = "success", "Canonical event/control family verified: " + family
+                      if not publish_if_current(number, head, "pending", "Checking complete canonical contract family",
+                                                token, run_url, workflow_source):
+                          continue
+                      try:
+                          family = verify_contract(head, token)
+                          state, description = "success", "Canonical event/control family verified: " + family
+                      except OSError:
+                          state, description = "error", "Canonical contract could not be fetched; retry verification"
+                      except (ValueError, KeyError, TypeError):
+                          state, description = "failure", "Snapshot does not match a contract family authorized on main"
+                      if publish_if_current(number, head, state, description, token, run_url, workflow_source):
+                          results.append((number, head, state))
+                          print(f"PR #{number} {head}: {state}")
                   except OSError:
-                      state, description = "error", "Canonical contract could not be fetched; retry verification"
-                  except (ValueError, KeyError, TypeError):
-                      state, description = "failure", "Snapshot does not match a contract family authorized on main"
-                  if publish_if_current(number, head, state, description, token, run_url, workflow_source):
-                      results.append((number, head, state))
-                      print(f"PR #{number} {head}: {state}")
+                      publication_failed = True
+                      print("Contract status publication failed; continuing with remaining PRs.")
+              if publication_failed:
+                  raise OSError("Some contract statuses could not be published")
               return results
 
 
