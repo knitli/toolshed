@@ -210,7 +210,12 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(client.principal, principal)
 
     def test_origin_and_agent_configuration_errors_are_stable(self):
-        for field, values in (("origin", ("https://[", None, 123, b"https://events.example.com")),
+        for field, values in (("origin", ("https://[", None, 123, b"https://events.example.com",
+                                       "https://events .example.com", "https://events.example.com%2f.evil",
+                                       "https://-events.example.com", "https://events-.example.com",
+                                       "https://" + "a" * 64 + ".example.com",
+                                       "https://" + ".".join(("a" * 63,) * 3 + ("b" * 62,)),
+                                       "https://events.\nexample.com", "https://events.\texample.com")),
                               ("agent", (None, 123, []))):
             for value in values:
                 configuration = {"origin": self.client.origin, "agent": self.client.agent}
@@ -219,6 +224,13 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
                     CloudClient(**configuration, principal=self.client.principal,
                                 node_id=NODE, node_generation=1, private_key=self.key,
                                 credentials=self.credentials, send=self.send)
+
+        client = CloudClient(origin="https://xn--bcher-kva.example", principal=self.client.principal,
+                             agent=self.client.agent, node_id=NODE, node_generation=1,
+                             private_key=self.key, credentials=self.credentials, send=self.send)
+        self.assertEqual(client.origin, "https://xn--bcher-kva.example")
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.credential_calls, 0)
 
     async def test_every_admitted_semantic_field_binds_original(self):
         replacements = {
@@ -256,6 +268,15 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             self.result["budget"][key] = bad
             with self.subTest(key=key), self.assertRaises(CloudError):
                 await self.client.claim(FIXTURE["original"])
+
+        for used in (0, 9):
+            self.result = copy.deepcopy(FIXTURE["overBudget"])
+            self.result["budget"].update(used=used, remaining=10 - used)
+            with self.subTest(used=used), self.assertRaisesRegex(CloudError, "^invalid_response$"):
+                await self.client.claim(FIXTURE["original"])
+        self.result = copy.deepcopy(FIXTURE["overBudget"])
+        self.result["budget"].update(used=11, remaining=0)
+        self.assertEqual(await self.client.claim(FIXTURE["original"]), self.result)
 
     async def test_http_refusal_codes_and_no_redirects(self):
         for status, body, code in ((403, {"error": "denied"}, "denied"),
@@ -406,10 +427,17 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(key=key), self.assertRaises(CloudError):
                 await self.client.complete_enrollment(challenge, mesh_ip="100.96.0.1", mesh_port=8789, agents=[self.client.agent])
         self.assertEqual(self.requests, [])
-        for result in ({"nodeId": NODE, "generation": 2}, {"nodeId": NODE, "generation": True},
-                       {"nodeId": FIXTURE["admitted"]["permitId"], "generation": 1}):
+        for result, code in (
+            ({"nodeId": NODE, "generation": 2}, "identity_mismatch"),
+            ({"nodeId": FIXTURE["admitted"]["permitId"], "generation": 1}, "identity_mismatch"),
+            ({"nodeId": "bad", "generation": 1}, "invalid_response"),
+            ({"nodeId": None, "generation": 1}, "invalid_response"),
+            ({"nodeId": NODE, "generation": True}, "invalid_response"),
+            ({"nodeId": NODE, "generation": 0}, "invalid_response"),
+            ({"nodeId": NODE, "generation": "1"}, "invalid_response"),
+        ):
             self.result = result
-            with self.assertRaises(CloudError):
+            with self.subTest(result=result), self.assertRaisesRegex(CloudError, f"^{code}$"):
                 await self.client.complete_enrollment(self.challenge(), mesh_ip="100.96.0.1", mesh_port=8789, agents=[self.client.agent])
 
     async def test_challenge_shape_errors_are_invalid_challenge_before_http(self):

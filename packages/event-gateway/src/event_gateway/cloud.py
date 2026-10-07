@@ -112,8 +112,9 @@ class CloudClient:
             parsed = urlsplit(origin)
         except ValueError:
             raise CloudError("invalid_configuration") from None
-        if (parsed.scheme != "https" or not parsed.hostname or "." not in parsed.hostname
-                or parsed.netloc != parsed.hostname or parsed.path or parsed.query or parsed.fragment
+        if (parsed.scheme != "https" or not parsed.hostname or len(parsed.hostname) > 253
+                or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+", parsed.hostname)
+                or origin != f"https://{parsed.hostname}"
                 or not _principal(principal) or not re.fullmatch(r"[a-z0-9-]{1,32}", agent)
                 or not _uuid(node_id) or not _generation(node_generation)
                 or not isinstance(private_key, Ed25519PrivateKey)):
@@ -209,6 +210,7 @@ class CloudClient:
             _closed(budget, ("used", "remaining", "limit", "windowMs"))
             if (any(type(budget[key]) is not int or budget[key] < 0 for key in budget)
                     or budget["limit"] != 10 or budget["windowMs"] != 3600000
+                    or budget["used"] < budget["limit"]
                     or budget["remaining"] != max(0, 10 - budget["used"])):
                 raise CloudError("invalid_response")
             return result
@@ -275,7 +277,9 @@ class CloudClient:
         result = await self._post("/v1/nodes/complete", {"challengeId": challenge["challengeId"],
                                   "signature": self._sign(expected.encode())}, node_proof=False)
         _closed(result, ("nodeId", "generation"))
-        if result["nodeId"] != self.node_id or result["generation"] != self.node_generation or not _generation(result["generation"]):
+        if not _uuid(result["nodeId"]) or not _generation(result["generation"]):
+            raise CloudError("invalid_response")
+        if result["nodeId"] != self.node_id or result["generation"] != self.node_generation:
             raise CloudError("identity_mismatch")
         return result
 
