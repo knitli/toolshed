@@ -15521,7 +15521,7 @@ index d9a5c6a..a705f50 100644
  
  async fn steer(
 diff --git a/codex-rs/core/src/session/turn_input_tests.rs b/codex-rs/core/src/session/turn_input_tests.rs
-index e76b3e2..93b0790 100644
+index e76b3e2..e67b927 100644
 --- a/codex-rs/core/src/session/turn_input_tests.rs
 +++ b/codex-rs/core/src/session/turn_input_tests.rs
 @@ -22,6 +22,8 @@ use codex_protocol::protocol::InterAgentCommunication;
@@ -15533,7 +15533,7 @@ index e76b3e2..93b0790 100644
  use codex_protocol::user_input::UserInput;
  use codex_utils_absolute_path::AbsolutePathBuf;
  use core_test_support::test_codex::local_selections;
-@@ -74,6 +76,193 @@ fn user_message(text: &str) -> ResponseItem {
+@@ -74,6 +76,307 @@ fn user_message(text: &str) -> ResponseItem {
      }
  }
  
@@ -15561,6 +15561,23 @@ index e76b3e2..93b0790 100644
 +    blocked_start_entered: tokio::sync::Notify,
 +    release_blocked_start: tokio::sync::Notify,
 +    events: std::sync::Mutex<Vec<String>>,
++}
++
++struct PanickingBeforeTaskStart {
++    turn_id: String,
++}
++
++impl codex_extension_api::TurnLifecycleContributor for PanickingBeforeTaskStart {
++    fn on_turn_start<'a>(
++        &'a self,
++        input: codex_extension_api::TurnStartInput<'a>,
++    ) -> codex_extension_api::ExtensionFuture<'a, ()> {
++        Box::pin(async move {
++            if input.turn_id == self.turn_id {
++                panic!("injected panic during guarded task preparation");
++            }
++        })
++    }
 +}
 +
 +impl codex_extension_api::TurnLifecycleContributor for BlockingBeforeTaskStart {
@@ -15724,19 +15741,117 @@ index e76b3e2..93b0790 100644
 +    session.abort_all_tasks(TurnAbortReason::Interrupted).await;
 +}
 +
++#[tokio::test]
++async fn panicking_guarded_start_preparation_is_not_started_and_cleans_dormant_task() {
++    let (mut session, _turn_context, rx) = make_session_and_context_with_rx().await;
++    let failed_turn_id = "panicking-guarded-turn".to_string();
++    let contributor = Arc::new(PanickingBeforeTaskStart {
++        turn_id: failed_turn_id.clone(),
++    });
++    let mut extensions =
++        codex_extension_api::ExtensionRegistryBuilder::<crate::config::Config>::new();
++    extensions.turn_lifecycle_contributor(contributor);
++    Arc::get_mut(&mut session)
++        .expect("test session should be uniquely owned")
++        .services
++        .extensions = Arc::new(extensions.build());
++
++    let submission = tokio::time::timeout(
++        std::time::Duration::from_secs(5),
++        handle(
++            &session,
++            TurnInputRequest::user_input(vec![UserInput::Text {
++                text: "must not run after preparation panic".to_string(),
++                text_elements: Vec::new(),
++            }])
++            .with_start_guard(Arc::new(CommitStartGuard)),
++            TurnInputMode::StartIfIdle,
++            failed_turn_id,
++        ),
++    )
++    .await
++    .expect("failed preparation should settle the submission")
++    .expect("failed preparation should remain a typed result");
++
++    assert_eq!(
++        submission,
++        TurnInputSubmission::NotSubmitted {
++            reason: NotSubmittedReason::NotIdle,
++        }
++    );
++    assert!(
++        session.active_turn.lock().await.is_none(),
++        "panicked preparation must release its dormant task registration"
++    );
++    assert!(
++        session
++            .input_queue
++            .get_pending_input(&session.active_turn)
++            .await
++            .0
++            .is_empty(),
++        "the unreleased task must not record its user input"
++    );
++    let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
++    assert!(!events.iter().any(|event| matches!(
++        event.msg,
++        EventMsg::UserMessage(_) | EventMsg::TurnStarted(_)
++    )));
++}
++
++#[tokio::test]
++async fn guarded_start_failure_cleanup_does_not_remove_a_different_turn() {
++    let (session, mut turn_context) = make_session_and_context().await;
++    let replacement_turn_id = "replacement-guarded-turn".to_string();
++    turn_context.sub_id = replacement_turn_id.clone();
++    let session = Arc::new(session);
++    session
++        .spawn_task(
++            Arc::new(turn_context),
++            Vec::new(),
++            NeverEndingTask {
++                kind: TaskKind::Regular,
++                listen_to_cancellation_token: true,
++            },
++        )
++        .await;
++
++    assert!(
++        !session
++            .abort_turn_if_active(
++                "failed-earlier-turn",
++                TurnAbortReason::Replaced,
++                /*error*/ None,
++            )
++            .await,
++        "cleanup for an earlier turn must not claim the replacement"
++    );
++    let active = session.active_turn.lock().await;
++    assert_eq!(
++        active
++            .as_ref()
++            .and_then(|active_turn| active_turn.task.as_ref())
++            .map(|task| task.turn_context.sub_id.as_str()),
++        Some(replacement_turn_id.as_str())
++    );
++    drop(active);
++    session.abort_all_tasks(TurnAbortReason::Interrupted).await;
++}
++
  async fn submit_start_only(
      session: &Arc<Session>,
      input: SubmittedTurnInput,
 diff --git a/codex-rs/core/src/tasks/guarded_start.rs b/codex-rs/core/src/tasks/guarded_start.rs
 new file mode 100644
-index 0000000..e2ea43a
+index 0000000..6e79dd0
 --- /dev/null
 +++ b/codex-rs/core/src/tasks/guarded_start.rs
-@@ -0,0 +1,259 @@
+@@ -0,0 +1,268 @@
 +use std::sync::Arc;
 +use std::time::Instant;
 +
 +use codex_protocol::protocol::EventMsg;
++use codex_protocol::protocol::TurnAbortReason;
 +use codex_protocol::protocol::WarningEvent;
 +use codex_protocol::turn_input::TurnStartGuard;
 +use codex_protocol::turn_input::TurnStartGuardCommit;
@@ -15947,7 +16062,15 @@ index 0000000..e2ea43a
 +            }
 +            let _ = prepared_tx.send(());
 +        });
-+        let _ = prepared_rx.await;
++        if prepared_rx.await.is_err() {
++            self.abort_turn_if_active(
++                &turn_context.sub_id,
++                TurnAbortReason::Replaced,
++                /*error*/ None,
++            )
++            .await;
++            return TurnStartGuardCommit::Rejected;
++        }
 +        TurnStartGuardCommit::Committed
 +    }
 +

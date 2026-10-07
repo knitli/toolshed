@@ -414,5 +414,241 @@
       }
     }
   ],
-  "purpose": "Complete v3 test-method delta inventory. A causal pair means an intended semantic assertion red followed by restored-source green; compile/schema/setup failures are excluded."
+  "purpose": "Complete v3 test-method delta inventory. A causal pair means an intended semantic assertion red followed by restored-source green; compile/schema/setup failures are excluded.",
+  "corePreparationReviewCorrection": {
+    "newMethods": 2,
+    "semanticCausalPairs": 3,
+    "methods": [
+      "panicking_guarded_start_preparation_is_not_started_and_cleans_dormant_task",
+      "guarded_start_failure_cleanup_does_not_remove_a_different_turn"
+    ],
+    "scope": "Preparation-panic baseline and cleanup-omission mutations exercise the first method; separate exact-ID helper mutation exercises the second. The latter is helper sensitivity, not a new production helper change.",
+    "ownerEvidence": {
+      "causalPairs": [
+        {
+          "failure": "prepared-channel error was ignored, so the result was Started instead of NotSubmitted(NotIdle)",
+          "kind": "pre-fix baseline regression",
+          "red": {
+            "assertion": "actual Started vs expected NotSubmitted(NotIdle)",
+            "exit": 100,
+            "path": "/private/tmp/codex-native-guarded-start-p2/causals/preparation-panics-baseline-red.log",
+            "sha256": "c3728bcb67b08c3820caf5e24ca62075eeeff10e84c9d1cdcb5acc6eb20ae129"
+          },
+          "restoredGreen": {
+            "exit": 0,
+            "passed": 4,
+            "path": "/private/tmp/codex-native-guarded-start-p2/causals/guarded-start-focused-green.log",
+            "sha256": "82f95d68fc83fcb5bf60ec4d692828eb0ce147411a3c9c0f03f31ead63d3ab01"
+          },
+          "test": "panicking_guarded_start_preparation_is_not_started_and_cleans_dormant_task"
+        },
+        {
+          "failure": "removed the exact-ID abort cleanup after preparation-channel failure",
+          "kind": "semantic cleanup-omitted mutant",
+          "red": {
+            "assertion": "panicked preparation must release its dormant task registration",
+            "exit": 100,
+            "path": "/private/tmp/codex-native-guarded-start-p2/causals/preparation-cleanup-omitted-red.log",
+            "sha256": "05fa1b50be776e33bb37d5d0ce32f4647741c0470b804bfd8fb18a7ff57bfad9"
+          },
+          "restoredGreen": {
+            "exit": 0,
+            "passed": 4,
+            "path": "/private/tmp/codex-native-guarded-start-p2/causals/guarded-start-focused-green.log",
+            "sha256": "82f95d68fc83fcb5bf60ec4d692828eb0ce147411a3c9c0f03f31ead63d3ab01"
+          },
+          "test": "panicking_guarded_start_preparation_is_not_started_and_cleans_dormant_task"
+        },
+        {
+          "evidence": {
+            "frozenManifestSha256": "c3720b8f37b003b6339213974db604f70bb68adb88d7760cce0f2d8317ae77cb",
+            "methodSourceSha256": "4167a59e4d411329c62a970015bea3f59bcce8a1ade62e1294a504f7ce464e73",
+            "mutantSha256": "6c68c97c3e2c43c965ddc08811f61690f2106b24faea1475c2003409f0bd6b82",
+            "path": "/private/tmp/codex-native-guarded-start-p2/causal-cleanup-scratch/evidence.json",
+            "sha256": "12acacecf6ee1f70557fe267744c350be259a9ea1b56f8df595e59c0e3c2fe7e",
+            "sourceRestoredBytewise": true
+          },
+          "kind": "semantic replacement-protection mutant in separate CoW scratch",
+          "mutant": "task.turn_context.sub_id == turn_id changed to != turn_id",
+          "red": {
+            "assertion": "cleanup for an earlier turn must not claim the replacement",
+            "exit": 100,
+            "path": "/private/tmp/codex-native-guarded-start-p2/causal-cleanup-scratch/red.log",
+            "sha256": "5656c8dbae9474bd01908352a3f9dae7dcc92a451e5e749cf8a2a7c47d9f26ac"
+          },
+          "restoredGreen": {
+            "exit": 0,
+            "passed": 1,
+            "path": "/private/tmp/codex-native-guarded-start-p2/causal-cleanup-scratch/green.log",
+            "sha256": "b6710ce665ee699c9604ddc6fb16e46aa4ba73fae759efb3d512a9dd1282db02"
+          },
+          "test": "guarded_start_failure_cleanup_does_not_remove_a_different_turn"
+        }
+      ],
+      "logs": {
+        "/private/tmp/codex-native-guarded-start-p2/causal-cleanup-scratch/green.log": "b6710ce665ee699c9604ddc6fb16e46aa4ba73fae759efb3d512a9dd1282db02",
+        "/private/tmp/codex-native-guarded-start-p2/causal-cleanup-scratch/red.log": "5656c8dbae9474bd01908352a3f9dae7dcc92a451e5e749cf8a2a7c47d9f26ac",
+        "/private/tmp/codex-native-guarded-start-p2/causals/app-server-native-start-integration-escalated.log": "75785b8899f07c35b0355c57b62e354dbe88f6e43bb2121d04da57e41e57cf0a",
+        "/private/tmp/codex-native-guarded-start-p2/causals/app-server-native-start-integration.log": "34ac1ef58cb478ae0c5e81e78c47833ab5dc95ad8219eacc366c336b6fad6d7b",
+        "/private/tmp/codex-native-guarded-start-p2/causals/core-turn-input-tests.log": "7feb5f21f725af0fdc653fe1dfa6a51a5bf6dd94935ad819760c40da151e1ec6",
+        "/private/tmp/codex-native-guarded-start-p2/causals/core-turn-start-mcp-tests.log": "8415ee90beeebf27a9d1296ccf1b3fd7ee6aabb4f0d4e5d0f65ed89d061cb0d7",
+        "/private/tmp/codex-native-guarded-start-p2/causals/final-cli-build.log": "6b19138f7815031f2fc7986248177eea620c81603886e60c7d31717f5efb6bbe",
+        "/private/tmp/codex-native-guarded-start-p2/causals/guarded-start-focused-green.log": "82f95d68fc83fcb5bf60ec4d692828eb0ce147411a3c9c0f03f31ead63d3ab01",
+        "/private/tmp/codex-native-guarded-start-p2/causals/just-fix-core-escalated.log": "b0a769b6b04e525b59b6d3328a98d8af83021bbdec13fe1aa6b268253e250af9",
+        "/private/tmp/codex-native-guarded-start-p2/causals/just-fix-core.log": "25e5c6388031b83706fdfa64161c3a5e18754833fb0dcf60de1e1e56fdfdd279",
+        "/private/tmp/codex-native-guarded-start-p2/causals/just-fmt-pinned.log": "f90fe01c8000b1e949d10c70b1a618f28ecb2c7326cf5fb8f99816a99bae3d6c",
+        "/private/tmp/codex-native-guarded-start-p2/causals/just-fmt.log": "2735200a9e5ae4ec6fd8dc2970366ad7c836160db0e9a38ce257538abc3a7451",
+        "/private/tmp/codex-native-guarded-start-p2/causals/preparation-cleanup-omitted-red.log": "05fa1b50be776e33bb37d5d0ce32f4647741c0470b804bfd8fb18a7ff57bfad9",
+        "/private/tmp/codex-native-guarded-start-p2/causals/preparation-panics-baseline-red.log": "c3728bcb67b08c3820caf5e24ca62075eeeff10e84c9d1cdcb5acc6eb20ae129"
+      },
+      "newRegressionTests": [
+        "panicking_guarded_start_preparation_is_not_started_and_cleans_dormant_task",
+        "guarded_start_failure_cleanup_does_not_remove_a_different_turn"
+      ],
+      "schemaVersion": 1,
+      "source": {
+        "cargoWorkspace": "/private/tmp/codex-native-guarded-start-p2/source/codex-rs/codex-rs",
+        "diffCheck": "pass",
+        "frozenV3Source": "/private/tmp/codex-native-durable-restart-v3-spike/source",
+        "gitRoot": "/private/tmp/codex-native-guarded-start-p2/source/codex-rs",
+        "head": "a956835d020762cb2b570053af06f643a11c0ecc",
+        "newCoreFilesComparedWithFrozenV3": {
+          "codex-rs/core/src/session/turn_input_tests.rs": "96a3a87407387bad786ee1664175b46204d453ce38e5f9a3645db18df0d22f1c",
+          "codex-rs/core/src/tasks/guarded_start.rs": "bc3673aaba4c3d0c467d93af81aae3b51f8abea2a6bdc29016bcca3eb38d752f"
+        },
+        "sourcePathCount": 48,
+        "threeCumulativeCoreFileSha256": {
+          "codex-rs/core/src/session/turn_input.rs": "06a1138f66cc9b93302ae2af04de412a978b9db2943e88b9e82a6b6dbb7eae65",
+          "codex-rs/core/src/session/turn_input_tests.rs": "96a3a87407387bad786ee1664175b46204d453ce38e5f9a3645db18df0d22f1c",
+          "codex-rs/core/src/tasks/guarded_start.rs": "bc3673aaba4c3d0c467d93af81aae3b51f8abea2a6bdc29016bcca3eb38d752f"
+        },
+        "unrelatedFixChurnRestored": [
+          "codex-rs/core/src/tools/registry.rs",
+          "codex-rs/core/tests/suite/openai_file_mcp.rs",
+          "codex-rs/core/tests/suite/scenarios.rs",
+          "codex-rs/Cargo.lock",
+          "justfile"
+        ]
+      },
+      "validation": {
+        "commands": [
+          {
+            "command": "just test -p codex-core session::turn_input::tests --cargo-profile dev-small",
+            "log": "/private/tmp/codex-native-guarded-start-p2/causals/core-turn-input-tests.log",
+            "result": "22 passed",
+            "sha256": "7feb5f21f725af0fdc653fe1dfa6a51a5bf6dd94935ad819760c40da151e1ec6"
+          },
+          {
+            "command": "just test -p codex-core turn_start_mcp --cargo-profile dev-small",
+            "log": "/private/tmp/codex-native-guarded-start-p2/causals/core-turn-start-mcp-tests.log",
+            "result": "1 passed",
+            "sha256": "8415ee90beeebf27a9d1296ccf1b3fd7ee6aabb4f0d4e5d0f65ed89d061cb0d7"
+          },
+          {
+            "command": "just test -p codex-core guarded_start --cargo-profile dev-small",
+            "log": "/private/tmp/codex-native-guarded-start-p2/causals/guarded-start-focused-green.log",
+            "result": "4 passed",
+            "sha256": "82f95d68fc83fcb5bf60ec4d692828eb0ce147411a3c9c0f03f31ead63d3ab01"
+          },
+          {
+            "command": "just test -p codex-app-server native_start_receipt_reports_the_core_recorded_user_message_item --cargo-profile dev-small",
+            "logs": [
+              "/private/tmp/codex-native-guarded-start-p2/causals/app-server-native-start-integration.log",
+              "/private/tmp/codex-native-guarded-start-p2/causals/app-server-native-start-integration-escalated.log"
+            ],
+            "result": "sandbox attempt hit local Wiremock bind EPERM; escalated same selector passed 1/1",
+            "sha256": [
+              "34ac1ef58cb478ae0c5e81e78c47833ab5dc95ad8219eacc366c336b6fad6d7b",
+              "75785b8899f07c35b0355c57b62e354dbe88f6e43bb2121d04da57e41e57cf0a"
+            ]
+          },
+          {
+            "command": "just test --offline --cargo-profile dev-small -p codex-core --lib -E test(guarded_start_failure_cleanup_does_not_remove_a_different_turn)",
+            "evidence": "/private/tmp/codex-native-guarded-start-p2/causal-cleanup-scratch/evidence.json",
+            "result": "mutant red exit 100; restored source green 1/1 in separate CoW scratch",
+            "sha256": "12acacecf6ee1f70557fe267744c350be259a9ea1b56f8df595e59c0e3c2fe7e"
+          }
+        ],
+        "fix": {
+          "command": "just fix -p codex-core --profile dev-small --offline",
+          "failedSandboxAttempt": {
+            "log": "/private/tmp/codex-native-guarded-start-p2/causals/just-fix-core.log",
+            "reason": "Cargo local TCP listener denied with EPERM",
+            "sha256": "25e5c6388031b83706fdfa64161c3a5e18754833fb0dcf60de1e1e56fdfdd279"
+          },
+          "passedLog": {
+            "path": "/private/tmp/codex-native-guarded-start-p2/causals/just-fix-core-escalated.log",
+            "sha256": "b0a769b6b04e525b59b6d3328a98d8af83021bbdec13fe1aa6b268253e250af9"
+          },
+          "result": "passed after local Cargo lock-socket escalation; warnings only",
+          "sourceBoundary": "owner checkout received no tests after final fix; unrelated auto-fix and Cargo.lock churn restored from frozen v3; replacement causal ran only in CoW scratch"
+        },
+        "format": {
+          "command": "just fmt",
+          "logs": [
+            {
+              "path": "/private/tmp/codex-native-guarded-start-p2/causals/just-fmt.log",
+              "sha256": "2735200a9e5ae4ec6fd8dc2970366ad7c836160db0e9a38ce257538abc3a7451"
+            },
+            {
+              "path": "/private/tmp/codex-native-guarded-start-p2/causals/just-fmt-pinned.log",
+              "sha256": "f90fe01c8000b1e949d10c70b1a618f28ecb2c7326cf5fb8f99816a99bae3d6c"
+            }
+          ],
+          "result": "aggregate incomplete: Rust stage had no reported failure in pinned run; Bazel formatter missing dotslash and Python formatters could not use/download their cache/dependencies"
+        },
+        "fullWorkspaceSuite": "not run for this Core slice"
+      },
+      "handoff": {
+        "path": "/private/tmp/codex-native-guarded-start-p2/handoff.json",
+        "sha256": "e36aeaae4965fa741dc3c7307760d1d9587c26e8d4031b41af8748b22c9540fb"
+      }
+    },
+    "replacementEvidence": {
+      "command": [
+        "/private/tmp/codex-native-selection-spike/tools/bin/just",
+        "test",
+        "--offline",
+        "--cargo-profile",
+        "dev-small",
+        "-p",
+        "codex-core",
+        "--lib",
+        "-E",
+        "test(guarded_start_failure_cleanup_does_not_remove_a_different_turn)"
+      ],
+      "cwd": "/private/tmp/codex-native-guarded-start-p2/causal-cleanup-scratch/source",
+      "environment": {
+        "RUSTUP_HOME": "/private/tmp/codex-native-selection-spike/rustup-home",
+        "RUSTUP_TOOLCHAIN": "1.95.0",
+        "RUSTC": "/private/tmp/codex-native-selection-spike/rustup-home/toolchains/1.95.0-aarch64-apple-darwin/bin/rustc",
+        "CARGO_HOME": "/private/tmp/codex-native-selection-spike/cargo-home",
+        "CARGO_NET_OFFLINE": "true",
+        "CARGO_TARGET_DIR": "/private/tmp/codex-native-guarded-start-p2/causal-cleanup-scratch/target195",
+        "PATH": "/private/tmp/codex-native-selection-spike/tools/bin:/private/tmp/codex-native-selection-spike/rustup-home/toolchains/1.95.0-aarch64-apple-darwin/bin:/Users/adampoulemanos/.cargo/bin:/Users/adampoulemanos/.local/share/mise/shims:/opt/homebrew/bin:/usr/bin:/bin"
+      },
+      "source_file_sha256": "4167a59e4d411329c62a970015bea3f59bcce8a1ade62e1294a504f7ce464e73",
+      "mutant_file_sha256": "6c68c97c3e2c43c965ddc08811f61690f2106b24faea1475c2003409f0bd6b82",
+      "test_file_sha256": "96a3a87407387bad786ee1664175b46204d453ce38e5f9a3645db18df0d22f1c",
+      "frozen_manifest_sha256": "c3720b8f37b003b6339213974db604f70bb68adb88d7760cce0f2d8317ae77cb",
+      "red": {
+        "exit": 100,
+        "log": "/private/tmp/codex-native-guarded-start-p2/causal-cleanup-scratch/red.log",
+        "sha256": "5656c8dbae9474bd01908352a3f9dae7dcc92a451e5e749cf8a2a7c47d9f26ac"
+      },
+      "green": {
+        "exit": 0,
+        "log": "/private/tmp/codex-native-guarded-start-p2/causal-cleanup-scratch/green.log",
+        "sha256": "b6710ce665ee699c9604ddc6fb16e46aa4ba73fae759efb3d512a9dd1282db02"
+      },
+      "scratch_source_restored_bytewise": true,
+      "restored_file_sha256": "4167a59e4d411329c62a970015bea3f59bcce8a1ade62e1294a504f7ce464e73",
+      "restored_manifest_sha256": "c3720b8f37b003b6339213974db604f70bb68adb88d7760cce0f2d8317ae77cb",
+      "post_test_generated_files_restored": [
+        "codex-rs/Cargo.lock",
+        "codex-rs/target/nextest/local/junit.xml"
+      ],
+      "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14)"
+    }
+  }
 }

@@ -2,24 +2,24 @@
   "schemaVersion": 1,
   "candidate": {
     "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
-    "sourceCheckout": "/private/tmp/codex-native-durable-restart-v3-spike/source",
+    "sourceCheckout": "/private/tmp/codex-native-guarded-start-p2/source/codex-rs",
     "sourceFileCount": 48,
     "sourceManifest": "durable-restart-v3-source-manifest.json",
-    "sourceManifestSha256": "d5a3ba01ae1caf8da697499a390201292585bdeb957f2053632326f8f532796d",
+    "sourceManifestSha256": "cb3897e086557213634b380d09d258d06af45e8f69b35f7603425e882749460b",
     "excludedBuildOnlyFiles": [
       "codex-rs/Cargo.lock"
     ],
     "implementationPatch": {
       "path": "durable-restart-v3-implementation.patch",
-      "sha256": "d657643667c6167c3650b45b5d985a579f1625fc9b7f56fc67bed43031d9abf8",
-      "bytes": 1115007,
+      "sha256": "b9ab28d49a62f5756495f729c6716511d3136f58c3b9ea4061f4f7dba3d2598c",
+      "bytes": 1119180,
       "cleanPinnedApply": "PASS",
       "patchedBytesMatch": "PASS",
       "mismatchCount": 0
     },
     "cli": {
-      "path": "/private/tmp/codex-native-durable-restart-v3-spike/codex-native-v3-cli-final",
-      "sha256": "2dcd17b33116eebe7026443b85e35be0fce85912c4a675d96c3af6a0456d9a61",
+      "path": "/private/tmp/codex-native-guarded-start-p2/codex-native-guarded-start-final",
+      "sha256": "0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de",
       "mode": "0555",
       "build": "cargo build -p codex-cli --bin codex --profile dev-small; Rust 1.95.0; Cargo offline"
     }
@@ -71,20 +71,30 @@
       "scopedJustFix": "PASS for touched packages; final just fix -p codex-app-server also passed after the helper-only setup delta",
       "repositoryJustFmt": "Partial: Rust formatting succeeded; Bazel/Starlark formatter could not start because dotslash is unavailable; Python/SDK Ruff formatter was unavailable offline because locked wheels were not cached."
     },
-    "fullWorkspaceSuite": "Not run in this v3 iteration."
+    "fullWorkspaceSuite": "Not run in this v3 iteration.",
+    "inheritedValidationBoundary": "Existing protocol/State/TUI suite counts below are historical v3 runs before the Core preparation correction. Those source files are unchanged; current Core scoped checks and native app-server integration are separately recorded in corePreparationReviewCorrection.",
+    "corePreparationReviewCorrection": {
+      "evidenceMap": "durable-restart-v3-method-causals.json",
+      "section": "corePreparationReviewCorrection",
+      "focusedResults": "Core turn-input 22/22; guarded-start 4/4; adjacent MCP start 1/1; app-server actual Core-input integration 1/1; separate replacement helper restored selector 1/1.",
+      "sequence": "Scoped owner tests, then final scoped just fix, then CLI build. Replacement causal campaign used a separate CoW snapshot; no tests ran afterward in the frozen owner checkout."
+    }
   },
   "methodCausalInventory": {
     "path": "durable-restart-v3-method-causals.json",
-    "sha256": "1d296f4cf2ae53fc46cbd73957cd1bd026d89accc846b6d23c8f8d6a05cd9c18",
-    "substantiveMethods": 12,
+    "sha256": "e15a302acec3f92901ea023211329f16380828df3672746b822daaf6ff8ff88e",
+    "substantiveMethods": 14,
     "mechanicalOnlyMethods": 7,
     "v3SpecificSemanticPairs": 11,
-    "knownNonDiscriminatingV3Subcase": "input_recorded_lookup_requires_the_full_native_request_identity: its in-memory lookup helper returns Unknown for every tuple, so the added bridge tuple cases are not an independent causal proof."
+    "knownNonDiscriminatingV3Subcase": "input_recorded_lookup_requires_the_full_native_request_identity: its in-memory lookup helper returns Unknown for every tuple, so the added bridge tuple cases are not an independent causal proof.",
+    "preparationCorrectionMethods": 2,
+    "preparationCorrectionSemanticPairs": 3
   },
   "sdkReviewStatusAtExport": {
     "pinnedHead": "21eceae56a2b605ba9634892f757bb1f06d8c4cd",
     "reportedStatus": "PR50 had 197 CI checks green, Exact Code running, and Security complete before two P2 SDK issues were identified and assigned for correction.",
-    "publicationBoundary": "Native artifacts are evidence against the pinned historical SDK only; do not describe them as validation of a future corrected SDK head."
+    "publicationBoundary": "Native artifacts are evidence against the pinned historical SDK only; do not describe them as validation of a future corrected SDK head.",
+    "historical": true
   },
   "historicalNativeTuiRestartRuntimeProof": {
     "result": "PASS",
@@ -146,7 +156,13 @@
       "This proof also pins the historical SDK snapshot described above and does not validate its subsequent correction."
     ]
   },
-  "correctedSdkRuntimeSupplement": {
+  "rootCleanApply": {
+    "proof": "/private/tmp/native-v3-preparation-p2-export-proof.json",
+    "proofSha256": "8ff98c633ef00030acb60dab9d78d50c476db4dd598d4b3d6ce2e5e97423cbae",
+    "filesVerified": 48,
+    "result": "PASS"
+  },
+  "historicalCorrectedSdkRuntimeSupplement": {
     "sdkPullRequest": 50,
     "sdkHead": "b2f55b0e0e476d9667073909bdf45174daa5334c",
     "sourceSha256": {
@@ -163,7 +179,7 @@
     "wheelSha256": "e226efcababfb66fc15fd14330224827d006d0700374a20a7710dad6a0c634a9",
     "installedModuleFilesByteMatch": 11,
     "canonicalContractFilesByteMatch": 5,
-    "bundledProof": "durable-restart-v3-runtime-proof.json",
+    "bundledProof": "/private/tmp/native-v3-corrected-wheel/two-tui-proof.json",
     "bundledProofSha256": "1ad93d778b708127565a721ef8b95b3085602a1a513a5727c4e083bd05168c03",
     "proofSummary": {
       "binarySha256": "2dcd17b33116eebe7026443b85e35be0fce85912c4a675d96c3af6a0456d9a61",
@@ -268,11 +284,383 @@
       "productionAdmissionProven": false
     },
     "productionAdmissionProven": false,
-    "productionWakeEnabled": false
+    "productionWakeEnabled": false,
+    "boundary": "Historical corrected-SDK b2 proof against the previous native binary with the subsequently found Core preparation defect; not validation of the current native candidate.",
+    "publishedExportCommitAtCapture": "00543c53c141734a7ac2d1118d71c0ce2a4ea6e9"
   },
-  "rootCleanApply": {
-    "proof": "/private/tmp/native-v3-root-clean-apply-proof.json",
-    "filesVerified": 48,
-    "result": "PASS"
+  "currentQualification": {
+    "result": "PASS",
+    "sdkPullRequest": 50,
+    "sdkHead": "57896c36fdc4e8298fa2d7aeea6f9c0b4f635d8e",
+    "sdkPackageTests": 203,
+    "installedWheel": {
+      "path": "/private/tmp/native-v3-current-wheel/knitli_event_gateway-0.1.0-py3-none-any.whl",
+      "result": "PASS",
+      "sdkHead": "57896c36fdc4e8298fa2d7aeea6f9c0b4f635d8e",
+      "wheelSha256": "01f9d61ee6a915b0ee12f25b047ecc6ddc4110b1c5b45f455e8e9e4f940d3f16",
+      "installedModuleCount": 11,
+      "contractCount": 5,
+      "sourceSha256": {
+        "packages/event-gateway/src/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+        "packages/event-gateway/src/event_gateway/cli.py": "08cdfc58623dd667c4ea10e55845958466ffa6a63c1bc96bc4aab1f790964b35",
+        "packages/event-gateway/src/event_gateway/cloud.py": "f970e6b902cb7e893241d0f914a6a4473f26635a0d790f11c6ed4b30679a3ad6",
+        "packages/event-gateway/src/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+        "packages/event-gateway/src/event_gateway/daemon.py": "6b05d73d5ba9382c54ad2abf59d03f70dca465256dc6d103a47b8885da422fd9",
+        "packages/event-gateway/src/event_gateway/gateway.py": "b949efa5184df151357fabf739a6736771672238e87cb60d1c9477ce0dddcc06",
+        "packages/event-gateway/src/event_gateway/listener.py": "565848a5f6047573f9b0b737c8158113b8f6070fb539a63c38553a6460799108",
+        "packages/event-gateway/src/event_gateway/native.py": "4ab38f6f5231acda4fee0af5d017ab33c583f3fecfc4e68531000a8dd25c0f85",
+        "packages/event-gateway/src/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+        "packages/event-gateway/src/event_gateway/security.py": "8eeb77c10faf2e8f0641a984930394c14fa0e722f16a7784b0324eb1ebde4434",
+        "packages/event-gateway/src/event_gateway/store.py": "0f877d5d581464eb71c431159e420ad7edc67f158d9aeb58e5ece41cf1a3bc7a"
+      },
+      "qualifierSha256": "78a7366ac439c4ab88c5400c75327c8408b17986fc8d6e98efba6ab860740bed",
+      "pinOnlyASTNormalization": true,
+      "previousHelperSha256": "e502ff549932eb685280ae27822d52b040a70726b21b976fa0f79b423038ad4d",
+      "contractSha256": {
+        "packages/event-gateway/contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
+        "packages/event-gateway/contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+        "packages/event-gateway/contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
+        "packages/event-gateway/contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
+        "packages/event-gateway/contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34"
+      }
+    },
+    "reader": {
+      "path": "/opt/coder/toolshed/.worktrees/native-receipt-v3/packages/event-gateway/scripts/qualify_native_bridge.py",
+      "sha256": "31a630277c0c0a552036233586792c1c04528faf7d2c5fec2eef70d83e270425"
+    },
+    "twoTuiRestart": {
+      "proof": "durable-restart-v3-runtime-proof.json",
+      "proofSha256": "80ae734539209b988f46712f10fb440034bec9f06dfc20178e341d5542758e73",
+      "executedHelperSha256": "78a7366ac439c4ab88c5400c75327c8408b17986fc8d6e98efba6ab860740bed",
+      "pythonMode": "-O",
+      "log": "/private/tmp/native-v3-current-wheel/two-tui-run.log",
+      "logSha256": "cb0590b265dcf35b536ad3b86cbad807248da344b6ca07933dac4f055d2488f2",
+      "exactReceiptRecoveredTwice": true,
+      "validIdentityProbesRejected": 15,
+      "originalAttachmentUnavailable": true,
+      "oldProcessesStopped": true,
+      "oldStartNoStartSettlementProven": false,
+      "modelRequestCounts": {
+        "primary": 1,
+        "title": 1,
+        "unknown": 0
+      },
+      "realModelCalls": 0
+    },
+    "coupledWorkerd": {
+      "proof": "/private/tmp/native-v3-current-wheel/coupled-proof.json",
+      "proofSha256": "44f086e63d360282c0c9d4d5eb009d15a3ddf656d666ecb2f8e8e82e21042252",
+      "log": "/private/tmp/native-v3-current-wheel/coupled-final-run.log",
+      "logSha256": "91f3cfeb1de7082e79bb80f8b505cfe09e3db44229320cbb5dcf7bbd88305a53",
+      "cloudPullRequest": 685,
+      "cloudHead": "ed23882eac491e26e070e3ef26cf8c0e9e702b38",
+      "nativeProcessRestarted": false,
+      "localStoreRestarted": true,
+      "modelRequests": {
+        "primary": 1,
+        "title": 1,
+        "unknown": 0
+      },
+      "productionAdmissionProven": false,
+      "fixtureBoundaries": [
+        "qualified runtime/admin setup",
+        "Access edge/ Messaging credentials and budget",
+        "manual source publication",
+        "queue metrics",
+        "loopback instead of Mesh"
+      ],
+      "cleanupEvidence": {
+        "result": "READY_FOR_ROOT_RUNTIME",
+        "rootCauseEvidence": "launcher starts native with start_new_session=True but finally terminates/waits only TUI; failed log is tempfile removal Directory not empty under plugins clone, consistent with surviving backend writer; no process trace proves the exact writer",
+        "fix": "callback finally releases mock primary then stops owned process group; bounded parent wait with group SIGKILL fallback; bounded backend kill(pid,0) absence verification before returning to launcher cleanup",
+        "exerciseASTUnchanged": true,
+        "callbackASTUnchangedExceptCleanupCall": true,
+        "causalCheck": {
+          "result": "PASS",
+          "scope": "simulated process ownership unit check, not real OS process/runtime proof",
+          "mutation": "remove only SIGTERM process-group stop; mock backend remains alive and assertion fails",
+          "fileSha256": {
+            "/private/tmp/native-v3-coupled-cleanup-check/restored.py": "d8223d9fdef36ba9f74bad86fe0f8aa076db427293aa7e7bae4df87557fe242f",
+            "/private/tmp/native-v3-coupled-cleanup-check/mutant.py": "509af5c2d8ba901945d054891f86e0b789826947f3ed4488bf71f53a356db99c",
+            "/private/tmp/native-v3-coupled-cleanup-check/test_cleanup.py": "45fa5bf3e8b2b71c1e188ae085d5dda3beef453fe10bad8bca84e76f019675f5"
+          },
+          "runs": [
+            {
+              "variant": "mutant",
+              "exitCode": 1,
+              "logSha256": "51035d069b0c4cd8f1f4e64ee9e901fd6c8d2413943e841febbc4f3b5d44f35d"
+            },
+            {
+              "variant": "restored",
+              "exitCode": 0,
+              "logSha256": "fb184ea57734512b1f088f9181209901b9cd46df3eb7eaa2500ea9e48dde20b5"
+            }
+          ]
+        },
+        "actualCoupledRuntimeRun": false,
+        "failedCleanupTrialExcluded": true,
+        "sdkSourceUnmodified": true,
+        "fileSha256": {
+          "/private/tmp/native-v3-current-wheel/coupled-workerd.py": "ee52e07d9d8f1e889ed2e9bc7f682d0dbfa5aba16bc14dadeab1eff4d70c7a42",
+          "/private/tmp/native-v3-current-wheel/coupled-workerd-before-cleanup.py": "3b7dd660d021423b1b59b29e10d9248087058bc6e37c69fd0b3ac3a7ddbe8e4a",
+          "/private/tmp/native-v3-current-wheel/coupled-run.log": "bebec8ba489799d0953b5957582a0e1388622db3bb6eb2e4e0607f0cb8d78ccb",
+          "/private/tmp/native-v3-current-wheel/coupled-first-temp-cleanup-failure.log": "bebec8ba489799d0953b5957582a0e1388622db3bb6eb2e4e0607f0cb8d78ccb",
+          "/private/tmp/native-v3-current-wheel/coupled-workerd-broker.mjs": "d191955e1cb1fced4f9e0987f6f4a0cfc9bd96c0e3fb86d077dadb39eba9b472",
+          "/private/tmp/native-v3-current-wheel/coupled-workerd-worker.ts": "a16957cfe80389cc6e4bca733caa87057b00289f30024fc856f976778f340f65",
+          "/opt/coder/toolshed/.worktrees/native-receipt-v3/packages/event-gateway/scripts/qualify_native_bridge.py": "31a630277c0c0a552036233586792c1c04528faf7d2c5fec2eef70d83e270425"
+        }
+      },
+      "cleanupResult": "Actual final run stopped the owned group and positively verified backend absence before temporary-directory cleanup. The earlier Directory-not-empty trial is excluded; no process trace identifies its exact writer."
+    },
+    "limits": [
+      "InputRecorded proves a genuine Core item plus durable receipt anchoring, not model success or transcript materialization.",
+      "Witness readiness does not certify Core idle; the final Core idle fence remains authoritative.",
+      "The two-TUI restart and controlled cloud settlement are separate runs; no combined native-and-cloud restart proof.",
+      "No production admission, Mesh delivery, installed owner client, automatic wake, deployment or submodule pin change."
+    ]
+  },
+  "pythonReviewCorrections": {
+    "currentHelperSha256": "78a7366ac439c4ab88c5400c75327c8408b17986fc8d6e98efba6ab860740bed",
+    "scope": "31 former assert guards are explicit require calls under normal and optimized Python; SDK integrity checks precede imports; partial restart resource acquisition is inside cleanup. Final SDK checksum pin is the only change after the FD snapshot.",
+    "evidenceBoundary": "Historical guard/preimport/FD snapshots and isolated sensitivity checks are retained separately; they are not full production fault-injection tests. Final current helper was actually executed under -O against the current wheel and corrected native binary.",
+    "explicitGuards": {
+      "result": "PASS",
+      "runtimePythonMode": "-O",
+      "runtimeExitCode": 0,
+      "guardCount": 31,
+      "normalizedEntireModuleASTMatches0122": true,
+      "messageArguments": "only constants/names, no eager side effects; missing message preserves empty AssertionError args",
+      "guardCausalProof": {
+        "classification": "primary-count explicit guard sensitivity; scratch mutant removes only primary require",
+        "result": "PASS",
+        "sourceSha256": "986383ec3fb35317bb1001436473a6a65898d0090db73697295b620fbc4069aa",
+        "fixtureSha256": {
+          "guard.py": "a89e7e166c3e42f220c933186e051a6d637375475b7dd251f040537e4fe659c4",
+          "mutant.py": "668808fb86907fb4ce909d25950d3daf88b6608d2a32bae34c27a700babd7b5b",
+          "test_guard.py": "e6543d73b39aa4a5e16e85307bc4c4f156a18f4c77f510b700e71156e61aaff1"
+        },
+        "runs": [
+          {
+            "mode": "normal",
+            "fixture": "mutant.py",
+            "exitCode": 1,
+            "log": "/private/tmp/native-v3-explicit-guard-check/normal-mutant.log",
+            "logSha256": "bec353cbb37fda5622860aeb4c512e1217a7da5823c50d7574a6b7f9ee6f7e7e"
+          },
+          {
+            "mode": "normal",
+            "fixture": "guard.py",
+            "exitCode": 0,
+            "log": "/private/tmp/native-v3-explicit-guard-check/normal-restored.log",
+            "logSha256": "fb184ea57734512b1f088f9181209901b9cd46df3eb7eaa2500ea9e48dde20b5"
+          },
+          {
+            "mode": "optimized",
+            "fixture": "mutant.py",
+            "exitCode": 1,
+            "log": "/private/tmp/native-v3-explicit-guard-check/optimized-mutant.log",
+            "logSha256": "bec353cbb37fda5622860aeb4c512e1217a7da5823c50d7574a6b7f9ee6f7e7e"
+          },
+          {
+            "mode": "optimized",
+            "fixture": "guard.py",
+            "exitCode": 0,
+            "log": "/private/tmp/native-v3-explicit-guard-check/optimized-restored.log",
+            "logSha256": "fb184ea57734512b1f088f9181209901b9cd46df3eb7eaa2500ea9e48dde20b5"
+          }
+        ]
+      },
+      "runtimeSourceQualification": "Executed source986383, final source f914743 adds one PEP8 blank line only; exact AST identical. No second runtime run performed under requested one-run bound.",
+      "runtimeChecks": {
+        "validNegativeProbesRejected": 15,
+        "expiredExactReceiptAfterTwoTUIRestart": true,
+        "oldStartLocallyRefused": true,
+        "oldStartNoStartSettlementProven": false,
+        "modelRequestCounts": {
+          "primary": 1,
+          "title": 1,
+          "unknown": 0
+        },
+        "cloudSettlementProven": false
+      },
+      "bundledProofUnchanged": true,
+      "fileSha256": {
+        "/private/tmp/native-v3-before-explicit-guards.py": "0122a4d6e56b2c750ee2bb557d5db147dc5703d40fde5d688570b908914b3f31",
+        "/private/tmp/native-v3-explicit-guard-executed-source.py": "986383ec3fb35317bb1001436473a6a65898d0090db73697295b620fbc4069aa",
+        "/private/tmp/native-v3-explicit-guard-runtime-proof.json": "f018093bcd13c14ad3a5b599a4bd25c56a3346ab6ee68ab0dae76c782958190e",
+        "/private/tmp/native-v3-explicit-guard-runtime-run.log": "898ee49c037ed3b054b0e1690140b5ff91a77823805b704156147f656f7d6540",
+        "/private/tmp/native-v3-explicit-guard-check/manifest.json": "14a214b59d78444465f76bb8fe3733d87a8794df27c970a9fb4b590add4ca2cf",
+        "/private/tmp/native-v3-before-preimport-guards.py": "f914743bfa785894e3787f54fea56a7015f64d84ea9d5097db638eb0848d1c3a",
+        "/private/tmp/native-v3-corrected-wheel/two-tui-proof.json": "1ad93d778b708127565a721ef8b95b3085602a1a513a5727c4e083bd05168c03"
+      },
+      "sourceEvidenceBoundary": "Historical captured snapshot; preserved paths are used for checksum validation. Current helper/runtime hashes are under currentQualification."
+    },
+    "preimport": {
+      "result": "PASS",
+      "runtimePythonMode": "-O",
+      "runtimeExitCode": 0,
+      "exactFinalSourceExecuted": true,
+      "allFunctionASTsUnchangedFromExplicitGuardRevision": true,
+      "allPreviousExplicitGuardsPreserved": true,
+      "preflight": "stdlib metadata RECORD native.py and parent init membership/path/hash checks before SDK import; reject any already-loaded event_gateway modules; prepend verified installed package parent before import; verify imported native path afterward",
+      "guardMutation": {
+        "result": "PASS",
+        "mutation": "bypass only native.py preimport checksum require; substituted SDK sentinel then executes",
+        "fileSha256": {
+          "/private/tmp/native-v3-preimport-guard-check/guard.py": "8897f1b1e00abfaf6e86ad11695bc1cdffa202f8e922997a89f928a8d35f892b",
+          "/private/tmp/native-v3-preimport-guard-check/mutant.py": "7b5fa64a8cb980eb5bdf633b72daf32ca809c7a7f804cdcccc47ad5a739a2a07",
+          "/private/tmp/native-v3-preimport-guard-check/test_preimport.py": "4967104d59069c10600ada55d86302fcf26d3e9a1bf150a3a28ac2211b3505dd"
+        },
+        "runs": [
+          {
+            "mode": "normal",
+            "variant": "mutant",
+            "exitCode": 1,
+            "log": "/private/tmp/native-v3-preimport-guard-check/normal-mutant.log",
+            "logSha256": "8a84f0410699a346730f6fa90b6af58df47c6478676dbf62e45a08d837573ec0"
+          },
+          {
+            "mode": "normal",
+            "variant": "restored",
+            "exitCode": 0,
+            "log": "/private/tmp/native-v3-preimport-guard-check/normal-restored.log",
+            "logSha256": "15e1b3902e99e62bc7f061b84c3f571d085b893e42f8ed52ac52d3ab8d134652"
+          },
+          {
+            "mode": "optimized",
+            "variant": "mutant",
+            "exitCode": 1,
+            "log": "/private/tmp/native-v3-preimport-guard-check/optimized-mutant.log",
+            "logSha256": "8a84f0410699a346730f6fa90b6af58df47c6478676dbf62e45a08d837573ec0"
+          },
+          {
+            "mode": "optimized",
+            "variant": "restored",
+            "exitCode": 0,
+            "log": "/private/tmp/native-v3-preimport-guard-check/optimized-restored.log",
+            "logSha256": "ff54520eb41a16677c9d2e2fc45533519a89fbdc9fb068da141805c0296b7a63"
+          }
+        ]
+      },
+      "wheelSha256": "e226efcababfb66fc15fd14330224827d006d0700374a20a7710dad6a0c634a9",
+      "installedModuleSha256": "8b14515981be9893fd696c9ae50984fab5f3cc8797e7cb8db01885e91d61b389",
+      "readerSha256": "31a630277c0c0a552036233586792c1c04528faf7d2c5fec2eef70d83e270425",
+      "binarySha256": "2dcd17b33116eebe7026443b85e35be0fce85912c4a675d96c3af6a0456d9a61",
+      "installedWheelModulesVerified": 11,
+      "installedWheelContractsVerified": 5,
+      "runtimeChecks": {
+        "validNegativeProbesRejected": 15,
+        "expiredExactReceiptAfterRestart": true,
+        "oldStartLocallyRefused": true,
+        "oldStartNoStartSettlementProven": false,
+        "modelRequestCounts": {
+          "primary": 1,
+          "title": 1,
+          "unknown": 0
+        },
+        "cloudSettlementProven": false
+      },
+      "bundledProofUnchanged": true,
+      "fileSha256": {
+        "/private/tmp/native-v3-before-preimport-guards.py": "f914743bfa785894e3787f54fea56a7015f64d84ea9d5097db638eb0848d1c3a",
+        "/private/tmp/native-v3-preimport-guard-runtime-proof.json": "3418d49af80510bd60d68b00c8d9358b3fe4de88493a87ae9cc0822ae5649101",
+        "/private/tmp/native-v3-preimport-guard-runtime-run.log": "f126774f2a07ccd336d0206b83aabb3f95f800723bc4403b2a93f8e85224ebfb",
+        "/private/tmp/native-v3-preimport-guard-check/manifest.json": "4fc3dd0088f98b9ce21e234fe2ec934b48ab863eb600bb8a523f111106ed360a",
+        "/private/tmp/native-v3-before-fd-cleanup.py": "3642e04d23e089d236538e3b79e0157dd63db8e1c379ac472087bae395ce46f2",
+        "/private/tmp/native-v3-corrected-wheel/two-tui-proof.json": "1ad93d778b708127565a721ef8b95b3085602a1a513a5727c4e083bd05168c03"
+      },
+      "sourceEvidenceBoundary": "Historical captured snapshot; preserved paths are used for checksum validation. Current helper/runtime hashes are under currentQualification."
+    },
+    "partialDescriptors": {
+      "result": "PASS",
+      "sourceSha256": "e502ff549932eb685280ae27822d52b040a70726b21b976fa0f79b423038ad4d",
+      "baselineSha256": "3642e04d23e089d236538e3b79e0157dd63db8e1c379ac472087bae395ce46f2",
+      "scope": "only restart_callback acquisition/conditional cleanup; preimport and explicit guards unchanged",
+      "ownership": "NativeBridge.close closes self.channel (parent socket); failed constructor leaves parent cleanup to caller",
+      "regression": {
+        "result": "PASS",
+        "classification": "restart_callback socket ownership regression; old source assertion-red and fixed source green",
+        "injectedFailure": "pty.openpty raises after real socketpair acquisition",
+        "fileSha256": {
+          "/private/tmp/native-v3-fd-cleanup-check/old.py": "5f5044c341711b8478ef1b75c3c5a1a447cee092fa67a7b750b593971ecc7900",
+          "/private/tmp/native-v3-fd-cleanup-check/restored.py": "3752084d2e6ec8f454e8b52ccb7cf1fa4f50dd1cddbc528383561c188cd0f1bb",
+          "/private/tmp/native-v3-fd-cleanup-check/test_cleanup.py": "e3e88059e8c2e5a99c9d60265cf577b11521feb6ade0a58ab47e8fd78154463f"
+        },
+        "runs": [
+          {
+            "mode": "normal",
+            "source": "old",
+            "exitCode": 1,
+            "log": "/private/tmp/native-v3-fd-cleanup-check/normal-old.log",
+            "logSha256": "ad6a38181e1c823c367c46ba75234aa52204a6bc1d885adc5042f6472e8b2d1e"
+          },
+          {
+            "mode": "normal",
+            "source": "restored",
+            "exitCode": 0,
+            "log": "/private/tmp/native-v3-fd-cleanup-check/normal-restored.log",
+            "logSha256": "34bf96f571766efb25b8cbefac01e2595d34f98298b83c09a407a0d431f44fdb"
+          },
+          {
+            "mode": "optimized",
+            "source": "old",
+            "exitCode": 1,
+            "log": "/private/tmp/native-v3-fd-cleanup-check/optimized-old.log",
+            "logSha256": "ad6a38181e1c823c367c46ba75234aa52204a6bc1d885adc5042f6472e8b2d1e"
+          },
+          {
+            "mode": "optimized",
+            "source": "restored",
+            "exitCode": 0,
+            "log": "/private/tmp/native-v3-fd-cleanup-check/optimized-restored.log",
+            "logSha256": "150ce933bc57aa0c0d12442135bd11ab77daecbebe3d10ee6292f3a75712b34f"
+          }
+        ]
+      },
+      "excludedEvidence": "first test accidentally injected callback sockets into asyncio.run wakeup; invalid green preserved and excluded; corrected test separates asyncio wakeup pair from callback pair",
+      "ruffExitCode": 0,
+      "ruffLogSha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "fullNativeRuntimeRun": false,
+      "bundledProofUnchanged": "1ad93d778b708127565a721ef8b95b3085602a1a513a5727c4e083bd05168c03",
+      "pathAtCapture": "/opt/coder/toolshed/.worktrees/native-durable-restart-v3/packages/event-gateway/docs/native-bridge/durable-restart-v3-qualify.py",
+      "preservedSourceSnapshot": "/private/tmp/native-v3-before-current-wheel-pin.py"
+    },
+    "sourceSnapshots": {
+      "/private/tmp/native-v3-before-preimport-guards.py": "f914743bfa785894e3787f54fea56a7015f64d84ea9d5097db638eb0848d1c3a",
+      "/private/tmp/native-v3-before-fd-cleanup.py": "3642e04d23e089d236538e3b79e0157dd63db8e1c379ac472087bae395ce46f2",
+      "/private/tmp/native-v3-before-current-wheel-pin.py": "e502ff549932eb685280ae27822d52b040a70726b21b976fa0f79b423038ad4d"
+    }
+  },
+  "independentReviewClosure": {
+    "corePreparation": {
+      "report": "/private/tmp/native-v3-core-preparation-p2-independent-audit.md",
+      "sha256": "8cb47f37f14d0267731a84d242be57a516c588e1addd241985f8e41d8919f8f0",
+      "status": "CLOSED",
+      "testsRerunByAuditor": false
+    },
+    "currentRuntime": {
+      "report": "/private/tmp/native-v3-current-runtime-independent-audit.md",
+      "sha256": "41d317c692c4596591c4c8ab251e577c18593da3b2c92d7f16917d0dee61deb1",
+      "status": "CLOSED",
+      "testsRerunByAuditor": false
+    },
+    "pythonGuardsAndPreimport": {
+      "report": "/private/tmp/native-v3-python-review-fixes-independent-audit.md",
+      "sha256": "6504a2703723b03b219bd08c4ee61080dce136b7db9f08000c2e65ea210aae26",
+      "status": "CLOSED",
+      "testsRerunByAuditor": false
+    },
+    "partialDescriptorCleanup": {
+      "report": "/private/tmp/native-v3-fd-cleanup-independent-audit.md",
+      "sha256": "da871414c720bd7ef59abce003cd425780bf5c5da032a3673ce487197e2d0eab",
+      "status": "CLOSED",
+      "testsRerunByAuditor": false
+    },
+    "currentWheelPin": {
+      "report": "/private/tmp/native-v3-current-wheel-pin-independent-audit.md",
+      "sha256": "494cdaaf2b487acdd141bcc9f27ae1cd91941be5468454cadfc1b61170cf4683",
+      "status": "CLOSED",
+      "testsRerunByAuditor": false
+    }
   }
 }

@@ -21,18 +21,35 @@ from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
-import event_gateway.native as installed_native
-from event_gateway.native import NativeBridgeAdapter, validate_receipt
+
+def require(condition, message=None):
+    if not condition:
+        if message is None:
+            raise AssertionError
+        raise AssertionError(message)
+
 
 SOURCE = Path(os.environ['EVENT_NATIVE_QUALIFIER']).resolve(strict=True)
 SOURCE_SHA = '31a630277c0c0a552036233586792c1c04528faf7d2c5fec2eef70d83e270425'
-assert hashlib.sha256(SOURCE.read_bytes()).hexdigest() == SOURCE_SHA
-INSTALLED = Path(installed_native.__file__).resolve()
-INSTALLED_SHA = '8b14515981be9893fd696c9ae50984fab5f3cc8797e7cb8db01885e91d61b389'
+require(hashlib.sha256(SOURCE.read_bytes()).hexdigest() == SOURCE_SHA)
+INSTALLED_SHA = '4ab38f6f5231acda4fee0af5d017ab33c583f3fecfc4e68531000a8dd25c0f85'
 DISTRIBUTION = importlib.metadata.distribution('knitli-event-gateway')
-assert any(str(file) == 'event_gateway/native.py' for file in DISTRIBUTION.files or ())
-assert INSTALLED == Path(DISTRIBUTION.locate_file('event_gateway/native.py')).resolve(strict=True)
-assert hashlib.sha256(INSTALLED.read_bytes()).hexdigest() == INSTALLED_SHA
+require(any(str(file) == 'event_gateway/native.py' for file in DISTRIBUTION.files or ()))
+INSTALLED = Path(DISTRIBUTION.locate_file('event_gateway/native.py')).resolve(strict=True)
+require(hashlib.sha256(INSTALLED.read_bytes()).hexdigest() == INSTALLED_SHA)
+PACKAGE_INIT = INSTALLED.with_name('__init__.py')
+PACKAGE_INIT_SHA = 'c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e'
+require(any(str(file) == 'event_gateway/__init__.py' for file in DISTRIBUTION.files or ()))
+require(PACKAGE_INIT == Path(DISTRIBUTION.locate_file('event_gateway/__init__.py')).resolve(strict=True))
+require(hashlib.sha256(PACKAGE_INIT.read_bytes()).hexdigest() == PACKAGE_INIT_SHA)
+require(not any(name == 'event_gateway' or name.startswith('event_gateway.') for name in sys.modules),
+        'SDK already loaded before integrity preflight')
+# Prefer only the verified installed package over cwd/PYTHONPATH shadows.
+sys.path.insert(0, str(INSTALLED.parent.parent))
+installed_native = importlib.import_module('event_gateway.native')
+require(Path(installed_native.__file__).resolve() == INSTALLED)
+NativeBridgeAdapter = installed_native.NativeBridgeAdapter
+validate_receipt = installed_native.validate_receipt
 spec = importlib.util.spec_from_file_location('native_qualifier', SOURCE)
 native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
@@ -41,7 +58,7 @@ spec.loader.exec_module(native)
 def wait_for(predicate, process, seconds=10):
     deadline = time.monotonic() + seconds
     while not predicate():
-        assert process.poll() is None and time.monotonic() < deadline, 'bounded live-process wait expired'
+        require(process.poll() is None and time.monotonic() < deadline, 'bounded live-process wait expired')
         time.sleep(0.05)
 
 
@@ -68,18 +85,18 @@ def stop_process(process, backend_pid):
     deadline = time.monotonic() + 5
     while alive(backend_pid) and time.monotonic() < deadline:
         time.sleep(0.05)
-    assert not alive(backend_pid), 'old app-server still alive'
+    require(not alive(backend_pid), 'old app-server still alive')
 
 
 def assert_counts(server):
-    assert server.request_counts['primary'] == 1, 'primary model request repeated'
-    assert server.request_counts['title'] <= 1 and server.request_counts['unknown'] == 0
-    assert server.model_requests == sum(server.request_counts.values())
+    require(server.request_counts['primary'] == 1, 'primary model request repeated')
+    require(server.request_counts['title'] <= 1 and server.request_counts['unknown'] == 0)
+    require(server.model_requests == sum(server.request_counts.values()))
 
 
 def old_request_probes(bridge, request, recorded, server):
     bridge.restore_attempt(request)
-    assert bridge.receipt(request) == recorded and bridge.receipt(request) == recorded
+    require(bridge.receipt(request) == recorded and bridge.receipt(request) == recorded)
     changed = []
     fields = [key for key in (*native.IDENTITY, 'generation') if key != 'permitExpiresAt']
     for key in (*fields, *('event.' + k for k in request['event'])):
@@ -108,14 +125,14 @@ def old_request_probes(bridge, request, recorded, server):
             target[field] = str(uuid4())
         native.validate_start(candidate)  # Every negative remains a structurally valid request.
         # Deliberate wire probes bypass the SDK's local exact-attempt guard.
-        assert bridge._receipt_exchange('receipt', candidate) == {'status': 'unknown'}, key
-        assert not bridge.closed, 'Unknown caused by a broken transport rather than native lookup'
-        assert bridge.receipt(request) == recorded, key
+        require(bridge._receipt_exchange('receipt', candidate) == {'status': 'unknown'}, key)
+        require(not bridge.closed, 'Unknown caused by a broken transport rather than native lookup')
+        require(bridge.receipt(request) == recorded, key)
         changed.append(key)
-    assert bridge._receipt_exchange('start', request) == {
-        'status': 'notStarted', 'reason': 'selectionChanged'}, 'old Start bypassed local selection'
+    require((bridge._receipt_exchange('start', request) == {
+        'status': 'notStarted', 'reason': 'selectionChanged'}), 'old Start bypassed local selection')
     # This local refusal is not a certified old-attempt no-start settlement.
-    assert not bridge.closed and bridge.receipt(request) == recorded
+    require(not bridge.closed and bridge.receipt(request) == recorded)
     assert_counts(server)
     return changed
 
@@ -124,20 +141,20 @@ def restart_callback(first, server, process, witness):
     request = native.synthetic_request(witness)
     mapping = {'nativeThreadId': request['threadId']}
     submitted = asyncio.run(NativeBridgeAdapter(mapping, first).submit({**request, 'receiptVersion': 3}))
-    assert submitted['generation'] == request['generation']
-    assert validate_receipt({**request, 'receiptVersion': 3}, submitted)['status'] == 'started'
+    require(submitted['generation'] == request['generation'])
+    require(validate_receipt({**request, 'receiptVersion': 3}, submitted)['status'] == 'started')
     observed = {}
 
     def input_seen():
         observed.update(first.receipt(request))
-        assert observed['status'] in ('started', 'inputRecorded')
+        require(observed['status'] in ('started', 'inputRecorded'))
         return observed['status'] == 'inputRecorded'
 
     wait_for(input_seen, process)
     recorded = dict(observed)
     wait_for(lambda: server.request_counts['primary'] == 1, process)
     wait_for(lambda: time.time_ns() // 1_000_000 > request['permitExpiresAt'], process)
-    assert first.receipt(request) == recorded
+    require(first.receipt(request) == recorded)
     server.release_primary.set()
     wait_for(lambda: first.challenge()['eligible'], process)
     assert_counts(server)
@@ -146,10 +163,7 @@ def restart_callback(first, server, process, witness):
     (root / 'old-bridge-event.json').write_text(json.dumps(request, sort_keys=True))
     stop_process(process, witness['backendPid'])
     first.close()
-    parent, child = socket.socketpair()
-    master, slave = pty.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 120, 0, 0))
-    bridge = native.NativeBridge(parent, receipt_version=3)
+    parent = child = master = slave = bridge = None
     stop, second, thread, new_witness = threading.Event(), None, None, None
     startup_tail = bytearray()
 
@@ -168,6 +182,10 @@ def restart_callback(first, server, process, witness):
                     break
 
     try:
+        parent, child = socket.socketpair()
+        master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 120, 0, 0))
+        bridge = native.NativeBridge(parent, receipt_version=3)
         second = subprocess.Popen(args, cwd=root, stdin=slave, stdout=slave, stderr=slave,  # nosec B603
                                   pass_fds=(child.fileno(),), start_new_session=True,
                                   env={'PATH': os.defpath, 'HOME': str(root), 'CODEX_HOME': str(root / 'codex-home'),
@@ -186,24 +204,24 @@ def restart_callback(first, server, process, witness):
             return new_witness['serverInstanceId'] is not None and new_witness['threadId'] is not None
 
         wait_for(connected, second)
-        assert new_witness['clientId'] != witness['clientId']
-        assert new_witness['serverInstanceId'] not in (None, witness['serverInstanceId'])
-        assert new_witness['backendPid'] != witness['backendPid']
-        assert new_witness['threadId'] != request['threadId']
+        require(new_witness['clientId'] != witness['clientId'])
+        require(new_witness['serverInstanceId'] not in (None, witness['serverInstanceId']))
+        require(new_witness['backendPid'] != witness['backendPid'])
+        require(new_witness['threadId'] != request['threadId'])
         restored = json.loads((root / 'old-bridge-event.json').read_text())
-        assert restored == request
+        require(restored == request)
         adapter = NativeBridgeAdapter(mapping, bridge)
-        assert asyncio.run(adapter.check()) == 'unavailable'
+        require(asyncio.run(adapter.check()) == 'unavailable')
         recovered = asyncio.run(adapter.reconcile({**restored, 'receiptVersion': 3}))
-        assert recovered['generation'] == request['generation']
-        assert validate_receipt({**request, 'receiptVersion': 3}, recovered, allow_input_recorded=True) == recorded
+        require(recovered['generation'] == request['generation'])
+        require(validate_receipt({**request, 'receiptVersion': 3}, recovered, allow_input_recorded=True) == recorded)
         changed = old_request_probes(bridge, restored, recorded, server)
-        assert asyncio.run(adapter.check()) == 'unavailable'
+        require(asyncio.run(adapter.check()) == 'unavailable')
         after_probes = bridge.challenge()
-        assert all(after_probes[key] == new_witness[key]
-                   for key in ('clientId', 'serverInstanceId', 'backendPid', 'threadId'))
+        require(all(after_probes[key] == new_witness[key]
+                   for key in ('clientId', 'serverInstanceId', 'backendPid', 'threadId')))
         time.sleep(0.25)
-        assert second.poll() is None
+        require(second.poll() is None)
         assert_counts(server)
         return {'qualification': 'synthetic-native-v3-two-tui-restart', 'nativeOnly': True,
                 'cloudSettlementProven': False, 'realModelCalls': 0, 'oldRequest': request,
@@ -211,7 +229,8 @@ def restart_callback(first, server, process, witness):
                 'installedAdapterSha256': INSTALLED_SHA,
                 'recorded': recorded, 'newWitness': new_witness, 'mutatedFieldsRejected': changed,
                 'oldProcessesStopped': True, 'permitExpired': True, 'exactReceiptRecoveredTwice': True,
-                'oldStartLocallyRefused': True, 'oldStartNoStartSettlementProven': False, 'originalAttachmentUnavailable': True, 'newSelectedThreadId': new_witness['threadId'],
+                'oldStartLocallyRefused': True, 'oldStartNoStartSettlementProven': False,
+                'originalAttachmentUnavailable': True, 'newSelectedThreadId': new_witness['threadId'],
                 'modelRequestCounts': dict(server.request_counts)}
     except Exception:
         print(json.dumps({'phase': 'second-tui-startup-or-proof', 'argv': args,
@@ -220,15 +239,20 @@ def restart_callback(first, server, process, witness):
         raise
     finally:
         stop.set()
-        bridge.close()
-        child.close()
+        if bridge is not None:
+            bridge.close()
+        elif parent is not None:
+            parent.close()
+        if child is not None:
+            child.close()
         if second is not None:
             stop_process(second, new_witness['backendPid'] if new_witness else None)
         if thread:
             thread.join(timeout=1)
         if slave is not None:
             os.close(slave)
-        os.close(master)
+        if master is not None:
+            os.close(master)
 
 
 if __name__ == '__main__':
@@ -237,7 +261,7 @@ if __name__ == '__main__':
     parser.add_argument('--sha256', required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
-    assert hashlib.sha256(args.binary.read_bytes()).hexdigest() == args.sha256, 'binary SHA mismatch'
+    require(hashlib.sha256(args.binary.read_bytes()).hexdigest() == args.sha256, 'binary SHA mismatch')
     native.qualify_input_recorded = restart_callback
     result = native.qualify(args.binary, input_recorded=True, receipt_version=3)
     result.update(binarySha256=args.sha256, readerSha256=SOURCE_SHA)

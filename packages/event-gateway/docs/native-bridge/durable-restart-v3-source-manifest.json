@@ -1,10 +1,10 @@
 {
-  "sourceCheckout": "/private/tmp/codex-native-durable-restart-v3-spike/source",
+  "sourceCheckout": "/private/tmp/codex-native-guarded-start-p2/source/codex-rs",
   "baseCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
-  "scope": "Cumulative native selection binding, terminal refusal, durable StateDB receipt, and v3 bridge identity across TUI restart; includes Core/app-server/protocol/State/TUI/CLI and generated schema/SDK exports.",
+  "scope": "Cumulative native selection binding, terminal refusal, durable StateDB receipt, and v3 bridge identity across TUI restart; includes Core/app-server/protocol/State/TUI/CLI and generated schema/SDK exports.; failed Core preparation now returns non-Started and cleans only the failed matching turn.",
   "fileCount": 48,
   "binaryPatch": true,
-  "patchSha256": "d657643667c6167c3650b45b5d985a579f1625fc9b7f56fc67bed43031d9abf8",
+  "patchSha256": "b9ab28d49a62f5756495f729c6716511d3136f58c3b9ea4061f4f7dba3d2598c",
   "cleanPinnedApply": {
     "base": "a956835d020762cb2b570053af06f643a11c0ecc",
     "cleanApply": "PASS",
@@ -36,8 +36,8 @@
     "codex-rs/cli/src/main.rs": "de484836dfaeec9294bedd18ab105af14a3cf68a6d6697188b76b890623bf75c",
     "codex-rs/core/src/session/mod.rs": "d4363e380ff2fe9e537c15a26330c497886d566c9cb14531c89db19c019b918c",
     "codex-rs/core/src/session/turn_input.rs": "06a1138f66cc9b93302ae2af04de412a978b9db2943e88b9e82a6b6dbb7eae65",
-    "codex-rs/core/src/session/turn_input_tests.rs": "4accd9f9d8b749e11d53f9f329e568790b403102f2cee81bdf0bb28a667c82d2",
-    "codex-rs/core/src/tasks/guarded_start.rs": "381b171a096088a389ca7891cce0a3cf1066da7b8d814e55b828606c5445fb8f",
+    "codex-rs/core/src/session/turn_input_tests.rs": "96a3a87407387bad786ee1664175b46204d453ce38e5f9a3645db18df0d22f1c",
+    "codex-rs/core/src/tasks/guarded_start.rs": "bc3673aaba4c3d0c467d93af81aae3b51f8abea2a6bdc29016bcca3eb38d752f",
     "codex-rs/core/src/tasks/mod.rs": "4167a59e4d411329c62a970015bea3f59bcce8a1ade62e1294a504f7ce464e73",
     "codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs": "b352df6700d4547951860df6347d4d21a03a546994f6e284f88fccbe5a77083b",
     "codex-rs/protocol/src/turn_input.rs": "4355925606639fd7f4c05252485d5d53b520ec0c9729a827c09b0f70edb8658b",
@@ -172,13 +172,13 @@
     },
     {
       "path": "codex-rs/core/src/session/turn_input_tests.rs",
-      "sha256": "4accd9f9d8b749e11d53f9f329e568790b403102f2cee81bdf0bb28a667c82d2",
-      "bytes": 42665
+      "sha256": "96a3a87407387bad786ee1664175b46204d453ce38e5f9a3645db18df0d22f1c",
+      "bytes": 46416
     },
     {
       "path": "codex-rs/core/src/tasks/guarded_start.rs",
-      "sha256": "381b171a096088a389ca7891cce0a3cf1066da7b8d814e55b828606c5445fb8f",
-      "bytes": 10918
+      "sha256": "bc3673aaba4c3d0c467d93af81aae3b51f8abea2a6bdc29016bcca3eb38d752f",
+      "bytes": 11217
     },
     {
       "path": "codex-rs/core/src/tasks/mod.rs",
