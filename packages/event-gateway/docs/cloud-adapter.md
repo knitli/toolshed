@@ -59,7 +59,9 @@ occur in signed node-proof JSON.
   and native IDs while obtaining fresh credentials/node proof. It neither claims
   again nor invokes native submission. Late reconciliation may outlive transport
   expiry. The reply's status must match the submitted ACK; a submitted ACK cannot
-  advance the current watermark.
+  advance the current watermark. Direct native input observation uses the separate
+  `native_input_recorded` correlation after confirmed submitted registration;
+  [its consumer](native-input-observation.md) persists both phases independently.
 - `complete_enrollment(challenge, mesh_ip=..., mesh_port=..., agents=...)` checks
   the exact owner challenge against the configured node/public key and explicitly
   reviewed Mesh binding before signing its bytes. Challenge expiry is at most five

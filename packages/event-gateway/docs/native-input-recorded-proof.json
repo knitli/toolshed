@@ -1,0 +1,415 @@
+{
+  "baseCommit": "39282c0a8372e2184dbc6909d0782c607d090e94",
+  "canonicalRevision": "ed23882eac491e26e070e3ef26cf8c0e9e702b38",
+  "sourceSha256": {
+    "src/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+    "src/event_gateway/cli.py": "08cdfc58623dd667c4ea10e55845958466ffa6a63c1bc96bc4aab1f790964b35",
+    "src/event_gateway/cloud.py": "f970e6b902cb7e893241d0f914a6a4473f26635a0d790f11c6ed4b30679a3ad6",
+    "src/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+    "src/event_gateway/daemon.py": "6b05d73d5ba9382c54ad2abf59d03f70dca465256dc6d103a47b8885da422fd9",
+    "src/event_gateway/gateway.py": "b949efa5184df151357fabf739a6736771672238e87cb60d1c9477ce0dddcc06",
+    "src/event_gateway/listener.py": "565848a5f6047573f9b0b737c8158113b8f6070fb539a63c38553a6460799108",
+    "src/event_gateway/native.py": "ad19fc2c63fbf7cd1dcf15afa8c18586e59f3c60c12c24129578ad78c6180a07",
+    "src/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+    "src/event_gateway/security.py": "8eeb77c10faf2e8f0641a984930394c14fa0e722f16a7784b0324eb1ebde4434",
+    "src/event_gateway/store.py": "2082acfe374c4363d104f83da784a5466da1b612d9710707ec31e17147af095d"
+  },
+  "testSha256": {
+    "tests/test_cloud.py": "76cd5b8b9b5ff4a3e409e0ed95232468136c9b1ac8600e8429a74a220bbcb6e8",
+    "tests/test_gateway.py": "838aadd7c109f5e41665878f9831e7aea61a580ba7a68d2863d2b1335db6c81e",
+    "tests/test_gateway_integration.py": "58c63e7b6b987c63d7e1349ae5c1f0711741c8e69fce57d0a5125cd592237fe2",
+    "tests/test_native.py": "dba9c4c591e6ec62310300004a6100172e554f7135322b082a323dc1812813b5",
+    "tests/test_protocol.py": "31566041015ca2e73070289e9da6c8e05437a52aeef596e0ded2c70fad075e00",
+    "tests/test_store.py": "a8ea3f0e451b875648758096b85a497f0c505c8ab5bca1f484478f325cc7a7fb"
+  },
+  "individualCausalCases": [
+    {
+      "family": "native",
+      "name": "default-opt-in",
+      "selector": "test_native.NativeValidationTests.test_input_recorded_requires_opt_in_and_exact_observed_identity",
+      "mutation": [
+        "*, allow_input_recorded=False",
+        "*, allow_input_recorded=True"
+      ],
+      "redAssertion": "AssertionError: NativeError not raised",
+      "redCaptureSha256": "0015feef1df7e7d078378aee69d745ccc6e294abc430d7ee5e1b400b73534fcf",
+      "restoredGreenCaptureSha256": "d10ffbd9f0faa72cd6837063279524e199b59fbc3d035051302a1e8dbc4b36ad"
+    },
+    {
+      "family": "native",
+      "name": "closed-shape",
+      "selector": "test_native.NativeValidationTests.test_input_recorded_requires_opt_in_and_exact_observed_identity",
+      "mutation": [
+        "or set(outcome) != {\"status\", \"turnId\", \"itemId\", \"replayed\"}",
+        "or False"
+      ],
+      "redAssertion": "AssertionError: NativeError not raised",
+      "redCaptureSha256": "1bb5f6cf129692d705d43c0a6841829b7d2ecd5c59123b38873878f586831bf8",
+      "restoredGreenCaptureSha256": "fb184ea57734512b1f088f9181209901b9cd46df3eb7eaa2500ea9e48dde20b5"
+    },
+    {
+      "family": "native",
+      "name": "turn-uuid",
+      "selector": "test_native.NativeValidationTests.test_input_recorded_requires_opt_in_and_exact_observed_identity",
+      "mutation": [
+        "or not _uuid(outcome[\"turnId\"])",
+        "or False"
+      ],
+      "redAssertion": "AssertionError: NativeError not raised",
+      "redCaptureSha256": "b46eb85927d13c784686bb6c520826e406db8f47c0b539f3905557e8db400dba",
+      "restoredGreenCaptureSha256": "fb184ea57734512b1f088f9181209901b9cd46df3eb7eaa2500ea9e48dde20b5"
+    },
+    {
+      "family": "native",
+      "name": "turn-correlation",
+      "selector": "test_native.NativeValidationTests.test_input_recorded_requires_opt_in_and_exact_observed_identity",
+      "mutation": [
+        "or outcome[\"turnId\"] != request[\"clientUserMessageId\"]",
+        "or False"
+      ],
+      "redAssertion": "AssertionError: NativeError not raised",
+      "redCaptureSha256": "221f3f95be7c2936558d8aece2f168f40f755de3c19454056cdd36e3a2efaaf0",
+      "restoredGreenCaptureSha256": "d10ffbd9f0faa72cd6837063279524e199b59fbc3d035051302a1e8dbc4b36ad"
+    },
+    {
+      "family": "native",
+      "name": "item-uuid",
+      "selector": "test_native.NativeValidationTests.test_input_recorded_requires_opt_in_and_exact_observed_identity",
+      "mutation": [
+        "or not _uuid(outcome[\"itemId\"])",
+        "or False"
+      ],
+      "redAssertion": "AssertionError: NativeError not raised",
+      "redCaptureSha256": "82d1c6dcb600273d64e742c93c34e22b9e7b8f2b970b0c98805a3ef9b663e7ac",
+      "restoredGreenCaptureSha256": "fb184ea57734512b1f088f9181209901b9cd46df3eb7eaa2500ea9e48dde20b5"
+    },
+    {
+      "family": "native",
+      "name": "item-distinct",
+      "selector": "test_native.NativeValidationTests.test_input_recorded_requires_opt_in_and_exact_observed_identity",
+      "mutation": [
+        "or outcome[\"itemId\"] == request[\"clientUserMessageId\"]",
+        "or False"
+      ],
+      "redAssertion": "AssertionError: NativeError not raised",
+      "redCaptureSha256": "059a3dac151ae5516207dc5a5ea8f5583eeaa18e8aaf1405f3ce7301f3f588b5",
+      "restoredGreenCaptureSha256": "fb184ea57734512b1f088f9181209901b9cd46df3eb7eaa2500ea9e48dde20b5"
+    },
+    {
+      "family": "native",
+      "name": "replay-true",
+      "selector": "test_native.NativeValidationTests.test_input_recorded_requires_opt_in_and_exact_observed_identity",
+      "mutation": [
+        "or outcome[\"replayed\"] is not True",
+        "or False"
+      ],
+      "redAssertion": "AssertionError: NativeError not raised",
+      "redCaptureSha256": "4be1d861c142e20447ba8cfe65e0154eb68acfd303dc3e76be8a67b2e74a2962",
+      "restoredGreenCaptureSha256": "fb184ea57734512b1f088f9181209901b9cd46df3eb7eaa2500ea9e48dde20b5"
+    },
+    {
+      "family": "native",
+      "name": "outer-identity",
+      "selector": "test_native.NativeValidationTests.test_input_recorded_requires_opt_in_and_exact_observed_identity",
+      "mutation": [
+        "if any(type(receipt[key]) is not type(request[key]) or receipt[key] != request[key]",
+        "if any(False"
+      ],
+      "redAssertion": "AssertionError: NativeError not raised",
+      "redCaptureSha256": "b40ee3a0f1ca9b666a9b0b7c99db1fb8930bb200d4894cc7a0fa361e00d277e7",
+      "restoredGreenCaptureSha256": "fb184ea57734512b1f088f9181209901b9cd46df3eb7eaa2500ea9e48dde20b5"
+    },
+    {
+      "family": "native",
+      "name": "submit-opt-in",
+      "selector": "test_native.NativeAdapterTests.test_input_recorded_is_reconcile_only",
+      "mutation": [
+        "        validate_receipt(request, receipt)\n",
+        "        validate_receipt(request, receipt, allow_input_recorded=True)\n"
+      ],
+      "redAssertion": "AssertionError: NativeError not raised",
+      "redCaptureSha256": "bb73fa00d0fdc5953c519507a1fd3187f7b692cd96e4758e54590095ce2ce6b7",
+      "restoredGreenCaptureSha256": "24cefc2bc38a1c71e18591075993695fc72546b32ff6b5baab3d98032ce96fb5"
+    },
+    {
+      "family": "store",
+      "name": "started-preserved",
+      "selector": "test_store.StoreTests.test_input_recorded_preserves_started_and_exact_recovery",
+      "redAssertion": "AssertionError: None != {'clientId': 'a1f49513-c757-4a74-85c2-81d[565 chars]lse}}",
+      "redCaptureSha256": "18864e6e76f791f3605c077173c92798900bda2e9015040aa6864c81ef353065",
+      "restoredGreenCaptureSha256": "39849bfb00ec48c8bfcb61b2008d11829d933ed7add34945dde4f49087b4ec5d"
+    },
+    {
+      "family": "store",
+      "name": "submitted-confirmation",
+      "selector": "test_store.StoreTests.test_input_only_observed_requires_submitted_confirmation_and_survives_restart",
+      "redAssertion": "AssertionError: StoreError not raised",
+      "redCaptureSha256": "c359963c3891c112eea209a0059d35218c990230ab59dfe1b94e13566aa27055",
+      "restoredGreenCaptureSha256": "cf86847e9cccf674040968ab7c36be29fd28c0b25a040a3f0037b475b800a8c0"
+    },
+    {
+      "family": "store",
+      "name": "detach-fence",
+      "selector": "test_store.StoreTests.test_observed_completion_after_detach_preserves_fence",
+      "redAssertion": "AssertionError: 0 != 1",
+      "redCaptureSha256": "a90af8ce07260e6addb0581a0b2a0fa705ff5b7cbd3dad8176cfa01d099dacc4",
+      "restoredGreenCaptureSha256": "82da33470ca8bf23e0798abb83d9c16966856e5c850c8339c699e6ac38a182ce"
+    },
+    {
+      "family": "store",
+      "name": "v3-migration",
+      "selector": "test_store.StoreTests.test_schema_v3_migration_preserves_native_and_legacy_bytes",
+      "redAssertion": "AssertionError: 3 != 4",
+      "redCaptureSha256": "36318da7176142aa76620d076e9355cec7163861e89d89d7c7e33d80d70b1f88",
+      "restoredGreenCaptureSha256": "762092a2478eec1b48e709deb457966aa4d8cdb7acb457a4bdb008207b2f994a"
+    },
+    {
+      "family": "store",
+      "name": "v2-migration",
+      "selector": "test_store.StoreTests.test_schema_v2_migration_clears_only_proven_native_turn_aliases",
+      "redAssertion": "AssertionError: 3 != 4",
+      "redCaptureSha256": "55ccc6240beb0ee2ab52679130c0030f045a916e4905a9850112c5e80e1dc583",
+      "restoredGreenCaptureSha256": "4f048e6ddd9c6146514dfa8dd37c312e4ae4496051c7580b50530c848e6249ba"
+    },
+    {
+      "family": "store",
+      "name": "v0-v1-migration",
+      "selector": "test_store.StoreTests.test_schema_zero_and_one_migrate_without_requeueing_native_work",
+      "redAssertion": "AssertionError: 3 != 4",
+      "redCaptureSha256": "eb0c21200ed65688d7f51b7a9d0b1466a1341779cc354a04f8dec6010322edaa",
+      "restoredGreenCaptureSha256": "01ceae9dbef737dbdc1d7bdb4d3f1bab59d07fba51d1831d34655dbeb09051ec"
+    },
+    {
+      "family": "store",
+      "name": "late-submit",
+      "selector": "test_store.StoreTests.test_input_only_observed_requires_submitted_confirmation_and_survives_restart",
+      "redAssertion": "AssertionError: 'submitted' != 'observed'",
+      "redCaptureSha256": "53acf6880bc6b1854471ae3f396bf68164d2c5c02ad2c703145450f0d8991d89",
+      "restoredGreenCaptureSha256": "79f77a212fba6e229cab46571744f3b62ec273f6acd50a50c532a127e6513146"
+    },
+    {
+      "family": "gateway",
+      "name": "test_started_receipt_gets_submitted_ack_and_never_restarts_native",
+      "selector": "test_gateway.GatewayTests.test_started_receipt_gets_submitted_ack_and_never_restarts_native",
+      "mutation": [
+        "if attempt.get(\"input_recorded_receipt\") or attempt[\"ack_state\"] != \"submitted\":",
+        "if attempt.get(\"started_receipt\") or attempt.get(\"input_recorded_receipt\") or attempt[\"ack_state\"] != \"submitted\":"
+      ],
+      "redAssertion": "AssertionError: Lists differ: [] != [{'clientId': '082fb06c-7f9b-4e67-a686-498[727 chars]1'}}]",
+      "redCaptureSha256": "0544f366ed5fe19ad6ba0d2d0024203e6e3995f5dbb15a46278065824606bd1c",
+      "restoredGreenCaptureSha256": "46df4f0edcf4a6f9a32504da3478dd3a1a7db82b7890d0c616cbb1a0a9b16b2a"
+    },
+    {
+      "family": "gateway",
+      "name": "test_lost_native_ack_retries_exact_persisted_dto_after_restart",
+      "selector": "test_gateway.GatewayTests.test_lost_native_ack_retries_exact_persisted_dto_after_restart",
+      "mutation": [
+        "attempt.get(column) or self._native_acknowledgment(attempt, observed=observed)",
+        "self._native_acknowledgment(attempt, observed=observed)"
+      ],
+      "redAssertion": "AssertionError: Lists differ: [{'ac[650 chars]ted'}] != [{'ac[650 chars]ted'}, {'acknowledgedAt': '2026-10-05T12:00:30[616 chars]ed'}]",
+      "redCaptureSha256": "a1bca29f88f005262d023383f906c2dfbd0b21311955e940a2909b423f458aa0",
+      "restoredGreenCaptureSha256": "46df4f0edcf4a6f9a32504da3478dd3a1a7db82b7890d0c616cbb1a0a9b16b2a"
+    },
+    {
+      "family": "gateway",
+      "name": "test_recovered_positive_is_immutable_and_never_resubmitted",
+      "selector": "test_gateway.GatewayTests.test_recovered_positive_is_immutable_and_never_resubmitted",
+      "mutation": [
+        "if attempt.get(\"input_recorded_receipt\") or attempt[\"ack_state\"] != \"submitted\":",
+        "if attempt.get(\"started_receipt\") or attempt.get(\"input_recorded_receipt\") or attempt[\"ack_state\"] != \"submitted\":"
+      ],
+      "redAssertion": "AssertionError: 1 != 2",
+      "redCaptureSha256": "e9452b035408f685d571950e503d880789be19d51d58eff1eb8eaea1f08996fc",
+      "restoredGreenCaptureSha256": "46df4f0edcf4a6f9a32504da3478dd3a1a7db82b7890d0c616cbb1a0a9b16b2a"
+    },
+    {
+      "family": "gateway",
+      "name": "test_input_only_recovery_orders_both_immutable_acks_across_lost_responses",
+      "selector": "test_gateway.GatewayTests.test_input_only_recovery_orders_both_immutable_acks_across_lost_responses",
+      "mutation": [
+        "for observed in (False, True):",
+        "for observed in (False,):"
+      ],
+      "redAssertion": "AssertionError: None != 'native_observed_ack_pending'",
+      "redCaptureSha256": "30778effbc2e754f6bd06bb9b1be0c78d00ef0ed9be092d350084c5bfdbd6c46",
+      "restoredGreenCaptureSha256": "a41e08b8782ccff561fc04da1c4aa92b79d00989913c15ae6639e0c2e9b7e03c"
+    },
+    {
+      "family": "gateway",
+      "name": "test_registered_attempt_polls_core_without_lease_or_start_and_preserves_started",
+      "selector": "test_gateway.GatewayTests.test_registered_attempt_polls_core_without_lease_or_start_and_preserves_started",
+      "mutation": [
+        "if attempt.get(\"input_recorded_receipt\") or attempt[\"ack_state\"] != \"submitted\":",
+        "if attempt.get(\"started_receipt\") or attempt.get(\"input_recorded_receipt\") or attempt[\"ack_state\"] != \"submitted\":"
+      ],
+      "redAssertion": "AssertionError: 'submitted' != 'observed'",
+      "redCaptureSha256": "a082bc3ef8b1f3c7708c99468fcd5f1d6d8f28d52c94e692064eecc716e3bb3a",
+      "restoredGreenCaptureSha256": "46df4f0edcf4a6f9a32504da3478dd3a1a7db82b7890d0c616cbb1a0a9b16b2a"
+    },
+    {
+      "family": "gateway",
+      "name": "test_input_recovery_requires_mapping_and_full_valid_readonly_receipt",
+      "selector": "test_gateway.GatewayTests.test_input_recovery_requires_mapping_and_full_valid_readonly_receipt",
+      "mutation": [
+        "if (not mapping or attempt[\"fenced\"]\n                    or any(mapping.get(key) != envelope.get(key) for key in FENCES[:7])\n                    or mapping.get(\"nativeThreadId\") != attempt[\"native_request\"][\"threadId\"]):",
+        "if False:"
+      ],
+      "redAssertion": "AssertionError: Lists differ: [{'attemptId': '018e2c70-7c6a-7a03-8000-00[2275 chars]7b'}] != []",
+      "redCaptureSha256": "9c997bd6a2701e6acb5e3bcf19737fbf3b3e64be232bd116699fdeb9f508c2dc",
+      "restoredGreenCaptureSha256": "c3dc4ce80790d0a5a68dcff2d3009be59564c24dfe01144e0f6b50051e539cc3"
+    },
+    {
+      "family": "gateway",
+      "name": "test_input_recorded_on_submit_cannot_ack_or_become_observed",
+      "selector": "test_gateway.GatewayTests.test_input_recorded_on_submit_cannot_ack_or_become_observed",
+      "mutation": [
+        "async def _receipt(self, delivery_id, attempt, receipt, *, allow_input_recorded=False):",
+        "async def _receipt(self, delivery_id, attempt, receipt, *, allow_input_recorded=True):"
+      ],
+      "redAssertion": "AssertionError: 'observed' != 'ambiguous'",
+      "redCaptureSha256": "33340996e615213cfc25361885f68c11ef29f7b74ebf5a2cd247d2c94eb969dd",
+      "restoredGreenCaptureSha256": "a626407facf1102b512cc38f00f6e7d889aa6280a5c03d1722ac6d1c4eb08dc5"
+    },
+    {
+      "family": "integration",
+      "name": "test_observed_receipt_signed_ack_retries_exact_after_restart",
+      "selector": "test_gateway_integration.GatewayIntegrationTests.test_observed_receipt_signed_ack_retries_exact_after_restart",
+      "mutation": [
+        "attempt.get(column) or self._native_acknowledgment(attempt, observed=observed)",
+        "self._native_acknowledgment(attempt, observed=observed)"
+      ],
+      "redAssertion": "AssertionError: 'submitted' != 'observed'",
+      "redCaptureSha256": "6fffadd10afdb7198d78a07338570323ab6bbf751c320835450f5c18aa7d372c",
+      "restoredGreenCaptureSha256": "8fc491c33af10c373d8f98a2362fd7e66cdc6c96497aa5aa59d429264ca5ac92"
+    },
+    {
+      "family": "integration",
+      "name": "test_old_cloud_rejection_keeps_exact_observed_phase_pending",
+      "selector": "test_gateway_integration.GatewayIntegrationTests.test_old_cloud_rejection_keeps_exact_observed_phase_pending",
+      "mutation": [
+        "            except Exception:\n                return self._row(delivery_id, \"native_observed_ack_pending\" if observed else \"native_started_ack_pending\")",
+        "            except Exception:\n                self.store.complete_native_ack(delivery_id, attempt_id, acknowledgment, {\"status\": \"observed\" if observed else \"submitted\", \"current\": False}, observed=observed)"
+      ],
+      "redAssertion": "AssertionError: Tuples differ: ('observed', None) != ('submitted', 'native_observed_ack_pending')",
+      "redCaptureSha256": "b7505b5b53e3c0169ca1fbd18dd15c979e34fde6f2e212a7a24e86f7ab82fbf5",
+      "restoredGreenCaptureSha256": "8fc491c33af10c373d8f98a2362fd7e66cdc6c96497aa5aa59d429264ca5ac92"
+    },
+    {
+      "family": "integration",
+      "name": "test_input_recorded_only_recovery_registers_then_observes_without_fake_started",
+      "selector": "test_gateway_integration.GatewayIntegrationTests.test_input_recorded_only_recovery_registers_then_observes_without_fake_started",
+      "mutation": [
+        "or not (attempt.get(\"started_receipt\") or attempt.get(\"input_recorded_receipt\"))",
+        "or not attempt.get(\"started_receipt\")"
+      ],
+      "redAssertion": "AssertionError: 'ambiguous' != 'observed'",
+      "redCaptureSha256": "8706fc93b9c74e040d6eae3606291690a812afe030bc04458d9e1f5043547735",
+      "restoredGreenCaptureSha256": "a41e08b8782ccff561fc04da1c4aa92b79d00989913c15ae6639e0c2e9b7e03c"
+    },
+    {
+      "family": "integration",
+      "name": "test_real_clients_retire_terminal_no_start_then_ack_started_receipt",
+      "selector": "test_gateway_integration.GatewayIntegrationTests.test_real_clients_retire_terminal_no_start_then_ack_started_receipt",
+      "mutation": [
+        "if attempt.get(\"input_recorded_receipt\") or attempt[\"ack_state\"] != \"submitted\":",
+        "if attempt.get(\"started_receipt\") or attempt.get(\"input_recorded_receipt\") or attempt[\"ack_state\"] != \"submitted\":"
+      ],
+      "redAssertion": "AssertionError: Lists differ: [('ch[1643 chars]1'}})] != [('ch[1643 chars]1'}}), ('restore', {'attemptId': '518dd75c-282[1529 chars]8'})]",
+      "redCaptureSha256": "f78a9a06ce7000f5dc8bb9ebabacaa23e5421e13570d9811ab8cf84799ffb36d",
+      "restoredGreenCaptureSha256": "8fc491c33af10c373d8f98a2362fd7e66cdc6c96497aa5aa59d429264ca5ac92"
+    },
+    {
+      "family": "external-node-vector",
+      "name": "observed-item-omitted",
+      "selector": "test_cloud.CloudTests.test_native_observed_ack_wire_and_node_proof_match_external_vector",
+      "redAssertion": "AssertionError: {'sch[642 chars]0000000001'}} != {'sch[642 chars]0000000001', 'itemId': '018e2c70-7c6a-7a07-8000-000000000001'}}",
+      "redCaptureSha256": "47dfce2d21b9fe65b6d04b7c627b36c49c1c2f5d7db028b755fde91a553bf276",
+      "restoredGreenCaptureSha256": "a626407facf1102b512cc38f00f6e7d889aa6280a5c03d1722ac6d1c4eb08dc5"
+    },
+    {
+      "family": "external-node-vector",
+      "name": "observed-current-not-boolean",
+      "selector": "test_cloud.CloudTests.test_native_observed_ack_wire_and_node_proof_match_external_vector",
+      "redAssertion": "AssertionError: CloudError not raised",
+      "redCaptureSha256": "4c89e4aa73ac9f17876cba49cb0ed5ed8f2d2d2e85227b1976a0dce62dbd6ebe",
+      "restoredGreenCaptureSha256": "a626407facf1102b512cc38f00f6e7d889aa6280a5c03d1722ac6d1c4eb08dc5"
+    },
+    {
+      "family": "portable-protocol",
+      "case": "native-input-recorded-item-id-equals-turn-id",
+      "selector": "test_protocol.ProtocolTests.test_shared_vectors",
+      "mutation": "Remove itemId!=turnId semantic guard after closed JSON Schema validation; custom x-distinct-from is annotation only",
+      "sourceSha256": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+      "mutantSha256": "078e43a4487204c2d6dbb43b023171df4d7ca09b2adbcc537361d40e092ecd87",
+      "redExit": 1,
+      "redAssertion": "AssertionError: ProtocolError not raised",
+      "redLogSha256": "0cec4abbbe087a08c8a09c6838ad047d3014c8b8ce3b31c5478f1d212c366c27",
+      "restoredGreenExit": 0,
+      "restoredGreenLogSha256": "197853f5215826ca01b315f16ed0e7a2a08221605e9201d64ab6a5ff3a9f0fba",
+      "fixturesSha256": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3"
+    }
+  ],
+  "excludedEvidence": [
+    {
+      "case": "reconcile-no-opt-in",
+      "reason": "Uncaught NativeError only; excluded from intended-assertion causal count. The adapter test has a separate submit-opt-in AssertionError proof."
+    },
+    {
+      "case": "closed-shape missing-field KeyErrors",
+      "reason": "Only the same mutation's extra-field acceptance AssertionError counts; missing-field exceptions are excluded."
+    },
+    {
+      "case": "initial pre-canonical integration pairs",
+      "reason": "Superseded by four current closed-parser integration pairs."
+    },
+    {
+      "case": "protocol helper pattern mismatch",
+      "reason": "Failed before mutation/test, excluded."
+    },
+    {
+      "case": "pre-policy full suite",
+      "reason": "Two known trusted-workflow checks failed before the separately signed policy dependency; excluded from green claim."
+    }
+  ],
+  "checks": {
+    "fullSourceTests": 187,
+    "fullSourceLogSha256": "442d36fd4f4e874115d9d9dffa96668226181f22f785f8a1f3b2fa6a471fdc71",
+    "ruffPassed": true,
+    "ruffLogSha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "independentAudit": "closed; 44 focused tests and exact current hashes verified",
+    "independentAuditSha256": "6b00a7b0f3701605f8eabafce92aeb7d7001f7bfb8fe6ed710c1875539d74ebd",
+    "installedWheel": {
+      "isolatedWheelInstalled": true,
+      "allProductionModulesByteMatch": 11,
+      "eventContractFilesByteMatch": true,
+      "closedNativeObservedAckParsed": true,
+      "automaticWakeEnabled": false,
+      "ownerClientChanged": false,
+      "wheelSha256": "0bad85697973ad21f576f72fdea4d8d11d408e84ab06ae7348f93cb630d2716c",
+      "installedChecksPassed": 4,
+      "installedTestsLogSha256": "4dcde7585eddbdb2e2ba904b8259daf45d931d68e8dfd955bf4c9acf80039845"
+    }
+  },
+  "controlledNativeQualification": {
+    "qualification": "real-native-production-local-MOCK-cloud-observed-ack",
+    "cloudSettlementProven": false,
+    "mockCloudOnly": true,
+    "realModelCalls": 0,
+    "nativeCliRestarted": false,
+    "localStoreAndClientRestarted": true,
+    "binarySha256": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
+    "freshProofAndCredentials": true,
+    "byteIdenticalObservedRetry": true,
+    "bridgeNonceUnchangedDuringAckRecovery": true,
+    "mockModelRequests": {
+      "primary": 1,
+      "title": 1,
+      "unknown": 0
+    },
+    "localFinalState": "observed",
+    "pendingCapacity": 0
+  },
+  "liveProofSha256": "eda16785170f6cdd96578cd30473db565c4f2ddf26ec87ed7758177088668805",
+  "rollback": "Schema4 retains actual full input receipt and both immutable ACKs. Keep compatible dual-phase reader/closed parser; older schema3 code fails closed. No downmigration."
+}

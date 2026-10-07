@@ -43,6 +43,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.after_check = self.after_claim = self.custom_submit = None
         self.outcome = 'started'
         self.recovered_outcome = 'unknown'
+        self.item_id = str(uuid.uuid4())
         self.gateway = Gateway(self.store, self, lambda mapping: self,
                                audience='test-gateway', keys={'test': self.key.public_key()},
                                clock=lambda: self.now)
@@ -96,8 +97,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
 
     def receipt(self, request, status, *, replayed=False):
         outcome = {'status': status}
-        if status == 'started':
+        if status in ('started', 'inputRecorded'):
             outcome.update(turnId=request['clientUserMessageId'], replayed=replayed)
+            if status == 'inputRecorded':
+                outcome['itemId'] = self.item_id
         elif status == 'terminalNotStarted':
             outcome.update(reason='busy', receiptId=str(uuid.uuid4()), replayed=replayed)
         elif status == 'notStarted':
@@ -127,12 +130,136 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def acknowledge(self, envelope, acknowledgment):
         self.acknowledgments.append(copy.deepcopy(acknowledgment))
         attempt = self.store.current_attempt(acknowledgment['deliveryId'])
-        self.assertEqual(attempt['native_ack'], acknowledgment)
+        # Explicit fake authority for the two native phases; no production parser bypass.
+        observed = acknowledgment['status'] == 'observed'
+        self.assertEqual(attempt['native_observed_ack' if observed else 'native_ack'], acknowledgment)
+        if observed:
+            self.assertEqual(attempt['ack_state'], 'submitted')
+            self.assertIsNotNone(attempt['input_recorded_receipt'])
         self.assertEqual(envelope, attempt['admission']['envelope'])
         if self.drop_acknowledgment:
             self.drop_acknowledgment = False
             raise TimeoutError('lost ACK response')
-        return {'status': 'submitted', 'current': False}
+        return {'status': acknowledgment['status'], 'current': False}
+
+    async def test_input_only_recovery_orders_both_immutable_acks_across_lost_responses(self):
+        ident = self.accept()['deliveryId']
+        self.drop_response = True
+        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'ambiguous')
+        original_attempt = self.store.current_attempt(ident)['attempt_id']
+        self.recovered_outcome = 'inputRecorded'
+        failures = {'submitted', 'observed'}
+        acknowledge = self.acknowledge
+
+        async def lose_each_phase_once(envelope, acknowledgment):
+            result = await acknowledge(envelope, acknowledgment)
+            phase = acknowledgment['status']
+            if phase in failures:
+                failures.remove(phase)
+                raise TimeoutError('accepted ACK response lost')
+            return result
+
+        with patch.object(self, 'acknowledge', lose_each_phase_once):
+            self.assertEqual((await self.gateway.reconcile(ident))['reason'], 'native_started_ack_pending')
+            first = self.store.current_attempt(ident)
+            self.assertIsNone(first['started_receipt'])
+            self.assertEqual(first['input_recorded_receipt'], self.receipt(self.submissions[0], 'inputRecorded', replayed=True))
+            self.assertIsNone(first['native_observed_ack'])
+            self.assertIsNone(first['ack_state'])
+            self.restart()
+            self.now += 3601
+            self.assertEqual((await self.gateway.reconcile(ident))['reason'], 'native_observed_ack_pending')
+            pending = self.store.current_attempt(ident)
+            self.assertEqual(pending['native_ack'], first['native_ack'])
+            self.assertEqual(pending['ack_state'], 'submitted')
+            self.assertGreater(pending['reserved_bytes'], 0)
+            self.assertTrue(self.store.native_receipt(ident)['ack_pending'])
+            self.restart()
+            self.store.detach(self.mapping['runtimeId'])
+            self.assertEqual((await self.gateway.reconcile(ident))['status'], 'observed')
+        current = self.store.current_attempt(ident)
+        self.assertIsNone(current['started_receipt'])
+        self.assertEqual(current['input_recorded_receipt'], first['input_recorded_receipt'])
+        self.assertEqual(current['native_ack'], first['native_ack'])
+        self.assertEqual(current['native_observed_ack'], pending['native_observed_ack'])
+        self.assertEqual(current['attempt_id'], original_attempt)
+        self.assertEqual(current['native_observed_ack']['nativeCorrelation'], {
+            'kind': 'native_input_recorded', 'permitId': current['admission']['permitId'],
+            'turnId': self.submissions[0]['clientUserMessageId'], 'itemId': self.item_id})
+        self.assertEqual(self.acknowledgments, [first['native_ack']] * 2 + [pending['native_observed_ack']] * 2)
+        self.assertEqual(len(self.claims), 1)
+        self.assertEqual(self.lookups, self.submissions)
+        self.assertEqual(len(self.submissions), 1)
+        self.assertEqual(self.settlements, [])
+        self.assertEqual(current['reserved_bytes'], 0)
+        self.assertFalse(self.store.native_receipt(ident)['ack_pending'])
+        self.assertEqual(self.store.list_reconcilable(), [])
+
+    async def test_registered_attempt_polls_core_without_lease_or_start_and_preserves_started(self):
+        ident = self.accept()['deliveryId']
+        await self.gateway.dispatch(ident)
+        first = self.store.current_attempt(ident)
+        checks = self.check_calls
+        self.now += 3601
+        self.busy = True
+        self.recovered_outcome = 'inputRecorded'
+        self.assertEqual((await self.gateway.reconcile(ident))['status'], 'observed')
+        current = self.store.current_attempt(ident)
+        self.assertEqual(current['started_receipt'], first['started_receipt'])
+        self.assertEqual(current['native_ack'], first['native_ack'])
+        self.assertEqual(current['input_recorded_receipt']['outcome']['itemId'], self.item_id)
+        self.assertEqual(self.lookups, self.submissions)
+        self.assertEqual(self.check_calls, checks)
+        self.assertEqual(len(self.claims), 1)
+        self.assertEqual(len(self.submissions), 1)
+        self.restart()
+        await self.gateway.reconcile(ident)
+        await self.gateway.dispatch(ident)
+        self.assertEqual(len(self.acknowledgments), 2)
+        self.assertEqual(len(self.lookups), 1)
+        self.assertEqual(len(self.submissions), 1)
+
+    async def test_input_recovery_requires_mapping_and_full_valid_readonly_receipt(self):
+        ident = self.accept()['deliveryId']
+        self.drop_response = True
+        await self.gateway.dispatch(ident)
+        request = self.submissions[0]
+        original = self.store.current_attempt(ident)['attempt_id']
+        for mapping in (None, dict(self.mapping, nativeThreadId=str(uuid.uuid4())),
+                        dict(self.mapping, attachmentGeneration=self.mapping['attachmentGeneration'] + 1)):
+            with self.subTest(mapping=mapping), patch.object(self.store, 'get_attachment', return_value=mapping):
+                self.assertEqual((await self.gateway.reconcile(ident))['status'], 'ambiguous')
+        self.assertEqual(self.lookups, [])
+        valid = self.receipt(request, 'inputRecorded', replayed=True)
+        for invalid in (self.receipt(request, 'unknown'), self.receipt(request, 'started', replayed=False),
+                        dict(valid, permitId=str(uuid.uuid4())),
+                        dict(valid, outcome=dict(valid['outcome'], replayed=False)),
+                        dict(valid, outcome=dict(valid['outcome'], itemId=request['clientUserMessageId']))):
+            async def recover(_request):
+                return invalid
+            with self.subTest(receipt=invalid), patch.object(self, 'reconcile', recover):
+                self.assertEqual((await self.gateway.reconcile(ident))['status'], 'ambiguous')
+        current = self.store.current_attempt(ident)
+        self.assertIsNone(current['input_recorded_receipt'])
+        self.assertIsNone(current['native_ack'])
+        self.assertIsNone(current['native_observed_ack'])
+        self.assertEqual(current['attempt_id'], original)
+        self.assertEqual(self.acknowledgments, [])
+        self.assertEqual(len(self.claims), 1)
+        self.assertEqual(len(self.submissions), 1)
+        self.assertEqual(self.settlements, [])
+
+    async def test_input_recorded_on_submit_cannot_ack_or_become_observed(self):
+        ident = self.accept()['deliveryId']
+        async def incorrect_start(request):
+            return self.receipt(request, 'inputRecorded', replayed=True)
+        self.custom_submit = incorrect_start
+        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'ambiguous')
+        current = self.store.current_attempt(ident)
+        self.assertIsNone(current['input_recorded_receipt'])
+        self.assertIsNone(current['started_receipt'])
+        self.assertEqual(self.acknowledgments, [])
+        self.assertEqual(len(self.submissions), 1)
 
     async def test_authentication_and_current_attachment_before_dedup(self):
         self.accept()
@@ -398,8 +525,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.store.native_receipt(ident)['ack_pending'])
         self.assertEqual(len(self.acknowledgments), 1)
         self.restart()
-        self.gateway.adapter_factory = lambda mapping: self.fail('positive receipt needs no native lookup')
+        checks = self.check_calls
         self.assertEqual((await self.gateway.reconcile(ident))['status'], 'submitted')
+        self.assertEqual(self.lookups, self.submissions)
+        self.assertEqual(self.check_calls, checks)
         await self.gateway.dispatch(ident)
         self.assertEqual(self.settlements, [])
         self.assertEqual(len(self.acknowledgments), 1)
@@ -414,13 +543,12 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.store.native_receipt(ident)['ack_pending'])
         self.restart()
         self.now += 3600
-        self.gateway.adapter_factory = lambda mapping: self.fail('persisted positive receipt needs no native lookup')
         self.assertEqual((await self.gateway.reconcile(ident))['status'], 'submitted')
         self.assertEqual(self.acknowledgments, [persisted, persisted])
         self.assertEqual(self.store.current_attempt(ident)['native_ack'], persisted)
         self.assertFalse(self.store.native_receipt(ident)['ack_pending'])
         self.assertEqual(len(self.submissions), 1)
-        self.assertEqual(self.lookups, [])
+        self.assertEqual(self.lookups, self.submissions)
         self.assertEqual(self.settlements, [])
 
     async def test_ack_storage_capacity_failure_keeps_receipt_and_sends_nothing(self):
@@ -518,7 +646,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         await self.gateway.reconcile(ident)
         await self.gateway.dispatch(ident)
         self.assertEqual(self.store.current_attempt(ident)['started_receipt'], receipt)
-        self.assertEqual(len(self.lookups), 1)
+        self.assertEqual(len(self.lookups), 2)
         self.assertEqual(len(self.submissions), 1)
         self.assertEqual(self.settlements, [])
 

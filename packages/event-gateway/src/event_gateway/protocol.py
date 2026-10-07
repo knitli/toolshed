@@ -106,6 +106,11 @@ def _parse(body, acknowledgment, now_ms):
     if not isinstance(now, (int, float)) or isinstance(now, bool) or not math.isfinite(now):
         raise ProtocolError('stale_message')
     if acknowledgment:
+        # JSON Schema's x-distinct-from annotation documents this cross-field constraint.
+        correlation = value['nativeCorrelation']
+        if (correlation['kind'] == 'native_input_recorded'
+                and correlation['itemId'] == correlation['turnId']):
+            raise ProtocolError('invalid_acknowledgment')
         fresh = _timestamp(value['acknowledgedAt']) <= now + CLOCK_SKEW_MS
     else:
         issued, expires, observed = map(_timestamp, (value['issuedAt'], value['expiresAt'], value['observedAt']))

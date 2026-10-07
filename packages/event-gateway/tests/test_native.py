@@ -137,6 +137,35 @@ class NativeValidationTests(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(NativeError):
                 validate_receipt(item, receipt(item, {**started, **mutation}))
 
+    def test_input_recorded_requires_opt_in_and_exact_observed_identity(self):
+        item = request()
+        observed = {"status": "inputRecorded", "turnId": item["clientUserMessageId"],
+                    "itemId": str(uuid.uuid4()), "replayed": True}
+        with self.assertRaises(NativeError):
+            validate_receipt(item, receipt(item, observed))
+        for item_id in (observed["itemId"], "018e2c70-7c6a-7a06-8000-000000000001"):
+            outcome = {**observed, "itemId": item_id}
+            self.assertEqual(validate_receipt(item, receipt(item, outcome), allow_input_recorded=True), outcome)
+        for mutation in ({"extra": True}, {"turnId": str(uuid.uuid4())},
+                         {"itemId": item["clientUserMessageId"]}, {"itemId": str(uuid.uuid1())},
+                         {"itemId": observed["itemId"].upper()}, {"itemId": None},
+                         {"replayed": False}, {"replayed": 1}):
+            with self.subTest(mutation=mutation), self.assertRaises(NativeError):
+                validate_receipt(item, receipt(item, {**observed, **mutation}), allow_input_recorded=True)
+        for field in observed:
+            incomplete = {key: value for key, value in observed.items() if key != field}
+            with self.subTest(missing=field), self.assertRaises(NativeError):
+                validate_receipt(item, receipt(item, incomplete), allow_input_recorded=True)
+        for turn_id in (str(uuid.uuid1()), observed["turnId"].upper(), "bad"):
+            invalid_request = {**item, "clientUserMessageId": turn_id}
+            with self.subTest(turn_id=turn_id), self.assertRaises(NativeError):
+                validate_receipt(invalid_request, receipt(invalid_request, {**observed, "turnId": turn_id}),
+                                 allow_input_recorded=True)
+        for field in IDENTITY:
+            invalid_receipt = {**receipt(item, observed), field: None}
+            with self.subTest(identity=field), self.assertRaises(NativeError):
+                validate_receipt(item, invalid_receipt, allow_input_recorded=True)
+
 
 class NativeAdapterTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -216,6 +245,15 @@ class NativeAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, receipt(self.item, self.bridge.outcome))
         self.assertEqual(self.bridge.calls, [("restore", self.item), ("receipt", self.item)])
         self.assertIsNone(self.adapter.witness)
+
+    async def test_input_recorded_is_reconcile_only(self):
+        self.bridge.outcome = {"status": "inputRecorded", "turnId": self.item["clientUserMessageId"],
+                               "itemId": str(uuid.uuid4()), "replayed": True}
+        with self.assertRaises(NativeError):
+            await self.adapter.submit(self.item)
+        self.bridge.calls.clear()
+        self.assertEqual(await self.adapter.reconcile(self.item), receipt(self.item, self.bridge.outcome))
+        self.assertEqual(self.bridge.calls, [("restore", self.item), ("receipt", self.item)])
 
     async def test_reconcile_rejects_nonreplayed_terminal_outcomes(self):
         for outcome in ({"status": "started", "turnId": self.item["clientUserMessageId"], "replayed": False},

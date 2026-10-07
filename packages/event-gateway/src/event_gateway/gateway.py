@@ -110,11 +110,14 @@ class Gateway:
             return self._row(delivery_id, "local_retirement_pending")
         return await self._settle(delivery_id)
 
-    async def _receipt(self, delivery_id, attempt, receipt):
-        outcome = validate_receipt(attempt["native_request"], receipt)
-        if outcome["status"] == "started":
-            self.store.record_started(delivery_id, attempt["attempt_id"], receipt)
-            return await self._ack_started(delivery_id, attempt["attempt_id"])
+    async def _receipt(self, delivery_id, attempt, receipt, *, allow_input_recorded=False):
+        outcome = validate_receipt(attempt["native_request"], receipt, allow_input_recorded=allow_input_recorded)
+        if outcome["status"] in ("started", "inputRecorded"):
+            record = self.store.record_input_recorded if outcome["status"] == "inputRecorded" else self.store.record_started
+            record(delivery_id, attempt["attempt_id"], receipt)
+            return await self._ack_native(delivery_id, attempt["attempt_id"])
+        if attempt.get("started_receipt") or attempt.get("input_recorded_receipt"):
+            return self._row(delivery_id, "native_input_unconfirmed")
         if outcome["status"] == "terminalNotStarted":
             self.store.begin_settlement(delivery_id, attempt["attempt_id"],
                 {"type": "native_terminal_no_start", "receiptId": outcome["receiptId"]},
@@ -123,8 +126,10 @@ class Gateway:
         return self.store.finish(delivery_id, "ambiguous", reason="native_outcome_unknown",
                                  attempt_id=attempt["attempt_id"])
 
-    def _native_acknowledgment(self, attempt):
+    def _native_acknowledgment(self, attempt, *, observed=False):
         envelope = attempt["admission"]["envelope"]
+        receipt = (attempt["input_recorded_receipt"] if observed else
+                   attempt.get("started_receipt") or attempt["input_recorded_receipt"])
         acknowledgment = {
             "schemaVersion": 1,
             **{key: envelope[key] for key in (
@@ -133,36 +138,47 @@ class Gateway:
             )},
             "deliveredSourceStateVersion": envelope["sourceStateVersion"],
             "acknowledgedAt": _iso(self.clock()),
-            "status": "submitted",
+            "status": "observed" if observed else "submitted",
             "nativeCorrelation": {
-                "kind": "native_turn_started",
+                "kind": "native_input_recorded" if observed else "native_turn_started",
                 "permitId": attempt["admission"]["permitId"],
-                "turnId": attempt["started_receipt"]["outcome"]["turnId"],
+                "turnId": receipt["outcome"]["turnId"],
             },
         }
+        if observed:
+            acknowledgment["nativeCorrelation"]["itemId"] = receipt["outcome"]["itemId"]
         if "consumerGeneration" in envelope:
             acknowledgment["consumerGeneration"] = envelope["consumerGeneration"]
         return acknowledgment
 
-    async def _ack_started(self, delivery_id, attempt_id):
-        attempt = self.store.current_attempt(delivery_id)
-        if not attempt or attempt["attempt_id"] != attempt_id or not attempt.get("started_receipt"):
-            return self._row(delivery_id)
-        if not self.store.native_receipt(delivery_id)["ack_pending"]:
-            return self._row(delivery_id)
-        try:
-            acknowledgment = self.store.persist_native_ack(
-                delivery_id, attempt_id, attempt.get("native_ack") or self._native_acknowledgment(attempt)
-            )
-        except StoreError:
-            return self._row(delivery_id, "native_ack_persistence_pending")
-        try:
-            result = await asyncio.wait_for(
-                self.authority.acknowledge(attempt["admission"]["envelope"], acknowledgment), 8
-            )
-            self.store.complete_native_ack(delivery_id, attempt_id, acknowledgment, result)
-        except Exception:
-            return self._row(delivery_id, "native_started_ack_pending")
+    async def _ack_native(self, delivery_id, attempt_id):
+        # Each phase has its own immutable DTO; observation cannot precede confirmed registration.
+        for observed in (False, True):
+            attempt = self.store.current_attempt(delivery_id)
+            if (not attempt or attempt["attempt_id"] != attempt_id
+                    or not (attempt.get("started_receipt") or attempt.get("input_recorded_receipt"))):
+                return self._row(delivery_id)
+            if observed and not attempt.get("input_recorded_receipt"):
+                break
+            if attempt["ack_state"] == "observed" or (not observed and attempt["ack_state"] == "submitted"):
+                continue
+            column = "native_observed_ack" if observed else "native_ack"
+            try:
+                acknowledgment = self.store.persist_native_ack(
+                    delivery_id, attempt_id,
+                    attempt.get(column) or self._native_acknowledgment(attempt, observed=observed),
+                    observed=observed,
+                )
+            except StoreError:
+                return self._row(delivery_id, "native_ack_persistence_pending")
+            try:
+                result = await asyncio.wait_for(
+                    self.authority.acknowledge(attempt["admission"]["envelope"], acknowledgment), 8
+                )
+                if not self.store.complete_native_ack(delivery_id, attempt_id, acknowledgment, result, observed=observed):
+                    raise StoreError("acknowledgment_conflict")
+            except Exception:
+                return self._row(delivery_id, "native_observed_ack_pending" if observed else "native_started_ack_pending")
         return self._row(delivery_id)
 
     async def dispatch(self, delivery_id):
@@ -247,9 +263,12 @@ class Gateway:
                 return await self._retire_local(delivery_id, "recovered_admission_not_submitted")
             if attempt["state"] == "settlement_pending":
                 return await self._settle(delivery_id)
-            if attempt.get("started_receipt"):
-                return await self._ack_started(delivery_id, attempt["attempt_id"])
-            if attempt["state"] not in ("submitting", "ambiguous"):
+            if attempt.get("started_receipt") or attempt.get("input_recorded_receipt"):
+                result = await self._ack_native(delivery_id, attempt["attempt_id"])
+                attempt = self.store.current_attempt(delivery_id)
+                if attempt.get("input_recorded_receipt") or attempt["ack_state"] != "submitted":
+                    return result
+            if attempt["state"] not in ("submitting", "submitted", "ambiguous"):
                 return self._row(delivery_id)
             mapping = self.store.get_attachment(envelope["runtimeId"])
             if (not mapping or attempt["fenced"]
@@ -259,9 +278,9 @@ class Gateway:
             try:
                 adapter = self.adapter_factory(mapping)
                 receipt = await asyncio.wait_for(adapter.reconcile(attempt["native_request"]), 10)
-                outcome = validate_receipt(attempt["native_request"], receipt)
+                outcome = validate_receipt(attempt["native_request"], receipt, allow_input_recorded=True)
                 if outcome["status"] in ("started", "terminalNotStarted") and not outcome["replayed"]:
                     raise NativeError()
-                return await self._receipt(delivery_id, attempt, receipt)
+                return await self._receipt(delivery_id, attempt, receipt, allow_input_recorded=True)
             except Exception:
                 return self._row(delivery_id, "reconciliation_unknown")

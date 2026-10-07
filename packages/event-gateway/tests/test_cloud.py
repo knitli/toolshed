@@ -149,6 +149,46 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         self.key.public_key().verify(base64.urlsafe_b64decode(proof["signature"] + "=="),
                                      vector["canonical"].encode())
 
+    async def test_native_observed_ack_wire_and_node_proof_match_external_vector(self):
+        vector_ack = FIXTURE["nativeObservedAck"]
+        vector = FIXTURE["nativeObservedAckNodeProof"]
+        gateway = object.__new__(Gateway)
+        gateway.clock = lambda: self.now
+        attempt = {"admission": FIXTURE["admitted"], "input_recorded_receipt": {"outcome": {
+            "turnId": vector_ack["nativeCorrelation"]["turnId"],
+            "itemId": vector_ack["nativeCorrelation"]["itemId"],
+        }}}
+        acknowledgment = gateway._native_acknowledgment(attempt, observed=True)
+        self.assertEqual(acknowledgment, vector_ack)
+        for item_id in ("bad", str(uuid.uuid1()), acknowledgment["nativeCorrelation"]["turnId"]):
+            invalid = copy.deepcopy(acknowledgment)
+            invalid["nativeCorrelation"]["itemId"] = item_id
+            with self.subTest(item_id=item_id), self.assertRaisesRegex(CloudError, "^invalid_acknowledgment$"):
+                await self.client.acknowledge(FIXTURE["original"], invalid)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.credential_calls, 0)
+        self.client._nonce = lambda: vector["proof"]["nonce"]
+        for current in (False, True):
+            self.result = {"status": "observed", "current": current}
+            self.assertEqual(await self.client.acknowledge(FIXTURE["original"], acknowledgment), self.result)
+            request = self.requests[-1]
+            self.assertEqual(request["url"], vector["binding"]["audience"] + vector["binding"]["path"])
+            self.assertEqual(request["method"], vector["binding"]["method"])
+            self.assertEqual(request["body"], vector["body"].encode())
+            self.assertEqual(hashlib.sha256(request["body"]).hexdigest(), vector["binding"]["bodySha256"])
+            self.assertFalse(request["follow_redirects"])
+            proof = json.loads(request["headers"]["x-event-node-proof"])
+            for key in ("nodeId", "nodeGeneration", "issuedAt", "nonce"):
+                self.assertEqual(proof[key], vector["proof"][key])
+            canonical = canonical_node_proof(vector["principal"], vector["binding"]["audience"],
+                                             vector["binding"]["path"], request["body"], proof)
+            self.assertEqual(canonical, vector["canonical"].encode())
+            self.key.public_key().verify(base64.urlsafe_b64decode(proof["signature"] + "=="),
+                                         vector["canonical"].encode())
+        self.result = {"status": "observed", "current": 1}
+        with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+            await self.client.acknowledge(FIXTURE["original"], acknowledgment)
+
     async def test_fresh_credentials_and_nonce_on_every_request(self):
         await self.client.claim(FIXTURE["original"])
         await self.client.claim(FIXTURE["original"])

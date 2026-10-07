@@ -85,7 +85,7 @@ def validate_request(request, admission):
     return request
 
 
-def validate_receipt(request, receipt):
+def validate_receipt(request, receipt, *, allow_input_recorded=False):
     """Return an outcome only after its entire echoed native identity matches."""
     if not isinstance(request, dict) or not set(IDENTITY) <= set(request):
         raise NativeError()
@@ -104,6 +104,15 @@ def validate_receipt(request, receipt):
                 or not _native_uuid(outcome["turnId"])
                 or outcome["turnId"] != request["clientUserMessageId"]
                 or type(outcome["replayed"]) is not bool):  # pylint: disable=unidiomatic-typecheck
+            raise NativeError()
+    elif status == "inputRecorded":
+        if (not allow_input_recorded
+                or set(outcome) != {"status", "turnId", "itemId", "replayed"}
+                or not _uuid(outcome["turnId"])
+                or outcome["turnId"] != request["clientUserMessageId"]
+                or not _uuid(outcome["itemId"])
+                or outcome["itemId"] == request["clientUserMessageId"]
+                or outcome["replayed"] is not True):
             raise NativeError()
     elif status == "terminalNotStarted":
         if (set(outcome) != {"status", "reason", "receiptId", "replayed"}
@@ -175,7 +184,7 @@ class NativeBridgeAdapter:
         self.bridge.restore_attempt(request)
         outcome = await asyncio.to_thread(self.bridge.receipt, request)
         receipt = {**{key: request[key] for key in IDENTITY}, "outcome": outcome}
-        validate_receipt(request, receipt)
+        validate_receipt(request, receipt, allow_input_recorded=True)
         if outcome.get("status") in ("started", "terminalNotStarted") and not outcome["replayed"]:
             raise NativeError()
         return receipt
