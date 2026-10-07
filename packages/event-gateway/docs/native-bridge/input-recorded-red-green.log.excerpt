@@ -218,3 +218,22 @@ red: exit=100 sha256=ce75a7c050380d97f4dcb063e96357f345e5a7330377a31ec14b5faadbf
 green: exit=0 sha256=cac3a9039ff1715ce16eba84ab3ec8f9c42522e9973134e51bdffbec5dae9bbf
      Summary [   4.412s] 1 test run: 1 passed, 313 skipped
 
+
+case: tui-exact-started-survives-receipt-poll-failure
+selector: codex-tui app::selection_witness::bridge::tests::receipt_lookup_failure_preserves_exact_cached_started
+expected: Unknown must return the exact cached Started with replayed=true; keep polling for a stronger receipt, never call Start
+red: exit=100 sha256=e77a77805b9377674f5fbe9f9a1926174de8aa09787b2133ee96f89ae69c8d55
+    thread 'app::selection_witness::bridge::tests::receipt_lookup_failure_preserves_exact_cached_started' (18102240) panicked at tui/src/app/selection_bridge_tests.rs:106:5:
+    assertion `left == right` failed: a failed receipt poll must preserve exact committed-start evidence
+      left: Unknown
+     right: Started { turn_id: "671d1a05-31e9-4941-8c2a-fc4f48558d93", replayed: true }
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  TRY 2 FAIL [   0.040s] (1/1) codex-tui app::selection_witness::bridge::tests::receipt_lookup_failure_preserves_exact_cached_started
+  stdout ───
+
+    running 1 test
+    test app::selection_witness::bridge::tests::receipt_lookup_failure_preserves_exact_cached_started ... FAILED
+
+green: exit=0 sha256=1af63ed7b66abb3e33429a208ee73fd1792629f2fd92c442d6990327489a511c
+     Summary [   0.043s] 1 test run: 1 passed, 5643 skipped

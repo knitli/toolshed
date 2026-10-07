@@ -1,6 +1,6 @@
 {
   "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
-  "patchSha256": "fdf8807f88bc70898d83e0a2a0c89ba1d2deeac7dd46f28e6c50cbd698720e03",
+  "patchSha256": "0aeec9c1e63f867d95f531c65d6ac5b5618b40079028a64b22467af7e856f8da",
   "fileCount": 42,
   "binaryPatch": true,
   "cleanPinnedApplyCheck": true,
@@ -39,8 +39,8 @@
     "codex-rs/tui/src/app/selection_adoption_tests.rs": "5c432b4e7ac233549b0455e7e2aef3ec6f0944ff97c71850ed45ee1441ada196",
     "codex-rs/tui/src/app/selection_binding.rs": "2eb6f70169b00e61492d0426528c3eb6962688ac8f6732de82520c2ad998cb25",
     "codex-rs/tui/src/app/selection_binding_tests.rs": "2c4518f587dca8b3336023561d673015a6d8e3fb3e336f0ad1bad15527152594",
-    "codex-rs/tui/src/app/selection_bridge.rs": "0001d41b22fe91d53d31b5b0ed1596a5643d268566c871146028450676fd4306",
-    "codex-rs/tui/src/app/selection_bridge_tests.rs": "602b553cb0b9b6415c3a2ddd643e6e358c89a61a7b91552be33060cc6081772e",
+    "codex-rs/tui/src/app/selection_bridge.rs": "39c4eb7c91e35ad5cc6b81e785269e2ef9618932a158a9da931c1c593086eaf5",
+    "codex-rs/tui/src/app/selection_bridge_tests.rs": "524b65a876bad880c28700c9ac46b4a932d22d1b0fdf00da7a009543f9302dc4",
     "codex-rs/tui/src/app/selection_witness.rs": "63a90373728990cee2178f51dc0f5ac7306598fba3a43f1ebe48ff9d077bc1a8",
     "codex-rs/tui/src/app/selection_witness_tests.rs": "edcb86e5fad15791639862980e527522f301d62060bc86016cc8cda6cb668b23",
     "codex-rs/tui/src/app/startup.rs": "e2b1bed360ede73b4734a5f9562214daf3f87b7d5c0998e02f1d2373914755ae",

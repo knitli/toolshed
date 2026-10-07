@@ -256,23 +256,42 @@
         "logSha256": "ce75a7c050380d97f4dcb063e96357f345e5a7330377a31ec14b5faadbf36a55"
       },
       "selector": "codex-app-server-protocol schema_fixtures_tests::experimental_precomputed_exports_match_generated"
+    },
+    {
+      "id": "tui-exact-started-survives-receipt-poll-failure",
+      "selector": "codex-tui app::selection_witness::bridge::tests::receipt_lookup_failure_preserves_exact_cached_started",
+      "layer": "TUI bridge / PR45 P2 repair",
+      "mutation": "Remove exact cached Started fallback after Unknown read-only lookup",
+      "intendedAssertion": "Unknown must return the exact cached Started with replayed=true; keep polling for a stronger receipt, never call Start",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/receipt-start-fallback-red.log",
+        "logSha256": "e77a77805b9377674f5fbe9f9a1926174de8aa09787b2133ee96f89ae69c8d55"
+      },
+      "green": {
+        "exitCode": 0,
+        "passed": 1,
+        "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/receipt-start-fallback-green.log",
+        "logSha256": "1af63ed7b66abb3e33429a208ee73fd1792629f2fd92c442d6990327489a511c"
+      }
     }
   ],
   "finalBuild": {
     "binaryMode": "0555",
-    "binaryPath": "/private/tmp/codex-native-input-observation-spike/codex-native-input-observer-bin-post-fix",
-    "binarySha256": "6ae0cb3accb4dedfcd5963d04ccfe61e65cd1795bec86e5f02aff696e72f1e8c",
-    "buildLogPath": "/private/tmp/codex-native-input-observation-spike/observer-cli-post-fix-build.log",
-    "buildLogSha256": "08f6e790f289734c0ec7b31227fbbdf392ac660da1ac19c938da112e30db20b7",
+    "binaryPath": "/private/tmp/codex-native-input-observation-spike/codex-native-input-observer-bin-pr45-p2-fallback",
+    "binarySha256": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
+    "buildLogPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/observer-cli-build.log",
+    "buildLogSha256": "773d2b5622a2118bd612fe92597c9d080bd274aa1717c0ec35450fb023b404fa",
     "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
     "cargoNextest": "0.9.128 (96bc6d4f4 2026-02-19)",
     "command": "cargo build --offline -p codex-cli --bin codex --profile dev-small",
     "exitCode": 0,
     "just": "1.40.0",
     "offline": true,
-    "postFixTuiQualification": "Passed; input-recorded-live.json records exact actual counts.",
+    "postFixTuiQualification": "Passed after review correction; input-recorded-live.json records actual result",
     "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
-    "sameDigestAsHistoricalPreFixBinary": true,
+    "sameDigestAsHistoricalPreFixBinary": false,
     "sourceRevision": "a956835d020762cb2b570053af06f643a11c0ecc",
     "target": "aarch64-apple-darwin"
   },
@@ -289,9 +308,9 @@
     "patchAppliesCleanlyToPinnedRevision": true,
     "patchIncludesBinaryPatchRecords": true,
     "patchPath": "/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/docs/native-bridge/input-recorded-codex-v0.160.0.patch",
-    "patchSha256": "fdf8807f88bc70898d83e0a2a0c89ba1d2deeac7dd46f28e6c50cbd698720e03",
+    "patchSha256": "0aeec9c1e63f867d95f531c65d6ac5b5618b40079028a64b22467af7e856f8da",
     "sourceManifestPath": "/opt/coder/toolshed/.worktrees/native-input-recorded/packages/event-gateway/docs/native-bridge/input-recorded-source-manifest.json",
-    "sourceManifestSha256": "86c32e708e196a867421beffcd92019af23b4f3f21596c9a8d2f77c482d22ab9"
+    "sourceManifestSha256": "4c463cc32544653ac9d93109dd851822dc0bb257f5e08f02702a98500ccd38a9"
   },
   "formatChecks": {
     "postFixGitDiffCheck": {
@@ -319,9 +338,9 @@
     "The stopped-hook case is a unit simulation where no completion event is emitted; no actual Core hook-stop runtime integration was run.",
     "The actual positive TestAppServer integration observed the Core-produced UserMessage completion and recovered its generated item ID.",
     "No persisted-history fallback or restart recovery was claimed; loss of the in-memory native receipt remains Unknown.",
-    "All focused tests predate the two just-fix clone-only edits; tests were not rerun after just fix per AGENTS.md.",
     "No full workspace suite was rerun; the prior attempt failed before tests because system GLib metadata was absent.",
-    "Cloud settlement, production activation, owner client install, and real model calls are not established by this synthetic proof."
+    "Cloud settlement, production activation, owner client install, and real model calls are not established by this synthetic proof.",
+    "Initial causal pairs precede two clone-only test lint edits; review-fix 12 TUI/18 receipt tests precede its just fix, which made no source edits. Protocol and actual Core integration are prior successful runs with unchanged protocol/Core observer source."
   ],
   "purpose": "Causal native/Core InputRecorded receipt proof for the cumulative Codex v0.160.0 native input-observation patch.",
   "requiredJustFix": {
@@ -386,7 +405,7 @@
   "rootRunLiveTuiEvidence": {
     "cloudSettlementProven": false,
     "exactReceiptRecovered": true,
-    "itemId": "01a11514-99c0-7d71-b969-6a559b90e4ae",
+    "itemId": "01a1152a-632a-7930-b349-ca4fdb06e298",
     "mockModelRequests": 2,
     "nativeOnly": true,
     "outcome": "inputRecorded",
@@ -394,13 +413,13 @@
     "qualification": "synthetic-native-input-recorded",
     "realModelCalls": 0,
     "recoveredWhileIneligibleAfterPermitExpiry": true,
-    "threadId": "01a11514-98db-7d90-968b-c25090233047",
+    "threadId": "01a1152a-624f-7c90-9c16-936e55f0be25",
     "titleModelRequests": 1,
-    "turnId": "f8c6a37c-0c1f-46a5-9bdf-2d94c772faa0",
+    "turnId": "0720ae1b-7784-43eb-a9c6-f5e4167413e0",
     "unknownModelRequests": 0,
     "path": "input-recorded-live.json",
-    "sha256": "c41da523ba4b6270e376f61b80b8356bf72306680328d029a2acb3d3c984100c",
-    "stage": "after just fix and final binary build",
+    "sha256": "357ef3b104ec0ff73d0c0e9c645f24d67477320c18fc700a19d3d6fc6024bb47",
+    "stage": "after review-fix scoped just fix and final binary build",
     "itemIsUuidV7AndDistinctFromTurn": true
   },
   "schemaVersion": 1,
@@ -465,6 +484,125 @@
       "selector": "codex-app-server-protocol schema_fixtures_tests::experimental_precomputed_exports_match_generated",
       "skipped": 313,
       "stage": "before just fix"
+    },
+    {
+      "package": "codex-tui",
+      "selector": "app::selection_witness::bridge::tests",
+      "run": 12,
+      "passed": 12,
+      "failed": 0,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/tui-bridge-12-post-format.log",
+      "logSha256": "02b9c1442e0d86ed3f4e189e377b4d1f809f467e94cd7fbdbe413b313cc7b361",
+      "stage": "after review correction, before scoped just fix"
+    },
+    {
+      "package": "codex-app-server",
+      "selector": "request_processors::native_selection_processor::tests",
+      "run": 18,
+      "passed": 18,
+      "failed": 0,
+      "nextestLeaky": 1,
+      "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/app-server-receipt-18-post-format.log",
+      "logSha256": "a612787ecb80e3876923e57fd05037193a294416ce8e6210b0c2eb3107544889",
+      "stage": "after review correction, before scoped just fix"
     }
-  ]
+  ],
+  "priorCandidate": {
+    "binarySha256": "6ae0cb3accb4dedfcd5963d04ccfe61e65cd1795bec86e5f02aff696e72f1e8c",
+    "patchSha256": "fdf8807f88bc70898d83e0a2a0c89ba1d2deeac7dd46f28e6c50cbd698720e03",
+    "stage": "Initial candidate before PR45 poll-failure review correction; preserved binary and Git history"
+  },
+  "reviewCorrection": {
+    "finding": {
+      "pr": "https://github.com/knitli/toolshed/pull/45",
+      "reviewedHead": "bb49271b1df0709f5703abcc20578c76de91ef49",
+      "finding": "If exact read-only native receipt lookup fails, Operation::Receipt returned Unknown despite retaining exact cached Started evidence.",
+      "scope": "One response could be downgraded; local Started remains and a later receipt lookup can retry. No blind start/replay occurred."
+    },
+    "source": {
+      "root": "/private/tmp/codex-native-input-observation-spike/source/codex-rs",
+      "pinnedUpstreamHead": "a956835d020762cb2b570053af06f643a11c0ecc",
+      "files": {
+        "tui/src/app/selection_bridge.rs": "39c4eb7c91e35ad5cc6b81e785269e2ef9618932a158a9da931c1c593086eaf5",
+        "tui/src/app/selection_bridge_tests.rs": "524b65a876bad880c28700c9ac46b4a932d22d1b0fdf00da7a009543f9302dc4"
+      },
+      "behavior": "Continue the read-only receipt lookup. Only when its outcome is Unknown, return an exact cached Started with replayed=true; successful InputRecorded or terminal receipts take precedence. No Start RPC is added."
+    },
+    "causalTest": {
+      "selector": "codex-tui app::selection_witness::bridge::tests::receipt_lookup_failure_preserves_exact_cached_started",
+      "red": {
+        "exitCode": 100,
+        "kind": "assertion",
+        "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/receipt-start-fallback-red.log",
+        "logSha256": "e77a77805b9377674f5fbe9f9a1926174de8aa09787b2133ee96f89ae69c8d55"
+      },
+      "green": {
+        "exitCode": 0,
+        "passed": 1,
+        "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/receipt-start-fallback-green.log",
+        "logSha256": "1af63ed7b66abb3e33429a208ee73fd1792629f2fd92c442d6990327489a511c"
+      }
+    },
+    "focusedSuites": [
+      {
+        "package": "codex-tui",
+        "selector": "app::selection_witness::bridge::tests",
+        "run": 12,
+        "passed": 12,
+        "failed": 0,
+        "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/tui-bridge-12-post-format.log",
+        "logSha256": "02b9c1442e0d86ed3f4e189e377b4d1f809f467e94cd7fbdbe413b313cc7b361"
+      },
+      {
+        "package": "codex-app-server",
+        "selector": "request_processors::native_selection_processor::tests",
+        "run": 18,
+        "passed": 18,
+        "failed": 0,
+        "nextestLeaky": 1,
+        "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/app-server-receipt-18-post-format.log",
+        "logSha256": "a612787ecb80e3876923e57fd05037193a294416ce8e6210b0c2eb3107544889"
+      }
+    ],
+    "protocolTests": "Not rerun; no protocol/schema files changed by this patch.",
+    "format": {
+      "rustfmtCheck": "pass",
+      "gitDiffCheck": "pass",
+      "trailingWhitespaceCheck": "pass"
+    },
+    "justFix": {
+      "command": "just fix -p codex-tui --profile dev-small --offline",
+      "exitCode": 0,
+      "escalatedForLocalCargoLockSocket": true,
+      "sourceChanges": 0,
+      "warnings": [
+        "pre-existing codex-core unused import",
+        "pre-existing codex-tui test unnecessary_literal_unwrap"
+      ],
+      "logPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/just-fix-escalated.log",
+      "logSha256": "f04bf125227ac79fd62d62a399194e67ddfd86638223b08c881f038fb48ba3d6"
+    },
+    "build": {
+      "command": "cargo build --offline -p codex-cli --bin codex --profile dev-small",
+      "toolchain": "rustc 1.95.0 (59807616e 2026-04-14)",
+      "exitCode": 0,
+      "buildLogPath": "/private/tmp/codex-native-input-observation-spike/review-p2-start-fallback/observer-cli-build.log",
+      "buildLogSha256": "773d2b5622a2118bd612fe92597c9d080bd274aa1717c0ec35450fb023b404fa",
+      "candidatePath": "/private/tmp/codex-native-input-observation-spike/codex-native-input-observer-bin-pr45-p2-fallback",
+      "candidateSha256": "26226b229488bc06b3f0f5e2c0623d4760af58d54c7cb729861692403418877a",
+      "candidateMode": "0o555",
+      "candidateSize": 389375744
+    },
+    "postFixTestsRerun": false,
+    "cargoLock": {
+      "buildResolutionChurnRestoredToHead": true,
+      "restoredSha256": "5553f06583159ed64666b6eb4beea3154e06b612e6312528131bdc226a6a860c"
+    },
+    "exportedOrPushed": false,
+    "manualReviewRequest": false
+  },
+  "reviewCorrectionAudit": {
+    "result": "No concrete P1/P2; exact cache identity, read-only polling and stronger receipt precedence verified",
+    "reportSha256": "2b06d64f313b99e6e149a341c01a8b2048656578941418862bdcb3d2f1ee51ea"
+  }
 }

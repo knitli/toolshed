@@ -16325,10 +16325,10 @@ index 0000000..1311414
 +}
 diff --git a/codex-rs/tui/src/app/selection_bridge.rs b/codex-rs/tui/src/app/selection_bridge.rs
 new file mode 100644
-index 0000000..022b646
+index 0000000..3c75723
 --- /dev/null
 +++ b/codex-rs/tui/src/app/selection_bridge.rs
-@@ -0,0 +1,497 @@
+@@ -0,0 +1,512 @@
 +//! Closed event metadata and receipts; this is not an arbitrary app-server RPC proxy.
 +use super::*;
 +use codex_app_server_protocol::ThreadStartIfIdleNotStartedReason as Reason;
@@ -16569,6 +16569,16 @@ index 0000000..022b646
 +    bound_outcome(outcome, expected_turn_id)
 +}
 +
++fn receipt_lookup_fallback(outcome: Outcome, cached_started: Option<Outcome>) -> Outcome {
++    match outcome {
++        Outcome::Unknown => match cached_started {
++            Some(started @ Outcome::Started { replayed: true, .. }) => started,
++            _ => Outcome::Unknown,
++        },
++        outcome => outcome,
++    }
++}
++
 +fn canonical_uuid(value: &str) -> bool {
 +    Uuid::parse_str(value).is_ok_and(|uuid| uuid.to_string() == value)
 +}
@@ -16774,6 +16784,10 @@ index 0000000..022b646
 +                (event, outcome)
 +            }
 +            Operation::Receipt(event) => {
++                let cached_started = self
++                    .attempts
++                    .previous(&event)
++                    .filter(|outcome| matches!(outcome, Outcome::Started { replayed: true, .. }));
 +                let outcome = if let Some(receipt) = self.attempts.receipt(&event) {
 +                    receipt
 +                } else if let Some(params) = self.attempts.receipt_params(&event) {
@@ -16802,6 +16816,7 @@ index 0000000..022b646
 +                } else {
 +                    Outcome::Unknown
 +                };
++                let outcome = receipt_lookup_fallback(outcome, cached_started);
 +                self.attempts
 +                    .cache_receipt_lookup_response(&event, outcome.clone());
 +                (event, outcome)
@@ -16828,10 +16843,10 @@ index 0000000..022b646
 +mod tests;
 diff --git a/codex-rs/tui/src/app/selection_bridge_tests.rs b/codex-rs/tui/src/app/selection_bridge_tests.rs
 new file mode 100644
-index 0000000..d12bbcd
+index 0000000..6a3cc17
 --- /dev/null
 +++ b/codex-rs/tui/src/app/selection_bridge_tests.rs
-@@ -0,0 +1,383 @@
+@@ -0,0 +1,421 @@
 +use super::*;
 +
 +fn event() -> BridgeEvent {
@@ -16922,6 +16937,44 @@ index 0000000..d12bbcd
 +        Some(Outcome::Unknown)
 +    ));
 +    assert_eq!(ledger.0.len(), 1);
++}
++
++#[test]
++fn receipt_lookup_failure_preserves_exact_cached_started() {
++    let event = event();
++    let mut ledger = AttemptLedger::default();
++    let index = ledger.reserve(&event).expect("first attempt");
++    ledger.0[index].1 = Outcome::Started {
++        turn_id: event.client_user_message_id.clone(),
++        replayed: false,
++    };
++    let cached_started = ledger
++        .previous(&event)
++        .filter(|outcome| matches!(outcome, Outcome::Started { replayed: true, .. }));
++
++    assert_eq!(
++        receipt_lookup_fallback(Outcome::Unknown, cached_started.clone()),
++        Outcome::Started {
++            turn_id: event.client_user_message_id.clone(),
++            replayed: true,
++        },
++        "a failed receipt poll must preserve exact committed-start evidence"
++    );
++    assert_eq!(
++        receipt_lookup_fallback(Outcome::Unknown, None),
++        Outcome::Unknown,
++        "an unknown attempt cannot be upgraded without cached start evidence"
++    );
++    let input_recorded = Outcome::InputRecorded {
++        turn_id: event.client_user_message_id,
++        item_id: Uuid::now_v7().to_string(),
++        replayed: true,
++    };
++    assert_eq!(
++        receipt_lookup_fallback(input_recorded.clone(), cached_started),
++        input_recorded,
++        "a successful stronger receipt still upgrades cached Started"
++    );
 +}
 +
 +#[test]
