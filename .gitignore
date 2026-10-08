@@ -13,3 +13,4 @@ __pycache__/
 packages/event-gateway/build/
 packages/event-gateway/*.egg-info/
 packages/event-gateway/.ruff_cache/
+.pnpm-store/

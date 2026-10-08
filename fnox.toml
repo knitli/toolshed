@@ -1,0 +1,11 @@
+default_provider = "age"
+
+[providers.age]
+type = "age"
+recipients = [
+  "age1efhuxtvrtmr40uvnw5up8as7dnt53cclu9vdkl6hrx3dl0t8lygqwlvxts",
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJjKIr3t+lncMsdtWvKA/ojHgtdRyyUEZwFA+gkXeRKp adam@knitli.com",
+]
+
+[secrets]
+CODACY_API_KEY= { provider = "age", value = "fnox-age-batch-v1:YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBMWkxsblQ4algvakxZem11UlFwWTFuZW9TM0hwNzUrUEhFRXcvMVkxNTFBClRPU2V2bzZDMDNMc25DUk9xQlhQVGxLR1k2VFB4bS9GWThHd0hVYURRdWcKLT4gc3NoLWVkMjU1MTkgelVvRnpBIFJOcXRlWk5KTVZpYU5qUVB6QWhNK1RhUFM5Z1FUc1NlRmwvbzdWbUhPUjAKK2ZtdkxJUlZwSUhLUlFrMXFUdUhtNHBXOG1wdVZ5clRhSjFlVnM4Rm1yTQotPiB5VERsd0NXci1ncmVhc2UKVm5SVXU1R2hhVXNFZ2xrMUYxS3JSaW81NmpnaTlDYnJReWlUMlEKLS0tIGwwVmN2ajJhS1piOERWblk4ZjdYeDRaTTAydDlteks0VWx6KzVGazJ5RmcKmYhXMhF7SbvlaTShoG9DgraHPnzjVSkgUAXjQyJHhq2A27zklCqGrNe5wCcU9unwswvcKVAyEBAS6BQsq/7gHWgOOdko41jNI0V69w==:AAwHN0s40sd7sZaPS/YomUCTXFmiM45heA9zIKl6ln5O3BMfHb2/Wdz7hARUhgfyXLc=", description = "Codacy CLI API key" }

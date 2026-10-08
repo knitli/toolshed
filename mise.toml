@@ -16,6 +16,8 @@ yq = "latest"
 uv = "latest"
 biome = "latest"
 hk = "latest"
+fnox = "latest"
+"npm:@codacy/codacy-cloud-cli" = "latest"
 
 [deps]
 [deps.bun]

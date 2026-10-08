@@ -22,7 +22,7 @@
     },
     "packages/openapi-mcp": {
       "name": "@knitli/openapi-mcp",
-      "version": "0.0.0",
+      "version": "1.4.0",
       "bin": {
         "openapi-mcp": "./dist/cli.js",
       },
