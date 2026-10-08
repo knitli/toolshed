@@ -44,6 +44,7 @@ jobs:
           consumer=$(mktemp -d "$RUNNER_TEMP/event-gateway-consumer.XXXXXX")
           uv venv --python 3.13.14 "$consumer/venv"
           uv pip install --python "$consumer/venv/bin/python" "$wheel"
+          native_tests="$PWD/tests"
           cd "$consumer"
           "$consumer/venv/bin/knitli-event-gateway" --help
           "$consumer/venv/bin/knitli-event-gateway" --state-dir "$consumer/state" status > status.json
@@ -56,3 +57,4 @@ jobs:
           assert "cloud_authority_not_integrated" in status["blockers"]
           assert files("event_gateway").joinpath("contracts/event-v1/protocol.schema.json").is_file()
           PYTHON
+          "$consumer/venv/bin/python" -I -m unittest discover -s "$native_tests" -p test_native_bridge.py -v

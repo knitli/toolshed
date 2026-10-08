@@ -4,9 +4,11 @@ import asyncio
 import argparse
 import base64
 import copy
+from contextlib import ExitStack
 import hashlib
 import http.client
 import importlib.util
+import importlib.metadata
 import json
 from pathlib import Path
 import select
@@ -19,18 +21,23 @@ from uuid import UUID, uuid4
 parser = argparse.ArgumentParser(description=__doc__)
 for name in ('package', 'qualifier', 'binary', 'binary-sha', 'node', 'cloud-source', 'esbuild', 'miniflare', 'output'):
     parser.add_argument('--' + name, required=True)
+parser.add_argument('--installed', action='store_true', help='Use the installed wheel, without adding source imports')
+parser.add_argument('--restart-native', action='store_true', help='Recover an expired v3 receipt after native process restart')
 args = parser.parse_args()
 PACKAGE, QUALIFIER, BINARY = (Path(x).resolve(strict=True) for x in (args.package, args.qualifier, args.binary))
 BINARY_SHA, NODE = args.binary_sha, str(Path(args.node).resolve(strict=True))
 BROKER = Path(__file__).with_name('coupled-workerd-broker.mjs')
 OUTPUT = Path(args.output).resolve()
-sys.path.insert(0, str(PACKAGE / 'src'))
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from event_gateway.cloud import CloudClient, Credentials
-from event_gateway.gateway import Gateway
-from event_gateway.native import NativeBridgeAdapter, validate_receipt
-from event_gateway.store import Store, IDENTITY
+if not args.installed:
+    sys.path.insert(0, str(PACKAGE / 'src'))
+# Package selection above deliberately precedes the imports used by this fixture.
+from cryptography.hazmat.primitives import serialization  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
+import event_gateway  # noqa: E402
+from event_gateway.cloud import CloudClient, Credentials  # noqa: E402
+from event_gateway.gateway import Gateway  # noqa: E402
+from event_gateway.native import NativeBridgeAdapter, validate_receipt  # noqa: E402
+from event_gateway.store import Store, IDENTITY  # noqa: E402
 
 
 def require(condition, message):
@@ -42,7 +49,7 @@ def b64(value):
     return base64.urlsafe_b64encode(value).rstrip(b'=').decode()
 
 
-async def exercise(bridge, model, native_process, witness, address):
+async def exercise(bridge, model, native_process, witness, address, launcher):
     node_key, transport_key = Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()
     node_id, runtime_id = str(uuid4()), str(uuid4())
     wires, auth_calls, drop_reply = [], 0, True
@@ -103,7 +110,7 @@ async def exercise(bridge, model, native_process, witness, address):
         return Gateway(store, cloud, lambda mapping: NativeBridgeAdapter(mapping, bridge),
             audience=node_id, keys={'fixture-transport': transport_key.public_key()})
 
-    with tempfile.TemporaryDirectory(prefix='native-workerd-local-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='native-workerd-local-') as temporary, ExitStack() as resources:
         state = Path(temporary).resolve() / 'private'
         store = Store(state)
         try:
@@ -118,6 +125,49 @@ async def exercise(bridge, model, native_process, witness, address):
             before = fixture('/fixture/read')
             require(len(before['slots']) == 1 and before['cloud']['attempts'][0]['state'] == 'submitted', 'retained slot')
             require(before['cloud']['manual_sources'][0]['observed_source_state_version'] is None, 'no early watermark')
+            restart = None
+            if args.restart_native:
+                # Observe Core independently; the gateway must recover this receipt only
+                # from the new native process, never from a pre-restart local receipt.
+                prior = store.current_attempt(ident)
+                request = prior['native_request']
+                wire_request = {key: value for key, value in request.items() if key != 'receiptVersion'}
+                require(request['receiptVersion'] == 3, 'explicit durable reader identity')
+                deadline = time.monotonic() + 12
+                while True:
+                    recorded = bridge.receipt(wire_request)
+                    require(recorded['status'] in ('started', 'inputRecorded'), 'native observation state')
+                    if recorded['status'] == 'inputRecorded' and model.request_counts['primary'] == 1:
+                        break
+                    require(time.monotonic() < deadline and native_process.poll() is None, 'native input deadline')
+                    await asyncio.sleep(.05)
+                model.release_primary.set()
+                deadline = time.monotonic() + 12
+                while time.time_ns() // 1_000_000 <= request['permitExpiresAt'] or not bridge.challenge()['eligible']:
+                    require(time.monotonic() < deadline and native_process.poll() is None, 'expiry and idle wait')
+                    await asyncio.sleep(.05)
+                old_process = native_process
+                native_args = list(old_process.args)
+                root = Path(native_args[native_args.index('-C') + 1])
+                launcher.stop_process(old_process, witness['backendPid'])
+                bridge.close()
+                bridge, native_process, new_witness = resources.enter_context(
+                    launcher.native_client(native_args, root, receipt_version=3))
+                require(old_process.poll() is not None and not launcher.alive(witness['backendPid']), 'old processes stopped')
+                require(native_process.pid != old_process.pid, 'new native TUI process')
+                require(all(new_witness[key] != witness[key] for key in (
+                    'clientId', 'serverInstanceId', 'backendPid', 'threadId')), 'new backend and selected thread')
+                store.close()
+                store = Store(state)
+                app = gateway(store)
+                restored = store.current_attempt(ident)
+                require(restored['native_request'] == request and not restored.get('input_recorded_receipt'),
+                        'only submitted identity persisted before restart')
+                require(await NativeBridgeAdapter(mapping, bridge).check() == 'unavailable', 'old attachment unavailable')
+                restart = {'oldPid': old_process.pid, 'newPid': native_process.pid,
+                           'oldWitness': witness, 'newWitness': new_witness,
+                           'expiredBeforeRecovery': True, 'oldAttachmentUnavailable': True,
+                           'gatewayReceiptAbsentBeforeRecovery': True, 'independentlyRecorded': recorded}
             deadline = time.monotonic()+12
             while drop_reply:
                 require(time.monotonic() < deadline and native_process.poll() is None, 'observation deadline')
@@ -128,6 +178,8 @@ async def exercise(bridge, model, native_process, witness, address):
             original = copy.deepcopy(store.current_attempt(ident))
             request = original['native_request']
             observed = validate_receipt(request, original['input_recorded_receipt'], allow_input_recorded=True)
+            if restart is not None:
+                require(observed == restart['independentlyRecorded'], 'exact Core receipt recovered after native restart')
             require(UUID(observed['itemId']).version == 7 and observed['itemId'] != observed['turnId'], 'actual Core item')
             fixture('/fixture/alarm')
             settled = fixture('/fixture/read')
@@ -146,7 +198,7 @@ async def exercise(bridge, model, native_process, witness, address):
             store = Store(state)
             app = gateway(store)
             require((await app.reconcile(ident))['status'] == 'observed', 'exact lost-reply recovery')
-            require(bridge.nonce == nonce and bridge.attempts == {request['attemptId']: request}, 'no native repeat')
+            require(bridge.nonce == nonce and bridge.attempts == {request['attemptId']: {key: value for key, value in request.items() if key != 'receiptVersion'}}, 'no native repeat')
             require(wires[-2]['body'] == wires[-1]['body'] and wires[-2]['proof']['nonce'] != wires[-1]['proof']['nonce'], 'same ACK fresh proof')
             require(auth_calls == len(wires) and len(wires) == 4, 'credentials refreshed; one claim/two ACK phases/retry')
             require(fixture('/fixture/read') == settled, 'replay leaves real cloud state unchanged')
@@ -154,7 +206,9 @@ async def exercise(bridge, model, native_process, witness, address):
             require(model.request_counts['primary'] == 1 and model.request_counts['title'] <= 1
                 and model.request_counts['unknown'] == 0, 'one mock-model primary')
             return {'result': 'PASS', 'qualification': 'fixture-qualified-native-local-workerd',
-                'binarySha256': BINARY_SHA, 'nativeProcessRestarted': False, 'localStoreRestarted': True,
+                'binarySha256': BINARY_SHA, 'nativeProcessRestarted': restart is not None, 'localStoreRestarted': True,
+                'restart': restart, 'installedPackage': args.installed,
+                'oldStartNoStartSettlementProven': False,
                 'realModelCalls': 0, 'modelRequests': model.request_counts,
                 'nativeRequest': request, 'fullInputRecordedReceipt': original['input_recorded_receipt'],
                 'before': before, 'settled': settled, 'wire': wires, 'productionAdmissionProven': False,
@@ -165,6 +219,13 @@ async def exercise(bridge, model, native_process, witness, address):
 
 
 def main():
+    if args.installed:
+        distribution = importlib.metadata.distribution('knitli-event-gateway')
+        require('event_gateway/native_reader.py' in {str(file) for file in distribution.files or ()},
+                'reader must belong to an installed wheel, not an editable source checkout')
+        require(Path(event_gateway.__file__).resolve() ==
+                Path(distribution.locate_file('event_gateway/__init__.py')).resolve(),
+                'package import must match installed distribution')
     require(hashlib.sha256(BINARY.read_bytes()).hexdigest() == BINARY_SHA, 'frozen native binary')
     spec = importlib.util.spec_from_file_location('coupled_qualifier', QUALIFIER)
     launcher = importlib.util.module_from_spec(spec)
@@ -182,13 +243,14 @@ def main():
 
             def callback(bridge, model, process, witness):
                 try:
-                    return asyncio.run(exercise(bridge, model, process, witness, address))
+                    return asyncio.run(exercise(bridge, model, process, witness, address, launcher))
                 finally:
                     model.release_primary.set()
             launcher.qualify_input_recorded = callback
-            proof = launcher.qualify(BINARY, input_recorded=True)
+            proof = launcher.qualify(BINARY, input_recorded=True, receipt_version=3 if args.restart_native else 2)
             paths = [Path(__file__), BROKER, BROKER.with_name('coupled-workerd-worker.ts'), QUALIFIER,
-                     *sorted((PACKAGE/'src/event_gateway').glob('*.py'))]
+                     *sorted(Path(event_gateway.__file__).parent.glob('*.py'))]
+            proof['cloudBundle'] = address['bundle']
             proof['sourceSha256'] = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
             target = OUTPUT
             target.write_text(json.dumps(proof, indent=2)+'\n')
