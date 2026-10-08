@@ -85,7 +85,8 @@ socket carries v3 bridge traffic. Startup synchronization grants no selection;
 selected status requires a fresh witness. A timed-out status read preserves one
 pending reply without interrupting the TUI. A later query drains and discards
 that old reply; the following query requests a fresh witness. This read-only path
-never grants permission to start a turn. The printed session UUID identifies
+revokes any prior Start eligibility and never grants permission to start a turn;
+use a dedicated bridge for presence polling. The printed session UUID identifies
 only this launcher. From another terminal, use the same `--state-dir` if supplied:
 
 ```sh

@@ -250,7 +250,7 @@ class NativeBridge:
         self.valid_until = min(issued + WITNESS_SECONDS, issued + (row["leaseMs"] or 0) / 1000)
 
     def challenge_readonly(self):
-        """Observe selection without Start authority; drain late replies before retrying."""
+        """Revoke Start eligibility and observe selection; drain late replies before retrying."""
         require(self.exchange_lock.acquire(blocking=False))
         self.witness = None
         self.valid_until = 0

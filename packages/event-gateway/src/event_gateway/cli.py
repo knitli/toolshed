@@ -97,6 +97,9 @@ def main(argv=None):
     except LaunchError as error:
         print(json.dumps({"reason": str(error)}), file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        print(json.dumps({"reason": "interrupted"}), file=sys.stderr)
+        return 130
     except (StoreError, SecurityError) as error:
         print(json.dumps({"reason": error.code}), file=sys.stderr)
         return 2

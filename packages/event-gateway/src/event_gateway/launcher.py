@@ -210,11 +210,24 @@ def launch(state_dir, binary, digest, cwd, *, resume=None):
     master = slave = None
     workers = []
     stop = threading.Event()
+    interrupted = threading.Event()
     startup_failed = threading.Event()
     previous = {}
+
+    def stop_launch(signum, _frame):
+        if signum == signal.SIGINT:
+            interrupted.set()
+        stop.set()
+
+    def check_stop():
+        if stop.is_set():
+            if interrupted.is_set():
+                raise KeyboardInterrupt
+            raise LaunchError("native_launch_interrupted")
+
     try:
-        for sig in (signal.SIGTERM, signal.SIGHUP):
-            previous[sig] = signal.signal(sig, lambda *_: stop.set())
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            previous[sig] = signal.signal(sig, stop_launch)
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         listener.bind(str(path))
         os.chmod(path, 0o600)
@@ -226,8 +239,7 @@ def launch(state_dir, binary, digest, cwd, *, resume=None):
         env.update(CODEX_NATIVE_BRIDGE_FD=str(child.fileno()),
                    CODEX_NATIVE_BRIDGE_RECEIPT_VERSION="3")
         binary = qualified_binary(binary, digest)
-        if stop.is_set():
-            raise LaunchError("native_launch_interrupted")
+        check_stop()
         command = [str(binary), "--no-alt-screen", "-C", str(cwd)]
         if resume:
             command += ["resume", resume]
@@ -236,8 +248,7 @@ def launch(state_dir, binary, digest, cwd, *, resume=None):
             pass_fds=(child.fileno(),), start_new_session=True,
             preexec_fn=_claim_terminal,
         )
-        if stop.is_set():
-            raise LaunchError("native_launch_interrupted")
+        check_stop()
         child.close()
         os.close(slave)
         slave = None
@@ -297,6 +308,8 @@ def launch(state_dir, binary, digest, cwd, *, resume=None):
         finally:
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
+    if interrupted.is_set():
+        raise KeyboardInterrupt
     if startup_failed.is_set():
         raise LaunchError("native_bridge_startup_failed")
     return process.returncode if process.returncode >= 0 else 128 - process.returncode
