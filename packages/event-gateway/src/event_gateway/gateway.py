@@ -314,13 +314,11 @@ class Gateway:
 
     @contextlib.asynccontextmanager
     async def _runtime_guard(self, runtime_id):
-        """Hold the per-runtime lock, dropping the entry when the last user leaves.
-
-        The increment runs synchronously (no await) before acquisition, covering
-        waiters as well as the holder; the decrement+delete runs synchronously
-        (no await) after release. On a single event loop this makes deletion safe:
-        an entry with users == 0 has no holder and no waiter.
-        """
+        """Hold the runtime lock until its last holder or waiter leaves."""
+        # The increment runs synchronously (no await) before acquisition, covering
+        # waiters as well as the holder; the decrement+delete runs synchronously
+        # (no await) after release. On a single event loop this makes deletion safe:
+        # an entry with users == 0 has no holder and no waiter.
         entry = self._locks.get(runtime_id)
         if entry is None:
             entry = self._locks[runtime_id] = _RuntimeLock()
