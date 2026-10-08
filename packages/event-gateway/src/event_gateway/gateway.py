@@ -324,8 +324,8 @@ class Gateway:
         entry = self._locks.get(runtime_id)
         if entry is None:
             entry = self._locks[runtime_id] = _RuntimeLock()
-        entry.users += 1
         try:
+            entry.users += 1
             async with entry.lock:
                 yield
         finally:

@@ -960,23 +960,88 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.gateway._locks, {})
 
     async def test_waiter_keeps_lock_alive(self):
+        # terminalNotStarted so every dispatch reaches submit (no early return).
+        self.outcome = 'terminalNotStarted'
         ident = self.accept()['deliveryId']
-        entered, release = asyncio.Event(), asyncio.Event()
+        entered_h, release_h = asyncio.Event(), asyncio.Event()
+        entered_w, release_w = asyncio.Event(), asyncio.Event()
+        calls = []
 
         async def gated(request):
-            entered.set()
-            await release.wait()
+            calls.append(request)
+            if len(calls) == 1:
+                entered_h.set()
+                await release_h.wait()
+            else:
+                entered_w.set()
+                await release_w.wait()
             return self.receipt(request, self.outcome)
 
         self.custom_submit = gated
         first = asyncio.create_task(self.gateway.dispatch(ident))
-        await asyncio.wait_for(entered.wait(), 1)
+        await asyncio.wait_for(entered_h.wait(), 5)
         entry_before = self.gateway._locks[self.event['runtimeId']]
         second = asyncio.create_task(self.gateway.dispatch(ident))
         await self.wait_for_users(entry_before, 2)
+        release_h.set()
+        await asyncio.wait_for(first, 5)
+        # Holder exited while the waiter is still in flight: the entry must
+        # survive (same object), otherwise a newcomer could get a fresh lock.
+        await asyncio.wait_for(entered_w.wait(), 5)
         self.assertIs(self.gateway._locks[self.event['runtimeId']], entry_before)
-        release.set()
-        await asyncio.gather(first, second)
+        release_w.set()
+        await asyncio.wait_for(second, 5)
+        self.assertEqual(self.gateway._locks, {})
+
+    async def test_newcomer_excluded_across_deliveries(self):
+        # Same-delivery concurrency is masked by the store-level claim, so use
+        # two deliveries sharing one runtimeId: D1 holder, D2 waiter, then D3
+        # (redispatched D1) newcomer after D1 exits. D3 must queue behind D2;
+        # naive delete-on-release lets D3 enter concurrently with D2.
+        self.outcome = 'terminalNotStarted'
+        ident1 = self.accept()['deliveryId']
+        event2 = copy.deepcopy(self.event)
+        event2.update(eventId=str(uuid.uuid4()), attemptId=str(uuid.uuid4()))
+        event2['deliveryId'] = derive_delivery_id(event2)
+        body2 = json.dumps(event2).encode()
+        self.gateway.accept(body2, signature=sign(body2, self.key, 'test-gateway'),
+                            audience='test-gateway', key_id='test')
+        ident2 = event2['deliveryId']
+        self.assertNotEqual(ident1, ident2)
+
+        entered_1, release_1 = asyncio.Event(), asyncio.Event()
+        entered_2, release_2 = asyncio.Event(), asyncio.Event()
+        entered_3 = asyncio.Event()
+        d1_calls = []
+
+        async def submit(request):
+            if request['deliveryId'] == ident1 and not d1_calls:
+                d1_calls.append(request)
+                entered_1.set()
+                await release_1.wait()
+            elif request['deliveryId'] == ident2:
+                entered_2.set()
+                await release_2.wait()
+            else:  # newcomer: redispatched delivery1
+                entered_3.set()
+                await release_2.wait()
+            return self.receipt(request, self.outcome)
+
+        self.custom_submit = submit
+        d1 = asyncio.create_task(self.gateway.dispatch(ident1))
+        await asyncio.wait_for(entered_1.wait(), 5)
+        entry_before = self.gateway._locks[self.event['runtimeId']]
+        d2 = asyncio.create_task(self.gateway.dispatch(ident2))
+        await self.wait_for_users(entry_before, 2)
+        release_1.set()
+        await asyncio.wait_for(d1, 5)
+        await asyncio.wait_for(entered_2.wait(), 5)
+        d3 = asyncio.create_task(self.gateway.dispatch(ident1))
+        await asyncio.sleep(0.05)  # give a buggy newcomer every chance to enter
+        self.assertFalse(entered_3.is_set(),
+                         'newcomer entered critical section while waiter holds the runtime')
+        release_2.set()
+        await asyncio.wait_for(asyncio.gather(d2, d3), 5)
         self.assertEqual(self.gateway._locks, {})
 
     async def test_cancelled_dispatch_releases_lock(self):
