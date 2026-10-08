@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from event_gateway.cloud import _iso
 from event_gateway.codex import CodexError
-from event_gateway.gateway import Gateway, Refused
+from event_gateway.gateway import Gateway, Refused, _RuntimeLock
 from event_gateway.native import EVENT_FIELDS, IDENTITY as NATIVE_IDENTITY, NativeBridgeAdapter
 from event_gateway.protocol import _timestamp, derive_delivery_id
 from event_gateway.security import SecurityError, sign
@@ -58,6 +58,28 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 'audience': 'test-gateway', 'key_id': 'test'}
         args.update(overrides)
         return self.gateway.accept(body, **args)
+
+    def inject_lock(self, runtime_id, lock):
+        entry = _RuntimeLock()
+        entry.lock = lock
+        self.gateway._locks[runtime_id] = entry
+        return entry
+
+    def fresh_runtime_delivery(self, agent=None):
+        """Attach a fresh runtime, accept one envelope for it, return (deliveryId, runtimeId)."""
+        event = copy.deepcopy(self.event)
+        runtime_id = str(uuid.uuid4())
+        event.update(eventId=str(uuid.uuid4()), attemptId=str(uuid.uuid4()), runtimeId=runtime_id)
+        if agent is not None:
+            event['agent'] = agent
+        event['deliveryId'] = derive_delivery_id(event)
+        mapping = {key: event[key] for key in IDENTITY}
+        mapping.update(leaseExpiresAt=self.now + 3600, nativeThreadId=str(uuid.uuid4()))
+        self.store.put_attachment(mapping)
+        body = json.dumps(event).encode()
+        self.gateway.accept(body, signature=sign(body, self.key, 'test-gateway'),
+                            audience='test-gateway', key_id='test')
+        return event['deliveryId'], runtime_id
 
     def restart(self):
         path = self.store.path
@@ -556,7 +578,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.store.detach(self.event['runtimeId'])
         lock = asyncio.Lock()
         await lock.acquire()
-        self.gateway._locks[self.event['runtimeId']] = lock
+        self.inject_lock(self.event['runtimeId'], lock)
         task = asyncio.create_task(self.gateway.dispatch(ident))
         await asyncio.sleep(0)
         self.now += 2 * RETENTION
@@ -579,7 +601,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.outcome = 'terminalNotStarted'
         lock = asyncio.Lock()
         await lock.acquire()
-        self.gateway._locks[self.event['runtimeId']] = lock
+        self.inject_lock(self.event['runtimeId'], lock)
         tasks = [asyncio.create_task(self.gateway.dispatch(ident)) for _ in range(2)]
         await asyncio.sleep(0)
         lock.release()
@@ -833,6 +855,175 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.gateway.reconcile(ident))['status'], 'queued')
         self.assertEqual(self.submissions, [])
         self.assertEqual(self.settlements[0][1], {'type': 'local_not_submitted'})
+
+    def patch_prepare_threads(self):
+        real_prepare = self.prepare
+
+        async def prepare_per_runtime(admission):
+            request = await real_prepare(admission)
+            mapping = self.store.get_attachment(admission['envelope']['runtimeId'])
+            request['threadId'] = mapping['nativeThreadId']
+            return request
+
+        patcher = patch.object(self, 'prepare', prepare_per_runtime)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    async def wait_for_users(self, entry, count):
+        for _ in range(100):
+            if entry.users == count:
+                return
+            await asyncio.sleep(0)
+        self.assertEqual(entry.users, count)
+
+    async def test_locks_released_after_dispatch(self):
+        ident = self.accept()['deliveryId']
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def gated(request):
+            entered.set()
+            await release.wait()
+            return self.receipt(request, self.outcome)
+
+        self.custom_submit = gated
+        task = asyncio.create_task(self.gateway.dispatch(ident))
+        await asyncio.wait_for(entered.wait(), 1)
+        self.assertEqual(len(self.gateway._locks), 1)
+        release.set()
+        self.assertEqual((await task)['status'], 'submitted')
+        self.assertEqual(self.gateway._locks, {})
+
+    async def test_locks_bounded_under_distinct_runtime_ids(self):
+        self.patch_prepare_threads()
+        for i in range(50):
+            ident, runtime = self.fresh_runtime_delivery(agent=f'agent-{i}')
+            await self.gateway.dispatch(ident)
+            self.store.detach(runtime)
+        self.assertEqual(self.gateway._locks, {})
+        for i in range(50, 60):
+            ident, runtime = self.fresh_runtime_delivery(agent=f'agent-{i}')
+            self.assertTrue(self.store.begin_claim(ident))
+            self.assertIsNotNone(await self.gateway.reconcile(ident))
+            self.store.detach(runtime)
+        self.assertEqual(self.gateway._locks, {})
+
+    async def test_concurrent_same_runtime_serialized(self):
+        ident = self.accept()['deliveryId']
+        self.outcome = 'terminalNotStarted'
+        entered, release = asyncio.Event(), asyncio.Event()
+        loop = asyncio.get_running_loop()
+        intervals, calls = [], []
+
+        async def timed(request):
+            start = loop.time()
+            if not calls:
+                entered.set()
+                await release.wait()
+            calls.append(request)
+            intervals.append((start, loop.time()))
+            return self.receipt(request, self.outcome)
+
+        self.custom_submit = timed
+        tasks = [asyncio.create_task(self.gateway.dispatch(ident)) for _ in range(2)]
+        await asyncio.wait_for(entered.wait(), 1)
+        entry = self.gateway._locks[self.event['runtimeId']]
+        await self.wait_for_users(entry, 2)
+        release.set()
+        rows = await asyncio.gather(*tasks)
+        self.assertEqual([row['status'] for row in rows], ['queued', 'queued'])
+        self.assertEqual(len(self.submissions), 2)
+        self.assertNotEqual(self.submissions[0]['attemptId'], self.submissions[1]['attemptId'])
+        ordered = sorted(intervals)
+        self.assertLessEqual(ordered[0][1], ordered[1][0])
+        self.assertEqual(self.gateway._locks, {})
+
+    async def test_concurrent_distinct_runtimes_independent(self):
+        self.patch_prepare_threads()
+        ident_a, _ = self.fresh_runtime_delivery(agent='agent-a')
+        ident_b, _ = self.fresh_runtime_delivery(agent='agent-b')
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def gated(request):
+            if request['deliveryId'] == ident_a:
+                entered.set()
+                await release.wait()
+            return self.receipt(request, self.outcome)
+
+        self.custom_submit = gated
+        task_a = asyncio.create_task(self.gateway.dispatch(ident_a))
+        await asyncio.wait_for(entered.wait(), 1)
+        row_b = await asyncio.wait_for(self.gateway.dispatch(ident_b), 5)
+        self.assertEqual(row_b['status'], 'submitted')
+        self.assertEqual(len(self.gateway._locks), 1)
+        release.set()
+        self.assertEqual((await task_a)['status'], 'submitted')
+        self.assertEqual(self.gateway._locks, {})
+
+    async def test_waiter_keeps_lock_alive(self):
+        ident = self.accept()['deliveryId']
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def gated(request):
+            entered.set()
+            await release.wait()
+            return self.receipt(request, self.outcome)
+
+        self.custom_submit = gated
+        first = asyncio.create_task(self.gateway.dispatch(ident))
+        await asyncio.wait_for(entered.wait(), 1)
+        entry_before = self.gateway._locks[self.event['runtimeId']]
+        second = asyncio.create_task(self.gateway.dispatch(ident))
+        await self.wait_for_users(entry_before, 2)
+        self.assertIs(self.gateway._locks[self.event['runtimeId']], entry_before)
+        release.set()
+        await asyncio.gather(first, second)
+        self.assertEqual(self.gateway._locks, {})
+
+    async def test_cancelled_dispatch_releases_lock(self):
+        ident = self.accept()['deliveryId']
+        entered = asyncio.Event()
+
+        async def pending(request):
+            entered.set()
+            await asyncio.Event().wait()
+
+        self.custom_submit = pending
+        task = asyncio.create_task(self.gateway.dispatch(ident))
+        await asyncio.wait_for(entered.wait(), 1)
+        self.assertEqual(len(self.gateway._locks), 1)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertEqual(self.gateway._locks, {})
+
+        self.custom_submit = None
+        holder = asyncio.Lock()
+        await holder.acquire()
+        self.inject_lock(self.event['runtimeId'], holder)
+        waiter = asyncio.create_task(self.gateway.dispatch(ident))
+        entry = self.gateway._locks[self.event['runtimeId']]
+        await self.wait_for_users(entry, 1)
+        waiter.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await waiter
+        self.assertEqual(self.gateway._locks, {})
+        holder.release()
+
+    async def test_cancelled_waiter_does_not_break_next_acquirer(self):
+        ident = self.accept()['deliveryId']
+        holder = asyncio.Lock()
+        await holder.acquire()
+        self.inject_lock(self.event['runtimeId'], holder)
+        entry = self.gateway._locks[self.event['runtimeId']]
+        waiter = asyncio.create_task(self.gateway.dispatch(ident))
+        await self.wait_for_users(entry, 1)
+        waiter.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await waiter
+        self.assertEqual(self.gateway._locks, {})
+        holder.release()
+        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'submitted')
+        self.assertEqual(self.gateway._locks, {})
 
 
 if __name__ == '__main__':

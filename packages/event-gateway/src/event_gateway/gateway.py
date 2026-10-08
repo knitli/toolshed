@@ -1,6 +1,7 @@
 """Durable cloud admission and native no-start settlement state machine."""
 
 import asyncio
+import contextlib
 import time
 
 from .cloud import _iso
@@ -44,13 +45,23 @@ class UnavailableAuthority:
         raise Refused("authority_unavailable")
 
 
+class _RuntimeLock:
+    """One asyncio.Lock plus its in-flight user count (holders + waiters)."""
+
+    __slots__ = ("lock", "users")
+
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.users = 0
+
+
 class Gateway:
     def __init__(self, store, authority, adapter_factory, *, audience, keys, clock=time.time):
         """Bind durable storage to explicitly injected authority and native providers."""
         self.store, self.authority = store, authority
         self.adapter_factory, self.clock = adapter_factory, clock
         self.audience, self.keys = audience, dict(keys)
-        self._locks = {}
+        self._locks = {}  # runtimeId -> _RuntimeLock, only while in flight
 
     def accept(self, body, *, signature, audience, key_id):
         # Authenticate exact bytes before parsing, deduplication, or persistence.
@@ -301,10 +312,31 @@ class Gateway:
         attempt = self.store.current_attempt(delivery_id)
         return await self._submit_native(delivery_id, adapter, attempt, request)
 
+    @contextlib.asynccontextmanager
+    async def _runtime_guard(self, runtime_id):
+        """Hold the per-runtime lock, dropping the entry when the last user leaves.
+
+        The increment runs synchronously (no await) before acquisition, covering
+        waiters as well as the holder; the decrement+delete runs synchronously
+        (no await) after release. On a single event loop this makes deletion safe:
+        an entry with users == 0 has no holder and no waiter.
+        """
+        entry = self._locks.get(runtime_id)
+        if entry is None:
+            entry = self._locks[runtime_id] = _RuntimeLock()
+        entry.users += 1
+        try:
+            async with entry.lock:
+                yield
+        finally:
+            entry.users -= 1
+            if entry.users == 0 and self._locks.get(runtime_id) is entry:
+                del self._locks[runtime_id]
+
     async def dispatch(self, delivery_id):
         """Dispatch one queued delivery through claim, submit, and settle."""
         envelope = self._require_envelope(delivery_id)
-        async with self._locks.setdefault(envelope["runtimeId"], asyncio.Lock()):
+        async with self._runtime_guard(envelope["runtimeId"]):
             # An earlier dispatch can settle and rotate the attempt while this
             # caller waits for the runtime lock.
             return await self._dispatch_locked(delivery_id)
@@ -313,7 +345,7 @@ class Gateway:
         envelope = self.store.delivery_envelope(delivery_id)
         if envelope is None:
             return None
-        async with self._locks.setdefault(envelope["runtimeId"], asyncio.Lock()):
+        async with self._runtime_guard(envelope["runtimeId"]):
             attempt = self.store.current_attempt(delivery_id)
             if not attempt:
                 return self._row(delivery_id)
