@@ -17,7 +17,7 @@ class SemanticVectorScriptTests(unittest.TestCase):
             corpus.write_text(json.dumps(vectors))
             result = subprocess.run(  # nosec B603 - Fixed interpreter and synthetic corpus path.
                 [sys.executable, '-O', str(script), str(corpus)],
-                                    capture_output=True, text=True, timeout=10)
+                capture_output=True, text=True, timeout=10)
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn('invalid-json', result.stderr)
 

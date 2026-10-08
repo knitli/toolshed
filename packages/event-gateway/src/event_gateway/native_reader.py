@@ -1,10 +1,8 @@
-"""
-Private socket reader for an explicitly supplied native client; never launches one.
+"""Private socket reader for an explicitly supplied native client; never launches one."""
 
-The caller owns client qualification and supplies a connected private AF_UNIX
-stream. Closing this reader closes that stream. Version 3 permits exact durable
-receipt recovery; recovery never grants selection or permission to start.
-"""
+# The caller owns client qualification and supplies a connected private AF_UNIX
+# stream. Closing this reader closes that stream. Version 3 permits exact durable
+# receipt recovery; recovery never grants selection or permission to start.
 
 from copy import deepcopy
 import json

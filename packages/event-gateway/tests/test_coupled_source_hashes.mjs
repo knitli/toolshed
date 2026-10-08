@@ -15,15 +15,15 @@ test('hashes only resolved sources inside qualified roots, before reading conten
   const fixture = join(temporary, 'fixture');
   const outside = join(temporary, 'qualified-other');
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- Owned disposable test tree only; no user paths.
-  for (const directory of [root, fixture, outside]) fs.mkdirSync(directory);
+  for (const directory of [root, fixture, outside]) fs.mkdirSync(directory); // nosemgrep: javascript_pathtraversal_rule-non-literal-fs-filename
   const source = join(root, 'module.ts');
   const fixtureSource = join(fixture, 'worker.ts');
   const escaped = join(outside, 'outside.ts');
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- Owned disposable test tree only; no user paths.
-  for (const path of [source, fixtureSource, escaped]) fs.writeFileSync(path, 'synthetic source');
+  for (const path of [source, fixtureSource, escaped]) fs.writeFileSync(path, 'synthetic source'); // nosemgrep: javascript_pathtraversal_rule-non-literal-fs-filename
   const symlink = join(root, 'escape.ts');
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- Owned disposable test tree only; no user paths.
-  fs.symlinkSync(escaped, symlink);
+  fs.symlinkSync(escaped, symlink); // nosemgrep: javascript_pathtraversal_rule-non-literal-fs-filename
   const sha = createHash('sha256').update('synthetic source').digest('hex');
   assert.deepEqual(sourceHashes([source, fixtureSource], [root, fixture]), {
     [source]: sha, [fixtureSource]: sha,
