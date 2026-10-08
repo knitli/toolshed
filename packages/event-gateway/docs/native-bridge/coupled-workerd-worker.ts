@@ -20,7 +20,7 @@ const budget = () => ({ used: reservations.size, remaining: 10-reservations.size
 const valid = (x:Auth) => x.accessAssertion === 'fixture-access' && x.agentToken === 'fixture-agent';
 const authority = {
   async registeredOwnerAgent() { return { status:'denied' }; },
-  async currentAuth(x:Auth) { return valid(x) ? { status:'authorized', identity:{ principal,agent,keyThumbprint:'fixture' } } : { status:'denied' }; },
+  async currentAuth(x:Auth) { return valid(x) ? { status:'authorized', identity:{ principal,agent,keyThumbprint:'A'.repeat(43) } } : { status:'denied' }; },
   async nativeAttemptStatus(x:AttemptAuth) { return valid(x) ? { status:reservations.has(x.attemptId)?'reserved':'unknown', attemptId:x.attemptId,reservedAt:null,budget:budget() } : { status:'denied' }; },
   async reserveNativeAttempt(x:AttemptAuth) { if (!valid(x)) return { status:'denied' }; const idempotent=reservations.has(x.attemptId); reservations.add(x.attemptId); return { status:'reserved',attemptId:x.attemptId,reservedAt:Date.now(),idempotent,budget:budget() }; },
 };

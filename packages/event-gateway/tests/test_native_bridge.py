@@ -9,13 +9,16 @@ import json
 from pathlib import Path
 import runpy
 import socket
+import signal
 import sys
 import threading
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 from uuid import uuid4
+
+from event_gateway import native_reader
 
 path = Path(__file__).parents[1] / "scripts" / "qualify_native_bridge.py"
 spec = importlib.util.spec_from_file_location("qualify_native_bridge", path)
@@ -85,6 +88,52 @@ def peer(handler, *, receipt_version=2):
 
 
 class NativeBridgeTests(unittest.TestCase):
+    def test_qualifier_uses_installed_reader(self):
+        self.assertEqual(native.NativeBridge.__module__, "event_gateway.native_reader")
+
+    def test_qualifier_stops_entire_native_group(self):
+        process = Mock(pid=1234)
+        process.poll.return_value = None
+        bridge = Mock()
+        bridge.challenge.return_value = witness()
+        with (patch.object(native.subprocess, "Popen", return_value=process),
+              patch.object(native, "NativeBridge", return_value=bridge),
+              patch.object(native, "ThreadingHTTPServer"),
+              patch.object(native, "qualify_input_recorded", return_value={}),
+              patch.object(native.os, "killpg") as signal_group,
+              patch.object(native.os, "kill", side_effect=ProcessLookupError)):
+            native.qualify(sys.executable, input_recorded=True)
+        self.assertEqual(signal_group.call_args_list, [
+            call(1234, signal.SIGTERM), call(1234, signal.SIGKILL),
+        ])
+
+    def test_stop_process_reaps_resistant_backend_once_after_leader_exit(self):
+        process = Mock(pid=1234)
+        process.poll.return_value = 0
+        backend = {"alive": True}
+
+        def signal_group(pid, sig):
+            # SIGTERM leaves the descendant alive after the leader has exited.
+            if sig == signal.SIGKILL:
+                backend["alive"] = False
+
+        with (patch.object(native.os, "killpg", side_effect=signal_group) as signals,
+              patch.object(native, "alive", side_effect=lambda pid: backend["alive"])):
+            native.stop_process(process, 5678)
+            self.assertFalse(backend["alive"])
+            count = signals.call_count
+            backend["alive"] = True  # A reused PID must not undo completed cleanup.
+            native.stop_process(process, 5678)
+            self.assertEqual(signals.call_count, count, "a stopped group must never be signaled again")
+
+    def test_permission_denial_cannot_prove_process_absence(self):
+        with patch.object(native.os, "kill", side_effect=PermissionError):
+            try:
+                running = native.alive(1234)
+            except PermissionError:
+                running = None
+        self.assertIs(running, True, "unavailable liveness evidence must count as alive")
+
     def test_receipt_mode_requires_explicit_integer_version(self):
         for mode in (None, True, False, "3", 3.0, 0, 1, 4):
             with self.subTest(mode=mode):
@@ -845,7 +894,7 @@ class NativeBridgeTests(unittest.TestCase):
 
                 with (
                     peer(handler) as client,
-                    patch.object(native, "START_SECONDS", 0.025)
+                    patch.object(native_reader, "START_SECONDS", 0.025)
                     if fault == "deadline" else contextlib.nullcontext(),
                 ):
                     request = native.synthetic_request(client.challenge())
@@ -931,7 +980,7 @@ class NativeBridgeTests(unittest.TestCase):
             send(channel, {**warmup, "nonce": 2, "sequence": 2})
             self.assertIsNone(receive(channel))
 
-        with peer(startup) as client, patch.object(native, "WITNESS_SECONDS", 0.01):
+        with peer(startup) as client, patch.object(native_reader, "WITNESS_SECONDS", 0.01):
             client.exchange(
                 {}, 0.5
             )  # Older than freshness; startup synchronization only.
