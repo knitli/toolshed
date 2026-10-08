@@ -158,10 +158,12 @@ class NativeBridge:
         self.exchange_lock = threading.Lock()
         self.attempts, self.deliveries, self.messages = {}, {}, set()
         self.terminal_attempts = set()
+        self.pending_presence = None
 
     def close(self):
         self.closed = True
         self.witness = None
+        self.pending_presence = None
         self.channel.close()
 
     def exchange(self, body, seconds):
@@ -172,7 +174,7 @@ class NativeBridge:
             self.exchange_lock.release()
 
     def _exchange(self, body, seconds):
-        require(not self.closed and self.nonce < 2**64 - 1)
+        require(not self.closed and self.pending_presence is None and self.nonce < 2**64 - 1)
         self.nonce += 1
         frame = (
             json.dumps(
@@ -217,46 +219,88 @@ class NativeBridge:
         self.witness = None
         try:
             row = self.exchange({}, WITNESS_SECONDS)
-            require(set(row) == WITNESS_FIELDS)
-            require(uuid(row["clientId"]) and self.client_id in (None, row["clientId"]))
-            for key in ("connectionId", "threadId", "serverInstanceId"):
-                require(row[key] is None or uuid(row[key]))
-            require(row["backendPid"] is None or uint(row["backendPid"], 2**32 - 1, 1))
-            require(
-                uint(row["generation"])
-                and uint(row["sequence"], minimum=self.sequence + 1)
-            )
-            require(
-                type(row["eligible"]) is bool  # pylint: disable=unidiomatic-typecheck
-                and isinstance(row["cause"], str)
-                and len(row["cause"]) <= 128
-            )
-            for key in ("serverGeneration", "leaseMs"):
-                require(row[key] is None or uint(row[key]))
-            if row["eligible"]:
-                require(
-                    all(
-                        row[key] is not None
-                        for key in (
-                            "backendPid",
-                            "connectionId",
-                            "threadId",
-                            "serverInstanceId",
-                            "serverGeneration",
-                            "leaseMs",
-                        )
-                    )
-                    and row["leaseMs"] > 0
-                )
-            self.sequence, self.client_id = row["sequence"], row["clientId"]
+            self._validate_witness(row, issued)
             self.witness = row
-            self.valid_until = min(
-                issued + WITNESS_SECONDS, issued + (row["leaseMs"] or 0) / 1000
-            )
             return dict(row)
         except (ValueError, TypeError):
             self.close()
             raise BridgeError("invalid witness") from None
+
+    def _validate_witness(self, row, issued):
+        require(set(row) == WITNESS_FIELDS)
+        require(uuid(row["clientId"]) and self.client_id in (None, row["clientId"]))
+        for key in ("connectionId", "threadId", "serverInstanceId"):
+            require(row[key] is None or uuid(row[key]))
+        require(row["backendPid"] is None or uint(row["backendPid"], 2**32 - 1, 1))
+        require(uint(row["generation"]) and uint(row["sequence"], minimum=self.sequence + 1))
+        require(
+            type(row["eligible"]) is bool  # pylint: disable=unidiomatic-typecheck
+            and isinstance(row["cause"], str) and len(row["cause"]) <= 128
+        )
+        for key in ("serverGeneration", "leaseMs"):
+            require(row[key] is None or uint(row[key]))
+        if row["eligible"]:
+            require(
+                all(row[key] is not None for key in (
+                    "backendPid", "connectionId", "threadId", "serverInstanceId",
+                    "serverGeneration", "leaseMs",
+                )) and row["leaseMs"] > 0
+            )
+        self.sequence, self.client_id = row["sequence"], row["clientId"]
+        self.valid_until = min(issued + WITNESS_SECONDS, issued + (row["leaseMs"] or 0) / 1000)
+
+    def challenge_readonly(self):
+        """Revoke Start eligibility and observe selection; drain late replies before retrying."""
+        require(self.exchange_lock.acquire(blocking=False))
+        self.witness = None
+        self.valid_until = 0
+        try:
+            return self._presence_exchange()
+        except (OSError, ValueError, UnicodeError, TypeError, RecursionError):
+            self.close()
+            raise BridgeError("invalid presence witness") from None
+        finally:
+            self.exchange_lock.release()
+
+    def _presence_exchange(self):
+        require(not self.closed)
+        issued = time.monotonic()
+        resumed = self.pending_presence is not None
+        if not resumed:
+            require(self.nonce < 2**64 - 1)
+            self.nonce += 1
+            self.channel.settimeout(WITNESS_SECONDS)
+            self.channel.sendall(json.dumps({"nonce": self.nonce}).encode() + b"\n")
+            self.pending_presence = (issued, bytearray())
+        original_issued, data = self.pending_presence
+        deadline = issued + WITNESS_SECONDS
+        while b"\n" not in data:
+            require(len(data) < MAX_FRAME)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            self.channel.settimeout(remaining)
+            try:
+                chunk = self.channel.recv(MAX_FRAME + 1 - len(data))
+            except TimeoutError:
+                # Only a timed-out read is recoverable. Keep its exact partial
+                # frame/nonce; never send another request before consuming it.
+                return None
+            require(bool(chunk))
+            data.extend(chunk)
+        require(len(data) <= MAX_FRAME and data[-1:] == b"\n" and data.count(b"\n") == 1)
+        row = json.loads(data, object_pairs_hook=unique, parse_constant=lambda _: require(False))
+        require(
+            isinstance(row, dict)
+            and type(row.get("version")) is int and row["version"] == 2  # pylint: disable=unidiomatic-typecheck
+            and type(row.get("nonce")) is int and row["nonce"] == self.nonce  # pylint: disable=unidiomatic-typecheck
+        )
+        self._validate_witness(row, original_issued)
+        self.pending_presence = None
+        if resumed or time.monotonic() >= self.valid_until:
+            self.valid_until = 0
+            return None
+        return dict(row)
 
     def start(self, request):
         validate_start(request)

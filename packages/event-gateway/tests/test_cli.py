@@ -1,4 +1,6 @@
 """Exercise the shipped CLI boundary in disposable private state."""
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -9,6 +11,9 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
+
+from event_gateway import cli
 
 
 class CliTests(unittest.TestCase):
@@ -30,6 +35,25 @@ class CliTests(unittest.TestCase):
         self.assertFalse(value["automaticWakeEnabled"])
         self.assertIn("native_client_binding_unavailable", value["blockers"])
         self.assertIn("cloud_authority_not_integrated", value["blockers"])
+
+    def test_launch_keyboard_interrupt_is_sanitized(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(cli, "launch", side_effect=KeyboardInterrupt("private interrupt detail")),
+            redirect_stdout(stdout), redirect_stderr(stderr),
+        ):
+            try:
+                code = cli.main([
+                    "--state-dir", str(self.state), "launch",
+                    "--codex-binary", "/unused/codex", "--binary-sha256", "unused",
+                    "--cwd", str(self.state.parent),
+                ])
+            except KeyboardInterrupt:
+                self.fail("KeyboardInterrupt escaped the CLI boundary")
+        self.assertEqual(code, 130)
+        self.assertEqual(json.loads(stderr.getvalue()), {"reason": "interrupted"})
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertFalse(self.state.exists())
 
     def test_help_status_and_attachment_refusal(self):
         self.assertIn("knitli-event-gateway", self.cli("--help"))
