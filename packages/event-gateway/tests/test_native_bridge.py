@@ -892,18 +892,19 @@ class NativeBridgeTests(unittest.TestCase):
                     except ConnectionResetError:
                         pass
 
-                with (
-                    peer(handler) as client,
-                    patch.object(native_reader, "START_SECONDS", 0.025)
-                    if fault == "deadline" else contextlib.nullcontext(),
-                ):
-                    request = native.synthetic_request(client.challenge())
-                    self.assertEqual(client.start(request), {"status": "unknown"})
-                    if fault == "readonly-replayed-false":
-                        self.assertEqual(client.receipt(request), {"status": "unknown"})
-                    self.assertTrue(client.closed)
-                    with self.assertRaises(native.BridgeError):
-                        client.start(request)
+                with peer(handler) as client:
+                    with (
+                        patch.object(native_reader, "START_SECONDS", 0.025)
+                        if fault == "deadline"
+                        else contextlib.nullcontext()
+                    ):
+                        request = native.synthetic_request(client.challenge())
+                        self.assertEqual(client.start(request), {"status": "unknown"})
+                        if fault == "readonly-replayed-false":
+                            self.assertEqual(client.receipt(request), {"status": "unknown"})
+                        self.assertTrue(client.closed)
+                        with self.assertRaises(native.BridgeError):
+                            client.start(request)
                 self.assertEqual(len(requests), 1)
 
     def test_unfresh_or_unbound_witness_never_writes_start(self):

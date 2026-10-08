@@ -13,8 +13,18 @@ from .store import StoreError
 
 class Refused(ValueError):
     def __init__(self, code):
+        """Create a refusal with a stable machine-readable code."""
         self.code = code
         super().__init__(code)
+
+
+class _Retire(Exception):
+    """Internal signal to retire the admitted attempt locally."""
+
+    def __init__(self, reason):
+        """Carry the local-retirement reason."""
+        self.reason = reason
+        super().__init__(reason)
 
 
 FENCES = (
@@ -181,68 +191,123 @@ class Gateway:
                 return self._row(delivery_id, "native_observed_ack_pending" if observed else "native_started_ack_pending")
         return self._row(delivery_id)
 
-    async def dispatch(self, delivery_id):
+    def _require_envelope(self, delivery_id):
+        """Return the delivery envelope or raise not_found."""
         envelope = self.store.delivery_envelope(delivery_id)
         if envelope is None:
             raise Refused("not_found")
+        return envelope
+
+    async def _dispatch_adapter(self, delivery_id, envelope):
+        """Resolve (mapping, adapter) or an early client-unavailable row."""
+        mapping = self.store.get_attachment(envelope["runtimeId"])
+        if not mapping or mapping["leaseExpiresAt"] <= self.clock():
+            return None, None, self._row(delivery_id, "client_unavailable")
+        adapter = await self._available_adapter(mapping)
+        if adapter is None:
+            return None, None, self._row(delivery_id, "client_unavailable_or_busy")
+        return mapping, adapter, None
+
+    def _begin_claim_or_row(self, delivery_id):
+        """Begin claiming; return an early row when dispatch cannot proceed."""
+        try:
+            if not self.store.begin_claim(delivery_id):
+                return self._row(delivery_id)
+        except StoreError:
+            return self._row(delivery_id, "capacity")
+        return None
+
+    async def _admission_or_row(self, delivery_id):
+        """Claim admission; return (admission, None) or (None, early row)."""
+        admission = await self._claim(delivery_id)
+        if admission == "over_budget":
+            return None, self._row(delivery_id, "over_budget")
+        if admission is None:
+            return None, self._row(delivery_id, "claim_outcome_unknown")
+        return admission, None
+
+    @staticmethod
+    def _attachment_rotated(mapping, current):
+        """Detect attachment rotation, ignoring lease expiry timestamps."""
+        if not current:
+            return True
+        old = {key: value for key, value in mapping.items() if key != "leaseExpiresAt"}
+        new = {key: value for key, value in current.items() if key != "leaseExpiresAt"}
+        return old != new
+
+    async def _admission_fenced(self, mapping, adapter, runtime_id):
+        """Check whether the admission lost its attachment or client."""
+        current = self.store.get_attachment(runtime_id)
+        return (self._attachment_rotated(mapping, current)
+                or not await self._adapter_available(adapter))
+
+    async def _prepare_native_request(self, delivery_id, envelope, mapping, adapter, admission):
+        """Prepare the native request or raise _Retire with the reason."""
+        try:
+            if await self._admission_fenced(mapping, adapter, envelope["runtimeId"]):
+                raise _Retire("admission_fenced")
+            request = validate_request(await adapter.prepare(admission), admission)
+            if request["threadId"] != mapping.get("nativeThreadId"):
+                raise NativeError("invalid_native_mapping")
+            if not self.store.begin_native(delivery_id, envelope["attemptId"], request):
+                raise _Retire("admission_expired_or_fenced")
+            return request
+        except asyncio.CancelledError:
+            # Still admitted: reconcile can prove that no event operation began.
+            raise
+        except _Retire:
+            raise
+        except Exception:
+            raise _Retire("native_preparation_failed")
+
+    async def _submit_native(self, delivery_id, adapter, attempt, request):
+        """Submit the native request and settle the receipt outcome."""
+        try:
+            receipt = await asyncio.wait_for(adapter.submit(request), 10)
+            return await self._receipt(delivery_id, attempt, receipt)
+        except asyncio.CancelledError:
+            # Settlement cancellation preserves pending proof; only an unresolved
+            # native operation transitions to ambiguity.
+            if self.store.current_attempt(delivery_id)["state"] == "submitting":
+                self.store.finish(delivery_id, "ambiguous", reason="native_outcome_unknown",
+                                  attempt_id=attempt["attempt_id"])
+            raise
+        except Exception:
+            if self.store.current_attempt(delivery_id)["state"] == "submitting":
+                return self.store.finish(delivery_id, "ambiguous", reason="native_outcome_unknown",
+                                         attempt_id=attempt["attempt_id"])
+            return self._row(delivery_id, "native_outcome_unknown")
+
+    async def _dispatch_locked(self, delivery_id):
+        """Run the admitted-submission pipeline under the runtime lock."""
+        envelope = self._require_envelope(delivery_id)
+        row = self._row(delivery_id)
+        if row["status"] != "queued":
+            return row
+        mapping, adapter, early = await self._dispatch_adapter(delivery_id, envelope)
+        if early is not None:
+            return early
+        early = self._begin_claim_or_row(delivery_id)
+        if early is not None:
+            return early
+        admission, early = await self._admission_or_row(delivery_id)
+        if early is not None:
+            return early
+        try:
+            request = await self._prepare_native_request(
+                delivery_id, envelope, mapping, adapter, admission)
+        except _Retire as retire:
+            return await self._retire_local(delivery_id, retire.reason)
+        attempt = self.store.current_attempt(delivery_id)
+        return await self._submit_native(delivery_id, adapter, attempt, request)
+
+    async def dispatch(self, delivery_id):
+        """Dispatch one queued delivery through claim, submit, and settle."""
+        envelope = self._require_envelope(delivery_id)
         async with self._locks.setdefault(envelope["runtimeId"], asyncio.Lock()):
             # An earlier dispatch can settle and rotate the attempt while this
             # caller waits for the runtime lock.
-            envelope = self.store.delivery_envelope(delivery_id)
-            if envelope is None:
-                raise Refused("not_found")
-            row = self._row(delivery_id)
-            if row["status"] != "queued":
-                return row
-            mapping = self.store.get_attachment(envelope["runtimeId"])
-            if not mapping or mapping["leaseExpiresAt"] <= self.clock():
-                return self._row(delivery_id, "client_unavailable")
-            adapter = await self._available_adapter(mapping)
-            if adapter is None:
-                return self._row(delivery_id, "client_unavailable_or_busy")
-            try:
-                if not self.store.begin_claim(delivery_id):
-                    return self._row(delivery_id)
-            except StoreError:
-                return self._row(delivery_id, "capacity")
-            admission = await self._claim(delivery_id)
-            if admission == "over_budget":
-                return self._row(delivery_id, "over_budget")
-            if admission is None:
-                return self._row(delivery_id, "claim_outcome_unknown")
-            try:
-                current = self.store.get_attachment(envelope["runtimeId"])
-                if (not current or
-                        {key: value for key, value in current.items() if key != "leaseExpiresAt"}
-                        != {key: value for key, value in mapping.items() if key != "leaseExpiresAt"}
-                        or not await self._adapter_available(adapter)):
-                    return await self._retire_local(delivery_id, "admission_fenced")
-                request = validate_request(await adapter.prepare(admission), admission)
-                if request["threadId"] != mapping.get("nativeThreadId"):
-                    raise NativeError("invalid_native_mapping")
-                if not self.store.begin_native(delivery_id, envelope["attemptId"], request):
-                    return await self._retire_local(delivery_id, "admission_expired_or_fenced")
-            except asyncio.CancelledError:
-                # Still admitted: reconcile can prove that no event operation began.
-                raise
-            except Exception:
-                return await self._retire_local(delivery_id, "native_preparation_failed")
-            attempt = self.store.current_attempt(delivery_id)
-            try:
-                receipt = await asyncio.wait_for(adapter.submit(request), 10)
-                return await self._receipt(delivery_id, attempt, receipt)
-            except asyncio.CancelledError:
-                # Settlement cancellation preserves pending proof; only an unresolved
-                # native operation transitions to ambiguity.
-                if self.store.current_attempt(delivery_id)["state"] == "submitting":
-                    self.store.finish(delivery_id, "ambiguous", reason="native_outcome_unknown",
-                                      attempt_id=attempt["attempt_id"])
-                raise
-            except Exception:
-                if self.store.current_attempt(delivery_id)["state"] == "submitting":
-                    return self.store.finish(delivery_id, "ambiguous", reason="native_outcome_unknown",
-                                             attempt_id=attempt["attempt_id"])
-                return self._row(delivery_id, "native_outcome_unknown")
+            return await self._dispatch_locked(delivery_id)
 
     async def reconcile(self, delivery_id):
         envelope = self.store.delivery_envelope(delivery_id)

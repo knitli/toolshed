@@ -55,84 +55,102 @@ class Store:
         except SecurityError as exc:
             raise StoreError("unsafe_state") from exc
         try:
-            self.lock = os.open(
-                self.path / "writer.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600
-            )
-            self._check(self.path / "writer.lock")
-            try:
-                fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as exc:
-                raise StoreError("writer_locked") from exc
-            for file in self.path.glob("ledger.sqlite*"):
-                self._check(file)
-            fd = os.open(
-                self.path / "ledger.sqlite",
-                os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
-                0o600,
-            )
-            os.close(fd)
-            self.db = sqlite3.connect(self.path / "ledger.sqlite")
-            self.db.row_factory = sqlite3.Row
-            self.db.execute("PRAGMA journal_mode=WAL")
-            self.db.execute("PRAGMA synchronous=FULL")
-            self.db.execute("PRAGMA wal_autocheckpoint=1")
-            self.db.execute("PRAGMA journal_size_limit=0")
-            # Bound database + one full WAL + shared-memory/index overhead.
-            pages = max(1, (max_bytes - 65536) // (3 * 4096))
-            self.db.execute(f"PRAGMA max_page_count={pages}")
-            version = self.db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3, 4):
-                raise StoreError("unsupported_schema")
-            with self.db:
-                self.db.execute("BEGIN IMMEDIATE")
-                self.db.execute(
-                    "CREATE TABLE IF NOT EXISTS attachments (runtime TEXT PRIMARY KEY, data TEXT NOT NULL)"
-                )
-                self.db.execute("""CREATE TABLE IF NOT EXISTS deliveries (
-                    id TEXT PRIMARY KEY, dedup TEXT UNIQUE NOT NULL, semantic TEXT NOT NULL,
-                    envelope TEXT NOT NULL, runtime TEXT NOT NULL, agent TEXT NOT NULL,
-                    state TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL,
-                    retain_until REAL NOT NULL, submission TEXT, turn TEXT, reason TEXT, ack_state TEXT)""")
-                self.db.execute(
-                    "CREATE INDEX IF NOT EXISTS delivery_state ON deliveries(state)"
-                )
-                self.db.execute("""CREATE TABLE IF NOT EXISTS attempts (
-                    delivery_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
-                    state TEXT NOT NULL, envelope TEXT NOT NULL, admission TEXT,
-                    native_request TEXT, evidence TEXT, receipt TEXT, settlement TEXT, started_receipt TEXT,
-                    native_ack TEXT, input_recorded_receipt TEXT, native_observed_ack TEXT,
-                    reason TEXT, fenced INTEGER NOT NULL DEFAULT 0,
-                    reserved_bytes INTEGER NOT NULL, updated REAL NOT NULL,
-                    PRIMARY KEY(delivery_id,attempt_id))""")
-                columns = {row[1] for row in self.db.execute("PRAGMA table_info(attempts)")}
-                if "started_receipt" not in columns:
-                    self.db.execute("ALTER TABLE attempts ADD COLUMN started_receipt TEXT")
-                if "native_ack" not in columns:
-                    self.db.execute("ALTER TABLE attempts ADD COLUMN native_ack TEXT")
-                for column in ("input_recorded_receipt", "native_observed_ack"):
-                    if column not in columns:
-                        self.db.execute(f"ALTER TABLE attempts ADD COLUMN {column} TEXT")
-                if version < 3:
-                    self._migrate_native_turn_aliases()
-                self.db.execute("PRAGMA user_version=4")
-                self.db.execute(
-                    "UPDATE attempts SET state='ambiguous', reason='restart_during_submit', updated=? WHERE state='submitting'",
-                    (self.clock(),),
-                )
-                self.db.execute(
-                    "UPDATE deliveries SET state='ambiguous', reason='restart_during_submit', updated=? WHERE state='submitting'",
-                    (self.clock(),),
-                )
-            reclaimed = self.cleanup()
-            if reclaimed and self._size() > self.max_bytes:
-                # DELETE frees SQLite pages but does not shrink the database file.
-                self.db.execute("VACUUM")
-                self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                self.db.execute(f"PRAGMA max_page_count={pages}")
+            self._open_locked()
+            self._initialize_schema()
+            self._reclaim_overgrowth()
             self._capacity()
         except BaseException:
             self.close()
             raise
+
+    def _page_budget(self):
+        """Bound database + one full WAL + shared-memory/index overhead."""
+        return max(1, (self.max_bytes - 65536) // (3 * 4096))
+
+    def _open_locked(self):
+        """Acquire the exclusive writer lock and open the ledger database."""
+        self.lock = os.open(
+            self.path / "writer.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600
+        )
+        self._check(self.path / "writer.lock")
+        try:
+            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise StoreError("writer_locked") from exc
+        for file in self.path.glob("ledger.sqlite*"):
+            self._check(file)
+        fd = os.open(
+            self.path / "ledger.sqlite",
+            os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+            0o600,
+        )
+        os.close(fd)
+        self.db = sqlite3.connect(self.path / "ledger.sqlite")
+        self.db.row_factory = sqlite3.Row
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=FULL")
+        self.db.execute("PRAGMA wal_autocheckpoint=1")
+        self.db.execute("PRAGMA journal_size_limit=0")
+        self.db.execute(f"PRAGMA max_page_count={self._page_budget()}")
+
+    def _ensure_attempt_columns(self):
+        """Add receipt/ack columns missing from older attempt tables."""
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(attempts)")}
+        if "started_receipt" not in columns:
+            self.db.execute("ALTER TABLE attempts ADD COLUMN started_receipt TEXT")
+        if "native_ack" not in columns:
+            self.db.execute("ALTER TABLE attempts ADD COLUMN native_ack TEXT")
+        for column in ("input_recorded_receipt", "native_observed_ack"):
+            if column not in columns:
+                self.db.execute(f"ALTER TABLE attempts ADD COLUMN {column} TEXT")
+
+    def _initialize_schema(self):
+        """Create tables, migrate columns, and mark interrupted submits ambiguous."""
+        version = self.db.execute("PRAGMA user_version").fetchone()[0]
+        if version not in (0, 1, 2, 3, 4):
+            raise StoreError("unsupported_schema")
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute(
+                "CREATE TABLE IF NOT EXISTS attachments (runtime TEXT PRIMARY KEY, data TEXT NOT NULL)"
+            )
+            self.db.execute("""CREATE TABLE IF NOT EXISTS deliveries (
+                id TEXT PRIMARY KEY, dedup TEXT UNIQUE NOT NULL, semantic TEXT NOT NULL,
+                envelope TEXT NOT NULL, runtime TEXT NOT NULL, agent TEXT NOT NULL,
+                state TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL,
+                retain_until REAL NOT NULL, submission TEXT, turn TEXT, reason TEXT, ack_state TEXT)""")
+            self.db.execute(
+                "CREATE INDEX IF NOT EXISTS delivery_state ON deliveries(state)"
+            )
+            self.db.execute("""CREATE TABLE IF NOT EXISTS attempts (
+                delivery_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+                state TEXT NOT NULL, envelope TEXT NOT NULL, admission TEXT,
+                native_request TEXT, evidence TEXT, receipt TEXT, settlement TEXT, started_receipt TEXT,
+                native_ack TEXT, input_recorded_receipt TEXT, native_observed_ack TEXT,
+                reason TEXT, fenced INTEGER NOT NULL DEFAULT 0,
+                reserved_bytes INTEGER NOT NULL, updated REAL NOT NULL,
+                PRIMARY KEY(delivery_id,attempt_id))""")
+            self._ensure_attempt_columns()
+            if version < 3:
+                self._migrate_native_turn_aliases()
+            self.db.execute("PRAGMA user_version=4")
+            self.db.execute(
+                "UPDATE attempts SET state='ambiguous', reason='restart_during_submit', updated=? WHERE state='submitting'",
+                (self.clock(),),
+            )
+            self.db.execute(
+                "UPDATE deliveries SET state='ambiguous', reason='restart_during_submit', updated=? WHERE state='submitting'",
+                (self.clock(),),
+            )
+
+    def _reclaim_overgrowth(self):
+        """Vacuum the ledger when cleanup cannot bring it under budget."""
+        reclaimed = self.cleanup()
+        if reclaimed and self._size() > self.max_bytes:
+            # DELETE frees SQLite pages but does not shrink the database file.
+            self.db.execute("VACUUM")
+            self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self.db.execute(f"PRAGMA max_page_count={self._page_budget()}")
 
     def _check(self, path, directory=False):
         info = path.lstat()
