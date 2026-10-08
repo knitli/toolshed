@@ -257,6 +257,9 @@ def alive(pid):
         return True
     except ProcessLookupError:
         return False
+    except PermissionError:
+        # Denied visibility cannot establish that a tracked process has stopped.
+        return True
 
 
 def stop_process(process, backend_pid):

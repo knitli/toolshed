@@ -15,7 +15,8 @@ from event_gateway.protocol import (
 
 def check(path):
     vectors = json.loads(Path(path).read_text())
-    assert vectors['schemaVersion'] == 1
+    if vectors['schemaVersion'] != 1:
+        raise ValueError('unsupported semantic corpus version')
     parsers = {'envelope': parse_envelope, 'acknowledgment': parse_acknowledgment}
     for vector in vectors['rawCases']:
         verdict = None
@@ -23,16 +24,19 @@ def check(path):
             parsers[vector['kind']](vector['raw'].encode('utf-8'), vector['nowMs'])
         except ProtocolError as error:
             verdict = error.code
-        assert verdict == vector['expectedError'], (vector['case'], verdict)
+        if verdict != vector['expectedError']:
+            raise AssertionError((vector['case'], verdict))
     for vector in vectors['digestCases']:
         envelope = vector['envelope']
-        assert derive_delivery_id(envelope) == vector['expectedDigest'], vector['case']
-        assert matches_delivery_id(envelope) is vector['matches'], vector['case']
+        if (derive_delivery_id(envelope) != vector['expectedDigest']
+                or matches_delivery_id(envelope) is not vector['matches']):
+            raise AssertionError(vector['case'])
     for vector in vectors['bindingCases']:
         envelope, ack = vector['envelope'], vector['acknowledgment']
-        assert acknowledgment_matches_delivery(envelope, ack) is vector['matches'], vector['case']
-        assert acknowledgment_advances_current_watermark(
-            envelope, ack, vector['currentSourceStateVersion']) is vector['advances'], vector['case']
+        if (acknowledgment_matches_delivery(envelope, ack) is not vector['matches']
+                or acknowledgment_advances_current_watermark(
+                    envelope, ack, vector['currentSourceStateVersion']) is not vector['advances']):
+            raise AssertionError(vector['case'])
     count = sum(len(vectors[key]) for key in ('rawCases', 'digestCases', 'bindingCases'))
     print(f'PASS: {count} canonical semantic verdicts')
 

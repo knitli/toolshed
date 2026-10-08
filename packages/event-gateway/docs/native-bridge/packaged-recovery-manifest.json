@@ -2,23 +2,26 @@
   "toolshedBase": "9e54800fdf8a513d14dce624324e542d7e426d3c",
   "cloudBase": "f2e63c0fdb7704e45ad80d7a639391d5d237aa60",
   "binarySha256": "0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de",
-  "readerExtractionAstIdentical": true,
-  "sourceTests": 226,
-  "installedReaderTests": 25,
+  "sourceTests": 228,
+  "installedReaderTests": 26,
   "productionAdmissionProven": false,
   "noStartSettlementProven": false,
   "artifacts": {
-    "packages/event-gateway/docs/native-bridge/packaged-recovery-proof.json": "dc6858a37bef0b6800ab779bc356d602328635ed5ff90492afd567fc35874c35",
-    "packages/event-gateway/dist/knitli_event_gateway-0.1.0-py3-none-any.whl": "4f0ccf97b232e00288951d61dcf2dfa2ae19c965bf84d7272363abc7c25bfc03",
+    "packages/event-gateway/docs/native-bridge/packaged-recovery-proof.json": "179d109881b3582207dd789fed5d5d7511fa363c530c7f6cd478bb2a1b16dcdf",
+    "packages/event-gateway/dist/knitli_event_gateway-0.1.0-py3-none-any.whl": "9f07c440b3daba31f93518dcc09dee51a47b0b6c4aea0dfdba8e69928cf80199",
     "/private/tmp/event-native-reader-red.log": "6988f8ac600dc5bc19fa8f2fd4fa7d552b58f745ea8d9e48c995a158b0381fc0",
     "/private/tmp/event-native-reader-restored-green.log": "7d1ee6be19e7652fbaa6ada13e9f1d26e6ecd558e5c1b37ce3dea1426b4b1af5",
     "/private/tmp/event-native-cleanup-idempotence-red.log": "b34765aeb15b0bf7db1bae2e2300052e3c7969eedfd3148da337bd8bde5fd272",
     "/private/tmp/event-native-cleanup-idempotence-green.log": "0f53c348c755a9aefcbb795eada949cb07a939ad0d13cb801f13973277741d12",
-    "/private/tmp/event-native-final-suite.log": "3b441b5473abe48f28311499b0f2d6606c42c09c1244ebaabd26d8c06fcf4a10",
-    "/private/tmp/event-native-installed-reader-final.log": "6b11f3ed7a942912b432f838f35d07cd6c582170cae5219a841654e39005a9dc",
+    "/private/tmp/event-native-final-suite.log": "d45eeb230137743cc79505505aa008dbb6200bfb59d00e9a8a4eff666096f181",
+    "/private/tmp/event-native-installed-reader-final.log": "afdc18c7df0a6ace7f6a7f65725085ddedc164fe82489d669bc5e80c230ac0b1",
     "/private/tmp/event-native-combined-baseline.json": "bb48e125744ed1bf7063b9451f21e87a281bde68a0224af7c1b19542d334232e",
     "/private/tmp/run-event-native-combined.sh": "c3f2bc1555bcf1c197b0d40ba1838f34c24adb2dd3771ecadefe333d3f7a2eb1",
-    "packages/event-gateway/scripts/check_semantic_vectors.py": "8f8563fcda83a1adde88a7ed419ed1cdf82001484c133e5b74614c9bb3956ff1"
+    "packages/event-gateway/scripts/check_semantic_vectors.py": "aa6d6a3c1ca44acb1b75cfea566ca7bc9a78eb6069b24e8636e24471b2fc7026",
+    "/private/tmp/event-native-source-hashes-red.log": "8c9a5ca04d9ebad6b81ec21f33122865b22de55bde7d0449c38722f679c74630",
+    "/private/tmp/event-native-source-hashes-green.log": "86b6f60bc522f9e251b59221e8f8ac410aa6de9e895a5f98d187aa8378cf3345",
+    "/private/tmp/event-native-liveness-red.log": "bc00d949bb4e385545a944e121b24e66d1fb9e199fb139ded7565d83fb4413fb",
+    "/private/tmp/event-native-liveness-green.log": "6a39d12a177b5279bf11ae7fcf7c27df216b4ab9d3649635599734a226f2e94d"
   },
   "cloudCommitVerifiedAfterRun": true,
   "cloudBundleInputsMatchCommittedCheckout": true,
@@ -27,5 +30,8 @@
     "apps/os/packages/event-runtime/src/authority-client.ts": "4c4f8785052da9bc3da633b94266b329b6f43299a2544073ae9b58c3604db9e4",
     "apps/os/packages/event-runtime/src/coordinator.ts": "d7772cd7e99d672cc2a96944a42dd925d3db9cbc3285c76e6851ac7cdfea588f"
   },
-  "cloudScopeNote": "admin-api.ts is checkout provenance only; the coupled fixture bypasses admin/runtime admission. Executed cloud inputs are recorded in proof.cloudBundle.inputs."
+  "cloudScopeNote": "admin-api.ts is checkout provenance only; the coupled fixture bypasses admin/runtime admission. Executed cloud inputs are recorded in proof.cloudBundle.inputs.",
+  "sourceBoundaryNodeTests": 1,
+  "readerExecutableAstIdentical": true,
+  "readerAstComparisonExcludesDocstrings": true
 }

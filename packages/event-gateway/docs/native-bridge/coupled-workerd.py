@@ -49,6 +49,55 @@ def b64(value):
     return base64.urlsafe_b64encode(value).rstrip(b'=').decode()
 
 
+async def restart_native(bridge, model, native_process, witness, launcher, resources, request):
+    wire_request = {key: value for key, value in request.items() if key != 'receiptVersion'}
+    require(request['receiptVersion'] == 3, 'explicit durable reader identity')
+    deadline = time.monotonic() + 12
+    while True:
+        recorded = bridge.receipt(wire_request)
+        require(recorded['status'] in ('started', 'inputRecorded'), 'native observation state')
+        if recorded['status'] == 'inputRecorded' and model.request_counts['primary'] == 1:
+            break
+        require(time.monotonic() < deadline and native_process.poll() is None, 'native input deadline')
+        await asyncio.sleep(.05)
+    model.release_primary.set()
+    deadline = time.monotonic() + 12
+    while time.time_ns() // 1_000_000 <= request['permitExpiresAt'] or not bridge.challenge()['eligible']:
+        require(time.monotonic() < deadline and native_process.poll() is None, 'expiry and idle wait')
+        await asyncio.sleep(.05)
+    old_process = native_process
+    native_args = list(old_process.args)
+    root = Path(native_args[native_args.index('-C') + 1])
+    launcher.stop_process(old_process, witness['backendPid'])
+    bridge.close()
+    bridge, native_process, new_witness = resources.enter_context(
+        launcher.native_client(native_args, root, receipt_version=3))
+    require(old_process.poll() is not None and not launcher.alive(witness['backendPid']), 'old processes stopped')
+    require(native_process.pid != old_process.pid, 'new native TUI process')
+    require(all(new_witness[key] != witness[key] for key in (
+        'clientId', 'serverInstanceId', 'backendPid', 'threadId')), 'new backend and selected thread')
+    return bridge, native_process, new_witness, recorded
+
+
+def require_observed_settlement(settled, original, envelope):
+    require(not settled['slots'] and not settled['cloud']['slot_intents'], 'real slot drained')
+    for table in ('attempts', 'deliveries', 'native_claims'):
+        require(settled['cloud'][table][0]['state'] == 'observed', 'actual observed ' + table)
+    require(json.loads(settled['cloud']['attempts'][0]['native_observed_ack_json']) == original['native_observed_ack'], 'immutable cloud ACK')
+    require(settled['cloud']['manual_sources'][0]['observed_source_state_version'] == envelope['sourceStateVersion'], 'current watermark')
+    require(settled['budget']['used'] == 1, 'one fixture authority charge')
+
+
+async def await_observed_ack(app, ident, native_process, reply_pending):
+    deadline = time.monotonic()+12
+    while reply_pending():
+        require(time.monotonic() < deadline and native_process.poll() is None, 'observation deadline')
+        result = await app.reconcile(ident)
+        if reply_pending():
+            await asyncio.sleep(.05)
+    return result
+
+
 async def exercise(bridge, model, native_process, witness, address, launcher):
     node_key, transport_key = Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()
     node_id, runtime_id = str(uuid4()), str(uuid4())
@@ -131,32 +180,9 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 # from the new native process, never from a pre-restart local receipt.
                 prior = store.current_attempt(ident)
                 request = prior['native_request']
-                wire_request = {key: value for key, value in request.items() if key != 'receiptVersion'}
-                require(request['receiptVersion'] == 3, 'explicit durable reader identity')
-                deadline = time.monotonic() + 12
-                while True:
-                    recorded = bridge.receipt(wire_request)
-                    require(recorded['status'] in ('started', 'inputRecorded'), 'native observation state')
-                    if recorded['status'] == 'inputRecorded' and model.request_counts['primary'] == 1:
-                        break
-                    require(time.monotonic() < deadline and native_process.poll() is None, 'native input deadline')
-                    await asyncio.sleep(.05)
-                model.release_primary.set()
-                deadline = time.monotonic() + 12
-                while time.time_ns() // 1_000_000 <= request['permitExpiresAt'] or not bridge.challenge()['eligible']:
-                    require(time.monotonic() < deadline and native_process.poll() is None, 'expiry and idle wait')
-                    await asyncio.sleep(.05)
                 old_process = native_process
-                native_args = list(old_process.args)
-                root = Path(native_args[native_args.index('-C') + 1])
-                launcher.stop_process(old_process, witness['backendPid'])
-                bridge.close()
-                bridge, native_process, new_witness = resources.enter_context(
-                    launcher.native_client(native_args, root, receipt_version=3))
-                require(old_process.poll() is not None and not launcher.alive(witness['backendPid']), 'old processes stopped')
-                require(native_process.pid != old_process.pid, 'new native TUI process')
-                require(all(new_witness[key] != witness[key] for key in (
-                    'clientId', 'serverInstanceId', 'backendPid', 'threadId')), 'new backend and selected thread')
+                bridge, native_process, new_witness, recorded = await restart_native(
+                    bridge, model, native_process, witness, launcher, resources, request)
                 store.close()
                 store = Store(state)
                 app = gateway(store)
@@ -168,12 +194,7 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                            'oldWitness': witness, 'newWitness': new_witness,
                            'expiredBeforeRecovery': True, 'oldAttachmentUnavailable': True,
                            'gatewayReceiptAbsentBeforeRecovery': True, 'independentlyRecorded': recorded}
-            deadline = time.monotonic()+12
-            while drop_reply:
-                require(time.monotonic() < deadline and native_process.poll() is None, 'observation deadline')
-                result = await app.reconcile(ident)
-                if drop_reply:
-                    await asyncio.sleep(.05)
+            result = await await_observed_ack(app, ident, native_process, lambda: drop_reply)
             require(result['reason'] == 'native_observed_ack_pending', 'lost reply remains pending')
             original = copy.deepcopy(store.current_attempt(ident))
             request = original['native_request']
@@ -183,12 +204,7 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
             require(UUID(observed['itemId']).version == 7 and observed['itemId'] != observed['turnId'], 'actual Core item')
             fixture('/fixture/alarm')
             settled = fixture('/fixture/read')
-            require(not settled['slots'] and not settled['cloud']['slot_intents'], 'real slot drained')
-            for table in ('attempts', 'deliveries', 'native_claims'):
-                require(settled['cloud'][table][0]['state'] == 'observed', 'actual observed ' + table)
-            require(json.loads(settled['cloud']['attempts'][0]['native_observed_ack_json']) == original['native_observed_ack'], 'immutable cloud ACK')
-            require(settled['cloud']['manual_sources'][0]['observed_source_state_version'] == e['sourceStateVersion'], 'current watermark')
-            require(settled['budget']['used'] == 1, 'one fixture authority charge')
+            require_observed_settlement(settled, original, e)
             expiry_deadline = time.monotonic()+10
             while time.time_ns()//1_000_000 <= request['permitExpiresAt']:
                 require(time.monotonic() < expiry_deadline, 'permit expiry phase')
@@ -198,7 +214,8 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
             store = Store(state)
             app = gateway(store)
             require((await app.reconcile(ident))['status'] == 'observed', 'exact lost-reply recovery')
-            require(bridge.nonce == nonce and bridge.attempts == {request['attemptId']: {key: value for key, value in request.items() if key != 'receiptVersion'}}, 'no native repeat')
+            wire_request = {key: value for key, value in request.items() if key != 'receiptVersion'}
+            require(bridge.nonce == nonce and bridge.attempts == {request['attemptId']: wire_request}, 'no native repeat')
             require(wires[-2]['body'] == wires[-1]['body'] and wires[-2]['proof']['nonce'] != wires[-1]['proof']['nonce'], 'same ACK fresh proof')
             require(auth_calls == len(wires) and len(wires) == 4, 'credentials refreshed; one claim/two ACK phases/retry')
             require(fixture('/fixture/read') == settled, 'replay leaves real cloud state unchanged')
@@ -248,7 +265,8 @@ def main():
                     model.release_primary.set()
             launcher.qualify_input_recorded = callback
             proof = launcher.qualify(BINARY, input_recorded=True, receipt_version=3 if args.restart_native else 2)
-            paths = [Path(__file__), BROKER, BROKER.with_name('coupled-workerd-worker.ts'), QUALIFIER,
+            paths = [Path(__file__), BROKER, BROKER.with_name('coupled-workerd-worker.ts'),
+                     BROKER.with_name('coupled-workerd-source-hashes.mjs'), QUALIFIER,
                      *sorted(Path(event_gateway.__file__).parent.glob('*.py'))]
             proof['cloudBundle'] = address['bundle']
             proof['sourceSha256'] = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}

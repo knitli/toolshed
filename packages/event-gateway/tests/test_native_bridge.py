@@ -126,6 +126,14 @@ class NativeBridgeTests(unittest.TestCase):
             native.stop_process(process, 5678)
             self.assertEqual(signals.call_count, count, "a stopped group must never be signaled again")
 
+    def test_permission_denial_cannot_prove_process_absence(self):
+        with patch.object(native.os, "kill", side_effect=PermissionError):
+            try:
+                running = native.alive(1234)
+            except PermissionError:
+                running = None
+        self.assertIs(running, True, "unavailable liveness evidence must count as alive")
+
     def test_receipt_mode_requires_explicit_integer_version(self):
         for mode in (None, True, False, "3", 3.0, 0, 1, 4):
             with self.subTest(mode=mode):

@@ -7,7 +7,8 @@ Python sources, the cloud bundle, and all 129 bundled input hashes. This remains
 fixture-qualified integration, not production admission or a client installation.
 
 The native reader moved unchanged from the qualification script into
-`event_gateway.native_reader` (AST equality checked against Toolshed `9e54800`).
+`event_gateway.native_reader` (executable AST equality checked against Toolshed `9e54800`; new docstrings
+are excluded from the comparison).
 The wheel exposes `NativeBridge`; the existing `NativeBridgeAdapter` remains the
 cloud-admission/recovery boundary. Callers supply a qualified connected Unix
 stream. Version 2 stays the default; durable version 3 is explicit. The reader
@@ -64,8 +65,8 @@ is a separate follow-up.
 
 ## Checks and causal evidence
 
-All 226 gateway tests passed; the installed-wheel reader suite runs outside the
-checkout in CI. Reader extraction preserves the entire prior reader AST.
+All 228 gateway tests passed; the installed-wheel reader suite runs outside the
+checkout in CI (26 passing tests). Reader extraction preserves the prior executable reader AST; docstrings differ.
 Two new assertions failed against the original qualifier before the change:
 reader ownership pointed to the script, and cleanup never signaled the owned
 process group. Both restored green. A third regression models a backend that
@@ -81,3 +82,13 @@ not counted as combined proof. Ruff and offline contract checks passed. The
 [manifest](packaged-recovery-manifest.json) records hashes for retained test logs,
 wheel, binary, and proof. The native patch and canonical contract snapshots did
 not change.
+
+Review corrections bound every resolved esbuild input to the explicit cloud OS
+checkout or fixture directory before any content read. A Node regression rejects
+sibling-prefix, traversal, and symlink escapes; the original unbounded reader
+failed this assertion, and the bounded version passes. Process-liveness permission
+denial now conservatively counts as alive, with its own assertion-red/green pair.
+Restart, bounded ACK polling, and observed-settlement helpers preserve the prior runtime assertions.
+The combined proof was rerun with the rebuilt wheel after these changes; the
+source manifest includes the hashing helper and the corrected semantic driver
+as separate provenance (the driver is not wheel content).

@@ -1,4 +1,5 @@
-"""Private socket reader for an explicitly supplied native client; never launches one.
+"""
+Private socket reader for an explicitly supplied native client; never launches one.
 
 The caller owns client qualification and supplies a connected private AF_UNIX
 stream. Closing this reader closes that stream. Version 3 permits exact durable
@@ -57,7 +58,8 @@ def require(condition):
 
 
 def uint(value, maximum=2**64 - 1, minimum=0):
-    return type(value) is int and minimum <= value <= maximum
+    # Wire integers must reject booleans and caller-defined integer subclasses.
+    return type(value) is int and minimum <= value <= maximum  # pylint: disable=unidiomatic-typecheck
 
 
 def uuid(value):
@@ -144,7 +146,8 @@ class NativeBridge:
     """One synchronous request at a time. Start attempts are never resent, even after refusal."""
 
     def __init__(self, channel, *, receipt_version=2):
-        require(type(receipt_version) is int and receipt_version in (2, 3))
+        """Own the supplied private stream in explicit v2 or durable v3 mode."""
+        require(type(receipt_version) is int and receipt_version in (2, 3))  # pylint: disable=unidiomatic-typecheck
         self.receipt_version = receipt_version
         require(channel.family == socket.AF_UNIX and channel.type == socket.SOCK_STREAM)
         channel.getpeername()
@@ -201,9 +204,9 @@ class NativeBridge:
             )
             require(
                 isinstance(row, dict)
-                and type(row.get("version")) is int
+                and type(row.get("version")) is int  # pylint: disable=unidiomatic-typecheck
                 and row["version"] == (self.receipt_version if "start" in body or "receipt" in body else 2)
-                and type(row.get("nonce")) is int
+                and type(row.get("nonce")) is int  # pylint: disable=unidiomatic-typecheck
                 and row["nonce"] == self.nonce
             )
             return row
@@ -226,7 +229,7 @@ class NativeBridge:
                 and uint(row["sequence"], minimum=self.sequence + 1)
             )
             require(
-                type(row["eligible"]) is bool
+                type(row["eligible"]) is bool  # pylint: disable=unidiomatic-typecheck
                 and isinstance(row["cause"], str)
                 and len(row["cause"]) <= 128
             )
@@ -335,7 +338,7 @@ class NativeBridge:
             )
             for key in identity:
                 require(
-                    type(receipt[key]) is type(request[key])
+                    type(receipt[key]) is type(request[key])  # pylint: disable=unidiomatic-typecheck
                     and receipt[key] == request[key]
                 )
             outcome = receipt["outcome"]
@@ -345,7 +348,7 @@ class NativeBridge:
                     set(outcome) == {"status", "turnId", "replayed"}
                     and uuid(outcome["turnId"])
                     and outcome["turnId"] == request["clientUserMessageId"]
-                    and type(outcome["replayed"]) is bool
+                    and type(outcome["replayed"]) is bool  # pylint: disable=unidiomatic-typecheck
                 )
                 require(operation == "start" or outcome["replayed"])
             elif outcome.get("status") == "inputRecorded":
@@ -367,7 +370,7 @@ class NativeBridge:
                     and outcome["reason"] in TERMINAL_REASONS
                     and uuid(outcome["receiptId"])
                     and UUID(outcome["receiptId"]).version in (4, 7)
-                    and type(outcome["replayed"]) is bool
+                    and type(outcome["replayed"]) is bool  # pylint: disable=unidiomatic-typecheck
                     and (operation == "start" or outcome["replayed"])
                 )
             elif outcome.get("status") == "notStarted":

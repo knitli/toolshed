@@ -35,6 +35,8 @@ jobs:
         run: uv run --frozen ruff check src tests scripts
       - name: Test gateway
         run: uv run --frozen python -m unittest discover -s tests -v
+      - name: Test qualification source boundaries
+        run: node --test tests/test_coupled_source_hashes.mjs
       - name: Build wheel
         run: uv build --wheel
       - name: Smoke test isolated installed wheel offline
