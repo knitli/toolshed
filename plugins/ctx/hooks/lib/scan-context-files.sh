@@ -155,7 +155,7 @@ if [ -n "$_ctx_nested_files" ]; then
             while IFS= read -r n; do
                 [ -n "$n" ] || continue
                 # Escape regex metacharacters in the filename.
-                n_esc="$(printf '%s' "$n" | sed 's/[.[\*^$()+?{|]/\\&/g')"
+                n_esc="$(printf '%s' "$n" | sed "s/[.[\\*^\$()+?{|]/\\\\&/g")"
                 if [ -z "$_ctx_alt" ]; then
                     _ctx_alt="$n_esc"
                 else
