@@ -209,34 +209,39 @@ function outcome(
   ]
     .filter(Boolean)
     .sort((left, right) => right.length - left.length);
-  // Literal single-pass redaction: at each offset the longest variant wins,
-  // matching the previous longest-first alternation without a dynamic RegExp.
+  // Literal redaction without a dynamic RegExp: find the earliest occurrence
+  // across variants (ties broken longest-first, matching the previous
+  // longest-first alternation), redact it, and resume after the match.
+  // indexOf skips non-matching regions in native code, so adversarial
+  // long-prefix inputs stay linear instead of quadratic per offset.
   const redact = (text: string): string => {
     if (variants.length === 0 || text.length === 0) return text;
     const parts: string[] = [];
     let cursor = 0;
-    let spanStart = 0;
     let redacted = false;
-    while (cursor < text.length) {
-      let match: string | undefined;
+    for (;;) {
+      let at = -1;
+      let match = "";
       for (const variant of variants) {
-        if (text.startsWith(variant, cursor)) {
+        const found = text.indexOf(variant, cursor);
+        if (found === -1) continue;
+        if (
+          at === -1 ||
+          found < at ||
+          (found === at && variant.length > match.length)
+        ) {
+          at = found;
           match = variant;
-          break;
         }
       }
-      if (match === undefined) {
-        cursor += 1;
-        continue;
-      }
-      if (cursor > spanStart) parts.push(text.slice(spanStart, cursor));
+      if (at === -1) break;
+      if (at > cursor) parts.push(text.slice(cursor, at));
       parts.push("[REDACTED]");
-      cursor += match.length;
-      spanStart = cursor;
+      cursor = at + match.length;
       redacted = true;
     }
     if (!redacted) return text;
-    if (cursor > spanStart) parts.push(text.slice(spanStart, cursor));
+    if (cursor < text.length) parts.push(text.slice(cursor));
     return parts.join("");
   };
   // Only upstream values are untrusted. Keep protocol fields and opaque tokens intact.

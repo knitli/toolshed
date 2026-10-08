@@ -1095,6 +1095,56 @@ for (const { secret, credentialType } of ["a", '"'].flatMap((secret) =>
   }
 }
 
+test("read redacts long-prefix secrets in linear time", async () => {
+  // Regression test for per-offset redaction scans: a body sharing a long
+  // prefix with the secret must not cause a quadratic blowup.
+  const c = await client("modern");
+  const snapshot = await credential();
+  const secret = `${"a".repeat(15_999)}b`;
+  c.setResolution({
+    status: "ready",
+    snapshot: {
+      ...snapshot,
+      credential: { type: "bearer", token: secret },
+    },
+  });
+  const body = new TextEncoder().encode("a".repeat(4_194_304));
+  const pageToken = "opaque-pagination-token";
+  c.respondWithOutcome({
+    kind: "success",
+    statusCode: 200,
+    headers: {},
+    body,
+    pageToken,
+  });
+  const operation = encodeOperationRef({
+    catalogId: c.call.catalogId,
+    releaseId: c.call.releaseId,
+    manifestDigest: c.call.manifestDigest,
+    operationId: c.call.operationId,
+  });
+  c.setCall(
+    await prepared({
+      safety: "read",
+      method: "GET",
+      actionKind: null,
+      cardinality: null,
+      body: null,
+    }),
+  );
+  const started = Date.now();
+  const response = await c.request("tools/call", {
+    name: "read",
+    arguments: { operation, arguments: {} },
+  });
+  const elapsedMs = Date.now() - started;
+  expect(response.result.isError).not.toBe(true);
+  expect(JSON.parse(response.result.content[0].text).body).toBe(
+    "a".repeat(4_194_304),
+  );
+  expect(elapsedMs).toBeLessThan(500);
+});
+
 test("modern: manifest and argument changes invalidate pending approval", async () => {
   for (const override of [
     { manifestDigest: "c".repeat(64) },
