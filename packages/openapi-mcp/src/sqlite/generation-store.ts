@@ -119,7 +119,7 @@ function requireIdentity(catalogId: CatalogId, issuer: string): void {
     catalogId.length > 128 ||
     catalogId === "." ||
     catalogId === ".." ||
-    !identityPattern.test(catalogId) ||
+    !identityPattern.test(catalogId) || // nosemgrep -- anchored linear-time literal; input length is capped at 128 above
     typeof issuer !== "string" ||
     issuer.length === 0 ||
     issuer.length > 256 ||
@@ -415,22 +415,79 @@ async function validateMutexMetadata(mutex: string): Promise<Stats> {
   return before;
 }
 
-function regexEscape(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const mutexInitSuffix = ".mutex-init";
+const mutexInitUuidSegments = [8, 4, 4, 4, 12] as const;
+
+function isAsciiHexDigit(code: number): boolean {
+  return (
+    (code >= 0x30 && code <= 0x39) ||
+    (code >= 0x41 && code <= 0x46) ||
+    (code >= 0x61 && code <= 0x66)
+  );
+}
+
+function isMutexInitializerUuid(candidate: string): boolean {
+  // 8-4-4-4-12 lowercase/uppercase hex with version 1-5 and variant 8/9/a/b.
+  if (candidate.length !== 36) return false;
+  let position = 0;
+  for (let segment = 0; segment < mutexInitUuidSegments.length; segment += 1) {
+    if (segment > 0) {
+      if (candidate[position] !== "-") return false;
+      position += 1;
+    }
+    const length = mutexInitUuidSegments[segment];
+    for (let index = 0; index < length; index += 1) {
+      const code = candidate.charCodeAt(position);
+      if (segment === 2 && index === 0) {
+        if (code < 0x31 || code > 0x35) return false;
+      } else if (segment === 3 && index === 0) {
+        if (
+          code !== 0x38 &&
+          code !== 0x39 &&
+          code !== 0x41 &&
+          code !== 0x42 &&
+          code !== 0x61 &&
+          code !== 0x62
+        )
+          return false;
+      } else if (!isAsciiHexDigit(code)) {
+        return false;
+      }
+      position += 1;
+    }
+  }
+  return true;
+}
+
+function isMutexInitializerAlias(name: string, targetName: string): boolean {
+  // Matches `.<target>.<digits>.<uuid>.mutex-init` case-insensitively,
+  // without building a RegExp from the target name.
+  const prefix = `.${targetName}.`;
+  if (name.length < prefix.length + 1 + 1 + 36 + mutexInitSuffix.length)
+    return false;
+  if (name.slice(0, prefix.length).toLowerCase() !== prefix.toLowerCase())
+    return false;
+  if (name.slice(-mutexInitSuffix.length).toLowerCase() !== mutexInitSuffix)
+    return false;
+  const middle = name.slice(prefix.length, -mutexInitSuffix.length);
+  const separator = middle.indexOf(".");
+  if (separator <= 0) return false;
+  const counter = middle.slice(0, separator);
+  for (let index = 0; index < counter.length; index += 1) {
+    const code = counter.charCodeAt(index);
+    if (code < 0x30 || code > 0x39) return false;
+  }
+  return isMutexInitializerUuid(middle.slice(separator + 1));
 }
 
 async function clearMutexInitializerAlias(
   location: StoreLocation,
 ): Promise<void> {
   const final = await lstat(location.mutex);
-  const namePattern = new RegExp(
-    `^\\.${regexEscape(basename(location.target))}\\.\\d+\\.` +
-      "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.mutex-init$",
-    "i",
-  );
+  const targetName = basename(location.target);
   let removed = false;
   for (const name of await readdir(location.parent)) {
-    if (!namePattern.test(name)) continue;
+    if (!isMutexInitializerAlias(name, targetName)) continue;
     const candidate = join(location.parent, name);
     let metadata: Stats;
     try {

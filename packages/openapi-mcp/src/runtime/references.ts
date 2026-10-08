@@ -41,7 +41,7 @@ function assertSegment(
     value.length > maximumLength ||
     value === "." ||
     value === ".." ||
-    !pattern.test(value)
+    !pattern.test(value) // nosemgrep -- anchored linear-time literal; length capped by maximumLength above
   ) {
     throw invalidReference(`${label} is invalid`);
   }

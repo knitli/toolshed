@@ -209,16 +209,41 @@ function outcome(
   ]
     .filter(Boolean)
     .sort((left, right) => right.length - left.length);
-  const pattern = variants.length
-    ? new RegExp(
-        variants
-          .map((entry) => entry.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-          .join("|"),
-        "g",
-      )
-    : undefined;
-  const redact = (text: string) =>
-    pattern ? text.replace(pattern, "[REDACTED]") : text;
+  // Literal redaction without a dynamic RegExp: find the earliest occurrence
+  // across variants (ties broken longest-first, matching the previous
+  // longest-first alternation), redact it, and resume after the match.
+  // indexOf skips non-matching regions in native code, so adversarial
+  // long-prefix inputs stay linear instead of quadratic per offset.
+  const redact = (text: string): string => {
+    if (variants.length === 0 || text.length === 0) return text;
+    const parts: string[] = [];
+    let cursor = 0;
+    let redacted = false;
+    for (;;) {
+      let at = -1;
+      let match = "";
+      for (const variant of variants) {
+        const found = text.indexOf(variant, cursor);
+        if (found === -1) continue;
+        if (
+          at === -1 ||
+          found < at ||
+          (found === at && variant.length > match.length)
+        ) {
+          at = found;
+          match = variant;
+        }
+      }
+      if (at === -1) break;
+      if (at > cursor) parts.push(text.slice(cursor, at));
+      parts.push("[REDACTED]");
+      cursor = at + match.length;
+      redacted = true;
+    }
+    if (!redacted) return text;
+    if (cursor < text.length) parts.push(text.slice(cursor));
+    return parts.join("");
+  };
   // Only upstream values are untrusted. Keep protocol fields and opaque tokens intact.
   if (value.kind === "success") {
     try {

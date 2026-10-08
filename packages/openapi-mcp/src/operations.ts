@@ -106,7 +106,11 @@ export function resolveCanonicalPointer(
       ) {
         throw new Error("JSON Pointer array index was not found");
       }
-      node = node[index];
+      const element = Object.getOwnPropertyDescriptor(node, index);
+      if (element === undefined || !("value" in element)) {
+        throw new Error("JSON Pointer array index was not found");
+      }
+      node = element.value;
       continue;
     }
     if (

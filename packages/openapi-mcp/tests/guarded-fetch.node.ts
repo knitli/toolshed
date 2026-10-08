@@ -464,7 +464,10 @@ test("Node 24 real guarded TLS HTTP dispatch", async (t) => {
     async () => {
       handler = (req, res) => {
         const n = Number(req.url.slice(1)) || 0;
-        if (n < 3) res.writeHead(302, { location: `/${n + 1}` });
+        // Literal same-origin chain targets only; no request-derived paths.
+        if (n === 0) res.writeHead(302, { location: "/1" });
+        else if (n === 1) res.writeHead(302, { location: "/2" });
+        else if (n === 2) res.writeHead(302, { location: "/3" });
         res.end("ok");
       };
       let before = requests.length;

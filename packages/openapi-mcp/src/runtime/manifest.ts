@@ -149,7 +149,7 @@ function requireString(
     typeof value !== "string" ||
     value.length === 0 ||
     value.length > maximum ||
-    (pattern && !pattern.test(value))
+    (pattern && !pattern.test(value)) // nosemgrep -- anchored linear-time literal; length capped by maximum above
   ) {
     throw manifestInvalid(`${label} is invalid`);
   }
@@ -170,7 +170,11 @@ function requireInteger(value: unknown, label: string): number {
 }
 
 function requireDigest(value: unknown, label: string): Sha256 {
-  if (typeof value !== "string" || !digestPattern.test(value))
+  if (
+    typeof value !== "string" ||
+    value.length !== 64 ||
+    !digestPattern.test(value) // nosemgrep -- anchored fixed-length linear literal; length pinned to 64 above
+  )
     throw manifestInvalid(`${label} is invalid`);
   return value as Sha256;
 }
