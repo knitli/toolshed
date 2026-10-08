@@ -191,6 +191,25 @@ def _watch_child(pid, stop):
         stop.wait(0.1)
 
 
+def _stop_process(process):
+    # No poll/wait occurs before this sole group signal: the unreaped child
+    # retains its PID, preventing reuse from targeting another process group.
+    if process is not None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            # Darwin can return EPERM for a zombie-only group. Keep
+            # the child unreaped while checking this exact identity;
+            # a still-running leader remains a cleanup failure.
+            exited = os.waitid(os.P_PID, process.pid,
+                               os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            if exited is None:
+                raise
+        process.wait(timeout=5)
+
+
 def launch(state_dir, binary, digest, cwd, *, resume=None):
     """Run a visible native TUI; expose only read-only per-session status."""
     if threading.current_thread() is not threading.main_thread() or threading.active_count() != 1:
@@ -281,23 +300,8 @@ def launch(state_dir, binary, digest, cwd, *, resume=None):
                 child.close()
             if listener is not None:
                 listener.close()
-            # No poll/wait occurs before this sole group signal: the unreaped child
-            # retains its PID, preventing reuse from targeting another process group.
             try:
-                if process is not None:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    except PermissionError:
-                        # Darwin can return EPERM for a zombie-only group. Keep
-                        # the child unreaped while checking this exact identity;
-                        # a still-running leader remains a cleanup failure.
-                        exited = os.waitid(os.P_PID, process.pid,
-                                           os.WEXITED | os.WNOHANG | os.WNOWAIT)
-                        if exited is None:
-                            raise
-                    process.wait(timeout=5)
+                _stop_process(process)
             finally:
                 for worker in workers:
                     worker.join(timeout=1)
