@@ -578,7 +578,7 @@ function serializeCanonical(value: JsonValue, ancestors: Set<object>): string {
 }
 
 function isCanonicalArrayIndex(key: string, length: number): boolean {
-  if (!/^(?:0|[1-9]\d*)$/.test(key)) return false;
+  if (!/^(?:0|[1-9]\d*)$/.test(key)) return false; // nosemgrep -- anchored literal, disjoint alternation, single star: linear-time
   const index = Number(key);
   return (
     Number.isSafeInteger(index) &&

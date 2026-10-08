@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import {
   acceptedContent,
   inputResponse,
@@ -142,6 +143,11 @@ function hexRandom(randomBytes: (size: number) => Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
     "",
   );
+}
+
+function randomIdsEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(Buffer.from(left), Buffer.from(right));
 }
 
 function exactPayloadMatch(
@@ -635,7 +641,7 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
       ) as AuthorizationId;
       let collision = false;
       for (const existing of this.#receipts.values()) {
-        if (existing.randomId === token) {
+        if (randomIdsEqual(existing.randomId, token)) {
           collision = true;
           break;
         }

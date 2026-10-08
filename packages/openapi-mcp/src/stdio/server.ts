@@ -209,16 +209,36 @@ function outcome(
   ]
     .filter(Boolean)
     .sort((left, right) => right.length - left.length);
-  const pattern = variants.length
-    ? new RegExp(
-        variants
-          .map((entry) => entry.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-          .join("|"),
-        "g",
-      )
-    : undefined;
-  const redact = (text: string) =>
-    pattern ? text.replace(pattern, "[REDACTED]") : text;
+  // Literal single-pass redaction: at each offset the longest variant wins,
+  // matching the previous longest-first alternation without a dynamic RegExp.
+  const redact = (text: string): string => {
+    if (variants.length === 0 || text.length === 0) return text;
+    const parts: string[] = [];
+    let cursor = 0;
+    let spanStart = 0;
+    let redacted = false;
+    while (cursor < text.length) {
+      let match: string | undefined;
+      for (const variant of variants) {
+        if (text.startsWith(variant, cursor)) {
+          match = variant;
+          break;
+        }
+      }
+      if (match === undefined) {
+        cursor += 1;
+        continue;
+      }
+      if (cursor > spanStart) parts.push(text.slice(spanStart, cursor));
+      parts.push("[REDACTED]");
+      cursor += match.length;
+      spanStart = cursor;
+      redacted = true;
+    }
+    if (!redacted) return text;
+    if (cursor > spanStart) parts.push(text.slice(spanStart, cursor));
+    return parts.join("");
+  };
   // Only upstream values are untrusted. Keep protocol fields and opaque tokens intact.
   if (value.kind === "success") {
     try {
