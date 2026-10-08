@@ -9,6 +9,17 @@ import unittest
 
 
 class ReviewerSignalTests(unittest.TestCase):
+    def test_optimized_replay_matches_corpus(self):
+        package = Path(__file__).resolve().parents[1]
+        script = package / "scripts/replay_reviewer_signals.py"
+        fixture = json.loads((package / "docs/reviewer-signals/replay.json").read_text())
+        result = subprocess.run(  # nosec B603 - Fixed interpreter and owned offline script.
+            [sys.executable, "-O", str(script)],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"PASS: {len(fixture['cases'])} reviewer-signal cases", result.stdout)
+
     def test_optimized_replay_rejects_wrong_expectation(self):
         package = Path(__file__).resolve().parents[1]
         script = package / "scripts/replay_reviewer_signals.py"

@@ -91,15 +91,18 @@ From the repository root:
 python3 packages/event-gateway/scripts/replay_reviewer_signals.py
 ```
 
-[Fixtures](reviewer-signals/replay.json) contain 30 cases: curated live
+[Fixtures](reviewer-signals/replay.json) contain 45 cases: curated live
 projections and clearly labeled synthetic edge cases. The script accepts an
 optional fixture path. It is an offline classifier, not an authenticated API
 normalizer, polling service, provider parser or full stage-3 implementation.
 No existing provider terminal classifier was found in the gateway/scripts;
 `scripts/wait-for-ci.sh` is a CI gate, not a reviewer terminal contract.
 
-[Proof](reviewer-signals/proof.json): nine in-memory source mutations each reached
-an assertion failure, followed by restored GREEN for all 30 cases. Mutations cover
+[Development evidence](reviewer-signals/proof.json) records nine manual,
+development-time in-memory source mutations against the original 30-case corpus.
+Each reached an assertion failure before restoration. The mutation harness was
+not committed; these historical checks are not a reproducible mutation suite.
+The committed replay and subprocess tests are the runnable checks. Mutations covered
 actor spoofing, partial reads, stale heads, same-head attempts, reactions,
 findings, skipped/failed steps and accidental completion authority. This proves
 the bounded classification logic, not live webhook completeness, provider
@@ -110,7 +113,13 @@ The replay comparison explicitly raises on mismatches so `-O` and
 `tests/test_reviewer_signals.py` changes an expected completion value and runs
 the actual script with `-O`: before the fix it failed because the script exited
 zero and printed PASS; after the fix it passes with a nonzero exit, the named
-mismatch, and no PASS output. All 30 valid cases also pass under `-O`.
+mismatch, and no PASS output. All 45 valid cases also pass under `-O`. The added corpus test runs all cases
+through the actual optimized script in CI. Fifteen follow-up cases cover combined
+head/round mismatches, non-boolean findings flags (including numeric booleans),
+and an explicit false flag. Before correction, eight head diagnostics were
+overwritten and six malformed flags reported completion; all now pass. Missing
+findings remains distinct from a present malformed value, and reported completion
+still never grants clean-completion authority.
 
 Read-only refresh examples (no review invocation):
 

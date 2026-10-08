@@ -32,8 +32,11 @@ def classify(evidence, candidate):
                                else "current_head" if reviewed == head else "prefix_only")
     # Base/policy/attempt evidence is separate; equal head does not imply equal round.
     for key in ("base_sha", "policy_revision", "invocation_id", "run_attempt"):
-        if key in candidate and evidence.get(key) != candidate[key]:
+        if (key in candidate and evidence.get(key) != candidate[key]
+                and result["candidate"] not in ("stale_head", "prefix_only")):
             result["candidate"] = "stale_or_unbound_round"
+    if "findings_present" in evidence and not isinstance(evidence["findings_present"], bool):
+        return result
     if evidence.get("kind") in ("reaction", "partial_comment"):
         return result
     status = evidence.get("status")
