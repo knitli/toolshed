@@ -24,6 +24,9 @@ cannot configure a production authority, admit clients, enable the Mesh listener
 or submit native turns. `attach` visibly refuses; `enroll` creates a local key
 and prepares an owner request without claiming cloud enrollment. The private
 control daemon supports status and detach only. Installation does not start it.
+The separate foreground `launch` command owns one explicitly qualified native
+client and exposes read-only local selection status; it does not attach a cloud
+runtime or enable delivery.
 
 ## Install and run
 
@@ -53,6 +56,46 @@ read-only recovery; it grants neither selection nor permission to start.
 `NativeBridgeAdapter` connects this reader to the existing gateway admission
 and recovery flow. Installing the reader does not attach or launch a client. See the
 [combined native restart qualification](docs/native-bridge/packaged-recovery.md).
+
+### Explicit foreground client
+
+Run from an interactive terminal, naming the exact reviewed v3 prototype:
+
+```sh
+knitli-event-gateway launch \
+  --codex-binary /absolute/path/to/qualified/codex \
+  --binary-sha256 0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de \
+  --cwd /absolute/path/to/project
+```
+
+Add `--resume NATIVE-THREAD-UUID` to resume one explicit native thread. A resumed
+session reports selected only while its live witness names that exact thread.
+The launcher preserves the user's Codex home, authentication and configuration;
+it refuses inherited bridge/test-adoption markers and dynamic-loader overrides.
+It never searches PATH for Codex. The executable and its ancestors must be
+owned by the current user or root, without other-user write access (root-owned
+sticky temporary directories are allowed). The executable must match the one
+reviewed digest above; a stock Codex binary or a different rebuild is refused.
+The binary is not distributed in this wheel. Same-user code and configuration
+are trusted: hash validation precedes execution but is not an atomic hash/exec
+guarantee against another process running as that user.
+
+The TUI retains terminal input, output and resize behavior. A private inherited
+socket carries v3 bridge traffic. Startup synchronization grants no selection;
+every status request obtains a fresh witness. The printed session UUID identifies
+only this launcher. From another terminal, use the same `--state-dir` if supplied:
+
+```sh
+knitli-event-gateway client-status --session-id PRINTED-SESSION-UUID
+```
+
+The response reports `selection: selected` with the exact native thread, or
+`selection: unavailable`; `attached` and `automaticWakeEnabled` remain false.
+Status is an observation at query time, never admission or a reusable lease.
+The owner-only session socket accepts status only, not start, receipt or arbitrary
+native commands. The foreground launcher removes it and closes its bridge when
+the TUI exits. Cleanup signals only the owned, unreaped process group, never a
+PID reported by a witness. There is no background restart or service install.
 
 Default state is `~/.local/state/knitli-event-gateway`, with mode 0700 directories
 and 0600 files/socket. `--state-dir PATH` accepts a private directory without

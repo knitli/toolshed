@@ -15,6 +15,7 @@ from .security import (
     SecurityError,
 )
 from .store import Store, StoreError
+from .launcher import LaunchError, launch, session_status
 
 
 def main(argv=None):
@@ -27,6 +28,13 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
     commands.add_parser("run", help="Run the private control daemon")
+    client = commands.add_parser("launch", help="Launch an explicit qualified Codex TUI")
+    client.add_argument("--codex-binary", type=Path, required=True)
+    client.add_argument("--binary-sha256", required=True)
+    client.add_argument("--cwd", type=Path, required=True)
+    client.add_argument("--resume", help="Exact native thread UUID")
+    presence = commands.add_parser("client-status", help="Query one live launcher selection")
+    presence.add_argument("--session-id", required=True)
     enroll = commands.add_parser("enroll", help="Prepare a public node-key request")
     enroll.add_argument("--challenge", required=True)
     attach = commands.add_parser("attach")
@@ -40,6 +48,12 @@ def main(argv=None):
     if any(part.is_symlink() for part in (state_dir, *state_dir.parents)):
         parser.error("unsafe_state")
     try:
+        if args.command == "launch":
+            return launch(state_dir, args.codex_binary, args.binary_sha256,
+                          args.cwd, resume=args.resume)
+        if args.command == "client-status":
+            print(json.dumps(session_status(state_dir, args.session_id)))
+            return 0
         if args.command == "run":
             asyncio.run(serve(state_dir))
             return 0
@@ -80,6 +94,9 @@ def main(argv=None):
                     result = status(store)
         print(json.dumps(result))
         return 0
+    except LaunchError as error:
+        print(json.dumps({"reason": str(error)}), file=sys.stderr)
+        return 2
     except (StoreError, SecurityError) as error:
         print(json.dumps({"reason": error.code}), file=sys.stderr)
         return 2
