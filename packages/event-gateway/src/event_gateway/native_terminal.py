@@ -22,8 +22,6 @@ def _write_all(fd, data, stop_event):
         if count == 0:
             raise OSError("terminal write made no progress")
         data = data[count:]
-        if data and stop_event.is_set():
-            return False
     return True
 
 

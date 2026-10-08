@@ -211,7 +211,8 @@ class LauncherTests(unittest.TestCase):
         stop.set.assert_called_once_with()
 
     def test_cleanup_signals_once_before_reaping_and_closes_partial_spawn(self):
-        for scenario in ("normal", "spawn_failure", "exited_eperm", "running_eperm"):
+        for scenario in ("normal", "spawn_failure", "exited_eperm", "running_eperm",
+                         "wait_timeout", "worker_start_failure"):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
                 root = Path(directory)
                 listener, parent, child, bridge, process = [Mock() for _ in range(5)]
@@ -241,12 +242,32 @@ class LauncherTests(unittest.TestCase):
                 kill = stack.enter_context(patch.object(launcher.os, "killpg", side_effect=lambda *_: events.append("kill")))
                 waitid = stack.enter_context(patch.object(launcher.os, "waitid", return_value=None))
                 spawn = stack.enter_context(patch.object(launcher.subprocess, "Popen", return_value=process))
+                unlink = stack.enter_context(patch.object(Path, "unlink"))
                 if scenario == "spawn_failure":
                     spawn.side_effect = OSError("spawn failed")
                     with self.assertRaises(OSError):
                         launcher.launch(root, "/qualified/codex", launcher.QUALIFIED_SHA256, root)
                     kill.assert_not_called()
                     process.wait.assert_not_called()
+                elif scenario in ("wait_timeout", "worker_start_failure"):
+                    if scenario == "wait_timeout":
+                        process.wait.side_effect = launcher.subprocess.TimeoutExpired("private arguments", 5)
+                        expected = "native_process_cleanup_timeout"
+                    else:
+                        started, unstarted = Mock(), Mock()
+                        unstarted.start.side_effect = RuntimeError("private thread failure")
+                        unstarted.join.side_effect = RuntimeError("cannot join thread before it is started")
+                        mocks["threading.Thread"].side_effect = [started, unstarted]
+                        expected = "native_worker_start_failed"
+                    with self.assertRaises(launcher.LaunchError) as raised:
+                        launcher.launch(root, "/qualified/codex", launcher.QUALIFIED_SHA256, root)
+                    self.assertEqual(str(raised.exception), expected)
+                    self.assertTrue(raised.exception.__suppress_context__)
+                    kill.assert_called_once_with(process.pid, signal.SIGKILL)
+                    process.wait.assert_called_once_with(timeout=5)
+                    if scenario == "worker_start_failure":
+                        started.join.assert_called_once_with(timeout=1)
+                        unstarted.join.assert_not_called()
                 elif scenario in ("exited_eperm", "running_eperm"):
                     kill.side_effect = PermissionError("group denied")
                     if scenario == "exited_eperm":
@@ -271,6 +292,7 @@ class LauncherTests(unittest.TestCase):
                 child.close.assert_called()
                 self.assertIn(call(22), mocks["os.close"].call_args_list)
                 self.assertIn(call(23), mocks["os.close"].call_args_list)
+                unlink.assert_called_once_with(missing_ok=True)
 
 
 if __name__ == "__main__":

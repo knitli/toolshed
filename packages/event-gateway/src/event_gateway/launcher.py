@@ -207,7 +207,19 @@ def _stop_process(process):
                                os.WEXITED | os.WNOHANG | os.WNOWAIT)
             if exited is None:
                 raise
-        process.wait(timeout=5)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            raise LaunchError("native_process_cleanup_timeout") from None
+
+
+def _start_worker(target, arguments):
+    worker = threading.Thread(target=target, args=arguments, daemon=True)
+    try:
+        worker.start()
+    except RuntimeError:
+        raise LaunchError("native_worker_start_failed") from None
+    return worker
 
 
 def _validate_launch(state_dir, cwd, resume):
@@ -289,9 +301,7 @@ def launch(state_dir, binary, digest, cwd, *, resume=None):
             (synchronize, ()), (_control, (listener, client, stop)),
             (_watch_child, (process.pid, stop)),
         ):
-            worker = threading.Thread(target=target, args=arguments, daemon=True)
-            workers.append(worker)
-            worker.start()
+            workers.append(_start_worker(target, arguments))
         print("Local Codex session: " + session_id + " (automatic delivery disabled)", flush=True)
         run_terminal(master, stop_event=stop)
     finally:

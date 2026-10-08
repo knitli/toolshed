@@ -10,6 +10,29 @@ from event_gateway import native_terminal
 
 
 class NativeTerminalTests(unittest.TestCase):
+    def test_stopped_partial_writes_finish_available_tail(self):
+        stopped = threading.Event()
+        stopped.set()
+        with (
+            patch.object(native_terminal.os, "write", side_effect=[2, 2]) as write,
+            patch.object(native_terminal.select, "select") as ready,
+        ):
+            self.assertTrue(native_terminal._write_all(12, b"tail", stopped))
+            self.assertEqual([item.args for item in write.call_args_list],
+                             [(12, b"tail"), (12, b"il")])
+            ready.assert_not_called()
+
+    def test_stopped_backpressure_returns_without_waiting(self):
+        stopped = threading.Event()
+        stopped.set()
+        with (
+            patch.object(native_terminal.os, "write", side_effect=BlockingIOError()) as write,
+            patch.object(native_terminal.select, "select") as ready,
+        ):
+            self.assertFalse(native_terminal._write_all(12, b"tail", stopped))
+            write.assert_called_once_with(12, b"tail")
+            ready.assert_not_called()
+
     def test_partial_writes_preserve_bytes_and_wait_without_busy_looping(self):
         with (
             patch.object(native_terminal.os, "write", side_effect=[2, BlockingIOError(), 3]) as write,
