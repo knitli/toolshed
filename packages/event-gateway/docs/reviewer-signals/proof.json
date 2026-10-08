@@ -1,0 +1,160 @@
+{
+  "method": "Historical manual development-time in-memory scratch mutations against the original 30-case corpus. Harness not committed; not a reproducible mutation suite.",
+  "mutations": [
+    {
+      "mutation": "actor spoof accepted",
+      "result": "RED",
+      "failed_case": "wrong provider actor"
+    },
+    {
+      "mutation": "partial pagination accepted",
+      "result": "RED",
+      "failed_case": "partial page cannot prove completion"
+    },
+    {
+      "mutation": "old head accepted",
+      "result": "RED",
+      "failed_case": "security independent old head"
+    },
+    {
+      "mutation": "same head old attempt accepted",
+      "result": "RED",
+      "failed_case": "same head old invocation"
+    },
+    {
+      "mutation": "reaction treated as terminal",
+      "result": "RED",
+      "failed_case": "partial comments not terminal"
+    },
+    {
+      "mutation": "findings treated as absent",
+      "result": "RED",
+      "failed_case": "code completed with findings is not failed"
+    },
+    {
+      "mutation": "skipped review treated as run",
+      "result": "RED",
+      "failed_case": "knitli successful workflow skipped review"
+    },
+    {
+      "mutation": "masked review step failure ignored",
+      "result": "RED",
+      "failed_case": "knitli successful workflow masked step failure"
+    },
+    {
+      "mutation": "round completion authorized",
+      "result": "RED",
+      "failed_case": "code completed with findings is not failed"
+    }
+  ],
+  "restored": "Historical GREEN: original 30 cases",
+  "optimizationRegression": {
+    "command": "python3 -m unittest discover -s packages/event-gateway/tests -p test_reviewer_signals.py -v",
+    "case": "test_optimized_replay_rejects_wrong_expectation",
+    "mutation": "First fixture expected round_complete changed to true; actual script subprocess uses -O",
+    "before": "RED: AssertionError: 0 == 0 : PASS: 30 reviewer-signal cases; no clean-completion authority",
+    "after": "GREEN: subprocess exits nonzero with named AssertionError and no PASS output",
+    "validCorpus": "GREEN: all 45 current cases with and without -O"
+  },
+  "followupRegression": {
+    "beforeFixHead": "22be826d85aef1376bc0a2c6577b31bf2f966b80",
+    "newCases": 15,
+    "beforeFixMismatches": {
+      "stale_head survives mismatched base_sha": {
+        "candidate": {
+          "actual": "stale_or_unbound_round",
+          "expected": "stale_head"
+        }
+      },
+      "stale_head survives mismatched policy_revision": {
+        "candidate": {
+          "actual": "stale_or_unbound_round",
+          "expected": "stale_head"
+        }
+      },
+      "stale_head survives mismatched invocation_id": {
+        "candidate": {
+          "actual": "stale_or_unbound_round",
+          "expected": "stale_head"
+        }
+      },
+      "stale_head survives mismatched run_attempt": {
+        "candidate": {
+          "actual": "stale_or_unbound_round",
+          "expected": "stale_head"
+        }
+      },
+      "prefix_only survives mismatched base_sha": {
+        "candidate": {
+          "actual": "stale_or_unbound_round",
+          "expected": "prefix_only"
+        }
+      },
+      "prefix_only survives mismatched policy_revision": {
+        "candidate": {
+          "actual": "stale_or_unbound_round",
+          "expected": "prefix_only"
+        }
+      },
+      "prefix_only survives mismatched invocation_id": {
+        "candidate": {
+          "actual": "stale_or_unbound_round",
+          "expected": "prefix_only"
+        }
+      },
+      "prefix_only survives mismatched run_attempt": {
+        "candidate": {
+          "actual": "stale_or_unbound_round",
+          "expected": "prefix_only"
+        }
+      },
+      "invalid findings flag 'yes'": {
+        "signal": {
+          "actual": "reported_completed",
+          "expected": "unknown"
+        }
+      },
+      "invalid findings flag 'true'": {
+        "signal": {
+          "actual": "reported_completed",
+          "expected": "unknown"
+        }
+      },
+      "invalid findings flag 1": {
+        "signal": {
+          "actual": "reported_completed",
+          "expected": "unknown"
+        }
+      },
+      "invalid findings flag 0": {
+        "signal": {
+          "actual": "reported_completed",
+          "expected": "unknown"
+        }
+      },
+      "invalid findings flag 1.0": {
+        "signal": {
+          "actual": "reported_completed",
+          "expected": "unknown"
+        }
+      },
+      "invalid findings flag None": {
+        "signal": {
+          "actual": "reported_completed",
+          "expected": "unknown"
+        }
+      }
+    },
+    "after": "GREEN: all 45 cases; both subprocess unittest checks pass",
+    "commands": [
+      "python3 -m unittest discover -s packages/event-gateway/tests -p test_reviewer_signals.py -v",
+      "python3 -O packages/event-gateway/scripts/replay_reviewer_signals.py",
+      "python3 packages/event-gateway/scripts/replay_reviewer_signals.py"
+    ],
+    "sourceSha256": {
+      "packages/event-gateway/scripts/replay_reviewer_signals.py": "71749f5bccb8a05837a8fdce31ed9ecb158ab9194f02a77973c178e790893725",
+      "packages/event-gateway/tests/test_reviewer_signals.py": "c7cad90ed3c7e0d694dac67601848c85f9047dba85d6e15c707e109a3fcb5c72",
+      "packages/event-gateway/docs/reviewer-signals/replay.json": "435f32d16c9f0ed2d2eaf4cc8bc899d1e970f812e9828279b419e31eefb3841f"
+    }
+  }
+}

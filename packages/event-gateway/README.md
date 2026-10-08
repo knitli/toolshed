@@ -43,6 +43,17 @@ or with `uv tool install path/to/knitli_event_gateway-0.1.0-py3-none-any.whl`.
 The installed wheel embeds the verified contract; no contract fetch happens at
 runtime. There is no PyPI publication workflow in this PR.
 
+The wheel includes `event_gateway.native_reader.NativeBridge`, the same private
+socket reader used by the qualification harness. A qualified host supplies an
+already connected private Unix stream and owns client selection and launch.
+The reader closes that stream on `close()` or an invalid exchange. Version 2
+remains the default; `receipt_version=3` explicitly enables durable receipt
+identity. `restore_attempt(request)` consumes the start-once identity for exact
+read-only recovery; it grants neither selection nor permission to start.
+`NativeBridgeAdapter` connects this reader to the existing gateway admission
+and recovery flow. Installing the reader does not attach or launch a client. See the
+[combined native restart qualification](docs/native-bridge/packaged-recovery.md).
+
 Default state is `~/.local/state/knitli-event-gateway`, with mode 0700 directories
 and 0600 files/socket. `--state-dir PATH` accepts a private directory without
 symlink components; use canonical `/private/tmp` paths for macOS scratch tests.

@@ -1,5 +1,8 @@
 # Controlled native / local gateway / workerd qualification
 
+Current packaged-reader and combined native-restart evidence is recorded in
+[packaged recovery](packaged-recovery.md). The evidence below remains historical.
+
 **PASS, 2026-10-07.** One real native input-recording receipt was carried through the production local gateway and production cloud coordinator/registry in disposable workerd. An observed ACK committed before its reply was deliberately lost; after permit expiry and a Store/CloudClient restart, the exact ACK recovered successfully without another native start.
 
 This is fixture-qualified integration evidence. Production admission is **not proved**. The native process was **not restarted**. No deployment occurred.

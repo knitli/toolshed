@@ -6,6 +6,9 @@ MISE_EXPERIMENTAL = 1
 MISE_YES = 1
 MISE_TRUST = 1
 
+[tool_alias]
+codacy = "npm:@codacy-cloud-cli"
+
 [tools]
 bun = "latest"
 node = "24"
@@ -17,7 +20,7 @@ uv = "latest"
 biome = "latest"
 hk = "latest"
 fnox = "latest"
-"npm:@codacy/codacy-cloud-cli" = "latest"
+codacy = "latest"
 
 [deps]
 [deps.bun]
@@ -41,3 +44,6 @@ biome = "latest"
 "npm:sort-package-json" = "latest"
 shfmt = "latest"
 yq = "latest"
+
+[shell_alias]
+codacy = "fnox exec -- codacy"
