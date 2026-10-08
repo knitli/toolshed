@@ -1,0 +1,51 @@
+{
+  "method": "In-memory scratch mutation; tracked source never modified. All mutations reach fixture equality assertions.",
+  "mutations": [
+    {
+      "mutation": "actor spoof accepted",
+      "result": "RED",
+      "failed_case": "wrong provider actor"
+    },
+    {
+      "mutation": "partial pagination accepted",
+      "result": "RED",
+      "failed_case": "partial page cannot prove completion"
+    },
+    {
+      "mutation": "old head accepted",
+      "result": "RED",
+      "failed_case": "security independent old head"
+    },
+    {
+      "mutation": "same head old attempt accepted",
+      "result": "RED",
+      "failed_case": "same head old invocation"
+    },
+    {
+      "mutation": "reaction treated as terminal",
+      "result": "RED",
+      "failed_case": "partial comments not terminal"
+    },
+    {
+      "mutation": "findings treated as absent",
+      "result": "RED",
+      "failed_case": "code completed with findings is not failed"
+    },
+    {
+      "mutation": "skipped review treated as run",
+      "result": "RED",
+      "failed_case": "knitli successful workflow skipped review"
+    },
+    {
+      "mutation": "masked review step failure ignored",
+      "result": "RED",
+      "failed_case": "knitli successful workflow masked step failure"
+    },
+    {
+      "mutation": "round completion authorized",
+      "result": "RED",
+      "failed_case": "code completed with findings is not failed"
+    }
+  ],
+  "restored": "GREEN: 30 cases"
+}
