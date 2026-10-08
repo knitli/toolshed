@@ -1,13 +1,13 @@
 {
   "toolshedBase": "9e54800fdf8a513d14dce624324e542d7e426d3c",
-  "cloudBase": "f2e63c0fdb7704e45ad80d7a639391d5d237aa60",
+  "cloudBase": "807f398a7da62d9107e858c63dbec92c8d8145f7",
   "binarySha256": "0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de",
   "sourceTests": 228,
   "installedReaderTests": 26,
   "productionAdmissionProven": false,
   "noStartSettlementProven": false,
   "artifacts": {
-    "packages/event-gateway/docs/native-bridge/packaged-recovery-proof.json": "d74d3f8e79bd5a28f0c4ddf93d33fa44c2d92dd2a8636ad97b32a12c9267dcf1",
+    "packages/event-gateway/docs/native-bridge/packaged-recovery-proof.json": "a8450b597df802abe49789840b39824859164f14fe80aa76dc7e4e2de938d614",
     "packages/event-gateway/dist/knitli_event_gateway-0.1.0-py3-none-any.whl": "ac871be819ae5a427ad48ba9d65ad6de217d93bbe0a6158cb09bbc50632a65f0",
     "/private/tmp/event-native-reader-red.log": "6988f8ac600dc5bc19fa8f2fd4fa7d552b58f745ea8d9e48c995a158b0381fc0",
     "/private/tmp/event-native-reader-restored-green.log": "7d1ee6be19e7652fbaa6ada13e9f1d26e6ecd558e5c1b37ce3dea1426b4b1af5",
@@ -26,12 +26,32 @@
   "cloudCommitVerifiedAfterRun": true,
   "cloudBundleInputsMatchCommittedCheckout": true,
   "cloudChangedSourceSha256": {
-    "apps/os/packages/event-runtime/src/admin-api.ts": "0edf24b3a90615ead2e15533e5a7dcca50400e615ff7834cc5566848b36a613f",
-    "apps/os/packages/event-runtime/src/authority-client.ts": "4c4f8785052da9bc3da633b94266b329b6f43299a2544073ae9b58c3604db9e4",
+    "apps/os/packages/event-runtime/src/admin-api.ts": "178ff0ee561e2b53e61554244c9a789b964d711cf1c3dd5655151c608f0324ab",
+    "apps/os/packages/event-runtime/src/authority-client.ts": "b0d2bf801ac8c31f4d19ce6513b4e9b0e98efac9c8e3458ae642d69568438034",
     "apps/os/packages/event-runtime/src/coordinator.ts": "d7772cd7e99d672cc2a96944a42dd925d3db9cbc3285c76e6851ac7cdfea588f"
   },
   "cloudScopeNote": "admin-api.ts is checkout provenance only; the coupled fixture bypasses admin/runtime admission. Executed cloud inputs are recorded in proof.cloudBundle.inputs.",
   "sourceBoundaryNodeTests": 1,
   "readerExecutableAstIdentical": true,
-  "readerAstComparisonExcludesDocstrings": true
+  "readerAstComparisonExcludesDocstrings": true,
+  "cloudExecutedSourceSha256": {
+    "apps/os/packages/event-runtime/src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+    "apps/os/packages/event-runtime/src/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
+    "apps/os/packages/event-runtime/src/delivery.ts": "a0561f468911bf62d7960f1a3363043b0b79a4ede0e50ade2ea1dd4a453a89a3",
+    "apps/os/packages/event-runtime/src/contracts.ts": "49e6170050b18ca6ee580bf8ebc38256e4795827ce6378629c78bb54e9920123",
+    "apps/os/packages/event-runtime/src/registry.ts": "98eff05fedf7415182e4bde5a0fa97cb4e64a712b65fdbe483e926b17222b6c1",
+    "apps/os/packages/event-runtime/src/request-deadline.ts": "31f34fd3be26c11f2a2d778d591cf84e6f5b315ae0941e7d8cf0987d169ab3d7",
+    "apps/os/packages/event-runtime/src/coordinator-admission.ts": "b0f6048e25d023f9caeb215de63dd0ca2c056f3d111aa042d031739b828d831e",
+    "apps/os/packages/gatekeeper-messaging/src/agent-token.ts": "af2c5344dcb6e652a26d179343b95b70b13608d4df59e39e840abb8f7686d502",
+    "apps/os/packages/gatekeeper-openapi/src/provider-contract.ts": "7d3484d27c081b27d4e08b5ae1b16aeadf30f75960b6d4289caf8a34e2a0c759",
+    "apps/os/packages/gatekeeper-openapi/src/catalog/contracts.ts": "672acd8e01adbb63df330764cd2ad40358da037049af459f73531916be3968ec",
+    "apps/os/packages/gatekeeper-openapi/src/catalog/limits.ts": "6814e39393267e895a590af24ce79b9dc6001b05c7852fe88781ab136529466f",
+    "apps/os/packages/gatekeeper-openapi/src/dispatch/limits.ts": "40659ea51595d4f23e10f3e327f343c6eae36e4a79723bf655e023a999f2505a",
+    "apps/os/packages/gatekeeper-openapi/src/installation-contracts.ts": "2c7159cc2920545d9184a9d07556900997757efa633f613aa32367fb0e8afdd6",
+    "apps/os/packages/gatekeeper-openapi/src/operator/contracts.ts": "290248a537a6f462a6b0f58b0710dba37e363ac3211abec686c2758c9b91170a",
+    "apps/os/packages/openapi-operator/src/access.ts": "7b9ed46f3396a4a2324e608aa72b71b1c35965a54c2a4c9b3043a321939c6a5c",
+    "apps/os/packages/event-runtime/src/authority-client.ts": "b0d2bf801ac8c31f4d19ce6513b4e9b0e98efac9c8e3458ae642d69568438034",
+    "apps/os/packages/event-runtime/src/api.ts": "17c7abfcbc623abb7901f67be856ee8e7bfed3ec3d9e3c34408a01f75ff3cf0d",
+    "apps/os/packages/event-runtime/src/coordinator.ts": "d7772cd7e99d672cc2a96944a42dd925d3db9cbc3285c76e6851ac7cdfea588f"
+  }
 }

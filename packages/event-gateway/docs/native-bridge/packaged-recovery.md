@@ -3,8 +3,11 @@
 PASS, 2026-10-07: the installed wheel's private socket reader recovered an expired
 Core receipt through a new native TUI/backend, then settled the real coordinator
 in disposable workerd. The [proof](packaged-recovery-proof.json) records exact
-Python sources, the cloud bundle, and all 129 bundled input hashes. This remains
+Python sources, the cloud bundle, and all 130 bundled input hashes. This remains
 fixture-qualified integration, not production admission or a client installation.
+The current cloud source pin is `807f398a7da62d9107e858c63dbec92c8d8145f7`;
+the synthetic authority fixture supplies a canonical 43-character thumbprint
+to exercise the stricter production response validator.
 
 The native reader moved unchanged from the qualification script into
 `event_gateway.native_reader` (executable AST equality checked against Toolshed `9e54800`; new docstrings
