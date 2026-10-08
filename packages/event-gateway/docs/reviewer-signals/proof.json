@@ -47,5 +47,13 @@
       "failed_case": "code completed with findings is not failed"
     }
   ],
-  "restored": "GREEN: 30 cases"
+  "restored": "GREEN: 30 cases",
+  "optimizationRegression": {
+    "command": "python3 -m unittest discover -s packages/event-gateway/tests -p test_reviewer_signals.py -v",
+    "case": "test_optimized_replay_rejects_wrong_expectation",
+    "mutation": "First fixture expected round_complete changed to true; actual script subprocess uses -O",
+    "before": "RED: AssertionError: 0 == 0 : PASS: 30 reviewer-signal cases; no clean-completion authority",
+    "after": "GREEN: subprocess exits nonzero with named AssertionError and no PASS output",
+    "validCorpus": "GREEN: all 30 cases with and without -O"
+  }
 }

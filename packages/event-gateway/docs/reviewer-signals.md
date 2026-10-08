@@ -105,6 +105,13 @@ findings, skipped/failed steps and accidental completion authority. This proves
 the bounded classification logic, not live webhook completeness, provider
 availability, verified normalization, or production clean completion.
 
+The replay comparison explicitly raises on mismatches so `-O` and
+`PYTHONOPTIMIZE` cannot disable it. The subprocess regression in
+`tests/test_reviewer_signals.py` changes an expected completion value and runs
+the actual script with `-O`: before the fix it failed because the script exited
+zero and printed PASS; after the fix it passes with a nonzero exit, the named
+mismatch, and no PASS output. All 30 valid cases also pass under `-O`.
+
 Read-only refresh examples (no review invocation):
 
 ```sh

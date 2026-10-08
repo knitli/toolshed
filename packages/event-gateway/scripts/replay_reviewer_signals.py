@@ -65,7 +65,8 @@ def replay(path):
     cases = json.loads(path.read_text())["cases"]
     for case in cases:
         actual = classify(case["evidence"], case["candidate"])
-        assert actual == case["expected"], (case["name"], actual, case["expected"])
+        if actual != case["expected"]:
+            raise AssertionError((case["name"], actual, case["expected"]))
     print(f"PASS: {len(cases)} reviewer-signal cases; no clean-completion authority")
 
 
