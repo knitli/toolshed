@@ -32,10 +32,7 @@ const envelope = {
   signature: { algorithm: "Ed25519", keyId: "fixture", signature: "fixture" },
 };
 fs.writeFileSync(payloadPath, "completion gate fixture");
-fs.writeFileSync(
-  confined("release.manifest.json"),
-  envelope.manifestJson,
-);
+fs.writeFileSync(confined("release.manifest.json"), envelope.manifestJson);
 fs.writeFileSync(
   confined("release.manifest.sig"),
   JSON.stringify(envelope.signature),
