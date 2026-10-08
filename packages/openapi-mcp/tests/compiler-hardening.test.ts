@@ -780,12 +780,12 @@ describe("compiler contract limits and provenance", () => {
       },
     });
     const spec = await write(root, "spec.json", JSON.stringify(document));
-    for (const [field, exact] of [
-      ["maxPaths", 1],
-      ["maxOperations", 1],
-      ["maxSchemas", 2],
-      ["maxParametersPerOperation", 1],
-      ["maxPropertiesPerSchema", 1],
+    for (const [field, exact, pattern] of [
+      ["maxPaths", 1, /Paths/i],
+      ["maxOperations", 1, /Operations/i],
+      ["maxSchemas", 2, /Schemas/i],
+      ["maxParametersPerOperation", 1, /ParametersPerOperation/i],
+      ["maxPropertiesPerSchema", 1, /PropertiesPerSchema/i],
     ] as const) {
       const ok = await compileRelease({
         ...releaseOptions(root, spec),
@@ -797,7 +797,7 @@ describe("compiler contract limits and provenance", () => {
           ...releaseOptions(root, spec),
           limits: limits({ [field]: exact - 1 }),
         }),
-      ).rejects.toThrow(new RegExp(field.replace(/^max/, ""), "i"));
+      ).rejects.toThrow(pattern);
     }
   });
 

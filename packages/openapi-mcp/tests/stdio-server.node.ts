@@ -119,6 +119,7 @@ test("stdio helper consumes real transport plans and permits exactly once under 
       lookup: async () => [{ address: "8.8.8.8", family: 4 }],
     });
     const transport = boundary.transport;
+    const activeBoundary = boundary;
     let dispatchInvocations = 0;
     let replayFailures = 0;
     const replayStatuses: string[] = [];
@@ -157,7 +158,7 @@ test("stdio helper consumes real transport plans and permits exactly once under 
                 },
               },
               boundary: {
-                ...boundary!,
+                ...activeBoundary,
                 transport: {
                   ...transport,
                   async dispatchAction(plan, permit) {

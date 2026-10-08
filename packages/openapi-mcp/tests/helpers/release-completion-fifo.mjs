@@ -1,22 +1,43 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { resolve, sep } from "node:path";
+
+const MODES = new Set(["ordinary", "static-fifo", "swap-fifo"]);
+const SIDECARS = new Set(["manifest.json", "manifest.sig"]);
 
 const [directory, mode, sidecar] = process.argv.slice(2);
-const payloadPath = join(directory, "release.sqlite");
-const target = join(directory, `release.${sidecar}`);
+if (!MODES.has(mode) || !SIDECARS.has(sidecar)) {
+  throw new Error("fixture invoked with unexpected mode or sidecar");
+}
+// Confine every filesystem touch to the caller-provided fixture directory,
+// which itself must live under the OS temp root.
+const root = resolve(directory ?? "");
+const tempRoot = resolve(tmpdir());
+if (root !== tempRoot && !root.startsWith(tempRoot + sep)) {
+  throw new Error("fixture directory escapes the temp root");
+}
+function confined(name) {
+  const resolved = resolve(root, name);
+  if (resolved !== root && !resolved.startsWith(root + sep)) {
+    throw new Error("fixture path escapes its directory");
+  }
+  return resolved;
+}
+const payloadPath = confined("release.sqlite");
+const target = confined(`release.${sidecar}`);
 const envelope = {
   manifestJson: "{}",
   signature: { algorithm: "Ed25519", keyId: "fixture", signature: "fixture" },
 };
 fs.writeFileSync(payloadPath, "completion gate fixture");
 fs.writeFileSync(
-  join(directory, "release.manifest.json"),
+  confined("release.manifest.json"),
   envelope.manifestJson,
 );
 fs.writeFileSync(
-  join(directory, "release.manifest.sig"),
+  confined("release.manifest.sig"),
   JSON.stringify(envelope.signature),
 );
 

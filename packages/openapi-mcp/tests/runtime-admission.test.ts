@@ -262,11 +262,14 @@ for (const fault of ["missing-operation", "corrupt-schema"] as const) {
       return accept(...args);
     };
     if (fault === "missing-operation") f.rows.splice(1, 1);
-    else
+    else {
+      const schemaRow = f.schemaRows[0];
+      if (!schemaRow) throw new Error("fixture must expose a schema row");
       f.schemaRows.splice(0, 1, {
-        ...f.schemaRows[0]!,
-        record: { ...f.schemaRows[0]!.record, schema: { type: "number" } },
+        ...schemaRow,
+        record: { ...schemaRow.record, schema: { type: "number" } },
       });
+    }
     const error = await admitCatalogRelease(f, catalogId, releaseId).catch(
       (error) => error,
     );
@@ -295,10 +298,12 @@ for (const fault of ["inventory", "manifest"] as const) {
       reads++;
       if (reads === 2) {
         if (fault === "manifest") return replacement;
+        const secondRow = f.rows[1];
+        if (!secondRow) throw new Error("fixture must expose two rows");
         f.rows.splice(1, 1, {
-          ...f.rows[1]!,
+          ...secondRow,
           record: {
-            ...f.rows[1]!.record,
+            ...secondRow.record,
             summary: "corrupted after preflight",
           },
         });
@@ -349,9 +354,11 @@ test("corruption following a lost CAS prevents the retry from accepting", async 
   let accepts = 0;
   f.generations.accept = async () => {
     accepts++;
+    const firstRow = f.rows[0];
+    if (!firstRow) throw new Error("fixture must expose a row");
     f.rows.splice(0, 1, {
-      ...f.rows[0]!,
-      record: { ...f.rows[0]!.record, summary: "corrupted during CAS" },
+      ...firstRow,
+      record: { ...firstRow.record, summary: "corrupted during CAS" },
     });
     return null;
   };
