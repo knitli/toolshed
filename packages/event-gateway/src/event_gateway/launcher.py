@@ -210,8 +210,7 @@ def _stop_process(process):
         process.wait(timeout=5)
 
 
-def launch(state_dir, binary, digest, cwd, *, resume=None):
-    """Run a visible native TUI; expose only read-only per-session status."""
+def _validate_launch(state_dir, cwd, resume):
     if threading.current_thread() is not threading.main_thread() or threading.active_count() != 1:
         raise LaunchError("launch_requires_single_thread")
     if not os.isatty(0) or not os.isatty(1):
@@ -223,6 +222,12 @@ def launch(state_dir, binary, digest, cwd, *, resume=None):
     if not cwd.is_dir():
         raise LaunchError("invalid_client_directory")
     ensure_private_directory(state_dir)
+    return env, cwd
+
+
+def launch(state_dir, binary, digest, cwd, *, resume=None):
+    """Run a visible native TUI; expose only read-only per-session status."""
+    env, cwd = _validate_launch(state_dir, cwd, resume)
     session_id = str(uuid4())
     path = session_path(state_dir, session_id)
     parent = child = listener = bridge = process = None
