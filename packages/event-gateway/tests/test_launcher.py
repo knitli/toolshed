@@ -23,17 +23,17 @@ class LauncherTests(unittest.TestCase):
         bridge = Mock()
         bridge.valid_until = float("inf")
         bridge.exchange.return_value = row
-        bridge.challenge.side_effect = [row, {**row, "threadId": str(uuid4())}, row]
+        bridge.challenge_readonly.side_effect = [row, {**row, "threadId": str(uuid4())}, row]
         client = launcher.NativeClient(bridge, expected_thread=row["threadId"])
         self.assertEqual(client.status()["selection"], "unavailable")
-        bridge.challenge.assert_not_called()
+        bridge.challenge_readonly.assert_not_called()
         client.synchronize()
         bridge.exchange.assert_called_once_with({}, 30)
-        bridge.challenge.assert_not_called()
+        bridge.challenge_readonly.assert_not_called()
         self.assertEqual(client.status()["threadId"], row["threadId"])
         self.assertEqual(client.status()["selection"], "unavailable")
         self.assertEqual(client.status()["selection"], "selected")
-        self.assertEqual(bridge.challenge.call_count, 3)
+        self.assertEqual(bridge.challenge_readonly.call_count, 3)
         bridge.start.assert_not_called()
 
     def test_real_reader_rejects_malformed_and_repeated_sequence(self):
@@ -59,10 +59,10 @@ class LauncherTests(unittest.TestCase):
     def test_ineligible_witness_and_failed_challenge_remain_unattached(self):
         bridge = Mock()
         bridge.valid_until = float("inf")
-        bridge.challenge.side_effect = [witness(eligible=False), ValueError("invalid")]
+        bridge.challenge_readonly.side_effect = [witness(eligible=False), None, ValueError("invalid")]
         client = launcher.NativeClient(bridge)
         client.synchronize()
-        for _ in range(2):
+        for _ in range(3):
             status = client.status()
             self.assertEqual(status["selection"], "unavailable")
             self.assertFalse(status["attached"])
@@ -82,14 +82,14 @@ class LauncherTests(unittest.TestCase):
         with peer(handle, receipt_version=3) as bridge:
             client = launcher.NativeClient(bridge)
             client.synchronize()
-            challenge = bridge.challenge
+            challenge = bridge.challenge_readonly
 
             def delayed_result():
                 result = challenge()
                 time.sleep(0.02)
                 return result
 
-            with patch.object(bridge, "challenge", side_effect=delayed_result):
+            with patch.object(bridge, "challenge_readonly", side_effect=delayed_result):
                 self.assertEqual(client.status()["selection"], "unavailable")
 
     def test_status_rejects_unsafe_state_before_connecting(self):

@@ -9,7 +9,7 @@ import pty
 import signal
 import socket
 import stat
-import subprocess
+import subprocess  # nosec B404 - only the explicitly qualified executable is launched
 import threading
 import termios
 import time
@@ -115,6 +115,7 @@ class NativeClient:
     """Own one private v3 bridge; presence does not attach or admit a runtime."""
 
     def __init__(self, bridge, *, expected_thread=None):
+        """Track one explicit bridge and optional exact resume selection."""
         if expected_thread is not None and not uuid(expected_thread):
             raise LaunchError("invalid_resume_thread")
         self.bridge = bridge
@@ -135,10 +136,10 @@ class NativeClient:
             return value
         with self.lock:
             try:
-                witness = self.bridge.challenge()
+                witness = self.bridge.challenge_readonly()
             except ValueError:
                 return value
-        if witness["eligible"] and time.monotonic() < self.bridge.valid_until and (
+        if witness is not None and witness["eligible"] and time.monotonic() < self.bridge.valid_until and (
                 self.expected_thread is None or witness["threadId"] == self.expected_thread):
             value.update(selection="selected", threadId=witness["threadId"],
                          clientId=witness["clientId"],
@@ -212,6 +213,8 @@ def launch(state_dir, binary, digest, cwd, *, resume=None):
     startup_failed = threading.Event()
     previous = {}
     try:
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            previous[sig] = signal.signal(sig, lambda *_: stop.set())
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         listener.bind(str(path))
         os.chmod(path, 0o600)
@@ -223,6 +226,8 @@ def launch(state_dir, binary, digest, cwd, *, resume=None):
         env.update(CODEX_NATIVE_BRIDGE_FD=str(child.fileno()),
                    CODEX_NATIVE_BRIDGE_RECEIPT_VERSION="3")
         binary = qualified_binary(binary, digest)
+        if stop.is_set():
+            raise LaunchError("native_launch_interrupted")
         command = [str(binary), "--no-alt-screen", "-C", str(cwd)]
         if resume:
             command += ["resume", resume]
@@ -231,6 +236,8 @@ def launch(state_dir, binary, digest, cwd, *, resume=None):
             pass_fds=(child.fileno(),), start_new_session=True,
             preexec_fn=_claim_terminal,
         )
+        if stop.is_set():
+            raise LaunchError("native_launch_interrupted")
         child.close()
         os.close(slave)
         slave = None
@@ -250,46 +257,46 @@ def launch(state_dir, binary, digest, cwd, *, resume=None):
             worker = threading.Thread(target=target, args=arguments, daemon=True)
             workers.append(worker)
             worker.start()
-        for sig in (signal.SIGTERM, signal.SIGHUP):
-            previous[sig] = signal.signal(sig, lambda *_: stop.set())
         print("Local Codex session: " + session_id + " (automatic delivery disabled)", flush=True)
         run_terminal(master, stop_event=stop)
     finally:
         stop.set()
-        for sig, handler in previous.items():
-            signal.signal(sig, handler)
-        if bridge is not None:
-            bridge.close()
-        elif parent is not None:
-            parent.close()
-        if child is not None:
-            child.close()
-        if listener is not None:
-            listener.close()
-        # No poll/wait occurs before this sole group signal: the unreaped child
-        # retains its PID, preventing reuse from targeting another process group.
         try:
-            if process is not None:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                except PermissionError:
-                    # Darwin can return EPERM for a zombie-only group. Keep
-                    # the child unreaped while checking this exact identity;
-                    # a still-running leader remains a cleanup failure.
-                    exited = os.waitid(os.P_PID, process.pid,
-                                       os.WEXITED | os.WNOHANG | os.WNOWAIT)
-                    if exited is None:
-                        raise
-                process.wait(timeout=5)
+            if bridge is not None:
+                bridge.close()
+            elif parent is not None:
+                parent.close()
+            if child is not None:
+                child.close()
+            if listener is not None:
+                listener.close()
+            # No poll/wait occurs before this sole group signal: the unreaped child
+            # retains its PID, preventing reuse from targeting another process group.
+            try:
+                if process is not None:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    except PermissionError:
+                        # Darwin can return EPERM for a zombie-only group. Keep
+                        # the child unreaped while checking this exact identity;
+                        # a still-running leader remains a cleanup failure.
+                        exited = os.waitid(os.P_PID, process.pid,
+                                           os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                        if exited is None:
+                            raise
+                    process.wait(timeout=5)
+            finally:
+                for worker in workers:
+                    worker.join(timeout=1)
+                for fd in (master, slave):
+                    if fd is not None:
+                        os.close(fd)
+                path.unlink(missing_ok=True)
         finally:
-            for worker in workers:
-                worker.join(timeout=1)
-            for fd in (master, slave):
-                if fd is not None:
-                    os.close(fd)
-            path.unlink(missing_ok=True)
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
     if startup_failed.is_set():
         raise LaunchError("native_bridge_startup_failed")
     return process.returncode if process.returncode >= 0 else 128 - process.returncode

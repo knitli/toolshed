@@ -82,7 +82,10 @@ guarantee against another process running as that user.
 
 The TUI retains terminal input, output and resize behavior. A private inherited
 socket carries v3 bridge traffic. Startup synchronization grants no selection;
-every status request obtains a fresh witness. The printed session UUID identifies
+selected status requires a fresh witness. A timed-out status read preserves one
+pending reply without interrupting the TUI. A later query drains and discards
+that old reply; the following query requests a fresh witness. This read-only path
+never grants permission to start a turn. The printed session UUID identifies
 only this launcher. From another terminal, use the same `--state-dir` if supplied:
 
 ```sh

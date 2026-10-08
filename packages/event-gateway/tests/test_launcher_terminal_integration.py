@@ -10,7 +10,7 @@ import re
 import select
 import signal
 import struct
-import subprocess
+import subprocess  # nosec B404 - Fixed interpreter and owned temporary mock child, no shell.
 import sys
 import tempfile
 import termios
@@ -69,7 +69,7 @@ print("MOCK_INPUT_HEX:" + data.hex(), flush=True)
 
 class LauncherTerminalIntegrationTests(unittest.TestCase):
     def test_owned_child_terminal_input_status_and_cleanup(self):
-        temporary_root = "/private/tmp" if Path("/private/tmp").is_dir() else "/tmp"
+        temporary_root = "/private/tmp" if Path("/private/tmp").is_dir() else "/tmp"  # nosec B108 - Secure TemporaryDirectory; short root keeps AF_UNIX paths valid.
         with tempfile.TemporaryDirectory(prefix="evlaunch-", dir=temporary_root) as directory:
             root = Path(directory)
             binary = root / "mock-codex"
@@ -107,7 +107,7 @@ class LauncherTerminalIntegrationTests(unittest.TestCase):
                         output.extend(chunk)
 
             try:
-                process = subprocess.Popen(
+                process = subprocess.Popen(  # nosec B603 - Fixed interpreter and test-owned literal script, no shell.
                     [sys.executable, "-c", script], env=environment,
                     stdin=slave, stdout=slave, stderr=slave, start_new_session=True,
                 )

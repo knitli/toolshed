@@ -27,8 +27,47 @@ def _write_all(fd, data, stop_event):
     return True
 
 
+def _read_ready(fd, master_fd):
+    try:
+        return os.read(fd, 4096)
+    except BlockingIOError:
+        return None
+    except OSError as error:
+        if fd == master_fd and error.errno == errno.EIO:
+            return b""
+        raise
+
+
+def _forward_terminal(master_fd, input_fd, output_fd, stop_event):
+    drained = 0
+    while True:
+        stopping = stop_event.is_set()
+        ready, _, _ = select.select(
+            [master_fd] if stopping else [master_fd, input_fd], [], [],
+            0 if stopping else 0.1,
+        )
+        if stopping and not ready:
+            return
+        # Deliver pending output before consuming more user input.
+        for fd in ready:
+            data = _read_ready(fd, master_fd)
+            if data is None:
+                continue
+            if not data:
+                return
+            if not _write_all(output_fd if fd == master_fd else master_fd, data, stop_event):
+                return
+            if stopping:
+                drained += len(data)
+                # ponytail: bound exit draining to 1 MiB; use a deadline if
+                # interactive workloads demonstrably need larger tails.
+                if drained >= 1024 * 1024:
+                    return
+
+
 def run_terminal(master_fd, *, stop_event):
-    """Forward bytes until PTY EOF or stop; caller owns descriptors and child cleanup.
+    """
+    Forward bytes until PTY EOF or stop; caller owns descriptors and child cleanup.
 
     Call on the main thread. Raw mode forwards Ctrl-C to the native client rather
     than interrupting this launcher. No child process is signalled or reaped here.
@@ -54,35 +93,7 @@ def run_terminal(master_fd, *, stop_event):
         signal.signal(signal.SIGWINCH, resize)
         resize()
         tty.setraw(input_fd, termios.TCSANOW)
-        drained = 0
-        while True:
-            stopping = stop_event.is_set()
-            ready, _, _ = select.select(
-                [master_fd] if stopping else [master_fd, input_fd], [], [],
-                0 if stopping else 0.1,
-            )
-            if stopping and not ready:
-                return
-            # Deliver pending output before consuming more user input.
-            for fd in ready:
-                try:
-                    data = os.read(fd, 4096)
-                except BlockingIOError:
-                    continue
-                except OSError as error:
-                    if fd == master_fd and error.errno == errno.EIO:
-                        return
-                    raise
-                if not data:
-                    return
-                if not _write_all(output_fd if fd == master_fd else master_fd, data, stop_event):
-                    return
-                if stopping:
-                    drained += len(data)
-                    # ponytail: bound exit draining to 1 MiB; use a deadline if
-                    # interactive workloads demonstrably need larger tails.
-                    if drained >= 1024 * 1024:
-                        return
+        _forward_terminal(master_fd, input_fd, output_fd, stop_event)
     finally:
         try:
             termios.tcsetattr(input_fd, termios.TCSANOW, previous_mode)

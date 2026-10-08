@@ -6,7 +6,7 @@ from pathlib import Path
 import pty
 import select
 import signal
-import subprocess
+import subprocess  # nosec B404 - Fixed interpreter and owned local terminal fixture, no shell.
 import sys
 import time
 import tty
@@ -65,7 +65,7 @@ class NativeTerminalBackpressureTests(unittest.TestCase):
                     tty.setraw(native_slave)
                     environment = dict(os.environ)
                     environment["PYTHONPATH"] = str(Path(native_terminal.__file__).resolve().parents[1])
-                    process = subprocess.Popen(
+                    process = subprocess.Popen(  # nosec B603 - Fixed interpreter and literal fixture with owned descriptors.
                         [sys.executable, "-c", WORKER, str(native_master), str(status_write)],
                         stdin=outer_slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                         pass_fds=(native_master, status_write), env=environment,
