@@ -66,12 +66,9 @@ def _forward_terminal(master_fd, input_fd, output_fd, stop_event):
 
 
 def run_terminal(master_fd, *, stop_event):
-    """
-    Forward bytes until PTY EOF or stop; caller owns descriptors and child cleanup.
-
-    Call on the main thread. Raw mode forwards Ctrl-C to the native client rather
-    than interrupting this launcher. No child process is signalled or reaped here.
-    """
+    """Forward bytes until PTY EOF or stop; caller owns descriptors and child cleanup."""
+    # Call on the main thread. Raw mode forwards Ctrl-C to the native client
+    # rather than interrupting this launcher. No process is signalled or reaped.
     input_fd, output_fd = sys.stdin.fileno(), sys.stdout.fileno()
     if not os.isatty(input_fd):
         raise ValueError("native terminal requires tty stdin")

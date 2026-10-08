@@ -69,7 +69,8 @@ print("MOCK_INPUT_HEX:" + data.hex(), flush=True)
 
 class LauncherTerminalIntegrationTests(unittest.TestCase):
     def test_owned_child_terminal_input_status_and_cleanup(self):
-        temporary_root = "/private/tmp" if Path("/private/tmp").is_dir() else "/tmp"  # nosec B108 - Secure TemporaryDirectory; short root keeps AF_UNIX paths valid.
+        # Secure TemporaryDirectory; the short root keeps AF_UNIX paths valid.
+        temporary_root = "/private/tmp" if Path("/private/tmp").is_dir() else "/tmp"  # nosec B108
         with tempfile.TemporaryDirectory(prefix="evlaunch-", dir=temporary_root) as directory:
             root = Path(directory)
             binary = root / "mock-codex"
