@@ -168,7 +168,9 @@ async function client(
             throw new OpenApiMcpError("ACTION_DENIED");
         },
         async dispatchAction(plan, permit) {
-          const bindingDigest = seenSnapshots.at(-1)!.binding.bindingDigest;
+          const lastSnapshot = seenSnapshots.at(-1);
+          if (!lastSnapshot) throw new Error("Missing credential snapshot");
+          const bindingDigest = lastSnapshot.binding.bindingDigest;
           pair.permits.consume(permit, call.preparedCallDigest, bindingDigest);
           if (probePermit)
             expect(() =>
@@ -254,7 +256,7 @@ async function client(
     { transport },
   );
   cleanups.push(() => handle.close());
-  const pending = new Map<number, (value: any) => void>();
+  const pending = new Map<number, (value: JSONRPCMessage) => void>();
   let serial = 0;
   let accept = true;
   let confirm = true;
@@ -309,7 +311,9 @@ async function client(
     customCaps: object = caps,
   ) {
     const id = ++serial;
-    const promise = new Promise<any>((resolve) => pending.set(id, resolve));
+    const promise = new Promise<JSONRPCMessage>((resolve) =>
+      pending.set(id, resolve),
+    );
     const _meta = {
       [PROTOCOL_VERSION_META_KEY]: "2026-07-28",
       [CLIENT_INFO_META_KEY]: { name: "stdio-test", version: "1" },
@@ -477,7 +481,9 @@ for (const era of ["modern", "legacy"] as const) {
   test(`${era}: search discovery identifies configured catalog and API namespaces`, async () => {
     const c = await client(era);
     const tools = (await c.request("tools/list")).result.tools;
-    const search = tools.find((tool: any) => tool.name === "search");
+    const search = tools.find(
+      (tool: { name: string }) => tool.name === "search",
+    );
     expect(search.description).toContain('"fixture"');
     expect(search.description).toContain('"widgets-api"');
     expect(search.inputSchema.properties.api.description).toContain(
@@ -499,7 +505,7 @@ for (const era of ["modern", "legacy"] as const) {
     ];
     const c = await client(era, { elicitation: { form: {} } }, false, names);
     const search = (await c.request("tools/list")).result.tools.find(
-      (tool: any) => tool.name === "search",
+      (tool: { name: string }) => tool.name === "search",
     );
     expect(search.description).toContain('"truncated":true');
     expect(
@@ -518,7 +524,7 @@ for (const era of ["modern", "legacy"] as const) {
       true,
     );
     const search = (await c.request("tools/list")).result.tools.find(
-      (tool: any) => tool.name === "search",
+      (tool: { name: string }) => tool.name === "search",
     );
     expect(search.description).toContain('"widgets-api"');
     expect(search.description).toContain('"other-api"');
@@ -576,7 +582,7 @@ for (const era of ["modern", "legacy"] as const) {
     const response = await c.request("tools/list");
     expect(response.error).toBeUndefined();
     const tools = response.result.tools;
-    expect(tools.map((tool: any) => tool.name).sort()).toEqual([
+    expect(tools.map((tool: { name: string }) => tool.name).sort()).toEqual([
       "action",
       "read",
       "search",
@@ -597,8 +603,8 @@ for (const era of ["modern", "legacy"] as const) {
       );
     }
     expect(
-      tools.find((tool: any) => tool.name === "action").inputSchema.properties
-        .arguments.properties.headers,
+      tools.find((tool: { name: string }) => tool.name === "action").inputSchema
+        .properties.arguments.properties.headers,
     ).toBeDefined();
     expect(
       (
@@ -737,7 +743,9 @@ for (const stage of ["failPreflight", "failFinal", "failPlan"] as const)
   test(`modern: ${stage} leaves receipt unconsumed and sends no action`, async () => {
     const c = await client("modern");
     const first = await c.invoke();
-    c[stage]();
+    if (stage === "failPreflight") c.failPreflight();
+    else if (stage === "failFinal") c.failFinal();
+    else c.failPlan();
     const response = await c.invoke({
       requestState: first.result.requestState,
       inputResponses: {
@@ -778,7 +786,8 @@ test("modern: helper authorization retains an immutable snapshot against same-sl
 for (const probe of ["probeReceipt", "probePermit"] as const)
   test(`modern: helper ${probe} proves atomic receipt and permit consumption`, async () => {
     const c = await client("modern");
-    c[probe]();
+    if (probe === "probeReceipt") c.probeReceipt();
+    else c.probePermit();
     const first = await c.invoke();
     const response = await c.invoke({
       requestState: first.result.requestState,
@@ -1195,9 +1204,13 @@ test("verified runtime routes qualified reads and declared headers, rejecting cr
   const { config: raw } = await operatorFixture();
   const config = parseOpenApiStdioConfig(raw);
   const c = await client("modern");
-  const store = new SqliteCatalogStore(config.catalogs[0]!.path);
+  const catalog = config.catalogs[0];
+  if (!catalog) throw new Error("Missing catalog");
+  const store = new SqliteCatalogStore(catalog.path);
   cleanups.push(async () => store.close());
-  const provider = await createCredentialProvider(config.profiles[0]!, {
+  const profile = config.profiles[0];
+  if (!profile) throw new Error("Missing profile");
+  const provider = await createCredentialProvider(profile, {
     manifestOrigins: config.allowedOrigins,
     environment: { STDIO_FIXTURE_CREDENTIAL: "stdio_fixture_secret_123" },
   });
@@ -1255,9 +1268,13 @@ test("changed manifest after preflight fails fresh runtime revalidation before r
   const { config: raw } = await operatorFixture();
   const config = parseOpenApiStdioConfig(raw);
   const c = await client("modern");
-  const store = new SqliteCatalogStore(config.catalogs[0]!.path);
+  const catalog = config.catalogs[0];
+  if (!catalog) throw new Error("Missing catalog");
+  const store = new SqliteCatalogStore(catalog.path);
   cleanups.push(async () => store.close());
-  const provider = await createCredentialProvider(config.profiles[0]!, {
+  const profile = config.profiles[0];
+  if (!profile) throw new Error("Missing profile");
+  const provider = await createCredentialProvider(profile, {
     manifestOrigins: config.allowedOrigins,
     environment: { STDIO_FIXTURE_CREDENTIAL: "stdio_fixture_secret_123" },
   });
@@ -1275,9 +1292,11 @@ test("changed manifest after preflight fails fresh runtime revalidation before r
     },
   });
   c.setRoute({ runtime, credentials: provider });
-  const operation = (await runtime.search({ query: "widget" })).operations.find(
-    (entry) => entry.safety === "action",
-  )!.operation;
+  const operationEntry = (
+    await runtime.search({ query: "widget" })
+  ).operations.find((entry) => entry.safety === "action");
+  if (!operationEntry) throw new Error("Missing action operation");
+  const operation = operationEntry.operation;
   const call = await runtime.prepareAction({ operation, arguments: {} });
   c.setCall(call);
   const invoke = (extra: object = {}) =>
@@ -1321,8 +1340,10 @@ test("stdio OAuth resource identifiers use the provider absolute-URI contract", 
     "https://api.example.test/resource",
     "custom:audience",
   ]) {
+    const baseProfile = config.profiles[0];
+    if (!baseProfile) throw new Error("Missing profile");
     const profile = {
-      ...config.profiles[0]!,
+      ...baseProfile,
       auth: {
         type: "oauth2-pkce" as const,
         authorizationEndpoint: "https://issuer.example/authorize",
@@ -1384,7 +1405,8 @@ test("stdio OAuth resource identifiers use the provider absolute-URI contract", 
 
 test("operator config rejects provider-invalid profile semantics without acquiring credentials", async () => {
   const { config } = await operatorFixture();
-  const base = config.profiles[0]!;
+  const base = config.profiles[0];
+  if (!base) throw new Error("Missing profile");
   const oauth = {
     type: "oauth2-pkce" as const,
     authorizationEndpoint: "https://issuer.example/authorize",
@@ -1527,6 +1549,16 @@ test("strict operator config accepts valid release routing and rejects widening 
     );
 });
 
+type StdioTestLine = {
+  jsonrpc?: string;
+  result?: {
+    serverInfo?: { name?: string };
+    isError?: boolean;
+    content?: { text?: string }[];
+    tools?: { name?: string; description?: string }[];
+  };
+};
+
 test("CLI stdio emits only protocol frames, writes diagnostics to stderr, and exits on SIGTERM", async () => {
   const { configPath } = await operatorFixture();
   const child = Bun.spawn(
@@ -1552,7 +1584,7 @@ test("CLI stdio emits only protocol frames, writes diagnostics to stderr, and ex
     if (child.exitCode === null) child.kill("SIGKILL");
     await child.exited;
   });
-  const lines: any[] = [];
+  const lines: StdioTestLine[] = [];
   const reader = child.stdout.getReader();
   let buffer = "";
   const output = (async () => {
@@ -1569,7 +1601,7 @@ test("CLI stdio emits only protocol frames, writes diagnostics to stderr, and ex
     }
   })();
   child.stdin.write(
-    JSON.stringify({
+    `${JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
       method: "initialize",
@@ -1578,18 +1610,17 @@ test("CLI stdio emits only protocol frames, writes diagnostics to stderr, and ex
         capabilities: {},
         clientInfo: { name: "test", version: "1" },
       },
-    }) + "\n",
+    })}\n`,
   );
   await child.stdin.flush();
   for (let attempt = 0; !lines.length && attempt < 200; attempt++)
     await Bun.sleep(10);
   expect(lines[0]?.result?.serverInfo?.name).toBe("openapi-mcp");
   child.stdin.write(
-    JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) +
-      "\n",
+    `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`,
   );
   child.stdin.write(
-    JSON.stringify({
+    `${JSON.stringify({
       jsonrpc: "2.0",
       id: 2,
       method: "tools/call",
@@ -1597,7 +1628,7 @@ test("CLI stdio emits only protocol frames, writes diagnostics to stderr, and ex
         name: "search",
         arguments: { query: "widgets", api: "fixture" },
       },
-    }) + "\n",
+    })}\n`,
   );
   await child.stdin.flush();
   for (let attempt = 0; lines.length < 2 && attempt < 200; attempt++)
@@ -1611,7 +1642,7 @@ test("CLI stdio emits only protocol frames, writes diagnostics to stderr, and ex
   for (let attempt = 0; lines.length < 3 && attempt < 200; attempt++)
     await Bun.sleep(10);
   const discoveredSearch = lines[2]?.result?.tools?.find(
-    (tool: any) => tool.name === "search",
+    (tool: { name?: string }) => tool.name === "search",
   );
   expect(discoveredSearch?.description).toContain(
     'Catalog names: {"names":["fixture"]',
