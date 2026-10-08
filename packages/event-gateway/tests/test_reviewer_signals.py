@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-import subprocess
+import subprocess  # nosec B404 - Fixed interpreter and owned offline replay fixture, no shell.
 import sys
 import tempfile
 import unittest
@@ -17,7 +17,7 @@ class ReviewerSignalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "wrong-expectation.json"
             path.write_text(json.dumps(fixture))
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 - Fixed interpreter and synthetic fixture path.
                 [sys.executable, "-O", str(script), str(path)],
                 capture_output=True, text=True, check=False, timeout=10,
             )
