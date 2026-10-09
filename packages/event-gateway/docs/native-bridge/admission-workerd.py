@@ -65,8 +65,6 @@ def inputs():
     args.python = checks.verified_python()
     args.provenance = checks.verify_installed(args.package_source)
     args.node = checks.verified_executable(args.node)
-    args.binary = Path(checks.verified_executable(args.binary))
-    require(sha(args.binary) == args.binary_sha, 'qualified native binary hash')
     args.qualifier = Path(args.qualifier).resolve(strict=True)
     args.output = Path(args.output).resolve()
     args.broker = HERE / 'admission-workerd-broker.mjs'
@@ -76,9 +74,17 @@ def inputs():
     # All installed module and contract bytes have been verified before these imports.
     from event_gateway import cli, client_runtime, launcher, security, store
 
+    args.binary = launcher.qualified_binary(Path(args.binary), args.binary_sha)
+    args.source_hashes[str(args.binary)] = args.binary_sha
     gateway = SimpleNamespace(cli=cli, client_runtime=client_runtime, launcher=launcher, security=security, store=store)
     native = load_module('admission_native_qualifier', args.qualifier)
     return args, gateway, native
+
+
+def qualify_native(args, gateway, native):
+    """Recheck one descriptor's metadata and bytes immediately before each owned boot."""
+    binary = gateway.launcher.qualified_binary(args.binary, args.binary_sha)
+    return native.qualify(binary, input_recorded=True, receipt_version=3)
 
 
 @contextmanager
@@ -322,6 +328,7 @@ class AdmissionRun:
         return run
 
     def proof(self):
+        self.gateway.launcher.qualified_binary(self.args.binary, self.args.binary_sha)
         require(all(sha(path) == digest for path, digest in self.args.source_hashes.items()), 'verified source changed during qualification')
         return {'result': 'PASS', 'qualification': 'fixture-authority-real-native-cloud-admission', 'productionAdmissionProven': False,
                 'nativeRuntimeSqlInsertion': False, 'daemonWriterVerified': True, 'realModelCalls': 0, 'binarySha256': self.args.binary_sha,
@@ -342,7 +349,7 @@ def main():
                 run.await_daemon(daemon)
                 for phase in ('source', 'target'):
                     native.qualify_input_recorded = run.callback(phase)
-                    native.qualify(args.binary, input_recorded=True, receipt_version=3)
+                    qualify_native(args, gateway, native)
                 args.output.write_text(json.dumps(run.proof(), indent=2) + '\n')
                 print(json.dumps({'result': 'PASS', 'proof': str(args.output), 'productionAdmissionProven': False}))
 

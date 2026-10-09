@@ -7,7 +7,7 @@ import unittest
 import uuid
 
 from event_gateway.protocol import derive_delivery_id, ProtocolError
-from event_gateway.store import Store, StoreError, IDENTITY, RETENTION
+from event_gateway.store import Store, StoreError, IDENTITY, RETENTION, validate_native_route
 
 FIXTURES = json.loads(
     (
@@ -44,6 +44,96 @@ class StoreTests(unittest.TestCase):
         event = dict(self.event, eventId=str(uuid.uuid4()), attemptId=str(uuid.uuid4()))
         event["deliveryId"] = derive_delivery_id(event)
         return event
+
+    def native_mapping(self):
+        binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                   "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
+                   "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+        return {**{key: self.mapping[key] for key in IDENTITY}, "runtimeId": str(uuid.uuid4()),
+                "leaseExpiresAt": NOW + 3600, "sessionId": str(uuid.uuid4()),
+                "nativeThreadId": binding["threadId"], "nativeBinding": binding}
+
+    def test_native_route_round_trip_and_legacy_factory_refusal(self):
+        mapping = self.native_mapping()
+        self.assertEqual(validate_native_route(mapping), mapping["nativeBinding"])
+        self.store.put_attachment(mapping)
+        renewed = dict(mapping, leaseExpiresAt=NOW + 7200)
+        self.store.put_attachment(renewed)
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertEqual(self.store.get_attachment(mapping["runtimeId"]), renewed)
+        self.assertIsNone(validate_native_route(self.mapping, allow_legacy=True))
+        with self.assertRaisesRegex(StoreError, "^invalid_attachment$"):
+            validate_native_route(self.mapping)
+        with self.assertRaisesRegex(StoreError, "^invalid_attachment$"):
+            validate_native_route(dict(self.mapping, nativeThreadId=str(uuid.uuid4())))
+
+    def test_native_route_rejects_incomplete_or_inconsistent_bindings(self):
+        mapping = self.native_mapping()
+        changes = [
+            {"sessionId": "not-a-uuid"}, {"sessionId": True},
+            {"nativeThreadId": str(uuid.uuid4())}, {"nativeThreadId": None},
+            {"nativeBinding": None},
+            {"nativeBinding": dict(mapping["nativeBinding"], clientId="invalid")},
+            {"nativeBinding": dict(mapping["nativeBinding"], backendPid=True)},
+            {"nativeBinding": dict(mapping["nativeBinding"], generation=-1)},
+            {"nativeBinding": dict(mapping["nativeBinding"], unexpected=True)},
+        ]
+        candidates = [dict(mapping, **change) for change in changes]
+        candidates += [{key: value for key, value in mapping.items() if key != missing}
+                       for missing in ("sessionId", "nativeThreadId", "nativeBinding")]
+        for candidate in candidates:
+            with self.subTest(candidate=candidate), self.assertRaisesRegex(StoreError, "^invalid_attachment$"):
+                self.store.put_attachment(candidate)
+        self.assertIsNone(self.store.get_attachment(mapping["runtimeId"]))
+
+    def test_native_route_requires_attachment_generation_to_change(self):
+        mapping = self.native_mapping()
+        self.store.put_attachment(mapping)
+        new_route = self.native_mapping()
+        for generation in ("runtimeGeneration", "nodeGeneration", "consumerGeneration"):
+            changed = {**mapping, generation: mapping.get(generation, 0) + 1,
+                       **{key: new_route[key] for key in ("sessionId", "nativeThreadId", "nativeBinding")}}
+            with self.subTest(generation=generation), self.assertRaisesRegex(StoreError, "native route changed"):
+                self.store.put_attachment(changed)
+        removed = {key: value for key, value in mapping.items() if key not in ("sessionId", "nativeBinding")}
+        removed["attachmentGeneration"] += 1
+        with self.assertRaisesRegex(StoreError, "^invalid_attachment$"):
+            self.store.put_attachment(removed)
+        self.assertEqual(self.store.get_attachment(mapping["runtimeId"]), mapping)
+
+    def test_reattaching_native_route_fences_old_delivery(self):
+        mapping = self.native_mapping()
+        self.store.put_attachment(mapping)
+        event = dict(self.event, runtimeId=mapping["runtimeId"])
+        event["deliveryId"] = derive_delivery_id(event)
+        self.store.accept(event)
+        replacement = self.native_mapping()
+        changed = {**mapping, "attachmentGeneration": mapping["attachmentGeneration"] + 1,
+                   **{key: replacement[key] for key in ("sessionId", "nativeThreadId", "nativeBinding")}}
+        self.store.put_attachment(changed)
+        self.assertEqual(self.store.get(event["deliveryId"])["status"], "stale")
+        self.assertEqual(self.store.get_attachment(mapping["runtimeId"]), changed)
+
+    def test_native_transfer_replay_preserves_both_routes(self):
+        source, target = self.native_mapping(), self.native_mapping()
+        self.store.put_attachment(source)
+        self.store.put_attachment(target)
+        replacement = dict(target, attachmentGeneration=target["attachmentGeneration"] + 1)
+        transfer = {"sourceRuntimeId": source["runtimeId"],
+                    "expectedRuntimeGeneration": source["runtimeGeneration"],
+                    "expectedAttachmentGeneration": source["attachmentGeneration"],
+                    "runtimeGeneration": source["runtimeGeneration"] + 1,
+                    "attachmentGeneration": source["attachmentGeneration"] + 1}
+        self.store.put_attachment(replacement, transfer=transfer)
+        self.store.put_attachment(replacement, transfer=transfer)
+        self.assertIsNone(self.store.get_attachment(source["runtimeId"]))
+        tombstone = json.loads(self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (source["runtimeId"],),
+        ).fetchone()[0])
+        for key in ("sessionId", "nativeThreadId", "nativeBinding"):
+            self.assertEqual(tombstone[key], source[key])
+        self.assertEqual(self.store.get_attachment(target["runtimeId"]), replacement)
 
     def transfer_mapping_and_cas(self):
         target = dict(self.mapping, runtimeId=str(uuid.uuid4()),

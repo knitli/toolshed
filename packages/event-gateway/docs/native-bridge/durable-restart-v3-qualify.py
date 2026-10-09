@@ -32,7 +32,7 @@ def require(condition, message=None):
 SOURCE = Path(os.environ['EVENT_NATIVE_QUALIFIER']).resolve(strict=True)
 SOURCE_SHA = 'e4068916c0739657186b8be34d087714ad9a544642dc8921a9c502ca1ab9ac11'
 require(hashlib.sha256(SOURCE.read_bytes()).hexdigest() == SOURCE_SHA)
-INSTALLED_SHA = '4ab38f6f5231acda4fee0af5d017ab33c583f3fecfc4e68531000a8dd25c0f85'
+INSTALLED_SHA = '25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e'
 DISTRIBUTION = importlib.metadata.distribution('knitli-event-gateway')
 require(any(str(file) == 'event_gateway/native.py' for file in DISTRIBUTION.files or ()))
 INSTALLED = Path(DISTRIBUTION.locate_file('event_gateway/native.py')).resolve(strict=True)

@@ -1,8 +1,9 @@
 # Knitli event gateway foundation
 
 This package owns local event transport, durable receipts, and harness adapters
-for the Event Runtime. **Automatic wake is disabled.** This is the Toolshed
-foundation for PR2, not its client-attachment release qualification.
+for the Event Runtime. **Automatic wake is disabled by default.** An explicit
+private dispatch configuration enables local delivery through an admitted,
+launcher-owned session. Production release still requires live qualification.
 
 Owner decision, 2026-10-05: build the foundation and investigate Codex bridges
 with a separate agent. Do not infer a live client's selected thread from a PID,
@@ -20,15 +21,16 @@ The dispatcher uses the injected cloud claim DTO and private native bridge.
 It persists claim intent before network access and the complete native request
 before submission. Definite no-start proof retires only the original permit;
 unknown outcomes remain fenced. The integrations have no production defaults.
-The shipped CLI does not configure a dispatch authority, enable the Mesh listener,
-or submit native turns. `attach`, `renew`, and `transfer` require an explicit
+Without `run --dispatch-config`, the shipped CLI runs only the private control
+daemon. An explicit configuration connects the signed listener, cloud authority,
+and durable dispatch/recovery worker; see [configured dispatch](docs/native-dispatch.md). `attach`, `renew`, and `transfer` require an explicit
 private cloud configuration and remain subject to the server's native-admission
 gate. `enroll` creates a local key and prepares an owner request without
 claiming cloud enrollment. The private control daemon supports status, detach,
 and single-writer attachment mapping updates. Installation does not start it.
 The separate foreground `launch` command owns one explicitly qualified native
-client and exposes read-only local selection status; it does not attach a cloud
-runtime or enable delivery.
+client and exposes local selection status plus bounded conditional Start and
+receipt operations. Launching alone does not attach a cloud runtime or enable delivery.
 
 ## Install and run
 
@@ -100,7 +102,7 @@ selected status requires a fresh witness. A timed-out status read preserves one
 pending reply without interrupting the TUI. A later query drains and discards
 that old reply; the following query requests a fresh witness. This read-only path
 revokes any prior Start eligibility and never grants permission to start a turn;
-use a dedicated bridge for presence polling. The printed session UUID identifies
+conditional Start obtains and checks fresh eligibility under the launcher lock. The printed session UUID identifies
 only this launcher. From another terminal, use the same `--state-dir` if supplied:
 
 ```sh
@@ -110,9 +112,9 @@ knitli-event-gateway client-status --session-id PRINTED-SESSION-UUID
 The response reports `selection: selected` with the exact native thread, or
 `selection: unavailable`; `attached` and `automaticWakeEnabled` remain false.
 Status is an observation at query time, never admission or a reusable lease.
-The owner-only session socket accepts presence status, binding preflight, and
-challenge-correlated read-only witness requests only, not start, receipt or
-arbitrary native commands. The foreground launcher removes it and closes its bridge when
+The owner-only session socket accepts presence, binding and admission witness
+requests, plus conditional Start and exact read-only receipt recovery for an
+explicit mapped session. It exposes no arbitrary native commands. The foreground launcher removes it and closes its bridge when
 the TUI exits. Cleanup signals only the owned, unreaped process group, never a
 PID reported by a witness. There is no background restart or service install.
 

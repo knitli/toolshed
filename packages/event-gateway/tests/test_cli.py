@@ -98,6 +98,8 @@ class CliTests(unittest.TestCase):
                     on_first_send(b'{"prepared":"body"}')
                 return response
 
+            renew = attach
+
         fake = FakeCloud()
         output, error = io.StringIO(), io.StringIO()
         with (
@@ -118,8 +120,30 @@ class CliTests(unittest.TestCase):
         with Store(self.state) as store:
             mapping = store.get_attachment(runtime_id)
             self.assertEqual(mapping["nativeBinding"], binding)
+            self.assertEqual(mapping["sessionId"], session_id)
+            self.assertEqual(mapping["nativeThreadId"], binding["threadId"])
             self.assertEqual(mapping["runtimeGeneration"], 1)
         self.assertIsNone(cli.load_pending_commit(self.state, "attach", session_id))
+
+        response.update(status="renewed", leaseUntil=_iso(time.time() + 180))
+        output = io.StringIO()
+        with (
+            patch.object(cli, "load_cloud_client", return_value=fake),
+            patch.object(cli, "session_binding", side_effect=[binding, binding]),
+            patch.object(cli, "session_challenge", return_value=evidence),
+            redirect_stdout(output),
+        ):
+            code = cli.main(["--state-dir", str(self.state), "renew", "--runtime-id", runtime_id,
+                             "--expected-runtime-generation", "1", "--expected-attachment-generation", "1",
+                             "--session-id", session_id, "--cloud-config", str(self.state / "cloud.json")])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue())["remoteStatus"], "renewed")
+        with Store(self.state) as store:
+            renewed = store.get_attachment(runtime_id)
+            self.assertGreater(renewed["leaseExpiresAt"], mapping["leaseExpiresAt"])
+            self.assertEqual({key: value for key, value in renewed.items() if key != "leaseExpiresAt"},
+                             {key: value for key, value in mapping.items() if key != "leaseExpiresAt"})
+        self.assertIsNone(cli.load_pending_commit(self.state, "renew", session_id))
 
     def test_ambiguous_challenge_failure_is_definite_without_sampling_or_commit(self):
         for operation in ("attach", "renew", "transfer"):
@@ -496,6 +520,11 @@ class CliTests(unittest.TestCase):
                              "--session-id", session_id, "--cloud-config", str(self.state / "cloud.json")])
         self.assertEqual(code, 0)
         self.assertEqual(fake.replayed, (intent, challenge, evidence, body, True))
+        with Store(self.state) as store:
+            mapping = store.get_attachment(runtime_id)
+            self.assertEqual(mapping["sessionId"], artifact["sessionId"])
+            self.assertEqual(mapping["nativeThreadId"], binding["threadId"])
+            self.assertEqual(mapping["nativeBinding"], binding)
         self.assertIsNone(cli.load_pending_commit(self.state, "attach", session_id))
 
     def test_concurrent_loser_preserves_winner_pending_commit(self):
@@ -650,7 +679,11 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result["remoteStatus"], "transferred")
             self.assertEqual(result["localStatus"], "current")
             self.assertIsNone(daemon_store.get_attachment(source_id))
-            self.assertEqual(daemon_store.get_attachment(replacement_id)["attachmentGeneration"], 9)
+            mapping = daemon_store.get_attachment(replacement_id)
+            self.assertEqual(mapping["attachmentGeneration"], 9)
+            self.assertEqual(mapping["sessionId"], session_id)
+            self.assertEqual(mapping["nativeThreadId"], binding["threadId"])
+            self.assertEqual(mapping["nativeBinding"], binding)
         pending = cli.load_pending_commit(self.state, "transfer", session_id)
         self.assertIsNone(pending)
 
@@ -768,7 +801,11 @@ class CliTests(unittest.TestCase):
                     self.assertEqual(json.loads(second_output.getvalue())["localStatus"], "current")
                     self.assertEqual(fake.recoveries, [False, True])
                     self.assertEqual(daemon_commands, ["revoke-transfer-source", "transfer-attachment"])
-                    self.assertEqual(daemon_store.get_attachment(replacement_id)["attachmentGeneration"], 9)
+                    mapping = daemon_store.get_attachment(replacement_id)
+                    self.assertEqual(mapping["attachmentGeneration"], 9)
+                    self.assertEqual(mapping["sessionId"], session_id)
+                    self.assertEqual(mapping["nativeThreadId"], binding["threadId"])
+                    self.assertEqual(mapping["nativeBinding"], binding)
                     self.assertEqual(daemon_store.get(queued)["status"], "stale")
                     self.assertIsNone(cli.load_pending_commit(state, "transfer", session_id))
                 elif capacity_fail:
@@ -799,7 +836,8 @@ class CliTests(unittest.TestCase):
         cloud_id = {"origin": "https://events.example.com", "principal": event["principal"],
                     "agent": event["agent"], "nodeId": str(uuid.uuid4()), "nodeGeneration": 1}
         source = {key: event[key] for key in IDENTITY}
-        source.update(leaseExpiresAt=now + 3600, nodeId=cloud_id["nodeId"], nativeBinding=binding)
+        source.update(leaseExpiresAt=now + 3600, nodeId=cloud_id["nodeId"], nativeBinding=binding,
+                      sessionId=str(uuid.uuid4()), nativeThreadId=binding["threadId"])
         with Store(self.state) as store:
             store.put_attachment(source)
             queued = store.accept(event)["deliveryId"]

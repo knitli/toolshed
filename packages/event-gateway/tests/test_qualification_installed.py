@@ -85,12 +85,13 @@ class InstalledQualificationTests(unittest.TestCase):
             self.verify()
 
     def test_rejects_editable_and_source_archive_provenance(self):
-        cases = ({'url': self.source.as_uri(), 'dir_info': {'editable': True}},
-                 {'url': 'https://example.invalid/source.tar.gz', 'archive_info': {}})
-        for value in cases:
+        cases = (({'url': self.source.as_uri(), 'dir_info': {'editable': True}}, 'editable or source-directory install'),
+                 ({'url': 'https://example.invalid/package.whl'}, 'wheel archive metadata missing'),
+                 ({'url': 'https://example.invalid/source.tar.gz', 'archive_info': {}}, 'wheel archive URL invalid'))
+        for value, error in cases:
             with self.subTest(value=value):
                 (self.info / 'direct_url.json').write_text(json.dumps(value))
-                with self.assertRaises(qualification.PreflightError):
+                with self.assertRaisesRegex(qualification.PreflightError, error):
                     self.verify()
 
     def test_rejects_mutated_module_and_contract_even_with_updated_record(self):

@@ -17,7 +17,8 @@ import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from .native_reader import NativeBridge, unique, uuid
+from .native import validate_receipt
+from .native_reader import IDENTITY, NativeBridge, unique, uuid, validate_start
 from .native_terminal import run_terminal
 from .security import ensure_private_directory
 
@@ -27,6 +28,8 @@ BINDING_FIELDS = (
     "clientId", "connectionId", "backendPid", "threadId", "generation",
     "serverInstanceId", "serverGeneration",
 )
+NATIVE_COMMANDS = frozenset(("nativeStart", "nativeReceipt"))
+NATIVE_OPERATION_SECONDS = 8
 
 
 def _claim_terminal():
@@ -170,7 +173,7 @@ def _reject_constant(_):
     raise ValueError
 
 
-def _session_request(state_dir, session_id, request):
+def _session_request(state_dir, session_id, request, *, native_request=None):
     state_dir = Path(state_dir).absolute()
     if any(part.is_symlink() for part in (state_dir, *state_dir.parents)):
         raise LaunchError("unsafe_client_state")
@@ -186,8 +189,16 @@ def _session_request(state_dir, session_id, request):
     payload = json.dumps(request, separators=(",", ":"), allow_nan=False).encode() + b"\n"
     if len(payload) > 1024:
         raise LaunchError("invalid_client_request")
+    if native_request is not None:
+        if request.get("command") not in NATIVE_COMMANDS:
+            raise LaunchError("invalid_client_request")
+        frame = json.dumps(native_request, separators=(",", ":"), allow_nan=False).encode() + b"\n"
+        if len(frame) > 4096:
+            raise LaunchError("invalid_client_request")
+        payload += frame
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
-        deadline = time.monotonic() + 2
+        deadline = (request["deadlineMonotonic"] if native_request is not None
+                    else time.monotonic() + 2)
         _remaining(channel, deadline)
         channel.connect(str(path))
         _remaining(channel, deadline)
@@ -208,6 +219,16 @@ def _session_request(state_dir, session_id, request):
         if not isinstance(value, dict):
             raise LaunchError("invalid_client_response")
         return value
+
+
+def session_native_operation(state_dir, session_id, binding, operation, request):
+    """Send one bounded exact native operation to an explicitly selected launcher."""
+    if operation not in NATIVE_COMMANDS or not _valid_binding(binding):
+        raise LaunchError("invalid_native_operation")
+    return _session_request(state_dir, session_id, {
+        "command": operation, "expectedBinding": binding,
+        "deadlineMonotonic": time.monotonic() + NATIVE_OPERATION_SECONDS,
+    }, native_request=request)
 
 
 def _remaining(channel, deadline):
@@ -294,6 +315,63 @@ class NativeClient:
         return {"challengeId": challenge_id, "observedAt": observed_at,
                 "validUntilMonotonic": self.bridge.valid_until, "witness": dict(witness)}
 
+    def native_operation(self, operation, binding, request, deadline):
+        """Serialize exact conditional Start or read-only recovery on the owned reader."""
+        if (not self.ready or operation not in NATIVE_COMMANDS
+                or not _valid_binding(binding) or self.bridge.receipt_version != 3):
+            raise LaunchError("native_operation_unavailable")
+        validate_start(request)
+        if any(type(request[key]) is not type(binding[key]) or request[key] != binding[key]
+               for key in ("clientId", "serverInstanceId", "serverGeneration", "threadId", "generation")):
+            raise LaunchError("native_binding_changed")
+        if not self.lock.acquire(timeout=max(0, deadline - time.monotonic())):
+            raise LaunchError("native_operation_timeout")
+        try:
+            if time.monotonic() >= deadline:
+                raise LaunchError("native_operation_timeout")
+            if operation == "nativeReceipt":
+                self.bridge.restore_attempt(request)
+                outcome = self.bridge.receipt(request)
+            else:
+                # Presence calls clear reader eligibility; reacquire and consume it under one lock.
+                witness = self.bridge.challenge()
+                if (not _valid_native_witness(witness) or _binding(witness) != binding
+                        or time.monotonic() >= min(deadline, self.bridge.valid_until)
+                        or (self.expected_thread is not None
+                            and witness["threadId"] != self.expected_thread)):
+                    outcome = {"status": "notStarted", "reason": "selectionChanged"}
+                else:
+                    outcome = self.bridge.start(request)
+            receipt = {**{key: request[key] for key in (*IDENTITY, "generation")}, "outcome": outcome}
+            validate_receipt({**request, "receiptVersion": 3}, receipt,
+                             allow_input_recorded=operation == "nativeReceipt")
+            return receipt
+        finally:
+            self.lock.release()
+
+
+def _native_control(channel, client, header, buffered, started):
+    if (set(header) != {"command", "expectedBinding", "deadlineMonotonic"}
+            or not _valid_binding(header["expectedBinding"])
+            or type(header["deadlineMonotonic"]) not in (int, float)
+            or not math.isfinite(header["deadlineMonotonic"])):
+        raise LaunchError("invalid_native_operation")
+    deadline = min(started + NATIVE_OPERATION_SECONDS, header["deadlineMonotonic"])
+    data = bytearray(buffered)
+    while b"\n" not in data and len(data) < 4096:
+        _remaining(channel, deadline)
+        chunk = channel.recv(4096 - len(data))
+        if not chunk:
+            break
+        data.extend(chunk)
+    if len(data) > 4096 or not data.endswith(b"\n") or data.count(b"\n") != 1:
+        raise LaunchError("invalid_native_operation")
+    request = json.loads(data, object_pairs_hook=unique, parse_constant=_reject_constant)
+    _remaining(channel, deadline)
+    value = client.native_operation(header["command"], header["expectedBinding"], request, deadline)
+    _remaining(channel, deadline)
+    return value
+
 
 def _control(listener, client, stop):
     while not stop.is_set():
@@ -304,7 +382,8 @@ def _control(listener, client, stop):
         except OSError:
             return
         with channel:
-            deadline = time.monotonic() + 2
+            started = time.monotonic()
+            deadline = started + 2
             try:
                 data = bytearray()
                 while b"\n" not in data and len(data) < 1024:
@@ -313,7 +392,16 @@ def _control(listener, client, stop):
                     if not chunk:
                         break
                     data.extend(chunk)
-                request = json.loads(bytes(data), object_pairs_hook=unique)
+                header, newline, buffered = bytes(data).partition(b"\n")
+                if not newline or len(header) + 1 > 1024:
+                    raise ValueError("invalid_client_request")
+                request = json.loads(header, object_pairs_hook=unique, parse_constant=_reject_constant)
+                if isinstance(request, dict) and request.get("command") in NATIVE_COMMANDS:
+                    value = _native_control(channel, client, request, buffered, started)
+                    channel.sendall(json.dumps(value, separators=(",", ":"), allow_nan=False).encode() + b"\n")
+                    continue
+                if buffered:
+                    raise ValueError("invalid_client_request")
                 if request == {"command": "status"}:
                     value = client.status()
                 elif request == {"command": "binding"}:
@@ -331,7 +419,7 @@ def _control(listener, client, stop):
                     channel.sendall(json.dumps({"reason": str(error)}).encode() + b"\n")
                 except OSError:
                     pass
-            except (OSError, ValueError):
+            except (OSError, ValueError, TypeError, RecursionError):
                 pass
 
 

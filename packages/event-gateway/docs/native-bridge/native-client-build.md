@@ -45,14 +45,17 @@ bit-for-bit reproducibility is claimed. The two-TUI runtime proof uses only a
 loopback synthetic model (`realModelCalls: 0`); it
 does not prove cloud settlement or public admission.
 
-Run the native runtime qualifier against the candidate and the exact installed wheel/reader recorded in its proof. For the two-TUI restart proof, the captured v3 runner is `docs/native-bridge/durable-restart-v3-qualify.py`; use the reader and wheel hashes pinned in `durable-restart-v3-checkpoint.md`, and pass the candidate's freshly computed SHA:
+Run the native runtime qualifier against the candidate and the exact installed wheel/reader recorded in its proof. For the two-TUI restart proof, the current v3 runner is `docs/native-bridge/durable-restart-v3-qualify.py`; use the current reader, adapter, and wheel hashes in [`native-release-runtime.md`](native-release-runtime.md), and pass the candidate's freshly computed SHA. Earlier durable-restart checkpoints retain historical wheel pins.
 
 ```sh
-EVENT_NATIVE_QUALIFIER="$EVENT_PINNED_READER" "$EVENT_PROOF_PYTHON" -I -O \
+EVENT_RECOVERY_CACHE="$(mktemp -d)"
+EVENT_NATIVE_QUALIFIER="$EVENT_PINNED_READER" "$EVENT_PROOF_PYTHON" -I -B -O \
+  -X "pycache_prefix=$EVENT_RECOVERY_CACHE" \
   docs/native-bridge/durable-restart-v3-qualify.py \
   --binary /private/tmp/codex-native-v3 \
   --sha256 "$(shasum -a 256 /private/tmp/codex-native-v3 | cut -d ' ' -f 1)" \
   --output /private/tmp/codex-native-v3-runtime.json
+rm -d "$EVENT_RECOVERY_CACHE"
 ```
 
 Review the source/build and runtime evidence together before any separately

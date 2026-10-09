@@ -16,12 +16,37 @@ class Listener:
         """Bound request processing by absolute time and concurrency."""
         self.gateway, self.deadline = gateway, deadline
         self.concurrency, self.active = concurrency, 0
+        self.tasks = set()
+        self.closing = False
+        self.server = None
 
     async def start(self, host, port):
         """Construct the server with the same header bound as request validation."""
-        return await asyncio.start_server(
-            self.handle, host, port, limit=MAX_HEADER_BYTES
+        self.server = await asyncio.start_server(
+            self._connected, host, port, limit=MAX_HEADER_BYTES
         )
+        return self.server
+
+    def _connected(self, reader, writer):
+        if self.closing:
+            writer.close()
+            return
+        task = asyncio.create_task(self.handle(reader, writer))
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+
+    async def close(self):
+        """Stop accepting and finish every handler before its Store is closed."""
+        self.closing = True
+        if self.server is not None:
+            self.server.close()
+        if self.tasks:
+            _, pending = await asyncio.wait(self.tasks, timeout=self.deadline + 2)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*self.tasks, return_exceptions=True)
+        if self.server is not None:
+            await self.server.wait_closed()
 
     async def handle(self, reader, writer):
         if self.active >= self.concurrency:
@@ -60,6 +85,8 @@ class Listener:
                     key_id=headers.get("x-event-key-id", ""),
                 )
                 await self._reply(writer, 202, result)
+        except ConnectionError:
+            pass
         except TimeoutError:
             await self._reply(writer, 408, {"reason": "request_deadline"})
         except (Refused, ProtocolError, SecurityError, StoreError) as error:
@@ -78,7 +105,10 @@ class Listener:
         finally:
             self.active -= 1
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            except ConnectionError:
+                pass
 
     @staticmethod
     async def _reply(writer, status, value):
