@@ -9,6 +9,7 @@ import runpy
 import tempfile
 import textwrap
 import unittest
+import zipfile
 from unittest.mock import patch
 
 
@@ -73,6 +74,77 @@ class ContractWorkflowTests(unittest.TestCase):
             replacements["FAMILIES"] = families
         with patch.dict(POLICY, replacements):
             return POLICY["verify_contract"](head, "test-token")
+
+    def approved_snapshot(self, name):
+        # Read immutable data only: no extraction, source evaluation, or Git/network dependency.
+        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
+            return {SNAPSHOT + path: archive.read(f"snapshots/{name}/{path}") for path in PATHS}
+
+    def test_actual_approved_families_and_frozen_policy(self):
+        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+        self.assertEqual(list(POLICY["FAMILIES"]), metadata["families"])
+        self.assertEqual(set(metadata["snapshots"]), {
+            "legacy", "no-start", "native-start", "native-input-recorded", "native-admission",
+        })
+        self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
+        for expected in metadata["families"]:
+            with self.subTest(family=expected["name"]):
+                self.blobs = self.approved_snapshot(expected["name"])
+                self.reads.clear()
+                self.api_reads.clear()
+                self.assertEqual(self.verify(), expected["name"])
+                self.assertCountEqual(self.reads, [SNAPSHOT + path for path in PATHS])
+                self.assertEqual(self.api_reads, [f"git/trees/{HEAD}?recursive=1"])
+
+    def test_native_admission_mutation_or_omission_rejected_for_all_required_blobs(self):
+        # PATHS explicitly includes both control fixtures.json and manifest.json.
+        original = self.approved_snapshot("native-admission")
+        for path in PATHS:
+            for missing in (False, True):
+                with self.subTest(path=path, missing=missing):
+                    self.blobs = original.copy()
+                    if missing:
+                        del self.blobs[SNAPSHOT + path]
+                    else:
+                        self.blobs[SNAPSHOT + path] += b"unapproved"
+                    with self.assertRaises((ValueError, KeyError)):
+                        self.verify()
+
+    def test_native_admission_manifest_source_provenance(self):
+        # This proves fixture provenance separately from the verifier's raw snapshot hash gate.
+        blobs = self.approved_snapshot("native-admission")
+        event = json.loads(blobs[SNAPSHOT + "event-v1/manifest.json"])
+        control = json.loads(blobs[SNAPSHOT + "event-control-v1/manifest.json"])
+        self.assertEqual(event["commit"], "ed23882eac491e26e070e3ef26cf8c0e9e702b38")
+        self.assertEqual(control["revision"], "038716741534afe804fb75b9eab15dba6ddbee11")
+        source_root = "apps/os/packages/event-runtime/"
+        event_paths = {source_root + path for path in (
+            "src/protocol.schema.json", "src/protocol.ts", "src/policy.ts",
+            "__tests__/fixtures/protocol-v1.json",
+        )}
+        control_paths = {source_root + "src/" + name + ".ts" for name in (
+            "contracts", "api", "registry", "coordinator", "coordinator-admission",
+            "authority-client", "protocol", "policy", "native-admission-contract",
+        )}
+        self.assertEqual({entry["originalPath"] for entry in event["files"]}, event_paths)
+        self.assertEqual(len(event["files"]), len(event_paths))
+        self.assertEqual(set(control["sources"]), control_paths)
+        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+            event_hashes = {entry["originalPath"]: entry["sha256"] for entry in event["files"]}
+            for revision, hashes in ((event["commit"], event_hashes),
+                                     (control["revision"], control["sources"])):
+                self.assertEqual(metadata["sources"][revision], hashes)
+                for path, expected in hashes.items():
+                    with self.subTest(revision=revision, source=path):
+                        source = archive.read(f"sources/{revision}/{path}")
+                        self.assertEqual(hashlib.sha256(source).hexdigest(), expected)
+            for entry in event["files"]:
+                source = archive.read(f"sources/{event['commit']}/{entry['originalPath']}")
+                self.assertEqual(blobs[SNAPSHOT + "event-v1/" + entry["file"]], source)
+        self.assertEqual(hashlib.sha256(blobs[SNAPSHOT + "event-control-v1/fixtures.json"]).hexdigest(),
+                         control["fixturesSha256"])
 
     def test_checked_in_snapshot_and_fixed_paths(self):
         accepted = self.verify()
