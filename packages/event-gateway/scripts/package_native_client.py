@@ -22,6 +22,7 @@ UPSTREAM_COMMIT = "a956835d020762cb2b570053af06f643a11c0ecc"
 PATCH_SHA256 = "b9ab28d49a62f5756495f729c6716511d3136f58c3b9ea4061f4f7dba3d2598c"
 SOURCE_MANIFEST_SHA256 = "cb3897e086557213634b380d09d258d06af45e8f69b35f7603425e882749460b"
 PINNED_CARGO_CONFIG_SHA256 = "b8ae1cea341beb2d4a3c8fb81f97a96f4aee1fd53f769c57f140dfe949806a80"
+PINNED_SOURCE_ROOT_CARGO_CONFIG_SHA256 = "b34b20f64e30695e8629ddad8b80885764e947f51e4ce49c6378a3b5a238d25e"
 PATCHED_FILE_COUNT = 48
 # Keep the builder standalone; the pin-parity test enforces this launcher constant.
 QUALIFIED_SHA256 = "0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de"
@@ -265,12 +266,11 @@ def _toolchain(env):
 
 
 def _archive_source(checkout, destination, env, git=None):
-    archive_paths = ("codex-rs", "sdk/python/src/openai_codex/generated")
     git = str(git or _git_executable(env))
     with tempfile.TemporaryFile() as archive:
         _run(
             [git, "-c", f"core.attributesFile={os.devnull}",
-             "archive", "--format=tar", UPSTREAM_COMMIT, "--", *archive_paths],
+             "archive", "--format=tar", UPSTREAM_COMMIT],
             cwd=checkout, env=_git_environment(env), stdout=archive,
         )
         archive.seek(0)
@@ -318,7 +318,14 @@ def _cargo_configuration(codex_rs, cargo_home):
         if candidate.exists() or candidate.is_symlink():
             raise ValueError("unreviewed_cargo_home_configuration")
 
-    allowed = codex_rs / ".cargo/config.toml"
+    allowed = {
+        codex_rs / ".cargo/config.toml": (
+            "codex-rs/.cargo/config.toml", PINNED_CARGO_CONFIG_SHA256,
+        ),
+        codex_rs.parent / ".cargo/config.toml": (
+            ".cargo/config.toml", PINNED_SOURCE_ROOT_CARGO_CONFIG_SHA256,
+        ),
+    }
     accepted = []
     for directory in (codex_rs, *codex_rs.parents):
         for name in ("config.toml", "config"):
@@ -329,11 +336,12 @@ def _cargo_configuration(codex_rs, cargo_home):
                     or not candidate.is_file()):
                 raise ValueError("unreviewed_cargo_configuration")
             digest = sha256_file(candidate)
-            if (candidate != allowed or name != "config.toml"
-                    or digest != PINNED_CARGO_CONFIG_SHA256):
+            expected = allowed.get(candidate)
+            if name != "config.toml" or expected is None or digest != expected[1]:
                 raise ValueError("unreviewed_cargo_configuration")
-            accepted.append({"path": "codex-rs/.cargo/config.toml", "sha256": digest})
-    if len(accepted) != 1:
+            accepted.append({"path": expected[0], "sha256": digest})
+    if {config["path"] for config in accepted} != {
+            "codex-rs/.cargo/config.toml", ".cargo/config.toml"}:
         raise ValueError("pinned_cargo_configuration_missing")
     return {
         "cargoHome": str(cargo_home),
@@ -438,6 +446,10 @@ def package(source, output, evidence_path):
         binary_hash = sha256_file(binary)
         evidence = {
             "upstreamCommit": UPSTREAM_COMMIT,
+            "archiveScope": {
+                "selection": "git archive of the pinned commit without pathspecs",
+                "extractionFilter": "tarfile.data_filter",
+            },
             "patchSha256": PATCH_SHA256,
             "sourceManifestSha256": sha256(manifest_bytes),
             "patchedFileCount": patched_count,

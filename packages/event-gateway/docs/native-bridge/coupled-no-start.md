@@ -98,3 +98,14 @@ intermediate Node 24.21.0 runs are superseded.
 The import-safe harness refresh repeats all three causal guard controls and both real
 qualification branches on Node 24.19.0. Tests call the extracted bounded wait and
 shared restart validator directly; no AST execution or test-only runtime bypass remains.
+
+## CI coverage boundary
+
+The product recovery state machine already has CI regressions in
+[`test_gateway_integration.py`](../../tests/test_gateway_integration.py) for exact
+signed settlement replay after a lost response, and in
+[`test_gateway.py`](../../tests/test_gateway.py) /
+[`test_store.py`](../../tests/test_store.py) for v3 unknown fencing, durable restart,
+contradictory receipts and storage rollback. The three harness guard tests do not
+automate the real native/workerd orchestration above. That remains a manually run,
+hardware-dependent qualification with recorded inputs and causal controls.

@@ -48,9 +48,15 @@ class NativePackagingTests(unittest.TestCase):
             (checkout / "codex-rs").mkdir()
             generated = checkout / "sdk/python/src/openai_codex/generated"
             generated.mkdir(parents=True)
+            outside = checkout / "outside"
+            outside.mkdir()
             tracked = checkout / "codex-rs/unpatched.rs"
             tracked.write_bytes(b"pinned source")
             (generated / "model.py").write_bytes(b"pinned generated source")
+            (checkout / "README.md").write_bytes(b"pinned root file")
+            (outside / "ordinary.txt").write_bytes(b"pinned outside file")
+            (checkout / ".cargo").mkdir()
+            (checkout / ".cargo/config.toml").write_bytes(b"pinned root cargo config")
             git("config", "user.name", "Native packaging test")
             git("config", "user.email", "native-packaging@example.invalid")
             git("add", ".")
@@ -63,14 +69,20 @@ class NativePackagingTests(unittest.TestCase):
             git("checkout", "--quiet", pinned)
             git("replace", pinned, replacement)
 
-            default_archive = subprocess.run(  # nosec B603 - fixed executable and fixture-owned commit/path
-                [str(git_executable), "archive", "--format=tar", pinned, "--", "codex-rs",
-                 "sdk/python/src/openai_codex/generated"],
+            default_archive = subprocess.run(  # nosec B603 - fixed executable and fixture-owned commit
+                [str(git_executable), "archive", "--format=tar", pinned],
                 cwd=checkout, env=env, check=True, stdout=subprocess.PIPE,
             ).stdout
             with tarfile.open(fileobj=io.BytesIO(default_archive), mode="r:") as archive:
                 self.assertEqual(
                     archive.extractfile("codex-rs/unpatched.rs").read(), b"replacement source"
+                )
+                self.assertEqual(archive.extractfile("README.md").read(), b"pinned root file")
+                self.assertEqual(
+                    archive.extractfile("outside/ordinary.txt").read(), b"pinned outside file"
+                )
+                self.assertEqual(
+                    archive.extractfile(".cargo/config.toml").read(), b"pinned root cargo config"
                 )
 
             hostile_env = {
@@ -96,6 +108,13 @@ class NativePackagingTests(unittest.TestCase):
             def assert_pinned_archive_source(archive_path):
                 self.assertEqual(
                     (archive_path / "codex-rs/unpatched.rs").read_bytes(), b"pinned source"
+                )
+                self.assertEqual((archive_path / "README.md").read_bytes(), b"pinned root file")
+                self.assertEqual(
+                    (archive_path / "outside/ordinary.txt").read_bytes(), b"pinned outside file"
+                )
+                self.assertEqual(
+                    (archive_path / ".cargo/config.toml").read_bytes(), b"pinned root cargo config"
                 )
 
             assert_pinned_archive_source(destination)
@@ -262,7 +281,16 @@ class NativePackagingTests(unittest.TestCase):
                 ),
                 "_cargo_configuration": lambda *_args: {
                     "cargoHome": str(root / "cargo-cache"), "cargoHomeConfig": None,
-                    "ancestorConfigs": [],
+                    "ancestorConfigs": [
+                        {
+                            "path": "codex-rs/.cargo/config.toml",
+                            "sha256": PACKAGER["PINNED_CARGO_CONFIG_SHA256"],
+                        },
+                        {
+                            "path": ".cargo/config.toml",
+                            "sha256": PACKAGER["PINNED_SOURCE_ROOT_CARGO_CONFIG_SHA256"],
+                        },
+                    ],
                 },
                 "verify_patched_source": verify_source,
                 "lock_version_changes": lambda *_args: 159,
@@ -274,6 +302,10 @@ class NativePackagingTests(unittest.TestCase):
             state["evidence"] = evidence_path
             with patch.dict(PACKAGER_GLOBALS, replacements), patch("builtins.print"):
                 evidence = PACKAGER["package"](source, output, evidence_path)
+                self.assertEqual(evidence["archiveScope"], {
+                    "selection": "git archive of the pinned commit without pathspecs",
+                    "extractionFilter": "tarfile.data_filter",
+                })
                 self.assertEqual(
                     evidence["patchedSourceInventoryBeforeBuildSha256"],
                     evidence["patchedSourceInventoryAfterBuildSha256"],
@@ -372,24 +404,46 @@ class NativePackagingTests(unittest.TestCase):
 
     def test_cargo_configuration_accepts_only_pinned_file_and_rejects_home_ancestor(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            parent = Path(directory)
+            root = parent / "source"
             codex_rs = root / "codex-rs"
             cargo_config_dir = codex_rs / ".cargo"
             cargo_config_dir.mkdir(parents=True)
-            cargo_home = root / "cargo-home"
+            cargo_home = parent / "cargo-home"
             cargo_home.mkdir()
             config = cargo_config_dir / "config.toml"
             config_bytes = b"[target]\n"
             config.write_bytes(config_bytes)
             digest = hashlib.sha256(config_bytes).hexdigest()
+            source_config_dir = root / ".cargo"
+            source_config_dir.mkdir()
+            source_config = source_config_dir / "config.toml"
+            source_config_bytes = b"[env]\nMALLOC_CONF = { value = 'thp:always', force = false }\n"
+            source_config.write_bytes(source_config_bytes)
+            source_digest = hashlib.sha256(source_config_bytes).hexdigest()
 
-            with patch.dict(PACKAGER_GLOBALS, {"PINNED_CARGO_CONFIG_SHA256": digest}):
+            with patch.dict(PACKAGER_GLOBALS, {
+                "PINNED_CARGO_CONFIG_SHA256": digest,
+                "PINNED_SOURCE_ROOT_CARGO_CONFIG_SHA256": source_digest,
+            }):
                 configuration = PACKAGER["_cargo_configuration"](codex_rs, cargo_home)
                 self.assertEqual(configuration["cargoHome"], str(cargo_home.resolve()))
                 self.assertEqual(configuration["cargoHomeConfig"], None)
                 self.assertEqual(configuration["ancestorConfigs"], [{
                     "path": "codex-rs/.cargo/config.toml", "sha256": digest,
+                }, {
+                    "path": ".cargo/config.toml", "sha256": source_digest,
                 }])
+
+                source_config.unlink()
+                with self.assertRaisesRegex(ValueError, "pinned_cargo_configuration_missing"):
+                    PACKAGER["_cargo_configuration"](codex_rs, cargo_home)
+                source_config.write_bytes(source_config_bytes)
+
+                source_config.write_bytes(b"modified pinned root config")
+                with self.assertRaisesRegex(ValueError, "unreviewed_cargo_configuration"):
+                    PACKAGER["_cargo_configuration"](codex_rs, cargo_home)
+                source_config.write_bytes(source_config_bytes)
 
                 home_config = cargo_home / "config.toml"
                 home_config.write_text("[build]\nrustflags = ['-C', 'opt-level=0']\n")
@@ -397,8 +451,14 @@ class NativePackagingTests(unittest.TestCase):
                     PACKAGER["_cargo_configuration"](codex_rs, cargo_home)
                 home_config.unlink()
 
-                ancestor_config_dir = root / ".cargo"
+                ancestor_config_dir = parent / ".cargo"
                 ancestor_config_dir.mkdir()
+                pinned_bytes_at_unapproved_location = ancestor_config_dir / "config.toml"
+                pinned_bytes_at_unapproved_location.write_bytes(source_config_bytes)
+                with self.assertRaisesRegex(ValueError, "unreviewed_cargo_configuration"):
+                    PACKAGER["_cargo_configuration"](codex_rs, cargo_home)
+                pinned_bytes_at_unapproved_location.unlink()
+
                 ancestor_config = ancestor_config_dir / "config"
                 ancestor_config.write_text("[build]\nrustc-wrapper = 'wrapper'\n")
                 with self.assertRaisesRegex(ValueError, "unreviewed_cargo_configuration"):

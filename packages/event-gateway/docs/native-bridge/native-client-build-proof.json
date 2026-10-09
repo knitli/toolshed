@@ -1,11 +1,12 @@
 {
-  "archiveCoverage": {
-    "cargoPathDependenciesOutsideCodexRs": 0,
-    "cargoReadmesOutsideCodexRs": 0,
-    "literalRustIncludesOutsideCodexRs": 0,
-    "missingLiteralRustIncludes": 0
-  },
   "build": {
+    "archiveScope": {
+      "extractionFilter": "tarfile.data_filter",
+      "selection": "git archive of the pinned commit without pathspecs"
+    },
+    "binaryBytes": 388546080,
+    "binarySha256": "3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c",
+    "buildCommand": "rustup run 1.95.0 cargo build --offline --locked -p codex-cli --bin codex -p codex-tui --bin codex-tui --profile dev-small",
     "buildEnvironment": {
       "allowlistedVariables": [
         "CARGO_HOME",
@@ -26,19 +27,79 @@
         {
           "path": "codex-rs/.cargo/config.toml",
           "sha256": "b8ae1cea341beb2d4a3c8fb81f97a96f4aee1fd53f769c57f140dfe949806a80"
+        },
+        {
+          "path": ".cargo/config.toml",
+          "sha256": "b34b20f64e30695e8629ddad8b80885764e947f51e4ce49c6378a3b5a238d25e"
         }
       ],
       "cargoHome": "/private/tmp/event-native-cargo-home",
       "cargoHomeConfig": null
     },
     "cargoLockLocalVersionChanges": 159,
-    "command": "rustup run 1.95.0 cargo build --offline --locked -p codex-cli --bin codex -p codex-tui --bin codex-tui --profile dev-small",
     "gitBinary": {
       "path": "/usr/bin/git",
       "sha256": "34129c71a01a74f7f3b2443521519b2e5447553fa187f5fcafaaf8c42cc192e2"
     },
     "host": "aarch64-apple-darwin",
+    "launcherQualified": false,
+    "launcherSha256": "0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de",
+    "patchSha256": "b9ab28d49a62f5756495f729c6716511d3136f58c3b9ea4061f4f7dba3d2598c",
+    "patchedFileCount": 48,
+    "patchedFileSha256": {
+      "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json": "cdb5512b033565c4322f3f7b20b34e45fbbc641d061d10dbf8d2c12dbcf788c3",
+      "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json": "722bb44139cd436422ee0eec79b8d865265b8b774eecee824ef7f7c0a8603052",
+      "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst": "4fd0d9ccd80d6d367ba0fcf1a821edb8f0d96593d52724de917b95a057eaee4c",
+      "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst": "fd00211c425bf0c2a482fb80b0b910dbd26ce9efbed0dcea43ae78926940b451",
+      "codex-rs/app-server-protocol/schema/typescript/v2/ClientSelectionUpdateStatus.ts": "9f70edf230a0fde8b1b714b69ec1cf1e2e2c03f74bcb5926d94b54b8dd687f0c",
+      "codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartIfIdleNotStartedReason.ts": "6e3e400e8a68f25219e873ffbf63e53ff068f4f98d9ecd731bbbafffe2f1faae",
+      "codex-rs/app-server-protocol/schema/typescript/v2/index.ts": "d1bc8d1fef56a4f1205594cd0757178bde740e09680d41bf313081ca3c2ead90",
+      "codex-rs/app-server-protocol/src/protocol/common.rs": "63e02847f7819f62a3d3167931a3b202445740aadf52c60d90cd31183da20f0f",
+      "codex-rs/app-server-protocol/src/protocol/v2/thread.rs": "b5247a33638f2313d9095065892ceec03a07301de66d23da5512597bb6ddb201",
+      "codex-rs/app-server/src/lib.rs": "46321d34235f5feffd33231a7390624720dcbfb627ba4222585a96ada3936ed8",
+      "codex-rs/app-server/src/message_processor.rs": "a47dc09bd9fccc83536dda784010dcc9f8ef16dd586071edbcc47d9f53619c8c",
+      "codex-rs/app-server/src/request_processors.rs": "eb4235cd2d56d6a5ab09e99d21ced2f720c4c454ff106ca597b928c35b675df2",
+      "codex-rs/app-server/src/request_processors/native_selection_processor.rs": "4645b977c8662df5052b65ada45a85fdd6362155717ff5f0b001c85483fba14e",
+      "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs": "addfccc107b2ebb7d1174bd2cdb44bda0ece0b7feed0c04c3ba6c34be5229865",
+      "codex-rs/app-server/src/request_processors/thread_lifecycle.rs": "286694f95faaf1419caabfe764b8392c4690ee529bc134f9b73c4091b2160ab9",
+      "codex-rs/app-server/src/thread_state.rs": "9c9006531cc814599f84fd26a82eb946ae3a9c8a1b2869d40a086f689a4bcbb4",
+      "codex-rs/app-server/tests/suite/v2/thread_start.rs": "7eb4133f3aa2cf7406a2c83f78e0221cb4a20a014d632f1736cfb828a6003c75",
+      "codex-rs/arg0/src/lib.rs": "8d5b9c1a896f874d81c23e0e5fbe9d8246018843acb369d59a6df9ce8c158f15",
+      "codex-rs/cli/src/main.rs": "de484836dfaeec9294bedd18ab105af14a3cf68a6d6697188b76b890623bf75c",
+      "codex-rs/core/src/session/mod.rs": "d4363e380ff2fe9e537c15a26330c497886d566c9cb14531c89db19c019b918c",
+      "codex-rs/core/src/session/turn_input.rs": "06a1138f66cc9b93302ae2af04de412a978b9db2943e88b9e82a6b6dbb7eae65",
+      "codex-rs/core/src/session/turn_input_tests.rs": "96a3a87407387bad786ee1664175b46204d453ce38e5f9a3645db18df0d22f1c",
+      "codex-rs/core/src/tasks/guarded_start.rs": "bc3673aaba4c3d0c467d93af81aae3b51f8abea2a6bdc29016bcca3eb38d752f",
+      "codex-rs/core/src/tasks/mod.rs": "4167a59e4d411329c62a970015bea3f59bcce8a1ade62e1294a504f7ce464e73",
+      "codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs": "b352df6700d4547951860df6347d4d21a03a546994f6e284f88fccbe5a77083b",
+      "codex-rs/protocol/src/turn_input.rs": "4355925606639fd7f4c05252485d5d53b520ec0c9729a827c09b0f70edb8658b",
+      "codex-rs/state/migrations/0059_native_turn_start_receipts.sql": "6a16875992277a8477c1b6a9f378604b7ccbefb8df847b2717234bbcb7dbca9b",
+      "codex-rs/state/migrations/0060_native_turn_start_bridge_identity.sql": "1023de33eb6a31f67f20c12cf0f2d5105abb1ea0cf22867c6e2359f482a5216e",
+      "codex-rs/state/src/lib.rs": "59544ce0db3de101c005799af99e11897a1c46ec4246e2c4dd4b91561b469bb0",
+      "codex-rs/state/src/runtime.rs": "76878304339e662224abf8e1d6dc652c397bf43f95286b9f1896be430d782fad",
+      "codex-rs/state/src/runtime/native_receipts.rs": "ac207a009cb8530747401134dcae29a29385d6a2f016ea421146190f901a294a",
+      "codex-rs/state/src/runtime/native_receipts_tests.rs": "52ae742a86588562082a21dc18c7d3cb5a0bb9a1d9603bb1d9bd37b3cc8562e5",
+      "codex-rs/tui/src/app.rs": "fc1301edc1c18d7405eec7b3ec09c0144642bbee6a7324e17e848705e7a3968e",
+      "codex-rs/tui/src/app/selection_adoption_tests.rs": "5c432b4e7ac233549b0455e7e2aef3ec6f0944ff97c71850ed45ee1441ada196",
+      "codex-rs/tui/src/app/selection_binding.rs": "2eb6f70169b00e61492d0426528c3eb6962688ac8f6732de82520c2ad998cb25",
+      "codex-rs/tui/src/app/selection_binding_tests.rs": "2c4518f587dca8b3336023561d673015a6d8e3fb3e336f0ad1bad15527152594",
+      "codex-rs/tui/src/app/selection_bridge.rs": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50",
+      "codex-rs/tui/src/app/selection_bridge_tests.rs": "8c397acb623d4902567c495a4f93c63487f214c30f1bd2e39c0516ad4b3a0683",
+      "codex-rs/tui/src/app/selection_witness.rs": "c154901acafe54b30b8b88a49546bceae8c76b1d41f541c4fb1028f5beebfe64",
+      "codex-rs/tui/src/app/selection_witness_tests.rs": "03ffeec3506651f61e3b4ab5d36bf9157c0eac7e3022ed7ec8509ca5f4811193",
+      "codex-rs/tui/src/app/startup.rs": "e2b1bed360ede73b4734a5f9562214daf3f87b7d5c0998e02f1d2373914755ae",
+      "codex-rs/tui/src/chatwidget/input_restore.rs": "267c942810e4229f3c4e657d2ffba89bc5b7499e0838e8d08f6b44f3b026d70b",
+      "codex-rs/tui/src/inherited_bridge.rs": "c764c770c090a7fc88ba1e74337c049cbfc5424db8c132613696a26dbfe2b9ef",
+      "codex-rs/tui/src/lib.rs": "1d8aaf623a50bb71e802e966c26a6a7f237fc0522b27c73d7ed120818028adc5",
+      "codex-rs/tui/src/main.rs": "2ab3b715303495b780224e27b4e9f09a38067c0c283bffaa477997aeae6394b1",
+      "codex-rs/utils/pty/src/lib.rs": "e84620ebf6ab55db18336fb8c3075a810638c9cc2d517f0522320ad3c6d350e5",
+      "codex-rs/utils/pty/src/spawn_helper.rs": "6e6ed848071a77e4f1b9c8059f9d68b24d5b14bd0205f253ef18beba9b62f881",
+      "sdk/python/src/openai_codex/generated/v2_all.py": "9fc11e2f08a244ef26c69118d915573f499c03062c03a39e6b8a83055cab70b0"
+    },
+    "patchedSourceInventoryAfterBuildSha256": "f9ceaa3e2f49e9720049f530a61dce49caac067275e249bd4486730051d50774",
+    "patchedSourceInventoryBeforeBuildSha256": "f9ceaa3e2f49e9720049f530a61dce49caac067275e249bd4486730051d50774",
     "rustc": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2",
+    "sourceManifestSha256": "cb3897e086557213634b380d09d258d06af45e8f69b35f7603425e882749460b",
     "toolchainBinaries": {
       "cargo": {
         "path": "/private/tmp/event-native-rustup/toolchains/1.95.0-aarch64-apple-darwin/bin/cargo",
@@ -52,53 +113,67 @@
         "path": "/Users/adampoulemanos/.cargo/bin/rustup",
         "sha256": "ec1b9233e7f72990ecd8e62063fa7f6c3dfc2bec8e97f88bff165f9100ac696a"
       }
-    }
+    },
+    "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc"
   },
   "candidate": {
     "binaryBytes": 388546080,
-    "binarySha256": "055c99b49ef203d72965de72355d5b91b38306ec7fb8ec2e7fdac3b5575d8588",
+    "binarySha256": "3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c",
     "launcherQualified": false,
     "launcherSha256": "0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de"
   },
   "rawEvidence": {
-    "candidateBinary": {
+    "fullTreeCandidateBinary": {
+      "path": "/private/tmp/native-codex-p7-full-tree",
+      "sha256": "3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c"
+    },
+    "fullTreeCandidateBuild": {
+      "path": "/private/tmp/native-codex-p7-full-tree.json",
+      "sha256": "589b1d5726baaafceda598ad5b03c8d40ee63bde33a8fe26c1e5c81845b4a23f"
+    },
+    "fullTreeCandidateRuntime": {
+      "path": "/private/tmp/native-codex-p7-full-tree-runtime.json",
+      "sha256": "4d63e73faf3fb2a459bc1360c5ace45b56d9ad53744dc841ba6e6dc11c510641"
+    },
+    "priorSubsetCandidateBinary": {
       "path": "/private/tmp/native-codex-p6-fresh",
       "sha256": "055c99b49ef203d72965de72355d5b91b38306ec7fb8ec2e7fdac3b5575d8588"
     },
-    "candidateBuild": {
+    "priorSubsetCandidateBuild": {
       "path": "/private/tmp/native-codex-p6-fresh.json",
       "sha256": "66f0a0190772fe6836eca1d28351fd9041bc5f88d7497480957c04cf54794011"
     },
-    "candidateRuntime": {
+    "priorSubsetCandidateRuntime": {
       "path": "/private/tmp/native-codex-p6-runtime.json",
       "sha256": "0e3998abd302af35e7e5b8f2df172cd2eef29e4bddd997b1af4ddac3ba097907"
     },
-    "comparisonBinary": {
+    "priorSubsetComparisonBinary": {
       "path": "/private/tmp/native-codex-v5-fresh",
       "sha256": "ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b"
     },
-    "comparisonBuild": {
+    "priorSubsetComparisonBuild": {
       "path": "/private/tmp/native-codex-v5-fresh.json",
       "sha256": "ed643a06ab4b87495a728ebcf97dd7b181697d4aa3d7aec949ea46d98da055f6"
     },
-    "comparisonRuntime": {
+    "priorSubsetComparisonRuntime": {
       "path": "/private/tmp/native-codex-v5-runtime.json",
       "sha256": "015afbab3de53f4249a09e5d79d59956884b9f9bb860330bf3550f6d6c18a597"
     },
-    "earlierBinary": {
+    "priorSubsetEarlierBinary": {
       "path": "/private/tmp/native-codex-v4-fresh",
       "sha256": "11965142a8712b4110568082448c3ce3aede69fbbddf6f089c4abf202d7c9755"
     },
-    "earlierBuild": {
+    "priorSubsetEarlierBuild": {
       "path": "/private/tmp/native-codex-v4-fresh.json",
       "sha256": "05a679da30c213c4ff553a5b40de5cf3517e9180d4b86494f5ca268d94be04f2"
     },
-    "earlierRuntime": {
+    "priorSubsetEarlierRuntime": {
       "path": "/private/tmp/native-codex-v4-runtime.json",
       "sha256": "65c83e119c29bed1c1eacc48067222c1630032bf46fa05c33f4ccacdfbc16bea"
     }
   },
   "repeatabilityObservation": {
+    "archiveAndConfigScope": "These three historical builds used the selective codex-rs plus generated Python SDK archive and only codex-rs/.cargo/config.toml; they predate the full-tree archive and repository-root Cargo config allowlist.",
     "binaryPathStringsContainDifferentTemporarySourcePaths": true,
     "builds": [
       {
@@ -119,7 +194,7 @@
     "samePinnedSourcePatchAndToolchain": true
   },
   "runtime": {
-    "binarySha256": "055c99b49ef203d72965de72355d5b91b38306ec7fb8ec2e7fdac3b5575d8588",
+    "binarySha256": "3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c",
     "cloudSettlementProven": false,
     "exactReceiptRecoveredTwice": true,
     "installedAdapterSha256": "4ab38f6f5231acda4fee0af5d017ab33c583f3fecfc4e68531000a8dd25c0f85",
