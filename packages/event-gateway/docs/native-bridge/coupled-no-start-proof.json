@@ -7,89 +7,89 @@
   "nativeProcessRestarted": false,
   "oldStartNoStartSettlementProven": true,
   "original": {
-    "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-    "attempt_id": "787c7d41-8291-450c-9310-e101df7347d6",
+    "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+    "attempt_id": "71a251fe-63cc-442b-8484-faecb916d12f",
     "state": "ambiguous",
     "envelope": {
       "agent": "pilot",
       "attachmentGeneration": 1,
-      "attemptId": "787c7d41-8291-450c-9310-e101df7347d6",
+      "attemptId": "71a251fe-63cc-442b-8484-faecb916d12f",
       "canonicalSubject": {
         "kind": "manual",
         "subjectId": "fixture-manual-source"
       },
-      "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-      "eventId": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
+      "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+      "eventId": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
       "eventKind": "manual",
-      "eventReference": "ref_d2e21e6d-c45f-4272-86e1-daabae04a95a",
-      "expiresAt": "2026-10-09T01:39:24.430Z",
-      "issuedAt": "2026-10-09T01:38:24.430Z",
+      "eventReference": "ref_89831e76-5c6a-4598-939a-e82e0742300c",
+      "expiresAt": "2026-10-09T02:07:04.472Z",
+      "issuedAt": "2026-10-09T02:06:04.472Z",
       "nodeGeneration": 1,
-      "observedAt": "2026-10-09T01:38:24.426Z",
+      "observedAt": "2026-10-09T02:06:04.468Z",
       "policyRevision": 1,
       "principal": "qualification@example.com",
       "reasonCode": "owner_canary",
       "runtimeGeneration": 1,
-      "runtimeId": "55c386d8-9cc7-4bf1-80e7-c4c9904ae4da",
+      "runtimeId": "fdad84fc-3ce1-4edc-9e6b-a0b10522a830",
       "schemaVersion": 1,
       "source": "manual",
-      "sourceStateVersion": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087"
+      "sourceStateVersion": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3"
     },
     "admission": {
       "envelope": {
         "agent": "pilot",
         "attachmentGeneration": 1,
-        "attemptId": "787c7d41-8291-450c-9310-e101df7347d6",
+        "attemptId": "71a251fe-63cc-442b-8484-faecb916d12f",
         "canonicalSubject": {
           "kind": "manual",
           "subjectId": "fixture-manual-source"
         },
-        "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-        "eventId": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
+        "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+        "eventId": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
         "eventKind": "manual",
-        "eventReference": "ref_d2e21e6d-c45f-4272-86e1-daabae04a95a",
-        "expiresAt": "2026-10-09T01:39:24.430Z",
-        "issuedAt": "2026-10-09T01:38:24.430Z",
+        "eventReference": "ref_89831e76-5c6a-4598-939a-e82e0742300c",
+        "expiresAt": "2026-10-09T02:07:04.472Z",
+        "issuedAt": "2026-10-09T02:06:04.472Z",
         "nodeGeneration": 1,
-        "observedAt": "2026-10-09T01:38:24.426Z",
+        "observedAt": "2026-10-09T02:06:04.468Z",
         "policyRevision": 1,
         "principal": "qualification@example.com",
         "reasonCode": "owner_canary",
         "runtimeGeneration": 1,
-        "runtimeId": "55c386d8-9cc7-4bf1-80e7-c4c9904ae4da",
+        "runtimeId": "fdad84fc-3ce1-4edc-9e6b-a0b10522a830",
         "schemaVersion": 1,
         "source": "manual",
-        "sourceStateVersion": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087"
+        "sourceStateVersion": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3"
       },
-      "nodeId": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
-      "permitExpiresAt": "2026-10-09T01:38:29.454Z",
-      "permitId": "8c74c053-f032-4a7b-b095-09b54b7d6fb2",
-      "permitIssuedAt": "2026-10-09T01:38:24.454Z",
+      "nodeId": "2e528fea-0469-4d1e-8650-ad7389126cb1",
+      "permitExpiresAt": "2026-10-09T02:06:09.490Z",
+      "permitId": "ac9599cb-bbc6-49f1-9726-f69fc34ca349",
+      "permitIssuedAt": "2026-10-09T02:06:04.490Z",
       "status": "admitted"
     },
     "native_request": {
-      "attemptId": "787c7d41-8291-450c-9310-e101df7347d6",
-      "clientId": "a3c98d46-3260-4a91-970e-fea3bff71cff",
-      "clientUserMessageId": "22fd2f1d-0708-419a-9975-77e219472b9a",
-      "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
+      "attemptId": "71a251fe-63cc-442b-8484-faecb916d12f",
+      "clientId": "114a9ce2-0354-49df-b082-6b1f04ccfd55",
+      "clientUserMessageId": "ab231bf5-1bb7-4e79-9aeb-2459c9abb825",
+      "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
       "event": {
         "canonicalSubject": {
           "kind": "manual",
           "subjectId": "fixture-manual-source"
         },
-        "eventId": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
-        "eventReference": "ref_d2e21e6d-c45f-4272-86e1-daabae04a95a",
+        "eventId": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
+        "eventReference": "ref_89831e76-5c6a-4598-939a-e82e0742300c",
         "source": "manual",
-        "sourceStateVersion": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087"
+        "sourceStateVersion": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3"
       },
       "generation": 9,
-      "permitExpiresAt": 1791509909454,
-      "permitId": "8c74c053-f032-4a7b-b095-09b54b7d6fb2",
-      "permitIssuedAt": 1791509904454,
+      "permitExpiresAt": 1791511569490,
+      "permitId": "ac9599cb-bbc6-49f1-9726-f69fc34ca349",
+      "permitIssuedAt": 1791511564490,
       "receiptVersion": 3,
       "serverGeneration": 7,
-      "serverInstanceId": "01a11e4f-bb4a-7793-ba41-a303655ac929",
-      "threadId": "01a11e4f-bb71-7400-9cd1-84f2bc53308a"
+      "serverInstanceId": "01a11e69-0fb8-7333-91e2-2786dae8f959",
+      "threadId": "01a11e69-0ff3-74f2-af5d-c6624b4b8a07"
     },
     "evidence": null,
     "receipt": null,
@@ -101,135 +101,135 @@
     "reason": "native_outcome_unknown",
     "fenced": 0,
     "reserved_bytes": 153094,
-    "updated": 1791509909.526415,
+    "updated": 1791511569.539287,
     "ack_state": null
   },
   "terminalReceipt": {
-    "clientId": "a3c98d46-3260-4a91-970e-fea3bff71cff",
-    "serverInstanceId": "01a11e4f-bb4a-7793-ba41-a303655ac929",
+    "clientId": "114a9ce2-0354-49df-b082-6b1f04ccfd55",
+    "serverInstanceId": "01a11e69-0fb8-7333-91e2-2786dae8f959",
     "serverGeneration": 7,
-    "threadId": "01a11e4f-bb71-7400-9cd1-84f2bc53308a",
-    "attemptId": "787c7d41-8291-450c-9310-e101df7347d6",
-    "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-    "clientUserMessageId": "22fd2f1d-0708-419a-9975-77e219472b9a",
-    "permitId": "8c74c053-f032-4a7b-b095-09b54b7d6fb2",
-    "permitIssuedAt": 1791509904454,
-    "permitExpiresAt": 1791509909454,
+    "threadId": "01a11e69-0ff3-74f2-af5d-c6624b4b8a07",
+    "attemptId": "71a251fe-63cc-442b-8484-faecb916d12f",
+    "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+    "clientUserMessageId": "ab231bf5-1bb7-4e79-9aeb-2459c9abb825",
+    "permitId": "ac9599cb-bbc6-49f1-9726-f69fc34ca349",
+    "permitIssuedAt": 1791511564490,
+    "permitExpiresAt": 1791511569490,
     "outcome": {
       "status": "terminalNotStarted",
       "reason": "permitExpired",
-      "receiptId": "01a11e4f-d015-7660-945a-9cc9bdace0c3",
+      "receiptId": "01a11e69-2481-7fe1-8d31-892ef152323b",
       "replayed": false
     },
     "generation": 9
   },
   "pending": {
-    "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-    "attempt_id": "787c7d41-8291-450c-9310-e101df7347d6",
+    "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+    "attempt_id": "71a251fe-63cc-442b-8484-faecb916d12f",
     "state": "settlement_pending",
     "envelope": {
       "agent": "pilot",
       "attachmentGeneration": 1,
-      "attemptId": "787c7d41-8291-450c-9310-e101df7347d6",
+      "attemptId": "71a251fe-63cc-442b-8484-faecb916d12f",
       "canonicalSubject": {
         "kind": "manual",
         "subjectId": "fixture-manual-source"
       },
-      "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-      "eventId": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
+      "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+      "eventId": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
       "eventKind": "manual",
-      "eventReference": "ref_d2e21e6d-c45f-4272-86e1-daabae04a95a",
-      "expiresAt": "2026-10-09T01:39:24.430Z",
-      "issuedAt": "2026-10-09T01:38:24.430Z",
+      "eventReference": "ref_89831e76-5c6a-4598-939a-e82e0742300c",
+      "expiresAt": "2026-10-09T02:07:04.472Z",
+      "issuedAt": "2026-10-09T02:06:04.472Z",
       "nodeGeneration": 1,
-      "observedAt": "2026-10-09T01:38:24.426Z",
+      "observedAt": "2026-10-09T02:06:04.468Z",
       "policyRevision": 1,
       "principal": "qualification@example.com",
       "reasonCode": "owner_canary",
       "runtimeGeneration": 1,
-      "runtimeId": "55c386d8-9cc7-4bf1-80e7-c4c9904ae4da",
+      "runtimeId": "fdad84fc-3ce1-4edc-9e6b-a0b10522a830",
       "schemaVersion": 1,
       "source": "manual",
-      "sourceStateVersion": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087"
+      "sourceStateVersion": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3"
     },
     "admission": {
       "envelope": {
         "agent": "pilot",
         "attachmentGeneration": 1,
-        "attemptId": "787c7d41-8291-450c-9310-e101df7347d6",
+        "attemptId": "71a251fe-63cc-442b-8484-faecb916d12f",
         "canonicalSubject": {
           "kind": "manual",
           "subjectId": "fixture-manual-source"
         },
-        "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-        "eventId": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
+        "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+        "eventId": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
         "eventKind": "manual",
-        "eventReference": "ref_d2e21e6d-c45f-4272-86e1-daabae04a95a",
-        "expiresAt": "2026-10-09T01:39:24.430Z",
-        "issuedAt": "2026-10-09T01:38:24.430Z",
+        "eventReference": "ref_89831e76-5c6a-4598-939a-e82e0742300c",
+        "expiresAt": "2026-10-09T02:07:04.472Z",
+        "issuedAt": "2026-10-09T02:06:04.472Z",
         "nodeGeneration": 1,
-        "observedAt": "2026-10-09T01:38:24.426Z",
+        "observedAt": "2026-10-09T02:06:04.468Z",
         "policyRevision": 1,
         "principal": "qualification@example.com",
         "reasonCode": "owner_canary",
         "runtimeGeneration": 1,
-        "runtimeId": "55c386d8-9cc7-4bf1-80e7-c4c9904ae4da",
+        "runtimeId": "fdad84fc-3ce1-4edc-9e6b-a0b10522a830",
         "schemaVersion": 1,
         "source": "manual",
-        "sourceStateVersion": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087"
+        "sourceStateVersion": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3"
       },
-      "nodeId": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
-      "permitExpiresAt": "2026-10-09T01:38:29.454Z",
-      "permitId": "8c74c053-f032-4a7b-b095-09b54b7d6fb2",
-      "permitIssuedAt": "2026-10-09T01:38:24.454Z",
+      "nodeId": "2e528fea-0469-4d1e-8650-ad7389126cb1",
+      "permitExpiresAt": "2026-10-09T02:06:09.490Z",
+      "permitId": "ac9599cb-bbc6-49f1-9726-f69fc34ca349",
+      "permitIssuedAt": "2026-10-09T02:06:04.490Z",
       "status": "admitted"
     },
     "native_request": {
-      "attemptId": "787c7d41-8291-450c-9310-e101df7347d6",
-      "clientId": "a3c98d46-3260-4a91-970e-fea3bff71cff",
-      "clientUserMessageId": "22fd2f1d-0708-419a-9975-77e219472b9a",
-      "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
+      "attemptId": "71a251fe-63cc-442b-8484-faecb916d12f",
+      "clientId": "114a9ce2-0354-49df-b082-6b1f04ccfd55",
+      "clientUserMessageId": "ab231bf5-1bb7-4e79-9aeb-2459c9abb825",
+      "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
       "event": {
         "canonicalSubject": {
           "kind": "manual",
           "subjectId": "fixture-manual-source"
         },
-        "eventId": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
-        "eventReference": "ref_d2e21e6d-c45f-4272-86e1-daabae04a95a",
+        "eventId": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
+        "eventReference": "ref_89831e76-5c6a-4598-939a-e82e0742300c",
         "source": "manual",
-        "sourceStateVersion": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087"
+        "sourceStateVersion": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3"
       },
       "generation": 9,
-      "permitExpiresAt": 1791509909454,
-      "permitId": "8c74c053-f032-4a7b-b095-09b54b7d6fb2",
-      "permitIssuedAt": 1791509904454,
+      "permitExpiresAt": 1791511569490,
+      "permitId": "ac9599cb-bbc6-49f1-9726-f69fc34ca349",
+      "permitIssuedAt": 1791511564490,
       "receiptVersion": 3,
       "serverGeneration": 7,
-      "serverInstanceId": "01a11e4f-bb4a-7793-ba41-a303655ac929",
-      "threadId": "01a11e4f-bb71-7400-9cd1-84f2bc53308a"
+      "serverInstanceId": "01a11e69-0fb8-7333-91e2-2786dae8f959",
+      "threadId": "01a11e69-0ff3-74f2-af5d-c6624b4b8a07"
     },
     "evidence": {
-      "receiptId": "01a11e4f-d015-7660-945a-9cc9bdace0c3",
+      "receiptId": "01a11e69-2481-7fe1-8d31-892ef152323b",
       "type": "native_terminal_no_start"
     },
     "receipt": {
-      "attemptId": "787c7d41-8291-450c-9310-e101df7347d6",
-      "clientId": "a3c98d46-3260-4a91-970e-fea3bff71cff",
-      "clientUserMessageId": "22fd2f1d-0708-419a-9975-77e219472b9a",
-      "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
+      "attemptId": "71a251fe-63cc-442b-8484-faecb916d12f",
+      "clientId": "114a9ce2-0354-49df-b082-6b1f04ccfd55",
+      "clientUserMessageId": "ab231bf5-1bb7-4e79-9aeb-2459c9abb825",
+      "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
       "generation": 9,
       "outcome": {
         "reason": "permitExpired",
-        "receiptId": "01a11e4f-d015-7660-945a-9cc9bdace0c3",
+        "receiptId": "01a11e69-2481-7fe1-8d31-892ef152323b",
         "replayed": true,
         "status": "terminalNotStarted"
       },
-      "permitExpiresAt": 1791509909454,
-      "permitId": "8c74c053-f032-4a7b-b095-09b54b7d6fb2",
-      "permitIssuedAt": 1791509904454,
+      "permitExpiresAt": 1791511569490,
+      "permitId": "ac9599cb-bbc6-49f1-9726-f69fc34ca349",
+      "permitIssuedAt": 1791511564490,
       "serverGeneration": 7,
-      "serverInstanceId": "01a11e4f-bb4a-7793-ba41-a303655ac929",
-      "threadId": "01a11e4f-bb71-7400-9cd1-84f2bc53308a"
+      "serverInstanceId": "01a11e69-0fb8-7333-91e2-2786dae8f959",
+      "threadId": "01a11e69-0ff3-74f2-af5d-c6624b4b8a07"
     },
     "settlement": null,
     "started_receipt": null,
@@ -239,20 +239,20 @@
     "reason": "native_terminal_no_start",
     "fenced": 0,
     "reserved_bytes": 115982,
-    "updated": 1791509909.549042,
+    "updated": 1791511569.561252,
     "ack_state": null
   },
   "before": {
     "cloud": {
       "attempts": [
         {
-          "attempt_id": "787c7d41-8291-450c-9310-e101df7347d6",
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"b39a8ef5-9620-4ba8-bc55-24e199b1ce3d\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-3056402f-b053-4b1c-b4cd-65ac4db7f087\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T01:38:24.426Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_d2e21e6d-c45f-4272-86e1-daabae04a95a\",\"runtimeId\":\"55c386d8-9cc7-4bf1-80e7-c4c9904ae4da\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"787c7d41-8291-450c-9310-e101df7347d6\",\"issuedAt\":\"2026-10-09T01:38:24.430Z\",\"expiresAt\":\"2026-10-09T01:39:24.430Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "attempt_id": "71a251fe-63cc-442b-8484-faecb916d12f",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"3181da3f-0e2f-4683-b67a-ebb85ed369a3\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-277fba51-a856-463a-bd0f-1d4a6560f2d3\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T02:06:04.468Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_89831e76-5c6a-4598-939a-e82e0742300c\",\"runtimeId\":\"fdad84fc-3ce1-4edc-9e6b-a0b10522a830\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"71a251fe-63cc-442b-8484-faecb916d12f\",\"issuedAt\":\"2026-10-09T02:06:04.472Z\",\"expiresAt\":\"2026-10-09T02:07:04.472Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
           "state": "admitted",
-          "transport_until": 1791509914430,
-          "permit_id": "8c74c053-f032-4a7b-b095-09b54b7d6fb2",
-          "permit_until": 1791509909454,
+          "transport_until": 1791511574472,
+          "permit_id": "ac9599cb-bbc6-49f1-9726-f69fc34ca349",
+          "permit_until": 1791511569490,
           "reservation_state": "reserved",
           "submission_id": null,
           "turn_id": null,
@@ -264,19 +264,19 @@
       ],
       "deliveries": [
         {
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "event_id": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "event_id": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
           "subject_id": "fixture-manual-source",
-          "source_state_version": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087",
-          "runtime_id": "55c386d8-9cc7-4bf1-80e7-c4c9904ae4da",
+          "source_state_version": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3",
+          "runtime_id": "fdad84fc-3ce1-4edc-9e6b-a0b10522a830",
           "runtime_generation": 1,
           "attachment_generation": 1,
-          "node_id": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+          "node_id": "2e528fea-0469-4d1e-8650-ad7389126cb1",
           "node_generation": 1,
           "state": "pending",
           "reason": null,
-          "created_at": 1791509904428,
-          "retry_until": 1791596304428,
+          "created_at": 1791511564470,
+          "retry_until": 1791597964470,
           "transport_state": "accepted",
           "transport_failures": 0,
           "terminal_at": null
@@ -284,46 +284,46 @@
       ],
       "native_claims": [
         {
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "attempt_id": "787c7d41-8291-450c-9310-e101df7347d6",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "attempt_id": "71a251fe-63cc-442b-8484-faecb916d12f",
           "state": "admitted",
-          "permit_id": "8c74c053-f032-4a7b-b095-09b54b7d6fb2",
-          "permit_issued_at": 1791509904454,
-          "permit_until": 1791509909454,
-          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"b39a8ef5-9620-4ba8-bc55-24e199b1ce3d\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-3056402f-b053-4b1c-b4cd-65ac4db7f087\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T01:38:24.426Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_d2e21e6d-c45f-4272-86e1-daabae04a95a\",\"runtimeId\":\"55c386d8-9cc7-4bf1-80e7-c4c9904ae4da\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"787c7d41-8291-450c-9310-e101df7347d6\",\"issuedAt\":\"2026-10-09T01:38:24.430Z\",\"expiresAt\":\"2026-10-09T01:39:24.430Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
-          "updated_at": 1791509904454
+          "permit_id": "ac9599cb-bbc6-49f1-9726-f69fc34ca349",
+          "permit_issued_at": 1791511564490,
+          "permit_until": 1791511569490,
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"3181da3f-0e2f-4683-b67a-ebb85ed369a3\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-277fba51-a856-463a-bd0f-1d4a6560f2d3\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T02:06:04.468Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_89831e76-5c6a-4598-939a-e82e0742300c\",\"runtimeId\":\"fdad84fc-3ce1-4edc-9e6b-a0b10522a830\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"71a251fe-63cc-442b-8484-faecb916d12f\",\"issuedAt\":\"2026-10-09T02:06:04.472Z\",\"expiresAt\":\"2026-10-09T02:07:04.472Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "updated_at": 1791511564490
         }
       ],
       "native_correlations": [],
       "manual_sources": [
         {
           "subject_id": "fixture-manual-source",
-          "event_id": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
-          "source_state_version": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087",
-          "event_reference": "ref_d2e21e6d-c45f-4272-86e1-daabae04a95a",
-          "observed_at": "2026-10-09T01:38:24.426Z",
+          "event_id": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
+          "source_state_version": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3",
+          "event_reference": "ref_89831e76-5c6a-4598-939a-e82e0742300c",
+          "observed_at": "2026-10-09T02:06:04.468Z",
           "observed_source_state_version": null,
-          "created_at": 1791509904428
+          "created_at": 1791511564470
         }
       ],
       "slot_intents": [
         {
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "node_id": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "node_id": "2e528fea-0469-4d1e-8650-ad7389126cb1",
           "node_generation": 1,
           "state": "reserved",
-          "updated_at": 1791509904429,
+          "updated_at": 1791511564471,
           "attempts": 1,
-          "next_at": 1791509919429
+          "next_at": 1791511579471
         }
       ],
       "no_start_settlements": []
     },
     "slots": [
       {
-        "node_id": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+        "node_id": "2e528fea-0469-4d1e-8650-ad7389126cb1",
         "agent": "pilot",
-        "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
+        "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
         "generation": 1
       }
     ],
@@ -338,13 +338,13 @@
     "cloud": {
       "attempts": [
         {
-          "attempt_id": "787c7d41-8291-450c-9310-e101df7347d6",
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"b39a8ef5-9620-4ba8-bc55-24e199b1ce3d\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-3056402f-b053-4b1c-b4cd-65ac4db7f087\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T01:38:24.426Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_d2e21e6d-c45f-4272-86e1-daabae04a95a\",\"runtimeId\":\"55c386d8-9cc7-4bf1-80e7-c4c9904ae4da\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"787c7d41-8291-450c-9310-e101df7347d6\",\"issuedAt\":\"2026-10-09T01:38:24.430Z\",\"expiresAt\":\"2026-10-09T01:39:24.430Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "attempt_id": "71a251fe-63cc-442b-8484-faecb916d12f",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"3181da3f-0e2f-4683-b67a-ebb85ed369a3\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-277fba51-a856-463a-bd0f-1d4a6560f2d3\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T02:06:04.468Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_89831e76-5c6a-4598-939a-e82e0742300c\",\"runtimeId\":\"fdad84fc-3ce1-4edc-9e6b-a0b10522a830\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"71a251fe-63cc-442b-8484-faecb916d12f\",\"issuedAt\":\"2026-10-09T02:06:04.472Z\",\"expiresAt\":\"2026-10-09T02:07:04.472Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
           "state": "not_started",
-          "transport_until": 1791509914430,
-          "permit_id": "8c74c053-f032-4a7b-b095-09b54b7d6fb2",
-          "permit_until": 1791509909454,
+          "transport_until": 1791511574472,
+          "permit_id": "ac9599cb-bbc6-49f1-9726-f69fc34ca349",
+          "permit_until": 1791511569490,
           "reservation_state": "reserved",
           "submission_id": null,
           "turn_id": null,
@@ -356,19 +356,19 @@
       ],
       "deliveries": [
         {
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "event_id": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "event_id": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
           "subject_id": "fixture-manual-source",
-          "source_state_version": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087",
-          "runtime_id": "55c386d8-9cc7-4bf1-80e7-c4c9904ae4da",
+          "source_state_version": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3",
+          "runtime_id": "fdad84fc-3ce1-4edc-9e6b-a0b10522a830",
           "runtime_generation": 1,
           "attachment_generation": 1,
-          "node_id": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+          "node_id": "2e528fea-0469-4d1e-8650-ad7389126cb1",
           "node_generation": 1,
           "state": "pending",
           "reason": null,
-          "created_at": 1791509904428,
-          "retry_until": 1791596304428,
+          "created_at": 1791511564470,
+          "retry_until": 1791597964470,
           "transport_state": "accepted",
           "transport_failures": 0,
           "terminal_at": null
@@ -376,52 +376,52 @@
       ],
       "native_claims": [
         {
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "attempt_id": "787c7d41-8291-450c-9310-e101df7347d6",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "attempt_id": "71a251fe-63cc-442b-8484-faecb916d12f",
           "state": "not_started",
-          "permit_id": "8c74c053-f032-4a7b-b095-09b54b7d6fb2",
-          "permit_issued_at": 1791509904454,
-          "permit_until": 1791509909454,
-          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"b39a8ef5-9620-4ba8-bc55-24e199b1ce3d\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-3056402f-b053-4b1c-b4cd-65ac4db7f087\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T01:38:24.426Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_d2e21e6d-c45f-4272-86e1-daabae04a95a\",\"runtimeId\":\"55c386d8-9cc7-4bf1-80e7-c4c9904ae4da\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"787c7d41-8291-450c-9310-e101df7347d6\",\"issuedAt\":\"2026-10-09T01:38:24.430Z\",\"expiresAt\":\"2026-10-09T01:39:24.430Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
-          "updated_at": 1791509909553
+          "permit_id": "ac9599cb-bbc6-49f1-9726-f69fc34ca349",
+          "permit_issued_at": 1791511564490,
+          "permit_until": 1791511569490,
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"3181da3f-0e2f-4683-b67a-ebb85ed369a3\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-277fba51-a856-463a-bd0f-1d4a6560f2d3\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T02:06:04.468Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_89831e76-5c6a-4598-939a-e82e0742300c\",\"runtimeId\":\"fdad84fc-3ce1-4edc-9e6b-a0b10522a830\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"71a251fe-63cc-442b-8484-faecb916d12f\",\"issuedAt\":\"2026-10-09T02:06:04.472Z\",\"expiresAt\":\"2026-10-09T02:07:04.472Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "updated_at": 1791511569567
         }
       ],
       "native_correlations": [],
       "manual_sources": [
         {
           "subject_id": "fixture-manual-source",
-          "event_id": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
-          "source_state_version": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087",
-          "event_reference": "ref_d2e21e6d-c45f-4272-86e1-daabae04a95a",
-          "observed_at": "2026-10-09T01:38:24.426Z",
+          "event_id": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
+          "source_state_version": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3",
+          "event_reference": "ref_89831e76-5c6a-4598-939a-e82e0742300c",
+          "observed_at": "2026-10-09T02:06:04.468Z",
           "observed_source_state_version": null,
-          "created_at": 1791509904428
+          "created_at": 1791511564470
         }
       ],
       "slot_intents": [
         {
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "node_id": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "node_id": "2e528fea-0469-4d1e-8650-ad7389126cb1",
           "node_generation": 1,
           "state": "reserved",
-          "updated_at": 1791509904429,
+          "updated_at": 1791511564471,
           "attempts": 1,
-          "next_at": 1791509919429
+          "next_at": 1791511579471
         }
       ],
       "no_start_settlements": [
         {
-          "attempt_id": "787c7d41-8291-450c-9310-e101df7347d6",
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "result_json": "{\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"787c7d41-8291-450c-9310-e101df7347d6\",\"permitId\":\"8c74c053-f032-4a7b-b095-09b54b7d6fb2\",\"nodeGeneration\":1,\"evidence\":{\"type\":\"native_terminal_no_start\",\"receiptId\":\"01a11e4f-d015-7660-945a-9cc9bdace0c3\"},\"nodeId\":\"54c6fdf2-c082-410b-a4cb-3d45961f9099\",\"status\":\"not_started\"}"
+          "attempt_id": "71a251fe-63cc-442b-8484-faecb916d12f",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "result_json": "{\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"71a251fe-63cc-442b-8484-faecb916d12f\",\"permitId\":\"ac9599cb-bbc6-49f1-9726-f69fc34ca349\",\"nodeGeneration\":1,\"evidence\":{\"type\":\"native_terminal_no_start\",\"receiptId\":\"01a11e69-2481-7fe1-8d31-892ef152323b\"},\"nodeId\":\"2e528fea-0469-4d1e-8650-ad7389126cb1\",\"status\":\"not_started\"}"
         }
       ]
     },
     "slots": [
       {
-        "node_id": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+        "node_id": "2e528fea-0469-4d1e-8650-ad7389126cb1",
         "agent": "pilot",
-        "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
+        "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
         "generation": 1
       }
     ],
@@ -433,128 +433,128 @@
     }
   },
   "replacement": {
-    "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-    "attempt_id": "3a52c0ce-33a6-4c9f-b964-1b44f8927e85",
+    "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+    "attempt_id": "a3796787-f977-4a9d-b58a-12d31110a9d6",
     "state": "submitted",
     "envelope": {
       "agent": "pilot",
       "attachmentGeneration": 1,
-      "attemptId": "3a52c0ce-33a6-4c9f-b964-1b44f8927e85",
+      "attemptId": "a3796787-f977-4a9d-b58a-12d31110a9d6",
       "canonicalSubject": {
         "kind": "manual",
         "subjectId": "fixture-manual-source"
       },
-      "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-      "eventId": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
+      "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+      "eventId": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
       "eventKind": "manual",
-      "eventReference": "ref_d2e21e6d-c45f-4272-86e1-daabae04a95a",
-      "expiresAt": "2026-10-09T01:39:24.430Z",
-      "issuedAt": "2026-10-09T01:38:24.430Z",
+      "eventReference": "ref_89831e76-5c6a-4598-939a-e82e0742300c",
+      "expiresAt": "2026-10-09T02:07:04.472Z",
+      "issuedAt": "2026-10-09T02:06:04.472Z",
       "nodeGeneration": 1,
-      "observedAt": "2026-10-09T01:38:24.426Z",
+      "observedAt": "2026-10-09T02:06:04.468Z",
       "policyRevision": 1,
       "principal": "qualification@example.com",
       "reasonCode": "owner_canary",
       "runtimeGeneration": 1,
-      "runtimeId": "55c386d8-9cc7-4bf1-80e7-c4c9904ae4da",
+      "runtimeId": "fdad84fc-3ce1-4edc-9e6b-a0b10522a830",
       "schemaVersion": 1,
       "source": "manual",
-      "sourceStateVersion": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087"
+      "sourceStateVersion": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3"
     },
     "admission": {
       "envelope": {
         "agent": "pilot",
         "attachmentGeneration": 1,
-        "attemptId": "3a52c0ce-33a6-4c9f-b964-1b44f8927e85",
+        "attemptId": "a3796787-f977-4a9d-b58a-12d31110a9d6",
         "canonicalSubject": {
           "kind": "manual",
           "subjectId": "fixture-manual-source"
         },
-        "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-        "eventId": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
+        "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+        "eventId": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
         "eventKind": "manual",
-        "eventReference": "ref_d2e21e6d-c45f-4272-86e1-daabae04a95a",
-        "expiresAt": "2026-10-09T01:39:29.577Z",
-        "issuedAt": "2026-10-09T01:38:29.577Z",
+        "eventReference": "ref_89831e76-5c6a-4598-939a-e82e0742300c",
+        "expiresAt": "2026-10-09T02:07:09.588Z",
+        "issuedAt": "2026-10-09T02:06:09.588Z",
         "nodeGeneration": 1,
-        "observedAt": "2026-10-09T01:38:24.426Z",
+        "observedAt": "2026-10-09T02:06:04.468Z",
         "policyRevision": 1,
         "principal": "qualification@example.com",
         "reasonCode": "owner_canary",
         "runtimeGeneration": 1,
-        "runtimeId": "55c386d8-9cc7-4bf1-80e7-c4c9904ae4da",
+        "runtimeId": "fdad84fc-3ce1-4edc-9e6b-a0b10522a830",
         "schemaVersion": 1,
         "source": "manual",
-        "sourceStateVersion": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087"
+        "sourceStateVersion": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3"
       },
-      "nodeId": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
-      "permitExpiresAt": "2026-10-09T01:38:34.577Z",
-      "permitId": "1039c43e-2277-4019-bb73-d55ea938de57",
-      "permitIssuedAt": "2026-10-09T01:38:29.577Z",
+      "nodeId": "2e528fea-0469-4d1e-8650-ad7389126cb1",
+      "permitExpiresAt": "2026-10-09T02:06:14.589Z",
+      "permitId": "6feff8ec-f439-40d1-9497-26c767104c27",
+      "permitIssuedAt": "2026-10-09T02:06:09.589Z",
       "status": "admitted"
     },
     "native_request": {
-      "attemptId": "3a52c0ce-33a6-4c9f-b964-1b44f8927e85",
-      "clientId": "a3c98d46-3260-4a91-970e-fea3bff71cff",
-      "clientUserMessageId": "f168c769-ed23-4b54-a760-1d19b8a86f5f",
-      "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
+      "attemptId": "a3796787-f977-4a9d-b58a-12d31110a9d6",
+      "clientId": "114a9ce2-0354-49df-b082-6b1f04ccfd55",
+      "clientUserMessageId": "de166706-0eed-4f16-a680-1ad9c632098d",
+      "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
       "event": {
         "canonicalSubject": {
           "kind": "manual",
           "subjectId": "fixture-manual-source"
         },
-        "eventId": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
-        "eventReference": "ref_d2e21e6d-c45f-4272-86e1-daabae04a95a",
+        "eventId": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
+        "eventReference": "ref_89831e76-5c6a-4598-939a-e82e0742300c",
         "source": "manual",
-        "sourceStateVersion": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087"
+        "sourceStateVersion": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3"
       },
       "generation": 9,
-      "permitExpiresAt": 1791509914577,
-      "permitId": "1039c43e-2277-4019-bb73-d55ea938de57",
-      "permitIssuedAt": 1791509909577,
+      "permitExpiresAt": 1791511574589,
+      "permitId": "6feff8ec-f439-40d1-9497-26c767104c27",
+      "permitIssuedAt": 1791511569589,
       "receiptVersion": 3,
       "serverGeneration": 7,
-      "serverInstanceId": "01a11e4f-bb4a-7793-ba41-a303655ac929",
-      "threadId": "01a11e4f-bb71-7400-9cd1-84f2bc53308a"
+      "serverInstanceId": "01a11e69-0fb8-7333-91e2-2786dae8f959",
+      "threadId": "01a11e69-0ff3-74f2-af5d-c6624b4b8a07"
     },
     "evidence": null,
     "receipt": null,
     "settlement": null,
     "started_receipt": {
-      "attemptId": "3a52c0ce-33a6-4c9f-b964-1b44f8927e85",
-      "clientId": "a3c98d46-3260-4a91-970e-fea3bff71cff",
-      "clientUserMessageId": "f168c769-ed23-4b54-a760-1d19b8a86f5f",
-      "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
+      "attemptId": "a3796787-f977-4a9d-b58a-12d31110a9d6",
+      "clientId": "114a9ce2-0354-49df-b082-6b1f04ccfd55",
+      "clientUserMessageId": "de166706-0eed-4f16-a680-1ad9c632098d",
+      "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
       "generation": 9,
       "outcome": {
         "replayed": false,
         "status": "started",
-        "turnId": "f168c769-ed23-4b54-a760-1d19b8a86f5f"
+        "turnId": "de166706-0eed-4f16-a680-1ad9c632098d"
       },
-      "permitExpiresAt": 1791509914577,
-      "permitId": "1039c43e-2277-4019-bb73-d55ea938de57",
-      "permitIssuedAt": 1791509909577,
+      "permitExpiresAt": 1791511574589,
+      "permitId": "6feff8ec-f439-40d1-9497-26c767104c27",
+      "permitIssuedAt": 1791511569589,
       "serverGeneration": 7,
-      "serverInstanceId": "01a11e4f-bb4a-7793-ba41-a303655ac929",
-      "threadId": "01a11e4f-bb71-7400-9cd1-84f2bc53308a"
+      "serverInstanceId": "01a11e69-0fb8-7333-91e2-2786dae8f959",
+      "threadId": "01a11e69-0ff3-74f2-af5d-c6624b4b8a07"
     },
     "native_ack": {
-      "acknowledgedAt": "2026-10-09T01:38:29.630Z",
+      "acknowledgedAt": "2026-10-09T02:06:09.644Z",
       "agent": "pilot",
       "attachmentGeneration": 1,
-      "attemptId": "3a52c0ce-33a6-4c9f-b964-1b44f8927e85",
-      "deliveredSourceStateVersion": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087",
-      "deliveryId": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-      "eventId": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
+      "attemptId": "a3796787-f977-4a9d-b58a-12d31110a9d6",
+      "deliveredSourceStateVersion": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3",
+      "deliveryId": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+      "eventId": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
       "nativeCorrelation": {
         "kind": "native_turn_started",
-        "permitId": "1039c43e-2277-4019-bb73-d55ea938de57",
-        "turnId": "f168c769-ed23-4b54-a760-1d19b8a86f5f"
+        "permitId": "6feff8ec-f439-40d1-9497-26c767104c27",
+        "turnId": "de166706-0eed-4f16-a680-1ad9c632098d"
       },
       "nodeGeneration": 1,
       "principal": "qualification@example.com",
       "runtimeGeneration": 1,
-      "runtimeId": "55c386d8-9cc7-4bf1-80e7-c4c9904ae4da",
+      "runtimeId": "fdad84fc-3ce1-4edc-9e6b-a0b10522a830",
       "schemaVersion": 1,
       "status": "submitted"
     },
@@ -563,20 +563,20 @@
     "reason": null,
     "fenced": 0,
     "reserved_bytes": 112754,
-    "updated": 1791509909.635167,
+    "updated": 1791511569.6496909,
     "ack_state": "submitted"
   },
   "after": {
     "cloud": {
       "attempts": [
         {
-          "attempt_id": "787c7d41-8291-450c-9310-e101df7347d6",
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"b39a8ef5-9620-4ba8-bc55-24e199b1ce3d\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-3056402f-b053-4b1c-b4cd-65ac4db7f087\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T01:38:24.426Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_d2e21e6d-c45f-4272-86e1-daabae04a95a\",\"runtimeId\":\"55c386d8-9cc7-4bf1-80e7-c4c9904ae4da\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"787c7d41-8291-450c-9310-e101df7347d6\",\"issuedAt\":\"2026-10-09T01:38:24.430Z\",\"expiresAt\":\"2026-10-09T01:39:24.430Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "attempt_id": "71a251fe-63cc-442b-8484-faecb916d12f",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"3181da3f-0e2f-4683-b67a-ebb85ed369a3\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-277fba51-a856-463a-bd0f-1d4a6560f2d3\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T02:06:04.468Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_89831e76-5c6a-4598-939a-e82e0742300c\",\"runtimeId\":\"fdad84fc-3ce1-4edc-9e6b-a0b10522a830\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"71a251fe-63cc-442b-8484-faecb916d12f\",\"issuedAt\":\"2026-10-09T02:06:04.472Z\",\"expiresAt\":\"2026-10-09T02:07:04.472Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
           "state": "not_started",
-          "transport_until": 1791509914430,
-          "permit_id": "8c74c053-f032-4a7b-b095-09b54b7d6fb2",
-          "permit_until": 1791509909454,
+          "transport_until": 1791511574472,
+          "permit_id": "ac9599cb-bbc6-49f1-9726-f69fc34ca349",
+          "permit_until": 1791511569490,
           "reservation_state": "reserved",
           "submission_id": null,
           "turn_id": null,
@@ -586,17 +586,17 @@
           "transport_reason": null
         },
         {
-          "attempt_id": "3a52c0ce-33a6-4c9f-b964-1b44f8927e85",
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"b39a8ef5-9620-4ba8-bc55-24e199b1ce3d\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-3056402f-b053-4b1c-b4cd-65ac4db7f087\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T01:38:24.426Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_d2e21e6d-c45f-4272-86e1-daabae04a95a\",\"runtimeId\":\"55c386d8-9cc7-4bf1-80e7-c4c9904ae4da\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"3a52c0ce-33a6-4c9f-b964-1b44f8927e85\",\"issuedAt\":\"2026-10-09T01:38:29.577Z\",\"expiresAt\":\"2026-10-09T01:39:29.577Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "attempt_id": "a3796787-f977-4a9d-b58a-12d31110a9d6",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"3181da3f-0e2f-4683-b67a-ebb85ed369a3\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-277fba51-a856-463a-bd0f-1d4a6560f2d3\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T02:06:04.468Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_89831e76-5c6a-4598-939a-e82e0742300c\",\"runtimeId\":\"fdad84fc-3ce1-4edc-9e6b-a0b10522a830\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"a3796787-f977-4a9d-b58a-12d31110a9d6\",\"issuedAt\":\"2026-10-09T02:06:09.588Z\",\"expiresAt\":\"2026-10-09T02:07:09.588Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
           "state": "submitted",
           "transport_until": 0,
-          "permit_id": "1039c43e-2277-4019-bb73-d55ea938de57",
-          "permit_until": 1791509914577,
+          "permit_id": "6feff8ec-f439-40d1-9497-26c767104c27",
+          "permit_until": 1791511574589,
           "reservation_state": "reserved",
           "submission_id": null,
-          "turn_id": "f168c769-ed23-4b54-a760-1d19b8a86f5f",
-          "ack_json": "{\"schemaVersion\":1,\"eventId\":\"b39a8ef5-9620-4ba8-bc55-24e199b1ce3d\",\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"3a52c0ce-33a6-4c9f-b964-1b44f8927e85\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"runtimeId\":\"55c386d8-9cc7-4bf1-80e7-c4c9904ae4da\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveredSourceStateVersion\":\"v1-3056402f-b053-4b1c-b4cd-65ac4db7f087\",\"acknowledgedAt\":\"2026-10-09T01:38:29.630Z\",\"status\":\"submitted\",\"nativeCorrelation\":{\"kind\":\"native_turn_started\",\"permitId\":\"1039c43e-2277-4019-bb73-d55ea938de57\",\"turnId\":\"f168c769-ed23-4b54-a760-1d19b8a86f5f\"}}",
+          "turn_id": "de166706-0eed-4f16-a680-1ad9c632098d",
+          "ack_json": "{\"schemaVersion\":1,\"eventId\":\"3181da3f-0e2f-4683-b67a-ebb85ed369a3\",\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"a3796787-f977-4a9d-b58a-12d31110a9d6\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"runtimeId\":\"fdad84fc-3ce1-4edc-9e6b-a0b10522a830\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveredSourceStateVersion\":\"v1-277fba51-a856-463a-bd0f-1d4a6560f2d3\",\"acknowledgedAt\":\"2026-10-09T02:06:09.644Z\",\"status\":\"submitted\",\"nativeCorrelation\":{\"kind\":\"native_turn_started\",\"permitId\":\"6feff8ec-f439-40d1-9497-26c767104c27\",\"turnId\":\"de166706-0eed-4f16-a680-1ad9c632098d\"}}",
           "native_observed_ack_json": null,
           "transport_status": "not_started",
           "transport_reason": null
@@ -604,19 +604,19 @@
       ],
       "deliveries": [
         {
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "event_id": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "event_id": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
           "subject_id": "fixture-manual-source",
-          "source_state_version": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087",
-          "runtime_id": "55c386d8-9cc7-4bf1-80e7-c4c9904ae4da",
+          "source_state_version": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3",
+          "runtime_id": "fdad84fc-3ce1-4edc-9e6b-a0b10522a830",
           "runtime_generation": 1,
           "attachment_generation": 1,
-          "node_id": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+          "node_id": "2e528fea-0469-4d1e-8650-ad7389126cb1",
           "node_generation": 1,
           "state": "submitted",
           "reason": null,
-          "created_at": 1791509904428,
-          "retry_until": 1791596304428,
+          "created_at": 1791511564470,
+          "retry_until": 1791597964470,
           "transport_state": "accepted",
           "transport_failures": 0,
           "terminal_at": null
@@ -624,59 +624,59 @@
       ],
       "native_claims": [
         {
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "attempt_id": "3a52c0ce-33a6-4c9f-b964-1b44f8927e85",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "attempt_id": "a3796787-f977-4a9d-b58a-12d31110a9d6",
           "state": "submitted",
-          "permit_id": "1039c43e-2277-4019-bb73-d55ea938de57",
-          "permit_issued_at": 1791509909577,
-          "permit_until": 1791509914577,
-          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"b39a8ef5-9620-4ba8-bc55-24e199b1ce3d\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-3056402f-b053-4b1c-b4cd-65ac4db7f087\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T01:38:24.426Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_d2e21e6d-c45f-4272-86e1-daabae04a95a\",\"runtimeId\":\"55c386d8-9cc7-4bf1-80e7-c4c9904ae4da\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"3a52c0ce-33a6-4c9f-b964-1b44f8927e85\",\"issuedAt\":\"2026-10-09T01:38:29.577Z\",\"expiresAt\":\"2026-10-09T01:39:29.577Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
-          "updated_at": 1791509909633
+          "permit_id": "6feff8ec-f439-40d1-9497-26c767104c27",
+          "permit_issued_at": 1791511569589,
+          "permit_until": 1791511574589,
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"3181da3f-0e2f-4683-b67a-ebb85ed369a3\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-277fba51-a856-463a-bd0f-1d4a6560f2d3\",\"policyRevision\":1,\"observedAt\":\"2026-10-09T02:06:04.468Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_89831e76-5c6a-4598-939a-e82e0742300c\",\"runtimeId\":\"fdad84fc-3ce1-4edc-9e6b-a0b10522a830\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"a3796787-f977-4a9d-b58a-12d31110a9d6\",\"issuedAt\":\"2026-10-09T02:06:09.588Z\",\"expiresAt\":\"2026-10-09T02:07:09.588Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "updated_at": 1791511569648
         }
       ],
       "native_correlations": [
         {
-          "correlation_id": "f168c769-ed23-4b54-a760-1d19b8a86f5f",
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "attempt_id": "3a52c0ce-33a6-4c9f-b964-1b44f8927e85",
+          "correlation_id": "de166706-0eed-4f16-a680-1ad9c632098d",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "attempt_id": "a3796787-f977-4a9d-b58a-12d31110a9d6",
           "kind": "turn"
         }
       ],
       "manual_sources": [
         {
           "subject_id": "fixture-manual-source",
-          "event_id": "b39a8ef5-9620-4ba8-bc55-24e199b1ce3d",
-          "source_state_version": "v1-3056402f-b053-4b1c-b4cd-65ac4db7f087",
-          "event_reference": "ref_d2e21e6d-c45f-4272-86e1-daabae04a95a",
-          "observed_at": "2026-10-09T01:38:24.426Z",
+          "event_id": "3181da3f-0e2f-4683-b67a-ebb85ed369a3",
+          "source_state_version": "v1-277fba51-a856-463a-bd0f-1d4a6560f2d3",
+          "event_reference": "ref_89831e76-5c6a-4598-939a-e82e0742300c",
+          "observed_at": "2026-10-09T02:06:04.468Z",
           "observed_source_state_version": null,
-          "created_at": 1791509904428
+          "created_at": 1791511564470
         }
       ],
       "slot_intents": [
         {
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "node_id": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "node_id": "2e528fea-0469-4d1e-8650-ad7389126cb1",
           "node_generation": 1,
           "state": "reserved",
-          "updated_at": 1791509904429,
+          "updated_at": 1791511564471,
           "attempts": 1,
-          "next_at": 1791509919429
+          "next_at": 1791511579471
         }
       ],
       "no_start_settlements": [
         {
-          "attempt_id": "787c7d41-8291-450c-9310-e101df7347d6",
-          "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
-          "result_json": "{\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"787c7d41-8291-450c-9310-e101df7347d6\",\"permitId\":\"8c74c053-f032-4a7b-b095-09b54b7d6fb2\",\"nodeGeneration\":1,\"evidence\":{\"type\":\"native_terminal_no_start\",\"receiptId\":\"01a11e4f-d015-7660-945a-9cc9bdace0c3\"},\"nodeId\":\"54c6fdf2-c082-410b-a4cb-3d45961f9099\",\"status\":\"not_started\"}"
+          "attempt_id": "71a251fe-63cc-442b-8484-faecb916d12f",
+          "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
+          "result_json": "{\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"71a251fe-63cc-442b-8484-faecb916d12f\",\"permitId\":\"ac9599cb-bbc6-49f1-9726-f69fc34ca349\",\"nodeGeneration\":1,\"evidence\":{\"type\":\"native_terminal_no_start\",\"receiptId\":\"01a11e69-2481-7fe1-8d31-892ef152323b\"},\"nodeId\":\"2e528fea-0469-4d1e-8650-ad7389126cb1\",\"status\":\"not_started\"}"
         }
       ]
     },
     "slots": [
       {
-        "node_id": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+        "node_id": "2e528fea-0469-4d1e-8650-ad7389126cb1",
         "agent": "pilot",
-        "delivery_id": "dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9",
+        "delivery_id": "dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987",
         "generation": 1
       }
     ],
@@ -690,61 +690,61 @@
   "wire": [
     {
       "path": "/v1/dispatch/claim",
-      "body": "{\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"787c7d41-8291-450c-9310-e101df7347d6\"}",
+      "body": "{\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"71a251fe-63cc-442b-8484-faecb916d12f\"}",
       "proof": {
-        "nodeId": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+        "nodeId": "2e528fea-0469-4d1e-8650-ad7389126cb1",
         "nodeGeneration": 1,
-        "issuedAt": "2026-10-09T01:38:24.450Z",
-        "nonce": "a033f000-234f-4153-8a0b-8f110b4f37f0",
-        "signature": "jWcyPLSqg1cMi6-LKN0JSljHpnmnpp8X0MtSPVkvmIuX8SnVil5GCu7mDHFZ8q1B2OglAoVjsPQ5dQm9ZoLHDw"
+        "issuedAt": "2026-10-09T02:06:04.486Z",
+        "nonce": "88ea12ac-d8e2-42ce-b733-f71c2014af4a",
+        "signature": "EIk6ic92quyCcWkLoYVsei4on3CtKZ4tWTpX-VEfM9R2KyD5IxFvEcKHCTkZWP5cbde-n0TVe8o_Epmtvr2ICg"
       },
       "responseStatus": 200
     },
     {
       "path": "/v1/dispatch/settle-no-start",
-      "body": "{\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"787c7d41-8291-450c-9310-e101df7347d6\",\"nodeGeneration\":1,\"permitId\":\"8c74c053-f032-4a7b-b095-09b54b7d6fb2\",\"evidence\":{\"receiptId\":\"01a11e4f-d015-7660-945a-9cc9bdace0c3\",\"type\":\"native_terminal_no_start\"}}",
+      "body": "{\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"71a251fe-63cc-442b-8484-faecb916d12f\",\"nodeGeneration\":1,\"permitId\":\"ac9599cb-bbc6-49f1-9726-f69fc34ca349\",\"evidence\":{\"receiptId\":\"01a11e69-2481-7fe1-8d31-892ef152323b\",\"type\":\"native_terminal_no_start\"}}",
       "proof": {
-        "nodeId": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+        "nodeId": "2e528fea-0469-4d1e-8650-ad7389126cb1",
         "nodeGeneration": 1,
-        "issuedAt": "2026-10-09T01:38:29.549Z",
-        "nonce": "d87de032-46ed-4ae1-b6ce-00d73da14656",
-        "signature": "fA3XgD_kz1nGpHrfi20exGAPy7KT251iXbdvjzFamX0TYrNQswRkVJCr1VFNzeGoGY1PRff1z8oNkKOntmnaCw"
+        "issuedAt": "2026-10-09T02:06:09.562Z",
+        "nonce": "1129a743-ea0a-4827-b86d-bb273378653b",
+        "signature": "gcfH6vYZx_XgsMy6nIE5el4Co7lwsI4hM9yKhBcnwWHDX4Z9GHLtEiJhhZEN2GVPnxOQqUtC8UwlFhkFMf44AA"
       },
       "responseStatus": 200
     },
     {
       "path": "/v1/dispatch/settle-no-start",
-      "body": "{\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"787c7d41-8291-450c-9310-e101df7347d6\",\"nodeGeneration\":1,\"permitId\":\"8c74c053-f032-4a7b-b095-09b54b7d6fb2\",\"evidence\":{\"receiptId\":\"01a11e4f-d015-7660-945a-9cc9bdace0c3\",\"type\":\"native_terminal_no_start\"}}",
+      "body": "{\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"71a251fe-63cc-442b-8484-faecb916d12f\",\"nodeGeneration\":1,\"permitId\":\"ac9599cb-bbc6-49f1-9726-f69fc34ca349\",\"evidence\":{\"receiptId\":\"01a11e69-2481-7fe1-8d31-892ef152323b\",\"type\":\"native_terminal_no_start\"}}",
       "proof": {
-        "nodeId": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+        "nodeId": "2e528fea-0469-4d1e-8650-ad7389126cb1",
         "nodeGeneration": 1,
-        "issuedAt": "2026-10-09T01:38:29.561Z",
-        "nonce": "5a6945f7-bc50-4922-87bd-21efc9c0f620",
-        "signature": "t6KLGG-e_EP_A9zmJYffb7VyHl9GolMYJTkEx0mMwzYEH4XKluw6HpHpyVp3JGXRS4sl1E1CV8fSJy82ZfT_AA"
+        "issuedAt": "2026-10-09T02:06:09.577Z",
+        "nonce": "b34efceb-3cae-4278-9024-defa8e3f6f97",
+        "signature": "UtmLMUj4KOg2IbC0c2m-gQd4SUI3-HmaHYFVZYbhM-kIlKaPNGc3Rw51QR5RN4FXh_umLSjHFFrHv3ycUh0RBw"
       },
       "responseStatus": 200
     },
     {
       "path": "/v1/dispatch/claim",
-      "body": "{\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"attemptId\":\"3a52c0ce-33a6-4c9f-b964-1b44f8927e85\"}",
+      "body": "{\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"attemptId\":\"a3796787-f977-4a9d-b58a-12d31110a9d6\"}",
       "proof": {
-        "nodeId": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+        "nodeId": "2e528fea-0469-4d1e-8650-ad7389126cb1",
         "nodeGeneration": 1,
-        "issuedAt": "2026-10-09T01:38:29.574Z",
-        "nonce": "720622fe-96b3-4c34-89ac-0212ddd9a18f",
-        "signature": "p67AMjedj35P5nz5wW_SLwtPLRuwnBoL6BjrOWf6f0tqYguIM8wvcp5Y587BqQauVNWJVnmagRsDLt9OXo-mAQ"
+        "issuedAt": "2026-10-09T02:06:09.586Z",
+        "nonce": "73e78359-b1db-4e68-9eb8-fa30b62de524",
+        "signature": "elX0zC7CeU1ESERfX42Epau4_ePpajsNMbnBguTdkdZwnkOdqPwM3sr6D-3F8Hf_ac8D0epODLz7MlF07a25AQ"
       },
       "responseStatus": 200
     },
     {
       "path": "/v1/ack",
-      "body": "{\"acknowledgedAt\":\"2026-10-09T01:38:29.630Z\",\"agent\":\"pilot\",\"attachmentGeneration\":1,\"attemptId\":\"3a52c0ce-33a6-4c9f-b964-1b44f8927e85\",\"deliveredSourceStateVersion\":\"v1-3056402f-b053-4b1c-b4cd-65ac4db7f087\",\"deliveryId\":\"dly_8330914118dc904d9775561faaec4a777eb258e28e9526eb060c0ae2fa36a7e9\",\"eventId\":\"b39a8ef5-9620-4ba8-bc55-24e199b1ce3d\",\"nativeCorrelation\":{\"kind\":\"native_turn_started\",\"permitId\":\"1039c43e-2277-4019-bb73-d55ea938de57\",\"turnId\":\"f168c769-ed23-4b54-a760-1d19b8a86f5f\"},\"nodeGeneration\":1,\"principal\":\"qualification@example.com\",\"runtimeGeneration\":1,\"runtimeId\":\"55c386d8-9cc7-4bf1-80e7-c4c9904ae4da\",\"schemaVersion\":1,\"status\":\"submitted\"}",
+      "body": "{\"acknowledgedAt\":\"2026-10-09T02:06:09.644Z\",\"agent\":\"pilot\",\"attachmentGeneration\":1,\"attemptId\":\"a3796787-f977-4a9d-b58a-12d31110a9d6\",\"deliveredSourceStateVersion\":\"v1-277fba51-a856-463a-bd0f-1d4a6560f2d3\",\"deliveryId\":\"dly_e4085d3ea49b58a1d60fcaeaa3a8ff7d17ca6b055ce2ab8a5300fb6626a32987\",\"eventId\":\"3181da3f-0e2f-4683-b67a-ebb85ed369a3\",\"nativeCorrelation\":{\"kind\":\"native_turn_started\",\"permitId\":\"6feff8ec-f439-40d1-9497-26c767104c27\",\"turnId\":\"de166706-0eed-4f16-a680-1ad9c632098d\"},\"nodeGeneration\":1,\"principal\":\"qualification@example.com\",\"runtimeGeneration\":1,\"runtimeId\":\"fdad84fc-3ce1-4edc-9e6b-a0b10522a830\",\"schemaVersion\":1,\"status\":\"submitted\"}",
       "proof": {
-        "nodeId": "54c6fdf2-c082-410b-a4cb-3d45961f9099",
+        "nodeId": "2e528fea-0469-4d1e-8650-ad7389126cb1",
         "nodeGeneration": 1,
-        "issuedAt": "2026-10-09T01:38:29.631Z",
-        "nonce": "e17d8034-8db6-4dcb-a91d-b60dd304fc77",
-        "signature": "PTD_i0Nhhvu4Jptk8AzgVx7EpXL0nxs6n0E19OJFT_zfHotamr-LbIMg4YH8FCXXgKTGEElp8Z2_Iu_MFrzXCQ"
+        "issuedAt": "2026-10-09T02:06:09.645Z",
+        "nonce": "e660eeae-0a2e-4e92-acf2-4a3383fa631b",
+        "signature": "CO3JDZtR9QTx3N2Em0hVBPI5vt9ieU9PQeC_BWh55BpB3YcFHgay824htgGUVvhh-WxQ_2rfCF8jbCLyzol9CA"
       },
       "responseStatus": 200
     }
@@ -903,7 +903,7 @@
     }
   },
   "sourceSha256": {
-    "/opt/coder/toolshed/.worktrees/event-client-admission/packages/event-gateway/docs/native-bridge/coupled-workerd.py": "b7165fcae928c0841beb067f4d9545954c5ddcb2d69a6b4dc7e5869b8d3fd3e4",
+    "/opt/coder/toolshed/.worktrees/event-client-admission/packages/event-gateway/docs/native-bridge/coupled-workerd.py": "1ceb3661b3c70b40a02929f1260953af5d2618d82ec2f5ddd915bc1c08ce0792",
     "/opt/coder/toolshed/.worktrees/event-client-admission/packages/event-gateway/docs/native-bridge/coupled-workerd-broker.mjs": "a13d7579b9efc3f487e0bad43a94c3d5f1468daae8e4f8feec2c21b250707fa1",
     "/opt/coder/toolshed/.worktrees/event-client-admission/packages/event-gateway/docs/native-bridge/coupled-workerd-worker.ts": "1182028f11c97f157a37ee0e0b84c1367e5041265392b349fae3d345e2b5facf",
     "/opt/coder/toolshed/.worktrees/event-client-admission/packages/event-gateway/docs/native-bridge/coupled-workerd-source-hashes.mjs": "0cf80b8f9dc816e7abae13979ed61ca938fdf1a23df6b05d33e4b029ac1e6515",

@@ -170,7 +170,9 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 while time.time_ns() // 1_000_000 <= request['permitExpiresAt']:
                     await asyncio.sleep(.02)
                 fresh = await asyncio.to_thread(bridge.challenge)
-                require(all(fresh[k] == request[k] for k in ('clientId', 'generation', 'serverInstanceId', 'serverGeneration', 'threadId')), 'unchanged selected native identity')
+                require(all(fresh[k] == request[k] for k in (
+                    'clientId', 'generation', 'serverInstanceId', 'serverGeneration', 'threadId')),
+                    'unchanged selected native identity')
                 receipt = await super().submit(request)
                 require(receipt['outcome']['status'] == 'terminalNotStarted', 'actual terminal no-start required')
                 require(receipt['outcome']['reason'] == 'permitExpired', 'native expired admitted permit')
@@ -261,7 +263,8 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 require(settled['budget']['used'] == 1, 'original budget remains charged')
                 require(len(settled['slots']) == 1, 'pending delivery retains its actual slot')
                 require(settled['cloud']['attempts'][0]['state'] == 'not_started', 'exact old attempt retired')
-                require(settled['cloud']['native_claims'][0]['permit_id'] == original['admission']['permitId'] and settled['cloud']['native_claims'][0]['state'] == 'not_started', 'exact old permit retired')
+                require(settled['cloud']['native_claims'][0]['permit_id'] == original['admission']['permitId']
+                    and settled['cloud']['native_claims'][0]['state'] == 'not_started', 'exact old permit retired')
                 store.close()
                 store = Store(state)
                 app = gateway(store)
@@ -272,7 +275,8 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 require(fixture('/fixture/read') == settled, 'settlement replay leaves coordinator unchanged')
                 require((await app.dispatch(ident))['status'] == 'submitted', 'one legitimate fresh native attempt')
                 replacement = copy.deepcopy(store.current_attempt(ident))
-                require(replacement['attempt_id'] != original['attempt_id'] and replacement['admission']['permitId'] != original['admission']['permitId'], 'fresh attempt and permit')
+                require(replacement['attempt_id'] != original['attempt_id']
+                    and replacement['admission']['permitId'] != original['admission']['permitId'], 'fresh attempt and permit')
                 await app.dispatch(ident)
                 require(len([w for w in wires if w['path'] == '/v1/dispatch/claim']) == 2, 'exactly original and one fresh claim')
                 require(len(bridge.attempts) == 2, 'only original refused start and one fresh start')
@@ -284,14 +288,16 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 after = fixture('/fixture/read')
                 require(after['budget']['used'] == 2, 'original charge retained plus one fresh charge')
                 require(len(settled['cloud']['no_start_settlements']) == 1 and
-                    json.loads(settled['cloud']['no_start_settlements'][0]['result_json'])['evidence'] == pending['evidence'], 'exact immutable terminal evidence stored')
+                    json.loads(settled['cloud']['no_start_settlements'][0]['result_json'])['evidence'] == pending['evidence'],
+                    'exact immutable terminal evidence stored')
                 return {'result': 'PASS', 'qualification': 'fixture-qualified-terminal-no-start-local-workerd',
                     'binarySha256': BINARY_SHA, 'productionAdmissionProven': False,
                     'nativeTerminalReceiptDurableAcrossNativeRestart': False, 'nativeProcessRestarted': False,
                     'oldStartNoStartSettlementProven': True, 'original': original, 'terminalReceipt': terminal_receipts[0],
                     'pending': pending, 'before': before, 'settled': settled, 'replacement': replacement, 'after': after,
                     'wire': wires, 'modelRequests': model.request_counts, 'realModelCalls': 0,
-                    'mocks': ['post-persistence submission delay', 'lost native and cloud replies', 'qualified runtime/admin setup', 'Access/Messaging identity and budget', 'manual source publication', 'queue metrics', 'loopback instead of Mesh']}
+                    'mocks': ['post-persistence submission delay', 'lost native and cloud replies', 'qualified runtime/admin setup',
+                        'Access/Messaging identity and budget', 'manual source publication', 'queue metrics', 'loopback instead of Mesh']}
             require((await app.dispatch(ident))['status'] == 'submitted', 'real claim and registration')
             before = fixture('/fixture/read')
             require(len(before['slots']) == 1 and before['cloud']['attempts'][0]['state'] == 'submitted', 'retained slot')

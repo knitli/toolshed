@@ -23,13 +23,11 @@
     "builds": [
       {
         "binaryBytes": 388546080,
-        "binarySha256": "11965142a8712b4110568082448c3ce3aede69fbbddf6f089c4abf202d7c9755",
-        "temporarySourcePathToken": "codex-native-v3-build-d30vj_aw"
+        "binarySha256": "11965142a8712b4110568082448c3ce3aede69fbbddf6f089c4abf202d7c9755"
       },
       {
         "binaryBytes": 388546080,
-        "binarySha256": "ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b",
-        "temporarySourcePathToken": "codex-native-v3-build-66_ydmd4"
+        "binarySha256": "ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b"
       }
     ],
     "causeIsolated": false,

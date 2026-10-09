@@ -49,8 +49,8 @@
     }
   ],
   "artifacts": {
-    "packages/event-gateway/docs/native-bridge/coupled-no-start-proof.json": "55eef34eba57bc6e129913828cba9c3376ed121266d456313cf1762503923637",
-    "packages/event-gateway/docs/native-bridge/coupled-no-start-unknown-proof.json": "10232b697549a5b307c88e6b2536dd0e85e15f920e52fb546df730869908776a",
+    "packages/event-gateway/docs/native-bridge/coupled-no-start-proof.json": "d0c6647fee5245034670f713460b45c6440c7787ceff07a98af10f374a752d41",
+    "packages/event-gateway/docs/native-bridge/coupled-no-start-unknown-proof.json": "365fe2ee99bd191cbf1c93ed7f4c97600399134c8745aa0390994a373cbb42c2",
     "/private/tmp/coupled-no-start-causal/red.log": "ec81564183452e386ba57aecfbeb916a5bf6deedfbcfe30a9cbe4725c4bc31da",
     "/private/tmp/coupled-no-start-causal/green.log": "d2cf2848703b509f0284aa51099e65442cb9c7b1ce47abee89ed51894fe9e14e",
     "/private/tmp/coupled-no-start-causal/unknown-red.log": "61609a55eae33674194e1d0cfff26f622fec6d7ac1b47bfb3f4fef3fe156578d",
@@ -58,6 +58,16 @@
     "/private/tmp/coupled-no-start-causal/lost-reply-mutation.py": "7f7ecbceadcafdfdd86fd98636b2e40318c75c286f462959e1a4bc1da93ed2b3",
     "/private/tmp/coupled-no-start-causal/unknown-restart-mutation.py": "a5fe2e68de004ac5c5e9f32de9f37c58058f194e10db3bf5f845e7a117a48e9b",
     "/private/tmp/coupled-no-start-causal/transport-red.log": "2f81abf1c25a091c21bdfce644c26bb3ebfc3a795f324187a0567cd2decd78c3",
-    "/private/tmp/coupled-no-start-causal/transport-mutation.py": "83fe712b5f2facd35d65d9df1c4cdd6d9bfddf9cf89275b120891cb601117f4a"
+    "/private/tmp/coupled-no-start-causal/transport-mutation.py": "83fe712b5f2facd35d65d9df1c4cdd6d9bfddf9cf89275b120891cb601117f4a",
+    "/private/tmp/coupled-no-start-e501.log": "93f8d49f670f01f91c9150a88b5869ec40179b51f432839bf24f76cda8b303c7",
+    "/private/tmp/coupled-no-start-unknown-e501.log": "6f38ef8ebaa0849c8f6ad23aba27534e62e8f3f319c9187863a06433afb097c2"
+  },
+  "formattingRefresh": {
+    "change": "Wrap five E501 lines; executable AST identical",
+    "astIdentical": true,
+    "harnessSha256": "1ceb3661b3c70b40a02929f1260953af5d2618d82ec2f5ddd915bc1c08ce0792",
+    "positiveExit": 0,
+    "unknownExit": 0,
+    "cloudCommitUnchanged": false
   }
 }
