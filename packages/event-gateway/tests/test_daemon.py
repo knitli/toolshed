@@ -15,6 +15,9 @@ from event_gateway.cloud import _iso
 from event_gateway.store import Store, StoreError
 
 
+TEMPORARY_ROOT = Path("/tmp").resolve()  # nosec B108 - private subdirectory with a short Unix socket path
+
+
 @asynccontextmanager
 async def running_daemon(state_dir):
     task = asyncio.create_task(daemon.serve(state_dir))
@@ -40,7 +43,7 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
         return path
 
     async def test_malformed_attachment_returns_bounded_store_code(self):
-        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory:
             state = await self.state_dir(directory, "malformed")
             async with running_daemon(state):
                 response = await daemon.request(state, {
@@ -59,7 +62,7 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
             }),
         )
         for label, code, command in cases:
-            with self.subTest(code=code), tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            with self.subTest(code=code), tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory:
                 state = await self.state_dir(directory, label)
                 with patch.object(
                     Store, "put_attachment",
@@ -72,7 +75,7 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
                 self.assertLessEqual(len(json.dumps(response).encode()), 128)
 
     async def _run_cli_with_store_error(self, operation, failure_code):
-        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory:
             state = Path(directory) / "state"
             binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
                        "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
