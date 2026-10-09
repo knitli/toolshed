@@ -52,7 +52,8 @@ class ClientRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("access-two", repr(second))
 
     async def test_config_and_tokens_require_closed_owner_only_files(self):
-        for changes in ({"extra": True}, {"version": True}, {"credentialsFile": "../tokens.json"},
+        for changes in ({"extra": True}, {"version": True}, {"version": False},
+                        {"credentialsFile": "../tokens.json"},
                         {"credentialsFile": ".."}):
             with self.subTest(changes=changes):
                 self.write_config(**changes)
@@ -73,6 +74,18 @@ class ClientRuntimeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(SecurityError, "^invalid_signing_key$"):
             load_cloud_client(self.config, state)
         self.assertFalse((state / "node-key.pem").exists())
+
+    async def test_transport_numeric_options_reject_booleans_before_spawn(self):
+        request = dict(method="POST", url="https://events.example.com/v1/runtimes/attach",
+                       headers={}, body=b"{}", timeout=1, max_response_bytes=8192,
+                       follow_redirects=False)
+        with patch("event_gateway.client_runtime.asyncio.create_subprocess_exec") as create:
+            for field in ("timeout", "max_response_bytes"):
+                for value in (True, False):
+                    with self.subTest(field=field, value=value):
+                        with self.assertRaisesRegex(ValueError, "invalid_transport_request"):
+                            await _https_send(**{**request, field: value})
+            create.assert_not_called()
 
     async def test_https_transport_uses_private_config_and_no_redirects(self):
         process = _FakeCurlProcess(b"HTTP/2 302 Found\r\ncontent-type: application/json\r\nlocation: /elsewhere\r\n\r\nredirect body")
@@ -146,6 +159,10 @@ class ClientRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "evidence": {"observedAt": "2026-10-09T12:00:00.100Z", "witness": {"sequence": 1}},
             "bodyB64": "e30=", "safeExpiryAt": "2026-10-09T12:02:00.000Z",
         }
+        for version in (True, False):
+            with self.subTest(version=version):
+                with self.assertRaisesRegex(SecurityError, "^invalid_pending_commit$"):
+                    save_pending_commit(self.state, "attach", session_id, {**artifact, "version": version})
         path = save_pending_commit(self.state, "attach", session_id, artifact)
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(load_pending_commit(self.state, "attach", session_id), artifact)

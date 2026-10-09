@@ -1,5 +1,5 @@
 """Exercise the shipped CLI boundary in disposable private state."""
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 import base64
 import io
 import json
@@ -17,8 +17,9 @@ from unittest.mock import patch
 
 from event_gateway import cli
 from event_gateway.cloud import CloudError, _iso
+from event_gateway.daemon import _execute_control_command
 from event_gateway.security import SecurityError
-from event_gateway.store import Store
+from event_gateway.store import IDENTITY, Store
 
 
 class CliTests(unittest.TestCase):
@@ -119,6 +120,51 @@ class CliTests(unittest.TestCase):
             self.assertEqual(mapping["runtimeGeneration"], 1)
         self.assertIsNone(cli.load_pending_commit(self.state, "attach", session_id))
 
+    def test_postcommit_launcher_transport_error_reports_remote_success_and_keeps_pending(self):
+        for error in (OSError("launcher socket disappeared"), TimeoutError("launcher timed out")):
+            with self.subTest(error=type(error).__name__):
+                runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
+                binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                           "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
+                           "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+                challenge = {"challengeId": str(uuid.uuid4()), "issuedAt": _iso(time.time()),
+                             "expiresAt": _iso(time.time() + 30)}
+                response = {"status": "attached", "runtimeId": runtime_id, "runtimeGeneration": 1,
+                            "nodeId": str(uuid.uuid4()), "nodeGeneration": 1, "attachmentGeneration": 1,
+                            "leaseUntil": _iso(time.time() + 90), "nativeBinding": binding}
+
+                class FakeCloud:
+                    origin, principal, agent = "https://events.example.com", "adam@knitli.com", "codex"
+                    node_id, node_generation = response["nodeId"], 1
+
+                    async def native_challenge(self, _intent):
+                        return challenge
+
+                    async def attach(self, *_args, on_first_send=None):
+                        on_first_send(b'{"prepared":"body"}')
+                        return response
+
+                output = io.StringIO()
+                with (patch.object(cli, "load_cloud_client", return_value=FakeCloud()),
+                      patch.object(cli, "session_binding", side_effect=[binding, error]),
+                      patch.object(cli, "session_challenge", return_value={
+                          "observedAt": challenge["issuedAt"],
+                          "validUntilMonotonic": time.monotonic() + 0.5,
+                          "witness": {"fixture": True},
+                      }),
+                      redirect_stdout(output)):
+                    code = cli.main([
+                        "--state-dir", str(self.state), "attach", "--runtime-id", runtime_id,
+                        "--session-id", session_id, "--cloud-config", str(self.state / "cloud.json"),
+                    ])
+
+                self.assertEqual(code, 2)
+                result = json.loads(output.getvalue())
+                self.assertEqual(result["remoteStatus"], "attached")
+                self.assertEqual(result["localStatus"], "not_current")
+                self.assertEqual(result["reason"], "native_client_unavailable_after_commit")
+                self.assertEqual(cli.load_pending_commit(self.state, "attach", session_id)["operation"], "attach")
+
     def test_attach_lost_commit_reply_reports_unknown_without_false_detach(self):
         runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
         binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
@@ -156,6 +202,143 @@ class CliTests(unittest.TestCase):
         self.assertTrue(self.state.exists())
         pending = cli.load_pending_commit(self.state, "attach", session_id)
         self.assertEqual(base64.b64decode(pending["bodyB64"]), b'{"prepared":"body"}')
+
+    def test_pending_commit_survives_launcher_transport_oserror_and_timeout(self):
+        for error in (OSError("launcher socket disappeared"), TimeoutError("launcher timed out")):
+            with self.subTest(error=type(error).__name__):
+                runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
+                binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                           "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
+                           "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+                cloud_id = {"origin": "https://events.example.com", "principal": "adam@knitli.com",
+                            "agent": "codex", "nodeId": str(uuid.uuid4()), "nodeGeneration": 1}
+                challenge = {"challengeId": str(uuid.uuid4()), "issuedAt": _iso(time.time()),
+                             "expiresAt": _iso(time.time() + 30)}
+                intent = {"operation": "attach", "runtimeId": runtime_id,
+                          "expectedRuntimeGeneration": None, "expectedAttachmentGeneration": None,
+                          "expectedNativeBinding": binding}
+                evidence = {"observedAt": challenge["issuedAt"], "witness": {"sequence": 1}}
+                body = json.dumps({"challengeId": challenge["challengeId"], "runtimeId": runtime_id,
+                                   "expectedRuntimeGeneration": None, "expectedAttachmentGeneration": None,
+                                   "nativeEvidence": evidence}, separators=(",", ":")).encode()
+                artifact = {"version": 1, "operation": "attach", "sessionId": session_id,
+                            "cloudIdentity": cloud_id, "intent": intent, "challenge": challenge,
+                            "evidence": evidence, "bodyB64": base64.b64encode(body).decode("ascii"),
+                            "safeExpiryAt": _iso(time.time() + 90)}
+                cli.save_pending_commit(self.state, "attach", session_id, artifact)
+
+                class FakeCloud:
+                    origin, principal, agent = cloud_id["origin"], cloud_id["principal"], cloud_id["agent"]
+                    node_id, node_generation = cloud_id["nodeId"], cloud_id["nodeGeneration"]
+
+                    async def attach(self, *_args, **_kwargs):
+                        raise AssertionError("must not replay before confirming the native binding")
+
+                output, stderr = io.StringIO(), io.StringIO()
+                with (
+                    patch.object(cli, "load_cloud_client", return_value=FakeCloud()),
+                    patch.object(cli, "session_binding", side_effect=error),
+                    patch.object(cli, "session_challenge", side_effect=AssertionError("must not resample")),
+                    redirect_stdout(output), redirect_stderr(stderr),
+                ):
+                    code = cli.main(["--state-dir", str(self.state), "attach", "--runtime-id", runtime_id,
+                                     "--session-id", session_id, "--cloud-config", str(self.state / "cloud.json")])
+
+                self.assertEqual(code, 2)
+                self.assertEqual(stderr.getvalue(), "")
+                result = json.loads(output.getvalue())
+                self.assertIsNone(result["attached"])
+                self.assertEqual(result["reason"], "commit_outcome_unknown")
+                self.assertEqual(result["pendingCommit"]["status"], "outcome_unknown")
+                self.assertEqual(cli.load_pending_commit(self.state, "attach", session_id), artifact)
+
+    def test_stale_control_socket_falls_back_only_when_store_lock_is_available(self):
+        binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                   "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
+                   "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+
+        def run_case(label, request_error, *, hold_writer=False, forbid_fallback=False):
+            state = self.state / label
+            state.mkdir(parents=True, mode=0o700)
+            (state / "control.sock").touch(mode=0o600)
+            runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
+            cloud_id = {"origin": "https://events.example.com", "principal": "adam@knitli.com",
+                        "agent": "codex", "nodeId": str(uuid.uuid4()), "nodeGeneration": 1}
+            challenge = {"challengeId": str(uuid.uuid4()), "issuedAt": _iso(time.time()),
+                         "expiresAt": _iso(time.time() + 30)}
+            evidence = {"observedAt": challenge["issuedAt"], "validUntilMonotonic": time.monotonic() + 0.5,
+                        "witness": {"fixture": True}}
+            response = {"status": "attached", "runtimeId": runtime_id, "runtimeGeneration": 1,
+                        "nodeId": cloud_id["nodeId"], "nodeGeneration": 1, "attachmentGeneration": 1,
+                        "leaseUntil": _iso(time.time() + 90), "nativeBinding": binding}
+
+            class FakeCloud:
+                origin, principal, agent = cloud_id["origin"], cloud_id["principal"], cloud_id["agent"]
+                node_id, node_generation = cloud_id["nodeId"], cloud_id["nodeGeneration"]
+
+                async def native_challenge(self, _intent):
+                    return challenge
+
+                async def attach(self, _intent, _challenge, _evidence, *, on_first_send=None):
+                    on_first_send(b'{"prepared":"body"}')
+                    return response
+
+            async def daemon_request(_state_dir, _command):
+                raise request_error
+
+            output, stderr = io.StringIO(), io.StringIO()
+
+            def invoke():
+                with ExitStack() as stack:
+                    stack.enter_context(patch.object(cli, "load_cloud_client", return_value=FakeCloud()))
+                    stack.enter_context(patch.object(cli, "session_binding", side_effect=[binding, binding]))
+                    stack.enter_context(patch.object(cli, "session_challenge", return_value=evidence))
+                    stack.enter_context(patch.object(cli, "request", side_effect=daemon_request))
+                    if forbid_fallback:
+                        stack.enter_context(patch.object(cli, "Store", side_effect=AssertionError(
+                            "a control timeout is not proof that the daemon has stopped")))
+                    stack.enter_context(redirect_stdout(output))
+                    stack.enter_context(redirect_stderr(stderr))
+                    return cli.main(["--state-dir", str(state), "attach", "--runtime-id", runtime_id,
+                                     "--session-id", session_id, "--cloud-config", str(state / "cloud.json")])
+
+            result = None
+            if hold_writer:
+                with Store(state) as daemon_store:
+                    sentinel_id = str(uuid.uuid4())
+                    sentinel = {"runtimeId": sentinel_id, "principal": cloud_id["principal"],
+                                "agent": cloud_id["agent"], "nodeGeneration": 1,
+                                "runtimeGeneration": 1, "attachmentGeneration": 1,
+                                "leaseExpiresAt": time.time() + 90}
+                    daemon_store.put_attachment(sentinel)
+                    before = daemon_store.get_attachment(sentinel_id)
+                    code = invoke()
+                    result = json.loads(output.getvalue())
+                    self.assertEqual(daemon_store.get_attachment(sentinel_id), before)
+                    self.assertIsNone(daemon_store.get_attachment(runtime_id))
+            else:
+                code = invoke()
+                result = json.loads(output.getvalue())
+                with Store(state) as store:
+                    self.assertEqual(store.get_attachment(runtime_id) is not None, request_error.__class__ in (
+                        ConnectionRefusedError, FileNotFoundError,
+                    ))
+
+            self.assertEqual(stderr.getvalue(), "")
+            self.assertEqual(code, 0 if result["localStatus"] == "current" else 2)
+            self.assertEqual(result["remoteStatus"], "attached")
+            if request_error.__class__ in (ConnectionRefusedError, FileNotFoundError) and not hold_writer:
+                self.assertEqual(result["localStatus"], "current")
+                self.assertIsNone(cli.load_pending_commit(state, "attach", session_id))
+            else:
+                self.assertEqual(result["localStatus"], "unavailable")
+                self.assertEqual(result["reason"], "local_mapping_unavailable")
+                self.assertIsNotNone(cli.load_pending_commit(state, "attach", session_id))
+
+        run_case("refused", ConnectionRefusedError("stale daemon socket"))
+        run_case("disappeared", FileNotFoundError("control socket disappeared"))
+        run_case("busy", ConnectionRefusedError("daemon stopped"), hold_writer=True)
+        run_case("timed-out", TimeoutError("daemon socket timed out"), forbid_fallback=True)
 
     def test_pending_commit_restart_replays_exact_body_without_native_resampling(self):
         runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
@@ -363,6 +546,127 @@ class CliTests(unittest.TestCase):
             self.assertEqual(daemon_store.get_attachment(replacement_id)["attachmentGeneration"], 9)
         pending = cli.load_pending_commit(self.state, "transfer", session_id)
         self.assertIsNone(pending)
+
+    def test_confirmed_transfer_fences_source_before_native_recheck_and_recovers_target(self):
+        fixture_path = Path(__file__).resolve().parents[1] / "contracts/event-v1/protocol-v1.json"
+        event = json.loads(fixture_path.read_text())["validEnvelopes"][0]
+        fixed_now = 1791201630
+
+        def run_case(label, post_commit_binding, *, recover):
+            state = self.state / label
+            state.mkdir(mode=0o700, parents=True)
+            (state / "control.sock").touch(mode=0o600)
+            source_id, replacement_id, session_id = event["runtimeId"], str(uuid.uuid4()), str(uuid.uuid4())
+            binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                       "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
+                       "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+            cloud_id = {"origin": "https://events.example.com", "principal": event["principal"],
+                        "agent": event["agent"], "nodeId": str(uuid.uuid4()), "nodeGeneration": 1}
+            challenge = {"challengeId": str(uuid.uuid4()), "issuedAt": _iso(time.time()),
+                         "expiresAt": _iso(time.time() + 30)}
+            response = {"status": "transferred", "sourceRuntimeId": source_id,
+                        "sourceRuntimeGeneration": 3, "sourceAttachmentGeneration": 4,
+                        "runtimeId": replacement_id, "runtimeGeneration": 7,
+                        "nodeId": cloud_id["nodeId"], "nodeGeneration": 1, "attachmentGeneration": 9,
+                        "leaseUntil": _iso(fixed_now + 3600), "nativeBinding": binding}
+
+            class FakeCloud:
+                origin, principal, agent = cloud_id["origin"], cloud_id["principal"], cloud_id["agent"]
+                node_id, node_generation = cloud_id["nodeId"], cloud_id["nodeGeneration"]
+
+                def __init__(self):
+                    self.recoveries = []
+
+                async def native_challenge(self, _intent):
+                    return challenge
+
+                async def transfer(self, _intent, _challenge, _evidence, *, on_first_send=None,
+                                   prepared_body=None, recovery=False):
+                    self.recoveries.append(recovery)
+                    if on_first_send is not None:
+                        on_first_send(b'{"transfer":"exact-body"}')
+                    return response
+
+            fake = FakeCloud()
+            daemon_commands = []
+            with Store(state, clock=lambda: fixed_now) as daemon_store:
+                source = {key: event[key] for key in IDENTITY}
+                source["leaseExpiresAt"] = fixed_now + 3600
+                daemon_store.put_attachment(source)
+                queued = daemon_store.accept(event)["deliveryId"]
+
+                def daemon_request(_state_dir, command):
+                    daemon_commands.append(command["command"])
+                    return _execute_control_command(daemon_store, command)
+
+                initial_bindings = [binding, post_commit_binding]
+                first_output = io.StringIO()
+                with (patch.object(cli, "load_cloud_client", return_value=fake),
+                      patch.object(cli, "session_binding", side_effect=initial_bindings),
+                      patch.object(cli, "session_challenge", return_value={
+                          "observedAt": challenge["issuedAt"],
+                          "validUntilMonotonic": time.monotonic() + 0.5,
+                          "witness": {"fixture": True},
+                      }),
+                      patch.object(cli, "request", side_effect=daemon_request),
+                      redirect_stdout(first_output)):
+                    first_code = cli.main([
+                        "--state-dir", str(state), "transfer",
+                        "--source-runtime-id", source_id,
+                        "--expected-source-runtime-generation", "2",
+                        "--expected-source-attachment-generation", "3",
+                        "--replacement-runtime-id", replacement_id,
+                        "--expected-replacement-runtime-generation", "7",
+                        "--expected-replacement-attachment-generation", "8",
+                        "--session-id", session_id, "--cloud-config", str(state / "cloud.json"),
+                    ])
+                first_result = json.loads(first_output.getvalue())
+                self.assertEqual(first_code, 2)
+                self.assertEqual(first_result["remoteStatus"], "transferred")
+                self.assertEqual(first_result["localStatus"], "not_current")
+                self.assertIsNone(daemon_store.get_attachment(source_id))
+                self.assertIsNone(daemon_store.get_attachment(replacement_id))
+                self.assertEqual(daemon_store.get(queued)["status"], "stale")
+                source_tombstone = json.loads(daemon_store.db.execute(
+                    "SELECT data FROM attachments WHERE runtime=?", (source_id,),
+                ).fetchone()[0])
+                self.assertEqual(source_tombstone["leaseExpiresAt"], 0)
+                self.assertEqual(daemon_commands, ["revoke-transfer-source"])
+                self.assertIsNotNone(cli.load_pending_commit(state, "transfer", session_id))
+
+                if recover:
+                    second_output = io.StringIO()
+                    with (patch.object(cli, "load_cloud_client", return_value=fake),
+                          patch.object(cli, "session_binding", side_effect=[binding, binding]),
+                          patch.object(cli, "session_challenge", side_effect=AssertionError("must not resample")),
+                          patch.object(cli, "request", side_effect=daemon_request),
+                          redirect_stdout(second_output)):
+                        second_code = cli.main([
+                            "--state-dir", str(state), "transfer",
+                            "--source-runtime-id", source_id,
+                            "--expected-source-runtime-generation", "2",
+                            "--expected-source-attachment-generation", "3",
+                            "--replacement-runtime-id", replacement_id,
+                            "--expected-replacement-runtime-generation", "7",
+                            "--expected-replacement-attachment-generation", "8",
+                            "--session-id", session_id, "--cloud-config", str(state / "cloud.json"),
+                        ])
+                    self.assertEqual(second_code, 0)
+                    self.assertEqual(json.loads(second_output.getvalue())["localStatus"], "current")
+                    self.assertEqual(fake.recoveries, [False, True])
+                    self.assertEqual(daemon_commands, ["revoke-transfer-source", "transfer-attachment"])
+                    self.assertEqual(daemon_store.get_attachment(replacement_id)["attachmentGeneration"], 9)
+                    self.assertEqual(daemon_store.get(queued)["status"], "stale")
+                    self.assertIsNone(cli.load_pending_commit(state, "transfer", session_id))
+                else:
+                    self.assertEqual(first_result["reason"], "native_binding_changed_after_commit")
+                    self.assertIsNotNone(cli.load_pending_commit(state, "transfer", session_id))
+
+        run_case("native-gone", OSError("launcher socket disappeared"), recover=True)
+        changed_binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                           "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 3,
+                           "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+        run_case("native-changed", changed_binding, recover=False)
 
     def test_client_status_labels_presence_only(self):
         output = io.StringIO()

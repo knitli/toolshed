@@ -158,7 +158,6 @@ class StoreTests(unittest.TestCase):
         self.assertFalse(self.store.begin_native(ident, self.event["attemptId"], self.request(admission)))
 
     def test_admission_storage_failure_keeps_durable_claim_for_exact_recovery(self):
-        import sqlite3
         ident = self.store.accept(self.event)["deliveryId"]
         self.store.begin_claim(ident)
         before = self.store.current_attempt(ident)
@@ -512,7 +511,6 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.list_pending(), [])
 
     def test_settlement_rejects_echo_tampering_and_rolls_back_storage_failure(self):
-        import sqlite3
         ident, admission = self.admitted()
         attempt = self.event["attemptId"]
         evidence = {"type": "local_not_submitted"}
@@ -800,6 +798,78 @@ class StoreTests(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(after, before)
         self.assertEqual(self.store.get_attachment(self.mapping["runtimeId"]), reattached)
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+
+    def test_transfer_with_newer_target_commits_source_fence_before_error(self):
+        queued = self.store.accept(self.event)["deliveryId"]
+        target, transfer = self.transfer_mapping_and_cas()
+        newer_target = dict(target, attachmentGeneration=target["attachmentGeneration"] + 1)
+        self.store.put_attachment(newer_target)
+        with self.assertRaisesRegex(StoreError, "^stale$"):
+            self.store.put_attachment(target, transfer=transfer)
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertIsNone(self.store.get_attachment(self.mapping["runtimeId"]))
+        self.assertEqual(self.store.get(queued)["status"], "stale")
+        self.assertEqual(self.store.get_attachment(target["runtimeId"]), newer_target)
+
+    def test_transfer_with_newer_source_and_target_preserves_new_source_work(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        newer_source = dict(self.mapping, runtimeGeneration=transfer["runtimeGeneration"],
+                            attachmentGeneration=transfer["attachmentGeneration"])
+        newer_target = dict(target, attachmentGeneration=target["attachmentGeneration"] + 1)
+        self.store.put_attachment(newer_source)
+        self.store.put_attachment(newer_target)
+        event = dict(self.event, runtimeGeneration=newer_source["runtimeGeneration"],
+                     attachmentGeneration=newer_source["attachmentGeneration"])
+        event["deliveryId"] = derive_delivery_id(event)
+        queued = self.store.accept(event)["deliveryId"]
+        with self.assertRaisesRegex(StoreError, "^stale_transfer$"):
+            self.store.put_attachment(target, transfer=transfer)
+        self.assertEqual(self.store.get_attachment(self.mapping["runtimeId"]), newer_source)
+        self.assertEqual(self.store.get_attachment(target["runtimeId"]), newer_target)
+        self.assertEqual(self.store.get(queued)["status"], "queued")
+
+    def test_source_only_revocation_replays_then_recovers_target(self):
+        queued = self.store.accept(self.event)["deliveryId"]
+        admitted_event = self.new_event()
+        admitted = self.store.accept(admitted_event)["deliveryId"]
+        self.store.begin_claim(admitted)
+        self.store.record_admission(admitted, self.admission(admitted_event))
+        target, transfer = self.transfer_mapping_and_cas()
+        expected = {"revoked": True, "runtimeId": self.mapping["runtimeId"]}
+        self.assertEqual(self.store.revoke_transfer_source(target, transfer=transfer), expected)
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+        self.assertIsNone(self.store.get_attachment(self.mapping["runtimeId"]))
+        self.assertEqual(self.store.get(queued)["status"], "stale")
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        before = self.store.current_attempt(admitted)
+        self.assertTrue(before["fenced"])
+        self.now += 1
+        self.assertEqual(self.store.revoke_transfer_source(target, transfer=transfer), expected)
+        self.assertEqual(self.store.current_attempt(admitted), before)
+        self.assertEqual(self.store.put_attachment(target, transfer=transfer), target)
+        self.assertEqual(self.store.current_attempt(admitted), before)
+        self.assertEqual(self.store.get_attachment(target["runtimeId"]), target)
+
+    def test_source_only_revocation_accepts_expired_target_receipt(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        self.now = target["leaseExpiresAt"] + 1
+        self.store.revoke_transfer_source(target, transfer=transfer)
+        self.assertIsNone(self.store.get_attachment(self.mapping["runtimeId"]))
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+        with self.assertRaisesRegex(StoreError, "^invalid_attachment$"):
+            self.store.put_attachment(target, transfer=transfer)
+
+    def test_source_only_revocation_preserves_newer_source(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        newer_source = dict(self.mapping, runtimeGeneration=transfer["runtimeGeneration"],
+                            attachmentGeneration=transfer["attachmentGeneration"])
+        self.store.put_attachment(newer_source)
+        with self.assertRaisesRegex(StoreError, "^stale_transfer$"):
+            self.store.revoke_transfer_source(target, transfer=transfer)
+        self.assertEqual(self.store.get_attachment(self.mapping["runtimeId"]), newer_source)
         self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
 
     def test_transfer_sql_failure_rolls_back_source_fence_and_target_write(self):

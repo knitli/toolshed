@@ -22,6 +22,36 @@ def status(store):
     }
 
 
+def _execute_control_command(store, request_value):
+    if request_value == {"command": "status"}:
+        return status(store)
+    if (
+        isinstance(request_value, dict)
+        and set(request_value) == {"command", "runtimeId"}
+        and request_value["command"] == "detach"
+        and isinstance(request_value["runtimeId"], str)
+    ):
+        store.detach(request_value["runtimeId"])
+        return {"detached": True}
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "mapping"}
+            and request_value["command"] == "put-attachment"):
+        stored = store.put_attachment(request_value["mapping"])
+        return {"stored": True, "runtimeId": stored["runtimeId"]}
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "mapping", "transfer"}
+            and request_value["command"] == "transfer-attachment"):
+        stored = store.put_attachment(request_value["mapping"], transfer=request_value["transfer"])
+        return {"stored": True, "runtimeId": stored["runtimeId"]}
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "mapping", "transfer"}
+            and request_value["command"] == "revoke-transfer-source"):
+        return store.revoke_transfer_source(
+            request_value["mapping"], transfer=request_value["transfer"],
+        )
+    return {"reason": "unsupported_command"}
+
+
 async def serve(state_dir):
     with Store(state_dir) as store:
         path = Path(state_dir) / "control.sock"
@@ -46,28 +76,7 @@ async def serve(state_dir):
                     if len(line) > 4096:
                         raise ValueError("request_too_large")
                     request = json.loads(line)
-                    if request == {"command": "status"}:
-                        result = status(store)
-                    elif (
-                        isinstance(request, dict)
-                        and set(request) == {"command", "runtimeId"}
-                        and request["command"] == "detach"
-                        and isinstance(request["runtimeId"], str)
-                    ):
-                        store.detach(request["runtimeId"])
-                        result = {"detached": True}
-                    elif (isinstance(request, dict)
-                          and set(request) == {"command", "mapping"}
-                          and request["command"] == "put-attachment"):
-                        stored = store.put_attachment(request["mapping"])
-                        result = {"stored": True, "runtimeId": stored["runtimeId"]}
-                    elif (isinstance(request, dict)
-                          and set(request) == {"command", "mapping", "transfer"}
-                          and request["command"] == "transfer-attachment"):
-                        stored = store.put_attachment(request["mapping"], transfer=request["transfer"])
-                        result = {"stored": True, "runtimeId": stored["runtimeId"]}
-                    else:
-                        result = {"reason": "unsupported_command"}
+                    result = _execute_control_command(store, request)
                     writer.write(json.dumps(result).encode() + b"\n")
                     await writer.drain()
             except (ValueError, TimeoutError):

@@ -1004,6 +1004,46 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(CloudError, "^invalid_response$"):
                 await self.client.native_challenge(intent)
 
+    async def test_invalid_body_400_is_definitive_for_first_native_commit(self):
+        binding = self.native_binding()
+        for operation in ("attach", "renew", "transfer"):
+            with self.subTest(operation=operation):
+                self.requests.clear()
+                self.status, self.result = 400, {"error": "invalid_body"}
+                intent = self.native_intent(operation, binding)
+                challenge = self.native_challenge_response()
+                evidence = self.native_sample(binding)
+                self.now += 0.2
+                with self.assertRaisesRegex(CloudError, "^invalid_body$") as caught:
+                    await getattr(self.client, operation)(intent, challenge, evidence)
+                self.assertFalse(caught.exception.ambiguous)
+                self.assertEqual(len(self.requests), 1)
+
+    async def test_invalid_body_400_after_ambiguous_send_remains_unknown(self):
+        binding = self.native_binding()
+        for first_result in ("timeout", "server_error"):
+            with self.subTest(first_result=first_result):
+                requests = []
+
+                async def ambiguous_then_invalid_body(**request):
+                    requests.append(request)
+                    if len(requests) == 1:
+                        if first_result == "timeout":
+                            raise TimeoutError()
+                        return 500, JSON_HEADERS, b'{"error":"unavailable"}'
+                    return 400, JSON_HEADERS, b'{"error":"invalid_body"}'
+
+                self.client._send = ambiguous_then_invalid_body
+                intent = self.native_intent("attach", binding)
+                challenge = self.native_challenge_response()
+                evidence = self.native_sample(binding)
+                self.now += 0.2
+                with self.assertRaisesRegex(CloudError, "^invalid_body$") as caught:
+                    await self.client.attach(intent, challenge, evidence)
+                self.assertTrue(caught.exception.ambiguous)
+                self.assertEqual(len(requests), 2)
+                self.assertEqual(requests[0]["body"], requests[1]["body"])
+
     async def test_native_commit_does_not_retry_explicit_conflict(self):
         binding = self.native_binding()
         intent = self.native_intent("attach", binding)

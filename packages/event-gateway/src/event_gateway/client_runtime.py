@@ -63,7 +63,8 @@ def load_cloud_config(path):
     if (not isinstance(config, dict)
             or set(config) != {"version", "origin", "principal", "agent", "nodeId",
                                "nodeGeneration", "credentialsFile"}
-            or type(config["version"]) is not int or config["version"] != 1
+            or not isinstance(config["version"], int) or isinstance(config["version"], bool)
+            or config["version"] != 1
             or not isinstance(config["credentialsFile"], str)
             or config["credentialsFile"] in ("", ".", "..")
             or Path(config["credentialsFile"]).name != config["credentialsFile"]
@@ -75,8 +76,10 @@ def load_cloud_config(path):
 async def _https_send(method, url, headers, body, timeout, max_response_bytes, follow_redirects):
     """Make one verified HTTPS request in a killable, wall-clock-bounded curl process."""
     if (method != "POST" or follow_redirects is not False
-            or type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 5
-            or type(max_response_bytes) is not int or max_response_bytes != 8192
+            or not isinstance(timeout, (int, float)) or isinstance(timeout, bool)
+            or not math.isfinite(timeout) or not 0 < timeout <= 5
+            or not isinstance(max_response_bytes, int) or isinstance(max_response_bytes, bool)
+            or max_response_bytes != 8192
             or not isinstance(body, bytes) or not isinstance(headers, dict)):
         raise ValueError("invalid_transport_request")
     parsed = urlsplit(url)
@@ -111,7 +114,6 @@ async def _https_send(method, url, headers, body, timeout, max_response_bytes, f
                                           "curl_ca_bundle", "ssl_cert_file", "ssl_cert_dir"}}
     deadline = asyncio.get_running_loop().time() + timeout
     process = None
-    output = bytearray()
     config_bytes = ("\n".join(config) + "\n").encode("utf-8")
     try:
         process = await asyncio.create_subprocess_exec(  # nosec B603 - fixed curl args, no shell, secrets only in stdin config
@@ -122,38 +124,43 @@ async def _https_send(method, url, headers, body, timeout, max_response_bytes, f
         await asyncio.wait_for(process.stdin.drain(), max(0, deadline - asyncio.get_running_loop().time()))
         process.stdin.close()
         await asyncio.wait_for(process.stdin.wait_closed(), max(0, deadline - asyncio.get_running_loop().time()))
-        header_end = -1
-        while True:
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                raise TimeoutError("https_transport_timeout")
-            chunk = await asyncio.wait_for(process.stdout.read(4096), remaining)
-            if not chunk:
-                break
-            output.extend(chunk)
-            if header_end < 0:
-                header_end = output.find(b"\r\n\r\n")
-                if header_end < 0 and len(output) > max_response_bytes:
-                    raise ValueError("https_response_too_large")
-            if header_end >= 0 and len(output) - header_end - 4 > max_response_bytes:
-                raise ValueError("https_response_too_large")
-            if len(output) > max_response_bytes * 2 + 4:
-                raise ValueError("https_response_too_large")
+        output = await _collect_curl_response(process, deadline, max_response_bytes)
         if await asyncio.wait_for(process.wait(), max(0, deadline - asyncio.get_running_loop().time())) != 0:
             raise OSError("https_transport_failed")
         return _parse_curl_response(bytes(output), max_response_bytes)
     except TimeoutError:
-        if process is not None and process.returncode is None:
-            process.kill()
-        if process is not None:
-            await process.wait()
         raise TimeoutError("https_transport_timeout") from None
-    except BaseException:
-        if process is not None and process.returncode is None:
+    finally:
+        await _reap_curl(process)
+
+
+async def _reap_curl(process):
+    if process is not None:
+        if process.returncode is None:
             process.kill()
-        if process is not None:
-            await process.wait()
-        raise
+        await process.wait()
+
+
+async def _collect_curl_response(process, deadline, max_response_bytes):
+    output = bytearray()
+    header_end = -1
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise TimeoutError("https_transport_timeout")
+        chunk = await asyncio.wait_for(process.stdout.read(4096), remaining)
+        if not chunk:
+            break
+        output.extend(chunk)
+        if header_end < 0:
+            header_end = output.find(b"\r\n\r\n")
+            if header_end < 0 and len(output) > max_response_bytes:
+                raise ValueError("https_response_too_large")
+        if header_end >= 0 and len(output) - header_end - 4 > max_response_bytes:
+            raise ValueError("https_response_too_large")
+        if len(output) > max_response_bytes * 2 + 4:
+            raise ValueError("https_response_too_large")
+    return output
 
 
 def _parse_curl_response(output, max_response_bytes):
@@ -233,7 +240,8 @@ def _pending_lock(directory):
 
 def _validate_pending_artifact(value, operation, session_id):
     if (not isinstance(value, dict) or set(value) != _PENDING_FIELDS
-            or type(value["version"]) is not int or value["version"] != 1
+            or not isinstance(value["version"], int) or isinstance(value["version"], bool)
+            or value["version"] != 1
             or value["operation"] != operation or value["sessionId"] != session_id
             or not isinstance(value["cloudIdentity"], dict)
             or set(value["cloudIdentity"]) != {"origin", "principal", "agent", "nodeId", "nodeGeneration"}

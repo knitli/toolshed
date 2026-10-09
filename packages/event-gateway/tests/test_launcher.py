@@ -18,6 +18,25 @@ from test_native_bridge import peer, receive, send, witness
 
 
 class LauncherTests(unittest.TestCase):
+    def test_native_numeric_fields_reject_booleans(self):
+        row = witness()
+        for field in ("version", "nonce", "backendPid", "generation",
+                      "serverGeneration", "sequence", "leaseMs"):
+            for value in (True, False):
+                with self.subTest(field=field, value=value):
+                    self.assertFalse(launcher._valid_native_witness({**row, field: value}))
+        binding = launcher._binding(row)
+        challenge_id = str(uuid4())
+        for deadline in (True, False):
+            with (self.subTest(deadline=deadline),
+                  patch.object(launcher, "_session_request", return_value={
+                      "challengeId": challenge_id,
+                      "observedAt": "2026-10-09T12:00:00.000Z",
+                      "validUntilMonotonic": deadline, "witness": row,
+                  }), patch.object(launcher.time, "monotonic", return_value=0.5),
+                  self.assertRaisesRegex(launcher.LaunchError, "invalid_client_challenge")):
+                launcher.session_challenge("unused", str(uuid4()), challenge_id, binding)
+
     def test_startup_is_not_selection_and_resume_requires_fresh_exact_thread(self):
         row = witness()
         bridge = Mock()
@@ -252,6 +271,7 @@ class LauncherTests(unittest.TestCase):
             b"x" * 1024,
         ):
             with self.subTest(payload=payload):
+                response = None
                 channel = MagicMock()
                 channel.recv.return_value = payload
                 listener = Mock()

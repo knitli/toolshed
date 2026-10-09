@@ -103,7 +103,8 @@ def session_challenge(state_dir, session_id, challenge_id, expected_binding):
             or set(value) != {"challengeId", "observedAt", "validUntilMonotonic", "witness"}
             or value["challengeId"] != challenge_id
             or not _valid_observed_at(value["observedAt"])
-            or type(value["validUntilMonotonic"]) not in (int, float)
+            or not isinstance(value["validUntilMonotonic"], (int, float))
+            or isinstance(value["validUntilMonotonic"], bool)
             or not math.isfinite(value["validUntilMonotonic"])
             or time.monotonic() >= value["validUntilMonotonic"]
             or not _valid_native_witness(value["witness"])
@@ -133,10 +134,12 @@ def _valid_binding(value):
             and all(uuid(value[key]) for key in (
                 "clientId", "connectionId", "threadId", "serverInstanceId",
             ))
-            and type(value["backendPid"]) is int and 0 < value["backendPid"] <= 2**32 - 1
-            and type(value["generation"]) is int and 0 <= value["generation"] <= 2**53 - 1
-            and type(value["serverGeneration"]) is int
-            and 0 <= value["serverGeneration"] <= 2**53 - 1)  # pylint: disable=unidiomatic-typecheck
+            and isinstance(value["backendPid"], int) and not isinstance(value["backendPid"], bool)
+            and 0 < value["backendPid"] <= 2**32 - 1
+            and isinstance(value["generation"], int) and not isinstance(value["generation"], bool)
+            and 0 <= value["generation"] <= 2**53 - 1
+            and isinstance(value["serverGeneration"], int) and not isinstance(value["serverGeneration"], bool)
+            and 0 <= value["serverGeneration"] <= 2**53 - 1)
 
 
 def _binding(witness):
@@ -150,13 +153,17 @@ def _valid_native_witness(value):
                 "generation", "eligible", "sequence", "cause", "serverInstanceId",
                 "serverGeneration", "leaseMs",
             }
-            and type(value["version"]) is int and value["version"] == 2
-            and type(value["nonce"]) is int and 0 <= value["nonce"] <= 2**53 - 1
+            and isinstance(value["version"], int) and not isinstance(value["version"], bool)
+            and value["version"] == 2
+            and isinstance(value["nonce"], int) and not isinstance(value["nonce"], bool)
+            and 0 <= value["nonce"] <= 2**53 - 1
             and value["eligible"] is True
             and isinstance(value["cause"], str) and len(value["cause"]) <= 128
-            and type(value["sequence"]) is int and 0 < value["sequence"] <= 2**53 - 1
-            and type(value["leaseMs"]) is int and 0 < value["leaseMs"] <= 2**53 - 1
-            and _valid_binding(_binding(value)))  # pylint: disable=unidiomatic-typecheck
+            and isinstance(value["sequence"], int) and not isinstance(value["sequence"], bool)
+            and 0 < value["sequence"] <= 2**53 - 1
+            and isinstance(value["leaseMs"], int) and not isinstance(value["leaseMs"], bool)
+            and 0 < value["leaseMs"] <= 2**53 - 1
+            and _valid_binding(_binding(value)))
 
 
 def _reject_constant(_):
