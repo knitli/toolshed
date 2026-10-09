@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 import runpy
-import subprocess
+import subprocess  # nosec B404 - fixed Git executable and disposable repo fixture, no shell
 import tarfile
 import tempfile
 import unittest
@@ -33,14 +33,17 @@ class NativePackagingTests(unittest.TestCase):
                 "GIT_CONFIG_NOSYSTEM": "1",
                 "GIT_CONFIG_GLOBAL": os.devnull,
             }
+            git_executable = PACKAGER["_git_executable"](env)
 
             def git(*args):
-                return subprocess.run(
-                    ["git", *args], cwd=checkout, env=env, check=True,
+                return subprocess.run(  # nosec B603 - fixed Git executable and literal fixture arguments
+                    [str(git_executable), *args], cwd=checkout, env=env, check=True,
                     stdout=subprocess.PIPE, text=True,
                 ).stdout.strip()
 
-            subprocess.run(["git", "init", "--quiet"], cwd=checkout, env=env, check=True)
+            subprocess.run(  # nosec B603 - fixed Git executable initializes this disposable repository
+                [str(git_executable), "init", "--quiet"], cwd=checkout, env=env, check=True,
+            )
             (checkout / "codex-rs").mkdir()
             generated = checkout / "sdk/python/src/openai_codex/generated"
             generated.mkdir(parents=True)
@@ -59,8 +62,8 @@ class NativePackagingTests(unittest.TestCase):
             git("checkout", "--quiet", pinned)
             git("replace", pinned, replacement)
 
-            default_archive = subprocess.run(
-                ["git", "archive", "--format=tar", pinned, "--", "codex-rs",
+            default_archive = subprocess.run(  # nosec B603 - fixed executable and fixture-owned commit/path
+                [str(git_executable), "archive", "--format=tar", pinned, "--", "codex-rs",
                  "sdk/python/src/openai_codex/generated"],
                 cwd=checkout, env=env, check=True, stdout=subprocess.PIPE,
             ).stdout
@@ -216,13 +219,13 @@ class NativePackagingTests(unittest.TestCase):
                 "RUSTUP_HOME": str(rustup_home),
                 "CARGO_PROFILE_DEV_SMALL_OPT_LEVEL": "0",
                 "CARGO_PROFILE_RELEASE_LTO": "false",
-                "CARGO_BUILD_RUSTC_WRAPPER": "/tmp/hidden-wrapper",
-                "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER": "/tmp/hidden-linker",
+                "CARGO_BUILD_RUSTC_WRAPPER": str(root / "unused-cargo-wrapper"),
+                "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER": str(root / "unused-linker"),
                 "CARGO_ENCODED_RUSTFLAGS": "-C link-arg=unreviewed",
                 "CARGO_BUILD_TARGET": "unreviewed-target",
-                "RUSTC": "/tmp/hidden-rustc",
-                "RUSTDOC": "/tmp/hidden-rustdoc",
-                "RUSTC_WRAPPER": "/tmp/hidden-rustc-wrapper",
+                "RUSTC": str(root / "unused-rustc"),
+                "RUSTDOC": str(root / "unused-rustdoc"),
+                "RUSTC_WRAPPER": str(root / "unused-rustc-wrapper"),
                 "RUSTFLAGS": "-C opt-level=0",
                 "RUSTDOCFLAGS": "--cfg unreviewed",
                 "RUSTUP_TOOLCHAIN": "stable",
