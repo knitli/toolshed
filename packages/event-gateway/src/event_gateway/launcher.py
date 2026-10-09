@@ -21,8 +21,8 @@ from .native_reader import NativeBridge, unique, uuid
 from .native_terminal import run_terminal
 from .security import ensure_private_directory
 
-# Exact executable used by the committed durable-v3 packaged recovery proof.
-QUALIFIED_SHA256 = "0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de"
+# Exact clean-build executable qualified by the native release checkpoint.
+QUALIFIED_SHA256 = "3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c"
 BINDING_FIELDS = (
     "clientId", "connectionId", "backendPid", "threadId", "generation",
     "serverInstanceId", "serverGeneration",
@@ -436,7 +436,7 @@ def launch(state_dir, binary, digest, cwd, *, resume=None):
                    CODEX_NATIVE_BRIDGE_RECEIPT_VERSION="3")
         binary = qualified_binary(binary, digest)
         check_stop()
-        command = [str(binary), "--no-alt-screen", "-C", str(cwd)]
+        command = [str(binary), "--no-daemon", "--no-alt-screen", "-C", str(cwd)]
         if resume:
             command += ["resume", resume]
         process = subprocess.Popen(  # nosec B603 - qualified absolute native executable

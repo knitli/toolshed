@@ -66,7 +66,7 @@ Run from an interactive terminal, naming the exact reviewed v3 prototype:
 ```sh
 knitli-event-gateway launch \
   --codex-binary /absolute/path/to/qualified/codex \
-  --binary-sha256 0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de \
+  --binary-sha256 3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c \
   --cwd /absolute/path/to/project
 ```
 
@@ -93,7 +93,8 @@ pin update; changing the evidence file alone does not authorize it.
 The binary is not in the Python wheel, and the workflow does not install or
 enroll a client.
 
-The TUI retains terminal input, output and resize behavior. A private inherited
+The standalone build runs with `--no-daemon`, keeping its app-server in the
+owned foreground process group. The TUI retains terminal input, output and resize behavior. A private inherited
 socket carries v3 bridge traffic. Startup synchronization grants no selection;
 selected status requires a fresh witness. A timed-out status read preserves one
 pending reply without interrupting the TUI. A later query drains and discards
