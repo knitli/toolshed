@@ -56,8 +56,8 @@
     }
   ],
   "artifacts": {
-    "packages/event-gateway/docs/native-bridge/coupled-no-start-proof.json": "82800cd32202df4b55dd45259dc72f61ab0c79f47a152d1bc7e41380b1d0997b",
-    "packages/event-gateway/docs/native-bridge/coupled-no-start-unknown-proof.json": "e27efe70812f73a8837d5bbb61c7af074c3a8f875ba5f28f67a41b045135e8a9",
+    "packages/event-gateway/docs/native-bridge/coupled-no-start-proof.json": "2b51fc920bd60bae75187bfeafc848708763f459bd0425e2efbc5786a9cb720b",
+    "packages/event-gateway/docs/native-bridge/coupled-no-start-unknown-proof.json": "4b854efb9af3e28856ac9adf987b4997fb385225d7789bfa825c9b4137c69db9",
     "/private/tmp/coupled-no-start-causal/red.log": "ec81564183452e386ba57aecfbeb916a5bf6deedfbcfe30a9cbe4725c4bc31da",
     "/private/tmp/coupled-no-start-causal/green.log": "d2cf2848703b509f0284aa51099e65442cb9c7b1ce47abee89ed51894fe9e14e",
     "/private/tmp/coupled-no-start-causal/unknown-red.log": "61609a55eae33674194e1d0cfff26f622fec6d7ac1b47bfb3f4fef3fe156578d",
@@ -71,7 +71,20 @@
     "/private/tmp/coupled-no-start-causal/after-settlement-red.log": "9c2ec0211d7bcf96ec62666e797ebc3c12b119d118d51d4af5ca005657bb5b57",
     "/private/tmp/coupled-no-start-causal/after-settlement-green.log": "352dd854dfed49f7340c66181aaf8deed6b89529197bc8d3cb197c501c62f7b6",
     "/private/tmp/coupled-no-start-causal/after-settlement-mutation.py": "c8e120709e683a1f6fdc0ba2540b68aec3f3f7d5d3a9c37ddd8eff6ea957b6e8",
-    "/private/tmp/coupled-no-start-after-unknown.log": "d13c56f95d146b965eaf2bf4546859ca1943e445eae6c914f398a40d07d5c5c9"
+    "/private/tmp/coupled-no-start-after-unknown.log": "d13c56f95d146b965eaf2bf4546859ca1943e445eae6c914f398a40d07d5c5c9",
+    "/private/tmp/coupled-round4/flags.py": "cc5f0752807d9fd2d904f4794f1404e06acd461a5a135f501a3ec0c607275242",
+    "/private/tmp/coupled-round4/deadline.py": "3667a43b7cfe6b9502370d3d54a9d56840bed046d789cd82aefc008c8043bfa9",
+    "/private/tmp/coupled-round4/restart.py": "1d755486d7b708a5bd8e4fe36fe29099989743d03e7e6adcfc03e99bf2df8504",
+    "/private/tmp/coupled-round4/flags-red.log": "94579309ecedefcf7a2906c2c21c29f693eb3f97308588a5f60c330a53272b37",
+    "/private/tmp/coupled-round4/deadline-red.log": "b7644fe106d9744e0d8a5e50fcc6904e7bad173c26cbad3f7932ec324587288c",
+    "/private/tmp/coupled-round4/restart-red.log": "4ed6900aa24f312fd8713a1a64584af94d5bfe9f49ab3a82df43cf86208d5dcc",
+    "/private/tmp/coupled-round4/restored-green.log": "fd3429f6a39b0337f73fcc2e93bc92cfa556334244053e19baf5f74b054988a4",
+    "/private/tmp/coupled-round4/unit-results.json": "e62fb45cbba21f008f6186d18751f5054772b1a42726f8a22fa89ef1b2a3b859",
+    "/private/tmp/coupled-round4/positive-pinned.log": "06fc1a9dfa1f6306173d627d23e17b6aadda0367ff997a14dcbad28fd4d40dc2",
+    "/private/tmp/coupled-round4/unknown-pinned.log": "3334021eea1d1cf5e1cdedc9b1359246ca40d450b0195a6dd3bef27eda353ff4",
+    "packages/event-gateway/tests/test_coupled_workerd.py": "0bf58cf9a02ca3e0af3aac7be0656244e9f61859d614f3dce404208a373ebfac",
+    "/private/tmp/coupled-round4/positive-node2419.log": "dc727e3c731c3d7cd05107ae66c20adec753acf3540167553eaad121136ae1c3",
+    "/private/tmp/coupled-round4/unknown-node2419.log": "51ef523b45477b19214b65226da87d3853fb7ec6b308f8539ffbe19b3deceb72"
   },
   "formattingRefresh": {
     "change": "Wrap five E501 lines; executable AST identical",
@@ -88,5 +101,35 @@
     "cloudCheckoutHead": "5f9012f8b470cdb8e6a942215b4eb58b1c41cc1c",
     "allExecutedCloudSourcesMatchPinnedCommit": "dc8cb0117ca4d5f497563a13dc438fa3b5238ba2",
     "checks": "Actual after snapshot retains immutable settlement, retired original attempt/permit, one submitted replacement and pending capacity"
+  },
+  "round4GuardRefresh": {
+    "harnessSha256": "e155b036ebcca0cb8356a578c0998c36809ed52e504ff1d7e11906a736697a67",
+    "positiveExit": 0,
+    "unknownExit": 0,
+    "cloudSourceArchiveCommit": "dc8cb0117ca4d5f497563a13dc438fa3b5238ba2",
+    "cloudSubmoduleCommit": "e8ff6074ba9fcbc3aa7b8f4b0bac3beba80f0787",
+    "copiedDependencyVersions": [
+      "zod@4.5.4",
+      "@knitli/openapi-mcp@1.4.0"
+    ],
+    "nodeVersion": "v24.19.0",
+    "focusedTests": 3,
+    "assertionRedRestoredGreenCases": [
+      "invalid flags",
+      "expiry deadline and process liveness",
+      "old process death and complete identity rotation"
+    ],
+    "restartChecks": {
+      "oldTuiStopped": true,
+      "oldBackendStopped": true,
+      "tuiPidRotated": true,
+      "clientIdRotated": true,
+      "serverInstanceIdRotated": true,
+      "backendPidRotated": true,
+      "threadIdRotated": true
+    },
+    "excludedRuns": "Initial shared-checkout runs had changed cloud sources; subsequent Node24.21 runs superseded by final Node24.19.0 runs",
+    "nodeExecutable": "/Users/adampoulemanos/.local/share/mise/installs/node/24.19.0/bin/node",
+    "nodeExecutableSha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1"
   }
 }

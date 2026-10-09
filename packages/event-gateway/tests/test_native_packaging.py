@@ -1,4 +1,5 @@
 import copy
+from contextlib import redirect_stderr
 import hashlib
 import io
 import json
@@ -204,6 +205,111 @@ class NativePackagingTests(unittest.TestCase):
 
     def test_builder_pin_matches_the_only_launcher_digest(self):
         self.assertEqual(PACKAGER["QUALIFIED_SHA256"], launcher.QUALIFIED_SHA256)
+
+    def test_package_rechecks_source_before_publication_and_preserves_raced_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "checkout"
+            source.mkdir()
+            state = {
+                "scenario": "success", "build_completed": False, "copies": [], "evidence": None,
+            }
+
+            def archive_source(_checkout, work, _env, _git):
+                codex_rs = work / "codex-rs"
+                codex_rs.mkdir()
+                (codex_rs / "Cargo.lock").write_text("version = 4\n")
+
+            def run(command, *, cwd, **_kwargs):
+                if "apply" in command:
+                    pass
+                elif "metadata" in command:
+                    return subprocess.CompletedProcess(
+                        command, 0,
+                        stdout=json.dumps({"target_directory": str(Path(cwd) / "target")}),
+                    )
+                elif "build" in command:
+                    state["build_completed"] = True
+                    binary = Path(cwd) / "target/dev-small/codex"
+                    binary.parent.mkdir(parents=True, exist_ok=True)
+                    binary.write_bytes(b"mock native CLI")
+                    if state["scenario"] == "race":
+                        state["evidence"].write_bytes(b"created during build")
+                else:
+                    self.fail(f"unexpected mocked build command: {command}")
+                return subprocess.CompletedProcess(command, 0)
+
+            def verify_source(_work, _manifest):
+                digest = "b" * 64 if (
+                    state["scenario"] == "drift" and state["build_completed"]
+                ) else "a" * 64
+                return PACKAGER["PATCHED_FILE_COUNT"], digest
+
+            original_copy = PACKAGER["_copy_new"]
+
+            def copy_candidate(binary, destination):
+                state["copies"].append(destination)
+                return original_copy(binary, destination)
+
+            replacements = {
+                "_binary_evidence": lambda _path: {"path": str(root / "git"), "sha256": "0" * 64},
+                "_clean_checkout": lambda path, _env, _git: path.resolve(strict=True),
+                "_archive_source": archive_source,
+                "_run": run,
+                "_toolchain": lambda _env: (
+                    ["rustup", "run", "1.95.0"], "mock rustc", "mock cargo",
+                    {"rustup": {"path": str(root / "mock-rustup"), "sha256": "1" * 64}},
+                ),
+                "_cargo_configuration": lambda *_args: {
+                    "cargoHome": str(root / "cargo-cache"), "cargoHomeConfig": None,
+                    "ancestorConfigs": [],
+                },
+                "verify_patched_source": verify_source,
+                "lock_version_changes": lambda *_args: 159,
+                "_copy_new": copy_candidate,
+            }
+
+            output = root / "candidate"
+            evidence_path = root / "candidate.json"
+            state["evidence"] = evidence_path
+            with patch.dict(PACKAGER_GLOBALS, replacements), patch("builtins.print"):
+                evidence = PACKAGER["package"](source, output, evidence_path)
+                self.assertEqual(
+                    evidence["patchedSourceInventoryBeforeBuildSha256"],
+                    evidence["patchedSourceInventoryAfterBuildSha256"],
+                )
+                self.assertEqual(output.read_bytes(), b"mock native CLI")
+                self.assertEqual(json.loads(evidence_path.read_text()), evidence)
+                self.assertEqual(
+                    evidence["binarySha256"], hashlib.sha256(output.read_bytes()).hexdigest()
+                )
+
+                drift_output = root / "drifted-candidate"
+                drift_evidence = root / "drifted-candidate.json"
+                state.update(
+                    scenario="drift", build_completed=False, copies=[], evidence=drift_evidence,
+                )
+                stderr = io.StringIO()
+                with redirect_stderr(stderr), self.assertRaises(SystemExit) as failure:
+                    PACKAGER["main"]([
+                        "--source", str(source), "--output", str(drift_output),
+                        "--evidence", str(drift_evidence),
+                    ])
+                self.assertEqual(failure.exception.code, 2)
+                self.assertIn("native_patched_source_changed_during_build", stderr.getvalue())
+                self.assertEqual(state["copies"], [])
+                self.assertFalse(drift_output.exists())
+                self.assertFalse(drift_evidence.exists())
+
+                raced_output = root / "raced-candidate"
+                raced_evidence = root / "raced-candidate.json"
+                state.update(
+                    scenario="race", build_completed=False, copies=[], evidence=raced_evidence,
+                )
+                with self.assertRaisesRegex(ValueError, "native_output_must_be_new"):
+                    PACKAGER["package"](source, raced_output, raced_evidence)
+                self.assertFalse(raced_output.exists())
+                self.assertEqual(raced_evidence.read_bytes(), b"created during build")
 
     def test_build_env_strips_ambient_build_overrides_and_keeps_selected_cache(self):
         with tempfile.TemporaryDirectory() as directory:

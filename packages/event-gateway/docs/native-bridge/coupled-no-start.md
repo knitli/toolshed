@@ -70,3 +70,26 @@ Ruff and `git diff --check` pass. No broad product suite was rerun for this harn
 
 The post-retry assertion refresh ran with checkout HEAD `5f9012f8b470cdb8e6a942215b4eb58b1c41cc1c`;
 all executed first-party cloud inputs still match the pinned `dc8cb011` commit exactly.
+
+
+## Review guard checks
+
+The harness rejects `--restart-native --terminal-no-start` before resolving artifact
+paths. Its post-persistence expiry wait has a ten-second monotonic deadline and
+requires a live native TUI. Both restart paths share the same validator: old TUI and
+backend must be dead, and TUI PID, backend PID, client ID, server instance ID, and
+selected thread must all rotate. The unknown proof retains these measured checks
+and derives its restart flag from them; exact native unknown-frame checks remain.
+
+Three focused tests execute the fixed repository harness definitions without starting
+services. Removing the flag guard, removing the wait guard, and restoring the weaker
+restart validator each caused assertion failures; the restored tests pass. Both real
+native/workerd qualification branches passed again and their source hashes were
+refreshed. Existing historical causal records remain unchanged.
+
+These final runs use a disposable archive of the original `dc8cb011` cloud source,
+its pinned `e8ff6074` submodule, and copied existing Zod 4.5.4 / openapi-mcp 1.4.0
+packages. No installation occurred. Earlier shared-checkout runs had picked up
+changed cloud sources and are excluded from the pinned evidence. Both final runs
+use the exact Node 24.19.0 executable recorded with its hash in the manifest; the
+intermediate Node 24.21.0 runs are superseded.

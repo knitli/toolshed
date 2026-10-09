@@ -26,6 +26,8 @@ parser.add_argument('--restart-native', action='store_true', help='Recover an ex
 parser.add_argument('--terminal-no-start', action='store_true', help='Qualify actual terminal refusal and durable cloud settlement')
 parser.add_argument('--forget-terminal', action='store_true', help='Restart native before terminal recovery; unknown must stay fenced')
 args = parser.parse_args()
+if args.restart_native and args.terminal_no_start:
+    parser.error('--restart-native and --terminal-no-start are mutually exclusive')
 if args.forget_terminal and not args.terminal_no_start:
     parser.error('--forget-terminal requires --terminal-no-start')
 PACKAGE, QUALIFIER, BINARY = (Path(x).resolve(strict=True) for x in (args.package, args.qualifier, args.binary))
@@ -53,6 +55,16 @@ def b64(value):
     return base64.urlsafe_b64encode(value).rstrip(b'=').decode()
 
 
+def verify_native_restart(old_process, native_process, witness, new_witness, launcher):
+    checks = {'oldTuiStopped': old_process.poll() is not None,
+        'oldBackendStopped': not launcher.alive(witness['backendPid']),
+        'tuiPidRotated': native_process.pid != old_process.pid,
+        **{key + 'Rotated': new_witness[key] != witness[key] for key in (
+            'clientId', 'serverInstanceId', 'backendPid', 'threadId')}}
+    require(all(checks.values()), 'old native processes stopped and all restart identities rotated')
+    return checks
+
+
 async def restart_native(bridge, model, native_process, witness, launcher, resources, request):
     wire_request = {key: value for key, value in request.items() if key != 'receiptVersion'}
     require(request['receiptVersion'] == 3, 'explicit durable reader identity')
@@ -76,10 +88,7 @@ async def restart_native(bridge, model, native_process, witness, launcher, resou
     bridge.close()
     bridge, native_process, new_witness = resources.enter_context(
         launcher.native_client(native_args, root, receipt_version=3))
-    require(old_process.poll() is not None and not launcher.alive(witness['backendPid']), 'old processes stopped')
-    require(native_process.pid != old_process.pid, 'new native TUI process')
-    require(all(new_witness[key] != witness[key] for key in (
-        'clientId', 'serverInstanceId', 'backendPid', 'threadId')), 'new backend and selected thread')
+    verify_native_restart(old_process, native_process, witness, new_witness, launcher)
     return bridge, native_process, new_witness, recorded
 
 
@@ -167,7 +176,10 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 require(store.current_attempt(ident)['state'] == 'submitting', 'request durable before native delay')
                 require(store.current_attempt(ident)['native_request'] == request, 'exact durable native identity')
                 # Fixture delay after durable submission intent; the actual native backend refuses expiry.
+                deadline = time.monotonic() + 10
                 while time.time_ns() // 1_000_000 <= request['permitExpiresAt']:
+                    require(time.monotonic() < deadline and native_process.poll() is None,
+                        'native delay fixture exceeded deadline or native process stopped')
                     await asyncio.sleep(.02)
                 fresh = await asyncio.to_thread(bridge.challenge)
                 require(all(fresh[k] == request[k] for k in (
@@ -208,12 +220,12 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 if args.forget_terminal:
                     native_args = list(native_process.args)
                     root = Path(native_args[native_args.index('-C') + 1])
-                    old_pid = native_process.pid
+                    old_process = native_process
                     launcher.stop_process(native_process, witness['backendPid'])
                     bridge.close()
                     bridge, native_process, new_witness = resources.enter_context(
                         launcher.native_client(native_args, root, receipt_version=3))
-                    require(native_process.pid != old_pid and new_witness['serverInstanceId'] != witness['serverInstanceId'], 'real new native backend')
+                    restart_checks = verify_native_restart(old_process, native_process, witness, new_witness, launcher)
                     store.close()
                     store = Store(state)
                     app = gateway(store)
@@ -245,7 +257,8 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                     require(all(count == 0 for count in model.request_counts.values()), 'unknown causes no model traffic')
                     return {'result': 'PASS', 'qualification': 'fixture-qualified-terminal-lost-on-native-restart',
                         'binarySha256': BINARY_SHA, 'productionAdmissionProven': False,
-                        'nativeProcessRestarted': True, 'unknownNeverRetriesProven': True,
+                        'nativeProcessRestarted': all(restart_checks.values()), 'restartChecks': restart_checks,
+                        'unknownNeverRetriesProven': True,
                         'nativeExchanges': native_exchanges, 'nativeBridgeOpen': not bridge.closed,
                         'original': original, 'actualTerminalBeforeLoss': terminal_receipts[0], 'after': after,
                         'before': before, 'wire': wires, 'modelRequests': model.request_counts,
