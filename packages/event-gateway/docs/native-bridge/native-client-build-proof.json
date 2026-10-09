@@ -1,0 +1,112 @@
+{
+  "archiveCoverage": {
+    "cargoPathDependenciesOutsideCodexRs": 0,
+    "cargoReadmesOutsideCodexRs": 0,
+    "literalRustIncludesOutsideCodexRs": 0,
+    "missingLiteralRustIncludes": 0
+  },
+  "build": {
+    "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+    "cargoLockLocalVersionChanges": 159,
+    "command": "rustup run 1.95.0 cargo build --offline --locked -p codex-cli --bin codex -p codex-tui --bin codex-tui --profile dev-small",
+    "host": "aarch64-apple-darwin",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2"
+  },
+  "candidate": {
+    "binaryBytes": 388546080,
+    "binarySha256": "ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b",
+    "launcherQualified": false,
+    "launcherSha256": "0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de"
+  },
+  "repeatabilityObservation": {
+    "binaryPathStringsContainDifferentTemporarySourcePaths": true,
+    "builds": [
+      {
+        "binaryBytes": 388546080,
+        "binarySha256": "11965142a8712b4110568082448c3ce3aede69fbbddf6f089c4abf202d7c9755",
+        "temporarySourcePathToken": "codex-native-v3-build-d30vj_aw"
+      },
+      {
+        "binaryBytes": 388546080,
+        "binarySha256": "ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b",
+        "temporarySourcePathToken": "codex-native-v3-build-66_ydmd4"
+      }
+    ],
+    "causeIsolated": false,
+    "hashesDiffer": true,
+    "samePinnedSourcePatchAndToolchain": true
+  },
+  "rawEvidence": {
+    "candidateBuild": {
+      "path": "/private/tmp/native-codex-v5-fresh.json",
+      "sha256": "ed643a06ab4b87495a728ebcf97dd7b181697d4aa3d7aec949ea46d98da055f6"
+    },
+    "candidateBinary": {
+      "path": "/private/tmp/native-codex-v5-fresh",
+      "sha256": "ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b"
+    },
+    "candidateRuntime": {
+      "path": "/private/tmp/native-codex-v5-runtime.json",
+      "sha256": "015afbab3de53f4249a09e5d79d59956884b9f9bb860330bf3550f6d6c18a597"
+    },
+    "comparisonBuild": {
+      "path": "/private/tmp/native-codex-v4-fresh.json",
+      "sha256": "05a679da30c213c4ff553a5b40de5cf3517e9180d4b86494f5ca268d94be04f2"
+    },
+    "comparisonBinary": {
+      "path": "/private/tmp/native-codex-v4-fresh",
+      "sha256": "11965142a8712b4110568082448c3ce3aede69fbbddf6f089c4abf202d7c9755"
+    },
+    "comparisonRuntime": {
+      "path": "/private/tmp/native-codex-v4-runtime.json",
+      "sha256": "65c83e119c29bed1c1eacc48067222c1630032bf46fa05c33f4ccacdfbc16bea"
+    }
+  },
+  "runtime": {
+    "binarySha256": "ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b",
+    "cloudSettlementProven": false,
+    "exactReceiptRecoveredTwice": true,
+    "installedAdapterSha256": "4ab38f6f5231acda4fee0af5d017ab33c583f3fecfc4e68531000a8dd25c0f85",
+    "mutatedFieldsRejected": [
+      "clientId",
+      "serverInstanceId",
+      "serverGeneration",
+      "threadId",
+      "attemptId",
+      "deliveryId",
+      "clientUserMessageId",
+      "permitId",
+      "permitIssuedAt+permitExpiresAt",
+      "generation",
+      "event.canonicalSubject",
+      "event.eventId",
+      "event.eventReference",
+      "event.source+event.canonicalSubject",
+      "event.sourceStateVersion"
+    ],
+    "nativeOnly": true,
+    "oldProcessesStopped": true,
+    "oldStartLocallyRefused": true,
+    "oldStartNoStartSettlementProven": false,
+    "originalAttachmentUnavailable": true,
+    "permitExpired": true,
+    "qualification": "synthetic-native-v3-two-tui-restart",
+    "readerSha256": "31a630277c0c0a552036233586792c1c04528faf7d2c5fec2eef70d83e270425",
+    "realModelCalls": 0,
+    "syntheticLoopbackModelRequestCounts": {
+      "primary": 1,
+      "title": 1,
+      "unknown": 0
+    }
+  },
+  "schemaVersion": 1,
+  "source": {
+    "patchSha256": "b9ab28d49a62f5756495f729c6716511d3136f58c3b9ea4061f4f7dba3d2598c",
+    "patchedFileCount": 48,
+    "patchedSourceInventoryAfterBuildSha256": "f9ceaa3e2f49e9720049f530a61dce49caac067275e249bd4486730051d50774",
+    "patchedSourceInventoryBeforeBuildSha256": "f9ceaa3e2f49e9720049f530a61dce49caac067275e249bd4486730051d50774",
+    "sourceManifest": "durable-restart-v3-source-manifest.json",
+    "sourceManifestSha256": "cb3897e086557213634b380d09d258d06af45e8f69b35f7603425e882749460b",
+    "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc"
+  }
+}
