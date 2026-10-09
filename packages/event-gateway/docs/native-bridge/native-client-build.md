@@ -11,16 +11,19 @@ python3 scripts/package_native_client.py \
   --evidence /private/tmp/codex-native-v3.json
 ```
 
-The evidence contains the upstream commit, patch and file hashes, exact Rust/Cargo versions, the 159 build-only lockfile version changes, and the CLI SHA-256. `launcherQualified` is true only when the rebuilt file matches the existing launcher digest. A different digest remains a candidate and is refused by the shipped launcher.
+The builder keeps only `PATH` for Git/Rustup discovery, an isolated `HOME` and `TMPDIR`, the selected `CARGO_HOME` offline cache, `RUSTUP_HOME`, and fixed offline/toolchain settings. It strips other inherited `CARGO_*` and `RUST*` overrides. It rejects Cargo config in the selected cache or any working-directory ancestor, except the exact pinned upstream `codex-rs/.cargo/config.toml` whose SHA-256 is `b8ae1cea341beb2d4a3c8fb81f97a96f4aee1fd53f769c57f140dfe949806a80`.
+
+The evidence contains the upstream commit, patch and file hashes, accepted Cargo config hash, Git/Rustup/Cargo/rustc binary paths and hashes, exact Rust/Cargo versions, the 159 build-only lockfile version changes, and the CLI SHA-256. The selected offline Cargo cache remains same-user mutable local state; recording its path and configuration does not remotely attest the cached package bytes. `launcherQualified` is true only when the rebuilt file matches the existing launcher digest. A different digest remains a candidate and is refused by the shipped launcher.
 
 The latest clean build and v3 runtime result are recorded in
 [`native-client-build-proof.json`](native-client-build-proof.json). The rebuilt
 candidate SHA-256 is
-`ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b`; it differs
+`055c99b49ef203d72965de72355d5b91b38306ec7fb8ec2e7fdac3b5575d8588`; it differs
 from the frozen launcher hash, so the evidence records
-`launcherQualified: false`. Two clean builds from the same pinned source,
-patch, and toolchain produced different hashes; temporary source paths appear
-in their binary strings, but the cause has not been isolated. The two-TUI
+`launcherQualified: false`. Three clean builds from the same pinned source and
+patch, using the same Rust 1.95.0/Cargo 1.95.0 toolchain, produced different
+hashes; temporary source paths appear in their binary strings, but the cause
+has not been isolated. The two-TUI
 runtime proof uses only a loopback synthetic model (`realModelCalls: 0`); it
 does not prove cloud settlement or public admission.
 

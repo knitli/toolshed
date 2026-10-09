@@ -55,11 +55,18 @@ cloud source hashes match that commit; each proof also records all 133 bundled i
 The broker adds only the fixed settlement route; readback adds the actual immutable
 settlement table. Other authority fixtures retain the existing coupled harness scope.
 
-Three scratch harness mutations failed at their intended assertions, then restored
+Four scratch harness mutations failed at their intended assertions, then restored
 runs passed: delivering the initial terminal reply violated the required ambiguous
 checkpoint; omitting native restart preserved real terminal evidence and violated
 the required unknown checkpoint; closing the private socket before recovery violated
 the successful-native-communication assertion even though Gateway remained ambiguous.
+Altering the settlement only in the readback after the fresh attempt violated the
+immutable-settlement assertion. The final readback also checks the original retired
+attempt/permit, the submitted replacement/current claim, retained slot, and absent
+observed watermark.
 These are causal harness checks, not product-source
 mutation coverage. Setup/readback assertion mistakes during development are excluded.
 Ruff and `git diff --check` pass. No broad product suite was rerun for this harness-only change.
+
+The post-retry assertion refresh ran with checkout HEAD `5f9012f8b470cdb8e6a942215b4eb58b1c41cc1c`;
+all executed first-party cloud inputs still match the pinned `dc8cb011` commit exactly.

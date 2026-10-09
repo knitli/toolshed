@@ -287,9 +287,24 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 require(model.request_counts['unknown'] == 0, 'no unknown mock request')
                 after = fixture('/fixture/read')
                 require(after['budget']['used'] == 2, 'original charge retained plus one fresh charge')
-                require(len(settled['cloud']['no_start_settlements']) == 1 and
-                    json.loads(settled['cloud']['no_start_settlements'][0]['result_json'])['evidence'] == pending['evidence'],
-                    'exact immutable terminal evidence stored')
+                require(after['cloud']['no_start_settlements'] == settled['cloud']['no_start_settlements']
+                    and len(after['cloud']['no_start_settlements']) == 1
+                    and json.loads(after['cloud']['no_start_settlements'][0]['result_json'])['evidence'] == pending['evidence'],
+                    'exact immutable terminal evidence survives fresh attempt')
+                old_attempts = [row for row in after['cloud']['attempts'] if row['attempt_id'] == original['attempt_id']]
+                require(len(old_attempts) == 1 and old_attempts[0]['state'] == 'not_started'
+                    and old_attempts[0]['permit_id'] == original['admission']['permitId'], 'old attempt and permit remain retired')
+                fresh_attempts = [row for row in after['cloud']['attempts'] if row['attempt_id'] == replacement['attempt_id']]
+                require(len(after['cloud']['attempts']) == 2 and len(fresh_attempts) == 1
+                    and fresh_attempts[0]['state'] == 'submitted', 'only fresh attempt is submitted')
+                require(len(after['cloud']['native_claims']) == 1
+                    and after['cloud']['native_claims'][0]['attempt_id'] == replacement['attempt_id']
+                    and after['cloud']['native_claims'][0]['permit_id'] == replacement['admission']['permitId']
+                    and after['cloud']['native_claims'][0]['state'] == 'submitted', 'current claim belongs to fresh permit')
+                require(after['slots'] == settled['slots'] and len(after['slots']) == 1
+                    and after['cloud']['deliveries'][0]['state'] == 'submitted'
+                    and after['cloud']['manual_sources'][0]['observed_source_state_version'] is None,
+                    'submitted delivery retains capacity without observation')
                 return {'result': 'PASS', 'qualification': 'fixture-qualified-terminal-no-start-local-workerd',
                     'binarySha256': BINARY_SHA, 'productionAdmissionProven': False,
                     'nativeTerminalReceiptDurableAcrossNativeRestart': False, 'nativeProcessRestarted': False,

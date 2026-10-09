@@ -46,11 +46,18 @@
       "red": "AssertionError: unknown requires successful native communication",
       "redExit": 1,
       "restoredExit": 0
+    },
+    {
+      "case": "immutable settlement survives fresh native retry",
+      "mutation": "Replace only after-readback settlement result_json with empty object",
+      "red": "AssertionError: exact immutable terminal evidence survives fresh attempt",
+      "redExit": 1,
+      "restoredExit": 0
     }
   ],
   "artifacts": {
-    "packages/event-gateway/docs/native-bridge/coupled-no-start-proof.json": "d0c6647fee5245034670f713460b45c6440c7787ceff07a98af10f374a752d41",
-    "packages/event-gateway/docs/native-bridge/coupled-no-start-unknown-proof.json": "365fe2ee99bd191cbf1c93ed7f4c97600399134c8745aa0390994a373cbb42c2",
+    "packages/event-gateway/docs/native-bridge/coupled-no-start-proof.json": "82800cd32202df4b55dd45259dc72f61ab0c79f47a152d1bc7e41380b1d0997b",
+    "packages/event-gateway/docs/native-bridge/coupled-no-start-unknown-proof.json": "e27efe70812f73a8837d5bbb61c7af074c3a8f875ba5f28f67a41b045135e8a9",
     "/private/tmp/coupled-no-start-causal/red.log": "ec81564183452e386ba57aecfbeb916a5bf6deedfbcfe30a9cbe4725c4bc31da",
     "/private/tmp/coupled-no-start-causal/green.log": "d2cf2848703b509f0284aa51099e65442cb9c7b1ce47abee89ed51894fe9e14e",
     "/private/tmp/coupled-no-start-causal/unknown-red.log": "61609a55eae33674194e1d0cfff26f622fec6d7ac1b47bfb3f4fef3fe156578d",
@@ -60,7 +67,11 @@
     "/private/tmp/coupled-no-start-causal/transport-red.log": "2f81abf1c25a091c21bdfce644c26bb3ebfc3a795f324187a0567cd2decd78c3",
     "/private/tmp/coupled-no-start-causal/transport-mutation.py": "83fe712b5f2facd35d65d9df1c4cdd6d9bfddf9cf89275b120891cb601117f4a",
     "/private/tmp/coupled-no-start-e501.log": "93f8d49f670f01f91c9150a88b5869ec40179b51f432839bf24f76cda8b303c7",
-    "/private/tmp/coupled-no-start-unknown-e501.log": "6f38ef8ebaa0849c8f6ad23aba27534e62e8f3f319c9187863a06433afb097c2"
+    "/private/tmp/coupled-no-start-unknown-e501.log": "6f38ef8ebaa0849c8f6ad23aba27534e62e8f3f319c9187863a06433afb097c2",
+    "/private/tmp/coupled-no-start-causal/after-settlement-red.log": "9c2ec0211d7bcf96ec62666e797ebc3c12b119d118d51d4af5ca005657bb5b57",
+    "/private/tmp/coupled-no-start-causal/after-settlement-green.log": "352dd854dfed49f7340c66181aaf8deed6b89529197bc8d3cb197c501c62f7b6",
+    "/private/tmp/coupled-no-start-causal/after-settlement-mutation.py": "c8e120709e683a1f6fdc0ba2540b68aec3f3f7d5d3a9c37ddd8eff6ea957b6e8",
+    "/private/tmp/coupled-no-start-after-unknown.log": "d13c56f95d146b965eaf2bf4546859ca1943e445eae6c914f398a40d07d5c5c9"
   },
   "formattingRefresh": {
     "change": "Wrap five E501 lines; executable AST identical",
@@ -69,5 +80,13 @@
     "positiveExit": 0,
     "unknownExit": 0,
     "cloudCommitUnchanged": false
+  },
+  "postRetryReadbackRefresh": {
+    "harnessSha256": "9c05a6cf54f9119f2543b673185fe6c1f640963607cc656bf96211f60bd845dc",
+    "positiveExit": 0,
+    "unknownExit": 0,
+    "cloudCheckoutHead": "5f9012f8b470cdb8e6a942215b4eb58b1c41cc1c",
+    "allExecutedCloudSourcesMatchPinnedCommit": "dc8cb0117ca4d5f497563a13dc438fa3b5238ba2",
+    "checks": "Actual after snapshot retains immutable settlement, retired original attempt/permit, one submitted replacement and pending capacity"
   }
 }

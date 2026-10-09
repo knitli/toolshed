@@ -6,17 +6,97 @@
     "missingLiteralRustIncludes": 0
   },
   "build": {
+    "buildEnvironment": {
+      "allowlistedVariables": [
+        "CARGO_HOME",
+        "CARGO_INCREMENTAL",
+        "CARGO_NET_OFFLINE",
+        "HOME",
+        "LC_ALL",
+        "PATH",
+        "RUSTUP_HOME",
+        "RUSTUP_TOOLCHAIN",
+        "TMPDIR"
+      ],
+      "ambientBuildOverridesRemoved": true
+    },
     "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+    "cargoConfiguration": {
+      "ancestorConfigs": [
+        {
+          "path": "codex-rs/.cargo/config.toml",
+          "sha256": "b8ae1cea341beb2d4a3c8fb81f97a96f4aee1fd53f769c57f140dfe949806a80"
+        }
+      ],
+      "cargoHome": "/private/tmp/event-native-cargo-home",
+      "cargoHomeConfig": null
+    },
     "cargoLockLocalVersionChanges": 159,
     "command": "rustup run 1.95.0 cargo build --offline --locked -p codex-cli --bin codex -p codex-tui --bin codex-tui --profile dev-small",
+    "gitBinary": {
+      "path": "/usr/bin/git",
+      "sha256": "34129c71a01a74f7f3b2443521519b2e5447553fa187f5fcafaaf8c42cc192e2"
+    },
     "host": "aarch64-apple-darwin",
-    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2"
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2",
+    "toolchainBinaries": {
+      "cargo": {
+        "path": "/private/tmp/event-native-rustup/toolchains/1.95.0-aarch64-apple-darwin/bin/cargo",
+        "sha256": "c512bff73c86143b557463f021d0c3d5b0490d97d65040ba59ea2b3427784758"
+      },
+      "rustc": {
+        "path": "/private/tmp/event-native-rustup/toolchains/1.95.0-aarch64-apple-darwin/bin/rustc",
+        "sha256": "b829b733131d4e1673eeebd1f34d06ae1e9ff4977b051313cf42e2a9e79ecf1c"
+      },
+      "rustup": {
+        "path": "/Users/adampoulemanos/.cargo/bin/rustup",
+        "sha256": "ec1b9233e7f72990ecd8e62063fa7f6c3dfc2bec8e97f88bff165f9100ac696a"
+      }
+    }
   },
   "candidate": {
     "binaryBytes": 388546080,
-    "binarySha256": "ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b",
+    "binarySha256": "055c99b49ef203d72965de72355d5b91b38306ec7fb8ec2e7fdac3b5575d8588",
     "launcherQualified": false,
     "launcherSha256": "0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de"
+  },
+  "rawEvidence": {
+    "candidateBinary": {
+      "path": "/private/tmp/native-codex-p6-fresh",
+      "sha256": "055c99b49ef203d72965de72355d5b91b38306ec7fb8ec2e7fdac3b5575d8588"
+    },
+    "candidateBuild": {
+      "path": "/private/tmp/native-codex-p6-fresh.json",
+      "sha256": "66f0a0190772fe6836eca1d28351fd9041bc5f88d7497480957c04cf54794011"
+    },
+    "candidateRuntime": {
+      "path": "/private/tmp/native-codex-p6-runtime.json",
+      "sha256": "0e3998abd302af35e7e5b8f2df172cd2eef29e4bddd997b1af4ddac3ba097907"
+    },
+    "comparisonBinary": {
+      "path": "/private/tmp/native-codex-v5-fresh",
+      "sha256": "ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b"
+    },
+    "comparisonBuild": {
+      "path": "/private/tmp/native-codex-v5-fresh.json",
+      "sha256": "ed643a06ab4b87495a728ebcf97dd7b181697d4aa3d7aec949ea46d98da055f6"
+    },
+    "comparisonRuntime": {
+      "path": "/private/tmp/native-codex-v5-runtime.json",
+      "sha256": "015afbab3de53f4249a09e5d79d59956884b9f9bb860330bf3550f6d6c18a597"
+    },
+    "earlierBinary": {
+      "path": "/private/tmp/native-codex-v4-fresh",
+      "sha256": "11965142a8712b4110568082448c3ce3aede69fbbddf6f089c4abf202d7c9755"
+    },
+    "earlierBuild": {
+      "path": "/private/tmp/native-codex-v4-fresh.json",
+      "sha256": "05a679da30c213c4ff553a5b40de5cf3517e9180d4b86494f5ca268d94be04f2"
+    },
+    "earlierRuntime": {
+      "path": "/private/tmp/native-codex-v4-runtime.json",
+      "sha256": "65c83e119c29bed1c1eacc48067222c1630032bf46fa05c33f4ccacdfbc16bea"
+    }
   },
   "repeatabilityObservation": {
     "binaryPathStringsContainDifferentTemporarySourcePaths": true,
@@ -28,40 +108,18 @@
       {
         "binaryBytes": 388546080,
         "binarySha256": "ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b"
+      },
+      {
+        "binaryBytes": 388546080,
+        "binarySha256": "055c99b49ef203d72965de72355d5b91b38306ec7fb8ec2e7fdac3b5575d8588"
       }
     ],
     "causeIsolated": false,
     "hashesDiffer": true,
     "samePinnedSourcePatchAndToolchain": true
   },
-  "rawEvidence": {
-    "candidateBuild": {
-      "path": "/private/tmp/native-codex-v5-fresh.json",
-      "sha256": "ed643a06ab4b87495a728ebcf97dd7b181697d4aa3d7aec949ea46d98da055f6"
-    },
-    "candidateBinary": {
-      "path": "/private/tmp/native-codex-v5-fresh",
-      "sha256": "ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b"
-    },
-    "candidateRuntime": {
-      "path": "/private/tmp/native-codex-v5-runtime.json",
-      "sha256": "015afbab3de53f4249a09e5d79d59956884b9f9bb860330bf3550f6d6c18a597"
-    },
-    "comparisonBuild": {
-      "path": "/private/tmp/native-codex-v4-fresh.json",
-      "sha256": "05a679da30c213c4ff553a5b40de5cf3517e9180d4b86494f5ca268d94be04f2"
-    },
-    "comparisonBinary": {
-      "path": "/private/tmp/native-codex-v4-fresh",
-      "sha256": "11965142a8712b4110568082448c3ce3aede69fbbddf6f089c4abf202d7c9755"
-    },
-    "comparisonRuntime": {
-      "path": "/private/tmp/native-codex-v4-runtime.json",
-      "sha256": "65c83e119c29bed1c1eacc48067222c1630032bf46fa05c33f4ccacdfbc16bea"
-    }
-  },
   "runtime": {
-    "binarySha256": "ab1b74b5338d05b9285e6c28f3d81c4d94b38c6eeaa51b6a6955dcbd5ba0392b",
+    "binarySha256": "055c99b49ef203d72965de72355d5b91b38306ec7fb8ec2e7fdac3b5575d8588",
     "cloudSettlementProven": false,
     "exactReceiptRecoveredTwice": true,
     "installedAdapterSha256": "4ab38f6f5231acda4fee0af5d017ab33c583f3fecfc4e68531000a8dd25c0f85",

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -20,6 +21,7 @@ SOURCE_MANIFEST = DOCS / "durable-restart-v3-source-manifest.json"
 UPSTREAM_COMMIT = "a956835d020762cb2b570053af06f643a11c0ecc"
 PATCH_SHA256 = "b9ab28d49a62f5756495f729c6716511d3136f58c3b9ea4061f4f7dba3d2598c"
 SOURCE_MANIFEST_SHA256 = "cb3897e086557213634b380d09d258d06af45e8f69b35f7603425e882749460b"
+PINNED_CARGO_CONFIG_SHA256 = "b8ae1cea341beb2d4a3c8fb81f97a96f4aee1fd53f769c57f140dfe949806a80"
 PATCHED_FILE_COUNT = 48
 QUALIFIED_SHA256 = "0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de"
 RUSTC_COMMIT_PREFIX = "59807616e"
@@ -110,6 +112,82 @@ def lock_version_changes(before, after):
     return changed
 
 
+def _file_identity(file_stat):
+    return file_stat.st_dev, file_stat.st_ino
+
+
+def _unlink_if_owned(path, identity):
+    """Remove only the regular file this process created at ``path``."""
+    if identity is None:
+        return
+    try:
+        current = path.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISREG(current.st_mode) and _file_identity(current) == identity:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _resolve_new_output(path):
+    """Resolve parent aliases while still rejecting an existing leaf."""
+    candidate = Path(path).expanduser().absolute()
+    if candidate.exists() or candidate.is_symlink() or not candidate.parent.is_dir():
+        raise ValueError("native_output_must_be_new_in_existing_directory")
+    return candidate.resolve(strict=False)
+
+
+def _resolve_output_pair(output, evidence_path):
+    output = _resolve_new_output(output)
+    evidence_path = _resolve_new_output(evidence_path)
+    if output == evidence_path:
+        raise ValueError("native_output_paths_must_differ")
+    return output, evidence_path
+
+
+def _git_environment(env=None):
+    selected_env = os.environ if env is None else env
+    return {
+        "PATH": selected_env.get("PATH", os.defpath),
+        "HOME": selected_env.get("HOME", str(Path.home())),
+        "TMPDIR": selected_env.get("TMPDIR", tempfile.gettempdir()),
+        "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+    }
+
+
+def _git_executable(env=None):
+    selected_env = os.environ if env is None else env
+    path = shutil.which("git", path=selected_env.get("PATH"))
+    if path is None:
+        raise ValueError("native_build_requires_git")
+    return Path(path).resolve(strict=True)
+
+
+def _binary_evidence(path):
+    path = Path(path).resolve(strict=True)
+    if not path.is_file():
+        raise ValueError("native_build_tool_missing")
+    return {"path": str(path), "sha256": sha256_file(path)}
+
+
+def _rustup_executable(env):
+    """Find the actual rustup binary, skipping command-manager shims."""
+    for directory in env.get("PATH", os.defpath).split(os.pathsep):
+        candidate = Path(directory or os.curdir) / "rustup"
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            continue
+        resolved = candidate.resolve(strict=True)
+        if resolved.name == "rustup":
+            return resolved
+    raise ValueError("native_build_requires_rustup_1_95_0_arm64_macos")
+
+
 def _run(command, *, cwd, env=None, capture=False, stdout=None):
     return subprocess.run(
         command, cwd=cwd, env=env, check=True, text=True, stdout=stdout or (
@@ -118,14 +196,44 @@ def _run(command, *, cwd, env=None, capture=False, stdout=None):
     )
 
 
-def _clean_checkout(source):
+def _clean_checkout(source, env=None, git=None):
     source = source.resolve(strict=True)
     if not source.is_dir():
         raise ValueError("invalid_native_source_checkout")
-    head = _run(["git", "rev-parse", "HEAD"], cwd=source, capture=True).stdout.strip()
+    git = str(git or _git_executable(env))
+    git_env = _git_environment(env)
+    pinned_git = [git, "-c", f"core.attributesFile={os.devnull}"]
+    top_level = Path(_run(
+        [*pinned_git, "rev-parse", "--show-toplevel"], cwd=source, env=git_env, capture=True,
+    ).stdout.strip()).resolve(strict=True)
+    if top_level != source:
+        raise ValueError("native_source_must_be_checkout_root")
+    attributes = Path(_run(
+        [*pinned_git, "rev-parse", "--git-path", "info/attributes"],
+        cwd=source, env=git_env, capture=True,
+    ).stdout.strip())
+    if not attributes.is_absolute():
+        attributes = source / attributes
+    if attributes.exists() or attributes.is_symlink():
+        raise ValueError("unreviewed_git_attributes")
+    attributes_file = subprocess.run(
+        [git, "config", "--local", "--includes", "--get", "core.attributesFile"],
+        cwd=source, env=git_env, check=False, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    if attributes_file.returncode == 0:
+        raise ValueError("unreviewed_git_attributes")
+    if attributes_file.returncode != 1:
+        raise subprocess.CalledProcessError(
+            attributes_file.returncode,
+            [git, "config", "--local", "--includes", "--get", "core.attributesFile"],
+            output=attributes_file.stdout,
+            stderr=attributes_file.stderr,
+        )
+    head = _run([*pinned_git, "rev-parse", "HEAD"], cwd=source, env=git_env, capture=True).stdout.strip()
     status = _run(
-        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
-        cwd=source, capture=True,
+        [*pinned_git, "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=source, env=git_env, capture=True,
     ).stdout
     if head != UPSTREAM_COMMIT or status:
         raise ValueError("native_source_checkout_must_be_clean_pinned_commit")
@@ -133,102 +241,169 @@ def _clean_checkout(source):
 
 
 def _toolchain(env):
-    rustup = shutil.which("rustup")
-    if rustup is None:
-        raise ValueError("native_build_requires_rustup_1_95_0_arm64_macos")
+    rustup = _rustup_executable(env)
     command = [rustup, "run", RUSTUP_TOOLCHAIN]
-    rustc = _run([*command, "rustc", "--version", "--verbose"], cwd=ROOT, env=env, capture=True).stdout
+    rustc = _run([*command, "rustc", "--version", "--verbose"], cwd=Path(env["HOME"]), env=env, capture=True).stdout
     values = dict(line.split(": ", 1) for line in rustc.splitlines() if ": " in line)
-    cargo = _run([*command, "cargo", "--version"], cwd=ROOT, env=env, capture=True).stdout.strip()
+    cargo = _run([*command, "cargo", "--version"], cwd=Path(env["HOME"]), env=env, capture=True).stdout.strip()
     if (values.get("release") != RUSTUP_TOOLCHAIN
             or not values.get("commit-hash", "").startswith(RUSTC_COMMIT_PREFIX)
             or values.get("host") != HOST_TRIPLE
             or cargo.split(" ", 2)[1:2] != [RUSTUP_TOOLCHAIN]):
         raise ValueError("native_build_requires_rust_1_95_0_arm64_macos")
-    return command, rustc.strip(), cargo
+    sysroot = Path(_run(
+        [*command, "rustc", "--print", "sysroot"],
+        cwd=Path(env["HOME"]), env=env, capture=True,
+    ).stdout.strip())
+    toolchains = {
+        "rustup": _binary_evidence(rustup),
+        "rustc": _binary_evidence(sysroot / "bin/rustc"),
+        "cargo": _binary_evidence(sysroot / "bin/cargo"),
+    }
+    return command, rustc.strip(), cargo, toolchains
 
 
-def _archive_source(checkout, destination, env):
+def _archive_source(checkout, destination, env, git=None):
     archive_paths = ("codex-rs", "sdk/python/src/openai_codex/generated")
+    git = str(git or _git_executable(env))
     with tempfile.TemporaryFile() as archive:
         _run(
-            ["git", "archive", "--format=tar", UPSTREAM_COMMIT, "--", *archive_paths],
-            cwd=checkout, env=env, stdout=archive,
+            [git, "-c", f"core.attributesFile={os.devnull}",
+             "archive", "--format=tar", UPSTREAM_COMMIT, "--", *archive_paths],
+            cwd=checkout, env=_git_environment(env), stdout=archive,
         )
         archive.seek(0)
         with tarfile.open(fileobj=archive, mode="r:") as bundle:
             bundle.extractall(destination, filter="data")
 
 
-def _build_env():
-    env = dict(os.environ)
-    for key in (
-        "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_TARGET_DIR", "CARGO_BUILD_TARGET",
-        "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "RUSTDOCFLAGS",
-    ):
-        env.pop(key, None)
-    env["RUSTUP_TOOLCHAIN"] = RUSTUP_TOOLCHAIN
-    env["CARGO_NET_OFFLINE"] = "true"
-    env["CARGO_INCREMENTAL"] = "0"
-    return env
+def _build_env(work):
+    """Keep the selected offline caches, but discard ambient build overrides."""
+    inherited = os.environ
+    original_home = Path(inherited.get("HOME", str(Path.home()))).expanduser()
+
+    def selected_home(name, default):
+        path = Path(inherited.get(name, str(default))).expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        return path.resolve(strict=False)
+
+    cargo_home = selected_home("CARGO_HOME", original_home / ".cargo")
+    rustup_home = selected_home("RUSTUP_HOME", original_home / ".rustup")
+    build_home = Path(work).resolve(strict=True)
+    home = build_home / "home"
+    temp = build_home / "tmp"
+    home.mkdir()
+    temp.mkdir()
+    return {
+        "PATH": inherited.get("PATH", os.defpath),
+        "HOME": str(home),
+        "TMPDIR": str(temp),
+        "CARGO_HOME": str(cargo_home),
+        "RUSTUP_HOME": str(rustup_home),
+        "RUSTUP_TOOLCHAIN": RUSTUP_TOOLCHAIN,
+        "CARGO_NET_OFFLINE": "true",
+        "CARGO_INCREMENTAL": "0",
+        "LC_ALL": "C",
+    }
+
+
+def _cargo_configuration(codex_rs, cargo_home):
+    """Reject unreviewed Cargo home and ancestor config files."""
+    codex_rs = Path(codex_rs).resolve(strict=True)
+    cargo_home = Path(cargo_home).resolve(strict=False)
+    for name in ("config.toml", "config"):
+        candidate = cargo_home / name
+        if candidate.exists() or candidate.is_symlink():
+            raise ValueError("unreviewed_cargo_home_configuration")
+
+    allowed = codex_rs / ".cargo/config.toml"
+    accepted = []
+    for directory in (codex_rs, *codex_rs.parents):
+        for name in ("config.toml", "config"):
+            candidate = directory / ".cargo" / name
+            if not candidate.exists() and not candidate.is_symlink():
+                continue
+            if (candidate.is_symlink() or candidate.parent.is_symlink()
+                    or not candidate.is_file()):
+                raise ValueError("unreviewed_cargo_configuration")
+            digest = sha256_file(candidate)
+            if (candidate != allowed or name != "config.toml"
+                    or digest != PINNED_CARGO_CONFIG_SHA256):
+                raise ValueError("unreviewed_cargo_configuration")
+            accepted.append({"path": "codex-rs/.cargo/config.toml", "sha256": digest})
+    if len(accepted) != 1:
+        raise ValueError("pinned_cargo_configuration_missing")
+    return {
+        "cargoHome": str(cargo_home),
+        "cargoHomeConfig": None,
+        "ancestorConfigs": accepted,
+    }
 
 
 def _write_new(path, contents, mode=None):
     if path.exists() or path.is_symlink() or not path.parent.is_dir():
         raise ValueError("native_output_must_be_new_in_existing_directory")
-    created = False
+    identity = None
     try:
         with path.open("xb") as output:
-            created = True
+            identity = _file_identity(os.fstat(output.fileno()))
             output.write(contents)
-        if mode is not None:
-            path.chmod(mode)
-    except OSError:
-        if created:
-            path.unlink(missing_ok=True)
+            if mode is not None:
+                os.fchmod(output.fileno(), mode)
+        return identity
+    except BaseException:
+        _unlink_if_owned(path, identity)
         raise
 
 
 def _copy_new(source, destination):
     if destination.exists() or destination.is_symlink() or not destination.parent.is_dir():
         raise ValueError("native_output_must_be_new_in_existing_directory")
-    created = False
+    identity = None
     try:
         with source.open("rb") as input_file, destination.open("xb") as output_file:
-            created = True
+            identity = _file_identity(os.fstat(output_file.fileno()))
             shutil.copyfileobj(input_file, output_file)
-        destination.chmod(0o755)
-    except OSError:
-        if created:
-            destination.unlink(missing_ok=True)
+            os.fchmod(output_file.fileno(), 0o755)
+        return identity
+    except BaseException:
+        _unlink_if_owned(destination, identity)
+        raise
+
+
+def _write_evidence(evidence_path, evidence, output, output_identity):
+    try:
+        contents = (json.dumps(evidence, indent=2, sort_keys=True) + "\n").encode()
+        _write_new(evidence_path, contents)
+    except BaseException:
+        _unlink_if_owned(output, output_identity)
         raise
 
 
 def package(source, output, evidence_path):
-    source = _clean_checkout(source)
-    output = output.absolute()
-    evidence_path = evidence_path.absolute()
-    if output == evidence_path:
-        raise ValueError("native_output_paths_must_differ")
-    if (output.exists() or output.is_symlink() or not output.parent.is_dir()
-            or evidence_path.exists() or evidence_path.is_symlink()
-            or not evidence_path.parent.is_dir()):
-        raise ValueError("native_output_must_be_new_in_existing_directory")
+    output, evidence_path = _resolve_output_pair(output, evidence_path)
 
     manifest_bytes = SOURCE_MANIFEST.read_bytes()
     patch_bytes = PATCH.read_bytes()
     manifest = verify_manifest(manifest_bytes, patch_bytes)
-    env = _build_env()
-    rustup_command, rustc, cargo = _toolchain(env)
 
     with tempfile.TemporaryDirectory(prefix="codex-native-v3-build-") as directory:
         work = Path(directory)
-        _archive_source(source, work, env)
-        _run(["git", "apply", "--check", "--whitespace=error", str(PATCH)], cwd=work, env=env)
-        _run(["git", "apply", "--whitespace=error", str(PATCH)], cwd=work, env=env)
+        env = _build_env(work)
+        git = _git_executable(env)
+        git_evidence = _binary_evidence(git)
+        source = _clean_checkout(source, env, git)
+        _archive_source(source, work, env, git)
+        git_env = _git_environment(env)
+        git_args = [str(git), "-c", f"core.attributesFile={os.devnull}", "apply"]
+        _run([*git_args, "--check", "--whitespace=error", str(PATCH)], cwd=work, env=git_env)
+        _run([*git_args, "--whitespace=error", str(PATCH)], cwd=work, env=git_env)
         patched_count, source_before_build = verify_patched_source(work, manifest)
 
         codex_rs = work / "codex-rs"
+        cargo_configuration = _cargo_configuration(codex_rs, env["CARGO_HOME"])
+        rustup_command, rustc, cargo, toolchain_binaries = _toolchain(env)
         lock_path = codex_rs / "Cargo.lock"
         lock_before = tomllib.loads(lock_path.read_text())
         metadata = _run(
@@ -249,6 +424,9 @@ def package(source, output, evidence_path):
         )
         if lock_path.read_bytes() != lock_after_bytes:
             raise ValueError("cargo_lock_changed_during_build")
+        cargo_configuration_after = _cargo_configuration(codex_rs, env["CARGO_HOME"])
+        if cargo_configuration_after != cargo_configuration:
+            raise ValueError("cargo_configuration_changed_during_build")
         patched_after_count, source_after_build = verify_patched_source(work, manifest)
         if patched_after_count != patched_count or source_after_build != source_before_build:
             raise ValueError("native_patched_source_changed_during_build")
@@ -267,6 +445,13 @@ def package(source, output, evidence_path):
             "patchedSourceInventoryAfterBuildSha256": source_after_build,
             "rustc": rustc,
             "cargo": cargo,
+            "gitBinary": git_evidence,
+            "toolchainBinaries": toolchain_binaries,
+            "buildEnvironment": {
+                "allowlistedVariables": sorted(env),
+                "ambientBuildOverridesRemoved": True,
+            },
+            "cargoConfiguration": cargo_configuration,
             "host": HOST_TRIPLE,
             "cargoLockLocalVersionChanges": lock_changes,
             "buildCommand": BUILD_COMMAND,
@@ -275,13 +460,9 @@ def package(source, output, evidence_path):
             "launcherQualified": binary_hash == QUALIFIED_SHA256,
             "launcherSha256": QUALIFIED_SHA256,
         }
-        _copy_new(binary, output)
+        output_identity = _copy_new(binary, output)
 
-    try:
-        _write_new(evidence_path, (json.dumps(evidence, indent=2, sort_keys=True) + "\n").encode())
-    except OSError:
-        output.unlink(missing_ok=True)
-        raise
+    _write_evidence(evidence_path, evidence, output, output_identity)
     return evidence
 
 
