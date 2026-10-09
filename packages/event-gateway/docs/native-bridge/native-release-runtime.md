@@ -1,18 +1,21 @@
 # Native release candidate runtime qualification
 
 The preserved clean-build candidate `3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c`
-passed a fresh macOS ARM64 two-TUI restart qualification with the gateway wheel
-built from `cc3630d3da726f7032b1d86062b0040aea57eb44`. The
+passed a fresh macOS ARM64 two-TUI restart qualification with the corrected
+standalone gateway wheel and an explicit `--no-daemon` qualifier. The
 [release proof](native-release-runtime-proof.json) records the binary, build
 evidence, executed runner, qualifier, installed reader, wheel, and raw logs.
 
 The preserved binary and build JSON match the earlier clean-build proof. All
 48 patched source hashes match the current native source manifest; no Rust
-rebuild was needed. The wheel SHA is
+rebuild was needed. The initial wheel SHA was
 `09be6b33fbdb64224e4f008faa38703821d928c6594963f6c3312944e8294b7b`.
 All 20 packaged modules/contracts match both the wheel archive and the base
 commit. This is the **pre-promotion wheel**: the later launcher pin update is
-separate from this reader/adapter runtime qualification.
+separate from that earlier reader/adapter runtime qualification. The latest
+two-TUI run uses final wheel
+`d11642c3ca2eb96f72f7ce192c422c60be174487cea418c243157d87fd1322a2`;
+the earlier run and its exact source hashes remain separately recorded.
 
 The current runner verifies the qualifier, adapter, package initializer, and
 extracted installed reader before loading them. It ran under Python 3.13.14
@@ -30,7 +33,7 @@ Replay with the external candidate and the recorded installed wheel:
 
 ```sh
 EVENT_NATIVE_QUALIFIER="$PWD/scripts/qualify_native_bridge.py" \
-  /private/tmp/event-native-release-setup/installed/bin/python -I -O \
+  /private/tmp/event-native-release-setup/standalone-installed/bin/python -I -O \
   docs/native-bridge/durable-restart-v3-qualify.py \
   --binary /private/tmp/native-codex-p7-full-tree \
   --sha256 3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c \
@@ -65,12 +68,26 @@ and adapter are byte-identical to those in the two-TUI run.
 ```sh
 /private/tmp/event-native-release-setup/standalone-installed/bin/python -I -O \
   docs/native-bridge/native-release-launcher-smoke.py \
+  --package-source "$PWD/src/event_gateway" \
   --binary /private/tmp/native-codex-p7-full-tree \
   --output /private/tmp/native-release-launcher-replay.json
 ```
 
 The smoke uses disposable configuration and homes and requires loopback
-binding. All proof checks use explicit guards that remain active under `-O`.
+binding. It requires `-I`, verifies its interpreter and noneditable installed
+wheel against the explicit source directory before importing gateway code,
+checks all 20 packaged module/contract bytes and wheel RECORD hashes, and
+records the preflight helper hash. Before importing gateway code, the parent
+uses a fresh private bytecode cache with writes disabled. The foreground child
+uses a separate fresh private cache via `-I -B -X pycache_prefix=...`; the smoke
+checks that this cache starts and remains empty. This prevents previously
+cached bytecode from bypassing verification of the installed source files.
+Socket-bearing temporary directories use resolved Unix `/tmp` to fit macOS's
+104-byte socket-path limit; the helper's import-only cache uses the resolved
+platform temporary directory. Both remain private, including the 0700 child cache.
+All proof checks use explicit guards that
+remain active under `-O`. Its PTY query detector is tested across all three
+possible splits of the cursor query, without duplicate replies.
 The earlier signal-termination run recorded exit 137; it is preserved separately
 and is not the graceful-exit proof. Excluded startup-selection and input-burst
 trials remain recorded with their logs.
