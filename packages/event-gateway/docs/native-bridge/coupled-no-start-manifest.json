@@ -1,0 +1,158 @@
+{
+  "cloudCommit": "dc8cb0117ca4d5f497563a13dc438fa3b5238ba2",
+  "cloudExecutedSourceHashesVerifiedAgainstCommit": {
+    "apps/os/packages/event-runtime/src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+    "apps/os/packages/event-runtime/src/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
+    "apps/os/packages/event-runtime/src/delivery.ts": "a0561f468911bf62d7960f1a3363043b0b79a4ede0e50ade2ea1dd4a453a89a3",
+    "apps/os/packages/event-runtime/src/contracts.ts": "5e5c210ec3bc34300226de03d462a1da7fef64ba29c0d30dcf3d85a8331c953f",
+    "apps/os/packages/event-runtime/src/registry.ts": "98eff05fedf7415182e4bde5a0fa97cb4e64a712b65fdbe483e926b17222b6c1",
+    "apps/os/packages/event-runtime/src/request-deadline.ts": "31f34fd3be26c11f2a2d778d591cf84e6f5b315ae0941e7d8cf0987d169ab3d7",
+    "apps/os/packages/event-runtime/src/coordinator-admission.ts": "b0f6048e25d023f9caeb215de63dd0ca2c056f3d111aa042d031739b828d831e",
+    "apps/os/packages/gatekeeper-messaging/src/agent-token.ts": "af2c5344dcb6e652a26d179343b95b70b13608d4df59e39e840abb8f7686d502",
+    "apps/os/packages/gatekeeper-openapi/src/provider-contract.ts": "7d3484d27c081b27d4e08b5ae1b16aeadf30f75960b6d4289caf8a34e2a0c759",
+    "apps/os/packages/gatekeeper-openapi/src/catalog/contracts.ts": "672acd8e01adbb63df330764cd2ad40358da037049af459f73531916be3968ec",
+    "apps/os/packages/gatekeeper-openapi/src/catalog/limits.ts": "6814e39393267e895a590af24ce79b9dc6001b05c7852fe88781ab136529466f",
+    "apps/os/packages/gatekeeper-openapi/src/dispatch/limits.ts": "40659ea51595d4f23e10f3e327f343c6eae36e4a79723bf655e023a999f2505a",
+    "apps/os/packages/gatekeeper-openapi/src/installation-contracts.ts": "2c7159cc2920545d9184a9d07556900997757efa633f613aa32367fb0e8afdd6",
+    "apps/os/packages/gatekeeper-openapi/src/operator/contracts.ts": "290248a537a6f462a6b0f58b0710dba37e363ac3211abec686c2758c9b91170a",
+    "apps/os/packages/openapi-operator/src/access.ts": "7b9ed46f3396a4a2324e608aa72b71b1c35965a54c2a4c9b3043a321939c6a5c",
+    "apps/os/packages/event-runtime/src/authority-client.ts": "b0d2bf801ac8c31f4d19ce6513b4e9b0e98efac9c8e3458ae642d69568438034",
+    "apps/os/packages/event-runtime/src/api.ts": "17c7abfcbc623abb7901f67be856ee8e7bfed3ec3d9e3c34408a01f75ff3cf0d",
+    "apps/os/packages/gatekeeper-memory/src/principals.ts": "f72010c2833e37e176925d0a9eaa2d15f02add6d938038ce0ebd814ece320ebd",
+    "apps/os/packages/event-runtime/src/github/state.ts": "edfe5d6fc6d0cf3470a7221a6a9468a9ac3221df1f87118fe93fe6c0842f2735",
+    "apps/os/packages/event-runtime/src/github/grants.ts": "a52f431ab5da70a12298303462bd2c22f93ec4d82cdad246f7affb5bd98fb21e",
+    "apps/os/packages/event-runtime/src/coordinator.ts": "26409368cc9e8dd343cf698744df112fdf62ed0682e07e2559e74e3b24267660"
+  },
+  "binarySha256": "0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de",
+  "productionAdmissionProven": false,
+  "causalPairs": [
+    {
+      "case": "lost terminal reply recovered before settlement",
+      "mutation": "Return the actual terminal receipt instead of dropping it",
+      "red": "AssertionError: lost native reply fences attempt",
+      "redExit": 1,
+      "restoredExit": 0
+    },
+    {
+      "case": "terminal evidence lost on actual native restart",
+      "mutation": "Omit the native stop/relaunch block while keeping real retained evidence",
+      "red": "AssertionError: missing terminal remains unknown",
+      "redExit": 1,
+      "restoredExit": 0
+    },
+    {
+      "case": "unknown requires an actual validated native reply",
+      "mutation": "Close private socket before read-only recovery; Gateway still reports ambiguity",
+      "red": "AssertionError: unknown requires successful native communication",
+      "redExit": 1,
+      "restoredExit": 0
+    },
+    {
+      "case": "immutable settlement survives fresh native retry",
+      "mutation": "Replace only after-readback settlement result_json with empty object",
+      "red": "AssertionError: exact immutable terminal evidence survives fresh attempt",
+      "redExit": 1,
+      "restoredExit": 0
+    }
+  ],
+  "artifacts": {
+    "packages/event-gateway/docs/native-bridge/coupled-no-start-proof.json": "324f8b73f2c4487dff34052a73ee94e591a7413da427f68cc9fe64b57c741f67",
+    "packages/event-gateway/docs/native-bridge/coupled-no-start-unknown-proof.json": "22ba5664bf17a81ee92f740f74bbce0d4ae542405d11fd9a5f6d92596ed0bd28",
+    "/private/tmp/coupled-no-start-causal/red.log": "ec81564183452e386ba57aecfbeb916a5bf6deedfbcfe30a9cbe4725c4bc31da",
+    "/private/tmp/coupled-no-start-causal/green.log": "d2cf2848703b509f0284aa51099e65442cb9c7b1ce47abee89ed51894fe9e14e",
+    "/private/tmp/coupled-no-start-causal/unknown-red.log": "61609a55eae33674194e1d0cfff26f622fec6d7ac1b47bfb3f4fef3fe156578d",
+    "/private/tmp/coupled-no-start-causal/unknown-green.log": "88486258c3c3b6956072432a62f3b3e0faea6cb4d3a30efbcdd08ea28610bae4",
+    "/private/tmp/coupled-no-start-causal/lost-reply-mutation.py": "7f7ecbceadcafdfdd86fd98636b2e40318c75c286f462959e1a4bc1da93ed2b3",
+    "/private/tmp/coupled-no-start-causal/unknown-restart-mutation.py": "a5fe2e68de004ac5c5e9f32de9f37c58058f194e10db3bf5f845e7a117a48e9b",
+    "/private/tmp/coupled-no-start-causal/transport-red.log": "2f81abf1c25a091c21bdfce644c26bb3ebfc3a795f324187a0567cd2decd78c3",
+    "/private/tmp/coupled-no-start-causal/transport-mutation.py": "83fe712b5f2facd35d65d9df1c4cdd6d9bfddf9cf89275b120891cb601117f4a",
+    "/private/tmp/coupled-no-start-e501.log": "93f8d49f670f01f91c9150a88b5869ec40179b51f432839bf24f76cda8b303c7",
+    "/private/tmp/coupled-no-start-unknown-e501.log": "6f38ef8ebaa0849c8f6ad23aba27534e62e8f3f319c9187863a06433afb097c2",
+    "/private/tmp/coupled-no-start-causal/after-settlement-red.log": "9c2ec0211d7bcf96ec62666e797ebc3c12b119d118d51d4af5ca005657bb5b57",
+    "/private/tmp/coupled-no-start-causal/after-settlement-green.log": "352dd854dfed49f7340c66181aaf8deed6b89529197bc8d3cb197c501c62f7b6",
+    "/private/tmp/coupled-no-start-causal/after-settlement-mutation.py": "c8e120709e683a1f6fdc0ba2540b68aec3f3f7d5d3a9c37ddd8eff6ea957b6e8",
+    "/private/tmp/coupled-no-start-after-unknown.log": "d13c56f95d146b965eaf2bf4546859ca1943e445eae6c914f398a40d07d5c5c9",
+    "/private/tmp/coupled-round4/flags.py": "cc5f0752807d9fd2d904f4794f1404e06acd461a5a135f501a3ec0c607275242",
+    "/private/tmp/coupled-round4/deadline.py": "3667a43b7cfe6b9502370d3d54a9d56840bed046d789cd82aefc008c8043bfa9",
+    "/private/tmp/coupled-round4/restart.py": "1d755486d7b708a5bd8e4fe36fe29099989743d03e7e6adcfc03e99bf2df8504",
+    "/private/tmp/coupled-round4/flags-red.log": "94579309ecedefcf7a2906c2c21c29f693eb3f97308588a5f60c330a53272b37",
+    "/private/tmp/coupled-round4/deadline-red.log": "b7644fe106d9744e0d8a5e50fcc6904e7bad173c26cbad3f7932ec324587288c",
+    "/private/tmp/coupled-round4/restart-red.log": "4ed6900aa24f312fd8713a1a64584af94d5bfe9f49ab3a82df43cf86208d5dcc",
+    "/private/tmp/coupled-round4/restored-green.log": "fd3429f6a39b0337f73fcc2e93bc92cfa556334244053e19baf5f74b054988a4",
+    "/private/tmp/coupled-round4/unit-results.json": "e62fb45cbba21f008f6186d18751f5054772b1a42726f8a22fa89ef1b2a3b859",
+    "/private/tmp/coupled-round4/positive-pinned.log": "06fc1a9dfa1f6306173d627d23e17b6aadda0367ff997a14dcbad28fd4d40dc2",
+    "/private/tmp/coupled-round4/unknown-pinned.log": "3334021eea1d1cf5e1cdedc9b1359246ca40d450b0195a6dd3bef27eda353ff4",
+    "packages/event-gateway/tests/test_coupled_workerd.py": "d65b4529e441d710d7d2dbe0e81ba2b784c5a1337b47ed9380c3a37424354765",
+    "/private/tmp/coupled-round4/positive-node2419.log": "dc727e3c731c3d7cd05107ae66c20adec753acf3540167553eaad121136ae1c3",
+    "/private/tmp/coupled-round4/unknown-node2419.log": "51ef523b45477b19214b65226da87d3853fb7ec6b308f8539ffbe19b3deceb72",
+    "/private/tmp/coupled-importable/run-unit.py": "3242d7090307bc4bd8a3acc28991780636f185d61481ceb5107acd7865f3aa9b",
+    "/private/tmp/coupled-importable/flags.py": "adea4cdf81802ff43e8ca4a076fcdc8b7b773ff0dc64079cfdd9152e22827e78",
+    "/private/tmp/coupled-importable/restart.py": "d891d8e9e605d863bdd2cff5574691b8ba2649aab18e1933adf2fb25ea0ca6dd",
+    "/private/tmp/coupled-importable/deadline.py": "ab31c2e55d3342faadaa21167b77bf88b34133172786804b855eae83ff7e956d",
+    "/private/tmp/coupled-importable/flags-red.log": "070d73d421461ae27fa5be00a706626fbe23737064f0a3ca6529a553f2c78817",
+    "/private/tmp/coupled-importable/positive.log": "f47de8f1f9fdbc304490d2eb17ca69bc0d8d416b7c003b035867af2a80abc578",
+    "/private/tmp/coupled-importable/deadline-red.log": "10dd69bbbeb9c310ed12827e5cf7681b4066bdfb78a24ca3b1f22e54653458ca",
+    "/private/tmp/coupled-importable/restored-green.log": "ebc478192e3c70f9b36de54ebd776b29225eccac9330163c1f1a2da57631cc1e",
+    "/private/tmp/coupled-importable/positive.json.broker.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/private/tmp/coupled-importable/restart-red.log": "96ddce4626e293ae5e3d1ec8fa3ffa8f3bb69321ddc5bca3c5b100efacfb6aba",
+    "/private/tmp/coupled-importable/unknown.log": "806db8f3eb7f60e8311c3251084f559c5314c330b6726e85e2c20ce33d2f3590",
+    "/private/tmp/coupled-importable/unknown.json.broker.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/private/tmp/coupled-importable/unit-results.json": "e62fb45cbba21f008f6186d18751f5054772b1a42726f8a22fa89ef1b2a3b859"
+  },
+  "formattingRefresh": {
+    "change": "Wrap five E501 lines; executable AST identical",
+    "astIdentical": true,
+    "harnessSha256": "1ceb3661b3c70b40a02929f1260953af5d2618d82ec2f5ddd915bc1c08ce0792",
+    "positiveExit": 0,
+    "unknownExit": 0,
+    "cloudCommitUnchanged": false
+  },
+  "postRetryReadbackRefresh": {
+    "harnessSha256": "9c05a6cf54f9119f2543b673185fe6c1f640963607cc656bf96211f60bd845dc",
+    "positiveExit": 0,
+    "unknownExit": 0,
+    "cloudCheckoutHead": "5f9012f8b470cdb8e6a942215b4eb58b1c41cc1c",
+    "allExecutedCloudSourcesMatchPinnedCommit": "dc8cb0117ca4d5f497563a13dc438fa3b5238ba2",
+    "checks": "Actual after snapshot retains immutable settlement, retired original attempt/permit, one submitted replacement and pending capacity"
+  },
+  "round4GuardRefresh": {
+    "harnessSha256": "e155b036ebcca0cb8356a578c0998c36809ed52e504ff1d7e11906a736697a67",
+    "positiveExit": 0,
+    "unknownExit": 0,
+    "cloudSourceArchiveCommit": "dc8cb0117ca4d5f497563a13dc438fa3b5238ba2",
+    "cloudSubmoduleCommit": "e8ff6074ba9fcbc3aa7b8f4b0bac3beba80f0787",
+    "copiedDependencyVersions": [
+      "zod@4.5.4",
+      "@knitli/openapi-mcp@1.4.0"
+    ],
+    "nodeVersion": "v24.19.0",
+    "focusedTests": 3,
+    "assertionRedRestoredGreenCases": [
+      "invalid flags",
+      "expiry deadline and process liveness",
+      "old process death and complete identity rotation"
+    ],
+    "restartChecks": {
+      "oldTuiStopped": true,
+      "oldBackendStopped": true,
+      "tuiPidRotated": true,
+      "clientIdRotated": true,
+      "serverInstanceIdRotated": true,
+      "backendPidRotated": true,
+      "threadIdRotated": true
+    },
+    "excludedRuns": "Initial shared-checkout runs had changed cloud sources; subsequent Node24.21 runs superseded by final Node24.19.0 runs",
+    "nodeExecutable": "/Users/adampoulemanos/.local/share/mise/installs/node/24.19.0/bin/node",
+    "nodeExecutableSha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1"
+  },
+  "importableHarnessRefresh": {
+    "harnessSha256": "3efe73bdce8de383647b3bd8673d3eb318703287ad382f16fd727381ca02611c",
+    "positiveExit": 0,
+    "unknownExit": 0,
+    "nodeVersion": "v24.19.0",
+    "cloudSourceArchiveCommit": "dc8cb0117ca4d5f497563a13dc438fa3b5238ba2",
+    "focusedTests": 3,
+    "assertionRedRestoredGreenCases": 3,
+    "testExecution": "Normal fixed-path importlib loader and actual CLI parser subprocess; no AST execution"
+  }
+}

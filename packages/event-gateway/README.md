@@ -80,6 +80,11 @@ The binary is not distributed in this wheel. Same-user code and configuration
 are trusted: hash validation precedes execution but is not an atomic hash/exec
 guarantee against another process running as that user.
 
+Build and qualify a candidate from the pinned upstream source using the
+[native client build workflow](docs/native-bridge/native-client-build.md). It
+records source and binary hashes; only the reviewed digest qualifies, and the
+workflow does not install or enroll a client.
+
 The TUI retains terminal input, output and resize behavior. A private inherited
 socket carries v3 bridge traffic. Startup synchronization grants no selection;
 selected status requires a fresh witness. A timed-out status read preserves one
@@ -115,7 +120,7 @@ presence/authority seams are implemented.
 ## Contract and validation
 
 `contracts/event-v1/manifest.json` pins the canonical OS schema, semantic
-reference, and fixture bytes at `9b1ab6e2c2cf801fe035c766d03f26f1b2f85790`.
+reference, and fixture bytes at `ed23882eac491e26e070e3ef26cf8c0e9e702b38`.
 
 ```sh
 uv run --frozen python scripts/sync_contract.py --check --fetch

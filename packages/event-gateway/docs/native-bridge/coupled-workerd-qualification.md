@@ -1,5 +1,8 @@
 # Controlled native / local gateway / workerd qualification
 
+Current combined terminal no-start and unknown-after-restart evidence is recorded in
+[terminal no-start qualification](coupled-no-start.md).
+
 Current packaged-reader and combined native-restart evidence is recorded in
 [packaged recovery](packaged-recovery.md). The evidence below remains historical.
 

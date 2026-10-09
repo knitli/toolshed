@@ -18,7 +18,7 @@ const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:bundle.out
   bindings:{FIXTURE_SECRET:secret,EVENT_ENABLED:'true',EVENT_MANUAL_ENABLED:'true',EVENT_HOST:'events.example.com',ACCESS_ISSUER:'https://access.test',ACCESS_EVENT_AUD:'event-aud',ACCESS_UI_AUD:'ui-aud'},
   durableObjects:{OWNER_REGISTRY:{className:'FixtureRegistry',useSQLite:true},AGENT_COORDINATOR:{className:'FixtureCoordinator',useSQLite:true}},
 }));
-const paths=new Set(['/fixture/challenge','/fixture/setup','/fixture/read','/fixture/alarm','/v1/nodes/complete','/v1/dispatch/claim','/v1/ack']);
+const paths=new Set(['/fixture/challenge','/fixture/setup','/fixture/read','/fixture/alarm','/v1/nodes/complete','/v1/dispatch/claim','/v1/dispatch/settle-no-start','/v1/ack']);
 const server=createServer({requestTimeout:5000,headersTimeout:5000,maxHeaderSize:16384},async(req,res)=>{
   try {
     if(req.method!=='POST'||!paths.has(req.url)||req.headers['x-fixture-secret']!==secret) {res.writeHead(403).end();req.resume();return;}
