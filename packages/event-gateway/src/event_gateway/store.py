@@ -36,6 +36,26 @@ def _json(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+def validate_native_route(mapping, *, allow_legacy=False):
+    """Validate an exact launcher route; live adapter factories cannot omit it."""
+    from .cloud import CloudError, _native_binding, _uuid
+
+    if not isinstance(mapping, dict):
+        raise StoreError("invalid_attachment")
+    # Historical injected-adapter fixtures have no admitted binding or launcher route.
+    if allow_legacy and "nativeBinding" not in mapping and "sessionId" not in mapping:
+        return None
+    if not _uuid(mapping.get("sessionId")):
+        raise StoreError("invalid_attachment")
+    try:
+        binding = _native_binding(mapping.get("nativeBinding"))
+    except CloudError:
+        raise StoreError("invalid_attachment") from None
+    if mapping.get("nativeThreadId") != binding["threadId"]:
+        raise StoreError("invalid_attachment")
+    return binding
+
+
 class Store:
     def __init__(
         self, state_dir, clock=time.time, max_rows=1000, max_bytes=64 * 1024 * 1024
@@ -247,6 +267,7 @@ class Store:
             k not in mapping for k in (*IDENTITY, "leaseExpiresAt")
         ):
             raise StoreError("invalid_attachment")
+        validate_native_route(mapping, allow_legacy=True)
         if transfer is not None and (
             not isinstance(transfer, dict)
             or set(transfer) != {
@@ -317,6 +338,13 @@ class Store:
             ):
                 raise StoreError("capacity", "session_capacity")
             if old:
+                if "nativeBinding" in old and "nativeBinding" not in mapping:
+                    raise StoreError("invalid_attachment")
+                if (("nativeBinding" in old or "nativeBinding" in mapping)
+                        and mapping["attachmentGeneration"] == old["attachmentGeneration"]
+                        and any(mapping.get(key) != old.get(key)
+                                for key in ("sessionId", "nativeThreadId", "nativeBinding"))):
+                    raise StoreError("conflict", "native route changed without attachment generation")
                 if old["leaseExpiresAt"] <= self.clock() and all(
                     mapping.get(k, 0) == old.get(k, 0) for k in generations
                 ):

@@ -225,9 +225,11 @@ def qualify(args, launcher, server):
                 drain(master, tail)
                 print(tail.decode(errors="replace"), file=sys.stderr)
                 raise
+        launcher.qualified_binary(args.binary, launcher.QUALIFIED_SHA256)
         return {
             "result": "PASS",
             "binarySha256": launcher.QUALIFIED_SHA256,
+            "nativeBinary": {"path": str(args.binary), "sha256": launcher.QUALIFIED_SHA256},
             "python": sys.executable,
             "argv": argv,
             "installedLauncherSha256": hashlib.sha256(

@@ -159,6 +159,9 @@ class NativeBridgeAdapter:
         self.thread_id = mapping.get("nativeThreadId") if isinstance(mapping, dict) else None
         if not _native_uuid(self.thread_id):
             raise NativeError("invalid_native_mapping")
+        self.binding = None
+        if "nativeBinding" in mapping or "sessionId" in mapping:
+            self.binding = _session_mapping(mapping)
         self.bridge, self.witness = bridge, None
         self.receipt_version = _receipt_version({"receiptVersion": getattr(bridge, "receipt_version", 2)})
 
@@ -170,6 +173,9 @@ class NativeBridgeAdapter:
             raise NativeError("native_unavailable") from None
         if (not isinstance(witness, dict) or witness.get("eligible") is not True
                 or witness.get("threadId") != self.thread_id
+                or (self.binding is not None and any(
+                    type(witness.get(key)) is not type(value) or witness.get(key) != value
+                    for key, value in self.binding.items()))
                 or any(not _native_uuid(witness.get(key)) for key in ("clientId", "serverInstanceId", "threadId"))
                 or any(not _uint(witness.get(key)) for key in ("generation", "serverGeneration"))):
             return "unavailable"
@@ -201,6 +207,11 @@ class NativeBridgeAdapter:
         if (type(current) is not int or current != self.receipt_version  # pylint: disable=unidiomatic-typecheck
                 or _receipt_version(request) != self.receipt_version):
             raise NativeError("native_receipt_version_mismatch")
+        if self.binding is not None and any(
+                type(request.get(key)) is not type(self.binding[key])
+                or request.get(key) != self.binding[key]
+                for key in ("clientId", "serverInstanceId", "serverGeneration", "threadId", "generation")):
+            raise NativeError("native_binding_changed")
         return {key: value for key, value in request.items() if key != "receiptVersion"}
 
     async def submit(self, request):
@@ -224,3 +235,62 @@ class NativeBridgeAdapter:
         if outcome.get("status") in ("started", "terminalNotStarted") and not outcome["replayed"]:
             raise NativeError()
         return receipt
+
+
+def _session_mapping(mapping):
+    from .store import validate_native_route  # Local import avoids loading storage for injected test bridges.
+
+    try:
+        validate_native_route(mapping)
+        return _copy(mapping["nativeBinding"])
+    except (KeyError, TypeError, ValueError):
+        raise NativeError("invalid_native_mapping") from None
+
+
+class SessionNativeBridge:
+    """Proxy one explicit session's launcher-owned reader without exposing its FD."""
+
+    receipt_version = 3
+
+    def __init__(self, state_dir, mapping):
+        """Bind all calls to the durable mapping's complete native identity."""
+        self.binding = _session_mapping(mapping)
+        self.state_dir, self.session_id = state_dir, mapping["sessionId"]
+
+    def challenge(self):
+        from .launcher import session_challenge
+
+        return session_challenge(self.state_dir, self.session_id, str(uuid4()), self.binding)["witness"]
+
+    def _request(self, request):
+        from .native_reader import validate_start
+
+        request = _copy(request)
+        validate_start(request)
+        if any(type(request[key]) is not type(self.binding[key]) or request[key] != self.binding[key]
+               for key in ("clientId", "serverInstanceId", "serverGeneration", "threadId", "generation")):
+            raise NativeError("native_binding_changed")
+        return request
+
+    def _operation(self, operation, request):
+        from .launcher import session_native_operation
+
+        request = self._request(request)
+        try:
+            receipt = session_native_operation(self.state_dir, self.session_id, self.binding, operation, request)
+        except (OSError, ValueError):
+            raise NativeError("native_unavailable") from None
+        return validate_receipt({**request, "receiptVersion": 3}, receipt,
+                                allow_input_recorded=operation == "nativeReceipt")
+
+    def start(self, request):
+        """The launcher rechecks binding and starts atomically under its reader lock."""
+        return self._operation("nativeStart", request)
+
+    def restore_attempt(self, request):
+        """Validate locally; durable identity restoration and lookup share the server lock."""
+        self._request(request)
+
+    def receipt(self, request):
+        """Recover an exact receipt without acquiring Start eligibility."""
+        return self._operation("nativeReceipt", request)

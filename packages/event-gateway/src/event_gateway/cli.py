@@ -36,7 +36,8 @@ def main(argv=None):
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
-    commands.add_parser("run", help="Run the private control daemon")
+    run = commands.add_parser("run", help="Run the private control daemon")
+    run.add_argument("--dispatch-config", type=Path, help="Private configuration for qualified event delivery")
     client = commands.add_parser("launch", help="Launch an explicit qualified Codex TUI")
     client.add_argument("--codex-binary", type=Path, required=True)
     client.add_argument("--binary-sha256", required=True)
@@ -107,7 +108,7 @@ def _execute_command(args, state_dir, parser):
                           "presence": session_status(state_dir, args.session_id)}))
         return 0
     if args.command == "run":
-        asyncio.run(serve(state_dir))
+        asyncio.run(serve(state_dir, dispatch_config=args.dispatch_config))
         return 0
     if args.command in ("attach", "renew", "transfer"):
         return _execute_native_lifecycle(args, state_dir, args.command)
@@ -303,6 +304,7 @@ def _native_mapping(args, operation, cloud, response):
         "attachmentGeneration": response["attachmentGeneration"],
         "leaseExpiresAt": _timestamp(response["leaseUntil"]) / 1000,
         "nativeBinding": response["nativeBinding"], "nodeId": response["nodeId"],
+        "sessionId": args.session_id, "nativeThreadId": response["nativeBinding"]["threadId"],
     }
     transfer = None
     if operation == "transfer":

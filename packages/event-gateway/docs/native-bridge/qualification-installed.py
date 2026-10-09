@@ -82,9 +82,9 @@ def _wheel_provenance(distribution):
     direct = json.loads(raw) if raw else None
     if direct is not None:
         require(isinstance(direct, dict) and 'dir_info' not in direct, 'editable or source-directory install')
-        require(isinstance(direct.get('archive_info'), dict), 'source distribution provenance')
+        require(isinstance(direct.get('archive_info'), dict), 'wheel archive metadata missing')
         parsed = urlsplit(direct.get('url', ''))
-        require(parsed.scheme in ('file', 'https') and parsed.path.endswith('.whl'), 'source distribution provenance')
+        require(parsed.scheme in ('file', 'https') and parsed.path.endswith('.whl'), 'wheel archive URL invalid')
     return direct
 
 

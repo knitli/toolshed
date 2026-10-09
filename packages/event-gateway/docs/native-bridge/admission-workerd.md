@@ -3,10 +3,11 @@
 **PASS, 2026-10-09.** [Recorded proof](admission-workerd-proof.json) passed with
 native binary SHA-256 `3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c`
 and the final installed wheel SHA-256
-`d11642c3ca2eb96f72f7ce192c422c60be174487cea418c243157d87fd1322a2`.
+`63c5ac411234f4a619540386c01183925e8bbdf84037734d95d08ea6bc251123`.
 The proof SHA-256 is
-`54a1c910bf9825ab9978fa82498cc8fa1fdc2db001857e56d6df848c606ba50d`.
-It records 16 wire requests and exact cloud source hashes, including the scoped
+`0b7ee751429b1ae5826812878b67c4bb6fb70d90082749c94dab1b65f08d0713`.
+It records 16 wire requests, 27 local input hashes, and 136 cloud bundle input
+hashes, including the scoped
 canary admission gate, RPC error mapping, and extracted synchronous native runtime store.
 The final run used Python `-I -O`; explicit qualification guards remain active.
 
@@ -56,6 +57,13 @@ explicit `--package-source` (`src/event_gateway`, with sibling `contracts/event-
 It rejects editable/source installs, import shadows, extra files, and changed
 module or contract bytes. Source is trusted local operator input; these checks
 are not remote or signed build attestation.
+
+The native binary is checked using the production launcher's same-descriptor
+file metadata and SHA-256 validation before broker startup, immediately before
+each native qualification, and before final proof creation. Its hash is included
+in the source inventory. Path validation and later process execution are not
+atomic: this trusts the same local user and does not provide portable descriptor
+execution or protection against that user replacing the path between checks.
 
 The parent and Python daemon require `-I` and independently use new private
 bytecode-cache directories with bytecode writes disabled. This prevents a valid
