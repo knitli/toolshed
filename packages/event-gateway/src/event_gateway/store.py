@@ -290,6 +290,12 @@ class Store:
             raise StoreError("invalid_attachment")
 
     def put_attachment(self, mapping, *, transfer=None):
+        try:
+            return self._put_attachment(mapping, transfer=transfer)
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
+
+    def _put_attachment(self, mapping, *, transfer=None):
         self._validate_attachment(mapping, transfer)
         if mapping["leaseExpiresAt"] <= self.clock():
             raise StoreError("invalid_attachment")
@@ -329,10 +335,11 @@ class Store:
             # Cloud-confirmed revocation must survive a superseded local target.
             target_error = exc
         data = _json(mapping)
-        self._capacity(32768 + len(data.encode()) * 3)
+        target_reserve = 32768 + len(data.encode()) * 3
+        self._capacity(target_reserve)
         with self.db:
             if transfer is not None:
-                self._revoke_transfer_source(mapping, transfer)
+                self._revoke_transfer_source(mapping, transfer, target_reserve=target_reserve)
             if target_error is None:
                 if old and any(
                     old.get(k) != mapping.get(k) for k in (*IDENTITY, "consumerGeneration")
@@ -350,12 +357,14 @@ class Store:
         if transfer is None:
             raise StoreError("invalid_attachment")
         self._validate_attachment(mapping, transfer)
-        self._capacity(32768 + len(_json(mapping).encode()) * 3)
-        with self.db:
-            self._revoke_transfer_source(mapping, transfer)
+        try:
+            with self.db:
+                self._revoke_transfer_source(mapping, transfer)
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
         return {"revoked": True, "runtimeId": transfer["sourceRuntimeId"]}
 
-    def _revoke_transfer_source(self, mapping, transfer):
+    def _revoke_transfer_source(self, mapping, transfer, *, target_reserve=0):
         source_id = transfer["sourceRuntimeId"]
         source_row = self.db.execute(
             "SELECT data FROM attachments WHERE runtime=?", (source_id,)
@@ -383,13 +392,14 @@ class Store:
             if (source.get("runtimeGeneration") != transfer["expectedRuntimeGeneration"]
                     or source.get("attachmentGeneration") != transfer["expectedAttachmentGeneration"]):
                 raise StoreError("stale_transfer")
-        self._fence(source_id)
         source.update(
             runtimeGeneration=transfer["runtimeGeneration"],
             attachmentGeneration=transfer["attachmentGeneration"],
             leaseExpiresAt=0,
         )
         source_data = _json(source)
+        self._capacity(target_reserve + 32768 + len(source_data.encode()) * 3)
+        self._fence(source_id)
         if source_row:
             self.db.execute(
                 "UPDATE attachments SET data=? WHERE runtime=?", (source_data, source_id)

@@ -1,6 +1,8 @@
 """Exercise private credential loading and the no-redirect HTTPS transport."""
 
 import asyncio
+import errno
+import os
 import json
 from pathlib import Path
 import tempfile
@@ -9,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 import uuid
 
 from event_gateway.client_runtime import (
-    _https_send, clear_pending_commit, load_cloud_client, load_pending_commit,
+    _https_send, _pending_lock, clear_pending_commit, load_cloud_client, load_pending_commit,
     save_pending_commit,
 )
 from event_gateway.security import SecurityError, load_or_create_signing_key
@@ -146,6 +148,41 @@ class ClientRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 await task
         self.assertTrue(blocked.killed)
         self.assertEqual(blocked.returncode, -9)
+
+    def test_pending_lock_closes_real_descriptor_on_contention_and_stat_failure(self):
+        opened = []
+        real_open = os.open
+        real_fstat = os.fstat
+
+        def capture_open(*args, **kwargs):
+            fd = real_open(*args, **kwargs)
+            opened.append(fd)
+            return fd
+
+        owner = _pending_lock(self.state)
+        self.addCleanup(os.close, owner)
+        self.assertTrue(real_fstat(owner))
+        for failure, code in (("contention", "pending_commit_busy"),
+                              ("fstat", "invalid_pending_commit")):
+            with self.subTest(failure=failure):
+                with patch("event_gateway.client_runtime.os.open", side_effect=capture_open):
+                    if failure == "fstat":
+                        with (patch("event_gateway.client_runtime.os.fstat", side_effect=OSError("stat failed")),
+                              self.assertRaisesRegex(SecurityError, "^" + code + "$")):
+                            _pending_lock(self.state)
+                    else:
+                        with self.assertRaisesRegex(SecurityError, "^" + code + "$"):
+                            _pending_lock(self.state)
+                try:
+                    with self.assertRaises(OSError) as error:
+                        real_fstat(opened[-1])
+                    self.assertEqual(error.exception.errno, errno.EBADF)
+                finally:
+                    try:
+                        os.close(opened[-1])
+                    except OSError as error:
+                        self.assertEqual(error.errno, errno.EBADF)
+                self.assertTrue(real_fstat(owner))
 
     async def test_pending_commit_is_private_exact_and_never_replaced(self):
         session_id = str(uuid.uuid4())

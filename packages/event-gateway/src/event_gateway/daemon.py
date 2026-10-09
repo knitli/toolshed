@@ -7,7 +7,7 @@ from pathlib import Path
 import signal
 import stat
 
-from .store import Store
+from .store import Store, StoreError
 
 
 BLOCKERS = ["native_client_binding_unavailable", "cloud_authority_not_integrated"]
@@ -76,7 +76,11 @@ async def serve(state_dir):
                     if len(line) > 4096:
                         raise ValueError("request_too_large")
                     request = json.loads(line)
-                    result = _execute_control_command(store, request)
+                    try:
+                        result = _execute_control_command(store, request)
+                    except StoreError as error:
+                        # Store codes are bounded; exception details may include data.
+                        result = {"reason": error.code}
                     writer.write(json.dumps(result).encode() + b"\n")
                     await writer.drain()
             except (ValueError, TimeoutError):

@@ -340,9 +340,13 @@ def _store_native_mapping(state_dir, operation, mapping, transfer):
             except (ConnectionRefusedError, FileNotFoundError):
                 # Only a definite missing listener permits the Store lock to arbitrate.
                 stored = store_mapping_directly()
-    except (StoreError, OSError, ValueError, TimeoutError):
-        return False
-    return stored == {"stored": True, "runtimeId": mapping["runtimeId"]}
+    except StoreError as error:
+        return False, error.code
+    except (OSError, ValueError, TimeoutError):
+        return False, "local_operation_unavailable"
+    if stored == {"stored": True, "runtimeId": mapping["runtimeId"]}:
+        return True, None
+    return False, _store_response_error(stored)
 
 
 def _revoke_transfer_source(state_dir, mapping, transfer):
@@ -362,17 +366,30 @@ def _revoke_transfer_source(state_dir, mapping, transfer):
             except (ConnectionRefusedError, FileNotFoundError):
                 # Let Store's normal writer lock arbitrate after a definite stale socket.
                 result = revoke_directly()
-    except (StoreError, OSError, ValueError, TimeoutError):
-        return False
-    return result == {"revoked": True, "runtimeId": transfer["sourceRuntimeId"]}
+    except StoreError as error:
+        return False, error.code
+    except (OSError, ValueError, TimeoutError):
+        return False, "local_operation_unavailable"
+    if result == {"revoked": True, "runtimeId": transfer["sourceRuntimeId"]}:
+        return True, None
+    return False, _store_response_error(result)
+
+
+def _store_response_error(result):
+    code = result.get("reason") if isinstance(result, dict) else None
+    if isinstance(code, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code):
+        return code
+    return "invalid_store_response"
 
 
 def _fence_source_after_confirmed_transfer(state_dir, args, cloud, response):
     mapping, transfer = _native_mapping(args, "transfer", cloud, response)
-    if _revoke_transfer_source(state_dir, mapping, transfer):
+    fenced, error_code = _revoke_transfer_source(state_dir, mapping, transfer)
+    if fenced:
         return None
     return {"remoteStatus": response["status"], "localStatus": "unavailable",
-            "reason": "local_transfer_source_fence_unavailable", "runtimeId": response["runtimeId"]}
+            "reason": "local_transfer_source_fence_unavailable", "runtimeId": response["runtimeId"],
+            "lastError": error_code}
 
 
 def _persist_native_lifecycle(args, state_dir, operation, binding, cloud, response,
@@ -398,9 +415,11 @@ def _persist_native_lifecycle(args, state_dir, operation, binding, cloud, respon
         return {"remoteStatus": response["status"], "localStatus": "not_current",
                 "reason": "native_binding_changed_after_commit", "runtimeId": response["runtimeId"]}
     mapping, transfer = _native_mapping(args, operation, cloud, response)
-    if not _store_native_mapping(state_dir, operation, mapping, transfer):
+    stored, error_code = _store_native_mapping(state_dir, operation, mapping, transfer)
+    if not stored:
         return {"remoteStatus": response["status"], "localStatus": "unavailable",
-                "reason": "local_mapping_unavailable", "runtimeId": mapping["runtimeId"]}
+                "reason": "local_mapping_unavailable", "runtimeId": mapping["runtimeId"],
+                "lastError": error_code}
     if artifact or persisted.get("artifact"):
         pending = artifact or persisted["artifact"]
         try:

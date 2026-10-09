@@ -893,7 +893,7 @@ class StoreTests(unittest.TestCase):
         )
         self.store.db.commit()
 
-        with self.assertRaises(sqlite3.IntegrityError):
+        with self.assertRaisesRegex(StoreError, "^storage_unavailable$"):
             self.store.put_attachment(target, transfer=transfer)
 
         after = self.store.db.execute(
@@ -904,6 +904,45 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.get(queued)["status"], "queued")
         self.assertEqual(self.store.get(submitted)["status"], "submitted")
         self.assertFalse(self.store.current_attempt(submitted)["fenced"])
+
+    def test_absent_source_transfer_reserves_both_rows_before_writing(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        self.store.db.execute("DELETE FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],))
+        self.store.db.commit()
+        target_bytes = len(json.dumps(target, sort_keys=True, separators=(",", ":")).encode())
+        self.store.max_bytes = self.store._size() + 32768 + target_bytes * 3 + 1
+        with self.assertRaisesRegex(StoreError, "^storage_capacity$"):
+            self.store.put_attachment(target, transfer=transfer)
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+        self.assertIsNone(self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone())
+
+    def test_source_only_sql_failure_is_bounded_and_rolls_back_fence(self):
+        queued = self.store.accept(self.event)["deliveryId"]
+        target, transfer = self.transfer_mapping_and_cas()
+        self.store.db.execute(
+            "CREATE TRIGGER fail_source BEFORE UPDATE ON attachments "
+            "BEGIN SELECT RAISE(ABORT, 'private source detail'); END"
+        )
+        self.store.db.commit()
+        with self.assertRaisesRegex(StoreError, "^storage_unavailable$"):
+            self.store.revoke_transfer_source(target, transfer=transfer)
+        self.assertEqual(self.store.get_attachment(self.mapping["runtimeId"]), self.mapping)
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+        self.assertEqual(self.store.get(queued)["status"], "queued")
+
+    def test_attachment_operational_errors_are_bounded_and_leave_rows_unchanged(self):
+        queued = self.store.accept(self.event)["deliveryId"]
+        target, transfer = self.transfer_mapping_and_cas()
+        self.store.db.execute("PRAGMA query_only=ON")
+        for operation in (self.store.put_attachment, self.store.revoke_transfer_source):
+            with self.subTest(operation=operation.__name__):
+                with self.assertRaisesRegex(StoreError, "^storage_unavailable$"):
+                    operation(target, transfer=transfer)
+                self.assertEqual(self.store.get_attachment(self.mapping["runtimeId"]), self.mapping)
+                self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+                self.assertEqual(self.store.get(queued)["status"], "queued")
 
     def test_absent_source_transfer_writes_complete_inactive_tombstone(self):
         target, transfer = self.transfer_mapping_and_cas()

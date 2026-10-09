@@ -221,20 +221,20 @@ def _pending_slot(state_dir, operation, session_id, *, create=False):
 
 def _pending_lock(directory):
     lock_path = directory / ".lock"
+    fd = None
     try:
         fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         info = os.fstat(fd)
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
                 or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
-            os.close(fd)
             raise SecurityError("invalid_pending_commit")
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return fd
-    except BlockingIOError:
-        raise SecurityError("pending_commit_busy") from None
-    except SecurityError:
-        raise
-    except OSError:
+    except (OSError, SecurityError) as error:
+        if fd is not None:
+            os.close(fd)
+        if isinstance(error, BlockingIOError):
+            raise SecurityError("pending_commit_busy") from None
         raise SecurityError("invalid_pending_commit") from None
 
 
