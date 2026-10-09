@@ -392,6 +392,18 @@ def _fence_source_after_confirmed_transfer(state_dir, args, cloud, response):
             "lastError": error_code}
 
 
+def _target_mapping_failure(state_dir, args, operation, cloud, response, mapping, error_code):
+    if operation == "transfer":
+        fence_error = _fence_source_after_confirmed_transfer(
+            state_dir, args, cloud, response,
+        )
+        if fence_error is not None:
+            return fence_error
+    return {"remoteStatus": response["status"], "localStatus": "unavailable",
+            "reason": "local_mapping_unavailable", "runtimeId": mapping["runtimeId"],
+            "lastError": error_code}
+
+
 def _persist_native_lifecycle(args, state_dir, operation, binding, cloud, response,
                               artifact, persisted):
     try:
@@ -417,9 +429,9 @@ def _persist_native_lifecycle(args, state_dir, operation, binding, cloud, respon
     mapping, transfer = _native_mapping(args, operation, cloud, response)
     stored, error_code = _store_native_mapping(state_dir, operation, mapping, transfer)
     if not stored:
-        return {"remoteStatus": response["status"], "localStatus": "unavailable",
-                "reason": "local_mapping_unavailable", "runtimeId": mapping["runtimeId"],
-                "lastError": error_code}
+        return _target_mapping_failure(
+            state_dir, args, operation, cloud, response, mapping, error_code,
+        )
     if artifact or persisted.get("artifact"):
         pending = artifact or persisted["artifact"]
         try:

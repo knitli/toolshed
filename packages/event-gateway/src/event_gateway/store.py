@@ -398,7 +398,9 @@ class Store:
             leaseExpiresAt=0,
         )
         source_data = _json(source)
-        self._capacity(target_reserve + 32768 + len(source_data.encode()) * 3)
+        # Like detach, revoking an existing source is allowed at admission capacity.
+        if target_reserve or not source_row:
+            self._capacity(target_reserve + 32768 + len(source_data.encode()) * 3)
         self._fence(source_id)
         if source_row:
             self.db.execute(

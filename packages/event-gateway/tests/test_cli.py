@@ -18,6 +18,7 @@ from unittest.mock import patch
 from event_gateway import cli
 from event_gateway.cloud import CloudError, _iso
 from event_gateway.daemon import _execute_control_command
+from event_gateway.protocol import derive_delivery_id
 from event_gateway.security import SecurityError
 from event_gateway.store import IDENTITY, Store
 
@@ -658,7 +659,7 @@ class CliTests(unittest.TestCase):
         event = json.loads(fixture_path.read_text())["validEnvelopes"][0]
         fixed_now = 1791201630
 
-        def run_case(label, post_commit_binding, *, recover):
+        def run_case(label, post_commit_binding, *, recover, capacity_fail=False):
             state = self.state / label
             state.mkdir(mode=0o700, parents=True)
             (state / "control.sock").touch(mode=0o600)
@@ -700,12 +701,14 @@ class CliTests(unittest.TestCase):
                 source["leaseExpiresAt"] = fixed_now + 3600
                 daemon_store.put_attachment(source)
                 queued = daemon_store.accept(event)["deliveryId"]
+                if capacity_fail:
+                    daemon_store.max_bytes = daemon_store._size()
 
                 def daemon_request(_state_dir, command):
                     daemon_commands.append(command["command"])
                     return _execute_control_command(daemon_store, command)
 
-                initial_bindings = [binding, post_commit_binding]
+                initial_bindings = [binding, binding if capacity_fail else post_commit_binding]
                 first_output = io.StringIO()
                 with (patch.object(cli, "load_cloud_client", return_value=fake),
                       patch.object(cli, "session_binding", side_effect=initial_bindings),
@@ -729,7 +732,8 @@ class CliTests(unittest.TestCase):
                 first_result = json.loads(first_output.getvalue())
                 self.assertEqual(first_code, 2)
                 self.assertEqual(first_result["remoteStatus"], "transferred")
-                self.assertEqual(first_result["localStatus"], "not_current")
+                self.assertEqual(first_result["localStatus"],
+                                 "unavailable" if capacity_fail else "not_current")
                 self.assertIsNone(daemon_store.get_attachment(source_id))
                 self.assertIsNone(daemon_store.get_attachment(replacement_id))
                 self.assertEqual(daemon_store.get(queued)["status"], "stale")
@@ -737,7 +741,10 @@ class CliTests(unittest.TestCase):
                     "SELECT data FROM attachments WHERE runtime=?", (source_id,),
                 ).fetchone()[0])
                 self.assertEqual(source_tombstone["leaseExpiresAt"], 0)
-                self.assertEqual(daemon_commands, ["revoke-transfer-source"])
+                self.assertEqual(daemon_commands, (
+                    ["transfer-attachment", "revoke-transfer-source"]
+                    if capacity_fail else ["revoke-transfer-source"]
+                ))
                 self.assertIsNotNone(cli.load_pending_commit(state, "transfer", session_id))
 
                 if recover:
@@ -764,6 +771,9 @@ class CliTests(unittest.TestCase):
                     self.assertEqual(daemon_store.get_attachment(replacement_id)["attachmentGeneration"], 9)
                     self.assertEqual(daemon_store.get(queued)["status"], "stale")
                     self.assertIsNone(cli.load_pending_commit(state, "transfer", session_id))
+                elif capacity_fail:
+                    self.assertEqual(first_result["reason"], "local_mapping_unavailable")
+                    self.assertEqual(first_result["lastError"], "capacity")
                 else:
                     self.assertEqual(first_result["reason"], "native_binding_changed_after_commit")
                     self.assertIsNotNone(cli.load_pending_commit(state, "transfer", session_id))
@@ -773,6 +783,88 @@ class CliTests(unittest.TestCase):
                            "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 3,
                            "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
         run_case("native-changed", changed_binding, recover=False)
+        run_case("target-capacity", None, recover=False, capacity_fail=True)
+
+    def test_confirmed_transfer_capacity_failure_fences_source_and_keeps_pending(self):
+        now = time.time()
+        fixture_path = Path(__file__).resolve().parents[1] / "contracts/event-v1/protocol-v1.json"
+        event = json.loads(fixture_path.read_text())["validEnvelopes"][0]
+        event["eventId"], event["attemptId"] = str(uuid.uuid4()), str(uuid.uuid4())
+        event["issuedAt"], event["expiresAt"] = _iso(now), _iso(now + 60)
+        event["deliveryId"] = derive_delivery_id(event)
+        source_id, target_id = event["runtimeId"], str(uuid.uuid4())
+        binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                   "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
+                   "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+        cloud_id = {"origin": "https://events.example.com", "principal": event["principal"],
+                    "agent": event["agent"], "nodeId": str(uuid.uuid4()), "nodeGeneration": 1}
+        source = {key: event[key] for key in IDENTITY}
+        source.update(leaseExpiresAt=now + 3600, nodeId=cloud_id["nodeId"], nativeBinding=binding)
+        with Store(self.state) as store:
+            store.put_attachment(source)
+            queued = store.accept(event)["deliveryId"]
+            capacity_limit = max(
+                store._size(),
+                65536 + 12288 * store.db.execute("PRAGMA page_count").fetchone()[0],
+            )
+
+        challenge = {"challengeId": str(uuid.uuid4()), "issuedAt": _iso(now),
+                     "expiresAt": _iso(now + 30)}
+        response = {"status": "transferred", "sourceRuntimeId": source_id,
+                    "sourceRuntimeGeneration": source["runtimeGeneration"] + 1,
+                    "sourceAttachmentGeneration": source["attachmentGeneration"] + 1,
+                    "runtimeId": target_id, "runtimeGeneration": 7,
+                    "nodeId": cloud_id["nodeId"], "nodeGeneration": cloud_id["nodeGeneration"],
+                    "attachmentGeneration": 9, "leaseUntil": _iso(now + 90),
+                    "nativeBinding": binding}
+
+        class FakeCloud:
+            origin, principal, agent = cloud_id["origin"], cloud_id["principal"], cloud_id["agent"]
+            node_id, node_generation = cloud_id["nodeId"], cloud_id["nodeGeneration"]
+
+            async def native_challenge(self, _intent):
+                return challenge
+
+            async def transfer(self, _intent, _challenge, _evidence, *, on_first_send=None):
+                on_first_send(b'{"commit":"confirmed"}')
+                return response
+
+        def limited_store(state_dir):
+            return Store(state_dir, max_bytes=capacity_limit)
+
+        session_id = str(uuid.uuid4())
+        output = io.StringIO()
+        with (patch.object(cli, "Store", side_effect=limited_store),
+              patch.object(cli, "load_cloud_client", return_value=FakeCloud()),
+              patch.object(cli, "session_binding", side_effect=[binding, binding]),
+              patch.object(cli, "session_challenge", return_value={
+                  "observedAt": challenge["issuedAt"],
+                  "validUntilMonotonic": time.monotonic() + 0.5,
+                  "witness": {"fixture": True},
+              }),
+              redirect_stdout(output)):
+            code = cli.main([
+                "--state-dir", str(self.state), "transfer",
+                "--source-runtime-id", source_id,
+                "--expected-source-runtime-generation", str(source["runtimeGeneration"]),
+                "--expected-source-attachment-generation", str(source["attachmentGeneration"]),
+                "--replacement-runtime-id", target_id,
+                "--expected-replacement-runtime-generation", "6",
+                "--expected-replacement-attachment-generation", "8",
+                "--session-id", session_id, "--cloud-config", str(self.state / "cloud.json"),
+            ])
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(code, 2)
+        self.assertEqual(result["remoteStatus"], "transferred")
+        self.assertEqual(result["localStatus"], "unavailable")
+        self.assertEqual(result["reason"], "local_mapping_unavailable")
+        self.assertEqual(result["lastError"], "capacity")
+        self.assertIsNotNone(cli.load_pending_commit(self.state, "transfer", session_id))
+        with Store(self.state) as store:
+            self.assertIsNone(store.get_attachment(source_id))
+            self.assertIsNone(store.get_attachment(target_id))
+            self.assertEqual(store.get(queued)["status"], "stale")
 
     def test_client_status_labels_presence_only(self):
         output = io.StringIO()

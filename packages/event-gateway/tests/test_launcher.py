@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import signal
+import socket
 import stat
 import tempfile
 import threading
@@ -77,6 +78,29 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(bridge.challenge_readonly.call_count, 1)
         bridge.challenge.assert_called_once_with()
         bridge.start.assert_not_called()
+
+    def test_challenge_ipc_latency_consumes_original_witness_lease(self):
+        row = witness(leaseMs=750)
+        channel, remote = socket.socketpair()
+        self.addCleanup(channel.close)
+        self.addCleanup(remote.close)
+        bridge = launcher.NativeBridge(channel, receipt_version=3)
+        client = launcher.NativeClient(bridge)
+        client.ready = True
+        clock = [1000.0, 10.0]
+
+        def delayed_exchange(*_args):
+            clock[0] += 0.4
+            clock[1] += 0.4
+            return row
+
+        with (patch.object(launcher.time, "time", side_effect=lambda: clock[0]),
+              patch.object(launcher.time, "monotonic", side_effect=lambda: clock[1]),
+              patch.object(bridge, "exchange", side_effect=delayed_exchange)):
+            result = client.challenge(str(uuid4()), launcher._binding(row))
+        self.assertEqual(result["observedAt"], "1970-01-01T00:16:40.000Z")
+        self.assertEqual(result["validUntilMonotonic"], 10.75)
+        self.assertAlmostEqual(result["validUntilMonotonic"] - clock[1], 0.35)
 
     def test_fresh_challenge_rejects_changed_or_expired_binding(self):
         row = witness()

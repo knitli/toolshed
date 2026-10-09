@@ -918,6 +918,36 @@ class StoreTests(unittest.TestCase):
             "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
         ).fetchone())
 
+    def test_source_only_revocation_of_existing_row_is_allowed_at_admission_capacity(self):
+        queued = self.store.accept(self.event)["deliveryId"]
+        target, transfer = self.transfer_mapping_and_cas()
+        self.store.max_bytes = self.store._size()
+        with self.assertRaisesRegex(StoreError, "^storage_capacity$"):
+            self.store.put_attachment(target, transfer=transfer)
+        expected = {"revoked": True, "runtimeId": self.mapping["runtimeId"]}
+        self.assertEqual(self.store.revoke_transfer_source(target, transfer=transfer), expected)
+        self.assertIsNone(self.store.get_attachment(self.mapping["runtimeId"]))
+        source = json.loads(self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone()[0])
+        self.assertEqual(source["runtimeGeneration"], transfer["runtimeGeneration"])
+        self.assertEqual(source["attachmentGeneration"], transfer["attachmentGeneration"])
+        self.assertEqual(source["leaseExpiresAt"], 0)
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+        self.assertEqual(self.store.get(queued)["status"], "stale")
+        self.assertEqual(self.store.revoke_transfer_source(target, transfer=transfer), expected)
+
+    def test_source_only_absent_tombstone_still_requires_admission_capacity(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        self.store.db.execute("DELETE FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],))
+        self.store.db.commit()
+        self.store.max_bytes = self.store._size()
+        with self.assertRaisesRegex(StoreError, "^storage_capacity$"):
+            self.store.revoke_transfer_source(target, transfer=transfer)
+        self.assertIsNone(self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone())
+
     def test_source_only_sql_failure_is_bounded_and_rolls_back_fence(self):
         queued = self.store.accept(self.event)["deliveryId"]
         target, transfer = self.transfer_mapping_and_cas()

@@ -18,12 +18,14 @@ The evidence contains the upstream commit, full-tree archive selection and extra
 ### Artifact handoff
 
 Keep the builder's executable and evidence JSON together as one external artifact
-pair; neither is included in the Python wheel. Before launch, require
-`launcherQualified: true`, recompute the executable SHA-256, and confirm it
-matches both `binarySha256` and `launcherSha256` in the evidence. Pass that
-absolute executable path and `launcherSha256` to `knitli-event-gateway launch`.
-The launcher checks the path and digest again immediately before execution. A
-candidate with `launcherQualified: false` is not launchable by the shipped CLI.
+pair; neither is included in the Python wheel. Treat `launcherQualified: true`
+as an operator handoff check: recompute the executable SHA-256 and confirm it
+matches both `binarySha256` and `launcherSha256` in the evidence. The launcher
+does not read the evidence JSON. Pass the absolute executable path and its
+SHA-256 to `knitli-event-gateway launch`; the CLI checks that digest against the
+hard-coded `QUALIFIED_SHA256` pin again immediately before execution. A
+different build requires a separate reviewed pin update, and changing the
+evidence file alone does not authorize it.
 
 The latest full-tree clean build and v3 runtime result are recorded in
 [`native-client-build-proof.json`](native-client-build-proof.json). The rebuilt

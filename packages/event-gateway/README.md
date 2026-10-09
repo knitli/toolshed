@@ -85,8 +85,11 @@ guarantee against another process running as that user.
 Build and qualify a candidate from the pinned upstream source using the
 [native client build workflow](docs/native-bridge/native-client-build.md). It
 records source and binary hashes. Keep its executable and evidence JSON as one
-external artifact pair; only evidence with `launcherQualified: true` can be
-passed to `launch`, which checks the absolute executable path and digest again.
+external artifact pair. Treat `launcherQualified: true` as an operator handoff
+check: the evidence is not read by the launcher. `launch` accepts the executable
+path and supplied SHA-256, then checks them against the hard-coded
+`QUALIFIED_SHA256` pin. Admitting a different build requires a separate reviewed
+pin update; changing the evidence file alone does not authorize it.
 The binary is not in the Python wheel, and the workflow does not install or
 enroll a client.
 
