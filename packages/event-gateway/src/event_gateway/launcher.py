@@ -3,6 +3,7 @@
 import hashlib
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import pty
@@ -13,14 +14,19 @@ import subprocess  # nosec B404 - only the explicitly qualified executable is la
 import threading
 import termios
 import time
+from datetime import datetime, timezone
 from uuid import uuid4
 
-from .native_reader import NativeBridge, uuid
+from .native_reader import NativeBridge, unique, uuid
 from .native_terminal import run_terminal
 from .security import ensure_private_directory
 
 # Exact executable used by the committed durable-v3 packaged recovery proof.
 QUALIFIED_SHA256 = "0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de"
+BINDING_FIELDS = (
+    "clientId", "connectionId", "backendPid", "threadId", "generation",
+    "serverInstanceId", "serverGeneration",
+)
 
 
 def _claim_terminal():
@@ -74,6 +80,97 @@ def session_path(state_dir, session_id):
 
 def session_status(state_dir, session_id):
     """Query one explicitly identified live launcher; never discover clients."""
+    return _session_request(state_dir, session_id, {"command": "status"})
+
+
+def session_binding(state_dir, session_id):
+    """Read the exact local selection tuple for a later cloud challenge."""
+    value = _session_request(state_dir, session_id, {"command": "binding"})
+    if not _valid_binding(value):
+        raise LaunchError("invalid_client_binding")
+    return value
+
+
+def session_challenge(state_dir, session_id, challenge_id, expected_binding):
+    """Obtain a fresh witness correlated with one cloud-issued challenge."""
+    if not _valid_challenge_id(challenge_id) or not _valid_binding(expected_binding):
+        raise LaunchError("invalid_client_challenge")
+    value = _session_request(state_dir, session_id, {
+        "command": "challenge", "challengeId": challenge_id,
+        "expectedBinding": expected_binding,
+    })
+    if (not isinstance(value, dict)
+            or set(value) != {"challengeId", "observedAt", "validUntilMonotonic", "witness"}
+            or value["challengeId"] != challenge_id
+            or not _valid_observed_at(value["observedAt"])
+            or not isinstance(value["validUntilMonotonic"], (int, float))
+            or isinstance(value["validUntilMonotonic"], bool)
+            or not math.isfinite(value["validUntilMonotonic"])
+            or time.monotonic() >= value["validUntilMonotonic"]
+            or not _valid_native_witness(value["witness"])
+            or _binding(value["witness"]) != expected_binding
+            or value["validUntilMonotonic"] - time.monotonic()
+            > min(value["witness"]["leaseMs"], 750) / 1000):
+        raise LaunchError("invalid_client_challenge")
+    return {key: value[key] for key in ("observedAt", "validUntilMonotonic", "witness")}
+
+
+def _valid_challenge_id(value):
+    return uuid(value)
+
+
+def _valid_observed_at(value):
+    if not isinstance(value, str) or len(value) != 24 or not value.endswith("Z"):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        return False
+    return parsed.isoformat(timespec="milliseconds").replace("+00:00", "Z") == value
+
+
+def _valid_binding(value):
+    return (isinstance(value, dict) and set(value) == set(BINDING_FIELDS)
+            and all(uuid(value[key]) for key in (
+                "clientId", "connectionId", "threadId", "serverInstanceId",
+            ))
+            and isinstance(value["backendPid"], int) and not isinstance(value["backendPid"], bool)
+            and 0 < value["backendPid"] <= 2**32 - 1
+            and isinstance(value["generation"], int) and not isinstance(value["generation"], bool)
+            and 0 <= value["generation"] <= 2**53 - 1
+            and isinstance(value["serverGeneration"], int) and not isinstance(value["serverGeneration"], bool)
+            and 0 <= value["serverGeneration"] <= 2**53 - 1)
+
+
+def _binding(witness):
+    return {key: witness[key] for key in BINDING_FIELDS}
+
+
+def _valid_native_witness(value):
+    return (isinstance(value, dict)
+            and set(value) == {
+                "version", "nonce", "clientId", "backendPid", "connectionId", "threadId",
+                "generation", "eligible", "sequence", "cause", "serverInstanceId",
+                "serverGeneration", "leaseMs",
+            }
+            and isinstance(value["version"], int) and not isinstance(value["version"], bool)
+            and value["version"] == 2
+            and isinstance(value["nonce"], int) and not isinstance(value["nonce"], bool)
+            and 0 <= value["nonce"] <= 2**53 - 1
+            and value["eligible"] is True
+            and isinstance(value["cause"], str) and len(value["cause"]) <= 128
+            and isinstance(value["sequence"], int) and not isinstance(value["sequence"], bool)
+            and 0 < value["sequence"] <= 2**53 - 1
+            and isinstance(value["leaseMs"], int) and not isinstance(value["leaseMs"], bool)
+            and 0 < value["leaseMs"] <= 2**53 - 1
+            and _valid_binding(_binding(value)))
+
+
+def _reject_constant(_):
+    raise ValueError
+
+
+def _session_request(state_dir, session_id, request):
     state_dir = Path(state_dir).absolute()
     if any(part.is_symlink() for part in (state_dir, *state_dir.parents)):
         raise LaunchError("unsafe_client_state")
@@ -86,12 +183,15 @@ def session_status(state_dir, session_id):
     if (not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid()
             or stat.S_IMODE(info.st_mode) != 0o600):
         raise LaunchError("unsafe_client_socket")
+    payload = json.dumps(request, separators=(",", ":"), allow_nan=False).encode() + b"\n"
+    if len(payload) > 1024:
+        raise LaunchError("invalid_client_request")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
         deadline = time.monotonic() + 2
         _remaining(channel, deadline)
         channel.connect(str(path))
         _remaining(channel, deadline)
-        channel.sendall(b'{"command":"status"}\n')
+        channel.sendall(payload)
         data = bytearray()
         while b"\n" not in data and len(data) <= 4096:
             _remaining(channel, deadline)
@@ -100,8 +200,14 @@ def session_status(state_dir, session_id):
                 break
             data.extend(chunk)
         if len(data) > 4096 or not data.endswith(b"\n"):
-            raise LaunchError("invalid_client_status")
-        return json.loads(data)
+            raise LaunchError("invalid_client_response")
+        try:
+            value = json.loads(data, object_pairs_hook=unique, parse_constant=_reject_constant)
+        except (ValueError, TypeError, RecursionError):
+            raise LaunchError("invalid_client_response") from None
+        if not isinstance(value, dict):
+            raise LaunchError("invalid_client_response")
+        return value
 
 
 def _remaining(channel, deadline):
@@ -112,7 +218,7 @@ def _remaining(channel, deadline):
 
 
 class NativeClient:
-    """Own one private v3 bridge; presence does not attach or admit a runtime."""
+    """Own one private v3 bridge for local selection proof and later admission."""
 
     def __init__(self, bridge, *, expected_thread=None):
         """Track one explicit bridge and optional exact resume selection."""
@@ -148,6 +254,46 @@ class NativeClient:
                          generation=witness["generation"])
         return value
 
+    def binding(self):
+        """Return only the observed binding tuple; this grants no Start eligibility."""
+        if not self.ready:
+            raise LaunchError("native_client_not_ready")
+        with self.lock:
+            try:
+                witness = self.bridge.challenge_readonly()
+            except ValueError:
+                raise LaunchError("native_binding_unavailable") from None
+        if (not _valid_native_witness(witness)
+                or time.monotonic() >= self.bridge.valid_until
+                or (self.expected_thread is not None
+                    and witness.get("threadId") != self.expected_thread)):
+            raise LaunchError("native_binding_unavailable")
+        return _binding(witness)
+
+    def challenge(self, challenge_id, expected_binding):
+        """Return a fresh exact native witness for one cloud operation intent."""
+        if not self.ready:
+            raise LaunchError("native_client_not_ready")
+        if not _valid_challenge_id(challenge_id) or not _valid_binding(expected_binding):
+            raise LaunchError("invalid_client_challenge")
+        with self.lock:
+            observed_at = datetime.fromtimestamp(time.time(), timezone.utc).isoformat(
+                timespec="milliseconds").replace("+00:00", "Z")
+            try:
+                witness = self.bridge.challenge()
+            except ValueError:
+                raise LaunchError("native_binding_unavailable") from None
+        if (not _valid_native_witness(witness)
+                or time.monotonic() >= self.bridge.valid_until
+                or (self.expected_thread is not None
+                    and witness.get("threadId") != self.expected_thread)
+                or _binding(witness) != expected_binding
+                or any(type(witness[key]) is not type(expected_binding[key])
+                       for key in BINDING_FIELDS)):
+            raise LaunchError("native_binding_changed")
+        return {"challengeId": challenge_id, "observedAt": observed_at,
+                "validUntilMonotonic": self.bridge.valid_until, "witness": dict(witness)}
+
 
 def _control(listener, client, stop):
     while not stop.is_set():
@@ -161,16 +307,30 @@ def _control(listener, client, stop):
             deadline = time.monotonic() + 2
             try:
                 data = bytearray()
-                while b"\n" not in data and len(data) < 128:
+                while b"\n" not in data and len(data) < 1024:
                     _remaining(channel, deadline)
-                    chunk = channel.recv(128 - len(data))
+                    chunk = channel.recv(1024 - len(data))
                     if not chunk:
                         break
                     data.extend(chunk)
-                value = (client.status() if bytes(data) == b'{"command":"status"}\n'
-                         else {"reason": "unsupported_command"})
+                request = json.loads(bytes(data), object_pairs_hook=unique)
+                if request == {"command": "status"}:
+                    value = client.status()
+                elif request == {"command": "binding"}:
+                    value = client.binding()
+                elif (isinstance(request, dict)
+                      and set(request) == {"command", "challengeId", "expectedBinding"}
+                      and request["command"] == "challenge"):
+                    value = client.challenge(request["challengeId"], request["expectedBinding"])
+                else:
+                    value = {"reason": "unsupported_command"}
                 _remaining(channel, deadline)
-                channel.sendall(json.dumps(value).encode() + b"\n")
+                channel.sendall(json.dumps(value, separators=(",", ":"), allow_nan=False).encode() + b"\n")
+            except LaunchError as error:
+                try:
+                    channel.sendall(json.dumps({"reason": str(error)}).encode() + b"\n")
+                except OSError:
+                    pass
             except (OSError, ValueError):
                 pass
 
@@ -238,7 +398,7 @@ def _validate_launch(state_dir, cwd, resume):
 
 
 def launch(state_dir, binary, digest, cwd, *, resume=None):
-    """Run a visible native TUI; expose only read-only per-session status."""
+    """Run a visible native TUI; expose only bounded local status and witness control."""
     env, cwd = _validate_launch(state_dir, cwd, resume)
     session_id = str(uuid4())
     path = session_path(state_dir, session_id)

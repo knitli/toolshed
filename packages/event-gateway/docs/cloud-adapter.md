@@ -1,5 +1,8 @@
 # Closed cloud control-plane adapter
 
+For the private config format and explicit attach invocation, see the
+[README quick start](../README.md#explicit-cloud-attachment-lifecycle).
+
 `src/event_gateway/cloud.py` supplies an injected, asynchronous HTTP client for
 the existing Event API. It has no default HTTP transport, credential discovery,
 CLI wiring, listener activation, native submission, or attachment qualification.
@@ -67,27 +70,69 @@ occur in signed node-proof JSON.
   reviewed Mesh binding before signing its bytes. Challenge expiry is at most five
   minutes. The completion reply must match the configured expected generation;
   it never updates local enrollment or authority automatically.
-- `attach(runtime_id)` and `renew(runtime_id)` preserve
-  `native_binding_unqualified`, including if a server unexpectedly returns 200.
+- `native_challenge(intent)` records one exact attach, renew, or transfer intent,
+  including the current native binding and every runtime/attachment CAS pair.
+  The CLI then asks the foreground launcher for a fresh read-only native witness
+  correlated to that challenge and commits it with a newly signed node proof.
+  A `native_binding_unqualified` response is a server admission gate refusal;
+  this client does not treat it as an unconditional local refusal or override it.
+  The production native-admission flag remains disabled until controlled
+  qualification enables the server route.
 
-The module has no retry loop. A timeout has unknown remote outcome; the caller
-must reconcile or retry the same durable identity. It cannot interpret a timeout
-as permission to start another native attempt.
+The explicit `attach`, `renew`, and `transfer` commands require a private
+mode-600 cloud configuration, a separate mode-600 credential file reread for
+each request, and the already enrolled node key. The bounded HTTPS transport
+uses the fixed `/usr/bin/curl` executable, passes headers and request bytes over
+stdin, verifies TLS, refuses redirects, and kills the process when its total
+deadline expires. These commands run in the foreground; they do not install a
+background service or refresh credentials themselves.
+
+Before its first commit send the CLI atomically writes a mode-600, secret-free
+exact-request record under `.native-pending`. A timeout or invalid success
+response reports an unknown result and retains that record. Repeating the same
+operation for the same session and cloud identity retries the exact body within
+the server's 90-second receipt window, without another challenge or native
+sample. Its local cutoff is conservatively anchored to challenge issuance, so it
+can expire before the full receipt horizon. After that cutoff, the command
+preserves the unknown state for operator reconciliation; it will not mint a
+replacement request. On a confirmed
+commit, the CLI rechecks the live native binding and writes the local attachment
+mapping. When the daemon is running, it remains the single SQLite writer for
+that mapping and an atomic transfer fence; otherwise the foreground CLI writes
+the store directly. No command renews leases automatically or enables wake or
+dispatch.
+
+General claim, settlement, and acknowledgment calls have no automatic retry
+loop. A native attachment commit gets at most one bounded retry after an
+ambiguous send, using identical request bytes with fresh credentials and node
+proof. The CLI retains that exact request for receipt recovery through a
+conservative cutoff anchored to challenge issuance; expiry preserves the
+unknown result for operator reconciliation. Neither path interprets a timeout
+as permission to create a new native attempt or attachment request.
 
 ## Separate control-plane source pin
 
 `contracts/event-control-v1/manifest.json` pins the exact Event source files from
-OS commit `737dca25de52ae39e2aa293c878521d02adacf60`, plus the Zod version and
+the OS snapshot candidate `038716741534afe804fb75b9eab15dba6ddbee11`, plus the Zod version and
 fixture SHA-256. It does not modify the earlier frozen `event-v1` transport pin.
 In `--check` mode, the exporter verifies the committed revision, every source
 hash and installed Zod version before evaluating source. A mismatch stops before
-any data-module import. It then executes the source's actual Zod claim and settlement schemas
-and `canonicalNodeProof()` to check the cross-language fixture. Generation
+any data-module import. It then executes the pinned source's claim/settlement
+and native admission Zod schemas and `canonicalNodeProof()` to check the
+cross-language fixtures. Generation
 without `--check` is an explicit operation on reviewed, fully trusted local
 source and an installed trusted Zod dependency; it executes that code and writes
-a new pin for review. Neither mode imports Worker runtime code or makes network
-requests. The source extraction is deliberately specific to the pinned function
-and imports; changing that source requires reviewing the exporter again.
+a new pin for review. The fixture includes the native admission challenge,
+attach/renew/transfer DTOs, error codes, rejection vectors, and node-proof
+canonicalization. Neither mode imports Worker runtime code or makes network
+requests. The source extraction is deliberately specific to the pinned
+functions and imports; changing that source requires reviewing the exporter
+again.
+
+`tests/test_cloud.py` consumes the exported `nativeAdmission` vectors directly.
+It checks attach, renew, and transfer challenge/commit bodies, NodeProof
+canonical bytes and signatures, successful response DTOs, and named rejection
+cases against the Python client.
 
 From `packages/event-gateway`, using Node 24.19.0 and the pinned Zod 4.5.4 module:
 

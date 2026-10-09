@@ -7,7 +7,7 @@ from pathlib import Path
 import signal
 import stat
 
-from .store import Store
+from .store import Store, StoreError
 
 
 BLOCKERS = ["native_client_binding_unavailable", "cloud_authority_not_integrated"]
@@ -20,6 +20,36 @@ def status(store):
         "blockers": BLOCKERS,
         "store": store.status(),
     }
+
+
+def _execute_control_command(store, request_value):
+    if request_value == {"command": "status"}:
+        return status(store)
+    if (
+        isinstance(request_value, dict)
+        and set(request_value) == {"command", "runtimeId"}
+        and request_value["command"] == "detach"
+        and isinstance(request_value["runtimeId"], str)
+    ):
+        store.detach(request_value["runtimeId"])
+        return {"detached": True}
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "mapping"}
+            and request_value["command"] == "put-attachment"):
+        stored = store.put_attachment(request_value["mapping"])
+        return {"stored": True, "runtimeId": stored["runtimeId"]}
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "mapping", "transfer"}
+            and request_value["command"] == "transfer-attachment"):
+        stored = store.put_attachment(request_value["mapping"], transfer=request_value["transfer"])
+        return {"stored": True, "runtimeId": stored["runtimeId"]}
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "mapping", "transfer"}
+            and request_value["command"] == "revoke-transfer-source"):
+        return store.revoke_transfer_source(
+            request_value["mapping"], transfer=request_value["transfer"],
+        )
+    return {"reason": "unsupported_command"}
 
 
 async def serve(state_dir):
@@ -46,18 +76,11 @@ async def serve(state_dir):
                     if len(line) > 4096:
                         raise ValueError("request_too_large")
                     request = json.loads(line)
-                    if request == {"command": "status"}:
-                        result = status(store)
-                    elif (
-                        isinstance(request, dict)
-                        and set(request) == {"command", "runtimeId"}
-                        and request["command"] == "detach"
-                        and isinstance(request["runtimeId"], str)
-                    ):
-                        store.detach(request["runtimeId"])
-                        result = {"detached": True}
-                    else:
-                        result = {"reason": "unsupported_command"}
+                    try:
+                        result = _execute_control_command(store, request)
+                    except StoreError as error:
+                        # Store codes are bounded; exception details may include data.
+                        result = {"reason": error.code}
                     writer.write(json.dumps(result).encode() + b"\n")
                     await writer.drain()
             except (ValueError, TimeoutError):

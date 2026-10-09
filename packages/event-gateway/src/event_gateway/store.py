@@ -242,9 +242,28 @@ class Store:
             if (value := json.loads(row[0]))["leaseExpiresAt"] > self.clock()
         ]
 
-    def put_attachment(self, mapping):
+    def _validate_attachment(self, mapping, transfer):
         if not isinstance(mapping, dict) or any(
             k not in mapping for k in (*IDENTITY, "leaseExpiresAt")
+        ):
+            raise StoreError("invalid_attachment")
+        if transfer is not None and (
+            not isinstance(transfer, dict)
+            or set(transfer) != {
+                "sourceRuntimeId", "expectedRuntimeGeneration", "expectedAttachmentGeneration",
+                "runtimeGeneration", "attachmentGeneration",
+            }
+            or not isinstance(transfer["sourceRuntimeId"], str)
+            or not transfer["sourceRuntimeId"]
+            or transfer["sourceRuntimeId"] == mapping.get("runtimeId")
+            or any(not isinstance(transfer[key], int) or isinstance(transfer[key], bool)
+                   or not 1 <= transfer[key] < 2**53 - 1
+                   for key in ("expectedRuntimeGeneration", "expectedAttachmentGeneration"))
+            or any(not isinstance(transfer[key], int) or isinstance(transfer[key], bool)
+                   or not 2 <= transfer[key] <= 2**53 - 1
+                   for key in ("runtimeGeneration", "attachmentGeneration"))
+            or transfer["runtimeGeneration"] != transfer["expectedRuntimeGeneration"] + 1
+            or transfer["attachmentGeneration"] != transfer["expectedAttachmentGeneration"] + 1
         ):
             raise StoreError("invalid_attachment")
         if any(
@@ -266,47 +285,131 @@ class Store:
             not isinstance(lease, (int, float))
             or isinstance(lease, bool)
             or not math.isfinite(lease)
-            or lease <= self.clock()
+            or lease <= 0
         ):
             raise StoreError("invalid_attachment")
+
+    def put_attachment(self, mapping, *, transfer=None):
+        try:
+            return self._put_attachment(mapping, transfer=transfer)
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
+
+    def _put_attachment(self, mapping, *, transfer=None):
+        self._validate_attachment(mapping, transfer)
+        if mapping["leaseExpiresAt"] <= self.clock():
+            raise StoreError("invalid_attachment")
+        generations = (*IDENTITY[3:], "consumerGeneration")
         row = self.db.execute(
             "SELECT data FROM attachments WHERE runtime=?", (mapping["runtimeId"],)
         ).fetchone()
         old = json.loads(row[0]) if row else None
-        if (
-            sum(
-                live["agent"] == mapping["agent"]
-                and live["runtimeId"] != mapping["runtimeId"]
-                for live in self.list_attachments()
-            )
-            >= 3
-        ):
-            raise StoreError("capacity", "session_capacity")
-        if old:
-            if old["leaseExpiresAt"] <= self.clock() and all(
-                mapping.get(k, 0) == old.get(k, 0) for k in generations
-            ):
-                raise StoreError("stale")
-            if any(mapping.get(k, 0) < old.get(k, 0) for k in generations):
-                raise StoreError("stale")
-            if all(mapping.get(k, 0) == old.get(k, 0) for k in generations) and {
-                k: v for k, v in mapping.items() if k != "leaseExpiresAt"
-            } != {k: v for k, v in old.items() if k != "leaseExpiresAt"}:
-                raise StoreError(
-                    "conflict", "attachment identity changed without generation"
+        target_error = None
+        try:
+            if (
+                sum(
+                    live["agent"] == mapping["agent"]
+                    and live["runtimeId"] != mapping["runtimeId"]
+                    and (transfer is None or live["runtimeId"] != transfer["sourceRuntimeId"])
+                    for live in self.list_attachments()
                 )
-        data = _json(mapping)
-        self._capacity(32768 + len(data.encode()) * 3)
-        with self.db:
-            if old and any(
-                old.get(k) != mapping.get(k) for k in (*IDENTITY, "consumerGeneration")
+                >= 3
             ):
-                self._fence(mapping["runtimeId"])
-            self.db.execute(
-                "INSERT OR REPLACE INTO attachments VALUES (?,?)",
-                (mapping["runtimeId"], data),
-            )
+                raise StoreError("capacity", "session_capacity")
+            if old:
+                if old["leaseExpiresAt"] <= self.clock() and all(
+                    mapping.get(k, 0) == old.get(k, 0) for k in generations
+                ):
+                    raise StoreError("stale")
+                if any(mapping.get(k, 0) < old.get(k, 0) for k in generations):
+                    raise StoreError("stale")
+                if all(mapping.get(k, 0) == old.get(k, 0) for k in generations) and {
+                    k: v for k, v in mapping.items() if k != "leaseExpiresAt"
+                } != {k: v for k, v in old.items() if k != "leaseExpiresAt"}:
+                    raise StoreError(
+                        "conflict", "attachment identity changed without generation"
+                    )
+        except StoreError as exc:
+            if transfer is None:
+                raise
+            # Cloud-confirmed revocation must survive a superseded local target.
+            target_error = exc
+        data = _json(mapping)
+        target_reserve = 32768 + len(data.encode()) * 3
+        self._capacity(target_reserve)
+        with self.db:
+            if transfer is not None:
+                self._revoke_transfer_source(mapping, transfer, target_reserve=target_reserve)
+            if target_error is None:
+                if old and any(
+                    old.get(k) != mapping.get(k) for k in (*IDENTITY, "consumerGeneration")
+                ):
+                    self._fence(mapping["runtimeId"])
+                self.db.execute(
+                    "INSERT OR REPLACE INTO attachments VALUES (?,?)",
+                    (mapping["runtimeId"], data),
+                )
+        if target_error is not None:
+            raise target_error
         return mapping.copy()
+
+    def revoke_transfer_source(self, mapping, *, transfer):
+        if transfer is None:
+            raise StoreError("invalid_attachment")
+        self._validate_attachment(mapping, transfer)
+        try:
+            with self.db:
+                self._revoke_transfer_source(mapping, transfer)
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
+        return {"revoked": True, "runtimeId": transfer["sourceRuntimeId"]}
+
+    def _revoke_transfer_source(self, mapping, transfer, *, target_reserve=0):
+        source_id = transfer["sourceRuntimeId"]
+        source_row = self.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (source_id,)
+        ).fetchone()
+        source = json.loads(source_row[0]) if source_row else {
+            "runtimeId": source_id,
+            "principal": mapping["principal"],
+            "agent": mapping["agent"],
+            "nodeGeneration": mapping["nodeGeneration"],
+            "runtimeGeneration": transfer["runtimeGeneration"],
+            "attachmentGeneration": transfer["attachmentGeneration"],
+            "leaseExpiresAt": 0,
+        }
+        if source.get("runtimeId") != source_id:
+            raise StoreError("corrupt_state")
+        if source_row:
+            if (source.get("principal") != mapping["principal"]
+                    or source.get("agent") != mapping["agent"]):
+                raise StoreError("transfer_identity_mismatch")
+            if (source.get("runtimeGeneration") == transfer["runtimeGeneration"]
+                    and source.get("attachmentGeneration") == transfer["attachmentGeneration"]
+                    and source.get("leaseExpiresAt") == 0):
+                # A durable receipt replay must not fence newer work.
+                return
+            if (source.get("runtimeGeneration") != transfer["expectedRuntimeGeneration"]
+                    or source.get("attachmentGeneration") != transfer["expectedAttachmentGeneration"]):
+                raise StoreError("stale_transfer")
+        source.update(
+            runtimeGeneration=transfer["runtimeGeneration"],
+            attachmentGeneration=transfer["attachmentGeneration"],
+            leaseExpiresAt=0,
+        )
+        source_data = _json(source)
+        # Like detach, revoking an existing source is allowed at admission capacity.
+        if target_reserve or not source_row:
+            self._capacity(target_reserve + 32768 + len(source_data.encode()) * 3)
+        self._fence(source_id)
+        if source_row:
+            self.db.execute(
+                "UPDATE attachments SET data=? WHERE runtime=?", (source_data, source_id)
+            )
+        else:
+            self.db.execute(
+                "INSERT INTO attachments VALUES (?,?)", (source_id, source_data)
+            )
 
     def _fence(self, runtime_id):
         self.db.execute(

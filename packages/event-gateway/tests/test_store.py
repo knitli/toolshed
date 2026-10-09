@@ -1,6 +1,7 @@
 import copy
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 import uuid
@@ -43,6 +44,19 @@ class StoreTests(unittest.TestCase):
         event = dict(self.event, eventId=str(uuid.uuid4()), attemptId=str(uuid.uuid4()))
         event["deliveryId"] = derive_delivery_id(event)
         return event
+
+    def transfer_mapping_and_cas(self):
+        target = dict(self.mapping, runtimeId=str(uuid.uuid4()),
+                      attachmentGeneration=self.mapping["attachmentGeneration"] + 1,
+                      leaseExpiresAt=NOW + 3600)
+        transfer = {
+            "sourceRuntimeId": self.mapping["runtimeId"],
+            "expectedRuntimeGeneration": self.mapping["runtimeGeneration"],
+            "expectedAttachmentGeneration": self.mapping["attachmentGeneration"],
+            "runtimeGeneration": self.mapping["runtimeGeneration"] + 1,
+            "attachmentGeneration": self.mapping["attachmentGeneration"] + 1,
+        }
+        return target, transfer
 
     def admission(self, envelope=None):
         from event_gateway.cloud import _iso
@@ -144,7 +158,6 @@ class StoreTests(unittest.TestCase):
         self.assertFalse(self.store.begin_native(ident, self.event["attemptId"], self.request(admission)))
 
     def test_admission_storage_failure_keeps_durable_claim_for_exact_recovery(self):
-        import sqlite3
         ident = self.store.accept(self.event)["deliveryId"]
         self.store.begin_claim(ident)
         before = self.store.current_attempt(ident)
@@ -498,7 +511,6 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.list_pending(), [])
 
     def test_settlement_rejects_echo_tampering_and_rolls_back_storage_failure(self):
-        import sqlite3
         ident, admission = self.admitted()
         attempt = self.event["attemptId"]
         evidence = {"type": "local_not_submitted"}
@@ -730,6 +742,299 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(len(self.store.list_attachments()), 5)
         with self.assertRaisesRegex(StoreError, "session_capacity"):
             self.store.put_attachment(dict(self.mapping, runtimeId=str(uuid.uuid4())))
+
+    def test_transfer_advances_source_cas_and_fences_old_work_atomically(self):
+        queued = self.store.accept(self.event)["deliveryId"]
+        submitted_event = self.new_event()
+        submitted = self.store.accept(submitted_event)["deliveryId"]
+        self.assertTrue(self.store.begin_claim(submitted))
+        admission = self.admission(submitted_event)
+        self.store.record_admission(submitted, admission)
+        self.assertTrue(self.store.begin_native(
+            submitted, submitted_event["attemptId"], self.request(admission),
+        ))
+        self.store.finish(submitted, "submitted", submission_id="native-submission", turn_id="native-turn")
+        target, transfer = self.transfer_mapping_and_cas()
+
+        self.store.put_attachment(target, transfer=transfer)
+
+        raw_source = self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone()[0]
+        source = json.loads(raw_source)
+        self.assertEqual(source["runtimeGeneration"], transfer["runtimeGeneration"])
+        self.assertEqual(source["attachmentGeneration"], transfer["attachmentGeneration"])
+        self.assertEqual(source["leaseExpiresAt"], 0)
+        self.assertEqual(source["principal"], target["principal"])
+        self.assertEqual(source["agent"], target["agent"])
+        self.assertIsNone(self.store.get_attachment(self.mapping["runtimeId"]))
+        self.assertEqual(self.store.get_attachment(target["runtimeId"]), target)
+        self.assertEqual(self.store.get(queued)["status"], "stale")
+        self.assertEqual(self.store.get(submitted)["status"], "ambiguous")
+        first_attempt = self.store.current_attempt(submitted)
+        self.assertTrue(first_attempt["fenced"])
+
+        # A replay after durable persistence but before pending-record cleanup is
+        # an exact no-op; a later source state remains fenced by generation CAS.
+        self.assertEqual(self.store.put_attachment(target, transfer=transfer), target)
+        self.assertEqual(self.store.current_attempt(submitted), first_attempt)
+
+    def test_stale_transfer_cas_cannot_overwrite_reattached_source(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        reattached = dict(self.mapping,
+                          runtimeGeneration=transfer["runtimeGeneration"],
+                          attachmentGeneration=transfer["attachmentGeneration"],
+                          leaseExpiresAt=NOW + 7200)
+        self.store.put_attachment(reattached)
+        before = self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone()[0]
+
+        with self.assertRaisesRegex(StoreError, "^stale_transfer$"):
+            self.store.put_attachment(target, transfer=transfer)
+
+        after = self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone()[0]
+        self.assertEqual(after, before)
+        self.assertEqual(self.store.get_attachment(self.mapping["runtimeId"]), reattached)
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+
+    def test_transfer_with_newer_target_commits_source_fence_before_error(self):
+        queued = self.store.accept(self.event)["deliveryId"]
+        target, transfer = self.transfer_mapping_and_cas()
+        newer_target = dict(target, attachmentGeneration=target["attachmentGeneration"] + 1)
+        self.store.put_attachment(newer_target)
+        with self.assertRaisesRegex(StoreError, "^stale$"):
+            self.store.put_attachment(target, transfer=transfer)
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertIsNone(self.store.get_attachment(self.mapping["runtimeId"]))
+        self.assertEqual(self.store.get(queued)["status"], "stale")
+        self.assertEqual(self.store.get_attachment(target["runtimeId"]), newer_target)
+
+    def test_transfer_with_newer_source_and_target_preserves_new_source_work(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        newer_source = dict(self.mapping, runtimeGeneration=transfer["runtimeGeneration"],
+                            attachmentGeneration=transfer["attachmentGeneration"])
+        newer_target = dict(target, attachmentGeneration=target["attachmentGeneration"] + 1)
+        self.store.put_attachment(newer_source)
+        self.store.put_attachment(newer_target)
+        event = dict(self.event, runtimeGeneration=newer_source["runtimeGeneration"],
+                     attachmentGeneration=newer_source["attachmentGeneration"])
+        event["deliveryId"] = derive_delivery_id(event)
+        queued = self.store.accept(event)["deliveryId"]
+        with self.assertRaisesRegex(StoreError, "^stale_transfer$"):
+            self.store.put_attachment(target, transfer=transfer)
+        self.assertEqual(self.store.get_attachment(self.mapping["runtimeId"]), newer_source)
+        self.assertEqual(self.store.get_attachment(target["runtimeId"]), newer_target)
+        self.assertEqual(self.store.get(queued)["status"], "queued")
+
+    def test_source_only_revocation_replays_then_recovers_target(self):
+        queued = self.store.accept(self.event)["deliveryId"]
+        admitted_event = self.new_event()
+        admitted = self.store.accept(admitted_event)["deliveryId"]
+        self.store.begin_claim(admitted)
+        self.store.record_admission(admitted, self.admission(admitted_event))
+        target, transfer = self.transfer_mapping_and_cas()
+        expected = {"revoked": True, "runtimeId": self.mapping["runtimeId"]}
+        self.assertEqual(self.store.revoke_transfer_source(target, transfer=transfer), expected)
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+        self.assertIsNone(self.store.get_attachment(self.mapping["runtimeId"]))
+        self.assertEqual(self.store.get(queued)["status"], "stale")
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        before = self.store.current_attempt(admitted)
+        self.assertTrue(before["fenced"])
+        self.now += 1
+        self.assertEqual(self.store.revoke_transfer_source(target, transfer=transfer), expected)
+        self.assertEqual(self.store.current_attempt(admitted), before)
+        self.assertEqual(self.store.put_attachment(target, transfer=transfer), target)
+        self.assertEqual(self.store.current_attempt(admitted), before)
+        self.assertEqual(self.store.get_attachment(target["runtimeId"]), target)
+
+    def test_source_only_revocation_accepts_expired_target_receipt(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        self.now = target["leaseExpiresAt"] + 1
+        self.store.revoke_transfer_source(target, transfer=transfer)
+        self.assertIsNone(self.store.get_attachment(self.mapping["runtimeId"]))
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+        with self.assertRaisesRegex(StoreError, "^invalid_attachment$"):
+            self.store.put_attachment(target, transfer=transfer)
+
+    def test_source_only_revocation_preserves_newer_source(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        newer_source = dict(self.mapping, runtimeGeneration=transfer["runtimeGeneration"],
+                            attachmentGeneration=transfer["attachmentGeneration"])
+        self.store.put_attachment(newer_source)
+        with self.assertRaisesRegex(StoreError, "^stale_transfer$"):
+            self.store.revoke_transfer_source(target, transfer=transfer)
+        self.assertEqual(self.store.get_attachment(self.mapping["runtimeId"]), newer_source)
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+
+    def test_transfer_sql_failure_rolls_back_source_fence_and_target_write(self):
+        queued = self.store.accept(self.event)["deliveryId"]
+        submitted_event = self.new_event()
+        submitted = self.store.accept(submitted_event)["deliveryId"]
+        self.assertTrue(self.store.begin_claim(submitted))
+        admission = self.admission(submitted_event)
+        self.store.record_admission(submitted, admission)
+        self.assertTrue(self.store.begin_native(
+            submitted, submitted_event["attemptId"], self.request(admission),
+        ))
+        self.store.finish(submitted, "submitted", submission_id="native-submission", turn_id="native-turn")
+        target, transfer = self.transfer_mapping_and_cas()
+        before = self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone()[0]
+        self.store.db.execute(
+            """CREATE TRIGGER fail_transfer_target BEFORE INSERT ON attachments
+               BEGIN SELECT RAISE(ABORT, 'injected transfer failure'); END"""
+        )
+        self.store.db.commit()
+
+        with self.assertRaisesRegex(StoreError, "^storage_unavailable$"):
+            self.store.put_attachment(target, transfer=transfer)
+
+        after = self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone()[0]
+        self.assertEqual(after, before)
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+        self.assertEqual(self.store.get(queued)["status"], "queued")
+        self.assertEqual(self.store.get(submitted)["status"], "submitted")
+        self.assertFalse(self.store.current_attempt(submitted)["fenced"])
+
+    def test_absent_source_transfer_reserves_both_rows_before_writing(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        self.store.db.execute("DELETE FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],))
+        self.store.db.commit()
+        target_bytes = len(json.dumps(target, sort_keys=True, separators=(",", ":")).encode())
+        self.store.max_bytes = self.store._size() + 32768 + target_bytes * 3 + 1
+        with self.assertRaisesRegex(StoreError, "^storage_capacity$"):
+            self.store.put_attachment(target, transfer=transfer)
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+        self.assertIsNone(self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone())
+
+    def test_source_only_revocation_of_existing_row_is_allowed_at_admission_capacity(self):
+        queued = self.store.accept(self.event)["deliveryId"]
+        target, transfer = self.transfer_mapping_and_cas()
+        self.store.max_bytes = self.store._size()
+        with self.assertRaisesRegex(StoreError, "^storage_capacity$"):
+            self.store.put_attachment(target, transfer=transfer)
+        expected = {"revoked": True, "runtimeId": self.mapping["runtimeId"]}
+        self.assertEqual(self.store.revoke_transfer_source(target, transfer=transfer), expected)
+        self.assertIsNone(self.store.get_attachment(self.mapping["runtimeId"]))
+        source = json.loads(self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone()[0])
+        self.assertEqual(source["runtimeGeneration"], transfer["runtimeGeneration"])
+        self.assertEqual(source["attachmentGeneration"], transfer["attachmentGeneration"])
+        self.assertEqual(source["leaseExpiresAt"], 0)
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+        self.assertEqual(self.store.get(queued)["status"], "stale")
+        self.assertEqual(self.store.revoke_transfer_source(target, transfer=transfer), expected)
+
+    def test_source_only_absent_tombstone_still_requires_admission_capacity(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        self.store.db.execute("DELETE FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],))
+        self.store.db.commit()
+        self.store.max_bytes = self.store._size()
+        with self.assertRaisesRegex(StoreError, "^storage_capacity$"):
+            self.store.revoke_transfer_source(target, transfer=transfer)
+        self.assertIsNone(self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone())
+
+    def test_source_only_sql_failure_is_bounded_and_rolls_back_fence(self):
+        queued = self.store.accept(self.event)["deliveryId"]
+        target, transfer = self.transfer_mapping_and_cas()
+        self.store.db.execute(
+            "CREATE TRIGGER fail_source BEFORE UPDATE ON attachments "
+            "BEGIN SELECT RAISE(ABORT, 'private source detail'); END"
+        )
+        self.store.db.commit()
+        with self.assertRaisesRegex(StoreError, "^storage_unavailable$"):
+            self.store.revoke_transfer_source(target, transfer=transfer)
+        self.assertEqual(self.store.get_attachment(self.mapping["runtimeId"]), self.mapping)
+        self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+        self.assertEqual(self.store.get(queued)["status"], "queued")
+
+    def test_attachment_operational_errors_are_bounded_and_leave_rows_unchanged(self):
+        queued = self.store.accept(self.event)["deliveryId"]
+        target, transfer = self.transfer_mapping_and_cas()
+        self.store.db.execute("PRAGMA query_only=ON")
+        for operation in (self.store.put_attachment, self.store.revoke_transfer_source):
+            with self.subTest(operation=operation.__name__):
+                with self.assertRaisesRegex(StoreError, "^storage_unavailable$"):
+                    operation(target, transfer=transfer)
+                self.assertEqual(self.store.get_attachment(self.mapping["runtimeId"]), self.mapping)
+                self.assertIsNone(self.store.get_attachment(target["runtimeId"]))
+                self.assertEqual(self.store.get(queued)["status"], "queued")
+
+    def test_absent_source_transfer_writes_complete_inactive_tombstone(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        self.store.db.execute("DELETE FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],))
+        self.store.db.commit()
+
+        self.store.put_attachment(target, transfer=transfer)
+        source = json.loads(self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone()[0])
+        self.assertEqual(set(IDENTITY) - {"runtimeId"}, set(source) - {"runtimeId", "leaseExpiresAt"})
+        self.assertEqual(source["runtimeId"], self.mapping["runtimeId"])
+        self.assertEqual(source["principal"], target["principal"])
+        self.assertEqual(source["agent"], target["agent"])
+        self.assertEqual(source["runtimeGeneration"], transfer["runtimeGeneration"])
+        self.assertEqual(source["attachmentGeneration"], transfer["attachmentGeneration"])
+        self.assertEqual(source["leaseExpiresAt"], 0)
+        self.assertNotIn("nativeBinding", source)
+        self.assertEqual(self.store.put_attachment(target, transfer=transfer), target)
+
+    def test_transfer_rejects_source_principal_or_agent_mismatch_before_fencing(self):
+        submitted_event = self.new_event()
+        submitted = self.store.accept(submitted_event)["deliveryId"]
+        self.assertTrue(self.store.begin_claim(submitted))
+        admission = self.admission(submitted_event)
+        self.store.record_admission(submitted, admission)
+        self.assertTrue(self.store.begin_native(
+            submitted, submitted_event["attemptId"], self.request(admission),
+        ))
+        target, transfer = self.transfer_mapping_and_cas()
+        row = self.store.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (self.mapping["runtimeId"],)
+        ).fetchone()
+        original = row[0]
+
+        for key, different in (("principal", "other@example.com"), ("agent", "other-agent")):
+            with self.subTest(key=key):
+                changed = dict(self.mapping, **{key: different})
+                self.store.db.execute("UPDATE attachments SET data=? WHERE runtime=?",
+                                      (json.dumps(changed), self.mapping["runtimeId"]))
+                self.store.db.commit()
+                with self.assertRaisesRegex(StoreError, "^transfer_identity_mismatch$"):
+                    self.store.put_attachment(target, transfer=transfer)
+                self.assertEqual(self.store.get(submitted)["status"], "submitting")
+                self.assertFalse(self.store.current_attempt(submitted)["fenced"])
+        # Restore identity so test cleanup and later reads see the original row.
+        self.store.db.execute("UPDATE attachments SET data=? WHERE runtime=?",
+                              (original, self.mapping["runtimeId"]))
+        self.store.db.commit()
+
+    def test_transfer_replay_rejects_a_newer_target_mapping(self):
+        target, transfer = self.transfer_mapping_and_cas()
+        self.store.put_attachment(target, transfer=transfer)
+        newer_target = dict(target,
+                            runtimeGeneration=target["runtimeGeneration"] + 1,
+                            attachmentGeneration=target["attachmentGeneration"] + 1,
+                            leaseExpiresAt=NOW + 7200)
+        self.store.put_attachment(newer_target)
+
+        with self.assertRaisesRegex(StoreError, "^stale$"):
+            self.store.put_attachment(target, transfer=transfer)
+        self.assertEqual(self.store.get_attachment(target["runtimeId"]), newer_target)
 
     def test_capacity_and_pilot_limit(self):
         self.store.max_rows = 1

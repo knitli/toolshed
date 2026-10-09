@@ -7,8 +7,10 @@ from datetime import datetime, timezone
 import hashlib
 import ipaddress
 import json
+import math
 import re
 import time
+from functools import partial
 from urllib.parse import urlsplit
 import uuid
 
@@ -23,9 +25,10 @@ from .protocol import (
 class CloudError(ValueError):
     """Only fixed local/server codes escape the credential boundary."""
 
-    def __init__(self, code):
+    def __init__(self, code, *, ambiguous=False):
         """Store the error code."""
         self.code = code
+        self.ambiguous = ambiguous
         super().__init__(code)
 
 
@@ -35,8 +38,35 @@ class Credentials:
     agent_token: str = field(repr=False)
 
 
+def _valid_credentials(credential):
+    return isinstance(credential, Credentials) and all(
+        isinstance(token, str) and token and len(token) <= 16384 and not re.search(r"\s", token)
+        for token in (credential.access_token, credential.agent_token)
+    ) and len(credential.agent_token) <= 4096
+
+
 def _json(value):
-    return json.dumps(value, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+    rendered = json.dumps(value, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    # Match well-formed JSON.stringify for lone UTF-16 surrogates without
+    # escaping ordinary non-ASCII text or attempting an invalid UTF-8 encode.
+    rendered = "".join(
+        f"\\u{ord(char):04x}" if 0xD800 <= ord(char) <= 0xDFFF else char
+        for char in rendered
+    )
+    return rendered.encode("utf-8")
+
+
+def _same_json_value(actual, expected):
+    """Compare parsed JSON semantically while keeping booleans distinct from integers."""
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return (actual.keys() == expected.keys()
+                and all(_same_json_value(actual[key], expected[key]) for key in expected))
+    if isinstance(expected, list):
+        return (len(actual) == len(expected)
+                and all(_same_json_value(left, right) for left, right in zip(actual, expected)))
+    return actual == expected
 
 
 def _closed(value, keys, *, code="invalid_response"):
@@ -80,6 +110,248 @@ def _uuid(value):
 def _generation(value):
     # bool is an int subtype but cannot identify a generation.
     return type(value) is int and 0 < value <= 9007199254740991  # pylint: disable=unidiomatic-typecheck
+
+
+def _safe_uint(value):
+    return type(value) is int and 0 <= value <= _SAFE_INTEGER  # pylint: disable=unidiomatic-typecheck
+
+
+_SAFE_INTEGER = 9007199254740991
+_NATIVE_BINDING_FIELDS = frozenset((
+    "clientId", "connectionId", "backendPid", "threadId", "generation",
+    "serverInstanceId", "serverGeneration",
+))
+_NATIVE_WITNESS_FIELDS = frozenset((
+    "version", "nonce", "clientId", "backendPid", "connectionId", "threadId",
+    "generation", "eligible", "sequence", "cause", "serverInstanceId",
+    "serverGeneration", "leaseMs",
+))
+
+
+def _native_binding(value, *, code="invalid_request"):
+    _closed(value, _NATIVE_BINDING_FIELDS, code=code)
+    if (any(not _uuid(value[key]) for key in (
+            "clientId", "connectionId", "threadId", "serverInstanceId"))
+            or type(value["backendPid"]) is not int  # pylint: disable=unidiomatic-typecheck
+            or not 1 <= value["backendPid"] <= 2**32 - 1
+            or any(not _safe_uint(value[key]) for key in ("generation", "serverGeneration"))):
+        raise CloudError(code)
+    return value
+
+
+def _native_witness(value, *, code="invalid_request"):
+    _closed(value, _NATIVE_WITNESS_FIELDS, code=code)
+    if (type(value["version"]) is not int or value["version"] != 2  # pylint: disable=unidiomatic-typecheck
+            or type(value["nonce"]) is not int or not 0 <= value["nonce"] <= _SAFE_INTEGER  # pylint: disable=unidiomatic-typecheck
+            or value["eligible"] is not True
+            or type(value["sequence"]) is not int or not 1 <= value["sequence"] <= _SAFE_INTEGER  # pylint: disable=unidiomatic-typecheck
+            or not isinstance(value["cause"], str)
+            or len(value["cause"].encode("utf-16-le", "surrogatepass")) // 2 > 128
+            or type(value["leaseMs"]) is not int or not 1 <= value["leaseMs"] <= _SAFE_INTEGER):  # pylint: disable=unidiomatic-typecheck
+        raise CloudError(code)
+    binding = {key: value[key] for key in _NATIVE_BINDING_FIELDS}
+    _native_binding(binding, code=code)
+    return value
+
+
+def _native_challenge_request(value):
+    if not isinstance(value, dict) or value.get("operation") not in ("attach", "renew", "transfer"):
+        raise CloudError("invalid_request")
+    operation = value["operation"]
+    _native_binding(value.get("expectedNativeBinding"))
+    if operation == "attach":
+        _closed(value, ("operation", "runtimeId", "expectedRuntimeGeneration",
+                        "expectedAttachmentGeneration", "expectedNativeBinding"), code="invalid_request")
+        if (not _uuid(value["runtimeId"])
+                or (value["expectedRuntimeGeneration"] is None) != (value["expectedAttachmentGeneration"] is None)
+                or (value["expectedRuntimeGeneration"] is not None
+                    and (not _generation(value["expectedRuntimeGeneration"])
+                         or not _generation(value["expectedAttachmentGeneration"])
+                         or value["expectedRuntimeGeneration"] >= _SAFE_INTEGER
+                         or value["expectedAttachmentGeneration"] >= _SAFE_INTEGER))):
+            raise CloudError("invalid_request")
+    elif operation == "renew":
+        _closed(value, ("operation", "runtimeId", "expectedRuntimeGeneration",
+                        "expectedAttachmentGeneration", "expectedNativeBinding"), code="invalid_request")
+        if (not _uuid(value["runtimeId"])
+                or not _generation(value["expectedRuntimeGeneration"])
+                or not _generation(value["expectedAttachmentGeneration"])):
+            raise CloudError("invalid_request")
+    else:
+        _closed(value, ("operation", "sourceRuntimeId", "expectedSourceRuntimeGeneration",
+                        "expectedSourceAttachmentGeneration", "replacementRuntimeId",
+                        "expectedReplacementRuntimeGeneration", "expectedReplacementAttachmentGeneration",
+                        "expectedNativeBinding"), code="invalid_request")
+        if (not _uuid(value["sourceRuntimeId"]) or not _uuid(value["replacementRuntimeId"])
+                or value["sourceRuntimeId"] == value["replacementRuntimeId"]
+                or any(not _generation(value[key]) for key in (
+                    "expectedSourceRuntimeGeneration", "expectedSourceAttachmentGeneration",
+                    "expectedReplacementRuntimeGeneration", "expectedReplacementAttachmentGeneration"))
+                or value["expectedSourceRuntimeGeneration"] >= _SAFE_INTEGER
+                or value["expectedSourceAttachmentGeneration"] >= _SAFE_INTEGER
+                or value["expectedReplacementAttachmentGeneration"] >= _SAFE_INTEGER):
+            raise CloudError("invalid_request")
+    return json.loads(_json(value))
+
+
+def _native_challenge_response(value, *, code="invalid_response"):
+    _closed(value, ("challengeId", "issuedAt", "expiresAt"), code=code)
+    try:
+        issued, expires = _timestamp(value["issuedAt"]), _timestamp(value["expiresAt"])
+    except (ProtocolError, TypeError):
+        raise CloudError(code) from None
+    if not _uuid(value["challengeId"]) or expires - issued != 30_000:
+        raise CloudError(code)
+    return value
+
+
+def _native_evidence(value, expected_binding):
+    _closed(value, ("observedAt", "witness"))
+    try:
+        _timestamp(value["observedAt"])
+    except (ProtocolError, TypeError):
+        raise CloudError("invalid_request") from None
+    witness = _native_witness(value["witness"])
+    binding = {key: witness[key] for key in _NATIVE_BINDING_FIELDS}
+    if binding != expected_binding:
+        raise CloudError("native_binding_changed")
+    return {"observedAt": value["observedAt"], "witness": json.loads(_json(witness))}
+
+
+def _native_local_evidence(value, expected_binding):
+    _closed(value, ("observedAt", "validUntilMonotonic", "witness"))
+    deadline = value["validUntilMonotonic"]
+    if (type(deadline) not in (int, float) or not math.isfinite(deadline)  # pylint: disable=unidiomatic-typecheck
+            or time.monotonic() >= deadline):
+        raise CloudError("native_evidence_expired")
+    evidence = _native_evidence(
+        {"observedAt": value["observedAt"], "witness": value["witness"]}, expected_binding,
+    )
+    remaining = deadline - time.monotonic()
+    if not 0 < remaining <= min(value["witness"]["leaseMs"], 750) / 1000:
+        raise CloudError("native_evidence_expired")
+    return evidence, deadline
+
+
+def _native_commit_body(operation, request, challenge, evidence):
+    fields = {
+        "attach": ("runtimeId", "expectedRuntimeGeneration", "expectedAttachmentGeneration"),
+        "renew": ("runtimeId", "expectedRuntimeGeneration", "expectedAttachmentGeneration"),
+        "transfer": ("sourceRuntimeId", "expectedSourceRuntimeGeneration",
+                     "expectedSourceAttachmentGeneration", "replacementRuntimeId",
+                     "expectedReplacementRuntimeGeneration", "expectedReplacementAttachmentGeneration"),
+    }[operation]
+    return {"challengeId": challenge["challengeId"],
+            **{key: request[key] for key in fields}, "nativeEvidence": evidence}
+
+
+def _prepared_native_commit_body(prepared_body, expected_body):
+    if prepared_body is None:
+        return _json(expected_body)
+    if not isinstance(prepared_body, bytes) or not 1 <= len(prepared_body) <= 4096:
+        raise CloudError("invalid_pending_commit")
+
+    def reject_constant(_):
+        raise ValueError("invalid_json")
+
+    try:
+        parsed_body = json.loads(prepared_body.decode("utf-8"), object_pairs_hook=_pairs,
+                                 parse_constant=reject_constant)
+        _depth(parsed_body)
+    except (UnicodeError, ValueError, RecursionError, ProtocolError):
+        raise CloudError("invalid_pending_commit") from None
+    if not _same_json_value(parsed_body, expected_body):
+        raise CloudError("invalid_pending_commit")
+    return prepared_body
+
+
+def _native_commit_timing(challenge, evidence):
+    observed_at = _timestamp(evidence["observedAt"])
+    challenge_issued = _timestamp(challenge["issuedAt"])
+    challenge_expires = _timestamp(challenge["expiresAt"])
+    witness_lease = min(evidence["witness"]["leaseMs"], 750)
+    return observed_at, challenge_issued, challenge_expires, witness_lease
+
+
+def _native_commit_send_fence(on_first_send, body_bytes, *, recovery, deadline,
+                              observed_at, challenge_issued, challenge_expires, witness_lease):
+    def before_send(proof, *, attempt):
+        if attempt == 0 and on_first_send is not None:
+            if not callable(on_first_send):
+                raise CloudError("invalid_configuration")
+            on_first_send(body_bytes)
+        # An exact receipt replay skips the original native evidence deadline.
+        if recovery or attempt > 0:
+            return
+        if time.monotonic() >= deadline:
+            raise CloudError("native_evidence_expired")
+        try:
+            proof_issued = _timestamp(proof["issuedAt"])
+        except (ProtocolError, TypeError):
+            raise CloudError("invalid_configuration") from None
+        if (not challenge_issued <= observed_at <= proof_issued < challenge_expires
+                or proof_issued - observed_at > witness_lease):
+            raise CloudError("native_evidence_expired")
+
+    return before_send
+
+
+def _native_attached_response(value, status, request, client):
+    _closed(value, ("status", "runtimeId", "runtimeGeneration", "nodeId", "nodeGeneration",
+                    "attachmentGeneration", "leaseUntil", "nativeBinding"), code="invalid_response")
+    try:
+        _timestamp(value["leaseUntil"])
+    except (ProtocolError, TypeError):
+        raise CloudError("invalid_response") from None
+    if (value["status"] != status or value["runtimeId"] != request["runtimeId"]
+            or not _generation(value["runtimeGeneration"])
+            or value["nodeId"] != client.node_id
+            or not _generation(value["nodeGeneration"])
+            or value["nodeGeneration"] != client.node_generation
+            or not _generation(value["attachmentGeneration"])):
+        raise CloudError("invalid_response")
+    binding = _native_binding(value["nativeBinding"], code="invalid_response")
+    if binding != request["expectedNativeBinding"]:
+        raise CloudError("identity_mismatch")
+    if status == "renewed":
+        expected_runtime, expected_attachment = (
+            request["expectedRuntimeGeneration"], request["expectedAttachmentGeneration"],
+        )
+    else:
+        expected_runtime = (request["expectedRuntimeGeneration"] or 0) + 1
+        expected_attachment = (request["expectedAttachmentGeneration"] or 0) + 1
+    if (value["runtimeGeneration"] != expected_runtime
+            or value["attachmentGeneration"] != expected_attachment):
+        raise CloudError("invalid_response")
+    return json.loads(_json(value))
+
+
+def _native_transfer_response(value, request, client):
+    _closed(value, ("status", "sourceRuntimeId", "sourceRuntimeGeneration",
+                    "sourceAttachmentGeneration", "runtimeId", "runtimeGeneration", "nodeId",
+                    "nodeGeneration", "attachmentGeneration", "leaseUntil", "nativeBinding"),
+            code="invalid_response")
+    try:
+        _timestamp(value["leaseUntil"])
+    except (ProtocolError, TypeError):
+        raise CloudError("invalid_response") from None
+    if (value["status"] != "transferred"
+            or value["sourceRuntimeId"] != request["sourceRuntimeId"]
+            or value["runtimeId"] != request["replacementRuntimeId"]
+            or value["sourceRuntimeGeneration"] != request["expectedSourceRuntimeGeneration"] + 1
+            or value["sourceAttachmentGeneration"] != request["expectedSourceAttachmentGeneration"] + 1
+            or value["runtimeGeneration"] != request["expectedReplacementRuntimeGeneration"]
+            or value["attachmentGeneration"] != request["expectedReplacementAttachmentGeneration"] + 1
+            or value["nodeId"] != client.node_id or value["nodeGeneration"] != client.node_generation
+            or any(not _generation(value[key]) for key in (
+                "nodeGeneration",
+                "sourceRuntimeGeneration", "sourceAttachmentGeneration", "runtimeGeneration",
+                "attachmentGeneration"))):
+        raise CloudError("invalid_response")
+    binding = _native_binding(value["nativeBinding"], code="invalid_response")
+    if binding != request["expectedNativeBinding"]:
+        raise CloudError("identity_mismatch")
+    return json.loads(_json(value))
 
 
 _PRINCIPAL_SCHEMA = _SCHEMA["anyOf"][0]["anyOf"][0]["properties"]["principal"]
@@ -141,15 +413,6 @@ def _no_start_evidence(evidence, *, code):
         raise CloudError(code)
 
 
-async def _call(port, **kwargs):
-    try:
-        return await port(**kwargs)
-    except TimeoutError:
-        raise
-    except Exception:
-        raise CloudError("unavailable") from None
-
-
 def canonical_node_proof(principal, audience, path, body, proof):
     return _json(["event-node-proof-v1", principal, audience, "POST", path,
                   hashlib.sha256(body).hexdigest(), proof["nodeId"],
@@ -158,7 +421,8 @@ def canonical_node_proof(principal, audience, path, body, proof):
 
 # HTTP failures expose only codes actually emitted by Event's public routes.
 _ERRORS = {
-    400: {"invalid", "invalid_request", "invalid_json", "duplicate_json_key", "content_type", "content_encoding"},
+    400: {"invalid", "invalid_request", "invalid_json", "invalid_body", "duplicate_json_key",
+          "content_type", "content_encoding"},
     403: {"denied", "node_proof_required", "node_denied", "acknowledgment_denied"},
     404: {"not_found"}, 405: {"method_not_allowed"},
     408: {"request_timeout"},
@@ -166,6 +430,9 @@ _ERRORS = {
     413: {"request_too_large"}, 415: {"content_type", "content_encoding"},
     503: {"runtime_disabled", "unavailable", "authority_unavailable", "invalid_dispatch_response", "registry_unavailable"},
 }
+_NATIVE_COMMIT_PATHS = frozenset((
+    "/v1/runtimes/attach", "/v1/runtimes/renew", "/v1/runtimes/transfer",
+))
 
 
 class CloudClient:
@@ -200,40 +467,74 @@ class CloudClient:
     def _sign(self, body):
         return base64.urlsafe_b64encode(self._key.sign(body)).rstrip(b"=").decode()
 
-    async def _post(self, path, value, *, node_proof=True):
+    async def _post_headers(self, path, body, *, node_proof, before_send):
         try:
-            async with asyncio.timeout(5):
-                body = _json(value)
-                if len(body) > 4096:
-                    raise CloudError("invalid_request")
-                credential = await _call(self._credentials)
-                if not isinstance(credential, Credentials) or any(
-                    not isinstance(token, str) or not token or len(token) > 16384
-                    or re.search(r"\s", token)
-                    for token in (credential.access_token, credential.agent_token)
-                ) or len(credential.agent_token) > 4096:
-                    raise CloudError("credentials_unavailable")
-                headers = {"content-type": "application/json", "cf-access-token": credential.access_token,
-                           "authorization": "Bearer " + credential.agent_token}
-                if node_proof:
-                    proof = {"nodeId": self.node_id, "nodeGeneration": self.node_generation,
-                             "issuedAt": _iso(self._clock()), "nonce": str(self._nonce())}
-                    if not _uuid(proof["nonce"]):
-                        raise CloudError("invalid_configuration")
-                    proof["signature"] = self._sign(canonical_node_proof(self.principal, self.origin, path, body, proof))
-                    headers["x-event-node-proof"] = _json(proof).decode()
-                status, response_headers, raw = await _call(
-                    self._send, method="POST", url=self.origin + path, headers=headers, body=body,
-                    timeout=5, max_response_bytes=8192, follow_redirects=False,
-                )
-                return _response(status, response_headers, raw)
-        except CloudError:
-            raise
+            credential = await self._credentials()
         except TimeoutError:
             raise CloudError("request_timeout") from None
         except Exception:
-            # Provider/transport errors can quote credentials: never propagate them.
             raise CloudError("unavailable") from None
+        if not _valid_credentials(credential):
+            raise CloudError("credentials_unavailable")
+        headers = {"content-type": "application/json", "cf-access-token": credential.access_token,
+                   "authorization": "Bearer " + credential.agent_token}
+        if node_proof:
+            proof = {"nodeId": self.node_id, "nodeGeneration": self.node_generation,
+                     "issuedAt": _iso(self._clock()), "nonce": str(self._nonce())}
+            if not _uuid(proof["nonce"]):
+                raise CloudError("invalid_configuration")
+            proof["signature"] = self._sign(canonical_node_proof(self.principal, self.origin, path, body, proof))
+            headers["x-event-node-proof"] = _json(proof).decode()
+            if before_send is not None:
+                before_send(proof)
+        return headers
+
+    async def _send_post(self, path, headers, body):
+        try:
+            return await self._send(
+                method="POST", url=self.origin + path, headers=headers, body=body,
+                timeout=5, max_response_bytes=8192, follow_redirects=False,
+            )
+        except TimeoutError:
+            raise CloudError("request_timeout", ambiguous=True) from None
+        except Exception:
+            # The transport may have sent the request before it failed.
+            raise CloudError("unavailable", ambiguous=True) from None
+
+    @staticmethod
+    def _post_response(path, status, response_headers, raw):
+        try:
+            return _response(status, response_headers, raw)
+        except CloudError as error:
+            definitive_refusal = (
+                status in (400, 403, 409)
+                and error.code not in ("invalid_response", "unavailable", "redirect_refused")
+            )
+            if path in _NATIVE_COMMIT_PATHS and not definitive_refusal:
+                raise CloudError(error.code, ambiguous=True) from None
+            raise
+
+    async def _post(self, path, value, *, node_proof=True, encoded_body=None, before_send=None):
+        send_started = False
+        try:
+            async with asyncio.timeout(5):
+                body = encoded_body if encoded_body is not None else _json(value)
+                if len(body) > 4096:
+                    raise CloudError("invalid_request")
+                headers = await self._post_headers(
+                    path, body, node_proof=node_proof, before_send=before_send,
+                )
+                send_started = True
+                status, response_headers, raw = await self._send_post(path, headers, body)
+                return self._post_response(path, status, response_headers, raw)
+        except CloudError:
+            raise
+        except TimeoutError:
+            code = "request_timeout"
+            raise CloudError(code, ambiguous=send_started) from None
+        except Exception:
+            # Provider/transport errors can quote credentials: never propagate them.
+            raise CloudError("unavailable", ambiguous=send_started) from None
 
     def _envelope(self, envelope, *, historical=False):
         try:
@@ -333,14 +634,87 @@ class CloudClient:
             raise CloudError("identity_mismatch")
         return result
 
-    async def attach(self, runtime_id):
-        return await self._unqualified("/v1/runtimes/attach", runtime_id)
+    async def native_challenge(self, request):
+        """Record one exact attach, renew, or transfer intent before local sampling."""
+        request = _native_challenge_request(request)
+        result = await self._post("/v1/runtimes/challenge", request)
+        return _native_challenge_response(result)
 
-    async def renew(self, runtime_id):
-        return await self._unqualified("/v1/runtimes/renew", runtime_id)
+    async def attach(self, request, challenge, native_evidence, *, prepared_body=None,
+                     on_first_send=None, recovery=False):
+        """Commit one challenged attach and validate its exact owned mapping."""
+        return await self._native_commit(
+            "attach", request, challenge, native_evidence, prepared_body=prepared_body,
+            on_first_send=on_first_send, recovery=recovery,
+        )
 
-    async def _unqualified(self, path, runtime_id):
-        if not _uuid(runtime_id):
+    async def renew(self, request, challenge, native_evidence, *, prepared_body=None,
+                    on_first_send=None, recovery=False):
+        """Commit one challenged lease renewal without changing generations."""
+        return await self._native_commit(
+            "renew", request, challenge, native_evidence, prepared_body=prepared_body,
+            on_first_send=on_first_send, recovery=recovery,
+        )
+
+    async def transfer(self, request, challenge, native_evidence, *, prepared_body=None,
+                       on_first_send=None, recovery=False):
+        """Atomically revoke the source and bind the replacement using both CAS pairs."""
+        return await self._native_commit(
+            "transfer", request, challenge, native_evidence, prepared_body=prepared_body,
+            on_first_send=on_first_send, recovery=recovery,
+        )
+
+    def _native_commit_validator(self, operation, request):
+        return {
+            "attach": lambda value: _native_attached_response(value, "attached", request, self),
+            "renew": lambda value: _native_attached_response(value, "renewed", request, self),
+            "transfer": lambda value: _native_transfer_response(value, request, self),
+        }[operation]
+
+    async def _retry_native_commit(self, path, body, body_bytes, before_send, response_validator):
+        ambiguous_prior = False
+        for attempt in range(2):
+            try:
+                response = await self._post(
+                    path, body, encoded_body=body_bytes,
+                    before_send=partial(before_send, attempt=attempt),
+                )
+            except CloudError as error:
+                if attempt == 0 and error.ambiguous:
+                    ambiguous_prior = True
+                    continue
+                if ambiguous_prior:
+                    raise CloudError(error.code, ambiguous=True) from None
+                raise
+            try:
+                return response_validator(response)
+            except CloudError as error:
+                # A 200 response with an invalid body can follow a committed request.
+                raise CloudError(error.code, ambiguous=True) from None
+        raise CloudError("commit_outcome_unknown", ambiguous=True)
+
+    async def _native_commit(self, operation, request, challenge, native_evidence, *,
+                             prepared_body=None, on_first_send=None, recovery=False):
+        request = _native_challenge_request(request)
+        if request["operation"] != operation:
             raise CloudError("invalid_request")
-        await self._post(path, {"runtimeId": runtime_id})
-        raise CloudError("native_binding_unqualified")
+        challenge = _native_challenge_response(challenge)
+        if recovery:
+            evidence = _native_evidence(native_evidence, request["expectedNativeBinding"])
+            deadline = None
+        else:
+            evidence, deadline = _native_local_evidence(
+                native_evidence, request["expectedNativeBinding"],
+            )
+        timing = _native_commit_timing(challenge, evidence)
+        body = _native_commit_body(operation, request, challenge, evidence)
+        body_bytes = _prepared_native_commit_body(prepared_body, body)
+        path = f"/v1/runtimes/{operation}"
+        before_send = _native_commit_send_fence(
+            on_first_send, body_bytes, recovery=recovery, deadline=deadline,
+            observed_at=timing[0], challenge_issued=timing[1],
+            challenge_expires=timing[2], witness_lease=timing[3],
+        )
+        return await self._retry_native_commit(
+            path, body, body_bytes, before_send, self._native_commit_validator(operation, request),
+        )
