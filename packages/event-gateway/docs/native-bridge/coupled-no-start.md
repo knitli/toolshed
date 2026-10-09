@@ -81,8 +81,9 @@ backend must be dead, and TUI PID, backend PID, client ID, server instance ID, a
 selected thread must all rotate. The unknown proof retains these measured checks
 and derives its restart flag from them; exact native unknown-frame checks remain.
 
-Three focused tests execute the fixed repository harness definitions without starting
-services. Removing the flag guard, removing the wait guard, and restoring the weaker
+Three focused tests import the fixed repository harness normally and invoke its actual
+CLI for parser rejection without starting services. Importing performs only standard-library
+setup and defines helpers; CLI artifact selection and runtime imports remain guarded. Removing the flag guard, removing the wait guard, and restoring the weaker
 restart validator each caused assertion failures; the restored tests pass. Both real
 native/workerd qualification branches passed again and their source hashes were
 refreshed. Existing historical causal records remain unchanged.
@@ -93,3 +94,7 @@ packages. No installation occurred. Earlier shared-checkout runs had picked up
 changed cloud sources and are excluded from the pinned evidence. Both final runs
 use the exact Node 24.19.0 executable recorded with its hash in the manifest; the
 intermediate Node 24.21.0 runs are superseded.
+
+The import-safe harness refresh repeats all three causal guard controls and both real
+qualification branches on Node 24.19.0. Tests call the extracted bounded wait and
+shared restart validator directly; no AST execution or test-only runtime bypass remains.

@@ -56,8 +56,8 @@
     }
   ],
   "artifacts": {
-    "packages/event-gateway/docs/native-bridge/coupled-no-start-proof.json": "2b51fc920bd60bae75187bfeafc848708763f459bd0425e2efbc5786a9cb720b",
-    "packages/event-gateway/docs/native-bridge/coupled-no-start-unknown-proof.json": "4b854efb9af3e28856ac9adf987b4997fb385225d7789bfa825c9b4137c69db9",
+    "packages/event-gateway/docs/native-bridge/coupled-no-start-proof.json": "324f8b73f2c4487dff34052a73ee94e591a7413da427f68cc9fe64b57c741f67",
+    "packages/event-gateway/docs/native-bridge/coupled-no-start-unknown-proof.json": "22ba5664bf17a81ee92f740f74bbce0d4ae542405d11fd9a5f6d92596ed0bd28",
     "/private/tmp/coupled-no-start-causal/red.log": "ec81564183452e386ba57aecfbeb916a5bf6deedfbcfe30a9cbe4725c4bc31da",
     "/private/tmp/coupled-no-start-causal/green.log": "d2cf2848703b509f0284aa51099e65442cb9c7b1ce47abee89ed51894fe9e14e",
     "/private/tmp/coupled-no-start-causal/unknown-red.log": "61609a55eae33674194e1d0cfff26f622fec6d7ac1b47bfb3f4fef3fe156578d",
@@ -82,9 +82,22 @@
     "/private/tmp/coupled-round4/unit-results.json": "e62fb45cbba21f008f6186d18751f5054772b1a42726f8a22fa89ef1b2a3b859",
     "/private/tmp/coupled-round4/positive-pinned.log": "06fc1a9dfa1f6306173d627d23e17b6aadda0367ff997a14dcbad28fd4d40dc2",
     "/private/tmp/coupled-round4/unknown-pinned.log": "3334021eea1d1cf5e1cdedc9b1359246ca40d450b0195a6dd3bef27eda353ff4",
-    "packages/event-gateway/tests/test_coupled_workerd.py": "0bf58cf9a02ca3e0af3aac7be0656244e9f61859d614f3dce404208a373ebfac",
+    "packages/event-gateway/tests/test_coupled_workerd.py": "d65b4529e441d710d7d2dbe0e81ba2b784c5a1337b47ed9380c3a37424354765",
     "/private/tmp/coupled-round4/positive-node2419.log": "dc727e3c731c3d7cd05107ae66c20adec753acf3540167553eaad121136ae1c3",
-    "/private/tmp/coupled-round4/unknown-node2419.log": "51ef523b45477b19214b65226da87d3853fb7ec6b308f8539ffbe19b3deceb72"
+    "/private/tmp/coupled-round4/unknown-node2419.log": "51ef523b45477b19214b65226da87d3853fb7ec6b308f8539ffbe19b3deceb72",
+    "/private/tmp/coupled-importable/run-unit.py": "3242d7090307bc4bd8a3acc28991780636f185d61481ceb5107acd7865f3aa9b",
+    "/private/tmp/coupled-importable/flags.py": "adea4cdf81802ff43e8ca4a076fcdc8b7b773ff0dc64079cfdd9152e22827e78",
+    "/private/tmp/coupled-importable/restart.py": "d891d8e9e605d863bdd2cff5574691b8ba2649aab18e1933adf2fb25ea0ca6dd",
+    "/private/tmp/coupled-importable/deadline.py": "ab31c2e55d3342faadaa21167b77bf88b34133172786804b855eae83ff7e956d",
+    "/private/tmp/coupled-importable/flags-red.log": "070d73d421461ae27fa5be00a706626fbe23737064f0a3ca6529a553f2c78817",
+    "/private/tmp/coupled-importable/positive.log": "f47de8f1f9fdbc304490d2eb17ca69bc0d8d416b7c003b035867af2a80abc578",
+    "/private/tmp/coupled-importable/deadline-red.log": "10dd69bbbeb9c310ed12827e5cf7681b4066bdfb78a24ca3b1f22e54653458ca",
+    "/private/tmp/coupled-importable/restored-green.log": "ebc478192e3c70f9b36de54ebd776b29225eccac9330163c1f1a2da57631cc1e",
+    "/private/tmp/coupled-importable/positive.json.broker.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/private/tmp/coupled-importable/restart-red.log": "96ddce4626e293ae5e3d1ec8fa3ffa8f3bb69321ddc5bca3c5b100efacfb6aba",
+    "/private/tmp/coupled-importable/unknown.log": "806db8f3eb7f60e8311c3251084f559c5314c330b6726e85e2c20ce33d2f3590",
+    "/private/tmp/coupled-importable/unknown.json.broker.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/private/tmp/coupled-importable/unit-results.json": "e62fb45cbba21f008f6186d18751f5054772b1a42726f8a22fa89ef1b2a3b859"
   },
   "formattingRefresh": {
     "change": "Wrap five E501 lines; executable AST identical",
@@ -131,5 +144,15 @@
     "excludedRuns": "Initial shared-checkout runs had changed cloud sources; subsequent Node24.21 runs superseded by final Node24.19.0 runs",
     "nodeExecutable": "/Users/adampoulemanos/.local/share/mise/installs/node/24.19.0/bin/node",
     "nodeExecutableSha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1"
+  },
+  "importableHarnessRefresh": {
+    "harnessSha256": "3efe73bdce8de383647b3bd8673d3eb318703287ad382f16fd727381ca02611c",
+    "positiveExit": 0,
+    "unknownExit": 0,
+    "nodeVersion": "v24.19.0",
+    "cloudSourceArchiveCommit": "dc8cb0117ca4d5f497563a13dc438fa3b5238ba2",
+    "focusedTests": 3,
+    "assertionRedRestoredGreenCases": 3,
+    "testExecution": "Normal fixed-path importlib loader and actual CLI parser subprocess; no AST execution"
   }
 }

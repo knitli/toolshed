@@ -18,32 +18,33 @@ import tempfile
 import time
 from uuid import UUID, uuid4
 
-parser = argparse.ArgumentParser(description=__doc__)
-for name in ('package', 'qualifier', 'binary', 'binary-sha', 'node', 'cloud-source', 'esbuild', 'miniflare', 'output'):
-    parser.add_argument('--' + name, required=True)
-parser.add_argument('--installed', action='store_true', help='Use the installed wheel, without adding source imports')
-parser.add_argument('--restart-native', action='store_true', help='Recover an expired v3 receipt after native process restart')
-parser.add_argument('--terminal-no-start', action='store_true', help='Qualify actual terminal refusal and durable cloud settlement')
-parser.add_argument('--forget-terminal', action='store_true', help='Restart native before terminal recovery; unknown must stay fenced')
-args = parser.parse_args()
-if args.restart_native and args.terminal_no_start:
-    parser.error('--restart-native and --terminal-no-start are mutually exclusive')
-if args.forget_terminal and not args.terminal_no_start:
-    parser.error('--forget-terminal requires --terminal-no-start')
-PACKAGE, QUALIFIER, BINARY = (Path(x).resolve(strict=True) for x in (args.package, args.qualifier, args.binary))
-BINARY_SHA, NODE = args.binary_sha, str(Path(args.node).resolve(strict=True))
-BROKER = Path(__file__).with_name('coupled-workerd-broker.mjs')
-OUTPUT = Path(args.output).resolve()
-if not args.installed:
-    sys.path.insert(0, str(PACKAGE / 'src'))
-# Package selection above deliberately precedes the imports used by this fixture.
-from cryptography.hazmat.primitives import serialization  # noqa: E402
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
-import event_gateway  # noqa: E402
-from event_gateway.cloud import CloudClient, Credentials  # noqa: E402
-from event_gateway.gateway import Gateway  # noqa: E402
-from event_gateway.native import NativeBridgeAdapter, validate_receipt  # noqa: E402
-from event_gateway.store import Store, IDENTITY  # noqa: E402
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    for name in ('package', 'qualifier', 'binary', 'binary-sha', 'node', 'cloud-source', 'esbuild', 'miniflare', 'output'):
+        parser.add_argument('--' + name, required=True)
+    parser.add_argument('--installed', action='store_true', help='Use the installed wheel, without adding source imports')
+    parser.add_argument('--restart-native', action='store_true', help='Recover an expired v3 receipt after native process restart')
+    parser.add_argument('--terminal-no-start', action='store_true', help='Qualify actual terminal refusal and durable cloud settlement')
+    parser.add_argument('--forget-terminal', action='store_true', help='Restart native before terminal recovery; unknown must stay fenced')
+    args = parser.parse_args()
+    if args.restart_native and args.terminal_no_start:
+        parser.error('--restart-native and --terminal-no-start are mutually exclusive')
+    if args.forget_terminal and not args.terminal_no_start:
+        parser.error('--forget-terminal requires --terminal-no-start')
+    PACKAGE, QUALIFIER, BINARY = (Path(x).resolve(strict=True) for x in (args.package, args.qualifier, args.binary))
+    BINARY_SHA, NODE = args.binary_sha, str(Path(args.node).resolve(strict=True))
+    BROKER = Path(__file__).with_name('coupled-workerd-broker.mjs')
+    OUTPUT = Path(args.output).resolve()
+    if not args.installed:
+        sys.path.insert(0, str(PACKAGE / 'src'))
+    # Package selection above deliberately precedes the imports used by this fixture.
+    from cryptography.hazmat.primitives import serialization  # noqa: E402
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
+    import event_gateway  # noqa: E402
+    from event_gateway.cloud import CloudClient, Credentials  # noqa: E402
+    from event_gateway.gateway import Gateway  # noqa: E402
+    from event_gateway.native import NativeBridgeAdapter, validate_receipt  # noqa: E402
+    from event_gateway.store import Store, IDENTITY  # noqa: E402
 
 
 def require(condition, message):
@@ -53,6 +54,14 @@ def require(condition, message):
 
 def b64(value):
     return base64.urlsafe_b64encode(value).rstrip(b'=').decode()
+
+
+async def wait_for_permit_expiry(request, native_process):
+    deadline = time.monotonic() + 10
+    while time.time_ns() // 1_000_000 <= request['permitExpiresAt']:
+        require(time.monotonic() < deadline and native_process.poll() is None,
+            'native delay fixture exceeded deadline or native process stopped')
+        await asyncio.sleep(.02)
 
 
 def verify_native_restart(old_process, native_process, witness, new_witness, launcher):
@@ -176,11 +185,7 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 require(store.current_attempt(ident)['state'] == 'submitting', 'request durable before native delay')
                 require(store.current_attempt(ident)['native_request'] == request, 'exact durable native identity')
                 # Fixture delay after durable submission intent; the actual native backend refuses expiry.
-                deadline = time.monotonic() + 10
-                while time.time_ns() // 1_000_000 <= request['permitExpiresAt']:
-                    require(time.monotonic() < deadline and native_process.poll() is None,
-                        'native delay fixture exceeded deadline or native process stopped')
-                    await asyncio.sleep(.02)
+                await wait_for_permit_expiry(request, native_process)
                 fresh = await asyncio.to_thread(bridge.challenge)
                 require(all(fresh[k] == request[k] for k in (
                     'clientId', 'generation', 'serverInstanceId', 'serverGeneration', 'threadId')),
