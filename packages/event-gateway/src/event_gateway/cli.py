@@ -160,7 +160,7 @@ def _native_lifecycle(args, state_dir, operation):
     intent, artifact, cloud, binding = context
     persisted = {}
     response, early_result = _commit_native_lifecycle(
-        args, state_dir, operation, intent, artifact, cloud, binding, result_key, persisted,
+        args, state_dir, operation, intent, artifact, cloud, binding, persisted,
     )
     if early_result is not None:
         return early_result
@@ -217,8 +217,9 @@ def _native_context(args, state_dir, operation, result_key):
     return (intent, artifact, cloud, binding), None
 
 
-def _save_pending_before_send(body, *, state_dir, operation, args, cloud, intent,
+def _save_pending_before_send(body, *, state_dir, args, cloud, intent,
                               challenge, evidence, persisted):
+    operation = intent["operation"]
     local_evidence = {"observedAt": evidence["observedAt"], "witness": evidence["witness"]}
     pending = {
         "version": 1, "operation": operation, "sessionId": args.session_id,
@@ -249,7 +250,7 @@ def _commit_native_call(args, state_dir, operation, intent, artifact, cloud, bin
         raise
     evidence = session_challenge(state_dir, args.session_id, challenge["challengeId"], binding)
     persist = partial(
-        _save_pending_before_send, state_dir=state_dir, operation=operation,
+        _save_pending_before_send, state_dir=state_dir,
         args=args, cloud=cloud, intent=intent, challenge=challenge,
         evidence=evidence, persisted=persisted,
     )
@@ -278,7 +279,8 @@ def _native_commit_error(error, state_dir, operation, artifact, args, result_key
 
 
 def _commit_native_lifecycle(args, state_dir, operation, intent, artifact, cloud,
-                             binding, result_key, persisted):
+                             binding, persisted):
+    result_key = {"attach": "attached", "renew": "renewed", "transfer": "transferred"}[operation]
     try:
         return _commit_native_call(
             args, state_dir, operation, intent, artifact, cloud, binding, persisted,
