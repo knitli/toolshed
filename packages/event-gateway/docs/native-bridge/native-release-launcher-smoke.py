@@ -182,7 +182,7 @@ def qualify(args, launcher, server):
         launcher.qualified_binary(args.binary, launcher.QUALIFIED_SHA256) == args.binary
     )
     # Unix socket paths must fit macOS's 104-byte limit even with its long default TMPDIR.
-    temporary_root = Path("/tmp").resolve(strict=True)
+    temporary_root = Path("/tmp").resolve(strict=True)  # nosec B108 - Short socket root; TemporaryDirectory creates random 0700 children.
     with tempfile.TemporaryDirectory(prefix="nr-", dir=temporary_root) as directory:
         root = Path(directory)
         state = root / "state"

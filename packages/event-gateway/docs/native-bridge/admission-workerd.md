@@ -5,7 +5,7 @@ native binary SHA-256 `3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf
 and the final installed wheel SHA-256
 `d11642c3ca2eb96f72f7ce192c422c60be174487cea418c243157d87fd1322a2`.
 The proof SHA-256 is
-`17757225fd87555d7da7023ffdd2c24f89c51e102f2e9fe8f77b8ed6f5106471`.
+`54a1c910bf9825ab9978fa82498cc8fa1fdc2db001857e56d6df848c606ba50d`.
 It records 16 wire requests and exact cloud source hashes, including the scoped
 canary admission gate, RPC error mapping, and extracted synchronous native runtime store.
 The final run used Python `-I -O`; explicit qualification guards remain active.

@@ -113,6 +113,7 @@ class FixtureTransport:
     """The explicit loopback and lost-reply boundary, preserving request body bytes."""
 
     def __init__(self, address):
+        """Bind the fixture endpoint and arrange two lost successful attach replies."""
         self.address = address
         self.wires = []
         self.drop = 2
@@ -159,6 +160,7 @@ class AdmissionRun:
     """One enrollment and daemon ledger, shared across two real native clients."""
 
     def __init__(self, args, gateway, root, transport):
+        """Create private local state and enroll one node for both native clients."""
         self.args, self.gateway, self.transport = args, gateway, transport
         self.state = root / 'state'
         self.state.mkdir(mode=0o700)
