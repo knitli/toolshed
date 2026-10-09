@@ -30,7 +30,7 @@ def require(condition, message=None):
 
 
 SOURCE = Path(os.environ['EVENT_NATIVE_QUALIFIER']).resolve(strict=True)
-SOURCE_SHA = '31a630277c0c0a552036233586792c1c04528faf7d2c5fec2eef70d83e270425'
+SOURCE_SHA = 'e4068916c0739657186b8be34d087714ad9a544642dc8921a9c502ca1ab9ac11'
 require(hashlib.sha256(SOURCE.read_bytes()).hexdigest() == SOURCE_SHA)
 INSTALLED_SHA = '4ab38f6f5231acda4fee0af5d017ab33c583f3fecfc4e68531000a8dd25c0f85'
 DISTRIBUTION = importlib.metadata.distribution('knitli-event-gateway')
@@ -42,6 +42,11 @@ PACKAGE_INIT_SHA = 'c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e6592845
 require(any(str(file) == 'event_gateway/__init__.py' for file in DISTRIBUTION.files or ()))
 require(PACKAGE_INIT == Path(DISTRIBUTION.locate_file('event_gateway/__init__.py')).resolve(strict=True))
 require(hashlib.sha256(PACKAGE_INIT.read_bytes()).hexdigest() == PACKAGE_INIT_SHA)
+READER = INSTALLED.with_name('native_reader.py')
+READER_SHA = '7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a'
+require(any(str(file) == 'event_gateway/native_reader.py' for file in DISTRIBUTION.files or ()))
+require(READER == Path(DISTRIBUTION.locate_file('event_gateway/native_reader.py')).resolve(strict=True))
+require(hashlib.sha256(READER.read_bytes()).hexdigest() == READER_SHA)
 require(not any(name == 'event_gateway' or name.startswith('event_gateway.') for name in sys.modules),
         'SDK already loaded before integrity preflight')
 # Prefer only the verified installed package over cwd/PYTHONPATH shadows.
@@ -50,6 +55,8 @@ installed_native = importlib.import_module('event_gateway.native')
 require(Path(installed_native.__file__).resolve() == INSTALLED)
 NativeBridgeAdapter = installed_native.NativeBridgeAdapter
 validate_receipt = installed_native.validate_receipt
+installed_reader = importlib.import_module('event_gateway.native_reader')
+require(Path(installed_reader.__file__).resolve() == READER)
 spec = importlib.util.spec_from_file_location('native_qualifier', SOURCE)
 native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
@@ -128,7 +135,7 @@ def old_request_probes(bridge, request, recorded, server):
             target[field] = 'changed-version'
         else:
             target[field] = str(uuid4())
-        native.validate_start(candidate)  # Every negative remains a structurally valid request.
+        installed_reader.validate_start(candidate)  # Every negative remains a structurally valid request.
         # Deliberate wire probes bypass the SDK's local exact-attempt guard.
         require(bridge._receipt_exchange('receipt', candidate) == {'status': 'unknown'}, key)
         require(not bridge.closed, 'Unknown caused by a broken transport rather than native lookup')
@@ -271,6 +278,6 @@ if __name__ == '__main__':
     require(hashlib.sha256(args.binary.read_bytes()).hexdigest() == args.sha256, 'binary SHA mismatch')
     native.qualify_input_recorded = restart_callback
     result = native.qualify(args.binary, input_recorded=True, receipt_version=3)
-    result.update(binarySha256=args.sha256, readerSha256=SOURCE_SHA)
+    result.update(binarySha256=args.sha256, readerSha256=SOURCE_SHA, installedReaderSha256=READER_SHA)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
     print(json.dumps(result, sort_keys=True))

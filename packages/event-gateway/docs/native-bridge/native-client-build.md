@@ -30,9 +30,12 @@ evidence file alone does not authorize it.
 The latest full-tree clean build and v3 runtime result are recorded in
 [`native-client-build-proof.json`](native-client-build-proof.json). The rebuilt
 candidate SHA-256 is
-`3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c`; it differs
-from the frozen launcher hash, so the evidence records
-`launcherQualified: false`. Three earlier builds using the selective
+`3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c`. The historical
+build evidence records `launcherQualified: false` against the former `0fb3…22de`
+pin. The [native release checkpoint](native-release-runtime.md) subsequently
+qualified this exact preserved candidate with the current reader and actual
+foreground launcher; the launcher and builder now pin `3e88…387c`. Historical
+evidence remains unchanged. Three earlier builds using the selective
 `codex-rs` plus generated SDK archive and only `codex-rs/.cargo/config.toml`
 produced different hashes; temporary source paths appear in those binary
 strings, but the cause has not been isolated. The full-tree build uses a
@@ -54,7 +57,8 @@ EVENT_NATIVE_QUALIFIER="$EVENT_PINNED_READER" "$EVENT_PROOF_PYTHON" -I -O \
 
 Review the source/build and runtime evidence together before any separately
 authorized qualification change. This runbook does not install the client or
-rotate the launcher's digest. Public owner enrollment and cloud attachment
-remain blocked on the separately reviewed attach tuple/challenge/CAS contract
-and executable combined admission proof. Native self-report, a build manifest,
+rotate the launcher's digest. The attach tuple/challenge/CAS implementation is
+merged; the [controlled admission proof](admission-workerd.md) exercises its
+actual paths with real native witnesses. Public owner enrollment and deployed
+cloud admission still require their live qualification. Native self-report, a build manifest,
 or a checkbox does not grant public runtime authority.

@@ -394,6 +394,7 @@ def qualify(binary, *, terminal_retry=False, input_recorded=False, receipt_versi
             server.release_primary = threading.Event()
         threading.Thread(target=server.serve_forever, daemon=True).start()
         flags = [
+            "--no-daemon",
             "-c",
             "check_for_update_on_startup=false",
             "-c",

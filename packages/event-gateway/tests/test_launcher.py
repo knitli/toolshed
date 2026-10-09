@@ -441,6 +441,8 @@ class LauncherTests(unittest.TestCase):
                                                   launcher.os.WEXITED | launcher.os.WNOHANG | launcher.os.WNOWAIT)
                 else:
                     self.assertEqual(launcher.launch(root, "/qualified/codex", launcher.QUALIFIED_SHA256, root), 0)
+                    self.assertEqual(spawn.call_args.args[0],
+                                     ["/qualified/codex", "--no-daemon", "--no-alt-screen", "-C", str(root.resolve())])
                     self.assertEqual(events, ["kill", "wait"])
                     kill.assert_called_once_with(process.pid, signal.SIGKILL)
                     process.poll.assert_not_called()
