@@ -3,9 +3,9 @@
 **PASS, 2026-10-09.** [Recorded proof](admission-workerd-proof.json) passed with
 native binary SHA-256 `3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c`
 and the final installed wheel SHA-256
-`583337d4f9ffa91b5d1e73d923f1716244fb828bd060e4e8f8e7a65b891432ec`.
+`63c5ac411234f4a619540386c01183925e8bbdf84037734d95d08ea6bc251123`.
 The proof SHA-256 is
-`19f44c37ddcce8022eb9827825a26509b81f3fef5f7478a2624ca222cb343363`.
+`0b7ee751429b1ae5826812878b67c4bb6fb70d90082749c94dab1b65f08d0713`.
 It records 16 wire requests, 27 local input hashes, and 136 cloud bundle input
 hashes, including the scoped
 canary admission gate, RPC error mapping, and extracted synchronous native runtime store.

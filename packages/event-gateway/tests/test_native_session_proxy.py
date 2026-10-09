@@ -51,7 +51,7 @@ def session_fixture(row):
     with peer(handle, receipt_version=3) as bridge:
         client = launcher.NativeClient(bridge)
         client.ready = True
-        with tempfile.TemporaryDirectory(prefix="nsp-", dir=Path("/tmp").resolve()) as directory:
+        with tempfile.TemporaryDirectory(prefix="nsp-", dir=Path("/tmp").resolve()) as directory:  # nosec B108 - Random 0700 child; short AF_UNIX path.
             state = Path(directory)
             state.chmod(0o700)
             session = str(uuid4())
@@ -181,6 +181,7 @@ class NativeSessionProxyTests(unittest.TestCase):
         row = witness()
         mapping = {"sessionId": str(uuid4()), "nativeThreadId": row["threadId"],
                    "nativeBinding": launcher._binding(row)}
+
         class Bridge:
             receipt_version = 3
 

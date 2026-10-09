@@ -35,11 +35,15 @@ class Listener:
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
-    async def close(self):
-        """Stop accepting and finish every handler before its Store is closed."""
+    def stop_accepting(self):
+        """Fence new and already connected deliveries without yielding."""
         self.closing = True
         if self.server is not None:
             self.server.close()
+
+    async def close(self):
+        """Stop accepting and finish every handler before its Store is closed."""
+        self.stop_accepting()
         if self.tasks:
             _, pending = await asyncio.wait(self.tasks, timeout=self.deadline + 2)
             for task in pending:
@@ -78,6 +82,9 @@ class Listener:
                 if length > 4096:
                     raise Refused("message_too_large")
                 body = await reader.readexactly(length)
+                if self.closing:
+                    await self._reply(writer, 503, {"reason": "listener_stopping"})
+                    return
                 result = self.gateway.accept(
                     body,
                     signature=headers.get("x-event-signature", ""),

@@ -17,15 +17,19 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from event_gateway import client_runtime, daemon, launcher
 from event_gateway.cloud import _iso
+from event_gateway.protocol import derive_delivery_id
 from event_gateway.security import SecurityError, load_or_create_signing_key, public_key_text, sign
 from event_gateway.store import IDENTITY, Store
+from test_daemon import running_daemon
 from test_gateway_integration import FIXTURE, InjectedBridge
 from test_native_session_proxy import session_fixture, witness
 
 
 class DaemonDispatchTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(dir=Path('/tmp').resolve())
+        self.temporary = tempfile.TemporaryDirectory(
+            dir=Path('/tmp').resolve(),  # nosec B108 - private temporary directory keeps AF_UNIX paths short
+        )
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name)
         self.state = self.directory / 's'
@@ -324,7 +328,7 @@ class DaemonDispatchTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(configured['listenHost'], host)
                 self.assertEqual(cloud.node_id, self.node_id)
         invalid = [{'listenHost': host} for host in (
-            '0.0.0.0', '::', '8.8.8.8', '169.254.1.1', 'fe80::1', 'ff02::1',
+            '0.0.0.0', '::', '8.8.8.8', '169.254.1.1', 'fe80::1', 'ff02::1',  # nosec B104 - rejection-only input, never bound
             '::ffff:127.0.0.1', 'fd00::1%en0', 'localhost', '192.0.2.1',
         )] + [{'version': True}, {'listenPort': True}, {'listenPort': 0}, {'listenPort': 65536},
              {'cloudConfig': '../cloud.json'}, {'cloudConfig': '/cloud.json'}, {'unexpected': 1},
@@ -342,6 +346,110 @@ class DaemonDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.write_private('dispatch.json', self.config).chmod(0o644)
         with self.assertRaises(SecurityError):
             daemon.load_dispatch_config(self.config_path, self.state)
+
+    async def test_default_daemon_remains_control_only(self):
+        with patch.object(daemon, 'Listener', side_effect=AssertionError('unexpected listener')), \
+                patch.object(daemon, 'load_cloud_client', side_effect=AssertionError('unexpected authority')):
+            async with running_daemon(self.state):
+                status = await daemon.request(self.state, {'command': 'status'})
+                self.assertEqual(status['stage'], 'foundation')
+                self.assertFalse(status['automaticWakeEnabled'])
+                self.assertEqual(status['blockers'], daemon.BLOCKERS)
+                self.assertNotIn('dispatch', status)
+                with self.assertRaises(ConnectionRefusedError):
+                    await asyncio.wait_for(asyncio.open_connection('127.0.0.1', self.port), 1)
+
+    async def test_worker_failure_stops_readiness_and_listener_preserving_queue(self):
+        fail_scan = asyncio.Event()
+        scan = Store.list_reconcilable
+
+        def failing_scan(store):
+            if fail_scan.is_set():
+                raise sqlite3.OperationalError('test worker storage failure')
+            return scan(store)
+
+        self.bridge.witness['eligible'] = False
+        with patch.object(Store, 'list_reconcilable', failing_scan):
+            with self.assertRaisesRegex(sqlite3.OperationalError, 'test worker storage failure'):
+                async with self.running() as task:
+                    status = await daemon.request(self.state, {'command': 'status'})
+                    self.assertTrue(status['dispatch']['workerRunning'])
+                    self.assertIn(b'202 Result', await self.deliver())
+                    fail_scan.set()
+                    await self.until(task.done)
+                    await task
+        self.assertFalse((self.state / 'control.sock').exists())
+        with self.assertRaises(FileNotFoundError):
+            await daemon.request(self.state, {'command': 'status'})
+        with self.assertRaises(ConnectionRefusedError):
+            await asyncio.wait_for(asyncio.open_connection('127.0.0.1', self.port), 1)
+        with Store(self.state) as store:
+            self.assertEqual([row['deliveryId'] for row in store.list_pending()],
+                             [self.envelope['deliveryId']])
+        self.assertFalse(self.claims)
+        self.assertFalse(self.starts())
+
+    async def test_worker_failure_fences_preconnected_status_and_partial_delivery(self):
+        fail_scan, stopped = asyncio.Event(), asyncio.Event()
+        scan, stop_accepting = Store.list_reconcilable, daemon.Listener.stop_accepting
+
+        def failing_scan(store):
+            if fail_scan.is_set():
+                raise sqlite3.OperationalError('test worker storage failure')
+            return scan(store)
+
+        def observe_stop(listener):
+            stop_accepting(listener)
+            stopped.set()
+
+        late = {**self.envelope, 'eventId': str(uuid.uuid4()), 'attemptId': str(uuid.uuid4())}
+        late['deliveryId'] = derive_delivery_id(late)
+        body = json.dumps(late).encode()
+        signature = sign(body, self.transport_key, self.node_id)
+        wire = (f'POST /v1/deliver HTTP/1.1\r\nContent-Type: application/json\r\n'
+                f'Content-Length: {len(body)}\r\nX-Event-Audience: {self.node_id}\r\n'
+                f'X-Event-Key-Id: test\r\nX-Event-Signature: {signature}\r\n\r\n').encode() + body
+        self.bridge.witness['eligible'] = False
+        with patch.object(Store, 'list_reconcilable', failing_scan), \
+                patch.object(daemon.Listener, 'stop_accepting', observe_stop):
+            with self.assertRaisesRegex(sqlite3.OperationalError, 'test worker storage failure'):
+                async with self.running() as task:
+                    self.assertIn(b'202 Result', await self.deliver())
+                    reader, writer = await asyncio.open_connection('127.0.0.1', self.port)
+                    control_reader, control_writer = await asyncio.open_unix_connection(self.state / 'control.sock')
+                    try:
+                        writer.write(wire[:-1])
+                        control_writer.write(b'{"command":')
+                        await writer.drain()
+                        await control_writer.drain()
+                        await asyncio.sleep(0.01)
+                        fail_scan.set()
+                        await asyncio.wait_for(stopped.wait(), 1)
+                        writer.write(wire[-1:])
+                        control_writer.write(b'"status"}\n')
+                        await writer.drain()
+                        await control_writer.drain()
+                        status = json.loads(await asyncio.wait_for(control_reader.readline(), 1))
+                        self.assertFalse(status['automaticWakeEnabled'])
+                        self.assertFalse(status['dispatch']['workerRunning'])
+                        self.assertFalse(status['dispatch']['listenerReady'])
+                        self.assertEqual(status['blockers'], ['dispatch_stopping'])
+                        response = await asyncio.wait_for(reader.read(), 1)
+                        self.assertIn(b'503 Result', response)
+                        self.assertIn(b'listener_stopping', response)
+                    finally:
+                        writer.close()
+                        control_writer.close()
+                        await writer.wait_closed()
+                        await control_writer.wait_closed()
+                    await self.until(task.done)
+                    await task
+        with Store(self.state) as store:
+            self.assertIsNone(store.delivery(late['deliveryId']))
+            self.assertEqual([row['deliveryId'] for row in store.list_pending()],
+                             [self.envelope['deliveryId']])
+        self.assertFalse(self.claims)
+        self.assertFalse(self.starts())
 
     async def test_batch_failure_cancels_other_inflight_work(self):
         started, finished = asyncio.Event(), asyncio.Event()

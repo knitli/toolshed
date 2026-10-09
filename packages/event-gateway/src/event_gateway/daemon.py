@@ -22,9 +22,11 @@ BLOCKERS = ["native_client_binding_unavailable", "cloud_authority_not_integrated
 
 def status(store, dispatch=None):
     if dispatch is not None:
+        enabled = dispatch["listenerReady"] and dispatch["workerRunning"]
         return {
-            "stage": "configured_dispatch", "automaticWakeEnabled": True,
-            "blockers": [], "dispatch": dict(dispatch), "store": store.status(),
+            "stage": "configured_dispatch", "automaticWakeEnabled": enabled,
+            "blockers": [] if enabled else ["dispatch_stopping"],
+            "dispatch": dict(dispatch), "store": store.status(),
         }
     return {
         "stage": "foundation",
@@ -79,13 +81,15 @@ def load_dispatch_config(path, state_dir):
     try:
         if (not isinstance(config, dict)
                 or set(config) != {"version", "cloudConfig", "listenHost", "listenPort", "transportKeys"}
-                or type(config["version"]) is not int or config["version"] != 1
+                or not isinstance(config["version"], int) or isinstance(config["version"], bool)
+                or config["version"] != 1
                 or not isinstance(config["cloudConfig"], str)
                 or config["cloudConfig"] in ("", ".", "..")
                 or Path(config["cloudConfig"]).name != config["cloudConfig"]
                 or "\\" in config["cloudConfig"]
                 or not isinstance(config["listenHost"], str) or "%" in config["listenHost"]
-                or type(config["listenPort"]) is not int or not 1 <= config["listenPort"] <= 65535
+                or not isinstance(config["listenPort"], int) or isinstance(config["listenPort"], bool)
+                or not 1 <= config["listenPort"] <= 65535
                 or not isinstance(config["transportKeys"], dict)
                 or not 1 <= len(config["transportKeys"]) <= 16):
             raise ValueError
@@ -138,6 +142,15 @@ async def _dispatch_worker(gateway, stop):
             await asyncio.wait_for(stop.wait(), WORKER_INTERVAL)
         except TimeoutError:
             pass
+
+
+def _stop_dispatch(dispatch, listener, stop):
+    """Fence readiness and admission before waiting for any shutdown work."""
+    if dispatch is not None:
+        dispatch.update(listenerReady=False, workerRunning=False)
+    if listener is not None:
+        listener.stop_accepting()
+    stop.set()
 
 
 def _control_handler(store, dispatch):
@@ -213,21 +226,21 @@ async def serve(state_dir, *, dispatch_config=None):
                 listener = Listener(gateway)
                 await listener.start(config["listenHost"], config["listenPort"])
                 worker = asyncio.create_task(_dispatch_worker(gateway, stop))
-                worker.add_done_callback(lambda _task: stop.set())
+                worker.add_done_callback(lambda _task: _stop_dispatch(dispatch, listener, stop))
                 dispatch = {"listenerReady": True, "workerRunning": True,
                             "authorityConfigured": True, "liveWakeVerified": False}
             control = _control_handler(store, dispatch)
             server = await asyncio.start_unix_server(connected, path=path, limit=4096)
             os.chmod(path, 0o600)
             for sig in (signal.SIGINT, signal.SIGTERM):
-                loop.add_signal_handler(sig, stop.set)
+                loop.add_signal_handler(sig, _stop_dispatch, dispatch, listener, stop)
                 signals.append(sig)
             await stop.wait()
             if worker is not None and worker.done():
                 await worker
         finally:
             closing = True
-            stop.set()
+            _stop_dispatch(dispatch, listener, stop)
             if server is not None:
                 server.close()
             if worker is not None:

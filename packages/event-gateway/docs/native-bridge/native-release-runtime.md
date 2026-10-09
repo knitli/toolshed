@@ -14,7 +14,7 @@ All 20 packaged modules/contracts match both the wheel archive and the base
 commit. This is the **pre-promotion wheel**: the later launcher pin update is
 separate from that earlier reader/adapter runtime qualification. The latest
 two-TUI run uses dispatch wheel
-`583337d4f9ffa91b5d1e73d923f1716244fb828bd060e4e8f8e7a65b891432ec`
+`63c5ac411234f4a619540386c01183925e8bbdf84037734d95d08ea6bc251123`
 and adapter SHA `25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e`.
 Earlier runs, including release wheel `d11642c3ca2eb96f72f7ce192c422c60be174487cea418c243157d87fd1322a2`,
 and their exact source hashes remain separately recorded.
@@ -66,7 +66,7 @@ After adding `--no-daemon`, the earlier rebuilt wheel
 `d11642c3ca2eb96f72f7ce192c422c60be174487cea418c243157d87fd1322a2`
 passed the foreground smoke. The latest [foreground smoke](native-release-launcher-smoke.py)
 passed against the dispatch wheel
-`583337d4f9ffa91b5d1e73d923f1716244fb828bd060e4e8f8e7a65b891432ec`. It exercised
+`63c5ac411234f4a619540386c01183925e8bbdf84037734d95d08ea6bc251123`. It exercised
 the installed CLI and `launch()` through a real PTY, accepted the candidate,
 reported a selected session with attachment and automatic wake disabled,
 returned its binding and fresh challenge-correlated witness, and removed its

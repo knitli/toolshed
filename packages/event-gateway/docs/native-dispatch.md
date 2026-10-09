@@ -36,6 +36,8 @@ The listener verifies signed bytes before durable acceptance. HTTP 202 means
 accepted into the spool. It does not mean a native turn started or was observed.
 The worker reconciles durable attempts and dispatches queued deliveries using
 the existing cloud claims, budgets, generation fences and acknowledgments.
+Unexpected worker failure stops readiness and rejects further deliveries before
+shutdown; previously accepted work remains durable for restart.
 
 Only the launcher owns the native bridge. Conditional Start obtains fresh
 eligibility and checks the exact binding under its lock immediately before
