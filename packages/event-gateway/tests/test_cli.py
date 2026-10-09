@@ -1,5 +1,6 @@
 """Exercise the shipped CLI boundary in disposable private state."""
 from contextlib import redirect_stderr, redirect_stdout
+import base64
 import io
 import json
 import os
@@ -11,9 +12,13 @@ import sys
 import tempfile
 import time
 import unittest
+import uuid
 from unittest.mock import patch
 
 from event_gateway import cli
+from event_gateway.cloud import CloudError, _iso
+from event_gateway.security import SecurityError
+from event_gateway.store import Store
 
 
 class CliTests(unittest.TestCase):
@@ -55,15 +60,319 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), "")
         self.assertFalse(self.state.exists())
 
-    def test_help_status_and_attachment_refusal(self):
+    def test_help_status_and_attachment_arguments(self):
         self.assertIn("knitli-event-gateway", self.cli("--help"))
         self.assertFalse(self.state.exists())
         self.assert_disabled(json.loads(self.cli("status")))
-        result = json.loads(self.cli("attach", "--runtime-id", "runtime-a",
-                                     "--thread-id", "thread-a", code=2))
-        self.assertFalse(result["attached"])
-        self.assertEqual(result["reason"], "native_client_binding_unavailable")
-        self.assert_disabled(json.loads(self.cli("status")))
+        help_text = self.cli("attach", "--help")
+        self.assertIn("--session-id", help_text)
+        self.assertIn("--cloud-config", help_text)
+        self.assertNotIn("--thread-id", help_text)
+
+    def test_attach_commits_challenge_sample_rechecks_and_persists_mapping(self):
+        runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
+        binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                   "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
+                   "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+        challenge = {"challengeId": str(uuid.uuid4()), "issuedAt": "2026-10-09T12:00:00.000Z",
+                     "expiresAt": "2026-10-09T12:00:30.000Z"}
+        evidence = {"observedAt": "2026-10-09T12:00:00.100Z",
+                    "validUntilMonotonic": time.monotonic() + 0.5, "witness": {"fixture": True}}
+        response = {"status": "attached", "runtimeId": runtime_id, "runtimeGeneration": 1,
+                    "nodeId": str(uuid.uuid4()), "nodeGeneration": 1, "attachmentGeneration": 1,
+                    "leaseUntil": _iso(time.time() + 90), "nativeBinding": binding}
+
+        class FakeCloud:
+            origin, principal, agent = "https://events.example.com", "adam@knitli.com", "codex"
+            node_id, node_generation = str(uuid.uuid4()), 1
+
+            async def native_challenge(self, intent):
+                self.intent = intent
+                return challenge
+
+            async def attach(self, intent, request_challenge, request_evidence, *, on_first_send=None):
+                self.asserted = (intent, request_challenge, request_evidence)
+                if on_first_send:
+                    on_first_send(b'{"prepared":"body"}')
+                return response
+
+        fake = FakeCloud()
+        output, error = io.StringIO(), io.StringIO()
+        with (
+            patch.object(cli, "load_cloud_client", return_value=fake),
+            patch.object(cli, "session_binding", side_effect=[binding, binding]),
+            patch.object(cli, "session_challenge", return_value=evidence),
+            redirect_stdout(output), redirect_stderr(error),
+        ):
+            code = cli.main(["--state-dir", str(self.state), "attach", "--runtime-id", runtime_id,
+                             "--session-id", session_id, "--cloud-config", str(self.state / "cloud.json")])
+        self.assertEqual(code, 0, error.getvalue())
+        self.assertEqual(error.getvalue(), "")
+        value = json.loads(output.getvalue())
+        self.assertEqual(value["remoteStatus"], "attached")
+        self.assertEqual(value["localStatus"], "current")
+        self.assertEqual(fake.intent["expectedNativeBinding"], binding)
+        self.assertEqual(fake.asserted, (fake.intent, challenge, evidence))
+        with Store(self.state) as store:
+            mapping = store.get_attachment(runtime_id)
+            self.assertEqual(mapping["nativeBinding"], binding)
+            self.assertEqual(mapping["runtimeGeneration"], 1)
+        self.assertIsNone(cli.load_pending_commit(self.state, "attach", session_id))
+
+    def test_attach_lost_commit_reply_reports_unknown_without_false_detach(self):
+        runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
+        binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                   "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
+                   "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+
+        class FakeCloud:
+            origin, principal, agent = "https://events.example.com", "adam@knitli.com", "codex"
+            node_id, node_generation = str(uuid.uuid4()), 1
+
+            async def native_challenge(self, _intent):
+                return {"challengeId": str(uuid.uuid4()), "issuedAt": "2026-10-09T12:00:00.000Z",
+                        "expiresAt": "2026-10-09T12:00:30.000Z"}
+
+            async def attach(self, *_args, on_first_send=None):
+                on_first_send(b'{"prepared":"body"}')
+                raise CloudError("request_timeout", ambiguous=True)
+
+        output = io.StringIO()
+        with (patch.object(cli, "load_cloud_client", return_value=FakeCloud()),
+              patch.object(cli, "session_binding", return_value=binding),
+              patch.object(cli, "session_challenge", return_value={
+                  "observedAt": "2026-10-09T12:00:00.100Z", "witness": {"fixture": True},
+                  "validUntilMonotonic": time.monotonic() + 0.5,
+              }),
+              redirect_stdout(output)):
+            code = cli.main(["--state-dir", str(self.state), "attach", "--runtime-id", runtime_id,
+                             "--session-id", session_id, "--cloud-config", str(self.state / "cloud.json")])
+        self.assertEqual(code, 2)
+        value = json.loads(output.getvalue())
+        self.assertEqual(value["attached"], None)
+        self.assertEqual(value["reason"], "commit_outcome_unknown")
+        self.assertEqual(value["pendingCommit"]["status"], "outcome_unknown")
+        self.assertEqual(value["pendingCommit"]["operation"], "attach")
+        self.assertTrue(self.state.exists())
+        pending = cli.load_pending_commit(self.state, "attach", session_id)
+        self.assertEqual(base64.b64decode(pending["bodyB64"]), b'{"prepared":"body"}')
+
+    def test_pending_commit_restart_replays_exact_body_without_native_resampling(self):
+        runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
+        binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                   "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
+                   "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+        challenge = {"challengeId": str(uuid.uuid4()), "issuedAt": _iso(time.time()),
+                     "expiresAt": _iso(time.time() + 30)}
+        intent = {"operation": "attach", "runtimeId": runtime_id,
+                  "expectedRuntimeGeneration": None, "expectedAttachmentGeneration": None,
+                  "expectedNativeBinding": binding}
+        witness = {"version": 2, "nonce": 0, "clientId": binding["clientId"],
+                   "backendPid": binding["backendPid"], "connectionId": binding["connectionId"],
+                   "threadId": binding["threadId"], "generation": binding["generation"],
+                   "eligible": True, "sequence": 1, "cause": "",
+                   "serverInstanceId": binding["serverInstanceId"],
+                   "serverGeneration": binding["serverGeneration"], "leaseMs": 750}
+        evidence = {"observedAt": challenge["issuedAt"], "witness": witness}
+        body = json.dumps({"challengeId": challenge["challengeId"], "runtimeId": runtime_id,
+                           "expectedRuntimeGeneration": None, "expectedAttachmentGeneration": None,
+                           "nativeEvidence": evidence}, separators=(",", ":"), ensure_ascii=False).encode()
+        cloud_id = {"origin": "https://events.example.com", "principal": "adam@knitli.com",
+                    "agent": "codex", "nodeId": str(uuid.uuid4()), "nodeGeneration": 1}
+        artifact = {"version": 1, "operation": "attach", "sessionId": session_id,
+                    "cloudIdentity": cloud_id, "intent": intent, "challenge": challenge,
+                    "evidence": evidence, "bodyB64": base64.b64encode(body).decode("ascii"),
+                    "safeExpiryAt": _iso(time.time() + 90)}
+        cli.save_pending_commit(self.state, "attach", session_id, artifact)
+        response = {"status": "attached", "runtimeId": runtime_id, "runtimeGeneration": 1,
+                    "nodeId": cloud_id["nodeId"], "nodeGeneration": 1, "attachmentGeneration": 1,
+                    "leaseUntil": _iso(time.time() + 90), "nativeBinding": binding}
+
+        class FakeCloud:
+            origin, principal, agent = cloud_id["origin"], cloud_id["principal"], cloud_id["agent"]
+            node_id, node_generation = cloud_id["nodeId"], cloud_id["nodeGeneration"]
+
+            async def attach(self, request, saved_challenge, saved_evidence, *, prepared_body=None, recovery=False):
+                self.replayed = (request, saved_challenge, saved_evidence, prepared_body, recovery)
+                return response
+
+        fake = FakeCloud()
+        output = io.StringIO()
+        with (patch.object(cli, "load_cloud_client", return_value=fake),
+              patch.object(cli, "session_binding", side_effect=[binding, binding]),
+              patch.object(cli, "session_challenge", side_effect=AssertionError("must not resample")),
+              redirect_stdout(output)):
+            code = cli.main(["--state-dir", str(self.state), "attach", "--runtime-id", runtime_id,
+                             "--session-id", session_id, "--cloud-config", str(self.state / "cloud.json")])
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.replayed, (intent, challenge, evidence, body, True))
+        self.assertIsNone(cli.load_pending_commit(self.state, "attach", session_id))
+
+    def test_concurrent_loser_preserves_winner_pending_commit(self):
+        runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
+        binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                   "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
+                   "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+        challenge = {"challengeId": str(uuid.uuid4()), "issuedAt": _iso(time.time()),
+                     "expiresAt": _iso(time.time() + 30)}
+
+        class FakeCloud:
+            origin, principal, agent = "https://events.example.com", "adam@knitli.com", "codex"
+            node_id, node_generation = str(uuid.uuid4()), 1
+
+            async def native_challenge(self, _intent):
+                return challenge
+
+            async def attach(self, _intent, _challenge, _evidence, *, on_first_send=None):
+                on_first_send(b'{"loser":"body"}')
+
+        original_save = cli.save_pending_commit
+
+        def another_invocation_won(state_dir, operation, ident, candidate):
+            original_save(state_dir, operation, ident, candidate)
+            raise SecurityError("pending_commit_exists")
+
+        output = io.StringIO()
+        with (patch.object(cli, "load_cloud_client", return_value=FakeCloud()),
+              patch.object(cli, "save_pending_commit", side_effect=another_invocation_won),
+              patch.object(cli, "session_binding", return_value=binding),
+              patch.object(cli, "session_challenge", return_value={
+                  "observedAt": challenge["issuedAt"],
+                  "validUntilMonotonic": time.monotonic() + 0.5,
+                  "witness": {"fixture": True},
+              }),
+              redirect_stdout(output)):
+            code = cli.main(["--state-dir", str(self.state), "attach", "--runtime-id", runtime_id,
+                             "--session-id", session_id, "--cloud-config", str(self.state / "cloud.json")])
+        self.assertEqual(code, 2)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["reason"], "commit_outcome_unknown")
+        self.assertEqual(result["lastError"], "pending_commit_exists")
+        pending = cli.load_pending_commit(self.state, "attach", session_id)
+        self.assertEqual(base64.b64decode(pending["bodyB64"]), b'{"loser":"body"}')
+
+    def test_pending_commit_past_safe_cutoff_stays_unknown_without_retry(self):
+        runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
+        binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                   "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
+                   "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+        challenge = {"challengeId": str(uuid.uuid4()), "issuedAt": _iso(time.time() - 120),
+                     "expiresAt": _iso(time.time() - 90)}
+        intent = {"operation": "attach", "runtimeId": runtime_id,
+                  "expectedRuntimeGeneration": None, "expectedAttachmentGeneration": None,
+                  "expectedNativeBinding": binding}
+        cloud_id = {"origin": "https://events.example.com", "principal": "adam@knitli.com",
+                    "agent": "codex", "nodeId": str(uuid.uuid4()), "nodeGeneration": 1}
+        artifact = {"version": 1, "operation": "attach", "sessionId": session_id,
+                    "cloudIdentity": cloud_id, "intent": intent, "challenge": challenge,
+                    "evidence": {"observedAt": _iso(time.time() - 120), "witness": {"sequence": 1}},
+                    "bodyB64": base64.b64encode(b"{}").decode("ascii"),
+                    "safeExpiryAt": _iso(time.time() - 1)}
+        cli.save_pending_commit(self.state, "attach", session_id, artifact)
+
+        class FakeCloud:
+            origin, principal, agent = cloud_id["origin"], cloud_id["principal"], cloud_id["agent"]
+            node_id, node_generation = cloud_id["nodeId"], cloud_id["nodeGeneration"]
+
+            async def attach(self, *_args, **_kwargs):
+                raise AssertionError("expired receipt must not be retried")
+
+        output = io.StringIO()
+        with (patch.object(cli, "load_cloud_client", return_value=FakeCloud()),
+              patch.object(cli, "session_binding", return_value=binding),
+              patch.object(cli, "session_challenge", side_effect=AssertionError("must not resample")),
+              redirect_stdout(output)):
+            code = cli.main(["--state-dir", str(self.state), "attach", "--runtime-id", runtime_id,
+                             "--session-id", session_id, "--cloud-config", str(self.state / "cloud.json")])
+        self.assertEqual(code, 2)
+        value = json.loads(output.getvalue())
+        self.assertEqual(value["reason"], "commit_outcome_unknown")
+        self.assertEqual(value["lastError"], "pending_receipt_window_closed")
+        self.assertEqual(cli.load_pending_commit(self.state, "attach", session_id), artifact)
+
+    def test_transfer_uses_running_daemon_as_single_store_writer(self):
+        source_id, replacement_id, session_id = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
+        binding = {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                   "backendPid": 123, "threadId": str(uuid.uuid4()), "generation": 2,
+                   "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3}
+        cloud_id = {"origin": "https://events.example.com", "principal": "adam@knitli.com",
+                    "agent": "codex", "nodeId": str(uuid.uuid4()), "nodeGeneration": 1}
+        challenge = {"challengeId": str(uuid.uuid4()), "issuedAt": _iso(time.time()),
+                     "expiresAt": _iso(time.time() + 30)}
+        response = {"status": "transferred", "sourceRuntimeId": source_id,
+                    "sourceRuntimeGeneration": 3, "sourceAttachmentGeneration": 4,
+                    "runtimeId": replacement_id, "runtimeGeneration": 7,
+                    "nodeId": cloud_id["nodeId"], "nodeGeneration": 1, "attachmentGeneration": 9,
+                    "leaseUntil": _iso(time.time() + 90), "nativeBinding": binding}
+        expected_cas = {
+            "sourceRuntimeId": source_id,
+            "expectedRuntimeGeneration": 2, "expectedAttachmentGeneration": 3,
+            "runtimeGeneration": 3, "attachmentGeneration": 4,
+        }
+
+        class FakeCloud:
+            origin, principal, agent = cloud_id["origin"], cloud_id["principal"], cloud_id["agent"]
+            node_id, node_generation = cloud_id["nodeId"], cloud_id["nodeGeneration"]
+
+            async def native_challenge(self, intent):
+                self.intent = intent
+                return challenge
+
+            async def transfer(self, intent, saved_challenge, evidence, *, on_first_send=None):
+                self.commit = (intent, saved_challenge, evidence)
+                on_first_send(b'{"exact":"body"}')
+                return response
+
+        fake = FakeCloud()
+        self.state.mkdir(mode=0o700)
+        (self.state / "control.sock").touch(mode=0o600)
+        output = io.StringIO()
+        with Store(self.state) as daemon_store:
+            async def daemon_request(_state_dir, command):
+                self.assertEqual(command["command"], "transfer-attachment")
+                self.assertEqual(command["transfer"], expected_cas)
+                stored = daemon_store.put_attachment(command["mapping"], transfer=command["transfer"])
+                return {"stored": True, "runtimeId": stored["runtimeId"]}
+
+            with (patch.object(cli, "load_cloud_client", return_value=fake),
+                  patch.object(cli, "session_binding", side_effect=[binding, binding]),
+                  patch.object(cli, "session_challenge", return_value={
+                      "observedAt": challenge["issuedAt"], "validUntilMonotonic": time.monotonic() + 0.5,
+                      "witness": {"fixture": True},
+                  }),
+                  patch.object(cli, "request", side_effect=daemon_request),
+                  patch.object(cli, "Store", side_effect=AssertionError("second writer opened")),
+                  redirect_stdout(output)):
+                code = cli.main([
+                    "--state-dir", str(self.state), "transfer",
+                    "--source-runtime-id", source_id,
+                    "--expected-source-runtime-generation", "2",
+                    "--expected-source-attachment-generation", "3",
+                    "--replacement-runtime-id", replacement_id,
+                    "--expected-replacement-runtime-generation", "7",
+                    "--expected-replacement-attachment-generation", "8",
+                    "--session-id", session_id,
+                    "--cloud-config", str(self.state / "cloud.json"),
+                ])
+
+            self.assertEqual(code, 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["remoteStatus"], "transferred")
+            self.assertEqual(result["localStatus"], "current")
+            self.assertIsNone(daemon_store.get_attachment(source_id))
+            self.assertEqual(daemon_store.get_attachment(replacement_id)["attachmentGeneration"], 9)
+        pending = cli.load_pending_commit(self.state, "transfer", session_id)
+        self.assertIsNone(pending)
+
+    def test_client_status_labels_presence_only(self):
+        output = io.StringIO()
+        presence = {"attached": False, "selection": "selected"}
+        with (patch.object(cli, "session_status", return_value=presence), redirect_stdout(output)):
+            code = cli.main(["--state-dir", str(self.state), "client-status", "--session-id", str(uuid.uuid4())])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "scope": "local_native_presence_only", "presence": presence,
+        })
 
     def test_enrollment_is_pending_and_key_stays_private(self):
         result = json.loads(self.cli("enroll", "--challenge", "owner-123", code=2))

@@ -15,6 +15,16 @@ The builder keeps only `PATH` for Git/Rustup discovery, an isolated `HOME` and `
 
 The evidence contains the upstream commit, full-tree archive selection and extraction filter, patch and file hashes, both accepted Cargo config paths and hashes, Git/Rustup/Cargo/rustc binary paths and hashes, exact Rust/Cargo versions, the 159 build-only lockfile version changes, and the CLI SHA-256. The selected offline Cargo cache remains same-user mutable local state; recording its path and configuration does not remotely attest the cached package bytes. `launcherQualified` is true only when the rebuilt file matches the existing launcher digest. A different digest remains a candidate and is refused by the shipped launcher.
 
+### Artifact handoff
+
+Keep the builder's executable and evidence JSON together as one external artifact
+pair; neither is included in the Python wheel. Before launch, require
+`launcherQualified: true`, recompute the executable SHA-256, and confirm it
+matches both `binarySha256` and `launcherSha256` in the evidence. Pass that
+absolute executable path and `launcherSha256` to `knitli-event-gateway launch`.
+The launcher checks the path and digest again immediately before execution. A
+candidate with `launcherQualified: false` is not launchable by the shipped CLI.
+
 The latest full-tree clean build and v3 runtime result are recorded in
 [`native-client-build-proof.json`](native-client-build-proof.json). The rebuilt
 candidate SHA-256 is
@@ -40,4 +50,9 @@ EVENT_NATIVE_QUALIFIER="$EVENT_PINNED_READER" "$EVENT_PROOF_PYTHON" -I -O \
   --output /private/tmp/codex-native-v3-runtime.json
 ```
 
-Review the source/build and runtime evidence together before changing `QUALIFIED_SHA256` in `event_gateway/launcher.py`. Public owner enrollment and cloud attachment remain blocked on the separately reviewed attach tuple/challenge/CAS contract and executable combined admission proof. Native self-report, a build manifest, or a checkbox does not grant public runtime authority.
+Review the source/build and runtime evidence together before any separately
+authorized qualification change. This runbook does not install the client or
+rotate the launcher's digest. Public owner enrollment and cloud attachment
+remain blocked on the separately reviewed attach tuple/challenge/CAS contract
+and executable combined admission proof. Native self-report, a build manifest,
+or a checkbox does not grant public runtime authority.

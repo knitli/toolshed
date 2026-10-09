@@ -10,12 +10,13 @@ import shutil
 # Test-only subprocesses invoke fixed git/node source-pin probes.
 import subprocess  # nosec B404
 import tempfile
+import time
 import unittest
 import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from event_gateway.cloud import CloudClient, CloudError, Credentials, canonical_node_proof, validate_admission
+from event_gateway.cloud import CloudClient, CloudError, Credentials, _iso, canonical_node_proof, validate_admission
 from event_gateway.gateway import Gateway
 from event_gateway.protocol import _timestamp, derive_delivery_id
 
@@ -90,6 +91,62 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
     async def send(self, **request):
         self.requests.append(request)
         return self.status, JSON_HEADERS, json.dumps(self.result).encode()
+
+    def native_binding(self):
+        return {
+            "clientId": str(uuid.uuid4()),
+            "connectionId": str(uuid.uuid4()),
+            "backendPid": 123,
+            "threadId": str(uuid.uuid4()),
+            "generation": 2,
+            "serverInstanceId": str(uuid.uuid4()),
+            "serverGeneration": 3,
+        }
+
+    def native_intent(self, operation, binding):
+        if operation in ("attach", "renew"):
+            return {
+                "operation": operation,
+                "runtimeId": str(uuid.uuid4()),
+                "expectedRuntimeGeneration": None if operation == "attach" else 4,
+                "expectedAttachmentGeneration": None if operation == "attach" else 5,
+                "expectedNativeBinding": binding,
+            }
+        return {
+            "operation": "transfer",
+            "sourceRuntimeId": str(uuid.uuid4()),
+            "expectedSourceRuntimeGeneration": 1,
+            "expectedSourceAttachmentGeneration": 2,
+            "replacementRuntimeId": str(uuid.uuid4()),
+            "expectedReplacementRuntimeGeneration": 4,
+            "expectedReplacementAttachmentGeneration": 5,
+            "expectedNativeBinding": binding,
+        }
+
+    def native_challenge_response(self):
+        return {"challengeId": str(uuid.uuid4()), "issuedAt": _iso(self.now),
+                "expiresAt": _iso(self.now + 30)}
+
+    def native_sample(self, binding, *, observed_at=None, lease_ms=5000):
+        witness = {
+            "version": 2,
+            "nonce": 8,
+            **{key: binding[key] for key in (
+                "clientId", "backendPid", "connectionId", "threadId", "generation",
+                "serverInstanceId", "serverGeneration",
+            )},
+            "eligible": True,
+            "sequence": 9,
+            "cause": "heartbeat",
+            "leaseMs": lease_ms,
+        }
+        return {"observedAt": _iso(self.now + 0.1),
+                "validUntilMonotonic": time.monotonic() + 0.5,
+                "witness": witness} if observed_at is None else {
+                    "observedAt": observed_at,
+                    "validUntilMonotonic": time.monotonic() + 0.5,
+                    "witness": witness,
+                }
 
     async def test_source_canonical_vector_and_signed_exact_request(self):
         vector = FIXTURE["nodeProof"]
@@ -668,12 +725,385 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             await self.client.complete_enrollment(challenge, mesh_ip="100.96.0.1", mesh_port=8789, agents=[self.client.agent])
         self.assertEqual(self.requests, [])
 
-    async def test_attach_renew_never_qualify(self):
-        for method in (self.client.attach, self.client.renew):
-            for status, result in ((409, {"error": "native_binding_unqualified"}), (200, {"status": "qualified"})):
-                self.status, self.result = status, result
-                with self.assertRaisesRegex(CloudError, "^native_binding_unqualified$"):
-                    await method(FIXTURE["original"]["runtimeId"])
+    async def test_native_challenge_and_attach_use_closed_intent_and_evidence(self):
+        binding = self.native_binding()
+        intent = self.native_intent("attach", binding)
+        challenge = self.native_challenge_response()
+        self.result = challenge
+        self.assertEqual(await self.client.native_challenge(intent), challenge)
+        request = self.requests[-1]
+        self.assertEqual(request["url"], self.client.origin + "/v1/runtimes/challenge")
+        self.assertEqual(json.loads(request["body"]), intent)
+        proof = json.loads(request["headers"]["x-event-node-proof"])
+        self.key.public_key().verify(base64.urlsafe_b64decode(proof["signature"] + "=="),
+                                     canonical_node_proof(self.client.principal, self.client.origin,
+                                                          "/v1/runtimes/challenge", request["body"], proof))
+
+        evidence = self.native_sample(binding)
+        self.result = {
+            "status": "attached", "runtimeId": intent["runtimeId"], "runtimeGeneration": 1,
+            "nodeId": self.client.node_id, "nodeGeneration": self.client.node_generation,
+            "attachmentGeneration": 1, "leaseUntil": _iso(self.now + 90),
+            "nativeBinding": binding,
+        }
+        self.now += 0.2
+        self.assertEqual(await self.client.attach(intent, challenge, evidence), self.result)
+        commit = self.requests[-1]
+        self.assertEqual(commit["url"], self.client.origin + "/v1/runtimes/attach")
+        self.assertEqual(json.loads(commit["body"]), {
+            "challengeId": challenge["challengeId"], "runtimeId": intent["runtimeId"],
+            "expectedRuntimeGeneration": None, "expectedAttachmentGeneration": None,
+            "nativeEvidence": {"observedAt": evidence["observedAt"], "witness": evidence["witness"]},
+        })
+        commit_proof = json.loads(commit["headers"]["x-event-node-proof"])
+        self.assertNotEqual(commit_proof["nonce"], proof["nonce"])
+
+    async def test_native_admission_external_vectors_match_python_wire_and_proof(self):
+        native = FIXTURE["nativeAdmission"]
+
+        def assert_node_proof(vector, request):
+            self.assertEqual(request["body"], vector["body"].encode())
+            self.assertEqual(request["method"], vector["binding"]["method"])
+            self.assertEqual(request["url"], vector["binding"]["audience"] + vector["binding"]["path"])
+            self.assertEqual(hashlib.sha256(request["body"]).hexdigest(), vector["binding"]["bodySha256"])
+            proof = json.loads(request["headers"]["x-event-node-proof"])
+            self.assertEqual(set(proof), {"nodeId", "nodeGeneration", "issuedAt", "nonce", "signature"})
+            for key in ("nodeId", "nodeGeneration", "issuedAt", "nonce"):
+                self.assertEqual(proof[key], vector["proof"][key])
+            canonical = canonical_node_proof(
+                vector["principal"], vector["binding"]["audience"],
+                vector["binding"]["path"], request["body"], proof,
+            )
+            self.assertEqual(canonical, vector["canonical"].encode())
+            self.key.public_key().verify(
+                base64.urlsafe_b64decode(proof["signature"] + "=="),
+                vector["canonical"].encode(),
+            )
+
+        for operation in ("attach", "renew", "transfer"):
+            with self.subTest(operation=operation, phase="challenge"):
+                challenge_request = native["challengeRequests"][operation]
+                challenge_response = native["challengeResponses"][operation]
+                vector = native["nodeProofs"][f"challenge{operation.title()}"]
+                self.now = _timestamp(vector["proof"]["issuedAt"]) / 1000
+                self.client._nonce = lambda nonce=vector["proof"]["nonce"]: nonce
+                self.result = challenge_response
+                self.assertEqual(await self.client.native_challenge(challenge_request), challenge_response)
+                assert_node_proof(vector, self.requests[-1])
+
+            with self.subTest(operation=operation, phase="commit"):
+                vector = native["nodeProofs"][operation]
+                challenge_response = native["challengeResponses"][operation]
+                self.now = _timestamp(vector["proof"]["issuedAt"]) / 1000
+                self.client._nonce = lambda nonce=vector["proof"]["nonce"]: nonce
+                self.result = native["successResponses"][operation]
+                local_evidence = {
+                    **native["evidence"],
+                    "validUntilMonotonic": time.monotonic() + min(native["witness"]["leaseMs"], 750) / 1000,
+                }
+                self.assertEqual(
+                    await getattr(self.client, operation)(
+                        native["challengeRequests"][operation], challenge_response, local_evidence,
+                    ),
+                    native["successResponses"][operation],
+                )
+                assert_node_proof(vector, self.requests[-1])
+
+    async def test_native_admission_external_rejection_vectors_match_python(self):
+        native = FIXTURE["nativeAdmission"]
+        challenge_rejections = {
+            "attach_partial_null_cas", "transfer_same_runtime", "unexpected_binding_field",
+        }
+        commit_rejections = {
+            "ineligible_witness": "attach",
+            "wrong_witness_version": "renew",
+            "unsafe_witness_integer": "renew",
+        }
+
+        for vector in native["rejections"]:
+            name = vector["name"]
+            value = vector["value"]
+            with self.subTest(vector=name):
+                before = len(self.requests)
+                if name in challenge_rejections:
+                    with self.assertRaisesRegex(CloudError, "^invalid_request$"):
+                        await self.client.native_challenge(value)
+                elif name in commit_rejections:
+                    operation = commit_rejections[name]
+                    local_evidence = {
+                        **value["nativeEvidence"],
+                        "validUntilMonotonic": time.monotonic() + 0.5,
+                    }
+                    challenge = native["challengeResponses"][operation]
+                    with self.assertRaisesRegex(CloudError, "^invalid_request$"):
+                        await getattr(self.client, operation)(
+                            native["challengeRequests"][operation], challenge, local_evidence,
+                        )
+                elif name == "wrong_challenge_ttl":
+                    self.result = value
+                    with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+                        await self.client.native_challenge(native["challengeRequests"]["attach"])
+                    self.assertEqual(len(self.requests), before + 1)
+                    continue
+                else:
+                    self.fail(f"unhandled native admission rejection vector: {name}")
+                self.assertEqual(len(self.requests), before)
+
+        self.assertEqual(len(native["errors"]), 23)
+        self.assertTrue(all(set(error) == {"error"} and isinstance(error["error"], str)
+                            for error in native["errors"]))
+
+    async def test_native_renew_and_transfer_validate_both_cas_pairs(self):
+        binding = self.native_binding()
+        challenge = self.native_challenge_response()
+        evidence = self.native_sample(binding)
+
+        renew = self.native_intent("renew", binding)
+        self.result = {"status": "renewed", "runtimeId": renew["runtimeId"],
+                       "runtimeGeneration": 4, "nodeId": self.client.node_id,
+                       "nodeGeneration": self.client.node_generation, "attachmentGeneration": 5,
+                       "leaseUntil": _iso(self.now + 90), "nativeBinding": binding}
+        self.now += 0.2
+        self.assertEqual(await self.client.renew(renew, challenge, evidence), self.result)
+        renew_body = json.loads(self.requests[-1]["body"])
+        self.assertEqual(renew_body["expectedRuntimeGeneration"], 4)
+        self.assertEqual(renew_body["expectedAttachmentGeneration"], 5)
+
+        transfer = self.native_intent("transfer", binding)
+        challenge = self.native_challenge_response()
+        evidence = self.native_sample(binding)
+        self.result = {
+            "status": "transferred", "sourceRuntimeId": transfer["sourceRuntimeId"],
+            "sourceRuntimeGeneration": 2, "sourceAttachmentGeneration": 3,
+            "runtimeId": transfer["replacementRuntimeId"], "runtimeGeneration": 4,
+            "nodeId": self.client.node_id, "nodeGeneration": self.client.node_generation,
+            "attachmentGeneration": 6, "leaseUntil": _iso(self.now + 90), "nativeBinding": binding,
+        }
+        self.now += 0.2
+        self.assertEqual(await self.client.transfer(transfer, challenge, evidence), self.result)
+        body = json.loads(self.requests[-1]["body"])
+        for key in ("expectedSourceRuntimeGeneration", "expectedSourceAttachmentGeneration",
+                    "expectedReplacementRuntimeGeneration", "expectedReplacementAttachmentGeneration"):
+            self.assertEqual(body[key], transfer[key])
+        self.assertEqual(body["sourceRuntimeId"], transfer["sourceRuntimeId"])
+        self.assertEqual(body["replacementRuntimeId"], transfer["replacementRuntimeId"])
+
+    async def test_native_commit_retries_same_body_only_after_ambiguous_transport(self):
+        binding = self.native_binding()
+        intent = self.native_intent("attach", binding)
+        challenge = self.native_challenge_response()
+        evidence = self.native_sample(binding)
+        response = {"status": "attached", "runtimeId": intent["runtimeId"],
+                    "runtimeGeneration": 1, "nodeId": self.client.node_id,
+                    "nodeGeneration": self.client.node_generation, "attachmentGeneration": 1,
+                    "leaseUntil": _iso(self.now + 90), "nativeBinding": binding}
+        requests = []
+
+        async def timeout_once(**request):
+            requests.append(request)
+            if len(requests) == 1:
+                raise TimeoutError()
+            return 200, JSON_HEADERS, json.dumps(response).encode()
+
+        self.client._send = timeout_once
+        self.now += 0.2
+        self.assertEqual(await self.client.attach(intent, challenge, evidence), response)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[0]["body"], requests[1]["body"])
+        first = json.loads(requests[0]["headers"]["x-event-node-proof"])
+        second = json.loads(requests[1]["headers"]["x-event-node-proof"])
+        self.assertNotEqual(first["nonce"], second["nonce"])
+        self.assertNotEqual(requests[0]["headers"]["authorization"], requests[1]["headers"]["authorization"])
+        self.assertNotEqual(requests[0]["headers"]["cf-access-token"], requests[1]["headers"]["cf-access-token"])
+
+        requests.clear()
+        self.client._send = timeout_once
+        self.client._credentials = lambda: (_ for _ in ()).throw(TimeoutError())
+        with self.assertRaisesRegex(CloudError, "^(request_timeout|unavailable)$"):
+            await self.client.attach(intent, challenge, evidence)
+        self.assertEqual(requests, [])
+
+    async def test_pending_commit_replays_exact_original_body_after_sorted_artifact_reload(self):
+        binding = self.native_binding()
+        intent = self.native_intent("attach", binding)
+        challenge = self.native_challenge_response()
+        local_evidence = self.native_sample(binding)
+        evidence = {"observedAt": local_evidence["observedAt"],
+                    "witness": local_evidence["witness"]}
+        body = json.dumps({
+            "challengeId": challenge["challengeId"], "runtimeId": intent["runtimeId"],
+            "expectedRuntimeGeneration": None, "expectedAttachmentGeneration": None,
+            "nativeEvidence": evidence,
+        }, separators=(",", ":"), ensure_ascii=False).encode()
+        # The durable artifact serializes objects with sorted keys, while bodyB64
+        # retains the original wire bytes from the first attempt.
+        reloaded_evidence = json.loads(json.dumps(evidence, sort_keys=True))
+        response = {"status": "attached", "runtimeId": intent["runtimeId"],
+                    "runtimeGeneration": 1, "nodeId": self.client.node_id,
+                    "nodeGeneration": self.client.node_generation, "attachmentGeneration": 1,
+                    "leaseUntil": _iso(self.now + 90), "nativeBinding": binding}
+        requests = []
+
+        async def send(**request):
+            requests.append(request)
+            return 200, JSON_HEADERS, json.dumps(response).encode()
+
+        self.client._send = send
+        replay = await self.client.attach(
+            intent, challenge, reloaded_evidence, prepared_body=body, recovery=True,
+        )
+        self.assertEqual(replay, response)
+        self.assertEqual(requests[0]["body"], body)
+        self.assertEqual(self.credential_calls, 1)
+        self.assertEqual(requests[0]["headers"]["cf-access-token"], "human-proof-1")
+        self.assertEqual(requests[0]["headers"]["authorization"], "Bearer agent-proof-1")
+        self.assertIn("x-event-node-proof", requests[0]["headers"])
+
+        changed_type = body.replace(b'"expectedRuntimeGeneration":null',
+                                    b'"expectedRuntimeGeneration":false')
+        requests.clear()
+        with self.assertRaisesRegex(CloudError, "^invalid_pending_commit$"):
+            await self.client.attach(
+                intent, challenge, reloaded_evidence,
+                prepared_body=changed_type, recovery=True,
+            )
+        self.assertEqual(requests, [])
+
+    async def test_native_witness_lone_surrogate_is_json_string_escaped(self):
+        binding = self.native_binding()
+        intent = self.native_intent("attach", binding)
+        challenge = self.native_challenge_response()
+        evidence = self.native_sample(binding)
+        evidence["witness"]["cause"] = chr(0xD800)
+        response = {"status": "attached", "runtimeId": intent["runtimeId"],
+                    "runtimeGeneration": 1, "nodeId": self.client.node_id,
+                    "nodeGeneration": self.client.node_generation, "attachmentGeneration": 1,
+                    "leaseUntil": _iso(self.now + 90), "nativeBinding": binding}
+        self.result = response
+        self.now += 0.2
+        self.assertEqual(await self.client.attach(intent, challenge, evidence), response)
+        body = self.requests[-1]["body"]
+        self.assertIn(b'"cause":"\\ud800"', body)
+        self.assertEqual(json.loads(body)["nativeEvidence"]["witness"]["cause"], chr(0xD800))
+
+    async def test_native_challenge_rejects_bad_union_and_malformed_response(self):
+        binding = self.native_binding()
+        intent = self.native_intent("transfer", binding)
+        intent["expectedReplacementAttachmentGeneration"] = 2**53 - 1
+        with self.assertRaisesRegex(CloudError, "^invalid_request$"):
+            await self.client.native_challenge(intent)
+        self.assertEqual(self.requests, [])
+
+        intent = self.native_intent("attach", binding)
+        for response in (
+            {**self.native_challenge_response(), "extra": True},
+            {"challengeId": str(uuid.uuid4()), "issuedAt": _iso(self.now),
+             "expiresAt": _iso(self.now + 29)},
+        ):
+            self.result = response
+            with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+                await self.client.native_challenge(intent)
+
+    async def test_native_commit_does_not_retry_explicit_conflict(self):
+        binding = self.native_binding()
+        intent = self.native_intent("attach", binding)
+        challenge = self.native_challenge_response()
+        evidence = self.native_sample(binding)
+        self.status, self.result = 409, {"error": "conflict"}
+        self.now += 0.2
+        with self.assertRaisesRegex(CloudError, "^conflict$"):
+            await self.client.attach(intent, challenge, evidence)
+        self.assertEqual(len(self.requests), 1)
+
+    async def test_native_commit_keeps_explicit_access_denial_definitive(self):
+        binding = self.native_binding()
+        intent = self.native_intent("attach", binding)
+        challenge = self.native_challenge_response()
+        evidence = self.native_sample(binding)
+        self.status, self.result = 403, {"error": "denied"}
+        self.now += 0.2
+        with self.assertRaisesRegex(CloudError, "^denied$") as caught:
+            await self.client.attach(intent, challenge, evidence)
+        self.assertFalse(caught.exception.ambiguous)
+        self.assertEqual(len(self.requests), 1)
+
+    async def test_malformed_success_and_http_5xx_retry_exact_native_commit(self):
+        binding = self.native_binding()
+        intent = self.native_intent("attach", binding)
+        challenge = self.native_challenge_response()
+        response = {"status": "attached", "runtimeId": intent["runtimeId"],
+                    "runtimeGeneration": 1, "nodeId": self.client.node_id,
+                    "nodeGeneration": self.client.node_generation, "attachmentGeneration": 1,
+                    "leaseUntil": _iso(self.now + 90), "nativeBinding": binding}
+
+        for first_status, first_body in (
+            (200, b'{"status":'),
+            (302, b'{"redirect":"refused"}'),
+            (408, b'{"error":"request_timeout"}'),
+            (503, b'{"error":"runtime_disabled"}'),
+        ):
+            requests = []
+            evidence = self.native_sample(binding)
+
+            async def recover(**request):
+                requests.append(request)
+                if len(requests) == 1:
+                    return first_status, JSON_HEADERS, first_body
+                return 200, JSON_HEADERS, json.dumps(response).encode()
+
+            self.client._send = recover
+            self.now += 0.2
+            self.assertEqual(await self.client.attach(intent, challenge, evidence), response)
+            self.assertEqual(len(requests), 2)
+            self.assertEqual(requests[0]["body"], requests[1]["body"])
+
+    async def test_5xx_then_definitive_recovery_error_remains_unknown(self):
+        binding = self.native_binding()
+        intent = self.native_intent("attach", binding)
+        challenge = self.native_challenge_response()
+        evidence = self.native_sample(binding)
+        requests = []
+
+        async def unavailable_then_conflict(**request):
+            requests.append(request)
+            if len(requests) == 1:
+                return 500, JSON_HEADERS, b'{"error":"unavailable"}'
+            return 409, JSON_HEADERS, b'{"error":"conflict"}'
+
+        self.client._send = unavailable_then_conflict
+        self.now += 0.2
+        with self.assertRaisesRegex(CloudError, "^conflict$") as caught:
+            await self.client.attach(intent, challenge, evidence)
+        self.assertTrue(caught.exception.ambiguous)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[0]["body"], requests[1]["body"])
+
+    async def test_ambiguous_commit_retry_or_malformed_success_stays_unknown(self):
+        binding = self.native_binding()
+        intent = self.native_intent("attach", binding)
+        challenge = self.native_challenge_response()
+        evidence = self.native_sample(binding)
+        requests = []
+
+        async def timeout_then_conflict(**request):
+            requests.append(request)
+            if len(requests) == 1:
+                raise TimeoutError()
+            return 409, JSON_HEADERS, b'{"error":"conflict"}'
+
+        self.client._send = timeout_then_conflict
+        self.now += 0.2
+        with self.assertRaisesRegex(CloudError, "^conflict$") as caught:
+            await self.client.attach(intent, challenge, evidence)
+        self.assertTrue(caught.exception.ambiguous)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[0]["body"], requests[1]["body"])
+
+        self.client._send = lambda **_request: asyncio.sleep(0, result=(200, JSON_HEADERS, b"{}"))
+        self.now += 0.2
+        with self.assertRaisesRegex(CloudError, "^invalid_response$") as caught:
+            await self.client.attach(intent, challenge, evidence)
+        self.assertTrue(caught.exception.ambiguous)
 
 
 if __name__ == "__main__":

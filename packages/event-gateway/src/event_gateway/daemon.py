@@ -56,6 +56,16 @@ async def serve(state_dir):
                     ):
                         store.detach(request["runtimeId"])
                         result = {"detached": True}
+                    elif (isinstance(request, dict)
+                          and set(request) == {"command", "mapping"}
+                          and request["command"] == "put-attachment"):
+                        stored = store.put_attachment(request["mapping"])
+                        result = {"stored": True, "runtimeId": stored["runtimeId"]}
+                    elif (isinstance(request, dict)
+                          and set(request) == {"command", "mapping", "transfer"}
+                          and request["command"] == "transfer-attachment"):
+                        stored = store.put_attachment(request["mapping"], transfer=request["transfer"])
+                        result = {"stored": True, "runtimeId": stored["runtimeId"]}
                     else:
                         result = {"reason": "unsupported_command"}
                     writer.write(json.dumps(result).encode() + b"\n")

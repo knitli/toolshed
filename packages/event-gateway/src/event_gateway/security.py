@@ -85,6 +85,28 @@ def load_or_create_signing_key(path):
         os.close(directory_fd)
 
 
+def load_signing_key(path):
+    """Load the already enrolled private node key without creating or rotating it."""
+    path = Path(path).absolute()
+    ensure_private_directory(path.parent)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1
+                    or info.st_size > 4096):
+                raise SecurityError("unsafe_signing_key")
+            key = serialization.load_pem_private_key(stream.read(4097), password=None)
+            if not isinstance(key, Ed25519PrivateKey):
+                raise SecurityError("invalid_signing_key")
+            return key
+    except SecurityError:
+        raise
+    except (OSError, ValueError, TypeError):
+        raise SecurityError("invalid_signing_key") from None
+
+
 def _encode(value):
     return base64.urlsafe_b64encode(value).rstrip(b'=').decode('ascii')
 

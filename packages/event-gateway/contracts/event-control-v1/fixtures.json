@@ -203,6 +203,601 @@
     "nodeId": "00000000-0000-4000-8000-000000000001",
     "status": "not_started"
   },
+  "nativeAdmission": {
+    "ids": {
+      "runtime": "00000000-0000-4000-8000-000000000003",
+      "sourceRuntime": "00000000-0000-4000-8000-000000000004",
+      "replacementRuntime": "00000000-0000-4000-8000-000000000005",
+      "attachChallenge": "00000000-0000-4000-8000-000000000006",
+      "renewChallenge": "00000000-0000-4000-8000-000000000007",
+      "transferChallenge": "00000000-0000-4000-8000-000000000008",
+      "client": "00000000-0000-4000-8000-000000000009",
+      "connection": "00000000-0000-4000-8000-000000000010",
+      "thread": "00000000-0000-4000-8000-000000000011",
+      "serverInstance": "00000000-0000-4000-8000-000000000012",
+      "challengeProofAttach": "00000000-0000-4000-8000-000000000013",
+      "challengeProofRenew": "00000000-0000-4000-8000-000000000014",
+      "challengeProofTransfer": "00000000-0000-4000-8000-000000000015",
+      "attachProof": "00000000-0000-4000-8000-000000000016",
+      "renewProof": "00000000-0000-4000-8000-000000000017",
+      "transferProof": "00000000-0000-4000-8000-000000000018"
+    },
+    "binding": {
+      "clientId": "00000000-0000-4000-8000-000000000009",
+      "connectionId": "00000000-0000-4000-8000-000000000010",
+      "backendPid": 4321,
+      "threadId": "00000000-0000-4000-8000-000000000011",
+      "generation": 7,
+      "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+      "serverGeneration": 2
+    },
+    "witness": {
+      "version": 2,
+      "nonce": 11,
+      "clientId": "00000000-0000-4000-8000-000000000009",
+      "backendPid": 4321,
+      "connectionId": "00000000-0000-4000-8000-000000000010",
+      "threadId": "00000000-0000-4000-8000-000000000011",
+      "generation": 7,
+      "eligible": true,
+      "sequence": 23,
+      "cause": "selection_changed",
+      "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+      "serverGeneration": 2,
+      "leaseMs": 500
+    },
+    "evidence": {
+      "observedAt": "2026-10-09T12:00:58.100Z",
+      "witness": {
+        "version": 2,
+        "nonce": 11,
+        "clientId": "00000000-0000-4000-8000-000000000009",
+        "backendPid": 4321,
+        "connectionId": "00000000-0000-4000-8000-000000000010",
+        "threadId": "00000000-0000-4000-8000-000000000011",
+        "generation": 7,
+        "eligible": true,
+        "sequence": 23,
+        "cause": "selection_changed",
+        "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+        "serverGeneration": 2,
+        "leaseMs": 500
+      }
+    },
+    "challengeRequests": {
+      "attach": {
+        "operation": "attach",
+        "runtimeId": "00000000-0000-4000-8000-000000000003",
+        "expectedRuntimeGeneration": null,
+        "expectedAttachmentGeneration": null,
+        "expectedNativeBinding": {
+          "clientId": "00000000-0000-4000-8000-000000000009",
+          "connectionId": "00000000-0000-4000-8000-000000000010",
+          "backendPid": 4321,
+          "threadId": "00000000-0000-4000-8000-000000000011",
+          "generation": 7,
+          "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+          "serverGeneration": 2
+        }
+      },
+      "renew": {
+        "operation": "renew",
+        "runtimeId": "00000000-0000-4000-8000-000000000003",
+        "expectedRuntimeGeneration": 1,
+        "expectedAttachmentGeneration": 1,
+        "expectedNativeBinding": {
+          "clientId": "00000000-0000-4000-8000-000000000009",
+          "connectionId": "00000000-0000-4000-8000-000000000010",
+          "backendPid": 4321,
+          "threadId": "00000000-0000-4000-8000-000000000011",
+          "generation": 7,
+          "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+          "serverGeneration": 2
+        }
+      },
+      "transfer": {
+        "operation": "transfer",
+        "sourceRuntimeId": "00000000-0000-4000-8000-000000000004",
+        "expectedSourceRuntimeGeneration": 2,
+        "expectedSourceAttachmentGeneration": 3,
+        "replacementRuntimeId": "00000000-0000-4000-8000-000000000005",
+        "expectedReplacementRuntimeGeneration": 4,
+        "expectedReplacementAttachmentGeneration": 5,
+        "expectedNativeBinding": {
+          "clientId": "00000000-0000-4000-8000-000000000009",
+          "connectionId": "00000000-0000-4000-8000-000000000010",
+          "backendPid": 4321,
+          "threadId": "00000000-0000-4000-8000-000000000011",
+          "generation": 7,
+          "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+          "serverGeneration": 2
+        }
+      }
+    },
+    "challengeResponses": {
+      "attach": {
+        "challengeId": "00000000-0000-4000-8000-000000000006",
+        "issuedAt": "2026-10-09T12:00:58.000Z",
+        "expiresAt": "2026-10-09T12:01:28.000Z"
+      },
+      "renew": {
+        "challengeId": "00000000-0000-4000-8000-000000000007",
+        "issuedAt": "2026-10-09T12:00:58.000Z",
+        "expiresAt": "2026-10-09T12:01:28.000Z"
+      },
+      "transfer": {
+        "challengeId": "00000000-0000-4000-8000-000000000008",
+        "issuedAt": "2026-10-09T12:00:58.000Z",
+        "expiresAt": "2026-10-09T12:01:28.000Z"
+      }
+    },
+    "commitRequests": {
+      "attach": {
+        "challengeId": "00000000-0000-4000-8000-000000000006",
+        "runtimeId": "00000000-0000-4000-8000-000000000003",
+        "expectedRuntimeGeneration": null,
+        "expectedAttachmentGeneration": null,
+        "nativeEvidence": {
+          "observedAt": "2026-10-09T12:00:58.100Z",
+          "witness": {
+            "version": 2,
+            "nonce": 11,
+            "clientId": "00000000-0000-4000-8000-000000000009",
+            "backendPid": 4321,
+            "connectionId": "00000000-0000-4000-8000-000000000010",
+            "threadId": "00000000-0000-4000-8000-000000000011",
+            "generation": 7,
+            "eligible": true,
+            "sequence": 23,
+            "cause": "selection_changed",
+            "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+            "serverGeneration": 2,
+            "leaseMs": 500
+          }
+        }
+      },
+      "renew": {
+        "challengeId": "00000000-0000-4000-8000-000000000007",
+        "runtimeId": "00000000-0000-4000-8000-000000000003",
+        "expectedRuntimeGeneration": 1,
+        "expectedAttachmentGeneration": 1,
+        "nativeEvidence": {
+          "observedAt": "2026-10-09T12:00:58.100Z",
+          "witness": {
+            "version": 2,
+            "nonce": 11,
+            "clientId": "00000000-0000-4000-8000-000000000009",
+            "backendPid": 4321,
+            "connectionId": "00000000-0000-4000-8000-000000000010",
+            "threadId": "00000000-0000-4000-8000-000000000011",
+            "generation": 7,
+            "eligible": true,
+            "sequence": 23,
+            "cause": "selection_changed",
+            "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+            "serverGeneration": 2,
+            "leaseMs": 500
+          }
+        }
+      },
+      "transfer": {
+        "challengeId": "00000000-0000-4000-8000-000000000008",
+        "sourceRuntimeId": "00000000-0000-4000-8000-000000000004",
+        "expectedSourceRuntimeGeneration": 2,
+        "expectedSourceAttachmentGeneration": 3,
+        "replacementRuntimeId": "00000000-0000-4000-8000-000000000005",
+        "expectedReplacementRuntimeGeneration": 4,
+        "expectedReplacementAttachmentGeneration": 5,
+        "nativeEvidence": {
+          "observedAt": "2026-10-09T12:00:58.100Z",
+          "witness": {
+            "version": 2,
+            "nonce": 11,
+            "clientId": "00000000-0000-4000-8000-000000000009",
+            "backendPid": 4321,
+            "connectionId": "00000000-0000-4000-8000-000000000010",
+            "threadId": "00000000-0000-4000-8000-000000000011",
+            "generation": 7,
+            "eligible": true,
+            "sequence": 23,
+            "cause": "selection_changed",
+            "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+            "serverGeneration": 2,
+            "leaseMs": 500
+          }
+        }
+      }
+    },
+    "successResponses": {
+      "attach": {
+        "status": "attached",
+        "runtimeId": "00000000-0000-4000-8000-000000000003",
+        "runtimeGeneration": 1,
+        "nodeId": "00000000-0000-4000-8000-000000000001",
+        "nodeGeneration": 1,
+        "attachmentGeneration": 1,
+        "leaseUntil": "2026-10-09T12:02:28.100Z",
+        "nativeBinding": {
+          "clientId": "00000000-0000-4000-8000-000000000009",
+          "connectionId": "00000000-0000-4000-8000-000000000010",
+          "backendPid": 4321,
+          "threadId": "00000000-0000-4000-8000-000000000011",
+          "generation": 7,
+          "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+          "serverGeneration": 2
+        }
+      },
+      "renew": {
+        "status": "renewed",
+        "runtimeId": "00000000-0000-4000-8000-000000000003",
+        "runtimeGeneration": 1,
+        "nodeId": "00000000-0000-4000-8000-000000000001",
+        "nodeGeneration": 1,
+        "attachmentGeneration": 1,
+        "leaseUntil": "2026-10-09T12:02:28.100Z",
+        "nativeBinding": {
+          "clientId": "00000000-0000-4000-8000-000000000009",
+          "connectionId": "00000000-0000-4000-8000-000000000010",
+          "backendPid": 4321,
+          "threadId": "00000000-0000-4000-8000-000000000011",
+          "generation": 7,
+          "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+          "serverGeneration": 2
+        }
+      },
+      "transfer": {
+        "status": "transferred",
+        "sourceRuntimeId": "00000000-0000-4000-8000-000000000004",
+        "sourceRuntimeGeneration": 3,
+        "sourceAttachmentGeneration": 4,
+        "runtimeId": "00000000-0000-4000-8000-000000000005",
+        "runtimeGeneration": 4,
+        "nodeId": "00000000-0000-4000-8000-000000000001",
+        "nodeGeneration": 1,
+        "attachmentGeneration": 6,
+        "leaseUntil": "2026-10-09T12:02:28.100Z",
+        "nativeBinding": {
+          "clientId": "00000000-0000-4000-8000-000000000009",
+          "connectionId": "00000000-0000-4000-8000-000000000010",
+          "backendPid": 4321,
+          "threadId": "00000000-0000-4000-8000-000000000011",
+          "generation": 7,
+          "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+          "serverGeneration": 2
+        }
+      }
+    },
+    "errors": [
+      {
+        "error": "invalid_request"
+      },
+      {
+        "error": "invalid_json"
+      },
+      {
+        "error": "duplicate_json_key"
+      },
+      {
+        "error": "invalid_body"
+      },
+      {
+        "error": "invalid"
+      },
+      {
+        "error": "denied"
+      },
+      {
+        "error": "node_proof_required"
+      },
+      {
+        "error": "node_denied"
+      },
+      {
+        "error": "conflict"
+      },
+      {
+        "error": "capacity"
+      },
+      {
+        "error": "coordinator_capacity"
+      },
+      {
+        "error": "expired"
+      },
+      {
+        "error": "native_binding_unqualified"
+      },
+      {
+        "error": "request_timeout"
+      },
+      {
+        "error": "request_too_large"
+      },
+      {
+        "error": "content_type"
+      },
+      {
+        "error": "content_encoding"
+      },
+      {
+        "error": "runtime_disabled"
+      },
+      {
+        "error": "authority_unavailable"
+      },
+      {
+        "error": "registry_unavailable"
+      },
+      {
+        "error": "unavailable"
+      },
+      {
+        "error": "not_found"
+      },
+      {
+        "error": "method_not_allowed"
+      }
+    ],
+    "rejections": [
+      {
+        "name": "attach_partial_null_cas",
+        "value": {
+          "operation": "attach",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "expectedRuntimeGeneration": null,
+          "expectedAttachmentGeneration": 1,
+          "expectedNativeBinding": {
+            "clientId": "00000000-0000-4000-8000-000000000009",
+            "connectionId": "00000000-0000-4000-8000-000000000010",
+            "backendPid": 4321,
+            "threadId": "00000000-0000-4000-8000-000000000011",
+            "generation": 7,
+            "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+            "serverGeneration": 2
+          }
+        }
+      },
+      {
+        "name": "transfer_same_runtime",
+        "value": {
+          "operation": "transfer",
+          "sourceRuntimeId": "00000000-0000-4000-8000-000000000004",
+          "expectedSourceRuntimeGeneration": 2,
+          "expectedSourceAttachmentGeneration": 3,
+          "replacementRuntimeId": "00000000-0000-4000-8000-000000000004",
+          "expectedReplacementRuntimeGeneration": 4,
+          "expectedReplacementAttachmentGeneration": 5,
+          "expectedNativeBinding": {
+            "clientId": "00000000-0000-4000-8000-000000000009",
+            "connectionId": "00000000-0000-4000-8000-000000000010",
+            "backendPid": 4321,
+            "threadId": "00000000-0000-4000-8000-000000000011",
+            "generation": 7,
+            "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+            "serverGeneration": 2
+          }
+        }
+      },
+      {
+        "name": "ineligible_witness",
+        "value": {
+          "challengeId": "00000000-0000-4000-8000-000000000006",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "expectedRuntimeGeneration": null,
+          "expectedAttachmentGeneration": null,
+          "nativeEvidence": {
+            "observedAt": "2026-10-09T12:00:58.100Z",
+            "witness": {
+              "version": 2,
+              "nonce": 11,
+              "clientId": "00000000-0000-4000-8000-000000000009",
+              "backendPid": 4321,
+              "connectionId": "00000000-0000-4000-8000-000000000010",
+              "threadId": "00000000-0000-4000-8000-000000000011",
+              "generation": 7,
+              "eligible": false,
+              "sequence": 23,
+              "cause": "selection_changed",
+              "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+              "serverGeneration": 2,
+              "leaseMs": 500
+            }
+          }
+        }
+      },
+      {
+        "name": "wrong_witness_version",
+        "value": {
+          "challengeId": "00000000-0000-4000-8000-000000000007",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "expectedRuntimeGeneration": 1,
+          "expectedAttachmentGeneration": 1,
+          "nativeEvidence": {
+            "observedAt": "2026-10-09T12:00:58.100Z",
+            "witness": {
+              "version": 3,
+              "nonce": 11,
+              "clientId": "00000000-0000-4000-8000-000000000009",
+              "backendPid": 4321,
+              "connectionId": "00000000-0000-4000-8000-000000000010",
+              "threadId": "00000000-0000-4000-8000-000000000011",
+              "generation": 7,
+              "eligible": true,
+              "sequence": 23,
+              "cause": "selection_changed",
+              "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+              "serverGeneration": 2,
+              "leaseMs": 500
+            }
+          }
+        }
+      },
+      {
+        "name": "unsafe_witness_integer",
+        "value": {
+          "challengeId": "00000000-0000-4000-8000-000000000007",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "expectedRuntimeGeneration": 1,
+          "expectedAttachmentGeneration": 1,
+          "nativeEvidence": {
+            "observedAt": "2026-10-09T12:00:58.100Z",
+            "witness": {
+              "version": 2,
+              "nonce": 11,
+              "clientId": "00000000-0000-4000-8000-000000000009",
+              "backendPid": 4321,
+              "connectionId": "00000000-0000-4000-8000-000000000010",
+              "threadId": "00000000-0000-4000-8000-000000000011",
+              "generation": 7,
+              "eligible": true,
+              "sequence": 9007199254740992,
+              "cause": "selection_changed",
+              "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+              "serverGeneration": 2,
+              "leaseMs": 500
+            }
+          }
+        }
+      },
+      {
+        "name": "unexpected_binding_field",
+        "value": {
+          "operation": "attach",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "expectedRuntimeGeneration": null,
+          "expectedAttachmentGeneration": null,
+          "expectedNativeBinding": {
+            "clientId": "00000000-0000-4000-8000-000000000009",
+            "connectionId": "00000000-0000-4000-8000-000000000010",
+            "backendPid": 4321,
+            "threadId": "00000000-0000-4000-8000-000000000011",
+            "generation": 7,
+            "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+            "serverGeneration": 2,
+            "enabled": true
+          }
+        }
+      },
+      {
+        "name": "wrong_challenge_ttl",
+        "value": {
+          "challengeId": "00000000-0000-4000-8000-000000000006",
+          "issuedAt": "2026-10-09T12:00:58.000Z",
+          "expiresAt": "2026-10-09T12:01:27.999Z"
+        }
+      }
+    ],
+    "nodeProofs": {
+      "challengeAttach": {
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "binding": {
+          "audience": "https://events.example.com",
+          "method": "POST",
+          "path": "/v1/runtimes/challenge",
+          "bodySha256": "010283e41d494a767e720f392429f6ed61cc03f57f0eacc4205c8019cb9efacf"
+        },
+        "body": "{\"operation\":\"attach\",\"runtimeId\":\"00000000-0000-4000-8000-000000000003\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"expectedNativeBinding\":{\"clientId\":\"00000000-0000-4000-8000-000000000009\",\"connectionId\":\"00000000-0000-4000-8000-000000000010\",\"backendPid\":4321,\"threadId\":\"00000000-0000-4000-8000-000000000011\",\"generation\":7,\"serverInstanceId\":\"00000000-0000-4000-8000-000000000012\",\"serverGeneration\":2}}",
+        "proof": {
+          "nodeId": "00000000-0000-4000-8000-000000000001",
+          "nodeGeneration": 1,
+          "issuedAt": "2026-10-09T12:00:58.100Z",
+          "nonce": "00000000-0000-4000-8000-000000000013"
+        },
+        "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/runtimes/challenge\",\"010283e41d494a767e720f392429f6ed61cc03f57f0eacc4205c8019cb9efacf\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-09T12:00:58.100Z\",\"00000000-0000-4000-8000-000000000013\"]"
+      },
+      "challengeRenew": {
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "binding": {
+          "audience": "https://events.example.com",
+          "method": "POST",
+          "path": "/v1/runtimes/challenge",
+          "bodySha256": "667a087095d6c1e491ee659d7172497fde6b577639e37e5490469de472fdfbae"
+        },
+        "body": "{\"operation\":\"renew\",\"runtimeId\":\"00000000-0000-4000-8000-000000000003\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"00000000-0000-4000-8000-000000000009\",\"connectionId\":\"00000000-0000-4000-8000-000000000010\",\"backendPid\":4321,\"threadId\":\"00000000-0000-4000-8000-000000000011\",\"generation\":7,\"serverInstanceId\":\"00000000-0000-4000-8000-000000000012\",\"serverGeneration\":2}}",
+        "proof": {
+          "nodeId": "00000000-0000-4000-8000-000000000001",
+          "nodeGeneration": 1,
+          "issuedAt": "2026-10-09T12:00:58.100Z",
+          "nonce": "00000000-0000-4000-8000-000000000014"
+        },
+        "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/runtimes/challenge\",\"667a087095d6c1e491ee659d7172497fde6b577639e37e5490469de472fdfbae\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-09T12:00:58.100Z\",\"00000000-0000-4000-8000-000000000014\"]"
+      },
+      "challengeTransfer": {
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "binding": {
+          "audience": "https://events.example.com",
+          "method": "POST",
+          "path": "/v1/runtimes/challenge",
+          "bodySha256": "bc8fa880646754e222d3cec7502dd1d0e7b498a8834bdfedb1f65ec327a3d9ef"
+        },
+        "body": "{\"operation\":\"transfer\",\"sourceRuntimeId\":\"00000000-0000-4000-8000-000000000004\",\"expectedSourceRuntimeGeneration\":2,\"expectedSourceAttachmentGeneration\":3,\"replacementRuntimeId\":\"00000000-0000-4000-8000-000000000005\",\"expectedReplacementRuntimeGeneration\":4,\"expectedReplacementAttachmentGeneration\":5,\"expectedNativeBinding\":{\"clientId\":\"00000000-0000-4000-8000-000000000009\",\"connectionId\":\"00000000-0000-4000-8000-000000000010\",\"backendPid\":4321,\"threadId\":\"00000000-0000-4000-8000-000000000011\",\"generation\":7,\"serverInstanceId\":\"00000000-0000-4000-8000-000000000012\",\"serverGeneration\":2}}",
+        "proof": {
+          "nodeId": "00000000-0000-4000-8000-000000000001",
+          "nodeGeneration": 1,
+          "issuedAt": "2026-10-09T12:00:58.100Z",
+          "nonce": "00000000-0000-4000-8000-000000000015"
+        },
+        "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/runtimes/challenge\",\"bc8fa880646754e222d3cec7502dd1d0e7b498a8834bdfedb1f65ec327a3d9ef\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-09T12:00:58.100Z\",\"00000000-0000-4000-8000-000000000015\"]"
+      },
+      "attach": {
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "binding": {
+          "audience": "https://events.example.com",
+          "method": "POST",
+          "path": "/v1/runtimes/attach",
+          "bodySha256": "abfb385092997f745592964f581c25d063f1e253db4879c592f61d2f75d45146"
+        },
+        "body": "{\"challengeId\":\"00000000-0000-4000-8000-000000000006\",\"runtimeId\":\"00000000-0000-4000-8000-000000000003\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"nativeEvidence\":{\"observedAt\":\"2026-10-09T12:00:58.100Z\",\"witness\":{\"version\":2,\"nonce\":11,\"clientId\":\"00000000-0000-4000-8000-000000000009\",\"backendPid\":4321,\"connectionId\":\"00000000-0000-4000-8000-000000000010\",\"threadId\":\"00000000-0000-4000-8000-000000000011\",\"generation\":7,\"eligible\":true,\"sequence\":23,\"cause\":\"selection_changed\",\"serverInstanceId\":\"00000000-0000-4000-8000-000000000012\",\"serverGeneration\":2,\"leaseMs\":500}}}",
+        "proof": {
+          "nodeId": "00000000-0000-4000-8000-000000000001",
+          "nodeGeneration": 1,
+          "issuedAt": "2026-10-09T12:00:58.100Z",
+          "nonce": "00000000-0000-4000-8000-000000000016"
+        },
+        "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/runtimes/attach\",\"abfb385092997f745592964f581c25d063f1e253db4879c592f61d2f75d45146\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-09T12:00:58.100Z\",\"00000000-0000-4000-8000-000000000016\"]"
+      },
+      "renew": {
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "binding": {
+          "audience": "https://events.example.com",
+          "method": "POST",
+          "path": "/v1/runtimes/renew",
+          "bodySha256": "ae8afd9ec76be49285de7884bc79992c9f785ad12ffaff431c8543f67479bce3"
+        },
+        "body": "{\"challengeId\":\"00000000-0000-4000-8000-000000000007\",\"runtimeId\":\"00000000-0000-4000-8000-000000000003\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"nativeEvidence\":{\"observedAt\":\"2026-10-09T12:00:58.100Z\",\"witness\":{\"version\":2,\"nonce\":11,\"clientId\":\"00000000-0000-4000-8000-000000000009\",\"backendPid\":4321,\"connectionId\":\"00000000-0000-4000-8000-000000000010\",\"threadId\":\"00000000-0000-4000-8000-000000000011\",\"generation\":7,\"eligible\":true,\"sequence\":23,\"cause\":\"selection_changed\",\"serverInstanceId\":\"00000000-0000-4000-8000-000000000012\",\"serverGeneration\":2,\"leaseMs\":500}}}",
+        "proof": {
+          "nodeId": "00000000-0000-4000-8000-000000000001",
+          "nodeGeneration": 1,
+          "issuedAt": "2026-10-09T12:00:58.100Z",
+          "nonce": "00000000-0000-4000-8000-000000000017"
+        },
+        "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/runtimes/renew\",\"ae8afd9ec76be49285de7884bc79992c9f785ad12ffaff431c8543f67479bce3\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-09T12:00:58.100Z\",\"00000000-0000-4000-8000-000000000017\"]"
+      },
+      "transfer": {
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "binding": {
+          "audience": "https://events.example.com",
+          "method": "POST",
+          "path": "/v1/runtimes/transfer",
+          "bodySha256": "dd62cdc589b3df2248d6f6c06ca452b8f40cb5196d434cf3e5247056e3d0b50d"
+        },
+        "body": "{\"challengeId\":\"00000000-0000-4000-8000-000000000008\",\"sourceRuntimeId\":\"00000000-0000-4000-8000-000000000004\",\"expectedSourceRuntimeGeneration\":2,\"expectedSourceAttachmentGeneration\":3,\"replacementRuntimeId\":\"00000000-0000-4000-8000-000000000005\",\"expectedReplacementRuntimeGeneration\":4,\"expectedReplacementAttachmentGeneration\":5,\"nativeEvidence\":{\"observedAt\":\"2026-10-09T12:00:58.100Z\",\"witness\":{\"version\":2,\"nonce\":11,\"clientId\":\"00000000-0000-4000-8000-000000000009\",\"backendPid\":4321,\"connectionId\":\"00000000-0000-4000-8000-000000000010\",\"threadId\":\"00000000-0000-4000-8000-000000000011\",\"generation\":7,\"eligible\":true,\"sequence\":23,\"cause\":\"selection_changed\",\"serverInstanceId\":\"00000000-0000-4000-8000-000000000012\",\"serverGeneration\":2,\"leaseMs\":500}}}",
+        "proof": {
+          "nodeId": "00000000-0000-4000-8000-000000000001",
+          "nodeGeneration": 1,
+          "issuedAt": "2026-10-09T12:00:58.100Z",
+          "nonce": "00000000-0000-4000-8000-000000000018"
+        },
+        "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/runtimes/transfer\",\"dd62cdc589b3df2248d6f6c06ca452b8f40cb5196d434cf3e5247056e3d0b50d\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-09T12:00:58.100Z\",\"00000000-0000-4000-8000-000000000018\"]"
+      }
+    }
+  },
   "noStartNodeProof": {
     "principal": "adam@knitli.com",
     "binding": {

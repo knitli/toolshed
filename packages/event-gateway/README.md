@@ -19,11 +19,13 @@ signed metadata → bounded listener → private SQLite spool
 The dispatcher uses the injected cloud claim DTO and private native bridge.
 It persists claim intent before network access and the complete native request
 before submission. Definite no-start proof retires only the original permit;
-unknown outcomes remain fenced. The integrations have no production defaults. The shipped CLI
-cannot configure a production authority, admit clients, enable the Mesh listener,
-or submit native turns. `attach` visibly refuses; `enroll` creates a local key
-and prepares an owner request without claiming cloud enrollment. The private
-control daemon supports status and detach only. Installation does not start it.
+unknown outcomes remain fenced. The integrations have no production defaults.
+The shipped CLI does not configure a dispatch authority, enable the Mesh listener,
+or submit native turns. `attach`, `renew`, and `transfer` require an explicit
+private cloud configuration and remain subject to the server's native-admission
+gate. `enroll` creates a local key and prepares an owner request without
+claiming cloud enrollment. The private control daemon supports status, detach,
+and single-writer attachment mapping updates. Installation does not start it.
 The separate foreground `launch` command owns one explicitly qualified native
 client and exposes read-only local selection status; it does not attach a cloud
 runtime or enable delivery.
@@ -82,8 +84,11 @@ guarantee against another process running as that user.
 
 Build and qualify a candidate from the pinned upstream source using the
 [native client build workflow](docs/native-bridge/native-client-build.md). It
-records source and binary hashes; only the reviewed digest qualifies, and the
-workflow does not install or enroll a client.
+records source and binary hashes. Keep its executable and evidence JSON as one
+external artifact pair; only evidence with `launcherQualified: true` can be
+passed to `launch`, which checks the absolute executable path and digest again.
+The binary is not in the Python wheel, and the workflow does not install or
+enroll a client.
 
 The TUI retains terminal input, output and resize behavior. A private inherited
 socket carries v3 bridge traffic. Startup synchronization grants no selection;
@@ -101,10 +106,52 @@ knitli-event-gateway client-status --session-id PRINTED-SESSION-UUID
 The response reports `selection: selected` with the exact native thread, or
 `selection: unavailable`; `attached` and `automaticWakeEnabled` remain false.
 Status is an observation at query time, never admission or a reusable lease.
-The owner-only session socket accepts status only, not start, receipt or arbitrary
-native commands. The foreground launcher removes it and closes its bridge when
+The owner-only session socket accepts presence status, binding preflight, and
+challenge-correlated read-only witness requests only, not start, receipt or
+arbitrary native commands. The foreground launcher removes it and closes its bridge when
 the TUI exits. Cleanup signals only the owned, unreaped process group, never a
 PID reported by a witness. There is no background restart or service install.
+
+### Explicit cloud attachment lifecycle
+
+The foreground `attach`, `renew`, and `transfer` commands use the cloud
+challenge API and a fresh read-only witness from the running launcher. They do
+not enable automatic renewal, wake, or dispatch. The server controls whether
+native admission is enabled; while its production gate is disabled, requests
+are refused with `native_binding_unqualified`.
+
+Create `cloud-config.json` and its sibling `cloud-credentials.json` in a private
+directory. The configuration stores immutable identity and only the credential
+filename; credentials are reread for each request:
+
+```json
+{
+  "version": 1,
+  "origin": "https://events.example.com",
+  "principal": "owner@example.com",
+  "agent": "pilot-agent",
+  "nodeId": "00000000-0000-4000-8000-000000000001",
+  "nodeGeneration": 1,
+  "credentialsFile": "cloud-credentials.json"
+}
+```
+
+The credential file has exactly `accessToken` and `agentToken`. Set both files
+to mode `600`; replace the sample identity with the enrolled node and
+owner-approved agent for this Event origin. A new attach can be requested with:
+
+```sh
+chmod 600 /private/path/cloud-config.json /private/path/cloud-credentials.json
+knitli-event-gateway --state-dir "$HOME/.local/state/knitli-event-gateway" attach \
+  --runtime-id 00000000-0000-4000-8000-000000000002 \
+  --session-id 00000000-0000-4000-8000-000000000003 \
+  --cloud-config /private/path/cloud-config.json
+```
+
+`--session-id` is the exact UUID printed by the foreground launcher. Renewal
+also requires `--expected-runtime-generation` and
+`--expected-attachment-generation`; transfer requires source and replacement
+generation pairs. See the [cloud client lifecycle and recovery details](docs/cloud-adapter.md).
 
 Default state is `~/.local/state/knitli-event-gateway`, with mode 0700 directories
 and 0600 files/socket. `--state-dir PATH` accepts a private directory without

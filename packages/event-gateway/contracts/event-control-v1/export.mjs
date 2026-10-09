@@ -9,7 +9,10 @@ import { execFileSync } from 'node:child_process';
 const [root, zodPath, check] = process.argv.slice(2);
 if (!root || !zodPath || (check && check !== '--check')) throw Error('usage: export.mjs OS_ROOT ZOD_ESM_PATH [--check]');
 const base = resolve(root, 'packages/event-runtime/src');
-const names = ['contracts.ts', 'api.ts', 'registry.ts', 'coordinator.ts', 'coordinator-admission.ts', 'authority-client.ts', 'protocol.ts', 'policy.ts'];
+const names = [
+  'contracts.ts', 'api.ts', 'registry.ts', 'coordinator.ts', 'coordinator-admission.ts',
+  'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts',
+];
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- Fixed source filenames under the operator-supplied local checkout.
 const source = Object.fromEntries(names.map(name => [name, readFileSync(resolve(base, name), 'utf8')]));
 const destination = dirname(fileURLToPath(import.meta.url));
@@ -32,6 +35,9 @@ const zod = pathToFileURL(resolve(zodPath)).href;
 const protocol = dataModule(source['protocol.ts'].replace('"zod"', JSON.stringify(zod)).replace('"./policy.js"', JSON.stringify(policy)));
 // eslint-disable-next-line no-unsanitized/method -- Execute reviewed local schemas; --check verifies revision, source hashes and Zod version before this import.
 const contracts = await import(dataModule(source['contracts.ts'].replace('"zod"', JSON.stringify(zod)).replace('"./protocol.ts"', JSON.stringify(protocol))));
+// eslint-disable-next-line no-unsanitized/method -- Execute the reviewed pinned native DTO schemas only after the same pre-evaluation source-pin checks.
+const nativeAdmissionSchemas = await import(dataModule(
+  source['native-admission-contract.ts'].replace('"zod"', JSON.stringify(zod))));
 const canonicalSource = source['registry.ts'].match(/export function canonicalNodeProof\([\s\S]*?\n\}/)[0];
 // eslint-disable-next-line no-unsanitized/method -- Execute the reviewed pinned proof function after the same pre-evaluation checks; regeneration explicitly trusts local source.
 const { canonicalNodeProof } = await import(dataModule(canonicalSource));
@@ -82,6 +88,168 @@ EventObservationAckSchema.parse(nativeObservedAck);
 const nativeObservedBody = JSON.stringify(nativeObservedAck);
 const nativeObservedBinding = { ...binding, path: '/v1/ack',
   bodySha256: createHash('sha256').update(nativeObservedBody).digest('hex') };
+const nativeIds = {
+  runtime: '00000000-0000-4000-8000-000000000003',
+  sourceRuntime: '00000000-0000-4000-8000-000000000004',
+  replacementRuntime: '00000000-0000-4000-8000-000000000005',
+  attachChallenge: '00000000-0000-4000-8000-000000000006',
+  renewChallenge: '00000000-0000-4000-8000-000000000007',
+  transferChallenge: '00000000-0000-4000-8000-000000000008',
+  client: '00000000-0000-4000-8000-000000000009',
+  connection: '00000000-0000-4000-8000-000000000010',
+  thread: '00000000-0000-4000-8000-000000000011',
+  serverInstance: '00000000-0000-4000-8000-000000000012',
+  challengeProofAttach: '00000000-0000-4000-8000-000000000013',
+  challengeProofRenew: '00000000-0000-4000-8000-000000000014',
+  challengeProofTransfer: '00000000-0000-4000-8000-000000000015',
+  attachProof: '00000000-0000-4000-8000-000000000016',
+  renewProof: '00000000-0000-4000-8000-000000000017',
+  transferProof: '00000000-0000-4000-8000-000000000018',
+};
+const nativeIssuedAt = '2026-10-09T12:00:58.000Z';
+const nativeObservedAt = '2026-10-09T12:00:58.100Z';
+const nativeLeaseUntil = '2026-10-09T12:02:28.100Z';
+const nativeBinding = {
+  clientId: nativeIds.client,
+  connectionId: nativeIds.connection,
+  backendPid: 4321,
+  threadId: nativeIds.thread,
+  generation: 7,
+  serverInstanceId: nativeIds.serverInstance,
+  serverGeneration: 2,
+};
+const nativeWitness = {
+  version: 2,
+  nonce: 11,
+  clientId: nativeIds.client,
+  backendPid: 4321,
+  connectionId: nativeIds.connection,
+  threadId: nativeIds.thread,
+  generation: 7,
+  eligible: true,
+  sequence: 23,
+  cause: 'selection_changed',
+  serverInstanceId: nativeIds.serverInstance,
+  serverGeneration: 2,
+  leaseMs: 500,
+};
+const nativeEvidence = { observedAt: nativeObservedAt, witness: nativeWitness };
+const nativeChallengeRequests = {
+  attach: { operation: 'attach', runtimeId: nativeIds.runtime, expectedRuntimeGeneration: null,
+    expectedAttachmentGeneration: null, expectedNativeBinding: nativeBinding },
+  renew: { operation: 'renew', runtimeId: nativeIds.runtime, expectedRuntimeGeneration: 1,
+    expectedAttachmentGeneration: 1, expectedNativeBinding: nativeBinding },
+  transfer: { operation: 'transfer', sourceRuntimeId: nativeIds.sourceRuntime,
+    expectedSourceRuntimeGeneration: 2, expectedSourceAttachmentGeneration: 3,
+    replacementRuntimeId: nativeIds.replacementRuntime, expectedReplacementRuntimeGeneration: 4,
+    expectedReplacementAttachmentGeneration: 5, expectedNativeBinding: nativeBinding },
+};
+for (const request of Object.values(nativeChallengeRequests))
+  nativeAdmissionSchemas.NativeRuntimeChallengeRequestSchema.parse(request);
+const nativeChallengeResponses = Object.fromEntries(Object.entries({
+  attach: nativeIds.attachChallenge, renew: nativeIds.renewChallenge, transfer: nativeIds.transferChallenge,
+}).map(([operation, challengeId]) => [operation, {
+  challengeId, issuedAt: nativeIssuedAt, expiresAt: new Date(Date.parse(nativeIssuedAt) + 30_000).toISOString(),
+}]));
+for (const response of Object.values(nativeChallengeResponses))
+  nativeAdmissionSchemas.NativeRuntimeChallengeResponseSchema.parse(response);
+const nativeCommitRequests = {
+  attach: { challengeId: nativeIds.attachChallenge, runtimeId: nativeIds.runtime,
+    expectedRuntimeGeneration: null, expectedAttachmentGeneration: null, nativeEvidence },
+  renew: { challengeId: nativeIds.renewChallenge, runtimeId: nativeIds.runtime,
+    expectedRuntimeGeneration: 1, expectedAttachmentGeneration: 1, nativeEvidence },
+  transfer: { challengeId: nativeIds.transferChallenge, sourceRuntimeId: nativeIds.sourceRuntime,
+    expectedSourceRuntimeGeneration: 2, expectedSourceAttachmentGeneration: 3,
+    replacementRuntimeId: nativeIds.replacementRuntime, expectedReplacementRuntimeGeneration: 4,
+    expectedReplacementAttachmentGeneration: 5, nativeEvidence },
+};
+nativeAdmissionSchemas.NativeRuntimeAttachRequestSchema.parse(nativeCommitRequests.attach);
+nativeAdmissionSchemas.NativeRuntimeRenewRequestSchema.parse(nativeCommitRequests.renew);
+nativeAdmissionSchemas.NativeRuntimeTransferRequestSchema.parse(nativeCommitRequests.transfer);
+const nativeSuccessResponses = {
+  attach: { status: 'attached', runtimeId: nativeIds.runtime, runtimeGeneration: 1, nodeId,
+    nodeGeneration: 1, attachmentGeneration: 1, leaseUntil: nativeLeaseUntil, nativeBinding },
+  renew: { status: 'renewed', runtimeId: nativeIds.runtime, runtimeGeneration: 1, nodeId,
+    nodeGeneration: 1, attachmentGeneration: 1, leaseUntil: nativeLeaseUntil, nativeBinding },
+  transfer: { status: 'transferred', sourceRuntimeId: nativeIds.sourceRuntime,
+    sourceRuntimeGeneration: 3, sourceAttachmentGeneration: 4, runtimeId: nativeIds.replacementRuntime,
+    runtimeGeneration: 4, nodeId, nodeGeneration: 1, attachmentGeneration: 6,
+    leaseUntil: nativeLeaseUntil, nativeBinding },
+};
+nativeAdmissionSchemas.NativeRuntimeAttachResponseSchema.parse(nativeSuccessResponses.attach);
+nativeAdmissionSchemas.NativeRuntimeRenewResponseSchema.parse(nativeSuccessResponses.renew);
+nativeAdmissionSchemas.NativeRuntimeTransferResponseSchema.parse(nativeSuccessResponses.transfer);
+const nativeErrors = [
+  'invalid_request', 'invalid_json', 'duplicate_json_key', 'invalid_body', 'invalid',
+  'denied', 'node_proof_required', 'node_denied', 'conflict', 'capacity',
+  'coordinator_capacity', 'expired', 'native_binding_unqualified', 'request_timeout',
+  'request_too_large', 'content_type', 'content_encoding', 'runtime_disabled',
+  'authority_unavailable', 'registry_unavailable', 'unavailable', 'not_found',
+  'method_not_allowed',
+].map(error => {
+  const value = { error };
+  nativeAdmissionSchemas.NativeRuntimeAdmissionErrorSchema.parse(value);
+  return value;
+});
+const nativeRejections = [
+  { name: 'attach_partial_null_cas', schema: nativeAdmissionSchemas.NativeRuntimeChallengeRequestSchema,
+    value: { ...nativeChallengeRequests.attach, expectedAttachmentGeneration: 1 } },
+  { name: 'transfer_same_runtime', schema: nativeAdmissionSchemas.NativeRuntimeChallengeRequestSchema,
+    value: { ...nativeChallengeRequests.transfer, replacementRuntimeId: nativeIds.sourceRuntime } },
+  { name: 'ineligible_witness', schema: nativeAdmissionSchemas.NativeRuntimeAttachRequestSchema,
+    value: { ...nativeCommitRequests.attach, nativeEvidence: { ...nativeEvidence,
+      witness: { ...nativeWitness, eligible: false } } } },
+  { name: 'wrong_witness_version', schema: nativeAdmissionSchemas.NativeRuntimeRenewRequestSchema,
+    value: { ...nativeCommitRequests.renew, nativeEvidence: { ...nativeEvidence,
+      witness: { ...nativeWitness, version: 3 } } } },
+  { name: 'unsafe_witness_integer', schema: nativeAdmissionSchemas.NativeRuntimeRenewRequestSchema,
+    value: { ...nativeCommitRequests.renew, nativeEvidence: { ...nativeEvidence,
+      witness: { ...nativeWitness, sequence: Number.MAX_SAFE_INTEGER + 1 } } } },
+  { name: 'unexpected_binding_field', schema: nativeAdmissionSchemas.NativeRuntimeChallengeRequestSchema,
+    value: { ...nativeChallengeRequests.attach, expectedNativeBinding: { ...nativeBinding, enabled: true } } },
+  { name: 'wrong_challenge_ttl', schema: nativeAdmissionSchemas.NativeRuntimeChallengeResponseSchema,
+    value: {
+      ...nativeChallengeResponses.attach,
+      expiresAt: new Date(Date.parse(nativeIssuedAt) + 29_999).toISOString(),
+    } },
+];
+for (const vector of nativeRejections) {
+  if (vector.schema.safeParse(vector.value).success)
+    throw Error('native admission rejection vector accepted: ' + vector.name);
+}
+const nativePrincipal = 'adam@knitli.com';
+const nativeProof = (path, value, nonce) => {
+  const body = JSON.stringify(value);
+  const proof = { nodeId, nodeGeneration: 1, issuedAt: nativeObservedAt, nonce };
+  const requestBinding = { audience: 'https://events.example.com', method: 'POST', path,
+    bodySha256: createHash('sha256').update(body).digest('hex') };
+  return { principal: nativePrincipal, agent: 'pilot-agent', binding: requestBinding, body, proof,
+    canonical: canonicalNodeProof(nativePrincipal, proof, requestBinding) };
+};
+const nativeNodeProofs = {
+  challengeAttach: nativeProof('/v1/runtimes/challenge', nativeChallengeRequests.attach,
+    nativeIds.challengeProofAttach),
+  challengeRenew: nativeProof('/v1/runtimes/challenge', nativeChallengeRequests.renew,
+    nativeIds.challengeProofRenew),
+  challengeTransfer: nativeProof('/v1/runtimes/challenge', nativeChallengeRequests.transfer,
+    nativeIds.challengeProofTransfer),
+  attach: nativeProof('/v1/runtimes/attach', nativeCommitRequests.attach, nativeIds.attachProof),
+  renew: nativeProof('/v1/runtimes/renew', nativeCommitRequests.renew, nativeIds.renewProof),
+  transfer: nativeProof('/v1/runtimes/transfer', nativeCommitRequests.transfer, nativeIds.transferProof),
+};
+const nativeAdmissionFixture = {
+  ids: nativeIds,
+  binding: nativeBinding,
+  witness: nativeWitness,
+  evidence: nativeEvidence,
+  challengeRequests: nativeChallengeRequests,
+  challengeResponses: nativeChallengeResponses,
+  commitRequests: nativeCommitRequests,
+  successResponses: nativeSuccessResponses,
+  errors: nativeErrors,
+  rejections: nativeRejections.map(({ name, value }) => ({ name, value })),
+  nodeProofs: nativeNodeProofs,
+};
 const fixture = { original, admitted, overBudget, claim,
   nativeAck,
   nativeAckNodeProof: { principal: nativeAck.principal, binding: nativeAckBinding, body: nativeAckBody, proof,
@@ -92,6 +260,7 @@ const fixture = { original, admitted, overBudget, claim,
     canonical: canonicalNodeProof(nativeObservedAck.principal, proof, nativeObservedBinding) },
   nodeProof: { principal: original.principal, binding, body, proof, canonical: canonicalNodeProof(original.principal, proof, binding) },
   noStart, localNoStart, noStartResult, localNoStartResult,
+  nativeAdmission: nativeAdmissionFixture,
   noStartNodeProof: { principal: original.principal, binding: noStartBinding, body: noStartBody, proof,
     canonical: canonicalNodeProof(original.principal, proof, noStartBinding) } };
 const json = value => JSON.stringify(value, null, 2) + '\n';

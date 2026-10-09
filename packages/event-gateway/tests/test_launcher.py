@@ -1,4 +1,4 @@
-"""Explicit launch and read-only presence checks; no native process is started."""
+"""Explicit launch, local binding challenges, and read-only presence checks."""
 
 from contextlib import ExitStack
 import hashlib
@@ -35,6 +35,88 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(client.status()["selection"], "selected")
         self.assertEqual(bridge.challenge_readonly.call_count, 3)
         bridge.start.assert_not_called()
+
+    def test_binding_preflight_and_fresh_challenge_use_exact_live_selection(self):
+        row = witness(leaseMs=5000)
+        bridge = Mock()
+        bridge.valid_until = time.monotonic() + 1
+        bridge.challenge_readonly.return_value = row
+        bridge.challenge.return_value = row
+        client = launcher.NativeClient(bridge, expected_thread=row["threadId"])
+        with self.assertRaisesRegex(launcher.LaunchError, "native_client_not_ready"):
+            client.binding()
+        client.synchronize()
+        binding = {key: row[key] for key in launcher.BINDING_FIELDS}
+        self.assertEqual(client.binding(), binding)
+        self.assertTrue(launcher._valid_native_witness(row))
+        challenge_id = str(uuid4())
+        challenge = client.challenge(challenge_id, binding)
+        self.assertEqual(challenge["challengeId"], challenge_id)
+        self.assertEqual(challenge["witness"], row)
+        self.assertTrue(challenge["observedAt"].endswith("Z"))
+        self.assertGreater(challenge["validUntilMonotonic"], time.monotonic())
+        self.assertEqual(bridge.challenge_readonly.call_count, 1)
+        bridge.challenge.assert_called_once_with()
+        bridge.start.assert_not_called()
+
+    def test_fresh_challenge_rejects_changed_or_expired_binding(self):
+        row = witness()
+        bridge = Mock()
+        bridge.valid_until = time.monotonic() + 1
+        bridge.challenge.return_value = row
+        client = launcher.NativeClient(bridge)
+        client.synchronize()
+        expected = {key: row[key] for key in launcher.BINDING_FIELDS}
+        changed = {**expected, "threadId": str(uuid4())}
+        with self.assertRaisesRegex(launcher.LaunchError, "native_binding_changed"):
+            client.challenge(str(uuid4()), changed)
+        bridge.valid_until = 0
+        with self.assertRaisesRegex(launcher.LaunchError, "native_binding_changed"):
+            client.challenge(str(uuid4()), expected)
+        self.assertFalse(launcher._valid_native_witness({**row, "sequence": 2**53}))
+        self.assertFalse(launcher._valid_native_witness({**row, "generation": 2**53}))
+
+    def test_session_challenge_is_correlated_and_uses_private_session_socket(self):
+        row = witness(leaseMs=5000)
+        binding = {key: row[key] for key in launcher.BINDING_FIELDS}
+        challenge_id = str(uuid4())
+        response = {
+            "challengeId": challenge_id,
+            "observedAt": "2026-10-09T12:00:00.000Z",
+            "validUntilMonotonic": time.monotonic() + 0.5,
+            "witness": row,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory).resolve()
+            state.chmod(0o700)
+            endpoint = Mock()
+            endpoint.lstat.return_value = Mock(
+                st_mode=stat.S_IFSOCK | 0o600, st_uid=launcher.os.getuid(),
+            )
+            channel = MagicMock()
+            channel.__enter__.return_value = channel
+            channel.recv.return_value = json.dumps(response).encode() + b"\n"
+            with (
+                patch.object(launcher, "session_path", return_value=endpoint),
+                patch.object(launcher.socket, "socket", return_value=channel),
+            ):
+                self.assertEqual(
+                    launcher.session_challenge(state, str(uuid4()), challenge_id, binding),
+                    {key: response[key] for key in ("observedAt", "validUntilMonotonic", "witness")},
+                )
+            request = json.loads(channel.sendall.call_args.args[0])
+            self.assertEqual(request, {
+                "command": "challenge", "challengeId": challenge_id,
+                "expectedBinding": binding,
+            })
+
+            channel.recv.return_value = json.dumps({**response, "challengeId": "other"}).encode() + b"\n"
+            with (
+                patch.object(launcher, "session_path", return_value=endpoint),
+                patch.object(launcher.socket, "socket", return_value=channel),
+                self.assertRaisesRegex(launcher.LaunchError, "invalid_client_challenge"),
+            ):
+                launcher.session_challenge(state, str(uuid4()), challenge_id, binding)
 
     def test_real_reader_rejects_malformed_and_repeated_sequence(self):
         for changes in ({"eligible": "yes"}, {"leaseMs": 0}, {"sequence": 1}):
@@ -156,8 +238,19 @@ class LauncherTests(unittest.TestCase):
             launcher.qualified_binary("/does/not/exist", "f" * 64)
 
     def test_control_accepts_only_bounded_exact_status(self):
-        for payload in (b'{"command":"status"}\n', b'{"command":"start"}\n',
-                        b'{"command":"status"}\n{"command":"start"}\n', b"x" * 128):
+        row = witness()
+        binding = {key: row[key] for key in launcher.BINDING_FIELDS}
+        challenge_id = str(uuid4())
+        for payload in (
+            b'{"command":"status"}\n',
+            b'{"command":"binding"}\n',
+            json.dumps({"command": "challenge", "challengeId": challenge_id,
+                        "expectedBinding": binding}, separators=(",", ":")).encode() + b"\n",
+            b'{"command":"start"}\n',
+            b'{"command":"status","command":"start"}\n',
+            b'{"command":"status"}\n{"command":"start"}\n',
+            b"x" * 1024,
+        ):
             with self.subTest(payload=payload):
                 channel = MagicMock()
                 channel.recv.return_value = payload
@@ -165,15 +258,37 @@ class LauncherTests(unittest.TestCase):
                 listener.accept.side_effect = [(channel, None), OSError("closed")]
                 client = Mock()
                 client.status.return_value = {"selection": "unavailable"}
+                client.binding.return_value = binding
+                client.challenge.return_value = {
+                    "challengeId": challenge_id,
+                    "observedAt": "2026-10-09T12:00:00.000Z",
+                    "validUntilMonotonic": time.monotonic() + 5,
+                    "witness": row,
+                }
                 launcher._control(listener, client, threading.Event())
-                response = json.loads(channel.sendall.call_args.args[0])
+                if payload in (b'{"command":"status"}\n', b'{"command":"binding"}\n') or payload.startswith(b'{"command":"challenge"'):
+                    response = json.loads(channel.sendall.call_args.args[0])
                 if payload == b'{"command":"status"}\n':
                     self.assertEqual(response, client.status.return_value)
                     client.status.assert_called_once_with()
-                else:
+                elif payload == b'{"command":"binding"}\n':
+                    self.assertEqual(response, binding)
+                    client.binding.assert_called_once_with()
+                elif payload.startswith(b'{"command":"challenge"'):
+                    self.assertEqual(response, client.challenge.return_value)
+                    client.challenge.assert_called_once_with(challenge_id, binding)
+                elif payload == b'{"command":"start"}\n':
+                    response = json.loads(channel.sendall.call_args.args[0])
                     self.assertEqual(response, {"reason": "unsupported_command"})
                     client.status.assert_not_called()
-                channel.recv.assert_called_once_with(128)
+                    client.binding.assert_not_called()
+                    client.challenge.assert_not_called()
+                else:
+                    channel.sendall.assert_not_called()
+                    client.status.assert_not_called()
+                    client.binding.assert_not_called()
+                    client.challenge.assert_not_called()
+                channel.recv.assert_called_once_with(1024)
                 client.start.assert_not_called()
 
     def test_binary_file_qualification(self):
