@@ -23,7 +23,11 @@ for name in ('package', 'qualifier', 'binary', 'binary-sha', 'node', 'cloud-sour
     parser.add_argument('--' + name, required=True)
 parser.add_argument('--installed', action='store_true', help='Use the installed wheel, without adding source imports')
 parser.add_argument('--restart-native', action='store_true', help='Recover an expired v3 receipt after native process restart')
+parser.add_argument('--terminal-no-start', action='store_true', help='Qualify actual terminal refusal and durable cloud settlement')
+parser.add_argument('--forget-terminal', action='store_true', help='Restart native before terminal recovery; unknown must stay fenced')
 args = parser.parse_args()
+if args.forget_terminal and not args.terminal_no_start:
+    parser.error('--forget-terminal requires --terminal-no-start')
 PACKAGE, QUALIFIER, BINARY = (Path(x).resolve(strict=True) for x in (args.package, args.qualifier, args.binary))
 BINARY_SHA, NODE = args.binary_sha, str(Path(args.node).resolve(strict=True))
 BROKER = Path(__file__).with_name('coupled-workerd-broker.mjs')
@@ -102,6 +106,7 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
     node_key, transport_key = Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()
     node_id, runtime_id = str(uuid4()), str(uuid4())
     wires, auth_calls, drop_reply = [], 0, True
+    terminal_receipts = []
 
     def post(path, body, headers=None, cap=1048576):
         connection = http.client.HTTPConnection('127.0.0.1', address['port'], timeout=5)
@@ -146,17 +151,39 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
         proof = json.loads(wire['headers']['x-event-node-proof'])
         wires.append({'path': path, 'body': wire['body'].decode(), 'proof': proof, 'responseStatus': response[0]})
         body = json.loads(wire['body'])
+        if args.terminal_no_start and path == '/v1/dispatch/settle-no-start' and response[0] == 200 and drop_reply:
+            drop_reply = False
+            require(json.loads(response[2])['status'] == 'not_started', 'real no-start commit before reply loss')
+            raise TimeoutError('real workerd committed no-start; response deliberately lost')
         if path == '/v1/ack' and body['status'] == 'observed' and response[0] == 200 and drop_reply:
             drop_reply = False
             require(json.loads(response[2])['status'] == 'observed', 'real commit before reply loss')
             raise TimeoutError('real workerd committed observation; response deliberately lost')
         return response
 
+    class DelayedNativeAdapter(NativeBridgeAdapter):
+        async def submit(self, request):
+            if not terminal_receipts:
+                require(store.current_attempt(ident)['state'] == 'submitting', 'request durable before native delay')
+                require(store.current_attempt(ident)['native_request'] == request, 'exact durable native identity')
+                # Fixture delay after durable submission intent; the actual native backend refuses expiry.
+                while time.time_ns() // 1_000_000 <= request['permitExpiresAt']:
+                    await asyncio.sleep(.02)
+                fresh = await asyncio.to_thread(bridge.challenge)
+                require(all(fresh[k] == request[k] for k in ('clientId', 'generation', 'serverInstanceId', 'serverGeneration', 'threadId')), 'unchanged selected native identity')
+                receipt = await super().submit(request)
+                require(receipt['outcome']['status'] == 'terminalNotStarted', 'actual terminal no-start required')
+                require(receipt['outcome']['reason'] == 'permitExpired', 'native expired admitted permit')
+                terminal_receipts.append(receipt)
+                raise TimeoutError('fixture loses actual native terminal reply before local persistence')
+            return await super().submit(request)
+
     def gateway(store):
         cloud = CloudClient(origin='https://events.example.com', principal=e['principal'], agent=e['agent'],
             node_id=node_id, node_generation=e['nodeGeneration'], private_key=node_key,
             credentials=credentials, send=send)
-        return Gateway(store, cloud, lambda mapping: NativeBridgeAdapter(mapping, bridge),
+        adapter = DelayedNativeAdapter if args.terminal_no_start else NativeBridgeAdapter
+        return Gateway(store, cloud, lambda mapping: adapter(mapping, bridge),
             audience=node_id, keys={'fixture-transport': transport_key.public_key()})
 
     with tempfile.TemporaryDirectory(prefix='native-workerd-local-') as temporary, ExitStack() as resources:
@@ -170,6 +197,101 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
             require(app.accept(signed['body'].encode(), signature=signed['headers']['x-event-signature'],
                 audience=signed['headers']['x-event-audience'], key_id=signed['headers']['x-event-key-id'])['deliveryId'] == ident,
                 'actual workerd signed delivery')
+            if args.terminal_no_start:
+                require((await app.dispatch(ident))['status'] == 'ambiguous', 'lost native reply fences attempt')
+                original = copy.deepcopy(store.current_attempt(ident))
+                require(original['receipt'] is None, 'terminal reply not persisted before recovery')
+                before = fixture('/fixture/read')
+                require(before['budget']['used'] == 1 and len(before['slots']) == 1, 'admission charged and slot retained')
+                if args.forget_terminal:
+                    native_args = list(native_process.args)
+                    root = Path(native_args[native_args.index('-C') + 1])
+                    old_pid = native_process.pid
+                    launcher.stop_process(native_process, witness['backendPid'])
+                    bridge.close()
+                    bridge, native_process, new_witness = resources.enter_context(
+                        launcher.native_client(native_args, root, receipt_version=3))
+                    require(native_process.pid != old_pid and new_witness['serverInstanceId'] != witness['serverInstanceId'], 'real new native backend')
+                    store.close()
+                    store = Store(state)
+                    app = gateway(store)
+                    native_exchanges = []
+                    exchange = bridge.exchange
+
+                    def record_exchange(body, seconds):
+                        sent = {'nonce': bridge.nonce + 1, **copy.deepcopy(body)}
+                        response = exchange(body, seconds)
+                        native_exchanges.append({'sent': sent, 'received': copy.deepcopy(response)})
+                        return response
+
+                    bridge.exchange = record_exchange
+                    wire_request = {key: value for key, value in original['native_request'].items() if key != 'receiptVersion'}
+                    for index in range(3):
+                        nonce = bridge.nonce
+                        require((await app.reconcile(ident))['status'] == 'ambiguous', 'missing terminal remains unknown')
+                        require(len(native_exchanges) == index + 1 and not bridge.closed, 'unknown requires successful native communication')
+                        recorded = native_exchanges[-1]
+                        require(recorded['sent'] == {'nonce': nonce + 1, 'receipt': wire_request}, 'exact read-only recovery frame')
+                        require(recorded['received']['nonce'] == nonce + 1 and bridge.nonce == nonce + 1, 'actual matching response nonce')
+                        require(validate_receipt(original['native_request'], recorded['received']['receipt'], allow_input_recorded=True)
+                            == {'status': 'unknown'}, 'actual native unknown receipt with exact original identity')
+                        require((await app.dispatch(ident))['status'] == 'ambiguous', 'unknown never dispatches replacement')
+                    after = store.current_attempt(ident)
+                    require(after['attempt_id'] == original['attempt_id'] and after['receipt'] is None, 'unknown keeps exact original fence')
+                    require(len(wires) == 1 and len(bridge.attempts) == 1, 'unknown issues no new cloud claim or native start')
+                    require(fixture('/fixture/read') == before, 'unknown leaves coordinator unchanged')
+                    require(all(count == 0 for count in model.request_counts.values()), 'unknown causes no model traffic')
+                    return {'result': 'PASS', 'qualification': 'fixture-qualified-terminal-lost-on-native-restart',
+                        'binarySha256': BINARY_SHA, 'productionAdmissionProven': False,
+                        'nativeProcessRestarted': True, 'unknownNeverRetriesProven': True,
+                        'nativeExchanges': native_exchanges, 'nativeBridgeOpen': not bridge.closed,
+                        'original': original, 'actualTerminalBeforeLoss': terminal_receipts[0], 'after': after,
+                        'before': before, 'wire': wires, 'modelRequests': model.request_counts,
+                        'realModelCalls': 0, 'nativeTerminalReceiptDurableAcrossNativeRestart': False}
+                nonce = bridge.nonce
+                store.close()
+                store = Store(state)
+                app = gateway(store)
+                require((await app.reconcile(ident))['status'] == 'settlement_pending', 'lost settlement reply durable')
+                pending = copy.deepcopy(store.current_attempt(ident))
+                require(pending['receipt']['outcome'] == {**terminal_receipts[0]['outcome'], 'replayed': True}, 'actual exact read-only terminal recovery')
+                require(bridge.nonce == nonce + 1, 'recovery issues one receipt lookup')
+                fixture('/fixture/alarm')
+                settled = fixture('/fixture/read')
+                require(settled['budget']['used'] == 1, 'original budget remains charged')
+                require(len(settled['slots']) == 1, 'pending delivery retains its actual slot')
+                require(settled['cloud']['attempts'][0]['state'] == 'not_started', 'exact old attempt retired')
+                require(settled['cloud']['native_claims'][0]['permit_id'] == original['admission']['permitId'] and settled['cloud']['native_claims'][0]['state'] == 'not_started', 'exact old permit retired')
+                store.close()
+                store = Store(state)
+                app = gateway(store)
+                nonce = bridge.nonce
+                require((await app.reconcile(ident))['status'] == 'queued', 'exact settlement replay creates fresh waiting attempt')
+                require(bridge.nonce == nonce, 'settlement recovery performs no native operation')
+                require(wires[-2]['body'] == wires[-1]['body'] and wires[-2]['proof']['nonce'] != wires[-1]['proof']['nonce'], 'same settlement fresh proof')
+                require(fixture('/fixture/read') == settled, 'settlement replay leaves coordinator unchanged')
+                require((await app.dispatch(ident))['status'] == 'submitted', 'one legitimate fresh native attempt')
+                replacement = copy.deepcopy(store.current_attempt(ident))
+                require(replacement['attempt_id'] != original['attempt_id'] and replacement['admission']['permitId'] != original['admission']['permitId'], 'fresh attempt and permit')
+                await app.dispatch(ident)
+                require(len([w for w in wires if w['path'] == '/v1/dispatch/claim']) == 2, 'exactly original and one fresh claim')
+                require(len(bridge.attempts) == 2, 'only original refused start and one fresh start')
+                deadline = time.monotonic() + 12
+                while model.request_counts['primary'] != 1:
+                    require(time.monotonic() < deadline and native_process.poll() is None, 'fresh native model deadline')
+                    await asyncio.sleep(.02)
+                require(model.request_counts['unknown'] == 0, 'no unknown mock request')
+                after = fixture('/fixture/read')
+                require(after['budget']['used'] == 2, 'original charge retained plus one fresh charge')
+                require(len(settled['cloud']['no_start_settlements']) == 1 and
+                    json.loads(settled['cloud']['no_start_settlements'][0]['result_json'])['evidence'] == pending['evidence'], 'exact immutable terminal evidence stored')
+                return {'result': 'PASS', 'qualification': 'fixture-qualified-terminal-no-start-local-workerd',
+                    'binarySha256': BINARY_SHA, 'productionAdmissionProven': False,
+                    'nativeTerminalReceiptDurableAcrossNativeRestart': False, 'nativeProcessRestarted': False,
+                    'oldStartNoStartSettlementProven': True, 'original': original, 'terminalReceipt': terminal_receipts[0],
+                    'pending': pending, 'before': before, 'settled': settled, 'replacement': replacement, 'after': after,
+                    'wire': wires, 'modelRequests': model.request_counts, 'realModelCalls': 0,
+                    'mocks': ['post-persistence submission delay', 'lost native and cloud replies', 'qualified runtime/admin setup', 'Access/Messaging identity and budget', 'manual source publication', 'queue metrics', 'loopback instead of Mesh']}
             require((await app.dispatch(ident))['status'] == 'submitted', 'real claim and registration')
             before = fixture('/fixture/read')
             require(len(before['slots']) == 1 and before['cloud']['attempts'][0]['state'] == 'submitted', 'retained slot')
@@ -264,7 +386,7 @@ def main():
                 finally:
                     model.release_primary.set()
             launcher.qualify_input_recorded = callback
-            proof = launcher.qualify(BINARY, input_recorded=True, receipt_version=3 if args.restart_native else 2)
+            proof = launcher.qualify(BINARY, input_recorded=True, receipt_version=3 if args.restart_native or args.terminal_no_start else 2)
             paths = [Path(__file__), BROKER, BROKER.with_name('coupled-workerd-worker.ts'),
                      BROKER.with_name('coupled-workerd-source-hashes.mjs'), QUALIFIER,
                      *sorted(Path(event_gateway.__file__).parent.glob('*.py'))]

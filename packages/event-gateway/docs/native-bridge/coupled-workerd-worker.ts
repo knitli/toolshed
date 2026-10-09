@@ -40,7 +40,7 @@ export class FixtureCoordinator extends AgentCoordinator {
   }
   async fixtureAlarm() { await this.alarm(); }
   async fixtureRead() {
-    const tables=['attempts','deliveries','native_claims','native_correlations','manual_sources','slot_intents'];
+    const tables=['attempts','deliveries','native_claims','native_correlations','manual_sources','slot_intents','no_start_settlements'];
     return Object.fromEntries(tables.map(t=>[t,this.ctx.storage.sql.exec(`SELECT * FROM ${t}`).toArray()]));
   }
 }
