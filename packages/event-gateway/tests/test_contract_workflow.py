@@ -124,7 +124,7 @@ class ContractWorkflowTests(unittest.TestCase):
     def test_native_runtime_status_manifest_source_provenance(self):
         self.assert_manifest_source_provenance(
             "native-runtime-status", "7675f40a4053795de03458c2741da4e3a475ce29",
-            ("native-runtime-store",))
+            ("native-runtime-store", "native-admission-gate"))
 
     def assert_manifest_source_provenance(self, name, control_revision, additional_sources=()):
         # This proves fixture provenance separately from the verifier's raw snapshot hash gate.

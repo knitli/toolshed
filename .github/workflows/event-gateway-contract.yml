@@ -120,7 +120,7 @@ jobs:
                       'event-v1/protocol-v1.json': 'bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3',
                       'event-v1/manifest.json': '87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f',
                       'event-control-v1/fixtures.json': 'a5dca38202380f31950ff0e7f06aa5ff97eee872d7538e83e4f56bea5e7cad82',
-                      'event-control-v1/manifest.json': '16f59c49ff43905f3ba94a93603b1ed17b94a4ffecd1927106ffda4eb92f7c95'}})
+                      'event-control-v1/manifest.json': '65bc6e08a08bae820d6291509bd2efea001cd0a715305dbd8384fd884b9d1c66'}})
 
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
