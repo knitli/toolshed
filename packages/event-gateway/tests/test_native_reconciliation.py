@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from event_gateway.cloud import CloudClient, CloudError, Credentials, _iso, canonical_node_proof
 from event_gateway import client_runtime
+from event_gateway.security import SecurityError
 from event_gateway.store import Store
 
 
@@ -227,18 +228,42 @@ class NativeReconciliationTests(unittest.TestCase):
         self.assert_original_preserved()
 
     def test_status_failure_preserves_old_without_successor_commit(self):
-        self.pending()
-        for reason in ("denied", "request_timeout", "invalid_response"):
-            with self.subTest(reason=reason):
-                self.cloud.status_error = CloudError(reason)
-                code, result, _, challenge = self.invoke()
+        artifact = self.pending()
+        before = {path.relative_to(self.state): path.read_bytes()
+                  for path in self.state.rglob("*") if path.is_file()}
+        for error in (
+            CloudError("request_timeout", ambiguous=True),
+            CloudError("unavailable", ambiguous=True),
+            CloudError("denied"), CloudError("request_timeout"), CloudError("invalid_response"),
+            SecurityError("unsafe_state"), cli.LaunchError("native_client_unavailable"),
+        ):
+            with self.subTest(reason=str(error), ambiguous=getattr(error, "ambiguous", False)):
+                self.cloud.status_error = error
+                self.cloud.status_calls.clear()
+                code, result, binding, challenge = self.invoke()
                 self.assertEqual(code, 2)
-                self.assertIn(reason, json.dumps(result))
+                self.assertEqual(result, {
+                    "reconciled": None if getattr(error, "ambiguous", False) else False,
+                    "reason": getattr(error, "code", str(error)),
+                    "originalHistoricalOutcome": "unknown",
+                    "originalPendingCommit": cli.pending_commit_summary(artifact),
+                })
+                self.assertEqual(self.cloud.status_calls, [self.runtime_id])
+                binding.assert_not_called()
                 challenge.assert_not_called()
+                self.assertEqual(self.cloud.intents, [])
                 self.assertEqual(self.cloud.commits, [])
                 self.assert_original_preserved()
+                self.assertEqual(
+                    {path.relative_to(self.state): path.read_bytes()
+                     for path in self.state.rglob("*") if path.is_file()}, before)
                 self.assertIsNone(client_runtime.load_reconciliation(
                     self.state, "attach", self.old_session))
+        self.cloud.status_error = None
+        code, result, _, _ = self.invoke()
+        self.assertEqual(code, 0, result)
+        self.assertEqual(len(self.cloud.commits), 1)
+        self.assert_original_preserved()
 
     def test_transfer_reconciliation_fails_closed(self):
         self.pending("transfer")

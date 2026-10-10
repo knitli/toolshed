@@ -40,6 +40,11 @@ Only an explicit `missing` response supplies null CAS generations. A replaced or
 unauthorized node key is rejected by the signed status request. A successor session
 reserved by any other retained reconciliation link cannot be reused.
 
+An ambiguous authority-read failure returns `reconciled: null` with its concrete
+error reason (such as `request_timeout` or `unavailable`); a definite failure returns
+`reconciled: false`. The status read is safe to retry: no successor commit has
+started, and `originalHistoricalOutcome` remains `unknown`.
+
 The successor performs the normal challenged attach to that same runtime. Its own
 pending artifact is durable before the commit is sent; local persistence uses the
 existing daemon writer. After the validated cloud result is stored, the command

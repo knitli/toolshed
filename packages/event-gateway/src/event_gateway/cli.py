@@ -208,7 +208,9 @@ def _reconcile_native(args, state_dir):
         if not _uuid(args.session_id) or args.session_id == args.original_session_id:
             raise CloudError("reconciliation_successor_required")
         result = _reconcile_successor(args, state_dir, original, digest)
-    except (CloudError, SecurityError, LaunchError) as error:
+    except CloudError as error:
+        result = {"reconciled": None if error.ambiguous else False, "reason": error.code}
+    except (SecurityError, LaunchError) as error:
         result = {"reconciled": False, "reason": getattr(error, "code", str(error))}
     return {**result, **summary}
 
