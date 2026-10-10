@@ -110,7 +110,17 @@ jobs:
                       'event-v1/protocol-v1.json': 'bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3',
                       'event-v1/manifest.json': '87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f',
                       'event-control-v1/fixtures.json': '46b10333b857cb918c3752933c465d81c10ae014aab57912644165d005cc0b06',
-                      'event-control-v1/manifest.json': '13a5535ab977068c2a6a235d8c9977c186f9d9d13b46988de11bc5e216548cce'}})
+                      'event-control-v1/manifest.json': '13a5535ab977068c2a6a235d8c9977c186f9d9d13b46988de11bc5e216548cce'}},
+          {'name': 'native-runtime-status',
+           'eventRevision': 'ed23882eac491e26e070e3ef26cf8c0e9e702b38',
+           'controlRevision': '7675f40a4053795de03458c2741da4e3a475ce29',
+           'hashes': {'event-v1/protocol.schema.json': '583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38',
+                      'event-v1/protocol.ts': 'c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34',
+                      'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+                      'event-v1/protocol-v1.json': 'bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3',
+                      'event-v1/manifest.json': '87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f',
+                      'event-control-v1/fixtures.json': 'a5dca38202380f31950ff0e7f06aa5ff97eee872d7538e83e4f56bea5e7cad82',
+                      'event-control-v1/manifest.json': '16f59c49ff43905f3ba94a93603b1ed17b94a4ffecd1927106ffda4eb92f7c95'}})
 
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
