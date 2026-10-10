@@ -139,6 +139,33 @@ def _native_binding(value, *, code="invalid_request"):
     return value
 
 
+def _runtime_status_response(value, runtime_id):
+    if not isinstance(value, dict) or value.get("status") not in ("missing", "present"):
+        raise CloudError("invalid_response")
+    fields = {"status", "runtimeId", "observedAt"}
+    if value["status"] == "present":
+        fields.update(("runtimeGeneration", "nodeId", "nodeGeneration", "attachmentGeneration",
+                       "leaseUntil", "storedQualified", "nativeBinding"))
+    _closed(value, fields)
+    if value["runtimeId"] != runtime_id or not _uuid(runtime_id):
+        raise CloudError("invalid_response")
+    try:
+        _timestamp(value["observedAt"])
+        if value["status"] == "present":
+            _timestamp(value["leaseUntil"])
+    except (ProtocolError, TypeError, ValueError):
+        raise CloudError("invalid_response") from None
+    if value["status"] == "present":
+        if (not _uuid(value["nodeId"]) or not isinstance(value["storedQualified"], bool)
+                or (value["storedQualified"] and value["nativeBinding"] is None)
+                or any(not _generation(value[key]) for key in (
+                    "runtimeGeneration", "nodeGeneration", "attachmentGeneration"))):
+            raise CloudError("invalid_response")
+        if value["nativeBinding"] is not None:
+            _native_binding(value["nativeBinding"], code="invalid_response")
+    return value
+
+
 def _native_witness(value, *, code="invalid_request"):
     _closed(value, _NATIVE_WITNESS_FIELDS, code=code)
     if (type(value["version"]) is not int or value["version"] != 2  # pylint: disable=unidiomatic-typecheck
@@ -633,6 +660,18 @@ class CloudClient:
         if result["nodeId"] != self.node_id or result["generation"] != self.node_generation:
             raise CloudError("identity_mismatch")
         return result
+
+    @property
+    def node_public_key(self):
+        """Public key identity for a retained local reconciliation link."""
+        return base64.urlsafe_b64encode(self._key.public_key().public_bytes_raw()).rstrip(b"=").decode()
+
+    async def runtime_status(self, runtime_id):
+        """Read stored authority; this does not assert live presence or current eligibility."""
+        if not _uuid(runtime_id):
+            raise CloudError("invalid_request")
+        value = await self._post("/v1/runtimes/status", {"runtimeId": runtime_id})
+        return _runtime_status_response(value, runtime_id)
 
     async def native_challenge(self, request):
         """Record one exact attach, renew, or transfer intent before local sampling."""

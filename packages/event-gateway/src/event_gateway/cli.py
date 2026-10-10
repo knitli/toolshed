@@ -13,9 +13,10 @@ import time
 from .daemon import request, serve, status
 from .client_runtime import (
     clear_pending_commit, cloud_identity, load_cloud_client, load_pending_commit,
-    pending_commit_summary, save_pending_commit,
+    pending_commit_summary, save_pending_commit, load_pending_commit_snapshot,
+    load_reconciliation, save_reconciliation, has_reconciliation, complete_reconciliation,
 )
-from .cloud import CloudError, _iso
+from .cloud import CloudError, _iso, _uuid, _native_challenge_request, _same_json_value
 from .security import (
     ensure_private_directory,
     load_or_create_signing_key,
@@ -68,6 +69,14 @@ def main(argv=None):
     transfer.add_argument("--expected-replacement-attachment-generation", type=int, required=True)
     transfer.add_argument("--session-id", required=True)
     transfer.add_argument("--cloud-config", type=Path, required=True)
+    runtime_status = commands.add_parser("runtime-status", help="Read stored cloud runtime authority")
+    runtime_status.add_argument("--runtime-id", required=True)
+    runtime_status.add_argument("--cloud-config", type=Path, required=True)
+    reconcile = commands.add_parser("reconcile", help="Reconcile retained attach/renew evidence with a fresh session")
+    reconcile.add_argument("--operation", choices=("attach", "renew", "transfer"), required=True)
+    reconcile.add_argument("--original-session-id", required=True)
+    reconcile.add_argument("--session-id", required=True)
+    reconcile.add_argument("--cloud-config", type=Path, required=True)
     detach = commands.add_parser("detach")
     detach.add_argument("runtime_id")
     args = parser.parse_args(argv)
@@ -110,6 +119,19 @@ def _execute_command(args, state_dir, parser):
     if args.command == "run":
         asyncio.run(serve(state_dir, dispatch_config=args.dispatch_config))
         return 0
+    if args.command == "runtime-status":
+        try:
+            cloud = load_cloud_client(args.cloud_config, state_dir)
+            result = asyncio.run(cloud.runtime_status(args.runtime_id))
+        except CloudError as error:
+            print(json.dumps({"runtimeStatus": None, "reason": error.code}))
+            return 2
+        print(json.dumps(result))
+        return 0
+    if args.command == "reconcile":
+        result = _reconcile_native(args, state_dir)
+        print(json.dumps(result))
+        return 0 if result.get("localStatus") == "current" else 2
     if args.command in ("attach", "renew", "transfer"):
         return _execute_native_lifecycle(args, state_dir, args.command)
     if args.command == "enroll":
@@ -158,6 +180,10 @@ def _native_lifecycle(args, state_dir, operation):
     context, early_result = _native_context(args, state_dir, operation, result_key)
     if early_result is not None:
         return early_result
+    return _native_lifecycle_context(args, state_dir, operation, context)
+
+
+def _native_lifecycle_context(args, state_dir, operation, context):
     intent, artifact, cloud, binding = context
     persisted = {}
     response, early_result = _commit_native_lifecycle(
@@ -168,6 +194,74 @@ def _native_lifecycle(args, state_dir, operation):
     return _persist_native_lifecycle(
         args, state_dir, operation, binding, cloud, response, artifact, persisted,
     )
+
+
+def _reconcile_native(args, state_dir):
+    summary = {"originalHistoricalOutcome": "unknown", "originalPendingCommit": None}
+    try:
+        original, digest = load_pending_commit_snapshot(state_dir, args.operation, args.original_session_id)
+        if original is None:
+            raise CloudError("original_pending_commit_missing")
+        summary["originalPendingCommit"] = pending_commit_summary(original)
+        if args.operation == "transfer":
+            raise CloudError("unsupported_transfer_reconciliation")
+        if not _uuid(args.session_id) or args.session_id == args.original_session_id:
+            raise CloudError("reconciliation_successor_required")
+        result = _reconcile_successor(args, state_dir, original, digest)
+    except CloudError as error:
+        result = {"reconciled": None if error.ambiguous else False, "reason": error.code}
+    except (SecurityError, LaunchError) as error:
+        result = {"reconciled": False, "reason": getattr(error, "code", str(error))}
+    return {**result, **summary}
+
+
+def _reconcile_successor(args, state_dir, original, digest):
+    original_intent = _native_challenge_request(original["intent"])
+    if original_intent["operation"] != args.operation:
+        raise CloudError("invalid_pending_commit")
+    cloud = load_cloud_client(args.cloud_config, state_dir)
+    if not _same_json_value(original["cloudIdentity"], cloud_identity(cloud)):
+        raise CloudError("reconciliation_identity_mismatch")
+    link = load_reconciliation(state_dir, args.operation, args.original_session_id, durable=True)
+    expected = {
+        "version": 1, "originalArtifactSha256": digest, "originalOperation": args.operation,
+        "originalSessionId": args.original_session_id, "cloudIdentity": cloud_identity(cloud),
+        "runtimeId": original_intent["runtimeId"], "successorSessionId": args.session_id,
+        "nodePublicKey": cloud.node_public_key,
+    }
+    if link is None:
+        if any(load_pending_commit(state_dir, operation, args.session_id) is not None
+               for operation in ("attach", "renew", "transfer")):
+            raise CloudError("reconciliation_successor_not_fresh")
+        observed = asyncio.run(cloud.runtime_status(original_intent["runtimeId"]))
+        binding = session_binding(state_dir, args.session_id)
+        intent = {
+            "operation": "attach", "runtimeId": original_intent["runtimeId"],
+            "expectedRuntimeGeneration": observed["runtimeGeneration"] if observed["status"] == "present" else None,
+            "expectedAttachmentGeneration": observed["attachmentGeneration"] if observed["status"] == "present" else None,
+            "expectedNativeBinding": binding,
+        }
+        link = {**expected, "observed": observed, "intent": intent}
+        save_reconciliation(state_dir, args.operation, args.original_session_id, link)
+    elif any(not _same_json_value(link[key], value) for key, value in expected.items()):
+        raise CloudError("reconciliation_link_mismatch")
+    successor = argparse.Namespace(
+        runtime_id=link["runtimeId"], session_id=args.session_id, cloud_config=args.cloud_config,
+        expected_runtime_generation=link["intent"]["expectedRuntimeGeneration"],
+        expected_attachment_generation=link["intent"]["expectedAttachmentGeneration"],
+    )
+    context, early = _native_context(successor, state_dir, "attach", "attached")
+    if early is not None:
+        return early
+    intent, _, current_cloud, _ = context
+    if (not _same_json_value(cloud_identity(current_cloud), link["cloudIdentity"])
+            or current_cloud.node_public_key != link["nodePublicKey"]):
+        raise CloudError("reconciliation_identity_mismatch")
+    if not _same_json_value(intent, link["intent"]):
+        raise CloudError("reconciliation_binding_changed")
+    if load_pending_commit_snapshot(state_dir, args.operation, args.original_session_id)[1] != digest:
+        raise CloudError("reconciliation_original_changed")
+    return _native_lifecycle_context(successor, state_dir, "attach", context)
 
 
 def _native_intent(args, operation):
@@ -219,7 +313,7 @@ def _native_context(args, state_dir, operation, result_key):
 
 
 def _save_pending_before_send(body, *, state_dir, args, cloud, intent,
-                              challenge, evidence, persisted):
+                              challenge, evidence, persisted, current_mapping=None):
     operation = intent["operation"]
     local_evidence = {"observedAt": evidence["observedAt"], "witness": evidence["witness"]}
     pending = {
@@ -230,7 +324,11 @@ def _save_pending_before_send(body, *, state_dir, args, cloud, intent,
         "safeExpiryAt": _iso((_timestamp(challenge["issuedAt"]) + 90_000) / 1000),
     }
     try:
-        save_pending_commit(state_dir, operation, args.session_id, pending)
+        if current_mapping is None:
+            save_pending_commit(state_dir, operation, args.session_id, pending)
+        else:
+            save_pending_commit(state_dir, operation, args.session_id, pending,
+                                current_mapping=current_mapping, node_public_key=cloud.node_public_key)
     except SecurityError as error:
         raise CloudError(error.code) from None
     persisted["artifact"] = pending
@@ -243,6 +341,9 @@ def _commit_native_call(args, state_dir, operation, intent, artifact, cloud, bin
             intent, artifact["challenge"], artifact["evidence"],
             prepared_body=body, recovery=True,
         ))
+    current_mapping = None
+    if operation == "renew" and has_reconciliation(state_dir, args.session_id):
+        current_mapping = _read_native_mapping(state_dir, args.runtime_id)
     try:
         challenge = asyncio.run(cloud.native_challenge(intent))
     except CloudError as error:
@@ -253,7 +354,7 @@ def _commit_native_call(args, state_dir, operation, intent, artifact, cloud, bin
     persist = partial(
         _save_pending_before_send, state_dir=state_dir,
         args=args, cloud=cloud, intent=intent, challenge=challenge,
-        evidence=evidence, persisted=persisted,
+        evidence=evidence, persisted=persisted, current_mapping=current_mapping,
     )
     return asyncio.run(getattr(cloud, operation)(
         intent, challenge, evidence, on_first_send=persist,
@@ -316,6 +417,29 @@ def _native_mapping(args, operation, cloud, response):
             "attachmentGeneration": response["sourceAttachmentGeneration"],
         }
     return mapping, transfer
+
+
+def _read_native_mapping(state_dir, runtime_id):
+    """Read through the existing writer; fall back only when no daemon can answer."""
+    def read_directly():
+        with Store(state_dir) as store:
+            return {"mapping": store.get_attachment(runtime_id)}
+
+    socket_path = state_dir / "control.sock"
+    try:
+        if not (socket_path.exists() or socket_path.is_symlink()):
+            result = read_directly()
+        else:
+            try:
+                result = asyncio.run(request(state_dir, {"command": "get-attachment", "runtimeId": runtime_id}))
+            except (ConnectionRefusedError, FileNotFoundError):
+                result = read_directly()
+    except (StoreError, OSError, ValueError, TimeoutError):
+        raise CloudError("local_mapping_unavailable") from None
+    if not isinstance(result, dict) or set(result) != {"mapping"} or (
+            result["mapping"] is not None and not isinstance(result["mapping"], dict)):
+        raise CloudError("invalid_store_response")
+    return result["mapping"]
 
 
 def _store_native_mapping(state_dir, operation, mapping, transfer):
@@ -434,6 +558,17 @@ def _persist_native_lifecycle(args, state_dir, operation, binding, cloud, respon
         return _target_mapping_failure(
             state_dir, args, operation, cloud, response, mapping, error_code,
         )
+    if operation == "attach" and has_reconciliation(state_dir, args.session_id):
+        try:
+            readback = _read_native_mapping(state_dir, mapping["runtimeId"])
+            if not _same_json_value(readback, mapping):
+                raise CloudError("local_mapping_changed")
+            complete_reconciliation(state_dir, args.session_id, cloud_identity(cloud),
+                                    cloud.node_public_key, response, readback)
+        except (CloudError, SecurityError) as error:
+            return {"remoteStatus": response["status"], "localStatus": "unavailable",
+                    "reason": "reconciliation_completion_unavailable", "lastError": error.code,
+                    "runtimeId": mapping["runtimeId"]}
     if artifact or persisted.get("artifact"):
         pending = artifact or persisted["artifact"]
         try:

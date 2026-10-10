@@ -12,6 +12,7 @@ const base = resolve(root, 'packages/event-runtime/src');
 const names = [
   'contracts.ts', 'api.ts', 'registry.ts', 'coordinator.ts', 'coordinator-admission.ts',
   'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts',
+  'native-runtime-store.ts', 'native-admission-gate.ts',
 ];
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- Fixed source filenames under the operator-supplied local checkout.
 const source = Object.fromEntries(names.map(name => [name, readFileSync(resolve(base, name), 'utf8')]));
@@ -237,7 +238,50 @@ const nativeNodeProofs = {
   renew: nativeProof('/v1/runtimes/renew', nativeCommitRequests.renew, nativeIds.renewProof),
   transfer: nativeProof('/v1/runtimes/transfer', nativeCommitRequests.transfer, nativeIds.transferProof),
 };
+const runtimeStatusRequest = { runtimeId: nativeIds.runtime };
+nativeAdmissionSchemas.NativeRuntimeStatusRequestSchema.parse(runtimeStatusRequest);
+const runtimeStatusResponses = {
+  missing: { status: 'missing', runtimeId: nativeIds.runtime, observedAt: nativeObservedAt },
+  expired: { ...nativeSuccessResponses.attach, status: 'present', observedAt: nativeObservedAt,
+    runtimeGeneration: 7, attachmentGeneration: 9,
+    leaseUntil: nativeIssuedAt, storedQualified: true },
+  legacy: { ...nativeSuccessResponses.attach, status: 'present', observedAt: nativeObservedAt,
+    runtimeGeneration: 3, attachmentGeneration: 4,
+    leaseUntil: nativeIssuedAt, storedQualified: false, nativeBinding: null },
+};
+for (const value of Object.values(runtimeStatusResponses))
+  nativeAdmissionSchemas.NativeRuntimeStatusResponseSchema.parse(value);
+const runtimeStatusRejections = [
+  { name: 'status_extra_request_field', request: true,
+    value: { ...runtimeStatusRequest, qualified: true } },
+  { name: 'status_invalid_runtime_id', request: true,
+    value: { runtimeId: 'not-a-runtime' } },
+  { name: 'status_qualified_without_binding',
+    value: { ...runtimeStatusResponses.expired, nativeBinding: null } },
+  { name: 'status_unsafe_runtime_generation',
+    value: { ...runtimeStatusResponses.expired, runtimeGeneration: Number.MAX_SAFE_INTEGER + 1 } },
+  { name: 'status_zero_attachment_generation',
+    value: { ...runtimeStatusResponses.expired, attachmentGeneration: 0 } },
+  { name: 'status_nonboolean_qualification',
+    value: { ...runtimeStatusResponses.expired, storedQualified: 1 } },
+  { name: 'status_extra_missing_field',
+    value: { ...runtimeStatusResponses.missing, nativeBinding } },
+  { name: 'status_invalid_snapshot_time',
+    value: { ...runtimeStatusResponses.missing, observedAt: 'unknown' } },
+  { name: 'status_invalid_binding',
+    value: { ...runtimeStatusResponses.expired, nativeBinding: { ...nativeBinding, clientId: 'invalid' } } },
+];
+for (const vector of runtimeStatusRejections) {
+  const schema = vector.request ? nativeAdmissionSchemas.NativeRuntimeStatusRequestSchema
+    : nativeAdmissionSchemas.NativeRuntimeStatusResponseSchema;
+  if (schema.safeParse(vector.value).success)
+    throw Error('runtime status rejection vector accepted: ' + vector.name);
+}
+const runtimeStatus = { request: runtimeStatusRequest, responses: runtimeStatusResponses,
+  rejections: runtimeStatusRejections,
+  nodeProof: nativeProof('/v1/runtimes/status', runtimeStatusRequest, nativeIds.challengeProofAttach) };
 const nativeAdmissionFixture = {
+  runtimeStatus,
   ids: nativeIds,
   binding: nativeBinding,
   witness: nativeWitness,

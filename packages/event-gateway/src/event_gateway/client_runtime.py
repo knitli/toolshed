@@ -13,9 +13,12 @@ import stat
 import tempfile
 from urllib.parse import urlsplit
 
-from .cloud import CloudClient, CloudError, Credentials, _uuid
+from .cloud import (
+    CloudClient, CloudError, Credentials, _uuid, _native_challenge_request,
+    _runtime_status_response, _same_json_value, _generation,
+)
 from .protocol import ProtocolError, _depth, _pairs, _timestamp
-from .security import SecurityError, ensure_private_directory, load_signing_key
+from .security import SecurityError, ensure_private_directory, load_signing_key, _decode
 
 _PENDING_FIELDS = frozenset((
     "version", "operation", "sessionId", "cloudIdentity", "intent", "challenge",
@@ -29,7 +32,7 @@ def _reject_constant(_):
     raise ValueError("invalid_json")
 
 
-def _private_json(path, limit, code):
+def _private_json(path, limit, code, *, include_sha256=False, sync=False):
     path = Path(path).absolute()
     if any(component.is_symlink() for component in (path, *path.parents)):
         raise SecurityError(code)
@@ -42,6 +45,11 @@ def _private_json(path, limit, code):
                     or info.st_size > limit):
                 raise SecurityError(code)
             raw = stream.read(limit + 1)
+            if sync:
+                try:
+                    os.fsync(stream.fileno())
+                except OSError:
+                    raise SecurityError("pending_commit_unavailable") from None
     except SecurityError:
         raise
     except OSError:
@@ -54,6 +62,8 @@ def _private_json(path, limit, code):
         _depth(value)
     except (UnicodeError, ValueError, RecursionError):
         raise SecurityError(code) from None
+    if include_sha256:
+        return value, path, hashlib.sha256(raw).hexdigest()
     return value, path
 
 
@@ -259,31 +269,73 @@ def _validate_pending_artifact(value, operation, session_id):
     return body
 
 
+def load_pending_commit_snapshot(state_dir, operation, session_id):
+    """Read validated pending data and the hash of the exact same private file bytes."""
+    directory, path = _pending_slot(state_dir, operation, session_id)
+    if directory is None or not os.path.lexists(path):
+        return None, None
+    value, _, digest = _private_json(
+        path, _PENDING_MAX_BYTES, "invalid_pending_commit", include_sha256=True,
+    )
+    _validate_pending_artifact(value, operation, session_id)
+    return value, digest
+
+
 def load_pending_commit(state_dir, operation, session_id):
     """Read one closed pending commit artifact without following filesystem links."""
-    _directory, path = _pending_slot(state_dir, operation, session_id)
-    if _directory is None:
-        return None
-    if not os.path.lexists(path):
-        return None
-    value, _ = _private_json(path, _PENDING_MAX_BYTES, "invalid_pending_commit")
-    _validate_pending_artifact(value, operation, session_id)
-    return value
+    return load_pending_commit_snapshot(state_dir, operation, session_id)[0]
 
 
-def save_pending_commit(state_dir, operation, session_id, artifact):
+def save_pending_commit(state_dir, operation, session_id, artifact, *, current_mapping=None,
+                        node_public_key=None):
     """Create a secret-free mode-600 replay artifact atomically and without replacement."""
     directory, path = _pending_slot(state_dir, operation, session_id, create=True)
-    body = _validate_pending_artifact(artifact, operation, session_id)
-    _ = body
-    raw = json.dumps(artifact, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    _validate_pending_artifact(artifact, operation, session_id)
+    return _save_private_record(directory, path, artifact, "pending_commit_exists",
+                                current_mapping=current_mapping, node_public_key=node_public_key)
+
+
+def _save_private_record(directory, path, value, exists_code, *, successor_session_id=None,
+                         current_mapping=None, node_public_key=None):
+    raw = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     if len(raw) > _PENDING_MAX_BYTES:
         raise SecurityError("invalid_pending_commit")
     lock_fd = _pending_lock(directory)
-    temporary = None
     try:
         if os.path.lexists(path):
-            raise SecurityError("pending_commit_exists")
+            raise SecurityError(exists_code)
+        if successor_session_id is not None:
+            if any(os.path.lexists(_pending_slot(directory.parent, operation, successor_session_id)[1])
+                   for operation in _PENDING_OPERATIONS):
+                raise SecurityError("reconciliation_successor_not_fresh")
+        for existing_path in directory.glob("*.reconcile.json"):
+            existing, _, digest = _private_json(existing_path, _PENDING_MAX_BYTES,
+                                                "invalid_reconciliation", include_sha256=True)
+            if not isinstance(existing, dict):
+                raise SecurityError("invalid_reconciliation")
+            _validate_reconciliation(existing, existing.get("originalOperation"),
+                                     existing.get("originalSessionId"))
+            reserved_session = successor_session_id if successor_session_id is not None else value["sessionId"]
+            if existing["successorSessionId"] == reserved_session:
+                allowed_attach = (successor_session_id is None and value["operation"] == "attach"
+                                  and _same_json_value(value["intent"], existing["intent"])
+                                  and _same_json_value(value["cloudIdentity"], existing["cloudIdentity"]))
+                allowed_renew = (successor_session_id is None and value["operation"] == "renew"
+                                 and _completed_renewal_matches(existing_path, existing, digest,
+                                                               value, current_mapping, node_public_key))
+                if not (allowed_attach or allowed_renew):
+                    raise SecurityError("reconciliation_successor_reserved")
+        return _write_private_record(directory, path, raw)
+    except OSError:
+        raise SecurityError("pending_commit_unavailable") from None
+    finally:
+        os.close(lock_fd)
+
+
+def _write_private_record(directory, path, raw):
+    """Publish and sync bytes while the caller holds the pending directory lock."""
+    temporary = None
+    try:
         fd, temporary = tempfile.mkstemp(prefix=".commit-", dir=directory)
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as stream:
@@ -303,7 +355,177 @@ def save_pending_commit(state_dir, operation, session_id, artifact):
     finally:
         if temporary is not None:
             Path(temporary).unlink(missing_ok=True)
+
+
+def _reconciliation_links(state_dir):
+    directory = Path(state_dir).absolute() / ".native-pending"
+    if not os.path.lexists(directory):
+        return
+    directory = ensure_private_directory(directory)
+    for path in directory.glob("*.reconcile.json"):
+        link, _, digest = _private_json(path, _PENDING_MAX_BYTES, "invalid_reconciliation",
+                                        include_sha256=True)
+        if not isinstance(link, dict):
+            raise SecurityError("invalid_reconciliation")
+        _validate_reconciliation(link, link.get("originalOperation"), link.get("originalSessionId"))
+        yield path, link, digest
+
+
+def has_reconciliation(state_dir, session_id):
+    return any(link["successorSessionId"] == session_id
+               for _, link, _ in _reconciliation_links(state_dir))
+
+
+def _completion_record(link, digest, response, mapping):
+    """Bind an actual validated cloud result and matching writer readback to its link."""
+    response_fields = {"status", "runtimeId", "runtimeGeneration", "attachmentGeneration",
+                       "nodeId", "nodeGeneration", "leaseUntil", "nativeBinding"}
+    if (not isinstance(response, dict) or set(response) != response_fields
+            or not isinstance(mapping, dict)
+            or any(not _generation(response[key]) for key in (
+                "runtimeGeneration", "attachmentGeneration", "nodeGeneration"))):
+        raise SecurityError("invalid_reconciliation_completion")
+    identity = link["cloudIdentity"]
+    expected_mapping = {
+        "runtimeId": link["runtimeId"], "principal": identity["principal"], "agent": identity["agent"],
+        "nodeId": identity["nodeId"], "nodeGeneration": identity["nodeGeneration"],
+        "sessionId": link["successorSessionId"],
+        "nativeThreadId": link["intent"]["expectedNativeBinding"]["threadId"],
+        "nativeBinding": link["intent"]["expectedNativeBinding"],
+        "runtimeGeneration": response.get("runtimeGeneration"),
+        "attachmentGeneration": response.get("attachmentGeneration"),
+        "leaseExpiresAt": _timestamp(response.get("leaseUntil")) / 1000,
+    }
+    if (response.get("status") != "attached"
+            or any(not _same_json_value(response.get(key), expected_mapping[key])
+                   for key in ("runtimeId", "nodeId", "nodeGeneration", "nativeBinding"))
+            or not _same_json_value(mapping, expected_mapping)):
+        raise SecurityError("invalid_reconciliation_completion")
+    return {"version": 1, "linkSha256": digest, "sessionId": link["successorSessionId"],
+            "cloudIdentity": identity, "nodePublicKey": link["nodePublicKey"],
+            "response": response, "mapping": mapping}
+
+
+def complete_reconciliation(state_dir, session_id, identity, node_public_key, response, mapping):
+    directory, _ = _pending_slot(state_dir, "attach", session_id)
+    if directory is None:
+        return
+    lock_fd = _pending_lock(directory)
+    try:
+        for path, link, digest in _reconciliation_links(state_dir):
+            if link["successorSessionId"] != session_id:
+                continue
+            if (not _same_json_value(identity, link["cloudIdentity"])
+                    or node_public_key != link["nodePublicKey"]):
+                raise SecurityError("reconciliation_identity_mismatch")
+            record = _completion_record(link, digest, response, mapping)
+            completed_path = path.with_suffix(".completed.json")
+            if os.path.lexists(completed_path):
+                existing, _ = _private_json(completed_path, _PENDING_MAX_BYTES,
+                                            "invalid_reconciliation_completion", sync=True)
+                if not _same_json_value(existing, record):
+                    raise SecurityError("reconciliation_completion_changed")
+                directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            else:
+                raw = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+                if len(raw) > _PENDING_MAX_BYTES:
+                    raise SecurityError("invalid_reconciliation_completion")
+                _write_private_record(directory, completed_path, raw)
+    except (OSError, ProtocolError, TypeError, ValueError) as error:
+        if isinstance(error, SecurityError):
+            raise
+        raise SecurityError("reconciliation_completion_unavailable") from None
+    finally:
         os.close(lock_fd)
+
+
+def _completed_renewal_matches(path, link, digest, pending, current_mapping, node_public_key):
+    completed_path = path.with_suffix(".completed.json")
+    if not os.path.lexists(completed_path):
+        return False
+    completed, _ = _private_json(completed_path, _PENDING_MAX_BYTES, "invalid_reconciliation_completion")
+    try:
+        expected = _completion_record(link, digest, completed["response"], completed["mapping"])
+        if not _same_json_value(completed, expected):
+            return False
+        mapping = completed["mapping"]
+        return (node_public_key == completed["nodePublicKey"]
+                and _same_json_value(pending["cloudIdentity"], completed["cloudIdentity"])
+                and isinstance(current_mapping, dict)
+                and _same_json_value({key: value for key, value in current_mapping.items() if key != "leaseExpiresAt"},
+                                     {key: value for key, value in mapping.items() if key != "leaseExpiresAt"})
+                and _same_json_value(pending["intent"], {
+                    "operation": "renew", "runtimeId": mapping["runtimeId"],
+                    "expectedRuntimeGeneration": mapping["runtimeGeneration"],
+                    "expectedAttachmentGeneration": mapping["attachmentGeneration"],
+                    "expectedNativeBinding": mapping["nativeBinding"],
+                }))
+    except (KeyError, TypeError, ProtocolError):
+        raise SecurityError("invalid_reconciliation_completion") from None
+
+
+def _validate_reconciliation(value, operation, session_id):
+    fields = {"version", "originalArtifactSha256", "originalOperation", "originalSessionId",
+              "cloudIdentity", "runtimeId", "successorSessionId", "nodePublicKey", "observed", "intent"}
+    if (not isinstance(value, dict) or set(value) != fields
+            or not isinstance(value["version"], int) or isinstance(value["version"], bool)
+            or value["version"] != 1
+            or operation not in ("attach", "renew") or value["originalOperation"] != operation
+            or not _uuid(value["originalSessionId"]) or value["originalSessionId"] != session_id
+            or not _uuid(value["successorSessionId"]) or value["successorSessionId"] == session_id
+            or not isinstance(value["originalArtifactSha256"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", value["originalArtifactSha256"])
+            or not isinstance(value["cloudIdentity"], dict)
+            or set(value["cloudIdentity"]) != {"origin", "principal", "agent", "nodeId", "nodeGeneration"}):
+        raise SecurityError("invalid_reconciliation")
+    try:
+        _decode(value["nodePublicKey"], 32)
+        observed = _runtime_status_response(value["observed"], value["runtimeId"])
+        intent = _native_challenge_request(value["intent"])
+        expected = (observed["runtimeGeneration"], observed["attachmentGeneration"]) if observed["status"] == "present" else (None, None)
+        if (intent["operation"] != "attach" or intent["runtimeId"] != value["runtimeId"]
+                or (intent["expectedRuntimeGeneration"], intent["expectedAttachmentGeneration"]) != expected):
+            raise CloudError("invalid_request")
+    except (CloudError, SecurityError, KeyError, TypeError):
+        raise SecurityError("invalid_reconciliation") from None
+
+
+def load_reconciliation(state_dir, operation, original_session_id, *, durable=False):
+    directory, pending_path = _pending_slot(state_dir, operation, original_session_id)
+    path = pending_path.with_suffix(".reconcile.json")
+    if directory is None or not os.path.lexists(path):
+        return None
+    lock_fd = _pending_lock(directory) if durable else None
+    try:
+        value, _ = _private_json(path, _PENDING_MAX_BYTES, "invalid_reconciliation", sync=durable)
+        _validate_reconciliation(value, operation, original_session_id)
+        if durable:
+            # A previous rename may be visible despite a failed directory fsync.
+            # Re-establish both file and directory durability before any retry request.
+            directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        return value
+    except OSError:
+        raise SecurityError("pending_commit_unavailable") from None
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
+
+
+def save_reconciliation(state_dir, operation, original_session_id, link):
+    """Durably pin one successor intent before it can send any lifecycle request."""
+    directory, path = _pending_slot(state_dir, operation, original_session_id, create=True)
+    _validate_reconciliation(link, operation, original_session_id)
+    return _save_private_record(directory, path.with_suffix(".reconcile.json"), link,
+                                "reconciliation_link_exists",
+                                successor_session_id=link["successorSessionId"])
 
 
 def clear_pending_commit(state_dir, operation, session_id, expected=None):

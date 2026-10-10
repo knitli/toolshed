@@ -113,7 +113,7 @@ as permission to create a new native attempt or attachment request.
 ## Separate control-plane source pin
 
 `contracts/event-control-v1/manifest.json` pins the exact Event source files from
-the OS snapshot candidate `038716741534afe804fb75b9eab15dba6ddbee11`, plus the Zod version and
+the OS snapshot candidate `7675f40a4053795de03458c2741da4e3a475ce29`, plus the Zod version and
 fixture SHA-256. It does not modify the earlier frozen `event-v1` transport pin.
 In `--check` mode, the exporter verifies the committed revision, every source
 hash and installed Zod version before evaluating source. A mismatch stops before
@@ -123,7 +123,8 @@ cross-language fixtures. Generation
 without `--check` is an explicit operation on reviewed, fully trusted local
 source and an installed trusted Zod dependency; it executes that code and writes
 a new pin for review. The fixture includes the native admission challenge,
-attach/renew/transfer DTOs, error codes, rejection vectors, and node-proof
+attach/renew/transfer and historical runtime-status DTOs, error codes, rejection
+vectors, and node-proof
 canonicalization. Neither mode imports Worker runtime code or makes network
 requests. The source extraction is deliberately specific to the pinned
 functions and imports; changing that source requires reviewing the exporter
@@ -132,7 +133,8 @@ again.
 `tests/test_cloud.py` consumes the exported `nativeAdmission` vectors directly.
 It checks attach, renew, and transfer challenge/commit bodies, NodeProof
 canonical bytes and signatures, successful response DTOs, and named rejection
-cases against the Python client.
+cases against the Python client. `tests/test_runtime_status_contract.py` checks
+the exported historical status, request rejections, and signed node-proof vectors.
 
 From `packages/event-gateway`, using Node 24.19.0 and the pinned Zod 4.5.4 module:
 

@@ -37,6 +37,45 @@ async def running_daemon(state_dir):
 
 
 class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
+    async def test_get_attachment_reads_through_live_writer_with_closed_request(self):
+        runtime_id = str(uuid.uuid4())
+        mapping = {"runtimeId": runtime_id, "fixture": "private-mapping"}
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory:
+            state = await self.state_dir(directory, "readback")
+            with patch.object(Store, "get_attachment", return_value=mapping) as read:
+                async with running_daemon(state):
+                    self.assertEqual(await daemon.request(state, {
+                        "command": "get-attachment", "runtimeId": runtime_id,
+                    }), {"mapping": mapping})
+                    for invalid in (
+                        {"command": "get-attachment", "runtimeId": "invalid"},
+                        {"command": "get-attachment", "runtimeId": runtime_id, "extra": True},
+                        {"command": "get-attachment"},
+                    ):
+                        self.assertEqual(await daemon.request(state, invalid), {"reason": "unsupported_command"})
+            read.assert_called_once_with(runtime_id)
+
+    async def test_cli_readback_uses_live_daemon_without_opening_second_writer(self):
+        runtime_id = str(uuid.uuid4())
+        mapping = {"runtimeId": runtime_id, "fixture": "private-mapping"}
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory:
+            state = await self.state_dir(directory, "readback-cli")
+            with patch.object(Store, "get_attachment", return_value=mapping):
+                async with running_daemon(state):
+                    with patch.object(cli, "Store", side_effect=AssertionError("second writer opened")):
+                        self.assertEqual(await asyncio.to_thread(cli._read_native_mapping, state, runtime_id), mapping)
+
+    async def test_cli_readback_timeout_does_not_fall_back_to_writer(self):
+        runtime_id = str(uuid.uuid4())
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory:
+            state = await self.state_dir(directory, "readback-timeout")
+            (state / "control.sock").touch()
+            with (patch.object(cli, "request", side_effect=TimeoutError),
+                  patch.object(cli, "Store", side_effect=AssertionError("second writer opened"))):
+                with self.assertRaises(cli.CloudError) as caught:
+                    await asyncio.to_thread(cli._read_native_mapping, state, runtime_id)
+            self.assertEqual(caught.exception.code, "local_mapping_unavailable")
+
     async def state_dir(self, parent, label):
         path = Path(parent) / label
         path.mkdir(mode=0o700)
