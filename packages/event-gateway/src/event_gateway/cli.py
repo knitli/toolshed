@@ -25,7 +25,7 @@ from .security import (
 )
 from .store import Store, StoreError
 from .launcher import LaunchError, launch, session_binding, session_challenge, session_status
-from .protocol import _timestamp
+from .protocol import ProtocolError, _pairs, _timestamp
 
 
 def main(argv=None):
@@ -72,6 +72,11 @@ def main(argv=None):
     runtime_status = commands.add_parser("runtime-status", help="Read stored cloud runtime authority")
     runtime_status.add_argument("--runtime-id", required=True)
     runtime_status.add_argument("--cloud-config", type=Path, required=True)
+    source_read = commands.add_parser("github-source-read", help="Read one retained GitHub source page")
+    source_read.add_argument("--cloud-config", type=Path, required=True)
+    for flag in ("installation-id", "repository-id", "pr-number", "from-version", "to-version"):
+        source_read.add_argument("--" + flag, type=int, required=True)
+    source_read.add_argument("--cursor", help="Exact nextCursor JSON from the preceding page")
     reconcile = commands.add_parser("reconcile", help="Reconcile retained attach/renew evidence with a fresh session")
     reconcile.add_argument("--operation", choices=("attach", "renew", "transfer"), required=True)
     reconcile.add_argument("--original-session-id", required=True)
@@ -119,6 +124,27 @@ def _execute_command(args, state_dir, parser):
     if args.command == "run":
         asyncio.run(serve(state_dir, dispatch_config=args.dispatch_config))
         return 0
+    if args.command == "github-source-read":
+        try:
+            source_request = {
+                "subject": {"installationId": args.installation_id, "repositoryId": args.repository_id,
+                            "prNumber": args.pr_number},
+                "fromVersion": args.from_version, "toVersion": args.to_version,
+            }
+            if args.cursor is not None:
+                if len(args.cursor.encode("utf-8", "surrogatepass")) > 4096:
+                    raise CloudError("invalid_request")
+                try:
+                    source_request["cursor"] = json.loads(args.cursor, object_pairs_hook=_pairs)
+                except (ValueError, RecursionError, ProtocolError):
+                    raise CloudError("invalid_request") from None
+            cloud = load_cloud_client(args.cloud_config, state_dir)
+            result = asyncio.run(cloud.github_source_read(source_request))
+        except CloudError as error:
+            print(json.dumps({"sourceRead": None, "reason": error.code}))
+            return 2
+        print(json.dumps(result))
+        return 0 if result["status"] == "ok" else 2
     if args.command == "runtime-status":
         try:
             cloud = load_cloud_client(args.cloud_config, state_dir)

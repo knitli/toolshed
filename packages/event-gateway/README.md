@@ -238,3 +238,30 @@ See [client presence evidence](docs/client-presence.md) and
 Three-session routing, authenticated live Mesh delivery, owner enrollment,
 installed user-service lifecycle, and cross-repository semantic conformance
 must pass before release. The prior bounded spike is historical evidence only.
+
+### Retained GitHub source readback
+
+`github-source-read` requests exactly one authorized page using the private cloud
+configuration and enrolled node key already used by `runtime-status`:
+
+```sh
+knitli-event-gateway --state-dir /private/state github-source-read \
+  --cloud-config /private/cloud.json \
+  --installation-id 123 --repository-id 456 --pr-number 7 \
+  --from-version 2 --to-version 5
+```
+
+For another page, repeat the same subject/range flags and pass the returned
+`nextCursor` object as `--cursor '<JSON>'`. The caller validates the subject,
+range, fixed anchor, cursor progression and closed safe record projections.
+Each request is capped at 4096 bytes and each response at 8192 bytes. The command
+prints one JSON result and exits 0 for `ok`, or 2 for `coverage_unavailable`,
+`conflict`, or a sanitized transport/authorization failure. It does not retry or
+paginate automatically. A conflict requires restarting without the old cursor.
+
+`complete` means this is the final page of that cursor chain. A standalone final
+page does not prove the caller retained all earlier pages. Anchor state and
+backward transitions can include versions above `toVersion`; those bridge records
+are needed to reconstruct the requested inclusive range. This command reads
+retained source state, not GitHub directly, and does not attach a runtime or
+establish native wake qualification.

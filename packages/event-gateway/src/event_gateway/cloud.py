@@ -166,6 +166,151 @@ def _runtime_status_response(value, runtime_id):
     return value
 
 
+def _github_text(value, limit):
+    return isinstance(value, str) and len(value.encode("utf-16-le", "surrogatepass")) // 2 <= limit
+
+
+def _github_cursor(value, request, *, code):
+    _closed(value, ("subjectKey", "fromVersion", "toVersion", "anchorVersion", "anchorEpoch",
+                    "revision", "policyRevision", "offset"), code=code)
+    subject = request["subject"]
+    subject_key = _json([subject[key] for key in ("installationId", "repositoryId", "prNumber")]).decode()
+    if (value["subjectKey"] != subject_key
+            or any(not _generation(value[key]) for key in (
+                "fromVersion", "toVersion", "anchorVersion", "anchorEpoch"))
+            or any(value[key] != request[key] for key in ("fromVersion", "toVersion"))
+            or value["anchorVersion"] < request["toVersion"]
+            or not _safe_uint(value["offset"])
+            or any(not _github_text(value[key], 256) for key in ("revision", "policyRevision"))):
+        raise CloudError(code)
+
+
+def _github_source_request(value):
+    code = "invalid_request"
+    if not isinstance(value, dict):
+        raise CloudError(code)
+    _closed(value, {"subject", "fromVersion", "toVersion"} | ({"cursor"} if "cursor" in value else set()), code=code)
+    _closed(value["subject"], ("installationId", "repositoryId", "prNumber"), code=code)
+    if (any(not _generation(number) for number in value["subject"].values())
+            or any(not _generation(value[key]) for key in ("fromVersion", "toVersion"))
+            or value["fromVersion"] > value["toVersion"]):
+        raise CloudError(code)
+    if "cursor" in value:
+        _github_cursor(value["cursor"], value, code=code)
+    return json.loads(_json(value))
+
+
+def _github_state(value):
+    return isinstance(value, str) and value in ("open", "closed", "merged")
+
+
+def _github_sha(value):
+    return isinstance(value, str) and re.fullmatch(r"[a-f0-9]{40}", value) is not None
+
+
+def _github_presence(value, kind):
+    if isinstance(value, dict) and value.get("presence") == "absent":
+        _closed(value, ("presence",))
+        return
+    if kind == "finding":
+        _closed(value, ("presence", "kind", "sourceHeadSha", "fingerprint", "disposition", "outdated"))
+        valid = (value["kind"] in ("review", "thread", "comment")
+                 and (value["sourceHeadSha"] is None or _github_sha(value["sourceHeadSha"]))
+                 and isinstance(value["fingerprint"], str)
+                 and re.fullmatch(r"[a-f0-9]{64}", value["fingerprint"]) is not None
+                 and value["disposition"] in ("open", "resolved")
+                 and isinstance(value["outdated"], bool))
+    else:
+        optional = {key for key in ("workflowId", "runNumber") if isinstance(value, dict) and key in value}
+        _closed(value, {"presence", "kind", "sourceId", "headSha", "attempt", "status",
+                        "conclusion", "startedAt", "completedAt"} | optional)
+        valid = (value["kind"] in ("check", "status", "workflow")
+                 and _github_text(value["sourceId"], 64) and _github_sha(value["headSha"])
+                 and (value["attempt"] is None or _generation(value["attempt"]))
+                 and all(value[key] is None or _github_text(value[key], 128) for key in ("status", "conclusion"))
+                 and all(value[key] is None or _safe_uint(value[key]) for key in ("startedAt", "completedAt"))
+                 and all(_generation(value[key]) for key in optional))
+    if value["presence"] != "present" or not valid:
+        raise CloudError("invalid_response")
+
+
+def _github_projection(kind, value):
+    if kind == "version":
+        _closed(value, ("complete", "observedAt", "candidateGeneration", "coverageStartVersion", "candidate", "state"))
+        candidate = value["candidate"]
+        _closed(candidate, ("headSha", "baseSha", "observedMergeSha"))
+        valid = (value["complete"] is True and _safe_uint(value["observedAt"])
+                 and _safe_uint(value["candidateGeneration"]) and _generation(value["coverageStartVersion"])
+                 and _github_state(value["state"]) and _github_sha(candidate["headSha"])
+                 and _github_sha(candidate["baseSha"])
+                 and (candidate["observedMergeSha"] is None or _github_sha(candidate["observedMergeSha"])))
+    elif kind == "terminal":
+        _closed(value, ("from", "to"))
+        valid = (value["from"] is None or _github_state(value["from"])) and _github_state(value["to"])
+    elif kind == "request":
+        _closed(value, ("kind", "identity", "from", "to"))
+        valid = (value["kind"] == "review_request" and _github_text(value["identity"], 128)
+                 and value["from"] in (None, "present", "absent") and value["to"] in ("present", "absent"))
+    elif kind in ("finding", "run"):
+        _closed(value, ("sourceId", "from", "to") if kind == "finding" else ("from", "to"))
+        valid = kind != "finding" or _github_text(value["sourceId"], 4096)
+        if value["from"] is not None:
+            _github_presence(value["from"], kind)
+        _github_presence(value["to"], kind)
+    else:
+        raise CloudError("invalid_response")
+    if not valid:
+        raise CloudError("invalid_response")
+
+
+def _github_source_response(value, request):
+    if isinstance(value, dict) and value.get("status") in ("coverage_unavailable", "conflict"):
+        _closed(value, ("status",))
+        return value
+    _closed(value, ("status", "subject", "requestedRange", "coverageStartVersion", "anchor",
+                    "items", "nextCursor", "complete"))
+    anchor = value["anchor"]
+    _closed(anchor, ("sourceVersion", "epoch", "observedAt"))
+    if (value["status"] != "ok" or not _same_json_value(value["subject"], request["subject"])
+            or not _same_json_value(value["requestedRange"], {key: request[key] for key in ("fromVersion", "toVersion")})
+            or not _generation(value["coverageStartVersion"])
+            or value["coverageStartVersion"] > request["fromVersion"]
+            or not _generation(anchor["sourceVersion"]) or anchor["sourceVersion"] < request["toVersion"]
+            or not _generation(anchor["epoch"]) or not _safe_uint(anchor["observedAt"])
+            or not isinstance(value["items"], list) or not value["items"]
+            or not isinstance(value["complete"], bool)
+            or value["complete"] != (value["nextCursor"] is None)):
+        raise CloudError("invalid_response")
+    for cursor in (request.get("cursor"), value["nextCursor"]):
+        if cursor is not None:
+            _github_cursor(cursor, request, code="invalid_response")
+            if cursor["anchorVersion"] != anchor["sourceVersion"] or cursor["anchorEpoch"] != anchor["epoch"]:
+                raise CloudError("invalid_response")
+    if value["nextCursor"] is not None:
+        previous = request.get("cursor")
+        if (value["nextCursor"]["offset"] != (previous["offset"] if previous else 0) + len(value["items"])
+                or not value["items"]
+                or (previous is not None and any(value["nextCursor"][key] != previous[key]
+                                                for key in previous if key != "offset"))):
+            raise CloudError("invalid_response")
+    anchor_epoch = None
+    for item in value["items"]:
+        _closed(item, ("phase", "sourceVersion", "epoch", "recordType", "recordKey", "value"))
+        if (item["phase"] not in ("anchor", "transition") or not _generation(item["sourceVersion"])
+                or not request["fromVersion"] <= item["sourceVersion"] <= anchor["sourceVersion"]
+                or not _generation(item["epoch"]) or item["epoch"] > anchor["epoch"]
+                or not _github_text(item["recordKey"], 4096)
+                or (item["phase"] == "anchor" and item["sourceVersion"] != anchor["sourceVersion"])):
+            raise CloudError("invalid_response")
+        if item["phase"] == "anchor":
+            # Lifecycle epochs can advance after the last committed observation.
+            if anchor_epoch is not None and item["epoch"] != anchor_epoch:
+                raise CloudError("invalid_response")
+            anchor_epoch = item["epoch"]
+        _github_projection(item["recordType"], item["value"])
+    return value
+
+
 def _native_witness(value, *, code="invalid_request"):
     _closed(value, _NATIVE_WITNESS_FIELDS, code=code)
     if (type(value["version"]) is not int or value["version"] != 2  # pylint: disable=unidiomatic-typecheck
@@ -665,6 +810,12 @@ class CloudClient:
     def node_public_key(self):
         """Public key identity for a retained local reconciliation link."""
         return base64.urlsafe_b64encode(self._key.public_key().public_bytes_raw()).rstrip(b"=").decode()
+
+    async def github_source_read(self, request):
+        """Read one bounded page of authorized retained GitHub source projections."""
+        request = _github_source_request(request)
+        result = await self._post("/v1/github/source/read", request)
+        return _github_source_response(result, request)
 
     async def runtime_status(self, runtime_id):
         """Read stored authority; this does not assert live presence or current eligibility."""
