@@ -157,7 +157,10 @@ knitli-event-gateway --state-dir "$HOME/.local/state/knitli-event-gateway" attac
 `--session-id` is the exact UUID printed by the foreground launcher. Renewal
 also requires `--expected-runtime-generation` and
 `--expected-attachment-generation`; transfer requires source and replacement
-generation pairs. See the [cloud client lifecycle and recovery details](docs/cloud-adapter.md).
+generation pairs. `runtime-status` reads stored cloud generations; `reconcile`
+creates a fenced successor for retained ambiguous attach/renew evidence. See the
+[retained native recovery procedure](docs/native-bridge/runtime-reconciliation.md)
+and [cloud client lifecycle details](docs/cloud-adapter.md).
 
 Default state is `~/.local/state/knitli-event-gateway`, with mode 0700 directories
 and 0600 files/socket. `--state-dir PATH` accepts a private directory without
