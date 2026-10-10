@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 from .cloud import (
     CloudClient, CloudError, Credentials, _uuid, _native_challenge_request,
-    _runtime_status_response,
+    _runtime_status_response, _same_json_value,
 )
 from .protocol import ProtocolError, _depth, _pairs, _timestamp
 from .security import SecurityError, ensure_private_directory, load_signing_key
@@ -32,7 +32,7 @@ def _reject_constant(_):
     raise ValueError("invalid_json")
 
 
-def _private_json(path, limit, code, *, include_sha256=False):
+def _private_json(path, limit, code, *, include_sha256=False, sync=False):
     path = Path(path).absolute()
     if any(component.is_symlink() for component in (path, *path.parents)):
         raise SecurityError(code)
@@ -45,6 +45,11 @@ def _private_json(path, limit, code, *, include_sha256=False):
                     or info.st_size > limit):
                 raise SecurityError(code)
             raw = stream.read(limit + 1)
+            if sync:
+                try:
+                    os.fsync(stream.fileno())
+                except OSError:
+                    raise SecurityError("pending_commit_unavailable") from None
     except SecurityError:
         raise
     except OSError:
@@ -301,13 +306,17 @@ def _save_private_record(directory, path, value, exists_code, *, successor_sessi
             if any(os.path.lexists(_pending_slot(directory.parent, operation, successor_session_id)[1])
                    for operation in _PENDING_OPERATIONS):
                 raise SecurityError("reconciliation_successor_not_fresh")
-            for existing_path in directory.glob("*.reconcile.json"):
-                existing, _ = _private_json(existing_path, _PENDING_MAX_BYTES, "invalid_reconciliation")
-                if not isinstance(existing, dict):
-                    raise SecurityError("invalid_reconciliation")
-                _validate_reconciliation(existing, existing.get("originalOperation"),
-                                         existing.get("originalSessionId"))
-                if existing["successorSessionId"] == successor_session_id:
+        for existing_path in directory.glob("*.reconcile.json"):
+            existing, _ = _private_json(existing_path, _PENDING_MAX_BYTES, "invalid_reconciliation")
+            if not isinstance(existing, dict):
+                raise SecurityError("invalid_reconciliation")
+            _validate_reconciliation(existing, existing.get("originalOperation"),
+                                     existing.get("originalSessionId"))
+            reserved_session = successor_session_id if successor_session_id is not None else value["sessionId"]
+            if existing["successorSessionId"] == reserved_session:
+                if (successor_session_id is not None or value["operation"] != "attach"
+                        or not _same_json_value(value["intent"], existing["intent"])
+                        or not _same_json_value(value["cloudIdentity"], existing["cloudIdentity"])):
                     raise SecurityError("reconciliation_successor_reserved")
         fd, temporary = tempfile.mkstemp(prefix=".commit-", dir=directory)
         os.fchmod(fd, 0o600)
@@ -357,14 +366,29 @@ def _validate_reconciliation(value, operation, session_id):
         raise SecurityError("invalid_reconciliation") from None
 
 
-def load_reconciliation(state_dir, operation, original_session_id):
+def load_reconciliation(state_dir, operation, original_session_id, *, durable=False):
     directory, pending_path = _pending_slot(state_dir, operation, original_session_id)
     path = pending_path.with_suffix(".reconcile.json")
     if directory is None or not os.path.lexists(path):
         return None
-    value, _ = _private_json(path, _PENDING_MAX_BYTES, "invalid_reconciliation")
-    _validate_reconciliation(value, operation, original_session_id)
-    return value
+    lock_fd = _pending_lock(directory) if durable else None
+    try:
+        value, _ = _private_json(path, _PENDING_MAX_BYTES, "invalid_reconciliation", sync=durable)
+        _validate_reconciliation(value, operation, original_session_id)
+        if durable:
+            # A previous rename may be visible despite a failed directory fsync.
+            # Re-establish both file and directory durability before any retry request.
+            directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        return value
+    except OSError:
+        raise SecurityError("pending_commit_unavailable") from None
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
 
 
 def save_reconciliation(state_dir, operation, original_session_id, link):

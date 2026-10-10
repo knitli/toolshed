@@ -401,6 +401,46 @@ class NativeReconciliationTests(unittest.TestCase):
                 self.assertIsNone(client_runtime.load_reconciliation(
                     self.state, "attach", self.old_session))
 
+    def test_reserved_successor_only_accepts_linked_attach_identity_and_intent(self):
+        original = self.pending()
+        with patch.object(self.cloud, "native_challenge", side_effect=KeyboardInterrupt):
+            self.assertEqual(self.invoke()[0], 130)
+        link = client_runtime.load_reconciliation(self.state, "attach", self.old_session)
+        exact = {**copy.deepcopy(original), "sessionId": self.session,
+                 "intent": copy.deepcopy(link["intent"])}
+        different_attach = copy.deepcopy(exact)
+        different_attach["intent"]["runtimeId"] = identifier()
+        different_identity = copy.deepcopy(exact)
+        different_identity["cloudIdentity"]["nodeGeneration"] += 1
+        for case, artifact in (
+            ("different_attach", different_attach),
+            ("renew", {**copy.deepcopy(exact), "operation": "renew",
+                       "intent": {**link["intent"], "operation": "renew"}}),
+            ("transfer", {**copy.deepcopy(exact), "operation": "transfer",
+                          "intent": {
+                              "operation": "transfer", "sourceRuntimeId": self.runtime_id,
+                              "expectedSourceRuntimeGeneration": 7,
+                              "expectedSourceAttachmentGeneration": 11,
+                              "replacementRuntimeId": identifier(),
+                              "expectedReplacementRuntimeGeneration": 2,
+                              "expectedReplacementAttachmentGeneration": 3,
+                              "expectedNativeBinding": self.binding,
+                          }}),
+            ("different_identity", different_identity),
+        ):
+            with self.subTest(case=case):
+                with self.assertRaises(client_runtime.SecurityError) as caught:
+                    client_runtime.save_pending_commit(
+                        self.state, artifact["operation"], self.session, artifact)
+                self.assertEqual(caught.exception.code, "reconciliation_successor_reserved")
+                self.assertIsNone(cli.load_pending_commit(
+                    self.state, artifact["operation"], self.session))
+                self.assertEqual(client_runtime.load_reconciliation(
+                    self.state, "attach", self.old_session), link)
+        client_runtime.save_pending_commit(self.state, "attach", self.session, exact)
+        self.assertEqual(cli.load_pending_commit(self.state, "attach", self.session), exact)
+        self.assert_original_preserved()
+
     def test_link_fsync_failures_send_nothing_and_remain_retryable(self):
         root = self.state
         real_fsync = os.fsync
@@ -430,6 +470,19 @@ class NativeReconciliationTests(unittest.TestCase):
                 retained = client_runtime.load_reconciliation(self.state, "attach", self.old_session)
                 self.assertEqual(retained is not None, fail_at == 2)
                 status_before = len(self.cloud.status_calls)
+                if retained is not None:
+                    for retry_fail_at in (1, 2):
+                        calls.clear()
+                        fail_at = retry_fail_at
+                        with patch.object(client_runtime.os, "fsync", side_effect=failing_fsync):
+                            code, result, _, challenge = self.invoke()
+                        self.assertEqual(code, 2)
+                        self.assertIn("pending_commit_unavailable", json.dumps(result))
+                        self.assertEqual(len(self.cloud.intents), challenges_before)
+                        self.assertEqual(len(self.cloud.commits), commits_before)
+                        challenge.assert_not_called()
+                        self.assertEqual(client_runtime.load_reconciliation(
+                            self.state, "attach", self.old_session), retained)
                 code, result, _, _ = self.invoke()
                 self.assertEqual(code, 0, result)
                 self.assertEqual(len(self.cloud.status_calls) - status_before, 1 if fail_at == 1 else 0)
