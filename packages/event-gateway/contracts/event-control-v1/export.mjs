@@ -12,7 +12,7 @@ const base = resolve(root, 'packages/event-runtime/src');
 const names = [
   'contracts.ts', 'api.ts', 'registry.ts', 'coordinator.ts', 'coordinator-admission.ts',
   'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts',
-  'native-runtime-store.ts',
+  'native-runtime-store.ts', 'native-admission-gate.ts',
 ];
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- Fixed source filenames under the operator-supplied local checkout.
 const source = Object.fromEntries(names.map(name => [name, readFileSync(resolve(base, name), 'utf8')]));

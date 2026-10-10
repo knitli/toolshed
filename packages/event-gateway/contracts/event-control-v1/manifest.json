@@ -12,7 +12,8 @@
     "apps/os/packages/event-runtime/src/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
     "apps/os/packages/event-runtime/src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
     "apps/os/packages/event-runtime/src/native-admission-contract.ts": "6f3fcdeee95ea967acbbcb9a701e89c2bcb653f2f8fba25b0b019b81b49cab23",
-    "apps/os/packages/event-runtime/src/native-runtime-store.ts": "c56c20a16df373e392dfca822c42fa9617c3934d59dab3331831154605e59b44"
+    "apps/os/packages/event-runtime/src/native-runtime-store.ts": "c56c20a16df373e392dfca822c42fa9617c3934d59dab3331831154605e59b44",
+    "apps/os/packages/event-runtime/src/native-admission-gate.ts": "e6f9975990b340c7ab12db636da916b5294430274f33599abe5c13fb4f2018af"
   },
   "fixturesSha256": "a5dca38202380f31950ff0e7f06aa5ff97eee872d7538e83e4f56bea5e7cad82"
 }
