@@ -194,6 +194,17 @@ class NativePackagingTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "native_source_manifest_mismatch"):
                 PACKAGER["verify_patched_source"](root, manifest)
 
+    def test_historical_proof_inputs_retain_their_recorded_hashes(self):
+        docs = Path(__file__).resolve().parents[1] / "docs/native-bridge"
+        candidate = json.loads((docs / "durable-restart-v3-proof-manifest.json").read_text())["candidate"]
+        inputs = (
+            (candidate["sourceManifest"], candidate["sourceManifestSha256"]),
+            (candidate["implementationPatch"]["path"], candidate["implementationPatch"]["sha256"]),
+        )
+        for relative, expected in inputs:
+            with self.subTest(path=relative):
+                self.assertEqual(hashlib.sha256((docs / relative).read_bytes()).hexdigest(), expected)
+
     def test_manifest_rejects_a_missing_patched_file(self):
         manifest_bytes = PACKAGER["SOURCE_MANIFEST"].read_bytes()
         patch_bytes = PACKAGER["PATCH"].read_bytes()

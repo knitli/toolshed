@@ -1,6 +1,6 @@
 # Build and qualify the pinned native client
 
-The launcher accepts only the reviewed v3 CLI digest `0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de`. This runbook rebuilds a disposable candidate from upstream Codex `a956835d020762cb2b570053af06f643a11c0ecc`, applies the cumulative v3 patch, checks all 48 patched source hashes, and records the toolchain and binary digest. It never installs the client or changes the launcher's digest.
+The proposed redraw-fix release pins v3 CLI digest `d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02`; see [redraw qualification](native-redraw-qualification.md). This runbook rebuilds a disposable candidate from upstream Codex `a956835d020762cb2b570053af06f643a11c0ecc`, applies `native-redraw-v1-implementation.patch`, checks all 48 hashes in `native-redraw-v1-source-manifest.json`, and records the toolchain and binary digest. It never installs the client or changes the launcher's digest.
 
 Use a clean checkout of the exact upstream commit, Rust 1.95.0 (`59807616e`), Cargo's existing offline cache, and Apple Silicon macOS. The builder archives the entire pinned Git tree into a temporary directory, with no pathspecs, then applies the reviewed patch and validates the 48 patched source files. Its only outputs are the two new paths you name:
 
@@ -20,21 +20,24 @@ The evidence contains the upstream commit, full-tree archive selection and extra
 Keep the builder's executable and evidence JSON together as one external artifact
 pair; neither is included in the Python wheel. Treat `launcherQualified: true`
 as an operator handoff check: recompute the executable SHA-256 and confirm it
-matches both `binarySha256` and `launcherSha256` in the evidence. The launcher
+matches both `binarySha256` and `launcherSha256` in the evidence. When the
+original build predates a reviewed pin promotion, retain that historical
+evidence and use the separately reviewed release proof to identify the
+promoted digest; it must match the current hard-coded launcher pin. The launcher
 does not read the evidence JSON. Pass the absolute executable path and its
 SHA-256 to `knitli-event-gateway launch`; the CLI checks that digest against the
 hard-coded `QUALIFIED_SHA256` pin again immediately before execution. A
 different build requires a separate reviewed pin update, and changing the
 evidence file alone does not authorize it.
 
-The latest full-tree clean build and v3 runtime result are recorded in
+The earlier full-tree clean build and v3 runtime result are recorded in
 [`native-client-build-proof.json`](native-client-build-proof.json). The rebuilt
 candidate SHA-256 is
 `3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c`. The historical
 build evidence records `launcherQualified: false` against the former `0fb3…22de`
 pin. The [native release checkpoint](native-release-runtime.md) subsequently
 qualified this exact preserved candidate with the current reader and actual
-foreground launcher; the launcher and builder now pin `3e88…387c`. Historical
+foreground launcher; the launcher and builder pinned `3e88…387c` at that checkpoint. Historical
 evidence remains unchanged. Three earlier builds using the selective
 `codex-rs` plus generated SDK archive and only `codex-rs/.cargo/config.toml`
 produced different hashes; temporary source paths appear in those binary

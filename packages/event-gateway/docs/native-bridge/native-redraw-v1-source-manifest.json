@@ -1,0 +1,309 @@
+{
+  "sourceCheckout": "/private/tmp/event-native-redraw-source/codex-rs",
+  "baseCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "scope": "Cumulative native selection binding, terminal refusal, durable StateDB receipt, and v3 bridge identity across TUI restart; includes Core/app-server/protocol/State/TUI/CLI and generated schema/SDK exports.; failed Core preparation now returns non-Started and cleans only the failed matching turn. Scheduled Draw events preserve native selection while all other TUI events retain pre-handling revocation; readiness remains checked before each bridge tick.",
+  "fileCount": 48,
+  "binaryPatch": true,
+  "patchSha256": "1eb419088d92b4b8ed238afd8866e669e5239c413580fd13d319edbe4a4e5108",
+  "cleanPinnedApply": {
+    "base": "a956835d020762cb2b570053af06f643a11c0ecc",
+    "cleanApply": "PASS",
+    "patchedBytesMatch": "PASS",
+    "mismatches": 0
+  },
+  "excludedBuildOnlyFiles": [
+    "codex-rs/Cargo.lock"
+  ],
+  "fileSha256": {
+    "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json": "cdb5512b033565c4322f3f7b20b34e45fbbc641d061d10dbf8d2c12dbcf788c3",
+    "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json": "722bb44139cd436422ee0eec79b8d865265b8b774eecee824ef7f7c0a8603052",
+    "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst": "4fd0d9ccd80d6d367ba0fcf1a821edb8f0d96593d52724de917b95a057eaee4c",
+    "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst": "fd00211c425bf0c2a482fb80b0b910dbd26ce9efbed0dcea43ae78926940b451",
+    "codex-rs/app-server-protocol/schema/typescript/v2/ClientSelectionUpdateStatus.ts": "9f70edf230a0fde8b1b714b69ec1cf1e2e2c03f74bcb5926d94b54b8dd687f0c",
+    "codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartIfIdleNotStartedReason.ts": "6e3e400e8a68f25219e873ffbf63e53ff068f4f98d9ecd731bbbafffe2f1faae",
+    "codex-rs/app-server-protocol/schema/typescript/v2/index.ts": "d1bc8d1fef56a4f1205594cd0757178bde740e09680d41bf313081ca3c2ead90",
+    "codex-rs/app-server-protocol/src/protocol/common.rs": "63e02847f7819f62a3d3167931a3b202445740aadf52c60d90cd31183da20f0f",
+    "codex-rs/app-server-protocol/src/protocol/v2/thread.rs": "b5247a33638f2313d9095065892ceec03a07301de66d23da5512597bb6ddb201",
+    "codex-rs/app-server/src/lib.rs": "46321d34235f5feffd33231a7390624720dcbfb627ba4222585a96ada3936ed8",
+    "codex-rs/app-server/src/message_processor.rs": "a47dc09bd9fccc83536dda784010dcc9f8ef16dd586071edbcc47d9f53619c8c",
+    "codex-rs/app-server/src/request_processors.rs": "eb4235cd2d56d6a5ab09e99d21ced2f720c4c454ff106ca597b928c35b675df2",
+    "codex-rs/app-server/src/request_processors/native_selection_processor.rs": "4645b977c8662df5052b65ada45a85fdd6362155717ff5f0b001c85483fba14e",
+    "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs": "addfccc107b2ebb7d1174bd2cdb44bda0ece0b7feed0c04c3ba6c34be5229865",
+    "codex-rs/app-server/src/request_processors/thread_lifecycle.rs": "286694f95faaf1419caabfe764b8392c4690ee529bc134f9b73c4091b2160ab9",
+    "codex-rs/app-server/src/thread_state.rs": "9c9006531cc814599f84fd26a82eb946ae3a9c8a1b2869d40a086f689a4bcbb4",
+    "codex-rs/app-server/tests/suite/v2/thread_start.rs": "7eb4133f3aa2cf7406a2c83f78e0221cb4a20a014d632f1736cfb828a6003c75",
+    "codex-rs/arg0/src/lib.rs": "8d5b9c1a896f874d81c23e0e5fbe9d8246018843acb369d59a6df9ce8c158f15",
+    "codex-rs/cli/src/main.rs": "de484836dfaeec9294bedd18ab105af14a3cf68a6d6697188b76b890623bf75c",
+    "codex-rs/core/src/session/mod.rs": "d4363e380ff2fe9e537c15a26330c497886d566c9cb14531c89db19c019b918c",
+    "codex-rs/core/src/session/turn_input.rs": "06a1138f66cc9b93302ae2af04de412a978b9db2943e88b9e82a6b6dbb7eae65",
+    "codex-rs/core/src/session/turn_input_tests.rs": "96a3a87407387bad786ee1664175b46204d453ce38e5f9a3645db18df0d22f1c",
+    "codex-rs/core/src/tasks/guarded_start.rs": "bc3673aaba4c3d0c467d93af81aae3b51f8abea2a6bdc29016bcca3eb38d752f",
+    "codex-rs/core/src/tasks/mod.rs": "4167a59e4d411329c62a970015bea3f59bcce8a1ade62e1294a504f7ce464e73",
+    "codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs": "b352df6700d4547951860df6347d4d21a03a546994f6e284f88fccbe5a77083b",
+    "codex-rs/protocol/src/turn_input.rs": "4355925606639fd7f4c05252485d5d53b520ec0c9729a827c09b0f70edb8658b",
+    "codex-rs/state/migrations/0059_native_turn_start_receipts.sql": "6a16875992277a8477c1b6a9f378604b7ccbefb8df847b2717234bbcb7dbca9b",
+    "codex-rs/state/migrations/0060_native_turn_start_bridge_identity.sql": "1023de33eb6a31f67f20c12cf0f2d5105abb1ea0cf22867c6e2359f482a5216e",
+    "codex-rs/state/src/lib.rs": "59544ce0db3de101c005799af99e11897a1c46ec4246e2c4dd4b91561b469bb0",
+    "codex-rs/state/src/runtime.rs": "76878304339e662224abf8e1d6dc652c397bf43f95286b9f1896be430d782fad",
+    "codex-rs/state/src/runtime/native_receipts.rs": "ac207a009cb8530747401134dcae29a29385d6a2f016ea421146190f901a294a",
+    "codex-rs/state/src/runtime/native_receipts_tests.rs": "52ae742a86588562082a21dc18c7d3cb5a0bb9a1d9603bb1d9bd37b3cc8562e5",
+    "codex-rs/tui/src/app.rs": "fc1301edc1c18d7405eec7b3ec09c0144642bbee6a7324e17e848705e7a3968e",
+    "codex-rs/tui/src/app/selection_adoption_tests.rs": "5c432b4e7ac233549b0455e7e2aef3ec6f0944ff97c71850ed45ee1441ada196",
+    "codex-rs/tui/src/app/selection_binding.rs": "2eb6f70169b00e61492d0426528c3eb6962688ac8f6732de82520c2ad998cb25",
+    "codex-rs/tui/src/app/selection_binding_tests.rs": "2c4518f587dca8b3336023561d673015a6d8e3fb3e336f0ad1bad15527152594",
+    "codex-rs/tui/src/app/selection_bridge.rs": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50",
+    "codex-rs/tui/src/app/selection_bridge_tests.rs": "8c397acb623d4902567c495a4f93c63487f214c30f1bd2e39c0516ad4b3a0683",
+    "codex-rs/tui/src/app/selection_witness.rs": "c154901acafe54b30b8b88a49546bceae8c76b1d41f541c4fb1028f5beebfe64",
+    "codex-rs/tui/src/app/selection_witness_tests.rs": "03ffeec3506651f61e3b4ab5d36bf9157c0eac7e3022ed7ec8509ca5f4811193",
+    "codex-rs/tui/src/app/startup.rs": "80c67394beb02c1b396030e4673b29d8f0e63fa339a36d80175e2f62ae36513c",
+    "codex-rs/tui/src/chatwidget/input_restore.rs": "267c942810e4229f3c4e657d2ffba89bc5b7499e0838e8d08f6b44f3b026d70b",
+    "codex-rs/tui/src/inherited_bridge.rs": "c764c770c090a7fc88ba1e74337c049cbfc5424db8c132613696a26dbfe2b9ef",
+    "codex-rs/tui/src/lib.rs": "1d8aaf623a50bb71e802e966c26a6a7f237fc0522b27c73d7ed120818028adc5",
+    "codex-rs/tui/src/main.rs": "2ab3b715303495b780224e27b4e9f09a38067c0c283bffaa477997aeae6394b1",
+    "codex-rs/utils/pty/src/lib.rs": "e84620ebf6ab55db18336fb8c3075a810638c9cc2d517f0522320ad3c6d350e5",
+    "codex-rs/utils/pty/src/spawn_helper.rs": "6e6ed848071a77e4f1b9c8059f9d68b24d5b14bd0205f253ef18beba9b62f881",
+    "sdk/python/src/openai_codex/generated/v2_all.py": "9fc11e2f08a244ef26c69118d915573f499c03062c03a39e6b8a83055cab70b0"
+  },
+  "files": [
+    {
+      "path": "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json",
+      "sha256": "cdb5512b033565c4322f3f7b20b34e45fbbc641d061d10dbf8d2c12dbcf788c3",
+      "bytes": 713289
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json",
+      "sha256": "722bb44139cd436422ee0eec79b8d865265b8b774eecee824ef7f7c0a8603052",
+      "bytes": 612089
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst",
+      "sha256": "4fd0d9ccd80d6d367ba0fcf1a821edb8f0d96593d52724de917b95a057eaee4c",
+      "bytes": 162197
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst",
+      "sha256": "fd00211c425bf0c2a482fb80b0b910dbd26ce9efbed0dcea43ae78926940b451",
+      "bytes": 156529
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/ClientSelectionUpdateStatus.ts",
+      "sha256": "9f70edf230a0fde8b1b714b69ec1cf1e2e2c03f74bcb5926d94b54b8dd687f0c",
+      "bytes": 229
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartIfIdleNotStartedReason.ts",
+      "sha256": "6e3e400e8a68f25219e873ffbf63e53ff068f4f98d9ecd731bbbafffe2f1faae",
+      "bytes": 408
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/index.ts",
+      "sha256": "d1bc8d1fef56a4f1205594cd0757178bde740e09680d41bf313081ca3c2ead90",
+      "bytes": 47317
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/common.rs",
+      "sha256": "63e02847f7819f62a3d3167931a3b202445740aadf52c60d90cd31183da20f0f",
+      "bytes": 174267
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+      "sha256": "b5247a33638f2313d9095065892ceec03a07301de66d23da5512597bb6ddb201",
+      "bytes": 82302
+    },
+    {
+      "path": "codex-rs/app-server/src/lib.rs",
+      "sha256": "46321d34235f5feffd33231a7390624720dcbfb627ba4222585a96ada3936ed8",
+      "bytes": 66088
+    },
+    {
+      "path": "codex-rs/app-server/src/message_processor.rs",
+      "sha256": "a47dc09bd9fccc83536dda784010dcc9f8ef16dd586071edbcc47d9f53619c8c",
+      "bytes": 83127
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors.rs",
+      "sha256": "eb4235cd2d56d6a5ab09e99d21ced2f720c4c454ff106ca597b928c35b675df2",
+      "bytes": 34980
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "sha256": "4645b977c8662df5052b65ada45a85fdd6362155717ff5f0b001c85483fba14e",
+      "bytes": 42279
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "sha256": "addfccc107b2ebb7d1174bd2cdb44bda0ece0b7feed0c04c3ba6c34be5229865",
+      "bytes": 31878
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/thread_lifecycle.rs",
+      "sha256": "286694f95faaf1419caabfe764b8392c4690ee529bc134f9b73c4091b2160ab9",
+      "bytes": 34443
+    },
+    {
+      "path": "codex-rs/app-server/src/thread_state.rs",
+      "sha256": "9c9006531cc814599f84fd26a82eb946ae3a9c8a1b2869d40a086f689a4bcbb4",
+      "bytes": 24405
+    },
+    {
+      "path": "codex-rs/app-server/tests/suite/v2/thread_start.rs",
+      "sha256": "7eb4133f3aa2cf7406a2c83f78e0221cb4a20a014d632f1736cfb828a6003c75",
+      "bytes": 80486
+    },
+    {
+      "path": "codex-rs/arg0/src/lib.rs",
+      "sha256": "8d5b9c1a896f874d81c23e0e5fbe9d8246018843acb369d59a6df9ce8c158f15",
+      "bytes": 29372
+    },
+    {
+      "path": "codex-rs/cli/src/main.rs",
+      "sha256": "de484836dfaeec9294bedd18ab105af14a3cf68a6d6697188b76b890623bf75c",
+      "bytes": 177759
+    },
+    {
+      "path": "codex-rs/core/src/session/mod.rs",
+      "sha256": "d4363e380ff2fe9e537c15a26330c497886d566c9cb14531c89db19c019b918c",
+      "bytes": 210839
+    },
+    {
+      "path": "codex-rs/core/src/session/turn_input.rs",
+      "sha256": "06a1138f66cc9b93302ae2af04de412a978b9db2943e88b9e82a6b6dbb7eae65",
+      "bytes": 30657
+    },
+    {
+      "path": "codex-rs/core/src/session/turn_input_tests.rs",
+      "sha256": "96a3a87407387bad786ee1664175b46204d453ce38e5f9a3645db18df0d22f1c",
+      "bytes": 46416
+    },
+    {
+      "path": "codex-rs/core/src/tasks/guarded_start.rs",
+      "sha256": "bc3673aaba4c3d0c467d93af81aae3b51f8abea2a6bdc29016bcca3eb38d752f",
+      "bytes": 11217
+    },
+    {
+      "path": "codex-rs/core/src/tasks/mod.rs",
+      "sha256": "4167a59e4d411329c62a970015bea3f59bcce8a1ade62e1294a504f7ce464e73",
+      "bytes": 38553
+    },
+    {
+      "path": "codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs",
+      "sha256": "b352df6700d4547951860df6347d4d21a03a546994f6e284f88fccbe5a77083b",
+      "bytes": 2933
+    },
+    {
+      "path": "codex-rs/protocol/src/turn_input.rs",
+      "sha256": "4355925606639fd7f4c05252485d5d53b520ec0c9729a827c09b0f70edb8658b",
+      "bytes": 10904
+    },
+    {
+      "path": "codex-rs/state/migrations/0059_native_turn_start_receipts.sql",
+      "sha256": "6a16875992277a8477c1b6a9f378604b7ccbefb8df847b2717234bbcb7dbca9b",
+      "bytes": 996
+    },
+    {
+      "path": "codex-rs/state/migrations/0060_native_turn_start_bridge_identity.sql",
+      "sha256": "1023de33eb6a31f67f20c12cf0f2d5105abb1ea0cf22867c6e2359f482a5216e",
+      "bytes": 163
+    },
+    {
+      "path": "codex-rs/state/src/lib.rs",
+      "sha256": "59544ce0db3de101c005799af99e11897a1c46ec4246e2c4dd4b91561b469bb0",
+      "bytes": 6480
+    },
+    {
+      "path": "codex-rs/state/src/runtime.rs",
+      "sha256": "76878304339e662224abf8e1d6dc652c397bf43f95286b9f1896be430d782fad",
+      "bytes": 27630
+    },
+    {
+      "path": "codex-rs/state/src/runtime/native_receipts.rs",
+      "sha256": "ac207a009cb8530747401134dcae29a29385d6a2f016ea421146190f901a294a",
+      "bytes": 14652
+    },
+    {
+      "path": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "sha256": "52ae742a86588562082a21dc18c7d3cb5a0bb9a1d9603bb1d9bd37b3cc8562e5",
+      "bytes": 21533
+    },
+    {
+      "path": "codex-rs/tui/src/app.rs",
+      "sha256": "fc1301edc1c18d7405eec7b3ec09c0144642bbee6a7324e17e848705e7a3968e",
+      "bytes": 51516
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_adoption_tests.rs",
+      "sha256": "5c432b4e7ac233549b0455e7e2aef3ec6f0944ff97c71850ed45ee1441ada196",
+      "bytes": 10772
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_binding.rs",
+      "sha256": "2eb6f70169b00e61492d0426528c3eb6962688ac8f6732de82520c2ad998cb25",
+      "bytes": 6755
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_binding_tests.rs",
+      "sha256": "2c4518f587dca8b3336023561d673015a6d8e3fb3e336f0ad1bad15527152594",
+      "bytes": 1469
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_bridge.rs",
+      "sha256": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50",
+      "bytes": 20064
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_bridge_tests.rs",
+      "sha256": "8c397acb623d4902567c495a4f93c63487f214c30f1bd2e39c0516ad4b3a0683",
+      "bytes": 17425
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_witness.rs",
+      "sha256": "c154901acafe54b30b8b88a49546bceae8c76b1d41f541c4fb1028f5beebfe64",
+      "bytes": 13871
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_witness_tests.rs",
+      "sha256": "03ffeec3506651f61e3b4ab5d36bf9157c0eac7e3022ed7ec8509ca5f4811193",
+      "bytes": 7876
+    },
+    {
+      "path": "codex-rs/tui/src/app/startup.rs",
+      "sha256": "80c67394beb02c1b396030e4673b29d8f0e63fa339a36d80175e2f62ae36513c",
+      "bytes": 67147
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/input_restore.rs",
+      "sha256": "267c942810e4229f3c4e657d2ffba89bc5b7499e0838e8d08f6b44f3b026d70b",
+      "bytes": 31044
+    },
+    {
+      "path": "codex-rs/tui/src/inherited_bridge.rs",
+      "sha256": "c764c770c090a7fc88ba1e74337c049cbfc5424db8c132613696a26dbfe2b9ef",
+      "bytes": 7318
+    },
+    {
+      "path": "codex-rs/tui/src/lib.rs",
+      "sha256": "1d8aaf623a50bb71e802e966c26a6a7f237fc0522b27c73d7ed120818028adc5",
+      "bytes": 146102
+    },
+    {
+      "path": "codex-rs/tui/src/main.rs",
+      "sha256": "2ab3b715303495b780224e27b4e9f09a38067c0c283bffaa477997aeae6394b1",
+      "bytes": 1871
+    },
+    {
+      "path": "codex-rs/utils/pty/src/lib.rs",
+      "sha256": "e84620ebf6ab55db18336fb8c3075a810638c9cc2d517f0522320ad3c6d350e5",
+      "bytes": 2531
+    },
+    {
+      "path": "codex-rs/utils/pty/src/spawn_helper.rs",
+      "sha256": "6e6ed848071a77e4f1b9c8059f9d68b24d5b14bd0205f253ef18beba9b62f881",
+      "bytes": 8474
+    },
+    {
+      "path": "sdk/python/src/openai_codex/generated/v2_all.py",
+      "sha256": "9fc11e2f08a244ef26c69118d915573f499c03062c03a39e6b8a83055cab70b0",
+      "bytes": 398089
+    }
+  ]
+}
