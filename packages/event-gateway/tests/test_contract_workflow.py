@@ -138,7 +138,7 @@ class ContractWorkflowTests(unittest.TestCase):
             "src/protocol.schema.json", "src/protocol.ts", "src/policy.ts",
             "__tests__/fixtures/protocol-v1.json",
         )}
-        control_paths = {source_root + "src/" + name + ".ts" for name in (
+        control_paths = {source_root + "src/" + source + ".ts" for source in (
             "contracts", "api", "registry", "coordinator", "coordinator-admission",
             "authority-client", "protocol", "policy", "native-admission-contract",
         ) + additional_sources}
