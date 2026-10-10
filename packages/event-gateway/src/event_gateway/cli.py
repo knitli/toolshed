@@ -220,7 +220,7 @@ def _reconcile_successor(args, state_dir, original, digest):
     cloud = load_cloud_client(args.cloud_config, state_dir)
     if not _same_json_value(original["cloudIdentity"], cloud_identity(cloud)):
         raise CloudError("reconciliation_identity_mismatch")
-    link = load_reconciliation(state_dir, args.operation, args.original_session_id)
+    link = load_reconciliation(state_dir, args.operation, args.original_session_id, durable=True)
     expected = {
         "version": 1, "originalArtifactSha256": digest, "originalOperation": args.operation,
         "originalSessionId": args.original_session_id, "cloudIdentity": cloud_identity(cloud),
