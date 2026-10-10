@@ -172,14 +172,15 @@ def _github_text(value, limit):
 
 def _github_cursor(value, request, *, code):
     _closed(value, ("subjectKey", "fromVersion", "toVersion", "anchorVersion", "anchorEpoch",
-                    "revision", "policyRevision", "offset"), code=code)
+                    "observationEpoch", "revision", "policyRevision", "offset"), code=code)
     subject = request["subject"]
     subject_key = _json([subject[key] for key in ("installationId", "repositoryId", "prNumber")]).decode()
     if (value["subjectKey"] != subject_key
             or any(not _generation(value[key]) for key in (
-                "fromVersion", "toVersion", "anchorVersion", "anchorEpoch"))
+                "fromVersion", "toVersion", "anchorVersion", "anchorEpoch", "observationEpoch"))
             or any(value[key] != request[key] for key in ("fromVersion", "toVersion"))
             or value["anchorVersion"] < request["toVersion"]
+            or value["observationEpoch"] > value["anchorEpoch"]
             or not _safe_uint(value["offset"])
             or any(not _github_text(value[key], 256) for key in ("revision", "policyRevision"))):
         raise CloudError(code)
@@ -270,13 +271,14 @@ def _github_source_response(value, request):
     _closed(value, ("status", "subject", "requestedRange", "coverageStartVersion", "anchor",
                     "items", "nextCursor", "complete"))
     anchor = value["anchor"]
-    _closed(anchor, ("sourceVersion", "epoch", "observedAt"))
+    _closed(anchor, ("sourceVersion", "epoch", "observationEpoch", "observedAt"))
     if (value["status"] != "ok" or not _same_json_value(value["subject"], request["subject"])
             or not _same_json_value(value["requestedRange"], {key: request[key] for key in ("fromVersion", "toVersion")})
             or not _generation(value["coverageStartVersion"])
             or value["coverageStartVersion"] > request["fromVersion"]
             or not _generation(anchor["sourceVersion"]) or anchor["sourceVersion"] < request["toVersion"]
-            or not _generation(anchor["epoch"]) or not _safe_uint(anchor["observedAt"])
+            or not _generation(anchor["epoch"]) or not _generation(anchor["observationEpoch"])
+            or anchor["observationEpoch"] > anchor["epoch"] or not _safe_uint(anchor["observedAt"])
             or not isinstance(value["items"], list) or not value["items"]
             or not isinstance(value["complete"], bool)
             or value["complete"] != (value["nextCursor"] is None)):
@@ -284,7 +286,8 @@ def _github_source_response(value, request):
     for cursor in (request.get("cursor"), value["nextCursor"]):
         if cursor is not None:
             _github_cursor(cursor, request, code="invalid_response")
-            if cursor["anchorVersion"] != anchor["sourceVersion"] or cursor["anchorEpoch"] != anchor["epoch"]:
+            if (cursor["anchorVersion"] != anchor["sourceVersion"] or cursor["anchorEpoch"] != anchor["epoch"]
+                    or cursor["observationEpoch"] != anchor["observationEpoch"]):
                 raise CloudError("invalid_response")
     if value["nextCursor"] is not None:
         previous = request.get("cursor")
@@ -293,21 +296,21 @@ def _github_source_response(value, request):
                 or (previous is not None and any(value["nextCursor"][key] != previous[key]
                                                 for key in previous if key != "offset"))):
             raise CloudError("invalid_response")
-    anchor_epoch = None
+    record_ids = set()
     for item in value["items"]:
         _closed(item, ("phase", "sourceVersion", "epoch", "recordType", "recordKey", "value"))
         if (item["phase"] not in ("anchor", "transition") or not _generation(item["sourceVersion"])
                 or not request["fromVersion"] <= item["sourceVersion"] <= anchor["sourceVersion"]
                 or not _generation(item["epoch"]) or item["epoch"] > anchor["epoch"]
                 or not _github_text(item["recordKey"], 4096)
-                or (item["phase"] == "anchor" and item["sourceVersion"] != anchor["sourceVersion"])):
+                or (item["phase"] == "anchor" and (item["sourceVersion"] != anchor["sourceVersion"]
+                                                     or item["epoch"] != anchor["observationEpoch"]))):
             raise CloudError("invalid_response")
-        if item["phase"] == "anchor":
-            # Lifecycle epochs can advance after the last committed observation.
-            if anchor_epoch is not None and item["epoch"] != anchor_epoch:
-                raise CloudError("invalid_response")
-            anchor_epoch = item["epoch"]
         _github_projection(item["recordType"], item["value"])
+        record_id = (item["phase"], item["sourceVersion"], item["recordType"], item["recordKey"])
+        if record_id in record_ids:
+            raise CloudError("invalid_response")
+        record_ids.add(record_id)
     return value
 
 

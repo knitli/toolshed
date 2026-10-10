@@ -16,9 +16,9 @@ from event_gateway.cloud import (
 SUBJECT = {"installationId": 1, "repositoryId": 2, "prNumber": 3}
 REQUEST = {"subject": SUBJECT, "fromVersion": 2, "toVersion": 3}
 CURSOR = {"subjectKey": "[1,2,3]", "fromVersion": 2, "toVersion": 3,
-          "anchorVersion": 4, "anchorEpoch": 1, "revision": "r1", "policyRevision": "p1", "offset": 1}
+          "anchorVersion": 4, "anchorEpoch": 1, "observationEpoch": 1, "revision": "r1", "policyRevision": "p1", "offset": 1}
 PAGE = {"status": "ok", "subject": SUBJECT, "requestedRange": {"fromVersion": 2, "toVersion": 3},
-        "coverageStartVersion": 1, "anchor": {"sourceVersion": 4, "epoch": 1, "observedAt": 0},
+        "coverageStartVersion": 1, "anchor": {"sourceVersion": 4, "epoch": 1, "observationEpoch": 1, "observedAt": 0},
         "items": [{"phase": "anchor", "sourceVersion": 4, "epoch": 1, "recordType": "terminal",
                    "recordKey": "state", "value": {"from": None, "to": "open"}}],
         "nextCursor": CURSOR, "complete": False}
@@ -62,6 +62,20 @@ class SourceReadTests(unittest.IsolatedAsyncioTestCase):
         self.result["nextCursor"]["offset"] = 2
         with self.assertRaisesRegex(CloudError, "^invalid_response$"):
             await self.client.github_source_read(REQUEST)
+
+    async def test_retained_anchor_epoch_is_bound_across_continuation_pages(self):
+        self.result["anchor"]["epoch"] = 2
+        self.result["nextCursor"]["anchorEpoch"] = 2
+        first = await self.client.github_source_read(REQUEST)
+        continuation = {**REQUEST, "cursor": copy.deepcopy(first["nextCursor"])}
+        self.result.update(nextCursor=None, complete=True)
+        self.result["anchor"]["observationEpoch"] = 2
+        self.result["items"][0]["epoch"] = 2
+        with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+            await self.client.github_source_read(continuation)
+        self.result["anchor"]["observationEpoch"] = 1
+        self.result["items"][0]["epoch"] = 1
+        await self.client.github_source_read(continuation)
 
     async def test_closed_projection_for_every_record_type(self):
         projections = {
@@ -126,6 +140,19 @@ class SourceReadTests(unittest.IsolatedAsyncioTestCase):
         self.result["nextCursor"].update(offset=2, revision="changed")
         with self.assertRaisesRegex(CloudError, "^invalid_response$"):
             await self.client.github_source_read({**REQUEST, "cursor": CURSOR})
+
+    async def test_duplicate_record_identity_is_rejected_for_anchor_and_transition(self):
+        for phase in ("anchor", "transition"):
+            self.result = copy.deepcopy(PAGE)
+            self.result["items"][0]["phase"] = phase
+            duplicate = copy.deepcopy(self.result["items"][0])
+            duplicate["value"]["to"] = "closed"
+            self.result["items"].append(duplicate)
+            self.result["nextCursor"]["offset"] = 2
+            with self.subTest(phase=phase), self.assertRaisesRegex(CloudError, "^invalid_response$"):
+                await self.client.github_source_read(REQUEST)
+            self.result["items"][1]["recordKey"] = "other"
+            await self.client.github_source_read(REQUEST)
 
     async def test_maximal_cursor_request_stays_within_wire_budget(self):
         request = {**REQUEST, "cursor": {**CURSOR, "revision": "\x00" * 256,

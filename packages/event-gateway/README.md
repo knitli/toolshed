@@ -254,6 +254,9 @@ knitli-event-gateway --state-dir /private/state github-source-read \
 For another page, repeat the same subject/range flags and pass the returned
 `nextCursor` object as `--cursor '<JSON>'`. The caller validates the subject,
 range, fixed anchor, cursor progression and closed safe record projections.
+The cursor binds both the current lifecycle epoch and the retained observation
+epoch, which can be older after a failed reconciliation. Duplicate record
+identities within a page are rejected.
 Each request is capped at 4096 bytes and each response at 8192 bytes. The command
 prints one JSON result and exits 0 for `ok`, or 2 for `coverage_unavailable`,
 `conflict`, or a sanitized transport/authorization failure. It does not retry or
