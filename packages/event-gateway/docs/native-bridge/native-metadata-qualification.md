@@ -33,18 +33,19 @@ The frozen [qualifier](native-metadata-launcher-smoke.py) copies only the existi
 canary's private ChatGPT authentication into a new private home, using a minimal
 configuration. It submits no prompts. It answers terminal queries and requires
 at least 60 seconds of measured warmup plus ten continuously stable seconds,
-within a 120-second startup deadline. Plugin/MCP initialization can intentionally
+within a 120-second startup deadline. On macOS, run with `TMPDIR=/private/tmp`
+to keep native Unix socket paths within the platform limit. Plugin/MCP initialization can intentionally
 revoke selection; this warmup does not prove all asynchronous startup is complete.
 
 After warmup, the same full binding remained current across 209 fresh samples
-for 125.035 seconds without input or resize. Two distinct source-defined
-`account-rate-limits-UUID` requests occurred during that interval, 60.426 seconds
+for 125.077 seconds without input or resize. Two distinct source-defined
+`account-rate-limits-UUID` requests occurred during that interval, 60.357 seconds
 apart. These are measured requests, not inferred timer ticks. Real model-network
 calls and account-read/turn-start counts are uninstrumented and reported unknown;
 the harness itself submits zero prompts or turn-start requests.
 
 The previous `d820…c02` binary fails the identical frozen qualifier, changing
-selection generations 1.732 seconds after warmup. Its retained log flush did not
+selection generations 2.944 seconds after warmup. Its retained log flush did not
 prove a passive metadata request before failure; this is a regression baseline,
 not an exact attribution of that event. Earlier short-warmup runs and an incorrect
 RPC-log extractor are retained privately and are not counted as passing proofs.

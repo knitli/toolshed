@@ -29,7 +29,10 @@ def helpers():
     require(hashlib.sha256(source).hexdigest() == FROZEN_SHA, "frozen helper digest mismatch")
     module = types.ModuleType("frozen_launcher_smoke")
     module.__file__ = str(path)
-    exec(compile(source, str(path), "exec"), module.__dict__)
+    # Execute the exact SHA-verified historical helper bytes; a path import would
+    # reread mutable source or cached bytecode after verification.
+    # nosemgrep: python.lang.security.audit.exec-detected.exec-detected
+    exec(compile(source, str(path), "exec"), module.__dict__)  # nosec B102
     return module
 
 
@@ -196,7 +199,7 @@ def qualify(args):
     launcher = importlib.import_module("event_gateway.launcher")
     require(args.binary_sha256 == launcher.QUALIFIED_SHA256, "candidate and installed pin differ")
     launcher.qualified_binary(args.binary, args.binary_sha256)
-    root = Path(tempfile.mkdtemp(prefix="nm-", dir=Path("/tmp").resolve()))
+    root = Path(tempfile.mkdtemp(prefix="nm-", dir=Path(tempfile.gettempdir()).resolve()))
     proof = {"result": "FAIL", "privateEvidenceDirectory": str(root),
              "frozenHelperSha256": FROZEN_SHA, "runnerSha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
              "binarySha256": args.binary_sha256, "installedPackagePreflight": provenance,
@@ -234,7 +237,7 @@ def qualify(args):
         # Exception strings from imported helpers can contain raw PTY text; never publish them.
         proof["failureType"] = type(error).__name__
         proof["failureStage"] = ("passive" if proof["passiveObservation"].get("startedUnix") else "startup")
-        if type(error) is AssertionError and error.__traceback__ is not None:
+        if isinstance(error, AssertionError) and error.__traceback__ is not None:
             tb = error.__traceback__
             while tb.tb_next:
                 tb = tb.tb_next
@@ -310,7 +313,12 @@ def self_test():
                 raise AssertionError("observer accepted unavailable or changed binding")
     finally:
         time.monotonic, time.time = real_monotonic, real_time
-    print(json.dumps({"result": "PASS", "checks": ["frozen-helper-digest", "exact-request-id-parser-and-deduplication", "split-terminal-queries", "no-query-replay", "minimum-passive-duration", "startup-minimum-warmup-reset-and-deadline", "bounded-stable-observer", "unavailable-and-changed-binding-rejected"]}))
+    print(json.dumps({"result": "PASS", "checks": [
+        "frozen-helper-digest", "exact-request-id-parser-and-deduplication",
+        "split-terminal-queries", "no-query-replay", "minimum-passive-duration",
+        "startup-minimum-warmup-reset-and-deadline", "bounded-stable-observer",
+        "unavailable-and-changed-binding-rejected",
+    ]}))
 
 
 def main():
