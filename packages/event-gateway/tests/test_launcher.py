@@ -359,8 +359,8 @@ class LauncherTests(unittest.TestCase):
                     launcher.qualified_binary(binary, digest)
 
     def test_promoted_digest_requires_both_reviewed_pin_and_opened_binary_hash(self):
-        promoted = "d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02"
-        retired = "3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c"
+        promoted = "9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5"
+        retired = "d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02"
         with tempfile.TemporaryDirectory() as directory:
             binary = Path(directory).resolve() / "codex"
             binary.write_bytes(b"release digest fixture")

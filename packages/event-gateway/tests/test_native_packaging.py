@@ -209,7 +209,7 @@ class NativePackagingTests(unittest.TestCase):
         manifest_bytes = PACKAGER["SOURCE_MANIFEST"].read_bytes()
         patch_bytes = PACKAGER["PATCH"].read_bytes()
         manifest = PACKAGER["verify_manifest"](manifest_bytes, patch_bytes)
-        self.assertEqual(manifest["fileCount"], 48)
+        self.assertEqual(manifest["fileCount"], 52)
         manifest["fileCount"] -= 1
         removed = manifest["files"].pop()
         del manifest["fileSha256"][removed["path"]]

@@ -1,8 +1,8 @@
 # Build and qualify the pinned native client
 
-The proposed redraw-fix release pins v3 CLI digest `d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02`; see [redraw qualification](native-redraw-qualification.md). This runbook rebuilds a disposable candidate from upstream Codex `a956835d020762cb2b570053af06f643a11c0ecc`, applies `native-redraw-v1-implementation.patch`, checks all 48 hashes in `native-redraw-v1-source-manifest.json`, and records the toolchain and binary digest. It never installs the client or changes the launcher's digest.
+The proposed metadata-fix release pins v3 CLI digest `9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5`; see [metadata qualification](native-metadata-qualification.md). This runbook rebuilds a disposable candidate from upstream Codex `a956835d020762cb2b570053af06f643a11c0ecc`, applies `native-metadata-v1-implementation.patch`, checks all 52 hashes in `native-metadata-v1-source-manifest.json`, and records the toolchain and binary digest. It never installs the client or changes the launcher's digest.
 
-Use a clean checkout of the exact upstream commit, Rust 1.95.0 (`59807616e`), Cargo's existing offline cache, and Apple Silicon macOS. The builder archives the entire pinned Git tree into a temporary directory, with no pathspecs, then applies the reviewed patch and validates the 48 patched source files. Its only outputs are the two new paths you name:
+Use a clean checkout of the exact upstream commit, Rust 1.95.0 (`59807616e`), Cargo's existing offline cache, and Apple Silicon macOS. The builder archives the entire pinned Git tree into a temporary directory, with no pathspecs, then applies the reviewed patch and validates the 52 patched source files. Its only outputs are the two new paths you name:
 
 ```sh
 python3 scripts/package_native_client.py \

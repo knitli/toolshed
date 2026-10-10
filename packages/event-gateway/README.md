@@ -68,7 +68,7 @@ Run from an interactive terminal, naming the exact reviewed v3 prototype:
 ```sh
 knitli-event-gateway launch \
   --codex-binary /absolute/path/to/qualified/codex \
-  --binary-sha256 d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02 \
+  --binary-sha256 9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5 \
   --cwd /absolute/path/to/project
 ```
 
