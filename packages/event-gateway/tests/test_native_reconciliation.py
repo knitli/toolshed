@@ -401,6 +401,22 @@ class NativeReconciliationTests(unittest.TestCase):
                 self.assertIsNone(client_runtime.load_reconciliation(
                     self.state, "attach", self.old_session))
 
+    def test_reconciliation_version_accepts_only_integer_one(self):
+        self.pending()
+        with patch.object(self.cloud, "native_challenge", side_effect=KeyboardInterrupt):
+            self.assertEqual(self.invoke()[0], 130)
+        link = client_runtime.load_reconciliation(self.state, "attach", self.old_session)
+        client_runtime._validate_reconciliation(link, "attach", self.old_session)
+        for version in (True, False, 0, 2, 1.0, "1", None, [], {}):
+            with self.subTest(version=version):
+                with self.assertRaises(client_runtime.SecurityError) as caught:
+                    client_runtime._validate_reconciliation(
+                        {**link, "version": version}, "attach", self.old_session)
+                self.assertEqual(caught.exception.code, "invalid_reconciliation")
+        self.assertEqual(client_runtime.load_reconciliation(
+            self.state, "attach", self.old_session), link)
+        self.assert_original_preserved()
+
     def test_reserved_successor_only_accepts_linked_attach_identity_and_intent(self):
         original = self.pending()
         with patch.object(self.cloud, "native_challenge", side_effect=KeyboardInterrupt):

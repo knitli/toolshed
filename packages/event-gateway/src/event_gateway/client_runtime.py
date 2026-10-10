@@ -344,7 +344,8 @@ def _validate_reconciliation(value, operation, session_id):
     fields = {"version", "originalArtifactSha256", "originalOperation", "originalSessionId",
               "cloudIdentity", "runtimeId", "successorSessionId", "nodePublicKey", "observed", "intent"}
     if (not isinstance(value, dict) or set(value) != fields
-            or type(value["version"]) is not int or value["version"] != 1
+            or not isinstance(value["version"], int) or isinstance(value["version"], bool)
+            or value["version"] != 1
             or operation not in ("attach", "renew") or value["originalOperation"] != operation
             or not _uuid(value["originalSessionId"]) or value["originalSessionId"] != session_id
             or not _uuid(value["successorSessionId"]) or value["successorSessionId"] == session_id

@@ -76,6 +76,26 @@ class RuntimeStatusContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(_timestamp(expired["leaseUntil"]), _timestamp(expired["observedAt"]))
         self.assertEqual((expired["runtimeGeneration"], expired["attachmentGeneration"]), (7, 9))
 
+    def test_each_missing_response_field_is_a_protocol_error(self):
+        runtime_id = FIXTURE["request"]["runtimeId"]
+        for name, response in FIXTURE["responses"].items():
+            for field in response:
+                with self.subTest(response=name, missing=field):
+                    malformed = {key: value for key, value in response.items() if key != field}
+                    with self.assertRaises(CloudError) as caught:
+                        _runtime_status_response(malformed, runtime_id)
+                    self.assertEqual(caught.exception.code, "invalid_response")
+            binding = response.get("nativeBinding")
+            if binding is not None:
+                for field in binding:
+                    with self.subTest(response=name, missing_binding_field=field):
+                        malformed = {**response, "nativeBinding": {
+                            key: value for key, value in binding.items() if key != field
+                        }}
+                        with self.assertRaises(CloudError) as caught:
+                            _runtime_status_response(malformed, runtime_id)
+                        self.assertEqual(caught.exception.code, "invalid_response")
+
     async def test_exported_request_rejections_never_reach_transport(self):
         for rejection in FIXTURE["rejections"]:
             if not rejection.get("request"):
