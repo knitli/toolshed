@@ -16,16 +16,16 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[3]
 DOCS = ROOT / "packages/event-gateway/docs/native-bridge"
-PATCH = DOCS / "native-redraw-v1-implementation.patch"
-SOURCE_MANIFEST = DOCS / "native-redraw-v1-source-manifest.json"
+PATCH = DOCS / "native-metadata-v1-implementation.patch"
+SOURCE_MANIFEST = DOCS / "native-metadata-v1-source-manifest.json"
 UPSTREAM_COMMIT = "a956835d020762cb2b570053af06f643a11c0ecc"
-PATCH_SHA256 = "1eb419088d92b4b8ed238afd8866e669e5239c413580fd13d319edbe4a4e5108"
-SOURCE_MANIFEST_SHA256 = "3f057811cda243226819fc3c22fbb939379611d7a528fcfa6a9417a955a894d2"
+PATCH_SHA256 = "922c3b2aa733564f67765aec27d4128b96b697441b37b42665b6656a4ad884fb"
+SOURCE_MANIFEST_SHA256 = "8f40ca398770501412963786ade67891749f3c9296a1c82c14d62f6257e98469"
 PINNED_CARGO_CONFIG_SHA256 = "b8ae1cea341beb2d4a3c8fb81f97a96f4aee1fd53f769c57f140dfe949806a80"
 PINNED_SOURCE_ROOT_CARGO_CONFIG_SHA256 = "b34b20f64e30695e8629ddad8b80885764e947f51e4ce49c6378a3b5a238d25e"
-PATCHED_FILE_COUNT = 48
+PATCHED_FILE_COUNT = 52
 # Keep the builder standalone; the pin-parity test enforces this launcher constant.
-QUALIFIED_SHA256 = "d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02"
+QUALIFIED_SHA256 = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
 RUSTC_COMMIT_PREFIX = "59807616e"
 LOCK_VERSION_CHANGES = 159
 HOST_TRIPLE = "aarch64-apple-darwin"
