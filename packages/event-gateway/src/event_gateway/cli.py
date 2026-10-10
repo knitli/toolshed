@@ -125,26 +125,7 @@ def _execute_command(args, state_dir, parser):
         asyncio.run(serve(state_dir, dispatch_config=args.dispatch_config))
         return 0
     if args.command == "github-source-read":
-        try:
-            source_request = {
-                "subject": {"installationId": args.installation_id, "repositoryId": args.repository_id,
-                            "prNumber": args.pr_number},
-                "fromVersion": args.from_version, "toVersion": args.to_version,
-            }
-            if args.cursor is not None:
-                if len(args.cursor.encode("utf-8", "surrogatepass")) > 4096:
-                    raise CloudError("invalid_request")
-                try:
-                    source_request["cursor"] = json.loads(args.cursor, object_pairs_hook=_pairs)
-                except (ValueError, RecursionError, ProtocolError):
-                    raise CloudError("invalid_request") from None
-            cloud = load_cloud_client(args.cloud_config, state_dir)
-            result = asyncio.run(cloud.github_source_read(source_request))
-        except CloudError as error:
-            print(json.dumps({"sourceRead": None, "reason": error.code}))
-            return 2
-        print(json.dumps(result))
-        return 0 if result["status"] == "ok" else 2
+        return _execute_github_source_read(args, state_dir)
     if args.command == "runtime-status":
         try:
             cloud = load_cloud_client(args.cloud_config, state_dir)
@@ -163,6 +144,29 @@ def _execute_command(args, state_dir, parser):
     if args.command == "enroll":
         return _execute_enrollment(args, state_dir, parser)
     return _execute_status_or_detach(args, state_dir)
+
+
+def _execute_github_source_read(args, state_dir):
+    try:
+        source_request = {
+            "subject": {"installationId": args.installation_id, "repositoryId": args.repository_id,
+                        "prNumber": args.pr_number},
+            "fromVersion": args.from_version, "toVersion": args.to_version,
+        }
+        if args.cursor is not None:
+            if len(args.cursor.encode("utf-8", "surrogatepass")) > 4096:
+                raise CloudError("invalid_request")
+            try:
+                source_request["cursor"] = json.loads(args.cursor, object_pairs_hook=_pairs)
+            except (ValueError, RecursionError, ProtocolError):
+                raise CloudError("invalid_request") from None
+        cloud = load_cloud_client(args.cloud_config, state_dir)
+        result = asyncio.run(cloud.github_source_read(source_request))
+    except CloudError as error:
+        print(json.dumps({"sourceRead": None, "reason": error.code}))
+        return 2
+    print(json.dumps(result))
+    return 0 if result["status"] == "ok" else 2
 
 
 def _execute_native_lifecycle(args, state_dir, operation):

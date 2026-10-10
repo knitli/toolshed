@@ -9,7 +9,9 @@ import unittest
 from unittest.mock import AsyncMock, patch
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from event_gateway import cli
-from event_gateway.cloud import CloudClient, CloudError, Credentials
+from event_gateway.cloud import (
+    CloudClient, CloudError, Credentials, _github_source_request, _github_source_response,
+)
 
 SUBJECT = {"installationId": 1, "repositoryId": 2, "prNumber": 3}
 REQUEST = {"subject": SUBJECT, "fromVersion": 2, "toVersion": 3}
@@ -124,6 +126,45 @@ class SourceReadTests(unittest.IsolatedAsyncioTestCase):
         self.result["nextCursor"].update(offset=2, revision="changed")
         with self.assertRaisesRegex(CloudError, "^invalid_response$"):
             await self.client.github_source_read({**REQUEST, "cursor": CURSOR})
+
+    async def test_maximal_cursor_request_stays_within_wire_budget(self):
+        request = {**REQUEST, "cursor": {**CURSOR, "revision": "\x00" * 256,
+                                       "policyRevision": "\x00" * 256}}
+        self.result = {"status": "conflict"}
+        await self.client.github_source_read(request)
+        self.assertLessEqual(len(self.requests[-1]["body"]), 4096)
+
+    def test_malformed_nested_shapes_always_fail_with_sanitized_codes(self):
+        def malformed(value):
+            if isinstance(value, dict):
+                for key in value:
+                    missing = copy.deepcopy(value)
+                    del missing[key]
+                    yield missing
+                    for invalid in (None, [], {}, True):
+                        changed = copy.deepcopy(value)
+                        changed[key] = invalid
+                        yield changed
+                    for nested in malformed(value[key]):
+                        changed = copy.deepcopy(value)
+                        changed[key] = nested
+                        yield changed
+            elif isinstance(value, list):
+                for index, item in enumerate(value):
+                    for nested in malformed(item):
+                        changed = copy.deepcopy(value)
+                        changed[index] = nested
+                        yield changed
+        for request in malformed({**REQUEST, "cursor": CURSOR}):
+            try:
+                _github_source_request(request)
+            except CloudError as error:
+                self.assertEqual(error.code, "invalid_request")
+        for response in malformed(PAGE):
+            try:
+                _github_source_response(response, REQUEST)
+            except CloudError as error:
+                self.assertEqual(error.code, "invalid_response")
 
     async def test_explicit_outcomes_and_no_retry(self):
         for status in ("conflict", "coverage_unavailable"):
