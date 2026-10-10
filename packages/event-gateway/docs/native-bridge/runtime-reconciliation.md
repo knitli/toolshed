@@ -42,15 +42,43 @@ reserved by any other retained reconciliation link cannot be reused.
 
 The successor performs the normal challenged attach to that same runtime. Its own
 pending artifact is durable before the commit is sent; local persistence uses the
-existing daemon writer. No model input or automatic turns are enabled by this
-command. A concurrent authority change produces a conflict rather than guessed
-replacement generations.
+existing daemon writer. After the validated cloud result is stored, the command
+reads the mapping back through that writer and requires an exact match. A direct
+Store read is used only when the daemon socket is absent or its listener is
+definitely gone; a timeout or unknown failure does not open a second writer.
+
+Before clearing the successor's pending attach, the command writes an immutable
+private `.reconcile.completed.json` record. It binds the original link's exact
+SHA-256, successor session, cloud identity, node public key, actual validated cloud
+result and matching mapping readback. Its generations come from that result.
+The record and containing directory are synced under the pending-directory lock.
+Readback or sync failure retains pending evidence and reports local unavailability;
+an identical retry re-syncs an existing completion record before pending cleanup.
+The original pending artifact and `.reconcile.json` reservation remain unchanged.
+
+After completion, use ordinary `renew` with the completed runtime's returned CAS
+generations and the same successor session. Renewal must match the completion
+record's cloud identity, node key, runtime, native binding and generations, and the
+current writer mapping must match every recorded field except `leaseExpiresAt`.
+That exception allows subsequent lease extensions; it does not permit a different
+binding, session or runtime. The permanent reservation still blocks another
+original's reconciliation, unrelated attach intent and transfer from reusing this
+successor. Completion does not establish the original attempt's historical outcome.
+
+No model input or automatic turns are enabled by this command. A concurrent
+authority change produces a conflict rather than guessed replacement generations.
 
 Retry the exact reconciliation command. A saved link reuses its original intent
 and generations; an existing successor pending commit uses normal exact replay.
 Changed identity, key, session, or binding is refused. A closed successor receipt
-window remains unknown. A link can remain after a successful local write, so a
-later retry may conflict instead of returning the earlier success. Inspect the
-reported result and stored status; do not delete evidence or rewrite the link to
-force a new attempt. A new recovery decision requires a separately reviewed fresh
-successor, not silent rebasing of this retained intent.
+window remains unknown. Once completion is recorded and the successor's pending
+attach is cleared, repeating `reconcile` still uses the original attach intent; it
+may conflict rather than return the earlier success. Use ordinary renewal to
+extend the completed attachment's lease. Inspect the reported result and stored
+status; do not delete evidence or rewrite either record to force a new attempt.
+A new recovery decision requires a separately reviewed fresh successor, not silent
+rebasing of this retained intent.
+
+The completion tests cover mapping-readback and injected file/directory-sync
+failures with retained-evidence retries. They do not prove recovery after an
+operating-system crash or physical power loss.
