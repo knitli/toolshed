@@ -1,17 +1,18 @@
 {
   "repository": "knitli/knitli-site",
-  "revision": "038716741534afe804fb75b9eab15dba6ddbee11",
+  "revision": "7675f40a4053795de03458c2741da4e3a475ce29",
   "zodVersion": "4.5.4",
   "sources": {
-    "apps/os/packages/event-runtime/src/contracts.ts": "07910aca7131969d928a6dae6c079c51783327e82dd93b0bd2a85ff64907d91d",
-    "apps/os/packages/event-runtime/src/api.ts": "eebb5c9f182ddff218acddaa5620042ece29ce193da864c51ed3f4f8593346ce",
-    "apps/os/packages/event-runtime/src/registry.ts": "cb0c872510b5a277e507cc54ae76cd0686dedf0818eb569448f76a5437f3346a",
-    "apps/os/packages/event-runtime/src/coordinator.ts": "1e450f478edd2b8313a9ce226101e18b54f57a1e7d33b712731039068ea39ce4",
+    "apps/os/packages/event-runtime/src/contracts.ts": "952e06452079999da38a99f549d8f746bd4b208dd67e5dd5d348bd8f31fbc6dd",
+    "apps/os/packages/event-runtime/src/api.ts": "e25927e15f9605fc1f269d514d11deb5e8b3f78fb53f2a35a906ffabd9c4df87",
+    "apps/os/packages/event-runtime/src/registry.ts": "fd1ba8adffd6e612a023a57f21a5bf8b348f8e60866b2ca1c704c52c3bbf40fc",
+    "apps/os/packages/event-runtime/src/coordinator.ts": "9d8619c5bb8c5c30a46ad65a6bc3e1ca184e8fd118dec6782afdc2cebfeca8bc",
     "apps/os/packages/event-runtime/src/coordinator-admission.ts": "b0f6048e25d023f9caeb215de63dd0ca2c056f3d111aa042d031739b828d831e",
     "apps/os/packages/event-runtime/src/authority-client.ts": "b0d2bf801ac8c31f4d19ce6513b4e9b0e98efac9c8e3458ae642d69568438034",
     "apps/os/packages/event-runtime/src/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
     "apps/os/packages/event-runtime/src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
-    "apps/os/packages/event-runtime/src/native-admission-contract.ts": "f651b994e563c764bae3c9981d512e164b5b8a69dbfef6d5706497a7b17e5fc2"
+    "apps/os/packages/event-runtime/src/native-admission-contract.ts": "6f3fcdeee95ea967acbbcb9a701e89c2bcb653f2f8fba25b0b019b81b49cab23",
+    "apps/os/packages/event-runtime/src/native-runtime-store.ts": "c56c20a16df373e392dfca822c42fa9617c3934d59dab3331831154605e59b44"
   },
-  "fixturesSha256": "46b10333b857cb918c3752933c465d81c10ae014aab57912644165d005cc0b06"
+  "fixturesSha256": "a5dca38202380f31950ff0e7f06aa5ff97eee872d7538e83e4f56bea5e7cad82"
 }

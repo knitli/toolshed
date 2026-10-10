@@ -204,6 +204,217 @@
     "status": "not_started"
   },
   "nativeAdmission": {
+    "runtimeStatus": {
+      "request": {
+        "runtimeId": "00000000-0000-4000-8000-000000000003"
+      },
+      "responses": {
+        "missing": {
+          "status": "missing",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "observedAt": "2026-10-09T12:00:58.100Z"
+        },
+        "expired": {
+          "status": "present",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "runtimeGeneration": 7,
+          "nodeId": "00000000-0000-4000-8000-000000000001",
+          "nodeGeneration": 1,
+          "attachmentGeneration": 9,
+          "leaseUntil": "2026-10-09T12:00:58.000Z",
+          "nativeBinding": {
+            "clientId": "00000000-0000-4000-8000-000000000009",
+            "connectionId": "00000000-0000-4000-8000-000000000010",
+            "backendPid": 4321,
+            "threadId": "00000000-0000-4000-8000-000000000011",
+            "generation": 7,
+            "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+            "serverGeneration": 2
+          },
+          "observedAt": "2026-10-09T12:00:58.100Z",
+          "storedQualified": true
+        },
+        "legacy": {
+          "status": "present",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "runtimeGeneration": 3,
+          "nodeId": "00000000-0000-4000-8000-000000000001",
+          "nodeGeneration": 1,
+          "attachmentGeneration": 4,
+          "leaseUntil": "2026-10-09T12:00:58.000Z",
+          "nativeBinding": null,
+          "observedAt": "2026-10-09T12:00:58.100Z",
+          "storedQualified": false
+        }
+      },
+      "rejections": [
+        {
+          "name": "status_extra_request_field",
+          "request": true,
+          "value": {
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "qualified": true
+          }
+        },
+        {
+          "name": "status_invalid_runtime_id",
+          "request": true,
+          "value": {
+            "runtimeId": "not-a-runtime"
+          }
+        },
+        {
+          "name": "status_qualified_without_binding",
+          "value": {
+            "status": "present",
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "runtimeGeneration": 7,
+            "nodeId": "00000000-0000-4000-8000-000000000001",
+            "nodeGeneration": 1,
+            "attachmentGeneration": 9,
+            "leaseUntil": "2026-10-09T12:00:58.000Z",
+            "nativeBinding": null,
+            "observedAt": "2026-10-09T12:00:58.100Z",
+            "storedQualified": true
+          }
+        },
+        {
+          "name": "status_unsafe_runtime_generation",
+          "value": {
+            "status": "present",
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "runtimeGeneration": 9007199254740992,
+            "nodeId": "00000000-0000-4000-8000-000000000001",
+            "nodeGeneration": 1,
+            "attachmentGeneration": 9,
+            "leaseUntil": "2026-10-09T12:00:58.000Z",
+            "nativeBinding": {
+              "clientId": "00000000-0000-4000-8000-000000000009",
+              "connectionId": "00000000-0000-4000-8000-000000000010",
+              "backendPid": 4321,
+              "threadId": "00000000-0000-4000-8000-000000000011",
+              "generation": 7,
+              "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+              "serverGeneration": 2
+            },
+            "observedAt": "2026-10-09T12:00:58.100Z",
+            "storedQualified": true
+          }
+        },
+        {
+          "name": "status_zero_attachment_generation",
+          "value": {
+            "status": "present",
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "runtimeGeneration": 7,
+            "nodeId": "00000000-0000-4000-8000-000000000001",
+            "nodeGeneration": 1,
+            "attachmentGeneration": 0,
+            "leaseUntil": "2026-10-09T12:00:58.000Z",
+            "nativeBinding": {
+              "clientId": "00000000-0000-4000-8000-000000000009",
+              "connectionId": "00000000-0000-4000-8000-000000000010",
+              "backendPid": 4321,
+              "threadId": "00000000-0000-4000-8000-000000000011",
+              "generation": 7,
+              "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+              "serverGeneration": 2
+            },
+            "observedAt": "2026-10-09T12:00:58.100Z",
+            "storedQualified": true
+          }
+        },
+        {
+          "name": "status_nonboolean_qualification",
+          "value": {
+            "status": "present",
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "runtimeGeneration": 7,
+            "nodeId": "00000000-0000-4000-8000-000000000001",
+            "nodeGeneration": 1,
+            "attachmentGeneration": 9,
+            "leaseUntil": "2026-10-09T12:00:58.000Z",
+            "nativeBinding": {
+              "clientId": "00000000-0000-4000-8000-000000000009",
+              "connectionId": "00000000-0000-4000-8000-000000000010",
+              "backendPid": 4321,
+              "threadId": "00000000-0000-4000-8000-000000000011",
+              "generation": 7,
+              "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+              "serverGeneration": 2
+            },
+            "observedAt": "2026-10-09T12:00:58.100Z",
+            "storedQualified": 1
+          }
+        },
+        {
+          "name": "status_extra_missing_field",
+          "value": {
+            "status": "missing",
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "observedAt": "2026-10-09T12:00:58.100Z",
+            "nativeBinding": {
+              "clientId": "00000000-0000-4000-8000-000000000009",
+              "connectionId": "00000000-0000-4000-8000-000000000010",
+              "backendPid": 4321,
+              "threadId": "00000000-0000-4000-8000-000000000011",
+              "generation": 7,
+              "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+              "serverGeneration": 2
+            }
+          }
+        },
+        {
+          "name": "status_invalid_snapshot_time",
+          "value": {
+            "status": "missing",
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "observedAt": "unknown"
+          }
+        },
+        {
+          "name": "status_invalid_binding",
+          "value": {
+            "status": "present",
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "runtimeGeneration": 7,
+            "nodeId": "00000000-0000-4000-8000-000000000001",
+            "nodeGeneration": 1,
+            "attachmentGeneration": 9,
+            "leaseUntil": "2026-10-09T12:00:58.000Z",
+            "nativeBinding": {
+              "clientId": "invalid",
+              "connectionId": "00000000-0000-4000-8000-000000000010",
+              "backendPid": 4321,
+              "threadId": "00000000-0000-4000-8000-000000000011",
+              "generation": 7,
+              "serverInstanceId": "00000000-0000-4000-8000-000000000012",
+              "serverGeneration": 2
+            },
+            "observedAt": "2026-10-09T12:00:58.100Z",
+            "storedQualified": true
+          }
+        }
+      ],
+      "nodeProof": {
+        "principal": "adam@knitli.com",
+        "agent": "pilot-agent",
+        "binding": {
+          "audience": "https://events.example.com",
+          "method": "POST",
+          "path": "/v1/runtimes/status",
+          "bodySha256": "3cabbfaaa0767b369b1272affd6a3293d5f9a45c79cd616f5bf89c143baea9d1"
+        },
+        "body": "{\"runtimeId\":\"00000000-0000-4000-8000-000000000003\"}",
+        "proof": {
+          "nodeId": "00000000-0000-4000-8000-000000000001",
+          "nodeGeneration": 1,
+          "issuedAt": "2026-10-09T12:00:58.100Z",
+          "nonce": "00000000-0000-4000-8000-000000000013"
+        },
+        "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/runtimes/status\",\"3cabbfaaa0767b369b1272affd6a3293d5f9a45c79cd616f5bf89c143baea9d1\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-09T12:00:58.100Z\",\"00000000-0000-4000-8000-000000000013\"]"
+      }
+    },
     "ids": {
       "runtime": "00000000-0000-4000-8000-000000000003",
       "sourceRuntime": "00000000-0000-4000-8000-000000000004",
