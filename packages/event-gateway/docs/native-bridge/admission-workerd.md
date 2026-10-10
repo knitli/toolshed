@@ -1,5 +1,11 @@
 # Controlled native admission qualification
 
+The recorded proof below is the historical `3e88…387c` checkpoint. The
+[redraw release qualification](native-redraw-qualification.md) contains the
+new candidate and fresh admission proof. The reproduction command targets the
+current promoted artifact; replay the historical proof from Toolshed
+`1d7babb7a6f294ffdc41113f46a377c56834e5f6` with its matching wheel and source.
+
 **PASS, 2026-10-09.** [Recorded proof](admission-workerd-proof.json) passed with
 native binary SHA-256 `3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c`
 and the final installed wheel SHA-256
@@ -90,7 +96,7 @@ or deployment is performed. Loopback listeners and a disposable PTY are required
   --package-source "$EVENT_PACKAGE_SOURCE" \
   --qualifier "$EVENT_QUALIFIER" \
   --binary "$EVENT_NATIVE_BINARY" \
-  --binary-sha 3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c \
+  --binary-sha d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02 \
   --node "$EVENT_NODE" \
   --cloud-source "$EVENT_CLOUD_SRC" \
   --esbuild "$EVENT_ESBUILD_PACKAGE" \

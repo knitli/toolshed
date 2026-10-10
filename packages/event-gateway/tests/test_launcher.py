@@ -358,6 +358,35 @@ class LauncherTests(unittest.TestCase):
                 with self.assertRaisesRegex(launcher.LaunchError, "native_binary_hash_mismatch"):
                     launcher.qualified_binary(binary, digest)
 
+    def test_promoted_digest_requires_both_reviewed_pin_and_opened_binary_hash(self):
+        promoted = "d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02"
+        retired = "3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c"
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory).resolve() / "codex"
+            binary.write_bytes(b"release digest fixture")
+            binary.chmod(0o700)
+            for supplied, actual, error in (
+                (retired, retired, "unqualified_native_binary"),
+                (retired, promoted, "unqualified_native_binary"),
+                (promoted, retired, "native_binary_hash_mismatch"),
+                (promoted, promoted, None),
+            ):
+                def file_digest(stream, algorithm):
+                    self.assertEqual(algorithm, "sha256")
+                    self.assertTrue(stat.S_ISREG(launcher.os.fstat(stream.fileno()).st_mode))
+                    self.assertEqual(stream.read(), b"release digest fixture")
+                    return Mock(hexdigest=Mock(return_value=actual))
+
+                with self.subTest(supplied=supplied, actual=actual), patch.object(
+                    launcher.hashlib, "file_digest", side_effect=file_digest,
+                ) as digest:
+                    if error:
+                        with self.assertRaisesRegex(launcher.LaunchError, error):
+                            launcher.qualified_binary(binary, supplied)
+                    else:
+                        self.assertEqual(launcher.qualified_binary(binary, supplied), binary)
+                    self.assertEqual(digest.call_count, int(supplied == promoted))
+
     def test_exit_observer_never_reaps(self):
         stop = Mock()
         stop.is_set.return_value = False

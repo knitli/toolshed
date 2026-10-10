@@ -1,10 +1,10 @@
 {
-  "sourceCheckout": "/private/tmp/codex-native-guarded-start-p2/source/codex-rs",
+  "sourceCheckout": "/private/tmp/event-native-redraw-source/codex-rs",
   "baseCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
-  "scope": "Cumulative native selection binding, terminal refusal, durable StateDB receipt, and v3 bridge identity across TUI restart; includes Core/app-server/protocol/State/TUI/CLI and generated schema/SDK exports.; failed Core preparation now returns non-Started and cleans only the failed matching turn.",
+  "scope": "Cumulative native selection binding, terminal refusal, durable StateDB receipt, and v3 bridge identity across TUI restart; includes Core/app-server/protocol/State/TUI/CLI and generated schema/SDK exports.; failed Core preparation now returns non-Started and cleans only the failed matching turn. Scheduled Draw events preserve native selection while all other TUI events retain pre-handling revocation; readiness remains checked before each bridge tick.",
   "fileCount": 48,
   "binaryPatch": true,
-  "patchSha256": "b9ab28d49a62f5756495f729c6716511d3136f58c3b9ea4061f4f7dba3d2598c",
+  "patchSha256": "1eb419088d92b4b8ed238afd8866e669e5239c413580fd13d319edbe4a4e5108",
   "cleanPinnedApply": {
     "base": "a956835d020762cb2b570053af06f643a11c0ecc",
     "cleanApply": "PASS",
@@ -55,7 +55,7 @@
     "codex-rs/tui/src/app/selection_bridge_tests.rs": "8c397acb623d4902567c495a4f93c63487f214c30f1bd2e39c0516ad4b3a0683",
     "codex-rs/tui/src/app/selection_witness.rs": "c154901acafe54b30b8b88a49546bceae8c76b1d41f541c4fb1028f5beebfe64",
     "codex-rs/tui/src/app/selection_witness_tests.rs": "03ffeec3506651f61e3b4ab5d36bf9157c0eac7e3022ed7ec8509ca5f4811193",
-    "codex-rs/tui/src/app/startup.rs": "e2b1bed360ede73b4734a5f9562214daf3f87b7d5c0998e02f1d2373914755ae",
+    "codex-rs/tui/src/app/startup.rs": "80c67394beb02c1b396030e4673b29d8f0e63fa339a36d80175e2f62ae36513c",
     "codex-rs/tui/src/chatwidget/input_restore.rs": "267c942810e4229f3c4e657d2ffba89bc5b7499e0838e8d08f6b44f3b026d70b",
     "codex-rs/tui/src/inherited_bridge.rs": "c764c770c090a7fc88ba1e74337c049cbfc5424db8c132613696a26dbfe2b9ef",
     "codex-rs/tui/src/lib.rs": "1d8aaf623a50bb71e802e966c26a6a7f237fc0522b27c73d7ed120818028adc5",
@@ -267,8 +267,8 @@
     },
     {
       "path": "codex-rs/tui/src/app/startup.rs",
-      "sha256": "e2b1bed360ede73b4734a5f9562214daf3f87b7d5c0998e02f1d2373914755ae",
-      "bytes": 66948
+      "sha256": "80c67394beb02c1b396030e4673b29d8f0e63fa339a36d80175e2f62ae36513c",
+      "bytes": 67147
     },
     {
       "path": "codex-rs/tui/src/chatwidget/input_restore.rs",

@@ -16,8 +16,8 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[3]
 DOCS = ROOT / "packages/event-gateway/docs/native-bridge"
-PATCH = DOCS / "durable-restart-v3-implementation.patch"
-SOURCE_MANIFEST = DOCS / "durable-restart-v3-source-manifest.json"
+PATCH = DOCS / "native-redraw-v1-implementation.patch"
+SOURCE_MANIFEST = DOCS / "native-redraw-v1-source-manifest.json"
 UPSTREAM_COMMIT = "a956835d020762cb2b570053af06f643a11c0ecc"
 PATCH_SHA256 = "1eb419088d92b4b8ed238afd8866e669e5239c413580fd13d319edbe4a4e5108"
 SOURCE_MANIFEST_SHA256 = "3f057811cda243226819fc3c22fbb939379611d7a528fcfa6a9417a955a894d2"

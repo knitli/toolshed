@@ -2,7 +2,9 @@
 
 This is the historical `3e88…387c` checkpoint. The redraw-fix candidate,
 updated source manifest, and fresh runtime proofs are recorded separately in
-[redraw qualification](native-redraw-qualification.md).
+[redraw qualification](native-redraw-qualification.md). Historical replay
+commands below require the matching wheel and source checkout at Toolshed
+`1d7babb7a6f294ffdc41113f46a377c56834e5f6`.
 
 The preserved clean-build candidate `3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c`
 passed a macOS ARM64 two-TUI restart qualification with the corrected

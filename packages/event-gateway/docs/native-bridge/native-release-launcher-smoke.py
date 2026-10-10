@@ -119,7 +119,7 @@ def drain(master, tail):
         for ending in (b"\x07", b"\x1b\\"):
             query = f"\x1b]{number};?".encode() + ending
             if query in bytes(tail[-len(query) + 1:]) + data:
-                os.write(master, f"\x1b]{number};rgb:".encode() + color + b"\x1b\\")
+                os.write(master, f"\x1b]{number};rgb:".encode() + color + ending)
     cursor_query = b"\x1b[6n" in bytes(tail[-3:]) + data
     tail.extend(data)
     del tail[:-16384]
@@ -190,6 +190,45 @@ def check_redraw_stability(launcher, state, process, master, tail, binding):
             "elapsedSeconds": elapsed, "bindingUnchanged": True}
 
 
+def check_non_draw_fences(launcher, state, process, master, tail, socket_path, binding):
+    session = socket_path.name[2:-5]
+    fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 121, 0, 0))
+    process.send_signal(signal.SIGWINCH)
+    deadline = time.monotonic() + 5
+    while True:
+        require(process.poll() is None, "foreground exited during resize fence check")
+        require(time.monotonic() < deadline, "resize did not revoke the previous binding")
+        drain(master, tail)
+        selection = current_selection(launcher, state)
+        if selection is not None and selection[2] != binding:
+            break
+    _, status, resized, challenge = selection
+    check_selection(status, resized, challenge)
+    require(resized["generation"] > binding["generation"]
+            and resized["serverGeneration"] > binding["serverGeneration"]
+            and all(resized[key] == value for key, value in binding.items()
+                    if key not in ("generation", "serverGeneration")),
+            "resize must advance both generations without changing identity")
+    os.write(master, b"/")
+    deadline = time.monotonic() + 5
+    while True:
+        require(process.poll() is None, "foreground exited during composer fence check")
+        require(time.monotonic() < deadline, "composer input did not refuse readiness")
+        drain(master, tail)
+        if launcher.session_status(state, session)["selection"] != "selected":
+            break
+    os.write(master, b"\x15")
+    _, status, cleared, challenge = wait_selection(launcher, state, process, master, tail)
+    check_selection(status, cleared, challenge)
+    require(cleared["generation"] > resized["generation"]
+            and cleared["serverGeneration"] > resized["serverGeneration"]
+            and all(cleared[key] == value for key, value in resized.items()
+                    if key not in ("generation", "serverGeneration")),
+            "clearing composer must advance both generations without changing identity")
+    return {"resizeRevokedBinding": True, "composerRefusedReadiness": True,
+            "clearedComposerRestoredSelection": True}
+
+
 def quit_foreground(process, master, tail, socket_path, backend_pid):
     os.write(master, b"/quit")
     deadline = time.monotonic() + 0.5
@@ -251,6 +290,9 @@ def qualify(args, launcher, server):
                 stability = check_redraw_stability(
                     launcher, state, process, master, tail, binding
                 )
+                fences = check_non_draw_fences(
+                    launcher, state, process, master, tail, socket_path, binding
+                )
                 require(server.calls == 0)
                 code = quit_foreground(
                     process, master, tail, socket_path, binding["backendPid"]
@@ -277,6 +319,7 @@ def qualify(args, launcher, server):
             "binding": binding,
             "freshChallengeCorrelated": True,
             "idleRedrawStability": stability,
+            "nonDrawFences": fences,
             "syntheticModelRequests": server.calls,
             "realModelCalls": 0,
             "controlSocketRemoved": True,
@@ -305,6 +348,7 @@ def main():
     finally:
         server.shutdown()
         server.server_close()
+
 
 if __name__ == "__main__":
     main()

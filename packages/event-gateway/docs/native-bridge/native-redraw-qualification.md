@@ -15,7 +15,10 @@ post-commit binding comparison is unchanged.
 
 The [release proof](native-redraw-release-proof.json) contains the clean build,
 foreground regression, two-TUI recovery, controlled admission, and installed
-wheel inventories. The cumulative patch applies cleanly to pinned upstream
+wheel inventories. The new [cumulative patch](native-redraw-v1-implementation.patch) and
+[source manifest](native-redraw-v1-source-manifest.json) are separate from the
+historical v3 inputs, whose bytes and proof references remain intact. The patch
+applies cleanly to pinned upstream
 `a956835d020762cb2b570053af06f643a11c0ecc`; all 48 source hashes are checked.
 Only `tui/src/app/startup.rs` changed from the previous native source manifest.
 The clean macOS ARM64 build uses Rust 1.95.0 and the full upstream Git tree.
@@ -29,8 +32,10 @@ synthetic model provider and disposable configuration. It answers terminal
 color queries, requires sustained terminal output, and samples complete fresh
 bindings over at least three seconds without input or resize. The old
 `3e88…387c` binary fails this same scenario; the corrected binary preserves
-the binding. Graceful `/quit` exits 0, removes the control socket, and stops the
-backend. Model calls remain zero. The earlier idle-only test lacked an
+the binding. A real resize advances the selection generations; a keyboard-opened
+composer popup denies readiness, and clearing it restores a fresh selection.
+Graceful `/quit` exits 0, removes the control socket, and stops the backend.
+Model calls remain zero. The earlier idle-only test lacked an
 animation trigger and passed the old binary; the resize test exercised an
 intentional input fence. Neither is counted as redraw regression evidence.
 
@@ -40,8 +45,17 @@ exercises two actual native sessions, 16 API requests, lost attach replies,
 renewal, denial paths and transfer through fixture authority. All 20 installed
 module/contract files match source and the wheel archive before and after
 qualification; fresh private bytecode caches remain empty under `-I -B -O`.
+Launcher tests reject the retired caller digest and retired opened-file hash,
+accept only the promoted pair, and check builder/launcher pin parity.
 The seven cross-repo contract blobs are unchanged; this native source/artifact
 update requires no cloud contract-family or deployment change.
+
+The full TUI crate run has 38 version-sensitive fixture mismatches: upstream
+expects development version `0.0.0` while its pinned workspace builds `0.160.0`.
+Two Git fixtures pass with test-only signing disabled, and an Insta assertion
+passes in isolation. Integration tests pass after supplying the qualified
+CLI artifact through the test binary locator. Snapshots were not accepted.
+The proof records aggregate failures separately from successful scoped checks.
 
 These are local and fixture-backed proofs. Production attachment must be
 retried after this pin update is reviewed and merged. Automatic turns, manual
