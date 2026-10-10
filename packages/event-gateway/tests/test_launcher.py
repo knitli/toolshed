@@ -359,13 +359,21 @@ class LauncherTests(unittest.TestCase):
                     launcher.qualified_binary(binary, digest)
 
     def test_promoted_digest_requires_both_reviewed_pin_and_opened_binary_hash(self):
-        promoted = "9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5"
+        promoted = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
+        superseded = "9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5"
+        unqualified_v2 = "9888c1f1631fee081d797189ea4c18809ce3fcac6c44cef4af291da1e263ae78"
         retired = "d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02"
         with tempfile.TemporaryDirectory() as directory:
             binary = Path(directory).resolve() / "codex"
             binary.write_bytes(b"release digest fixture")
             binary.chmod(0o700)
             for supplied, actual, error in (
+                (superseded, superseded, "unqualified_native_binary"),
+                (superseded, promoted, "unqualified_native_binary"),
+                (promoted, superseded, "native_binary_hash_mismatch"),
+                (unqualified_v2, unqualified_v2, "unqualified_native_binary"),
+                (unqualified_v2, promoted, "unqualified_native_binary"),
+                (promoted, unqualified_v2, "native_binary_hash_mismatch"),
                 (retired, retired, "unqualified_native_binary"),
                 (retired, promoted, "unqualified_native_binary"),
                 (promoted, retired, "native_binary_hash_mismatch"),

@@ -4,6 +4,7 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -72,8 +73,8 @@ def terminal_replies(previous, data):
 
 
 def make_drain(log):
-    def drain(master, tail):
-        if not select.select([master], [], [], 0.1)[0]:
+    def drain(master, tail, timeout=0.1):
+        if not select.select([master], [], [], timeout)[0]:
             return 0
         try:
             data = os.read(master, 65536)
@@ -215,6 +216,123 @@ def observe(h, launcher, state, process, master, tail, binding, proof):
     proof.update(endedUnix=time.time(), bindingUnchanged=True, inputEvents=0, resizeEvents=0)
 
 
+REVOCATION_CATEGORIES = frozenset({
+    "periodic-response-queued-event", "periodic-response-semantic", "rate-limits-recovery",
+    "rate-limits-other-origin", "app-event-other", "server-mcp-status",
+    "server-account-rate-limits", "server-account-updated", "server-notification-other",
+    "server-request", "server-lagged", "server-disconnected", "server-stream-closed",
+    "pending-app-event", "pending-active-thread-event", "selection-state-not-ready",
+    "selection-not-ready", "selection-loop-gap", "selection-binding-expired-or-mismatched",
+    "connecting", "native-revoke", "native-update", "native-connect", "pending-transition",
+    "pending-event", "app-event", "thread-event", "tui-event", "server-event", "reconnect",
+    "commit-event", "startup-drain", "shutdown", "exit",
+    "loop-gap", "native-transport-unavailable",
+})
+
+
+SERVER_REVOCATION_CATEGORIES = frozenset({
+    "connection-closed", "lease-expired", "client-selection-ready", "client-revoke",
+})
+
+
+def parse_revocation(stamp, body, target="codex_selection_witness"):
+    if not isinstance(stamp, (int, float)) or isinstance(stamp, bool) or not math.isfinite(stamp):
+        return None
+    if target == "codex_selection_witness":
+        side, marker, allowed = "tui", "native selection revocation trigger", REVOCATION_CATEGORIES
+        fields = ("generation", "server_generation")
+    elif target == "codex_native_selection":
+        side, marker, allowed = "server", "native selection authority changed", SERVER_REVOCATION_CATEGORIES
+        fields = ("generation", "expected_generation")
+    else:
+        return None
+    if not isinstance(body, str) or marker not in body:
+        return None
+    categories = re.findall(r'(?:^|\s)category="([a-z-]+)"(?=\s|$)', body)
+    if len(categories) != 1 or categories[0] not in allowed:
+        return None
+    record = {"timestampUnix": stamp, "side": side, "target": target, "category": categories[0]}
+    for name in fields:
+        # A present but malformed value must not silently become an absent field.
+        present = re.findall(r'(?:^|\s)' + name + r'=', body)
+        values = re.findall(r'(?:^|\s)' + name + r'=([0-9]{1,20})(?=\s|$)', body)
+        if len(present) != len(values) or len(values) > 1 or (name == "generation" and not values):
+            return None
+        if values:
+            value = int(values[0])
+            if value > 2**64 - 1:
+                return None
+            record[name] = value
+    return record
+
+
+def collect_revocations(home, proof):
+    capture = proof["postFailureCapture"]
+    paths = list(home.glob("logs_*.sqlite"))
+    require(len(paths) == 1, "expected one cause log database")
+    with sqlite3.connect(paths[0].as_uri() + "?mode=ro", uri=True, timeout=0.1) as db:
+        rows = db.execute(
+            "SELECT ts + ts_nanos / 1000000000.0, feedback_log_body, target FROM logs "
+            "WHERE target IN (?, ?) AND ts BETWEEN ? AND ? ORDER BY ts, ts_nanos LIMIT 256",
+            ("codex_selection_witness", "codex_native_selection", int(proof["failureObservedUnix"]) - 2,
+             int(capture["endedUnix"]) + 1),
+        ).fetchall()
+    capture["authorityTransitions"] = [record for stamp, body, target in rows
+                              if proof["failureObservedUnix"] - 2 <= stamp <= capture["endedUnix"]
+                              and (record := parse_revocation(stamp, body, target)) is not None]
+    capture["actualRevocationRecordsObserved"] = any(
+        record["category"] != "client-selection-ready" for record in capture["authorityTransitions"]
+    )
+
+
+def capture_failure(h, home, process, master, tail, proof):
+    started = time.monotonic()
+    deadline = started + 11
+    capture = {"maxWaitSeconds": 11, "startedUnix": time.time(),
+               "authorityTransitions": [], "actualRevocationRecordsObserved": False}
+    proof["postFailureCapture"] = capture
+    try:
+        while process.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            h.drain(master, tail, timeout=min(0.1, remaining))
+    except Exception as error:
+        capture["drainFailureType"] = type(error).__name__
+    capture.update(elapsedSeconds=time.monotonic() - started, endedUnix=time.time())
+    try:
+        collect_revocations(home, proof)
+    except Exception as error:
+        capture["collectionFailureType"] = type(error).__name__
+
+
+def record_failure(proof, error, phase):
+    # Imported helper exceptions may contain raw PTY text; publish only our own assertions.
+    if "failureStage" in proof:
+        return
+    proof.update(result="FAIL", failureType=type(error).__name__, failureStage=phase,
+                 failureObservedUnix=time.time())
+    if isinstance(error, AssertionError) and error.__traceback__ is not None:
+        tb = error.__traceback__
+        while tb.tb_next:
+            tb = tb.tb_next
+        if tb.tb_frame.f_code.co_filename == __file__:
+            proof["failureReason"] = str(error)
+
+
+def cleanup_auth(root, proof):
+    try:
+        (root / "home" / "auth.json").unlink(missing_ok=True)
+        proof["copiedAuthRemoved"] = True
+    except OSError as error:
+        proof["copiedAuthRemoved"] = False
+        proof["authCleanupFailureType"] = type(error).__name__
+        if "failureStage" not in proof:
+            record_failure(proof, error, "authCleanup")
+        else:
+            proof["result"] = "FAIL"
+
+
 def qualify(args):
     h = helpers()
     provenance = h.installed_preflight(args.package_source)
@@ -230,6 +348,7 @@ def qualify(args):
              "realModelNetworkCallsEvidence": "Not instrumented; RPC observations are not HTTP-call counts",
              "passiveObservation": {}}
     home = None
+    phase = "startup"
     try:
         home = private_home(root, args.auth_source)
         state = root / "state"
@@ -240,42 +359,163 @@ def qualify(args):
             h.drain = make_drain(log)
             tail = bytearray()
             with h.foreground_process(root, home, argv) as (process, master):
-                proof["startupSettling"] = {}
-                selection = settle(h, launcher, state, process, master, tail, proof["startupSettling"])
-                socket_path, status, binding, challenge = selection
-                h.check_selection(status, binding, challenge)
-                proof["initialBinding"] = binding
-                observe(h, launcher, state, process, master, tail, binding, proof["passiveObservation"])
-                proof["nonDrawFences"] = h.check_non_draw_fences(launcher, state, process, master, tail, socket_path, binding)
-                proof["terminationExitCode"] = h.quit_foreground(process, master, tail, socket_path, binding["backendPid"])
-                proof.update(controlSocketRemoved=True, backendStopped=True)
+                try:
+                    proof["startupSettling"] = {}
+                    selection = settle(h, launcher, state, process, master, tail, proof["startupSettling"])
+                    socket_path, status, binding, challenge = selection
+                    h.check_selection(status, binding, challenge)
+                    proof["initialBinding"] = binding
+                    phase = "passive"
+                    observe(h, launcher, state, process, master, tail, binding, proof["passiveObservation"])
+                    phase = "nonDraw"
+                    proof["nonDrawFences"] = h.check_non_draw_fences(launcher, state, process, master, tail, socket_path, binding)
+                    phase = "termination"
+                    proof["terminationExitCode"] = h.quit_foreground(process, master, tail, socket_path, binding["backendPid"])
+                    proof.update(controlSocketRemoved=True, backendStopped=True)
+                except Exception as error:
+                    record_failure(proof, error, phase)
+                    capture_failure(h, home, process, master, tail, proof)
+                    raise
+        phase = "finalBinary"
         launcher.qualified_binary(args.binary, args.binary_sha256)
+        phase = "rpcProof"
         passive = proof["passiveObservation"]
         proof["rpcMetadata"] = rpc_evidence(home, passive["startedUnix"], passive["endedUnix"])
         require(proof["rpcMetadata"]["account/rateLimits/read"]["passiveObserved"] >= 2,
                 "fewer than two periodic rate-limit RPCs observed")
         proof["result"] = "PASS"
     except Exception as error:
-        # Exception strings from imported helpers can contain raw PTY text; never publish them.
-        proof["failureType"] = type(error).__name__
-        proof["failureStage"] = ("passive" if proof["passiveObservation"].get("startedUnix") else "startup")
-        if isinstance(error, AssertionError) and error.__traceback__ is not None:
-            tb = error.__traceback__
-            while tb.tb_next:
-                tb = tb.tb_next
-            if tb.tb_frame.f_code.co_filename == __file__:
-                proof["failureReason"] = str(error)
+        record_failure(proof, error, phase)
+        if home is not None and "postFailureCapture" in proof:
+            try:
+                collect_revocations(home, proof)
+            except Exception as capture_error:
+                proof["postFailureCapture"]["postExitCollectionFailureType"] = type(capture_error).__name__
         if home is not None and proof["passiveObservation"].get("startedUnix"):
             try:
-                proof["rpcMetadata"] = rpc_evidence(home, proof["passiveObservation"]["startedUnix"], time.time())
+                proof["rpcMetadata"] = rpc_evidence(home, proof["passiveObservation"]["startedUnix"],
+                                                       proof["failureObservedUnix"])
             except Exception:
                 proof["rpcMetadataUnavailable"] = True
+    finally:
+        # The foreground context has stopped its owned process before this runs.
+        # Address the known copy even if private_home failed after creating it.
+        cleanup_auth(root, proof)
     args.output.write_text(json.dumps(proof, indent=2) + "\n")
     print(json.dumps(proof))
     return 0 if proof["result"] == "PASS" else 1
 
 
 def self_test():
+    valid_cause = 'native selection revocation trigger category="app-event-other" generation=4 server_generation=9'
+    require(parse_revocation(1000, valid_cause) == {
+        "timestampUnix": 1000, "side": "tui", "target": "codex_selection_witness",
+        "category": "app-event-other", "generation": 4, "server_generation": 9,
+    }, "valid sanitized cause rejected")
+    for invalid in (valid_cause.replace("app-event-other", "secret-unknown"),
+                    valid_cause.replace("generation=4", 'generation="credential"'),
+                    valid_cause.replace("server_generation=9", "server_generation=Some(9)"),
+                    valid_cause.replace("generation=4", "generation=-1"),
+                    valid_cause + " generation=5", valid_cause.replace("generation=4", "generation=18446744073709551616")):
+        require(parse_revocation(1000, invalid) is None, "unsafe cause accepted")
+    require(parse_revocation(float("nan"), valid_cause) is None, "invalid cause timestamp accepted")
+    server_cause = 'native selection authority changed category="lease-expired" generation=6 expected_generation=5'
+    parsed_server = parse_revocation(1000, server_cause, "codex_native_selection")
+    require(parsed_server == {"timestampUnix": 1000, "side": "server", "target": "codex_native_selection",
+                              "category": "lease-expired", "generation": 6, "expected_generation": 5},
+            "server cause rejected")
+    for body, target in ((server_cause, "codex_selection_witness"), (valid_cause, "codex_native_selection"),
+                         (server_cause, "unknown"),
+                         (server_cause.replace("lease-expired", "app-event-other"), "codex_native_selection"),
+                         (server_cause.replace("expected_generation=5", 'expected_generation="secret"'),
+                          "codex_native_selection")):
+        require(parse_revocation(1000, body, target) is None, "invalid target/category pair accepted")
+    for category in ("loop-gap", "native-transport-unavailable"):
+        require(parse_revocation(1000, valid_cause.replace("app-event-other", category)) is not None,
+                "direct emission cause rejected")
+    real_monotonic, real_time = time.monotonic, time.time
+    with tempfile.TemporaryDirectory(prefix="nm-capture-selftest-") as directory:
+        home = Path(directory)
+        with sqlite3.connect(home / "logs_2.sqlite") as db:
+            db.execute("CREATE TABLE logs (ts INTEGER, ts_nanos INTEGER, target TEXT, feedback_log_body TEXT)")
+        try:
+            clock = [0.0]
+            time.monotonic = lambda: clock[0]
+            time.time = lambda: 1000 + clock[0]
+            def advance_capture(*_, timeout):
+                clock[0] += timeout
+            fake = types.SimpleNamespace(drain=advance_capture)
+            proof = {}
+            original = AssertionError("original capture failure")
+            record_failure(proof, original, "passive")
+            captured_failure = dict(proof)
+            capture_failure(fake, home, types.SimpleNamespace(poll=lambda: None), None, bytearray(), proof)
+            require(proof["postFailureCapture"]["elapsedSeconds"] == 11,
+                    "capture wait did not respect eleven-second deadline")
+            record_failure(proof, RuntimeError("later cleanup failure"), "termination")
+            require(all(proof[key] == value for key, value in captured_failure.items()),
+                    "capture changed original failure stage, type, result or time")
+            require(not proof["postFailureCapture"]["actualRevocationRecordsObserved"], "elapsed time invented cause proof")
+            clock[0] = 0
+            short = {}
+            record_failure(short, original, "startup")
+            capture_failure(fake, home, types.SimpleNamespace(poll=lambda: None if clock[0] < 0.5 else 1),
+                            None, bytearray(), short)
+            require(short["postFailureCapture"]["elapsedSeconds"] == 0.5
+                    and not short["postFailureCapture"]["actualRevocationRecordsObserved"], "500ms implied cause proof")
+            with sqlite3.connect(home / "logs_2.sqlite") as db:
+                db.executemany("INSERT INTO logs VALUES (1000,0,?,?)", [
+                    ("codex_selection_witness", valid_cause),
+                    ("codex_native_selection", server_cause),
+                    ("wrong_target", valid_cause),
+                    ("codex_selection_witness", valid_cause.replace("app-event-other", "secret-unknown")),
+                ])
+            collect_revocations(home, proof)
+            require(len(proof["postFailureCapture"]["authorityTransitions"]) == 2,
+                    "cause collector accepted untrusted target or label")
+            with sqlite3.connect(home / "logs_2.sqlite") as db:
+                db.execute("DELETE FROM logs")
+                db.execute("INSERT INTO logs VALUES (1000,0,?,?)", (
+                    "codex_native_selection", server_cause.replace("lease-expired", "client-selection-ready"),
+                ))
+            collect_revocations(home, proof)
+            require(len(proof["postFailureCapture"]["authorityTransitions"]) == 1
+                    and not proof["postFailureCapture"]["actualRevocationRecordsObserved"],
+                    "positive authority transition was reported as revocation")
+        finally:
+            time.monotonic, time.time = real_monotonic, real_time
+    with tempfile.TemporaryDirectory(prefix="nm-auth-selftest-") as directory:
+        root = Path(directory)
+        source = root / "dummy-source.json"
+        source.write_text(json.dumps({"auth_mode": "chatgpt", "tokens": {"dummy": "test-only"}}))
+        source.chmod(0o600)
+        source_bytes = source.read_bytes()
+        for phase in (None, "startup", "passive", "nonDraw", "termination", "finalBinary", "rpcProof"):
+            attempt = root / (phase or "success")
+            attempt.mkdir(mode=0o700)
+            proof = {"result": "PASS", "passiveObservation": {"startedUnix": 1}}
+            try:
+                private_home(attempt, source)
+                if phase is not None:
+                    raise AssertionError("self-test phase failure")
+            except AssertionError as error:
+                record_failure(proof, error, phase)
+            finally:
+                cleanup_auth(attempt, proof)
+            require(not (attempt / "home" / "auth.json").exists() and proof["copiedAuthRemoved"],
+                    "copied auth retained after qualification")
+            require(source.read_bytes() == source_bytes, "source auth changed")
+            require(proof.get("failureStage") == phase, "failure phase misreported")
+        failed = root / "cleanup-failure"
+        (failed / "home" / "auth.json").mkdir(parents=True)
+        for primary in (None, "passive"):
+            proof = {"result": "PASS"}
+            if primary:
+                proof.update(result="FAIL", failureStage=primary, failureType="AssertionError")
+            cleanup_auth(failed, proof)
+            require(proof["result"] == "FAIL" and not proof["copiedAuthRemoved"]
+                    and proof["failureStage"] == (primary or "authCleanup")
+                    and "authCleanupFailureType" in proof, "auth cleanup masked primary failure")
     helper = helpers()
     private = Path(helper.__file__).parent
     require(stat.S_IMODE(private.stat().st_mode) == 0o700, "helper directory is not private")
@@ -354,6 +594,12 @@ def self_test():
     finally:
         time.monotonic, time.time = real_monotonic, real_time
     print(json.dumps({"result": "PASS", "checks": [
+        "bounded-post-failure-capture", "original-failure-preserved",
+        "strict-cause-target-label-and-integers", "server-and-tui-closed-pairs",
+        "direct-emission-causes", "positive-transition-is-not-revocation",
+        "short-wait-is-not-cause-proof",
+        "auth-copy-success-and-failure-cleanup", "auth-source-preserved",
+        "explicit-failure-phases", "auth-cleanup-failure-preserves-primary",
         "both-frozen-helper-pins", "private-copy-permissions-and-cleanup",
         "historical-helpers-unchanged", "helper-module-drain-override",
         "exact-request-id-parser-and-deduplication",

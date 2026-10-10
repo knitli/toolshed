@@ -1,19 +1,19 @@
 {
   "automaticActivation": false,
   "baseCommit": "2a52f72d57c2e5b9db525465165f37a12db01699",
-  "binarySha256": "9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5",
+  "binarySha256": "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27",
   "buildEvidence": {
     "artifact": {
-      "path": "/private/tmp/native-codex-metadata-v1.json",
-      "sha256": "0b50bd46471b7dfcb43906765273a58da1f23c053957cdd438438c23b09f8fd4"
+      "path": "/private/tmp/native-codex-metadata-v3.json",
+      "sha256": "c05d0fe7f6f5033f88e2a2e8d331eea54923491c7e4208a88c8902e2e2fdd889"
     },
     "original": {
       "archiveScope": {
         "extractionFilter": "tarfile.data_filter",
         "selection": "git archive of the pinned commit without pathspecs"
       },
-      "binaryBytes": 388513152,
-      "binarySha256": "9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5",
+      "binaryBytes": 388563968,
+      "binarySha256": "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27",
       "buildCommand": "rustup run 1.95.0 cargo build --offline --locked -p codex-cli --bin codex -p codex-tui --bin codex-tui --profile dev-small",
       "buildEnvironment": {
         "allowlistedVariables": [
@@ -51,8 +51,8 @@
       },
       "host": "aarch64-apple-darwin",
       "launcherQualified": false,
-      "launcherSha256": "d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02",
-      "patchSha256": "5dbd9d1956b11a29deeecec46dba53c392e367d56149204b75c327d5704347cf",
+      "launcherSha256": "9888c1f1631fee081d797189ea4c18809ce3fcac6c44cef4af291da1e263ae78",
+      "patchSha256": "922c3b2aa733564f67765aec27d4128b96b697441b37b42665b6656a4ad884fb",
       "patchedFileCount": 52,
       "patchedFileSha256": {
         "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json": "cdb5512b033565c4322f3f7b20b34e45fbbc641d061d10dbf8d2c12dbcf788c3",
@@ -67,7 +67,7 @@
         "codex-rs/app-server/src/lib.rs": "46321d34235f5feffd33231a7390624720dcbfb627ba4222585a96ada3936ed8",
         "codex-rs/app-server/src/message_processor.rs": "a47dc09bd9fccc83536dda784010dcc9f8ef16dd586071edbcc47d9f53619c8c",
         "codex-rs/app-server/src/request_processors.rs": "eb4235cd2d56d6a5ab09e99d21ced2f720c4c454ff106ca597b928c35b675df2",
-        "codex-rs/app-server/src/request_processors/native_selection_processor.rs": "4645b977c8662df5052b65ada45a85fdd6362155717ff5f0b001c85483fba14e",
+        "codex-rs/app-server/src/request_processors/native_selection_processor.rs": "c43087232b1ee34a023c73bbb928356e6bbc436819c8c829fee13782d7d0ff6b",
         "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs": "addfccc107b2ebb7d1174bd2cdb44bda0ece0b7feed0c04c3ba6c34be5229865",
         "codex-rs/app-server/src/request_processors/thread_lifecycle.rs": "286694f95faaf1419caabfe764b8392c4690ee529bc134f9b73c4091b2160ab9",
         "codex-rs/app-server/src/thread_state.rs": "9c9006531cc814599f84fd26a82eb946ae3a9c8a1b2869d40a086f689a4bcbb4",
@@ -89,14 +89,14 @@
         "codex-rs/state/src/runtime/native_receipts_tests.rs": "52ae742a86588562082a21dc18c7d3cb5a0bb9a1d9603bb1d9bd37b3cc8562e5",
         "codex-rs/tui/src/app.rs": "fc1301edc1c18d7405eec7b3ec09c0144642bbee6a7324e17e848705e7a3968e",
         "codex-rs/tui/src/app/selection_adoption_tests.rs": "5c432b4e7ac233549b0455e7e2aef3ec6f0944ff97c71850ed45ee1441ada196",
-        "codex-rs/tui/src/app/selection_binding.rs": "2eb6f70169b00e61492d0426528c3eb6962688ac8f6732de82520c2ad998cb25",
+        "codex-rs/tui/src/app/selection_binding.rs": "925aa481fee11547f1292903a8358f98e10ee6867dfcbb0fd6907b97522f626c",
         "codex-rs/tui/src/app/selection_binding_tests.rs": "2c4518f587dca8b3336023561d673015a6d8e3fb3e336f0ad1bad15527152594",
         "codex-rs/tui/src/app/selection_bridge.rs": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50",
         "codex-rs/tui/src/app/selection_bridge_tests.rs": "8c397acb623d4902567c495a4f93c63487f214c30f1bd2e39c0516ad4b3a0683",
-        "codex-rs/tui/src/app/selection_witness.rs": "841d1c80f0d0faeceb44b4bbc32cdd369c523827ac91972175defc9a143fb051",
-        "codex-rs/tui/src/app/selection_witness_tests.rs": "03ffeec3506651f61e3b4ab5d36bf9157c0eac7e3022ed7ec8509ca5f4811193",
-        "codex-rs/tui/src/app/startup.rs": "61a52243c93c3792dff38c7bfa12697e4e8d664eb6cb7d9f1dca7941b9920b4e",
-        "codex-rs/tui/src/app/tests/rate_limits.rs": "15a41684dae3d1b832af64ae78ca6279bb62f777be3c165d34f03887dcfe6eb8",
+        "codex-rs/tui/src/app/selection_witness.rs": "db9157ccc1f57a80f7f0658752e8930db9bbb2b56e5715f5f30239b54f4e13cb",
+        "codex-rs/tui/src/app/selection_witness_tests.rs": "fb361ea75b72fda061a0507f46a6d474370e8ac732ef63bc2f514169335e7242",
+        "codex-rs/tui/src/app/startup.rs": "eeee83c92181a459e416af108ce982a30da4d48d433d43fba5d8967cc5bfcd10",
+        "codex-rs/tui/src/app/tests/rate_limits.rs": "dc6f53da2c7c9703219546be034d1ba70c7c5e2ce3d353527b0d1b9d263152f7",
         "codex-rs/tui/src/chatwidget/backend_banners.rs": "472a5b62771107d0810c87b4f0a53f7455097e3a655ef8c0046e36d94c51f879",
         "codex-rs/tui/src/chatwidget/input_restore.rs": "267c942810e4229f3c4e657d2ffba89bc5b7499e0838e8d08f6b44f3b026d70b",
         "codex-rs/tui/src/chatwidget/rate_limits.rs": "824ae52a71abf579848e25fb44ed01ef60418580d4d36df8fac7886f9f880826",
@@ -108,10 +108,10 @@
         "codex-rs/utils/pty/src/spawn_helper.rs": "6e6ed848071a77e4f1b9c8059f9d68b24d5b14bd0205f253ef18beba9b62f881",
         "sdk/python/src/openai_codex/generated/v2_all.py": "9fc11e2f08a244ef26c69118d915573f499c03062c03a39e6b8a83055cab70b0"
       },
-      "patchedSourceInventoryAfterBuildSha256": "18ce0cc309efd898f4aeb23cfadfc62a18503124173dd53d03f599cb60eaf6b9",
-      "patchedSourceInventoryBeforeBuildSha256": "18ce0cc309efd898f4aeb23cfadfc62a18503124173dd53d03f599cb60eaf6b9",
+      "patchedSourceInventoryAfterBuildSha256": "f3619b501e5b6b6725efdfd0be6e4511a752f0a8882092d9ed9424a2850a2445",
+      "patchedSourceInventoryBeforeBuildSha256": "f3619b501e5b6b6725efdfd0be6e4511a752f0a8882092d9ed9424a2850a2445",
       "rustc": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2",
-      "sourceManifestSha256": "00c2b140d9722f8f8b1c73fccef1ea9ebb90b495d2bb241f41d8ffd223ba0057",
+      "sourceManifestSha256": "8f40ca398770501412963786ade67891749f3c9296a1c82c14d62f6257e98469",
       "toolchainBinaries": {
         "cargo": {
           "path": "/private/tmp/event-native-rustup/toolchains/1.95.0-aarch64-apple-darwin/bin/cargo",
@@ -131,126 +131,126 @@
   },
   "controlledAdmission": {
     "artifact": {
-      "path": "/private/tmp/event-native-metadata-proof/admission-workerd.json",
-      "sha256": "f53c6cac2e804ce1eba8ec9d7692ef24c9ee5886e4448a7f41c0fc5540ac9949"
+      "path": "/private/tmp/event-native-metadata-v3-proof/admission-workerd.json",
+      "sha256": "dad2607870065f43a70f752910c5763a3c86eef0a45f93ff0fab7e3638cb1a4a"
     },
     "proof": {
-      "binarySha256": "9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5",
+      "binarySha256": "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27",
       "cloud": {
         "native_runtime_bindings": [
           {
-            "binding_json": "{\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"backendPid\":34800,\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3}",
-            "client_id": "61035923-d696-435f-b568-1c4efc574dd1",
+            "binding_json": "{\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"backendPid\":81560,\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3}",
+            "client_id": "3201be4c-fe39-4ce5-9e3a-9251ac34d7a0",
             "key_thumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "nonce": 10,
-            "runtime_id": "d9eee756-4134-4bac-8fe3-83894e05ea89",
+            "runtime_id": "04ee15c0-b8a8-4103-a30d-20925582a979",
             "sequence": 10
           },
           {
-            "binding_json": "{\"clientId\":\"bda123ed-7562-4343-9707-0ea662934dda\",\"connectionId\":\"a533ba87-48fc-4fa2-9b31-9846a0e28835\",\"backendPid\":34945,\"threadId\":\"01a123cf-e58b-7442-851f-8f4eb6a1d0fb\",\"generation\":5,\"serverInstanceId\":\"01a123cf-e560-7dc0-964e-e049f807e67e\",\"serverGeneration\":3}",
-            "client_id": "bda123ed-7562-4343-9707-0ea662934dda",
+            "binding_json": "{\"clientId\":\"2b3eb44a-b2e2-43c7-af2a-a381587f9a53\",\"connectionId\":\"371592d7-021e-40e0-a419-e9cf6798ad24\",\"backendPid\":81779,\"threadId\":\"01a1240c-1aff-7930-899b-2dde367a735f\",\"generation\":5,\"serverInstanceId\":\"01a1240c-1ad5-7271-bf50-d4cb69ee29d5\",\"serverGeneration\":3}",
+            "client_id": "2b3eb44a-b2e2-43c7-af2a-a381587f9a53",
             "key_thumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "nonce": 11,
-            "runtime_id": "e3667013-e923-4ce3-9307-9facbd801c14",
+            "runtime_id": "48c32b87-7412-4cb2-96ad-33d7493f229a",
             "sequence": 11
           }
         ],
         "native_runtime_challenges": [
           {
             "agent": "pilot",
-            "challenge_id": "b174e9b1-0a3a-44ac-85a3-20a35976d0d4",
-            "commit_hash": "05fb22f106dc126891d7a03d8f19bfd8df35795b5dbd43a41d6fb4cb32e9e96a",
-            "consumed_at": 1791602187743,
-            "expires_at": 1791602217722,
-            "issued_at": 1791602187722,
+            "challenge_id": "47d6cdf5-9170-4cd4-82f6-a5a7fd14c003",
+            "commit_hash": "45b5d43c6cabd399d39b79ada9d7b6ff5b974e2ce2786b0c8d517993f0587fa7",
+            "consumed_at": 1791606133560,
+            "expires_at": 1791606163540,
+            "issued_at": 1791606133540,
             "key_thumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "node_generation": 1,
-            "node_id": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "node_id": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "operation": "attach",
             "principal": "qualification@example.com",
-            "receipt_expires_at": 1791602277743,
-            "request_json": "{\"operation\":\"attach\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"expectedNativeBinding\":{\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"backendPid\":34800,\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3}}",
-            "result_json": "{\"status\":\"attached\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"runtimeGeneration\":1,\"nodeId\":\"dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c\",\"nodeGeneration\":1,\"attachmentGeneration\":1,\"leaseUntil\":\"2026-10-10T03:17:57.743Z\",\"nativeBinding\":{\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"backendPid\":34800,\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3}}"
+            "receipt_expires_at": 1791606223560,
+            "request_json": "{\"operation\":\"attach\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"expectedNativeBinding\":{\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"backendPid\":81560,\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3}}",
+            "result_json": "{\"status\":\"attached\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"runtimeGeneration\":1,\"nodeId\":\"ffa560e2-ea8d-43e6-b83b-4a1288e1986e\",\"nodeGeneration\":1,\"attachmentGeneration\":1,\"leaseUntil\":\"2026-10-10T04:23:43.560Z\",\"nativeBinding\":{\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"backendPid\":81560,\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3}}"
           },
           {
             "agent": "pilot",
-            "challenge_id": "7c4aa07f-dfff-48b0-b0bc-5c570346857a",
-            "commit_hash": "215c64ecc4b55a910356ae2cc7473d975eb1f7f4aaddf740b7dfd9763b2377cd",
-            "consumed_at": 1791602188642,
-            "expires_at": 1791602218617,
-            "issued_at": 1791602188617,
+            "challenge_id": "ec70c3d4-7570-4f9d-87f6-63120638a923",
+            "commit_hash": "7f6cacb234eaed60c8801b7d640f63b57df94ed53957a9206fd12fd0fffba6b1",
+            "consumed_at": 1791606134461,
+            "expires_at": 1791606164435,
+            "issued_at": 1791606134435,
             "key_thumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "node_generation": 1,
-            "node_id": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "node_id": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "operation": "renew",
             "principal": "qualification@example.com",
-            "receipt_expires_at": 1791602278642,
-            "request_json": "{\"operation\":\"renew\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"backendPid\":34800,\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3}}",
-            "result_json": "{\"status\":\"renewed\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"runtimeGeneration\":1,\"nodeId\":\"dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c\",\"nodeGeneration\":1,\"attachmentGeneration\":1,\"leaseUntil\":\"2026-10-10T03:17:58.642Z\",\"nativeBinding\":{\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"backendPid\":34800,\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3}}"
+            "receipt_expires_at": 1791606224461,
+            "request_json": "{\"operation\":\"renew\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"backendPid\":81560,\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3}}",
+            "result_json": "{\"status\":\"renewed\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"runtimeGeneration\":1,\"nodeId\":\"ffa560e2-ea8d-43e6-b83b-4a1288e1986e\",\"nodeGeneration\":1,\"attachmentGeneration\":1,\"leaseUntil\":\"2026-10-10T04:23:44.461Z\",\"nativeBinding\":{\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"backendPid\":81560,\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3}}"
           },
           {
             "agent": "pilot",
-            "challenge_id": "6df467d6-0afe-48a0-89f2-c37d77b07ed5",
+            "challenge_id": "877d833f-918d-48a8-ae38-ca6a71a3ce68",
             "commit_hash": null,
             "consumed_at": null,
-            "expires_at": 1791602218692,
-            "issued_at": 1791602188692,
+            "expires_at": 1791606164508,
+            "issued_at": 1791606134508,
             "key_thumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "node_generation": 1,
-            "node_id": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "node_id": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "operation": "renew",
             "principal": "qualification@example.com",
             "receipt_expires_at": null,
-            "request_json": "{\"operation\":\"renew\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":2,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"backendPid\":34800,\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3}}",
+            "request_json": "{\"operation\":\"renew\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":2,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"backendPid\":81560,\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3}}",
             "result_json": null
           },
           {
             "agent": "pilot",
-            "challenge_id": "da22dbbd-98a0-41b8-a2bf-90f91c9e76e1",
+            "challenge_id": "028d1a0e-f2a3-4831-ad67-b033c041ef80",
             "commit_hash": null,
             "consumed_at": null,
-            "expires_at": 1791602219893,
-            "issued_at": 1791602189893,
+            "expires_at": 1791606165738,
+            "issued_at": 1791606135738,
             "key_thumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "node_generation": 1,
-            "node_id": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "node_id": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "operation": "renew",
             "principal": "qualification@example.com",
             "receipt_expires_at": null,
-            "request_json": "{\"operation\":\"renew\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"bda123ed-7562-4343-9707-0ea662934dda\",\"connectionId\":\"a533ba87-48fc-4fa2-9b31-9846a0e28835\",\"backendPid\":34945,\"threadId\":\"01a123cf-e58b-7442-851f-8f4eb6a1d0fb\",\"generation\":5,\"serverInstanceId\":\"01a123cf-e560-7dc0-964e-e049f807e67e\",\"serverGeneration\":3}}",
+            "request_json": "{\"operation\":\"renew\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"2b3eb44a-b2e2-43c7-af2a-a381587f9a53\",\"connectionId\":\"371592d7-021e-40e0-a419-e9cf6798ad24\",\"backendPid\":81779,\"threadId\":\"01a1240c-1aff-7930-899b-2dde367a735f\",\"generation\":5,\"serverInstanceId\":\"01a1240c-1ad5-7271-bf50-d4cb69ee29d5\",\"serverGeneration\":3}}",
             "result_json": null
           },
           {
             "agent": "pilot",
-            "challenge_id": "7c626658-df8c-4e8b-bf90-e1096927149a",
-            "commit_hash": "d434388d60d5ae7278efa3fc3d3506700190fd5b72a11a69ab9c4e15a209ee19",
-            "consumed_at": 1791602189968,
-            "expires_at": 1791602219943,
-            "issued_at": 1791602189943,
+            "challenge_id": "097e5a6d-1f04-4932-ab16-894794c5ae8c",
+            "commit_hash": "45f788aec9455881aae09abdccc5657c57d9aa68a8ca75c782958465b1e05a89",
+            "consumed_at": 1791606135811,
+            "expires_at": 1791606165787,
+            "issued_at": 1791606135787,
             "key_thumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "node_generation": 1,
-            "node_id": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "node_id": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "operation": "attach",
             "principal": "qualification@example.com",
-            "receipt_expires_at": 1791602279968,
-            "request_json": "{\"operation\":\"attach\",\"runtimeId\":\"e3667013-e923-4ce3-9307-9facbd801c14\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"expectedNativeBinding\":{\"clientId\":\"bda123ed-7562-4343-9707-0ea662934dda\",\"connectionId\":\"a533ba87-48fc-4fa2-9b31-9846a0e28835\",\"backendPid\":34945,\"threadId\":\"01a123cf-e58b-7442-851f-8f4eb6a1d0fb\",\"generation\":5,\"serverInstanceId\":\"01a123cf-e560-7dc0-964e-e049f807e67e\",\"serverGeneration\":3}}",
-            "result_json": "{\"status\":\"attached\",\"runtimeId\":\"e3667013-e923-4ce3-9307-9facbd801c14\",\"runtimeGeneration\":1,\"nodeId\":\"dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c\",\"nodeGeneration\":1,\"attachmentGeneration\":1,\"leaseUntil\":\"2026-10-10T03:17:59.968Z\",\"nativeBinding\":{\"clientId\":\"bda123ed-7562-4343-9707-0ea662934dda\",\"connectionId\":\"a533ba87-48fc-4fa2-9b31-9846a0e28835\",\"backendPid\":34945,\"threadId\":\"01a123cf-e58b-7442-851f-8f4eb6a1d0fb\",\"generation\":5,\"serverInstanceId\":\"01a123cf-e560-7dc0-964e-e049f807e67e\",\"serverGeneration\":3}}"
+            "receipt_expires_at": 1791606225811,
+            "request_json": "{\"operation\":\"attach\",\"runtimeId\":\"48c32b87-7412-4cb2-96ad-33d7493f229a\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"expectedNativeBinding\":{\"clientId\":\"2b3eb44a-b2e2-43c7-af2a-a381587f9a53\",\"connectionId\":\"371592d7-021e-40e0-a419-e9cf6798ad24\",\"backendPid\":81779,\"threadId\":\"01a1240c-1aff-7930-899b-2dde367a735f\",\"generation\":5,\"serverInstanceId\":\"01a1240c-1ad5-7271-bf50-d4cb69ee29d5\",\"serverGeneration\":3}}",
+            "result_json": "{\"status\":\"attached\",\"runtimeId\":\"48c32b87-7412-4cb2-96ad-33d7493f229a\",\"runtimeGeneration\":1,\"nodeId\":\"ffa560e2-ea8d-43e6-b83b-4a1288e1986e\",\"nodeGeneration\":1,\"attachmentGeneration\":1,\"leaseUntil\":\"2026-10-10T04:23:45.811Z\",\"nativeBinding\":{\"clientId\":\"2b3eb44a-b2e2-43c7-af2a-a381587f9a53\",\"connectionId\":\"371592d7-021e-40e0-a419-e9cf6798ad24\",\"backendPid\":81779,\"threadId\":\"01a1240c-1aff-7930-899b-2dde367a735f\",\"generation\":5,\"serverInstanceId\":\"01a1240c-1ad5-7271-bf50-d4cb69ee29d5\",\"serverGeneration\":3}}"
           },
           {
             "agent": "pilot",
-            "challenge_id": "721cc6d4-7700-48c0-8158-98b2d7f96682",
-            "commit_hash": "831969e2271023b9c7f15871a8e417e34023765952ff8ac23b05f4928f6fbed6",
-            "consumed_at": 1791602190042,
-            "expires_at": 1791602220018,
-            "issued_at": 1791602190018,
+            "challenge_id": "0701e96b-9cda-4f84-80bc-83eb13f2c0e9",
+            "commit_hash": "a0ebb3553d5fdae74a0ccc830631cf42ae931f4ce4161c4ca714828d8af8bb56",
+            "consumed_at": 1791606135887,
+            "expires_at": 1791606165861,
+            "issued_at": 1791606135861,
             "key_thumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "node_generation": 1,
-            "node_id": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "node_id": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "operation": "transfer",
             "principal": "qualification@example.com",
-            "receipt_expires_at": 1791602280042,
-            "request_json": "{\"operation\":\"transfer\",\"sourceRuntimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedSourceRuntimeGeneration\":1,\"expectedSourceAttachmentGeneration\":1,\"replacementRuntimeId\":\"e3667013-e923-4ce3-9307-9facbd801c14\",\"expectedReplacementRuntimeGeneration\":1,\"expectedReplacementAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"bda123ed-7562-4343-9707-0ea662934dda\",\"connectionId\":\"a533ba87-48fc-4fa2-9b31-9846a0e28835\",\"backendPid\":34945,\"threadId\":\"01a123cf-e58b-7442-851f-8f4eb6a1d0fb\",\"generation\":5,\"serverInstanceId\":\"01a123cf-e560-7dc0-964e-e049f807e67e\",\"serverGeneration\":3}}",
-            "result_json": "{\"status\":\"transferred\",\"sourceRuntimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"sourceRuntimeGeneration\":2,\"sourceAttachmentGeneration\":2,\"runtimeId\":\"e3667013-e923-4ce3-9307-9facbd801c14\",\"runtimeGeneration\":1,\"nodeId\":\"dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c\",\"nodeGeneration\":1,\"attachmentGeneration\":2,\"leaseUntil\":\"2026-10-10T03:18:00.042Z\",\"nativeBinding\":{\"clientId\":\"bda123ed-7562-4343-9707-0ea662934dda\",\"connectionId\":\"a533ba87-48fc-4fa2-9b31-9846a0e28835\",\"backendPid\":34945,\"threadId\":\"01a123cf-e58b-7442-851f-8f4eb6a1d0fb\",\"generation\":5,\"serverInstanceId\":\"01a123cf-e560-7dc0-964e-e049f807e67e\",\"serverGeneration\":3}}"
+            "receipt_expires_at": 1791606225887,
+            "request_json": "{\"operation\":\"transfer\",\"sourceRuntimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedSourceRuntimeGeneration\":1,\"expectedSourceAttachmentGeneration\":1,\"replacementRuntimeId\":\"48c32b87-7412-4cb2-96ad-33d7493f229a\",\"expectedReplacementRuntimeGeneration\":1,\"expectedReplacementAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"2b3eb44a-b2e2-43c7-af2a-a381587f9a53\",\"connectionId\":\"371592d7-021e-40e0-a419-e9cf6798ad24\",\"backendPid\":81779,\"threadId\":\"01a1240c-1aff-7930-899b-2dde367a735f\",\"generation\":5,\"serverInstanceId\":\"01a1240c-1ad5-7271-bf50-d4cb69ee29d5\",\"serverGeneration\":3}}",
+            "result_json": "{\"status\":\"transferred\",\"sourceRuntimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"sourceRuntimeGeneration\":2,\"sourceAttachmentGeneration\":2,\"runtimeId\":\"48c32b87-7412-4cb2-96ad-33d7493f229a\",\"runtimeGeneration\":1,\"nodeId\":\"ffa560e2-ea8d-43e6-b83b-4a1288e1986e\",\"nodeGeneration\":1,\"attachmentGeneration\":2,\"leaseUntil\":\"2026-10-10T04:23:45.887Z\",\"nativeBinding\":{\"clientId\":\"2b3eb44a-b2e2-43c7-af2a-a381587f9a53\",\"connectionId\":\"371592d7-021e-40e0-a419-e9cf6798ad24\",\"backendPid\":81779,\"threadId\":\"01a1240c-1aff-7930-899b-2dde367a735f\",\"generation\":5,\"serverInstanceId\":\"01a1240c-1ad5-7271-bf50-d4cb69ee29d5\",\"serverGeneration\":3}}"
           }
         ],
         "runtimes": [
@@ -258,19 +258,19 @@
             "attachment_generation": 2,
             "lease_until": 0,
             "node_generation": 1,
-            "node_id": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "node_id": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "qualified": 0,
             "runtime_generation": 2,
-            "runtime_id": "d9eee756-4134-4bac-8fe3-83894e05ea89"
+            "runtime_id": "04ee15c0-b8a8-4103-a30d-20925582a979"
           },
           {
             "attachment_generation": 2,
-            "lease_until": 1791602280042,
+            "lease_until": 1791606225887,
             "node_generation": 1,
-            "node_id": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "node_id": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "qualified": 1,
             "runtime_generation": 1,
-            "runtime_id": "e3667013-e923-4ce3-9307-9facbd801c14"
+            "runtime_id": "48c32b87-7412-4cb2-96ad-33d7493f229a"
           }
         ]
       },
@@ -419,77 +419,77 @@
       "installedDistribution": {
         "directUrl": {
           "archive_info": {},
-          "url": "file:///private/tmp/event-native-metadata-proof/dist/knitli_event_gateway-0.1.0-py3-none-any.whl"
+          "url": "file:///private/tmp/event-native-metadata-v3-proof/dist/knitli_event_gateway-0.1.0-py3-none-any.whl"
         },
-        "packageRoot": "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway",
+        "packageRoot": "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway",
         "packageSource": "/opt/coder/toolshed/.worktrees/event-native-metadata/packages/event-gateway/src/event_gateway",
-        "pycachePrefix": "/private/var/folders/43/sd8c5gyd4mq1twfp41pj9l_40000gn/T/qualification-pycache-dg71y4jr",
+        "pycachePrefix": "/private/tmp/qualification-pycache-nb86ca4o",
         "verifiedSha256": {
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/cli.py": "0322ddbcc5bf5e715a96202787f46aa4e5bf95a738e36ca183e199c146f658f7",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/client_runtime.py": "1b61209e06835260d37aedab56fb10ba577a41675480614faced90004a1b8b00",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/cloud.py": "0ccf6be599a980030dedade52918c4d0581b610b3a7216537ebaf2069f6d4df3",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/daemon.py": "44354ed079f131f2217fe012204f723c34a908b2d307f1e475860dc9c56ee9bb",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/gateway.py": "7e45b9c92c6ba96f298c6612a890f9df246b13f26682d5ce64eab546a3a27cc6",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/launcher.py": "f800b3b53836c0891d08b196c77829921946d112d089bd46d38caddf0832a663",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/store.py": "9123146cd7b2fa32bb17b166cd5f72359159afd760bbd8828f1031989f49aea4"
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/cli.py": "0322ddbcc5bf5e715a96202787f46aa4e5bf95a738e36ca183e199c146f658f7",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/client_runtime.py": "1b61209e06835260d37aedab56fb10ba577a41675480614faced90004a1b8b00",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/cloud.py": "0ccf6be599a980030dedade52918c4d0581b610b3a7216537ebaf2069f6d4df3",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/daemon.py": "44354ed079f131f2217fe012204f723c34a908b2d307f1e475860dc9c56ee9bb",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/gateway.py": "7e45b9c92c6ba96f298c6612a890f9df246b13f26682d5ce64eab546a3a27cc6",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/launcher.py": "75dbfcc6b223f57fb498851e77e0b578139863c026b421cd5b2259c0d7000491",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/store.py": "9123146cd7b2fa32bb17b166cd5f72359159afd760bbd8828f1031989f49aea4"
         },
         "version": "0.1.0"
       },
       "local": {
-        "d9eee756-4134-4bac-8fe3-83894e05ea89": {
+        "04ee15c0-b8a8-4103-a30d-20925582a979": {
           "agent": "pilot",
           "attachmentGeneration": 2,
           "leaseExpiresAt": 0,
           "nativeBinding": {
-            "backendPid": 34800,
-            "clientId": "61035923-d696-435f-b568-1c4efc574dd1",
-            "connectionId": "b55d7540-e6c3-4d35-ad51-a7c7c2c58065",
+            "backendPid": 81560,
+            "clientId": "3201be4c-fe39-4ce5-9e3a-9251ac34d7a0",
+            "connectionId": "a5e042ec-9056-4e34-bfeb-02df3ef7e344",
             "generation": 5,
             "serverGeneration": 3,
-            "serverInstanceId": "01a123cf-dce0-7170-8e8c-913526fb11ab",
-            "threadId": "01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f"
+            "serverInstanceId": "01a1240c-123e-7b61-8571-479791f4f91c",
+            "threadId": "01a1240c-1263-7931-b852-bf3410ad7738"
           },
-          "nativeThreadId": "01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f",
+          "nativeThreadId": "01a1240c-1263-7931-b852-bf3410ad7738",
           "nodeGeneration": 1,
-          "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+          "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
           "principal": "qualification@example.com",
           "runtimeGeneration": 2,
-          "runtimeId": "d9eee756-4134-4bac-8fe3-83894e05ea89",
-          "sessionId": "6071fded-8f50-474e-9f53-19dc5b7c15e9"
+          "runtimeId": "04ee15c0-b8a8-4103-a30d-20925582a979",
+          "sessionId": "e31d1f95-b79e-4314-9cdb-82bcad6cad22"
         },
-        "e3667013-e923-4ce3-9307-9facbd801c14": {
+        "48c32b87-7412-4cb2-96ad-33d7493f229a": {
           "agent": "pilot",
           "attachmentGeneration": 2,
-          "leaseExpiresAt": 1791602280.042,
+          "leaseExpiresAt": 1791606225.887,
           "nativeBinding": {
-            "backendPid": 34945,
-            "clientId": "bda123ed-7562-4343-9707-0ea662934dda",
-            "connectionId": "a533ba87-48fc-4fa2-9b31-9846a0e28835",
+            "backendPid": 81779,
+            "clientId": "2b3eb44a-b2e2-43c7-af2a-a381587f9a53",
+            "connectionId": "371592d7-021e-40e0-a419-e9cf6798ad24",
             "generation": 5,
             "serverGeneration": 3,
-            "serverInstanceId": "01a123cf-e560-7dc0-964e-e049f807e67e",
-            "threadId": "01a123cf-e58b-7442-851f-8f4eb6a1d0fb"
+            "serverInstanceId": "01a1240c-1ad5-7271-bf50-d4cb69ee29d5",
+            "threadId": "01a1240c-1aff-7930-899b-2dde367a735f"
           },
-          "nativeThreadId": "01a123cf-e58b-7442-851f-8f4eb6a1d0fb",
+          "nativeThreadId": "01a1240c-1aff-7930-899b-2dde367a735f",
           "nodeGeneration": 1,
-          "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+          "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
           "principal": "qualification@example.com",
           "runtimeGeneration": 1,
-          "runtimeId": "e3667013-e923-4ce3-9307-9facbd801c14",
-          "sessionId": "1da727d7-9780-4b3c-8c69-ec66c585d12d"
+          "runtimeId": "48c32b87-7412-4cb2-96ad-33d7493f229a",
+          "sessionId": "0e1483e8-b020-4818-ab85-95991a0f6075"
         }
       },
       "mocks": [
@@ -507,9 +507,9 @@
             "attached": null,
             "lastError": "request_timeout",
             "pendingCommit": {
-              "challengeId": "b174e9b1-0a3a-44ac-85a3-20a35976d0d4",
+              "challengeId": "47d6cdf5-9170-4cd4-82f6-a5a7fd14c003",
               "operation": "attach",
-              "safeExpiryAt": "2026-10-10T03:17:57.722Z",
+              "safeExpiryAt": "2026-10-10T04:23:43.540Z",
               "status": "outcome_unknown"
             },
             "reason": "commit_outcome_unknown"
@@ -523,7 +523,7 @@
             "localStatus": "current",
             "remoteStatus": "attached",
             "runtimeGeneration": 1,
-            "runtimeId": "d9eee756-4134-4bac-8fe3-83894e05ea89"
+            "runtimeId": "04ee15c0-b8a8-4103-a30d-20925582a979"
           }
         },
         {
@@ -534,7 +534,7 @@
             "localStatus": "current",
             "remoteStatus": "renewed",
             "runtimeGeneration": 1,
-            "runtimeId": "d9eee756-4134-4bac-8fe3-83894e05ea89"
+            "runtimeId": "04ee15c0-b8a8-4103-a30d-20925582a979"
           }
         },
         {
@@ -577,7 +577,7 @@
             "localStatus": "current",
             "remoteStatus": "attached",
             "runtimeGeneration": 1,
-            "runtimeId": "e3667013-e923-4ce3-9307-9facbd801c14"
+            "runtimeId": "48c32b87-7412-4cb2-96ad-33d7493f229a"
           }
         },
         {
@@ -588,7 +588,7 @@
             "localStatus": "current",
             "remoteStatus": "transferred",
             "runtimeGeneration": 1,
-            "runtimeId": "e3667013-e923-4ce3-9307-9facbd801c14"
+            "runtimeId": "48c32b87-7412-4cb2-96ad-33d7493f229a"
           }
         }
       ],
@@ -599,59 +599,59 @@
       "sessions": [
         {
           "binding": {
-            "backendPid": 34800,
-            "clientId": "61035923-d696-435f-b568-1c4efc574dd1",
-            "connectionId": "b55d7540-e6c3-4d35-ad51-a7c7c2c58065",
+            "backendPid": 81560,
+            "clientId": "3201be4c-fe39-4ce5-9e3a-9251ac34d7a0",
+            "connectionId": "a5e042ec-9056-4e34-bfeb-02df3ef7e344",
             "generation": 5,
             "serverGeneration": 3,
-            "serverInstanceId": "01a123cf-dce0-7170-8e8c-913526fb11ab",
-            "threadId": "01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f"
+            "serverInstanceId": "01a1240c-123e-7b61-8571-479791f4f91c",
+            "threadId": "01a1240c-1263-7931-b852-bf3410ad7738"
           },
           "initialWitness": {
-            "backendPid": 34800,
+            "backendPid": 81560,
             "cause": "heartbeat",
-            "clientId": "61035923-d696-435f-b568-1c4efc574dd1",
-            "connectionId": "b55d7540-e6c3-4d35-ad51-a7c7c2c58065",
+            "clientId": "3201be4c-fe39-4ce5-9e3a-9251ac34d7a0",
+            "connectionId": "a5e042ec-9056-4e34-bfeb-02df3ef7e344",
             "eligible": true,
             "generation": 5,
             "leaseMs": 750,
             "nonce": 3,
             "sequence": 3,
             "serverGeneration": 3,
-            "serverInstanceId": "01a123cf-dce0-7170-8e8c-913526fb11ab",
-            "threadId": "01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f",
+            "serverInstanceId": "01a1240c-123e-7b61-8571-479791f4f91c",
+            "threadId": "01a1240c-1263-7931-b852-bf3410ad7738",
             "version": 2
           },
-          "pid": 34800,
-          "sessionId": "6071fded-8f50-474e-9f53-19dc5b7c15e9"
+          "pid": 81560,
+          "sessionId": "e31d1f95-b79e-4314-9cdb-82bcad6cad22"
         },
         {
           "binding": {
-            "backendPid": 34945,
-            "clientId": "bda123ed-7562-4343-9707-0ea662934dda",
-            "connectionId": "a533ba87-48fc-4fa2-9b31-9846a0e28835",
+            "backendPid": 81779,
+            "clientId": "2b3eb44a-b2e2-43c7-af2a-a381587f9a53",
+            "connectionId": "371592d7-021e-40e0-a419-e9cf6798ad24",
             "generation": 5,
             "serverGeneration": 3,
-            "serverInstanceId": "01a123cf-e560-7dc0-964e-e049f807e67e",
-            "threadId": "01a123cf-e58b-7442-851f-8f4eb6a1d0fb"
+            "serverInstanceId": "01a1240c-1ad5-7271-bf50-d4cb69ee29d5",
+            "threadId": "01a1240c-1aff-7930-899b-2dde367a735f"
           },
           "initialWitness": {
-            "backendPid": 34945,
+            "backendPid": 81779,
             "cause": "heartbeat",
-            "clientId": "bda123ed-7562-4343-9707-0ea662934dda",
-            "connectionId": "a533ba87-48fc-4fa2-9b31-9846a0e28835",
+            "clientId": "2b3eb44a-b2e2-43c7-af2a-a381587f9a53",
+            "connectionId": "371592d7-021e-40e0-a419-e9cf6798ad24",
             "eligible": true,
             "generation": 5,
             "leaseMs": 750,
             "nonce": 3,
             "sequence": 3,
             "serverGeneration": 3,
-            "serverInstanceId": "01a123cf-e560-7dc0-964e-e049f807e67e",
-            "threadId": "01a123cf-e58b-7442-851f-8f4eb6a1d0fb",
+            "serverInstanceId": "01a1240c-1ad5-7271-bf50-d4cb69ee29d5",
+            "threadId": "01a1240c-1aff-7930-899b-2dde367a735f",
             "version": 2
           },
-          "pid": 34945,
-          "sessionId": "1da727d7-9780-4b3c-8c69-ec66c585d12d"
+          "pid": 81779,
+          "sessionId": "0e1483e8-b020-4818-ab85-95991a0f6075"
         }
       ],
       "sourceSha256": {
@@ -661,209 +661,209 @@
         "/opt/coder/toolshed/.worktrees/event-native-metadata/packages/event-gateway/docs/native-bridge/coupled-workerd-source-hashes.mjs": "0cf80b8f9dc816e7abae13979ed61ca938fdf1a23df6b05d33e4b029ac1e6515",
         "/opt/coder/toolshed/.worktrees/event-native-metadata/packages/event-gateway/docs/native-bridge/qualification-installed.py": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c",
         "/opt/coder/toolshed/.worktrees/event-native-metadata/packages/event-gateway/scripts/qualify_native_bridge.py": "e4068916c0739657186b8be34d087714ad9a544642dc8921a9c502ca1ab9ac11",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/cli.py": "0322ddbcc5bf5e715a96202787f46aa4e5bf95a738e36ca183e199c146f658f7",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/client_runtime.py": "1b61209e06835260d37aedab56fb10ba577a41675480614faced90004a1b8b00",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/cloud.py": "0ccf6be599a980030dedade52918c4d0581b610b3a7216537ebaf2069f6d4df3",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/daemon.py": "44354ed079f131f2217fe012204f723c34a908b2d307f1e475860dc9c56ee9bb",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/gateway.py": "7e45b9c92c6ba96f298c6612a890f9df246b13f26682d5ce64eab546a3a27cc6",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/launcher.py": "f800b3b53836c0891d08b196c77829921946d112d089bd46d38caddf0832a663",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
-        "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/store.py": "9123146cd7b2fa32bb17b166cd5f72359159afd760bbd8828f1031989f49aea4",
-        "/private/tmp/native-codex-metadata-v1": "9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5"
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/cli.py": "0322ddbcc5bf5e715a96202787f46aa4e5bf95a738e36ca183e199c146f658f7",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/client_runtime.py": "1b61209e06835260d37aedab56fb10ba577a41675480614faced90004a1b8b00",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/cloud.py": "0ccf6be599a980030dedade52918c4d0581b610b3a7216537ebaf2069f6d4df3",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/daemon.py": "44354ed079f131f2217fe012204f723c34a908b2d307f1e475860dc9c56ee9bb",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/gateway.py": "7e45b9c92c6ba96f298c6612a890f9df246b13f26682d5ce64eab546a3a27cc6",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/launcher.py": "75dbfcc6b223f57fb498851e77e0b578139863c026b421cd5b2259c0d7000491",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
+        "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/store.py": "9123146cd7b2fa32bb17b166cd5f72359159afd760bbd8828f1031989f49aea4",
+        "/private/tmp/native-codex-metadata-v3": "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
       },
       "wire": [
         {
-          "body": "{\"operation\":\"attach\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"expectedNativeBinding\":{\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"backendPid\":34800,\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3}}",
+          "body": "{\"operation\":\"attach\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"expectedNativeBinding\":{\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"backendPid\":81560,\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3}}",
           "path": "/v1/runtimes/challenge",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:27.715Z",
+            "issuedAt": "2026-10-10T04:22:13.532Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "294039ea-e4a5-4da1-9878-7de5006c4d94",
-            "signature": "Zqd8QXoRXXl45m4KAwtxkt76veZMgIHzs_OvFKiByVwurgDTu0zm0UgzjCrEnozQNaf_p4oHWV_im-a1CFzACw"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "5d3d69fb-3980-48d0-961b-d8100e18b4e8",
+            "signature": "7rHDsNAXfKsfccaYp2g7GgN8Coeh7KrzRGEcPvyNPN6yiZgkGmon0Zrv9gyjp36vj-EA8srbovRlUbuXWY-tCw"
           },
           "response": {
-            "challengeId": "b174e9b1-0a3a-44ac-85a3-20a35976d0d4",
-            "expiresAt": "2026-10-10T03:16:57.722Z",
-            "issuedAt": "2026-10-10T03:16:27.722Z"
+            "challengeId": "47d6cdf5-9170-4cd4-82f6-a5a7fd14c003",
+            "expiresAt": "2026-10-10T04:22:43.540Z",
+            "issuedAt": "2026-10-10T04:22:13.540Z"
           },
           "status": 200
         },
         {
-          "body": "{\"challengeId\":\"b174e9b1-0a3a-44ac-85a3-20a35976d0d4\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T03:16:27.724Z\",\"witness\":{\"version\":2,\"nonce\":6,\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"backendPid\":34800,\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"eligible\":true,\"sequence\":6,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3,\"leaseMs\":750}}}",
+          "body": "{\"challengeId\":\"47d6cdf5-9170-4cd4-82f6-a5a7fd14c003\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T04:22:13.542Z\",\"witness\":{\"version\":2,\"nonce\":6,\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"backendPid\":81560,\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"eligible\":true,\"sequence\":6,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3,\"leaseMs\":750}}}",
           "path": "/v1/runtimes/attach",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:27.739Z",
+            "issuedAt": "2026-10-10T04:22:13.557Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "36ae3f52-d265-4eb7-af11-d14077e69ce7",
-            "signature": "P7MqoCQOhu62021xSMYKpbICFD_tc_sPyWRKO6TPGB29FFL8lYcFhiWez_sU4YZ-yDSCYwx1rU0G3ae9itL7Cw"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "b943f8e5-2e44-4fa5-aec8-551fd3877935",
+            "signature": "iVcIXydMO8pglmbqtDRJUR1Q8JiXf0uKYeJ_MwC2yMFWJX40rce7cyXs3sWBREoFp8-DeIQ9i0lHJ0K32RvvBg"
           },
           "response": {
             "attachmentGeneration": 1,
-            "leaseUntil": "2026-10-10T03:17:57.743Z",
+            "leaseUntil": "2026-10-10T04:23:43.560Z",
             "nativeBinding": {
-              "backendPid": 34800,
-              "clientId": "61035923-d696-435f-b568-1c4efc574dd1",
-              "connectionId": "b55d7540-e6c3-4d35-ad51-a7c7c2c58065",
+              "backendPid": 81560,
+              "clientId": "3201be4c-fe39-4ce5-9e3a-9251ac34d7a0",
+              "connectionId": "a5e042ec-9056-4e34-bfeb-02df3ef7e344",
               "generation": 5,
               "serverGeneration": 3,
-              "serverInstanceId": "01a123cf-dce0-7170-8e8c-913526fb11ab",
-              "threadId": "01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f"
+              "serverInstanceId": "01a1240c-123e-7b61-8571-479791f4f91c",
+              "threadId": "01a1240c-1263-7931-b852-bf3410ad7738"
             },
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "runtimeGeneration": 1,
-            "runtimeId": "d9eee756-4134-4bac-8fe3-83894e05ea89",
+            "runtimeId": "04ee15c0-b8a8-4103-a30d-20925582a979",
             "status": "attached"
           },
           "status": 200
         },
         {
-          "body": "{\"challengeId\":\"b174e9b1-0a3a-44ac-85a3-20a35976d0d4\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T03:16:27.724Z\",\"witness\":{\"version\":2,\"nonce\":6,\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"backendPid\":34800,\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"eligible\":true,\"sequence\":6,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3,\"leaseMs\":750}}}",
+          "body": "{\"challengeId\":\"47d6cdf5-9170-4cd4-82f6-a5a7fd14c003\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T04:22:13.542Z\",\"witness\":{\"version\":2,\"nonce\":6,\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"backendPid\":81560,\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"eligible\":true,\"sequence\":6,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3,\"leaseMs\":750}}}",
           "path": "/v1/runtimes/attach",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:27.744Z",
+            "issuedAt": "2026-10-10T04:22:13.562Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "dc34befe-7f5b-47a6-a06d-772f8410b305",
-            "signature": "H7FPt-Tks2Nz_PnsNlepjYMJaseSaahk9z1XWDW6dMMNG-5ux4krtxc8CXsLPMKxAPCoN1v3P7k34uDu3zU3BA"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "43cf7701-8a60-4b3a-b511-c7ba6a790370",
+            "signature": "hzV_yetm_v7zfdlr-EipWDsHnriobVkzV0bjHFvnPImk7B7aAtv5scOjwQpBTsiHS1mgL5h4yuwfKBVm9EoMDA"
           },
           "response": {
             "attachmentGeneration": 1,
-            "leaseUntil": "2026-10-10T03:17:57.743Z",
+            "leaseUntil": "2026-10-10T04:23:43.560Z",
             "nativeBinding": {
-              "backendPid": 34800,
-              "clientId": "61035923-d696-435f-b568-1c4efc574dd1",
-              "connectionId": "b55d7540-e6c3-4d35-ad51-a7c7c2c58065",
+              "backendPid": 81560,
+              "clientId": "3201be4c-fe39-4ce5-9e3a-9251ac34d7a0",
+              "connectionId": "a5e042ec-9056-4e34-bfeb-02df3ef7e344",
               "generation": 5,
               "serverGeneration": 3,
-              "serverInstanceId": "01a123cf-dce0-7170-8e8c-913526fb11ab",
-              "threadId": "01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f"
+              "serverInstanceId": "01a1240c-123e-7b61-8571-479791f4f91c",
+              "threadId": "01a1240c-1263-7931-b852-bf3410ad7738"
             },
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "runtimeGeneration": 1,
-            "runtimeId": "d9eee756-4134-4bac-8fe3-83894e05ea89",
+            "runtimeId": "04ee15c0-b8a8-4103-a30d-20925582a979",
             "status": "attached"
           },
           "status": 200
         },
         {
-          "body": "{\"challengeId\":\"b174e9b1-0a3a-44ac-85a3-20a35976d0d4\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T03:16:27.724Z\",\"witness\":{\"version\":2,\"nonce\":6,\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"backendPid\":34800,\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"eligible\":true,\"sequence\":6,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3,\"leaseMs\":750}}}",
+          "body": "{\"challengeId\":\"47d6cdf5-9170-4cd4-82f6-a5a7fd14c003\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T04:22:13.542Z\",\"witness\":{\"version\":2,\"nonce\":6,\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"backendPid\":81560,\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"eligible\":true,\"sequence\":6,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3,\"leaseMs\":750}}}",
           "path": "/v1/runtimes/attach",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:28.565Z",
+            "issuedAt": "2026-10-10T04:22:14.381Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "cea3039e-a0d1-4432-957c-95ec3c608842",
-            "signature": "ayq2E8k2QDtq-z_Z2YLzKQZYWeEMAzTJO7ZfNfO2DSZhy4723ZrPuavdH_tDE3Qk3S7hdtkoH3dTOpzvBroWDQ"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "57b09f0d-a011-477a-a2d4-2487c0b60f99",
+            "signature": "8tdbsz_5jVXvDKAVL2h39_EilSObFXXZMoI6U6TQUoV_JqRWqMywY2jhcsueVRPqB6APE1MLHjrc2eLEhQXlAQ"
           },
           "response": {
             "attachmentGeneration": 1,
-            "leaseUntil": "2026-10-10T03:17:57.743Z",
+            "leaseUntil": "2026-10-10T04:23:43.560Z",
             "nativeBinding": {
-              "backendPid": 34800,
-              "clientId": "61035923-d696-435f-b568-1c4efc574dd1",
-              "connectionId": "b55d7540-e6c3-4d35-ad51-a7c7c2c58065",
+              "backendPid": 81560,
+              "clientId": "3201be4c-fe39-4ce5-9e3a-9251ac34d7a0",
+              "connectionId": "a5e042ec-9056-4e34-bfeb-02df3ef7e344",
               "generation": 5,
               "serverGeneration": 3,
-              "serverInstanceId": "01a123cf-dce0-7170-8e8c-913526fb11ab",
-              "threadId": "01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f"
+              "serverInstanceId": "01a1240c-123e-7b61-8571-479791f4f91c",
+              "threadId": "01a1240c-1263-7931-b852-bf3410ad7738"
             },
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "runtimeGeneration": 1,
-            "runtimeId": "d9eee756-4134-4bac-8fe3-83894e05ea89",
+            "runtimeId": "04ee15c0-b8a8-4103-a30d-20925582a979",
             "status": "attached"
           },
           "status": 200
         },
         {
-          "body": "{\"operation\":\"renew\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"backendPid\":34800,\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3}}",
+          "body": "{\"operation\":\"renew\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"backendPid\":81560,\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3}}",
           "path": "/v1/runtimes/challenge",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:28.614Z",
+            "issuedAt": "2026-10-10T04:22:14.432Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "a8b991d8-d2d0-4b61-9093-343253af7784",
-            "signature": "T3AemSyJtKqlVCofWUtzuXsJX-QEEgPn2P7ScN74h4gtDQd2JzmfNfd3CRUJfWsdKjcX9-qtiItZKkf5Nj-XBw"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "1e7de064-7b31-4caa-b69e-4da5aba021d9",
+            "signature": "VQtEv_grSdtxV6Gk-9eU1U39cpeCAZJfdWKKfGy7l3BhGIE627KVC1qNHDbhv7jP8pWq9gttH0U6FKhHGX7CAw"
           },
           "response": {
-            "challengeId": "7c4aa07f-dfff-48b0-b0bc-5c570346857a",
-            "expiresAt": "2026-10-10T03:16:58.617Z",
-            "issuedAt": "2026-10-10T03:16:28.617Z"
+            "challengeId": "ec70c3d4-7570-4f9d-87f6-63120638a923",
+            "expiresAt": "2026-10-10T04:22:44.435Z",
+            "issuedAt": "2026-10-10T04:22:14.435Z"
           },
           "status": 200
         },
         {
-          "body": "{\"challengeId\":\"7c4aa07f-dfff-48b0-b0bc-5c570346857a\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T03:16:28.618Z\",\"witness\":{\"version\":2,\"nonce\":10,\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"backendPid\":34800,\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"eligible\":true,\"sequence\":10,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3,\"leaseMs\":750}}}",
+          "body": "{\"challengeId\":\"ec70c3d4-7570-4f9d-87f6-63120638a923\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T04:22:14.438Z\",\"witness\":{\"version\":2,\"nonce\":10,\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"backendPid\":81560,\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"eligible\":true,\"sequence\":10,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3,\"leaseMs\":750}}}",
           "path": "/v1/runtimes/renew",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:28.640Z",
+            "issuedAt": "2026-10-10T04:22:14.456Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "7acecf9f-a711-4ab7-9bbb-dbea8939e92a",
-            "signature": "ui02SJbd_ZxskwN6cHR4NFv9jYLN5hjUI4051sl091WiZyoKHUevd1BcZ2XGTIs5HyzHPiPvQ1XXxAXJ4j6qAA"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "a5c2bdea-9a0d-496f-af3e-f3e7c8482f88",
+            "signature": "rCcY3XXrnYX0RKHAYwaFtXIlUJ9gH74uVfYGOwqRvYdsYvB1whemmIc6BJPvHmgk8VqIk1YPZbq4fdQdtKWdCg"
           },
           "response": {
             "attachmentGeneration": 1,
-            "leaseUntil": "2026-10-10T03:17:58.642Z",
+            "leaseUntil": "2026-10-10T04:23:44.461Z",
             "nativeBinding": {
-              "backendPid": 34800,
-              "clientId": "61035923-d696-435f-b568-1c4efc574dd1",
-              "connectionId": "b55d7540-e6c3-4d35-ad51-a7c7c2c58065",
+              "backendPid": 81560,
+              "clientId": "3201be4c-fe39-4ce5-9e3a-9251ac34d7a0",
+              "connectionId": "a5e042ec-9056-4e34-bfeb-02df3ef7e344",
               "generation": 5,
               "serverGeneration": 3,
-              "serverInstanceId": "01a123cf-dce0-7170-8e8c-913526fb11ab",
-              "threadId": "01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f"
+              "serverInstanceId": "01a1240c-123e-7b61-8571-479791f4f91c",
+              "threadId": "01a1240c-1263-7931-b852-bf3410ad7738"
             },
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "runtimeGeneration": 1,
-            "runtimeId": "d9eee756-4134-4bac-8fe3-83894e05ea89",
+            "runtimeId": "04ee15c0-b8a8-4103-a30d-20925582a979",
             "status": "renewed"
           },
           "status": 200
         },
         {
-          "body": "{\"operation\":\"renew\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":2,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"backendPid\":34800,\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3}}",
+          "body": "{\"operation\":\"renew\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":2,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"backendPid\":81560,\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3}}",
           "path": "/v1/runtimes/challenge",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:28.690Z",
+            "issuedAt": "2026-10-10T04:22:14.504Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "8f819e76-a182-4a77-8839-330694c2af1c",
-            "signature": "Qi5AKPhRbVP46NfowHhYMmc5WPQ1rPDpdpyvHAH9sPTGzHrt1LCJr4a1F4X89XvsInjU6huTngE9FEIv_xQODQ"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "595d65a6-3f7e-4ca4-8091-7807361ddfd3",
+            "signature": "6OBeBpVa1HHJ3fMNlagULhpUjda4uwSi7uLOdm2cbj8VKcPAfcYzPiWlSew7XjfO09CngbwRtt5Jxp96WVO4Dw"
           },
           "response": {
-            "challengeId": "6df467d6-0afe-48a0-89f2-c37d77b07ed5",
-            "expiresAt": "2026-10-10T03:16:58.692Z",
-            "issuedAt": "2026-10-10T03:16:28.692Z"
+            "challengeId": "877d833f-918d-48a8-ae38-ca6a71a3ce68",
+            "expiresAt": "2026-10-10T04:22:44.508Z",
+            "issuedAt": "2026-10-10T04:22:14.508Z"
           },
           "status": 200
         },
         {
-          "body": "{\"challengeId\":\"6df467d6-0afe-48a0-89f2-c37d77b07ed5\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":2,\"expectedAttachmentGeneration\":1,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T03:16:28.693Z\",\"witness\":{\"version\":2,\"nonce\":13,\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"backendPid\":34800,\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"eligible\":true,\"sequence\":13,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3,\"leaseMs\":750}}}",
+          "body": "{\"challengeId\":\"877d833f-918d-48a8-ae38-ca6a71a3ce68\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":2,\"expectedAttachmentGeneration\":1,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T04:22:14.510Z\",\"witness\":{\"version\":2,\"nonce\":13,\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"backendPid\":81560,\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"eligible\":true,\"sequence\":13,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3,\"leaseMs\":750}}}",
           "path": "/v1/runtimes/renew",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:28.715Z",
+            "issuedAt": "2026-10-10T04:22:14.532Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "4e0d4207-20a0-4763-8a61-614d88e6f59b",
-            "signature": "e4x08x-_r8FinDYyn0VCRl-0ljfzkD2JXRB9EpImISIJ94wld_DywIClt-2rXgBRrdawLuLdoonJ-sMs29VtBQ"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "78b9241b-f473-4cd1-a8c4-21460bf25ae1",
+            "signature": "nvki7VGB-t23eV_fW8q8GNdgtKPnRJabiYQly-nHL5ZPtOTr1Et7q1-4S1DAYck39UtRtaR-MixGKia5miLzAg"
           },
           "response": {
             "error": "conflict"
@@ -871,14 +871,14 @@
           "status": 409
         },
         {
-          "body": "{\"operation\":\"renew\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"backendPid\":34800,\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3}}",
+          "body": "{\"operation\":\"renew\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"backendPid\":81560,\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3}}",
           "path": "/v1/runtimes/challenge",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:28.740Z",
+            "issuedAt": "2026-10-10T04:22:14.556Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "e0f87027-24ea-4a34-b35e-bea45781bdc5",
-            "signature": "lF5Tn4XU5bq40DdKyDKQ09wOIbzHP6q16Gv-usLPsYD1SnszB_H3Hwhi42-EyGC9dTS94HOt3-axhLR565bACg"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "4a01c394-bc0a-4fc5-8a29-df55ededd1f7",
+            "signature": "B--Z67zLgTpFfhMrhBOt4N_yoyolC4VH2HsMX9myht5SDRznsVQ-3wgTnZxGshw5zyruWYNqDnKdhV-PBCS7Bg"
           },
           "response": {
             "error": "native_binding_unqualified"
@@ -886,14 +886,14 @@
           "status": 409
         },
         {
-          "body": "{\"operation\":\"renew\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"61035923-d696-435f-b568-1c4efc574dd1\",\"connectionId\":\"b55d7540-e6c3-4d35-ad51-a7c7c2c58065\",\"backendPid\":34800,\"threadId\":\"01a123cf-dd0c-7b62-8e87-a7c0fb9ce58f\",\"generation\":5,\"serverInstanceId\":\"01a123cf-dce0-7170-8e8c-913526fb11ab\",\"serverGeneration\":3}}",
+          "body": "{\"operation\":\"renew\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"3201be4c-fe39-4ce5-9e3a-9251ac34d7a0\",\"connectionId\":\"a5e042ec-9056-4e34-bfeb-02df3ef7e344\",\"backendPid\":81560,\"threadId\":\"01a1240c-1263-7931-b852-bf3410ad7738\",\"generation\":5,\"serverInstanceId\":\"01a1240c-123e-7b61-8571-479791f4f91c\",\"serverGeneration\":3}}",
           "path": "/v1/runtimes/challenge",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:28.764Z",
+            "issuedAt": "2026-10-10T04:22:14.579Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "353c07c7-5f8c-458e-bc82-0a7782449ced",
-            "signature": "v0ONHbzSK1QWltk_4iCW9RM4d7S8luoXbplrlOe_rZn0szs_E1qwzHRUqTYqr-hbO6c5fVL8ZseIORvLzCUvDA"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "b96cbaac-7530-42ba-bca3-af89f39a0365",
+            "signature": "gcgmdhe5fBrk2_s48XuSXuMP53F0DWyaPUWoTMnSHXXgFR08Z1xMdlfWaMIUaBoYuTDPEfkxVq9iUHex6-PPAA"
           },
           "response": {
             "error": "native_binding_unqualified"
@@ -901,31 +901,31 @@
           "status": 409
         },
         {
-          "body": "{\"operation\":\"renew\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"bda123ed-7562-4343-9707-0ea662934dda\",\"connectionId\":\"a533ba87-48fc-4fa2-9b31-9846a0e28835\",\"backendPid\":34945,\"threadId\":\"01a123cf-e58b-7442-851f-8f4eb6a1d0fb\",\"generation\":5,\"serverInstanceId\":\"01a123cf-e560-7dc0-964e-e049f807e67e\",\"serverGeneration\":3}}",
+          "body": "{\"operation\":\"renew\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"2b3eb44a-b2e2-43c7-af2a-a381587f9a53\",\"connectionId\":\"371592d7-021e-40e0-a419-e9cf6798ad24\",\"backendPid\":81779,\"threadId\":\"01a1240c-1aff-7930-899b-2dde367a735f\",\"generation\":5,\"serverInstanceId\":\"01a1240c-1ad5-7271-bf50-d4cb69ee29d5\",\"serverGeneration\":3}}",
           "path": "/v1/runtimes/challenge",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:29.890Z",
+            "issuedAt": "2026-10-10T04:22:15.735Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "10b9275c-dd98-4472-8db7-62313f7232e4",
-            "signature": "i8XgVw43cDzByUGb1lGPAtlPaFf0CmQIb8qzUz3aTSsOciu9uvI88BV8hQMbagXSb7WhGObZlbr9IgRw0KlpDA"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "e240f23f-224f-46db-bd73-564ea1f10e08",
+            "signature": "RBXVai4bef8Cd9xuo6iWFr0cq-8qdj4Z-jlMQTI_LjPI_chmBlrSGsJEXsxgm-E0g1f3DqhL949fVeiRoDLzDQ"
           },
           "response": {
-            "challengeId": "da22dbbd-98a0-41b8-a2bf-90f91c9e76e1",
-            "expiresAt": "2026-10-10T03:16:59.893Z",
-            "issuedAt": "2026-10-10T03:16:29.893Z"
+            "challengeId": "028d1a0e-f2a3-4831-ad67-b033c041ef80",
+            "expiresAt": "2026-10-10T04:22:45.738Z",
+            "issuedAt": "2026-10-10T04:22:15.738Z"
           },
           "status": 200
         },
         {
-          "body": "{\"challengeId\":\"da22dbbd-98a0-41b8-a2bf-90f91c9e76e1\",\"runtimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T03:16:29.894Z\",\"witness\":{\"version\":2,\"nonce\":6,\"clientId\":\"bda123ed-7562-4343-9707-0ea662934dda\",\"backendPid\":34945,\"connectionId\":\"a533ba87-48fc-4fa2-9b31-9846a0e28835\",\"threadId\":\"01a123cf-e58b-7442-851f-8f4eb6a1d0fb\",\"generation\":5,\"eligible\":true,\"sequence\":6,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a123cf-e560-7dc0-964e-e049f807e67e\",\"serverGeneration\":3,\"leaseMs\":750}}}",
+          "body": "{\"challengeId\":\"028d1a0e-f2a3-4831-ad67-b033c041ef80\",\"runtimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedRuntimeGeneration\":1,\"expectedAttachmentGeneration\":1,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T04:22:15.739Z\",\"witness\":{\"version\":2,\"nonce\":6,\"clientId\":\"2b3eb44a-b2e2-43c7-af2a-a381587f9a53\",\"backendPid\":81779,\"connectionId\":\"371592d7-021e-40e0-a419-e9cf6798ad24\",\"threadId\":\"01a1240c-1aff-7930-899b-2dde367a735f\",\"generation\":5,\"eligible\":true,\"sequence\":6,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a1240c-1ad5-7271-bf50-d4cb69ee29d5\",\"serverGeneration\":3,\"leaseMs\":750}}}",
           "path": "/v1/runtimes/renew",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:29.915Z",
+            "issuedAt": "2026-10-10T04:22:15.759Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "60c6834d-7a1d-4313-a0aa-54944fec3b24",
-            "signature": "ORXY9kXkA0ctH8LZgaNTapNMgvMI84cKou-7P4JDu8oXedGcv8sBXl8zt37b2hAxFS-oUle68kkGYawS8a9QDA"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "cce36c54-40f5-45c3-82fc-ee665eccb050",
+            "signature": "v0XYT_vMP6AI2XOCvPWXpk14abaoEWhbEw1d1T4JjQR50-1ymCIlVayYVZLGg1KUt-Fa7RN8_r_s8-v3skSNAA"
           },
           "response": {
             "error": "native_binding_unqualified"
@@ -933,98 +933,98 @@
           "status": 409
         },
         {
-          "body": "{\"operation\":\"attach\",\"runtimeId\":\"e3667013-e923-4ce3-9307-9facbd801c14\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"expectedNativeBinding\":{\"clientId\":\"bda123ed-7562-4343-9707-0ea662934dda\",\"connectionId\":\"a533ba87-48fc-4fa2-9b31-9846a0e28835\",\"backendPid\":34945,\"threadId\":\"01a123cf-e58b-7442-851f-8f4eb6a1d0fb\",\"generation\":5,\"serverInstanceId\":\"01a123cf-e560-7dc0-964e-e049f807e67e\",\"serverGeneration\":3}}",
+          "body": "{\"operation\":\"attach\",\"runtimeId\":\"48c32b87-7412-4cb2-96ad-33d7493f229a\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"expectedNativeBinding\":{\"clientId\":\"2b3eb44a-b2e2-43c7-af2a-a381587f9a53\",\"connectionId\":\"371592d7-021e-40e0-a419-e9cf6798ad24\",\"backendPid\":81779,\"threadId\":\"01a1240c-1aff-7930-899b-2dde367a735f\",\"generation\":5,\"serverInstanceId\":\"01a1240c-1ad5-7271-bf50-d4cb69ee29d5\",\"serverGeneration\":3}}",
           "path": "/v1/runtimes/challenge",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:29.941Z",
+            "issuedAt": "2026-10-10T04:22:15.785Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "bc0065d2-aee6-4031-87ec-73f0db1a3ba1",
-            "signature": "kWYuBAzAZRfHyE4NhPC2CgG_ZhA_Y1eNy3Ny0MqwgK2q1_WXcLfc7TyWDYHZUhW2LPdfiHBokSkVm6xgOFogCg"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "0c8fd80e-5a77-4075-aef0-740f5d8b2888",
+            "signature": "ETc3t3LZ4kae25sgAV9Ofj7szHyYsh1zMdp5JXJgzWnDCzoGpb0Z5o2t5vOb_FGodUjfvhIu7nOCdnoY_OikAA"
           },
           "response": {
-            "challengeId": "7c626658-df8c-4e8b-bf90-e1096927149a",
-            "expiresAt": "2026-10-10T03:16:59.943Z",
-            "issuedAt": "2026-10-10T03:16:29.943Z"
+            "challengeId": "097e5a6d-1f04-4932-ab16-894794c5ae8c",
+            "expiresAt": "2026-10-10T04:22:45.787Z",
+            "issuedAt": "2026-10-10T04:22:15.787Z"
           },
           "status": 200
         },
         {
-          "body": "{\"challengeId\":\"7c626658-df8c-4e8b-bf90-e1096927149a\",\"runtimeId\":\"e3667013-e923-4ce3-9307-9facbd801c14\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T03:16:29.944Z\",\"witness\":{\"version\":2,\"nonce\":8,\"clientId\":\"bda123ed-7562-4343-9707-0ea662934dda\",\"backendPid\":34945,\"connectionId\":\"a533ba87-48fc-4fa2-9b31-9846a0e28835\",\"threadId\":\"01a123cf-e58b-7442-851f-8f4eb6a1d0fb\",\"generation\":5,\"eligible\":true,\"sequence\":8,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a123cf-e560-7dc0-964e-e049f807e67e\",\"serverGeneration\":3,\"leaseMs\":750}}}",
+          "body": "{\"challengeId\":\"097e5a6d-1f04-4932-ab16-894794c5ae8c\",\"runtimeId\":\"48c32b87-7412-4cb2-96ad-33d7493f229a\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T04:22:15.788Z\",\"witness\":{\"version\":2,\"nonce\":8,\"clientId\":\"2b3eb44a-b2e2-43c7-af2a-a381587f9a53\",\"backendPid\":81779,\"connectionId\":\"371592d7-021e-40e0-a419-e9cf6798ad24\",\"threadId\":\"01a1240c-1aff-7930-899b-2dde367a735f\",\"generation\":5,\"eligible\":true,\"sequence\":8,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a1240c-1ad5-7271-bf50-d4cb69ee29d5\",\"serverGeneration\":3,\"leaseMs\":750}}}",
           "path": "/v1/runtimes/attach",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:29.966Z",
+            "issuedAt": "2026-10-10T04:22:15.808Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "813758a9-1a63-4f22-b9fc-2b24e57593a8",
-            "signature": "9AAe-fgzOumlTN7KDZxsigpX9kP8jpmm_E5bAdX2Qr9padNuhlnR3neZAVIOKadvxaQjXRDqqOpK5bAoghIuDw"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "da0795b1-ac92-4477-90b5-3131c82011ca",
+            "signature": "UFEbas54E1MN4v2sNELAGcXyrmZaH_BY8cqy2EVNFMgit8pv2Dl2C3v9vj4BOrUmGqJ0nq2J6qf42qbWWAQyAw"
           },
           "response": {
             "attachmentGeneration": 1,
-            "leaseUntil": "2026-10-10T03:17:59.968Z",
+            "leaseUntil": "2026-10-10T04:23:45.811Z",
             "nativeBinding": {
-              "backendPid": 34945,
-              "clientId": "bda123ed-7562-4343-9707-0ea662934dda",
-              "connectionId": "a533ba87-48fc-4fa2-9b31-9846a0e28835",
+              "backendPid": 81779,
+              "clientId": "2b3eb44a-b2e2-43c7-af2a-a381587f9a53",
+              "connectionId": "371592d7-021e-40e0-a419-e9cf6798ad24",
               "generation": 5,
               "serverGeneration": 3,
-              "serverInstanceId": "01a123cf-e560-7dc0-964e-e049f807e67e",
-              "threadId": "01a123cf-e58b-7442-851f-8f4eb6a1d0fb"
+              "serverInstanceId": "01a1240c-1ad5-7271-bf50-d4cb69ee29d5",
+              "threadId": "01a1240c-1aff-7930-899b-2dde367a735f"
             },
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "runtimeGeneration": 1,
-            "runtimeId": "e3667013-e923-4ce3-9307-9facbd801c14",
+            "runtimeId": "48c32b87-7412-4cb2-96ad-33d7493f229a",
             "status": "attached"
           },
           "status": 200
         },
         {
-          "body": "{\"operation\":\"transfer\",\"sourceRuntimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedSourceRuntimeGeneration\":1,\"expectedSourceAttachmentGeneration\":1,\"replacementRuntimeId\":\"e3667013-e923-4ce3-9307-9facbd801c14\",\"expectedReplacementRuntimeGeneration\":1,\"expectedReplacementAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"bda123ed-7562-4343-9707-0ea662934dda\",\"connectionId\":\"a533ba87-48fc-4fa2-9b31-9846a0e28835\",\"backendPid\":34945,\"threadId\":\"01a123cf-e58b-7442-851f-8f4eb6a1d0fb\",\"generation\":5,\"serverInstanceId\":\"01a123cf-e560-7dc0-964e-e049f807e67e\",\"serverGeneration\":3}}",
+          "body": "{\"operation\":\"transfer\",\"sourceRuntimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedSourceRuntimeGeneration\":1,\"expectedSourceAttachmentGeneration\":1,\"replacementRuntimeId\":\"48c32b87-7412-4cb2-96ad-33d7493f229a\",\"expectedReplacementRuntimeGeneration\":1,\"expectedReplacementAttachmentGeneration\":1,\"expectedNativeBinding\":{\"clientId\":\"2b3eb44a-b2e2-43c7-af2a-a381587f9a53\",\"connectionId\":\"371592d7-021e-40e0-a419-e9cf6798ad24\",\"backendPid\":81779,\"threadId\":\"01a1240c-1aff-7930-899b-2dde367a735f\",\"generation\":5,\"serverInstanceId\":\"01a1240c-1ad5-7271-bf50-d4cb69ee29d5\",\"serverGeneration\":3}}",
           "path": "/v1/runtimes/challenge",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:30.015Z",
+            "issuedAt": "2026-10-10T04:22:15.859Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "94e46431-c851-4859-9804-5b6fb2366e49",
-            "signature": "oXR0enMUmJlBzt3wFdXQk1qFcxPgh5w7rNL6C2c7eQoo9Yz2JWSMdHvm3CPPGDmRnT4sM049i_UMiGv0hJbUAA"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "c58c1bf4-6611-4b87-bf15-72fb343dbaf2",
+            "signature": "_RFPugJ8Zx8m2SdB1rZzNrsiOGVBcFA7o5xA-r0CfM-ifS60Y6R8hgM9g4cG0YmnWXd15xt7YoBtjEKd9h9aCw"
           },
           "response": {
-            "challengeId": "721cc6d4-7700-48c0-8158-98b2d7f96682",
-            "expiresAt": "2026-10-10T03:17:00.018Z",
-            "issuedAt": "2026-10-10T03:16:30.018Z"
+            "challengeId": "0701e96b-9cda-4f84-80bc-83eb13f2c0e9",
+            "expiresAt": "2026-10-10T04:22:45.861Z",
+            "issuedAt": "2026-10-10T04:22:15.861Z"
           },
           "status": 200
         },
         {
-          "body": "{\"challengeId\":\"721cc6d4-7700-48c0-8158-98b2d7f96682\",\"sourceRuntimeId\":\"d9eee756-4134-4bac-8fe3-83894e05ea89\",\"expectedSourceRuntimeGeneration\":1,\"expectedSourceAttachmentGeneration\":1,\"replacementRuntimeId\":\"e3667013-e923-4ce3-9307-9facbd801c14\",\"expectedReplacementRuntimeGeneration\":1,\"expectedReplacementAttachmentGeneration\":1,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T03:16:30.019Z\",\"witness\":{\"version\":2,\"nonce\":11,\"clientId\":\"bda123ed-7562-4343-9707-0ea662934dda\",\"backendPid\":34945,\"connectionId\":\"a533ba87-48fc-4fa2-9b31-9846a0e28835\",\"threadId\":\"01a123cf-e58b-7442-851f-8f4eb6a1d0fb\",\"generation\":5,\"eligible\":true,\"sequence\":11,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a123cf-e560-7dc0-964e-e049f807e67e\",\"serverGeneration\":3,\"leaseMs\":750}}}",
+          "body": "{\"challengeId\":\"0701e96b-9cda-4f84-80bc-83eb13f2c0e9\",\"sourceRuntimeId\":\"04ee15c0-b8a8-4103-a30d-20925582a979\",\"expectedSourceRuntimeGeneration\":1,\"expectedSourceAttachmentGeneration\":1,\"replacementRuntimeId\":\"48c32b87-7412-4cb2-96ad-33d7493f229a\",\"expectedReplacementRuntimeGeneration\":1,\"expectedReplacementAttachmentGeneration\":1,\"nativeEvidence\":{\"observedAt\":\"2026-10-10T04:22:15.862Z\",\"witness\":{\"version\":2,\"nonce\":11,\"clientId\":\"2b3eb44a-b2e2-43c7-af2a-a381587f9a53\",\"backendPid\":81779,\"connectionId\":\"371592d7-021e-40e0-a419-e9cf6798ad24\",\"threadId\":\"01a1240c-1aff-7930-899b-2dde367a735f\",\"generation\":5,\"eligible\":true,\"sequence\":11,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a1240c-1ad5-7271-bf50-d4cb69ee29d5\",\"serverGeneration\":3,\"leaseMs\":750}}}",
           "path": "/v1/runtimes/transfer",
           "proof": {
-            "issuedAt": "2026-10-10T03:16:30.039Z",
+            "issuedAt": "2026-10-10T04:22:15.884Z",
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
-            "nonce": "d370b79c-f5c3-405c-9bdb-33c225151a74",
-            "signature": "8OkM3T75hOzPtJu8E5vrY1Tx6iZ-9wiGBGmIn5oInqgnnbqqD-9AgHKu8OHOYkgSmTlCuXBeYqS0I9q_i6QFDw"
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
+            "nonce": "c0e01061-61b6-4fa0-a17a-d9c19b29c53d",
+            "signature": "iyZ4OQt-hPCPzcWRDXyFNBituFj92LHng2JGojNUlTNyVLYhnIff61WTgXPeUy9ZdQjITcGqbLpkdb_o6scgBQ"
           },
           "response": {
             "attachmentGeneration": 2,
-            "leaseUntil": "2026-10-10T03:18:00.042Z",
+            "leaseUntil": "2026-10-10T04:23:45.887Z",
             "nativeBinding": {
-              "backendPid": 34945,
-              "clientId": "bda123ed-7562-4343-9707-0ea662934dda",
-              "connectionId": "a533ba87-48fc-4fa2-9b31-9846a0e28835",
+              "backendPid": 81779,
+              "clientId": "2b3eb44a-b2e2-43c7-af2a-a381587f9a53",
+              "connectionId": "371592d7-021e-40e0-a419-e9cf6798ad24",
               "generation": 5,
               "serverGeneration": 3,
-              "serverInstanceId": "01a123cf-e560-7dc0-964e-e049f807e67e",
-              "threadId": "01a123cf-e58b-7442-851f-8f4eb6a1d0fb"
+              "serverInstanceId": "01a1240c-1ad5-7271-bf50-d4cb69ee29d5",
+              "threadId": "01a1240c-1aff-7930-899b-2dde367a735f"
             },
             "nodeGeneration": 1,
-            "nodeId": "dfb07ad5-2dc1-44dd-a038-4f6c97b05e3c",
+            "nodeId": "ffa560e2-ea8d-43e6-b83b-4a1288e1986e",
             "runtimeGeneration": 1,
-            "runtimeId": "e3667013-e923-4ce3-9307-9facbd801c14",
+            "runtimeId": "48c32b87-7412-4cb2-96ad-33d7493f229a",
             "sourceAttachmentGeneration": 2,
             "sourceRuntimeGeneration": 2,
-            "sourceRuntimeId": "d9eee756-4134-4bac-8fe3-83894e05ea89",
+            "sourceRuntimeId": "04ee15c0-b8a8-4103-a30d-20925582a979",
             "status": "transferred"
           },
           "status": 200
@@ -1033,53 +1033,54 @@
     }
   },
   "foreground": {
-    "baselineAttribution": "Old selection unavailable after measured warmup; retained log flush did not prove a passive rate-limit request before failure. No exact event-causality claim.",
+    "baselineAttribution": "Retired Draw binary fails the identical frozen c796 qualifier after1.734seconds with generation/serverGeneration change; one actual rate-limit request preceded observed failure. It lacks the new diagnostic producers, so no exact event-causality claim. V2 prior binding loss remains unattributed. Current V3 bounded foreground pass does not prove all asynchronous startup or production renewal.",
     "green": {
       "backendStopped": true,
-      "binarySha256": "9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5",
+      "binarySha256": "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27",
       "controlSocketRemoved": true,
+      "copiedAuthRemoved": true,
       "frozenHelperSha256": "073ddf6a43248db44345e0a20d09f11ced91740186d741b9038b7f7bea5dd33e",
       "harnessTurnStartRequests": 0,
       "harnessUserPrompts": 0,
       "initialBinding": {
-        "backendPid": 21671,
-        "clientId": "455e1655-96a3-4c8b-8dfe-f78aaa87b3b5",
-        "connectionId": "2e1d886e-e1ab-4a4c-bf66-4865fa29abf0",
-        "generation": 27,
-        "serverGeneration": 25,
-        "serverInstanceId": "01a123e7-84f2-73d0-ac4e-fcfb987052cf",
-        "threadId": "01a123e7-894b-7ce1-a304-e22b7512325d"
+        "backendPid": 66991,
+        "clientId": "daf00e40-ea79-4858-ba3e-dd012c0d53e8",
+        "connectionId": "fc73a0fb-e298-4b46-bf8e-0a57b931291c",
+        "generation": 29,
+        "serverGeneration": 27,
+        "serverInstanceId": "01a12408-8261-7881-ae31-ed85a57eb016",
+        "threadId": "01a12408-84f2-71a2-bd5f-048a79ea68e3"
       },
       "installedPackagePreflight": {
         "directUrl": {
           "archive_info": {},
-          "url": "file:///private/tmp/event-native-metadata-proof/dist/knitli_event_gateway-0.1.0-py3-none-any.whl"
+          "url": "file:///private/tmp/event-native-metadata-v3-proof/dist/knitli_event_gateway-0.1.0-py3-none-any.whl"
         },
-        "packageRoot": "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway",
+        "packageRoot": "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway",
         "packageSource": "/opt/coder/toolshed/.worktrees/event-native-metadata/packages/event-gateway/src/event_gateway",
         "preflightSha256": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c",
-        "pycachePrefix": "/private/tmp/qualification-pycache-dpy42vkg",
+        "pycachePrefix": "/private/tmp/qualification-pycache-db8g17ln",
         "verifiedSha256": {
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/cli.py": "0322ddbcc5bf5e715a96202787f46aa4e5bf95a738e36ca183e199c146f658f7",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/client_runtime.py": "1b61209e06835260d37aedab56fb10ba577a41675480614faced90004a1b8b00",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/cloud.py": "0ccf6be599a980030dedade52918c4d0581b610b3a7216537ebaf2069f6d4df3",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/daemon.py": "44354ed079f131f2217fe012204f723c34a908b2d307f1e475860dc9c56ee9bb",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/gateway.py": "7e45b9c92c6ba96f298c6612a890f9df246b13f26682d5ce64eab546a3a27cc6",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/launcher.py": "f800b3b53836c0891d08b196c77829921946d112d089bd46d38caddf0832a663",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
-          "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/store.py": "9123146cd7b2fa32bb17b166cd5f72359159afd760bbd8828f1031989f49aea4"
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/cli.py": "0322ddbcc5bf5e715a96202787f46aa4e5bf95a738e36ca183e199c146f658f7",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/client_runtime.py": "1b61209e06835260d37aedab56fb10ba577a41675480614faced90004a1b8b00",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/cloud.py": "0ccf6be599a980030dedade52918c4d0581b610b3a7216537ebaf2069f6d4df3",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/daemon.py": "44354ed079f131f2217fe012204f723c34a908b2d307f1e475860dc9c56ee9bb",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/gateway.py": "7e45b9c92c6ba96f298c6612a890f9df246b13f26682d5ce64eab546a3a27cc6",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/launcher.py": "75dbfcc6b223f57fb498851e77e0b578139863c026b421cd5b2259c0d7000491",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
+          "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/store.py": "9123146cd7b2fa32bb17b166cd5f72359159afd760bbd8828f1031989f49aea4"
         },
         "version": "0.1.0"
       },
@@ -1091,14 +1092,14 @@
       },
       "passiveObservation": {
         "bindingUnchanged": true,
-        "elapsedSeconds": 125.09792329196353,
-        "endedUnix": 1791603922.64541,
+        "elapsedSeconds": 125.09796366700903,
+        "endedUnix": 1791606082.69405,
         "inputEvents": 0,
         "resizeEvents": 0,
         "samples": 209,
-        "startedUnix": 1791603797.493813
+        "startedUnix": 1791605957.5436642
       },
-      "privateEvidenceDirectory": "/private/tmp/nm-4qbgt2qk",
+      "privateEvidenceDirectory": "/private/tmp/nm-ujclgtz0",
       "provider": "openai",
       "realModelNetworkCalls": null,
       "realModelNetworkCallsEvidence": "Not instrumented; RPC observations are not HTTP-call counts",
@@ -1107,12 +1108,12 @@
         "account/rateLimits/read": {
           "measurement": "Distinct source-defined account-rate-limits-UUID typed-request IDs",
           "passiveIntervalsSeconds": [
-            60.41987180709839
+            60.452351808547974
           ],
           "passiveObserved": 2,
           "passiveOffsetsSeconds": [
-            1.9621660709381104,
-            62.3820378780365
+            3.332141876220703,
+            63.78449368476868
           ],
           "source": "codex-rs/tui/src/app/background_requests.rs:fetch_account_rate_limits",
           "totalObserved": 4
@@ -1128,10 +1129,10 @@
           "totalObserved": null
         }
       },
-      "runnerSha256": "68624ca3fdaa448028e9c63a20521af8c3dd74544524ebcd4259545895e6f9f1",
+      "runnerSha256": "c7964bf51da53b76fa573418571d25262e4c904ebfc67b78a7d4ab42e1dad56e",
       "startupSettling": {
-        "continuouslyStableSeconds": 28.17642999999225,
-        "elapsedSeconds": 60.01052349997917,
+        "continuouslyStableSeconds": 34.10122795798816,
+        "elapsedSeconds": 60.10745941696223,
         "minimumWarmupSeconds": 60,
         "requiredStableSeconds": 10,
         "resets": 9,
@@ -1142,43 +1143,27 @@
       "terminationExitCode": 0
     },
     "greenArtifact": {
-      "path": "/private/tmp/event-native-metadata-proof/new-private-loader.json",
-      "sha256": "1580576dc4373f637349469efe09c3390f1799b33555c0d78b24053f9a8690fb"
+      "path": "/private/tmp/event-native-metadata-v3-proof/new-final.json",
+      "sha256": "8b74b9a11a7ac1f92db42ae69384f6cde689f455da0163bd6072949e5535829d"
     },
-    "priorForegroundArtifacts": [
-      {
-        "path": "/private/tmp/event-native-metadata-proof/new-warmup.json",
-        "sha256": "8ff3d4120805648ed1e26fb1db1ffd27019102e5b2b8524c15b76bf180c9ab1b"
-      },
-      {
-        "path": "/private/tmp/event-native-metadata-proof/old-warmup.json",
-        "sha256": "f835057d3f6a7c587f1546bc58678d9b417a469da9ef4ce7c1a022fbe6c8b74a"
-      },
-      {
-        "path": "/private/tmp/event-native-metadata-proof/new-reviewed-runner.json",
-        "sha256": "99711878d56a4ddf1fa62b1ca27fa93142884caa70eb5f7e236ec2eca5bc2442"
-      },
-      {
-        "path": "/private/tmp/event-native-metadata-proof/old-reviewed-runner.json",
-        "sha256": "7da0b4f29033a76eb8252c9cdd56157905123ddf0eb0f1e9a50ad48fcaf18bb7"
-      }
-    ],
     "red": {
       "binarySha256": "d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02",
-      "failureReason": "selection unavailable during passive observation",
+      "copiedAuthRemoved": true,
+      "failureObservedUnix": 1791606269.382447,
+      "failureReason": "binding changed during passive metadata observation",
       "failureStage": "passive",
       "failureType": "AssertionError",
       "frozenHelperSha256": "073ddf6a43248db44345e0a20d09f11ced91740186d741b9038b7f7bea5dd33e",
       "harnessTurnStartRequests": 0,
       "harnessUserPrompts": 0,
       "initialBinding": {
-        "backendPid": 21636,
-        "clientId": "53d91dca-d8cf-4ca1-888f-c2fda135c51c",
-        "connectionId": "3a026532-70b7-43d8-9b53-b65070968d3e",
-        "generation": 61,
-        "serverGeneration": 59,
-        "serverInstanceId": "01a123e7-82c8-7662-a8d6-5d11b1f8e2b4",
-        "threadId": "01a123e7-8533-73f0-9c5f-60df06e94310"
+        "backendPid": 85918,
+        "clientId": "440f7e81-439b-408e-b23c-861606ee2cb6",
+        "connectionId": "1a06739b-ef96-4cf3-9502-b869408d4e5b",
+        "generation": 53,
+        "serverGeneration": 51,
+        "serverInstanceId": "01a1240d-352e-7632-bdcc-cde68ebf0080",
+        "threadId": "01a1240d-3853-7662-9a42-96bebb82d6dd"
       },
       "installedPackagePreflight": {
         "directUrl": {
@@ -1188,7 +1173,7 @@
         "packageRoot": "/private/tmp/event-native-redraw-proof/installed/lib/python3.13/site-packages/event_gateway",
         "packageSource": "/opt/coder/toolshed/.worktrees/event-native-overnight-canary/packages/event-gateway/src/event_gateway",
         "preflightSha256": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c",
-        "pycachePrefix": "/private/tmp/qualification-pycache-8o7bn7xr",
+        "pycachePrefix": "/private/tmp/qualification-pycache-k6yao7lk",
         "verifiedSha256": {
           "/private/tmp/event-native-redraw-proof/installed/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
           "/private/tmp/event-native-redraw-proof/installed/lib/python3.13/site-packages/event_gateway/cli.py": "0322ddbcc5bf5e715a96202787f46aa4e5bf95a738e36ca183e199c146f658f7",
@@ -1215,11 +1200,23 @@
       },
       "model": "gpt-6.1-sol",
       "passiveObservation": {
-        "elapsedSeconds": 1.728580333001446,
-        "samples": 2,
-        "startedUnix": 1791603796.98988
+        "changedBindingFields": [
+          "generation",
+          "serverGeneration"
+        ],
+        "elapsedSeconds": 1.733818499953486,
+        "samples": 3,
+        "startedUnix": 1791606267.582113
       },
-      "privateEvidenceDirectory": "/private/tmp/nm-il94s2me",
+      "postFailureCapture": {
+        "actualRevocationRecordsObserved": false,
+        "authorityTransitions": [],
+        "elapsedSeconds": 11.010046209034044,
+        "endedUnix": 1791606280.39261,
+        "maxWaitSeconds": 11,
+        "startedUnix": 1791606269.382538
+      },
+      "privateEvidenceDirectory": "/private/tmp/nm-x803u4tx",
       "provider": "openai",
       "realModelNetworkCalls": null,
       "realModelNetworkCallsEvidence": "Not instrumented; RPC observations are not HTTP-call counts",
@@ -1228,10 +1225,12 @@
         "account/rateLimits/read": {
           "measurement": "Distinct source-defined account-rate-limits-UUID typed-request IDs",
           "passiveIntervalsSeconds": [],
-          "passiveObserved": 0,
-          "passiveOffsetsSeconds": [],
+          "passiveObserved": 1,
+          "passiveOffsetsSeconds": [
+            1.4459590911865234
+          ],
           "source": "codex-rs/tui/src/app/background_requests.rs:fetch_account_rate_limits",
-          "totalObserved": 2
+          "totalObserved": 3
         },
         "account/read": {
           "passiveObserved": null,
@@ -1244,71 +1243,134 @@
           "totalObserved": null
         }
       },
-      "runnerSha256": "68624ca3fdaa448028e9c63a20521af8c3dd74544524ebcd4259545895e6f9f1",
+      "runnerSha256": "c7964bf51da53b76fa573418571d25262e4c904ebfc67b78a7d4ab42e1dad56e",
       "startupSettling": {
-        "continuouslyStableSeconds": 24.84882445796393,
-        "elapsedSeconds": 60.01599266700214,
+        "continuouslyStableSeconds": 35.0498491670005,
+        "elapsedSeconds": 60.13902137498371,
         "minimumWarmupSeconds": 60,
         "requiredStableSeconds": 10,
-        "resets": 21,
-        "samples": 396,
+        "resets": 19,
+        "samples": 393,
         "startupDeadlineSeconds": 120,
         "warmupEvidence": "Measured warmup only; asynchronous startup completion is not proven"
       }
     },
     "redArtifact": {
-      "path": "/private/tmp/event-native-metadata-proof/old-private-loader.json",
-      "sha256": "00da687fe9a7b1f943dfb4eb0dd8597ae0e5d97c097583ec82cc3af2accef05a"
+      "path": "/private/tmp/event-native-metadata-v3-proof/old-final.json",
+      "sha256": "afd92801fa6cd04f4f42522abaa9129fdea2364ebdb7bf556c36fad8bdfdb041"
     },
-    "runner": {
-      "path": "/opt/coder/toolshed/.worktrees/event-native-metadata/packages/event-gateway/docs/native-bridge/native-metadata-launcher-smoke.py",
-      "sha256": "68624ca3fdaa448028e9c63a20521af8c3dd74544524ebcd4259545895e6f9f1"
-    }
+    "selfCheckCount": 22
   },
   "gatewayChecks": {
-    "bunValidate": "PASS",
+    "baselineDifferential": {
+      "evidence": {
+        "path": "/opt/coder/toolshed/.local-artifacts/event-native-release-20261009/native-tui-baseline-differential.json",
+        "sha256": "6c06435a2b1e828e9761a54446f42bceed2d36cdcff02fbd181875e79dd20e8f"
+      },
+      "scope": "Same45-test subset: both1pass44fail with matching signatures. Cursor4/4pass on both with process-localNO_COLOR unset. Bounded differential, not full suite green.",
+      "summary": {
+        "path": "/opt/coder/toolshed/.local-artifacts/event-native-release-20261009/native-tui-baseline-differential.md",
+        "sha256": "b4220199004a0b344e7958378cf1bd66af075a3d1c0bdb59bdd4a0c6de35bbf7"
+      }
+    },
+    "bunValidate": "Not rerun for this revision; prior result in historical proof.",
     "fullRustSuiteRerun": false,
-    "fullTuiHistoricalFailures": "Retained separately in native-redraw-release-proof.json; not claimed green.",
+    "fullTuiAggregate": {
+      "artifact": {
+        "path": "/private/tmp/event-native-metadata-p1-nextest-integration.log",
+        "sha256": "5a061c05fd2e13572cdca0054d085141b86a3ebac391b0dc15d2a5aed866e6e1"
+      },
+      "failed": 45,
+      "passed": 5598,
+      "result": "FAIL; not claimed green",
+      "skipped": 8
+    },
+    "fullTuiHistoricalFailures": "Current aggregate and bounded baseline differential recorded separately; neither is claimed fully green.",
+    "gatewayTestArtifact": {
+      "path": "/private/tmp/event-native-metadata-v3-proof/gateway-tests.log",
+      "sha256": "054508c2ccb8b1602847df28c82246781a07b8f3036fc8ebc533b0ae3d4ca1f1"
+    },
     "nodeCoupledSourceTests": 1,
+    "providerIntegrationCalibration": {
+      "artifact": {
+        "path": "/private/tmp/event-native-metadata-p1-provider-defaults-calibrated.log",
+        "sha256": "e6ab0f2e08e381add329a681391b667b4785915c3224bd0399077f97d68dfbef"
+      },
+      "passedSelectedTests": 1,
+      "scope": "Explicit CARGO_BIN_EXE_codex points to actual V2 binary; full aggregate remains unchanged."
+    },
+    "qualifierSelfChecks": 22,
     "ruff": "PASS",
+    "syncContract": "PASS",
     "tests": 389
   },
+  "historicalAttempts": [
+    {
+      "artifact": {
+        "path": "/private/tmp/event-native-metadata-proof/release-proof-9e99.json",
+        "sha256": "55bcf7cb01d9388ed4c2a48580cae69b0c9d4015c70bacba8af7573a37370e8b"
+      },
+      "description": "Preserved earlier V1 proof; its binary and foreground measurements are not current qualification."
+    },
+    {
+      "artifact": {
+        "path": "/private/tmp/event-native-metadata-v2-proof/new-final.json",
+        "sha256": "cd54a7bfc97daa76293db5cd12f2d00ba18954ba123e201e4dee5ac8af9bc168"
+      },
+      "description": "P1-fixed V2 real-auth foreground FAIL: binding changed after24.465seconds; cause not captured. Retained without attributing diagnostics-only V3 pass to a semantic fix."
+    },
+    {
+      "artifact": {
+        "path": "/private/tmp/event-native-metadata-v2-proof/old-final.json",
+        "sha256": "dfdd81e19a1a78f313763b484f881bbb218d17bc6be28dc8e35daf5dfd1cf77e"
+      },
+      "description": "Historical Draw baseline with then-frozen qualifier failed after5.902seconds; no exact causal attribution."
+    },
+    {
+      "artifact": {
+        "path": "/private/tmp/event-native-metadata-v2-proof/two-tui.json",
+        "sha256": "34e6e9c8b39f3b4e87cd85def2eefae6b95da998f1c6ff1b8af95c9d7c3ed4f2"
+      },
+      "description": "Earlier V2 two-TUI pass, superseded by current candidate proof."
+    },
+    {
+      "artifact": {
+        "path": "/private/tmp/event-native-metadata-v2-proof/admission-workerd.json",
+        "sha256": "afdeb28b0ee95c7b2402bbbb0aa167b6a4426fa4d48728aa3c7aaf3c7d5194c1"
+      },
+      "description": "Earlier V2 controlled admission pass, superseded by current candidate proof."
+    },
+    {
+      "artifact": {
+        "path": "/private/tmp/event-native-metadata-proof/auth-copy-cleanup-result.json",
+        "sha256": "75e9bd4143761ae734e02f7d0003a7aaf217150c0b02e83d9efda518941c6967"
+      },
+      "description": "Historical copied credential cleanup; evidence directories retained."
+    }
+  ],
   "nativeScopedChecks": {
-    "earlierSandboxSocketFailure": "The regression log contains an earlier denied loopback bind; recovery-tests.log records the successful authorized rerun.",
+    "diagnosticLimit": "Closed static cause labels and numeric generations only. Post-failure records require timestamp comparison and do not alone identify the original cause.",
     "logs": [
       {
-        "passedSelectedTests": 4,
-        "path": "/private/tmp/event-native-metadata-final-tests.log",
-        "sha256": "054695c7584831276807a36c9e2651fbe4911734d529dd44db7d08cb133c5287"
-      },
-      {
-        "passedSelectedTests": 235,
-        "path": "/private/tmp/event-native-metadata-regression-tests.log",
-        "sha256": "24aeb1229e95190a9f60522f1a247be84b41181689b3e86e15aa5ddf2525299c"
-      },
-      {
-        "passedSelectedTests": 18,
-        "path": "/private/tmp/event-native-metadata-recovery-tests.log",
-        "sha256": "2369315e13c9f37e46ecec53228c118f9d190d42f4224a038e8a61c89e2c04b9"
+        "path": "/private/tmp/event-native-metadata-v3-diagnostics-tests-complete.log",
+        "sha256": "525ba16bcc229122ed7a3b6bbba40ca43c1eaf97031120bca974fd0d7cbe296c"
       }
     ],
-    "testTargetCompilerCache": {
-      "path": "/private/tmp/event-native-redraw-source/target/.rustc_info.json",
-      "sha256": "4e0978094e9e7a6da66d958c311cf5551f0d6b3d06887a3ad5768733381f01ba"
-    }
+    "p1RegressionLimit": "Predicate-level queued-event regression is red on old predicate and green on corrected post-await queue check; it is not an acknowledgment scheduler interleaving proof.",
+    "passedSelectedTests": 278
   },
   "ownerInstallationChanged": false,
   "productionAdmissionProven": false,
   "twoTui": {
     "artifact": {
-      "path": "/private/tmp/event-native-metadata-proof/two-tui.json",
-      "sha256": "9e7a70fe1776b1f5670f6f2d8dcbf58977df388778869914c8d3b6a1d79d8711"
+      "path": "/private/tmp/event-native-metadata-v3-proof/two-tui.json",
+      "sha256": "9b1d0bea95008a4efe2998ffc3d839ce4fba6f6f83b650173aea9cf7b7760b90"
     },
     "proof": {
-      "binarySha256": "9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5",
+      "binarySha256": "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27",
       "cloudSettlementProven": false,
       "exactReceiptRecoveredTwice": true,
-      "installedAdapterModule": "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/native.py",
+      "installedAdapterModule": "/private/tmp/event-native-metadata-v3-proof/installed/lib/python3.13/site-packages/event_gateway/native.py",
       "installedAdapterProven": true,
       "installedAdapterSha256": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
       "installedReaderSha256": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
@@ -1335,45 +1397,45 @@
         "event.sourceStateVersion"
       ],
       "nativeOnly": true,
-      "newSelectedThreadId": "01a123cf-2de5-70e3-8c44-4f2f614047a4",
+      "newSelectedThreadId": "01a1240c-082e-7e62-ab3b-4629a30b4f43",
       "newWitness": {
-        "backendPid": 32445,
+        "backendPid": 81397,
         "cause": "state",
-        "clientId": "e716f4d5-326c-4451-858b-ff4a867abb78",
-        "connectionId": "96e2d6c9-6ae2-4964-8dda-2f6e68ab0024",
+        "clientId": "969f05e7-bdb0-47bb-b37f-b5f0f473699b",
+        "connectionId": "c21c8264-5ae3-4659-b522-7f6a7b474394",
         "eligible": false,
         "generation": 2,
         "leaseMs": 750,
         "nonce": 2,
         "sequence": 2,
         "serverGeneration": 0,
-        "serverInstanceId": "01a123cf-2db7-7400-b5e2-bb0582a04bc2",
-        "threadId": "01a123cf-2de5-70e3-8c44-4f2f614047a4",
+        "serverInstanceId": "01a1240c-0807-7510-8cee-707426025f41",
+        "threadId": "01a1240c-082e-7e62-ab3b-4629a30b4f43",
         "version": 2
       },
       "oldProcessesStopped": true,
       "oldRequest": {
-        "attemptId": "21ab2479-da2b-40a4-ae7f-7acb97e10c82",
-        "clientId": "8a640306-5f5e-459c-99a8-df3bd0e90c26",
-        "clientUserMessageId": "62bd66de-22c5-43a4-9a5d-22accdef15c5",
-        "deliveryId": "dly_1bd7b7d6baac4893a56bd8e4c6e2dee08306579cc7e74e089937d4d027803552",
+        "attemptId": "065ca247-b3f0-4350-a288-3f21d252395e",
+        "clientId": "a6728cab-30c2-4538-844d-e05a24de2f20",
+        "clientUserMessageId": "bd2fc649-bf66-48f5-8edb-11344c5c6a70",
+        "deliveryId": "dly_a37ea05d38614321a89dbebbd858b29e8f3a9c5dc6df472b806a2a8de9034a4f",
         "event": {
           "canonicalSubject": {
             "kind": "manual",
             "subjectId": "native-qualification"
           },
-          "eventId": "7b4f4827-1d3e-4fd9-b4cb-e2b8e16d81ac",
-          "eventReference": "ref_a33d5671-7976-4474-bf98-a3be6c935c34",
+          "eventId": "513d221b-ce8d-408d-ac22-55fab816d58c",
+          "eventReference": "ref_8bec2d1e-1239-4eb2-b88b-99babfb3b76b",
           "source": "manual",
           "sourceStateVersion": "qualification-1"
         },
         "generation": 5,
-        "permitExpiresAt": 1791602142241,
-        "permitId": "91918d60-6e39-44e6-bad8-147af8c52b4a",
-        "permitIssuedAt": 1791602137241,
+        "permitExpiresAt": 1791606130247,
+        "permitId": "eefea46f-ec78-4409-8b6f-517dc123571f",
+        "permitIssuedAt": 1791606125247,
         "serverGeneration": 3,
-        "serverInstanceId": "01a123cf-17ea-7ad3-94c1-f56db226b57b",
-        "threadId": "01a123cf-1813-7442-a741-3684f8a8398c"
+        "serverInstanceId": "01a1240b-f214-7e62-be19-3f9dc7ae0fb3",
+        "threadId": "01a1240b-f23a-72f3-afa2-8486ab8f581a"
       },
       "oldStartLocallyRefused": true,
       "oldStartNoStartSettlementProven": false,
@@ -1383,10 +1445,10 @@
       "readerSha256": "e4068916c0739657186b8be34d087714ad9a544642dc8921a9c502ca1ab9ac11",
       "realModelCalls": 0,
       "recorded": {
-        "itemId": "01a123cf-18ed-73a2-a6a7-bf0aff19a010",
+        "itemId": "01a1240b-f30e-79d1-8f31-135e1ae75a71",
         "replayed": true,
         "status": "inputRecorded",
-        "turnId": "62bd66de-22c5-43a4-9a5d-22accdef15c5"
+        "turnId": "bd2fc649-bf66-48f5-8edb-11344c5c6a70"
       }
     }
   },

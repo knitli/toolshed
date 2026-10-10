@@ -1,10 +1,10 @@
 {
   "sourceCheckout": "/private/tmp/event-native-metadata-source/codex-rs",
   "baseCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
-  "scope": "Cumulative native selection binding, terminal refusal, durable StateDB receipt, and v3 bridge identity across TUI restart; includes Core/app-server/protocol/State/TUI/CLI and generated schema/SDK exports.; failed Core preparation now returns non-Started and cleans only the failed matching turn. Scheduled Draw events preserve native selection while all other TUI events retain pre-handling revocation; readiness remains checked before each bridge tick. Ordinary periodic usage metadata and title timers preserve selection; semantic rate-limit changes remain fenced and bridge ticks recheck pending events after acknowledgment waits.",
+  "scope": "Cumulative native selection binding, terminal refusal, durable StateDB receipt, and v3 bridge identity across TUI restart; includes Core/app-server/protocol/State/TUI/CLI and generated schema/SDK exports.; failed Core preparation now returns non-Started and cleans only the failed matching turn. Scheduled Draw events preserve native selection while all other TUI events retain pre-handling revocation; readiness remains checked before each bridge tick. Ordinary periodic usage metadata and title timers preserve selection; semantic rate-limit changes remain fenced and bridge ticks recheck pending events after acknowledgment waits. Periodic response handling rechecks the app-event queue after the selection acknowledgment await before preserving authority. Revocation diagnostics record only static event categories and numeric binding generations, with no authority or protocol changes.",
   "fileCount": 52,
   "binaryPatch": true,
-  "patchSha256": "5dbd9d1956b11a29deeecec46dba53c392e367d56149204b75c327d5704347cf",
+  "patchSha256": "922c3b2aa733564f67765aec27d4128b96b697441b37b42665b6656a4ad884fb",
   "cleanPinnedApply": {
     "base": "a956835d020762cb2b570053af06f643a11c0ecc",
     "cleanApply": "PASS",
@@ -27,7 +27,7 @@
     "codex-rs/app-server/src/lib.rs": "46321d34235f5feffd33231a7390624720dcbfb627ba4222585a96ada3936ed8",
     "codex-rs/app-server/src/message_processor.rs": "a47dc09bd9fccc83536dda784010dcc9f8ef16dd586071edbcc47d9f53619c8c",
     "codex-rs/app-server/src/request_processors.rs": "eb4235cd2d56d6a5ab09e99d21ced2f720c4c454ff106ca597b928c35b675df2",
-    "codex-rs/app-server/src/request_processors/native_selection_processor.rs": "4645b977c8662df5052b65ada45a85fdd6362155717ff5f0b001c85483fba14e",
+    "codex-rs/app-server/src/request_processors/native_selection_processor.rs": "c43087232b1ee34a023c73bbb928356e6bbc436819c8c829fee13782d7d0ff6b",
     "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs": "addfccc107b2ebb7d1174bd2cdb44bda0ece0b7feed0c04c3ba6c34be5229865",
     "codex-rs/app-server/src/request_processors/thread_lifecycle.rs": "286694f95faaf1419caabfe764b8392c4690ee529bc134f9b73c4091b2160ab9",
     "codex-rs/app-server/src/thread_state.rs": "9c9006531cc814599f84fd26a82eb946ae3a9c8a1b2869d40a086f689a4bcbb4",
@@ -49,14 +49,14 @@
     "codex-rs/state/src/runtime/native_receipts_tests.rs": "52ae742a86588562082a21dc18c7d3cb5a0bb9a1d9603bb1d9bd37b3cc8562e5",
     "codex-rs/tui/src/app.rs": "fc1301edc1c18d7405eec7b3ec09c0144642bbee6a7324e17e848705e7a3968e",
     "codex-rs/tui/src/app/selection_adoption_tests.rs": "5c432b4e7ac233549b0455e7e2aef3ec6f0944ff97c71850ed45ee1441ada196",
-    "codex-rs/tui/src/app/selection_binding.rs": "2eb6f70169b00e61492d0426528c3eb6962688ac8f6732de82520c2ad998cb25",
+    "codex-rs/tui/src/app/selection_binding.rs": "925aa481fee11547f1292903a8358f98e10ee6867dfcbb0fd6907b97522f626c",
     "codex-rs/tui/src/app/selection_binding_tests.rs": "2c4518f587dca8b3336023561d673015a6d8e3fb3e336f0ad1bad15527152594",
     "codex-rs/tui/src/app/selection_bridge.rs": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50",
     "codex-rs/tui/src/app/selection_bridge_tests.rs": "8c397acb623d4902567c495a4f93c63487f214c30f1bd2e39c0516ad4b3a0683",
-    "codex-rs/tui/src/app/selection_witness.rs": "841d1c80f0d0faeceb44b4bbc32cdd369c523827ac91972175defc9a143fb051",
-    "codex-rs/tui/src/app/selection_witness_tests.rs": "03ffeec3506651f61e3b4ab5d36bf9157c0eac7e3022ed7ec8509ca5f4811193",
-    "codex-rs/tui/src/app/startup.rs": "61a52243c93c3792dff38c7bfa12697e4e8d664eb6cb7d9f1dca7941b9920b4e",
-    "codex-rs/tui/src/app/tests/rate_limits.rs": "15a41684dae3d1b832af64ae78ca6279bb62f777be3c165d34f03887dcfe6eb8",
+    "codex-rs/tui/src/app/selection_witness.rs": "db9157ccc1f57a80f7f0658752e8930db9bbb2b56e5715f5f30239b54f4e13cb",
+    "codex-rs/tui/src/app/selection_witness_tests.rs": "fb361ea75b72fda061a0507f46a6d474370e8ac732ef63bc2f514169335e7242",
+    "codex-rs/tui/src/app/startup.rs": "eeee83c92181a459e416af108ce982a30da4d48d433d43fba5d8967cc5bfcd10",
+    "codex-rs/tui/src/app/tests/rate_limits.rs": "dc6f53da2c7c9703219546be034d1ba70c7c5e2ce3d353527b0d1b9d263152f7",
     "codex-rs/tui/src/chatwidget/backend_banners.rs": "472a5b62771107d0810c87b4f0a53f7455097e3a655ef8c0046e36d94c51f879",
     "codex-rs/tui/src/chatwidget/input_restore.rs": "267c942810e4229f3c4e657d2ffba89bc5b7499e0838e8d08f6b44f3b026d70b",
     "codex-rs/tui/src/chatwidget/rate_limits.rs": "824ae52a71abf579848e25fb44ed01ef60418580d4d36df8fac7886f9f880826",
@@ -131,8 +131,8 @@
     },
     {
       "path": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
-      "sha256": "4645b977c8662df5052b65ada45a85fdd6362155717ff5f0b001c85483fba14e",
-      "bytes": 42279
+      "sha256": "c43087232b1ee34a023c73bbb928356e6bbc436819c8c829fee13782d7d0ff6b",
+      "bytes": 42976
     },
     {
       "path": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
@@ -241,8 +241,8 @@
     },
     {
       "path": "codex-rs/tui/src/app/selection_binding.rs",
-      "sha256": "2eb6f70169b00e61492d0426528c3eb6962688ac8f6732de82520c2ad998cb25",
-      "bytes": 6755
+      "sha256": "925aa481fee11547f1292903a8358f98e10ee6867dfcbb0fd6907b97522f626c",
+      "bytes": 6999
     },
     {
       "path": "codex-rs/tui/src/app/selection_binding_tests.rs",
@@ -261,23 +261,23 @@
     },
     {
       "path": "codex-rs/tui/src/app/selection_witness.rs",
-      "sha256": "841d1c80f0d0faeceb44b4bbc32cdd369c523827ac91972175defc9a143fb051",
-      "bytes": 14884
+      "sha256": "db9157ccc1f57a80f7f0658752e8930db9bbb2b56e5715f5f30239b54f4e13cb",
+      "bytes": 17532
     },
     {
       "path": "codex-rs/tui/src/app/selection_witness_tests.rs",
-      "sha256": "03ffeec3506651f61e3b4ab5d36bf9157c0eac7e3022ed7ec8509ca5f4811193",
-      "bytes": 7876
+      "sha256": "fb361ea75b72fda061a0507f46a6d474370e8ac732ef63bc2f514169335e7242",
+      "bytes": 12470
     },
     {
       "path": "codex-rs/tui/src/app/startup.rs",
-      "sha256": "61a52243c93c3792dff38c7bfa12697e4e8d664eb6cb7d9f1dca7941b9920b4e",
-      "bytes": 68260
+      "sha256": "eeee83c92181a459e416af108ce982a30da4d48d433d43fba5d8967cc5bfcd10",
+      "bytes": 69563
     },
     {
       "path": "codex-rs/tui/src/app/tests/rate_limits.rs",
-      "sha256": "15a41684dae3d1b832af64ae78ca6279bb62f777be3c165d34f03887dcfe6eb8",
-      "bytes": 22594
+      "sha256": "dc6f53da2c7c9703219546be034d1ba70c7c5e2ce3d353527b0d1b9d263152f7",
+      "bytes": 23098
     },
     {
       "path": "codex-rs/tui/src/chatwidget/backend_banners.rs",

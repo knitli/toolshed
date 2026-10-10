@@ -1,78 +1,79 @@
 # Native background metadata qualification
 
-The proposed release pins binary SHA-256
-`9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5`.
-The earlier Draw fix preserved idle animation, but background metadata still
-revoked selection and prevented a later live canary renewal. This release
-preserves a selection only across an eligible periodic metadata update.
+The proposed macOS ARM64 release pins binary SHA-256
+`362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27`.
+It preserves eligible selection across display-only periodic rate-limit updates.
+Recovery, stale hard-stop generations, Reserve/model transitions, blocked usage,
+banners, prompts, input, resize and semantic server events remain fenced. The
+periodic-response branch rechecks the app-event queue after the acknowledgment
+await, preserving FIFO order and revoking authority when another event is queued.
 
-The TUI classifies the actual snapshots before handling a successful periodic
-rate-limit result. Recovery, stale hard-stop generations, Reserve transitions,
-model/settings changes, blocked usage, new or removed banners, and high-usage
-prompts remain fenced. Benign meter changes may preserve selection. The FIFO
-prefetch slot preserves event ordering and select fairness; heartbeat readiness
-checks refresh pending-event state after the synchronization await. Input,
-resize, focus, other UI events, and semantic server events still revoke selection.
-Title and rate-limit timers no longer revoke merely for requesting metadata.
+The [cumulative patch](native-metadata-v1-implementation.patch) and
+[source manifest](native-metadata-v1-source-manifest.json) cover 52 source files
+against pinned upstream `a956835d020762cb2b570053af06f643a11c0ecc`.
+V3 adds diagnostics containing static cause categories and numeric generations;
+these diagnostics do not change selection authority or establish the cause of an
+earlier failure. Historical patches, manifests and proofs are preserved.
 
-The separate [cumulative patch](native-metadata-v1-implementation.patch) and
-[source manifest](native-metadata-v1-source-manifest.json) apply to pinned upstream
-`a956835d020762cb2b570053af06f643a11c0ecc`. All 52 source hashes are checked;
-six source files changed from the Draw candidate. Historical Draw and v3
-patches, manifests and proofs are preserved.
+The [release proof](native-metadata-release-proof.json) records the clean full-tree
+Rust 1.95.0 build. Original V3 builder JSON remains unchanged (SHA prefix `c05d`):
+it recorded `launcherQualified: false` against the then-current `9888…ae78` pin.
+Subsequent launcher qualification is separate evidence, not a rewritten build result.
 
-The [release proof](native-metadata-release-proof.json) records a clean full-tree
-macOS ARM64 build with Rust 1.95.0, installed-wheel inventories and runtime checks.
-Original builder evidence remains unchanged: it recorded `launcherQualified: false`
-against the prior `d820…c02` pin. The launcher and builder now propose the same
-new digest; a different rebuild needs separate qualification and review.
+## Foreground proof
 
-## Foreground stability
+The frozen [qualifier](native-metadata-launcher-smoke.py), SHA prefix `c7964bf5`,
+uses a fresh private home and a copied ChatGPT auth file. Its `finally` cleanup
+removes that copy after foreground teardown, on success or failure; the original
+source remains untouched. On macOS use `TMPDIR=/private/tmp` for short socket paths.
 
-The frozen [qualifier](native-metadata-launcher-smoke.py) copies only the existing
-canary's private ChatGPT authentication into a new private home, using a minimal
-configuration. It submits no prompts. It answers terminal queries and requires
-at least 60 seconds of measured warmup plus ten continuously stable seconds,
-within a 120-second startup deadline. On macOS, run with `TMPDIR=/private/tmp`
-to keep native Unix socket paths within the platform limit. Plugin/MCP initialization can intentionally
-revoke selection; this warmup does not prove all asynchronous startup is complete.
+The startup gate requires 60 seconds elapsed and ten continuously stable seconds
+within 120 seconds. This is measured warmup, not proof that all asynchronous
+plugin/MCP startup has finished. V3 then passed **125.09796 seconds and 209 fresh
+binding samples**, without input or resize. Two measured rate-limit requests were
+**60.45235 seconds apart**. Resize and composer refusal/restoration checks passed;
+graceful exit returned zero, removed the control socket and stopped the backend.
+The copied auth file was removed.
 
-After warmup, the same full binding remained current across 209 fresh samples
-for 125.098 seconds without input or resize. Two distinct source-defined
-`account-rate-limits-UUID` requests occurred during that interval, 60.420 seconds
-apart. These are measured requests, not inferred timer ticks. Real model-network
-calls and account-read/turn-start counts are uninstrumented and reported unknown;
-the harness itself submits zero prompts or turn-start requests.
+The harness submits no prompts or turn-start requests. Actual model-network calls
+and account-read/turn-start RPC counts remain unknown. The 22 self-checks cover
+strict observation, terminal replies, private pinned helpers, auth cleanup,
+failure phases and sanitized diagnostics. On failure, an additional bounded
+11-second capture preserves the original failure time/result and excludes capture
+time from passive RPC counts. Positive authority transitions are not labeled
+revocations.
 
-The previous `d820…c02` binary fails the identical frozen qualifier, losing
-selection availability 1.729 seconds after warmup. Its retained log flush did not
-prove a passive metadata request before failure; this is a regression baseline,
-not an exact attribution of that event. Earlier short-warmup runs and an incorrect
-RPC-log extractor are retained privately and are not counted as passing proofs.
+The older `d820…c02` binary failed the same frozen `c7964bf5` qualifier after
+60.139 seconds of warmup: both generations changed at passive +1.733818 seconds
+(three samples). One measured rate-limit request preceded the failure at
++1.445959 seconds; this timing does not establish causation. The old binary lacks
+the new cause producer, so its empty 11-second capture does not prove no events
+occurred. Its copied auth was removed. V2 passed synthetic recovery/admission
+but failed real-auth stability after 24.465 seconds;
+the exact cause was not retained. V3's successful run and new diagnostics do not
+retroactively explain or prove a fix for that failure.
 
-A resize revokes the previous binding, composer input refuses readiness, and
-clearing it restores selection. Graceful exit returns zero, removes the control
-socket and stops the backend. The eleven qualifier self-checks cover bounded
-warmup/observation, unavailable or changed bindings, exact request-ID parsing,
-deduplication, terminal replies, exact private helper loading and cleanup.
+## Other validation and limits
 
-## Recovery and admission
+All **278 focused native tests** passed. The full TUI aggregate had **5,598 passed,
+45 failed and 8 skipped**: a paired baseline reproduced 44 failure signatures;
+the remaining isolated binary fixture passed, as did all four isolated NO_COLOR
+cases on both candidates. The aggregate is not green.
 
-Fresh two-TUI recovery restores the exact expired receipt twice, rejects all
-15 identity mutations, and refuses stale Start. Controlled workerd admission
-uses two actual native sessions, 16 requests and nine outcomes, including lost
-attach replies, renewal, denial and transfer. The daemon remains the local writer;
-no native-runtime rows are inserted directly. These synthetic-provider runs make
-zero real model calls and use fixture authority, not production admission.
+Fresh V3 two-TUI recovery passed: two exact expired-receipt recoveries, all 15
+identity mutations rejected, and stale Start refused. Controlled workerd admission
+passed with two actual native sessions, 16 requests and nine outcomes. The daemon
+was the local writer; no native-runtime rows were inserted directly. These runs
+used a synthetic provider with zero real model calls and fixture authority;
+production admission was not proven.
 
-All 389 gateway tests, Ruff, the Node source-boundary test and repository validation
-pass. Scoped native tests cover periodic metadata, selection, banners and recovery.
-The full Rust workspace/TUI aggregate was not rerun; historical aggregate fixture
-failures remain separately recorded, without accepting snapshots.
+All 389 gateway tests passed in 17.843 seconds, along with Ruff, the Node
+source-boundary test and contract synchronization. The post-await queue regression
+tests exercise the production predicate, not actual scheduler interleaving across
+the acknowledgment await.
 
-The seven cross-repository contract blobs are unchanged. This artifact update
-activates neither cloud admission nor automatic, manual or GitHub delivery.
-Production attachment and renewal must be retried after review and merge. Mesh
-transport, live wake, observed ACK and cloud settlement remain separate gates.
-The earlier unknown production pending attempt remains untouched. No owner
-Codex installation, configuration, history or authentication was changed.
+The seven contract blobs remain unchanged. No owner installation, configuration,
+history or original authentication was changed. This artifact update activates
+no automatic, manual or GitHub delivery. Production attachment/renewal, Mesh
+transport, live wake, observed ACK and settlement remain separate gates; the
+existing unknown production pending attempt remains untouched.

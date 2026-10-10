@@ -12713,10 +12713,10 @@ index 2f4731a..727d654 100644
  pub(crate) use projects::ProjectRequestProcessor;
 diff --git a/codex-rs/app-server/src/request_processors/native_selection_processor.rs b/codex-rs/app-server/src/request_processors/native_selection_processor.rs
 new file mode 100644
-index 0000000..8fad71c
+index 0000000..27faecc
 --- /dev/null
 +++ b/codex-rs/app-server/src/request_processors/native_selection_processor.rs
-@@ -0,0 +1,1120 @@
+@@ -0,0 +1,1128 @@
 +use super::thread_input::ensure_direct_input_allowed;
 +use codex_app_server_protocol::ClientSelectionUpdateParams;
 +use codex_app_server_protocol::ClientSelectionUpdateResponse;
@@ -12792,6 +12792,7 @@ index 0000000..8fad71c
 +        selection.expires_at = None;
 +        selection.closed = true;
 +        selection.generation = selection.generation.saturating_add(1);
++        tracing::info!(target: "codex_native_selection", category = "connection-closed", generation = selection.generation, "native selection authority changed");
 +    }
 +
 +    fn drained(&mut self, connection_id: crate::outgoing_message::ConnectionId) {
@@ -13389,6 +13390,7 @@ index 0000000..8fad71c
 +        selection.ready = false;
 +        selection.expires_at = None;
 +        selection.generation = selection.generation.saturating_add(1);
++        tracing::info!(target: "codex_native_selection", category = "lease-expired", generation = selection.generation, expected_generation = params.expected_generation, "native selection authority changed");
 +    }
 +
 +    let requested_is_valid = match (params.thread_id.as_deref(), params.ready) {
@@ -13409,6 +13411,12 @@ index 0000000..8fad71c
 +        selection.generation = selection.generation.saturating_add(1);
 +        selection.thread_id = params.thread_id;
 +        selection.ready = params.ready;
++        let category = if params.ready {
++            "client-selection-ready"
++        } else {
++            "client-revoke"
++        };
++        tracing::info!(target: "codex_native_selection", category, generation = selection.generation, expected_generation = params.expected_generation, "native selection authority changed");
 +    }
 +    selection.expires_at = selection.ready.then(|| Instant::now() + SELECTION_LEASE);
 +    ClientSelectionUpdateStatus::Updated
@@ -17592,10 +17600,10 @@ index 0000000..254c51f
 +}
 diff --git a/codex-rs/tui/src/app/selection_binding.rs b/codex-rs/tui/src/app/selection_binding.rs
 new file mode 100644
-index 0000000..fe235fd
+index 0000000..703ad41
 --- /dev/null
 +++ b/codex-rs/tui/src/app/selection_binding.rs
-@@ -0,0 +1,186 @@
+@@ -0,0 +1,193 @@
 +//! Native selection RPCs are sent only through this TUI's existing app-server handle.
 +use super::*;
 +use codex_app_server_protocol::ClientSelectionUpdateParams;
@@ -17745,6 +17753,13 @@ index 0000000..fe235fd
 +            .is_some_and(|response| response.ready)
 +            && !self.binding.matches(thread);
 +        if !ready || gap || wrong_or_expired {
++            self.trace_revocation(if !ready {
++                "selection-not-ready"
++            } else if gap {
++                "selection-loop-gap"
++            } else {
++                "selection-binding-expired-or-mismatched"
++            });
 +            self.revoke_ack(server, "native-revoke").await?;
 +        }
 +        if ready {
@@ -18901,10 +18916,10 @@ index 0000000..dea010a
 +}
 diff --git a/codex-rs/tui/src/app/selection_witness.rs b/codex-rs/tui/src/app/selection_witness.rs
 new file mode 100644
-index 0000000..2bff308
+index 0000000..7ae452a
 --- /dev/null
 +++ b/codex-rs/tui/src/app/selection_witness.rs
-@@ -0,0 +1,467 @@
+@@ -0,0 +1,532 @@
 +//! Unix-only private launcher/TUI observation capability, not daemon or execution authority.
 +//! Only the UI loop answers challenges; hostile same-user processes are out of scope.
 +
@@ -19275,14 +19290,71 @@ index 0000000..2bff308
 +        }
 +    }
 +
++    pub(super) fn trace_revocation(&self, category: &'static str) {
++        if self.state.eligible
++            || self
++                .binding
++                .response
++                .as_ref()
++                .is_some_and(|response| response.ready)
++        {
++            tracing::info!(target: "codex_selection_witness", category,
++                generation = self.state.generation,
++                server_generation = self.binding.response.as_ref().map(|response| response.generation),
++                "native selection revocation trigger");
++        }
++    }
++
++    pub(super) fn app_event_category(event: &AppEvent, queue_is_empty: bool) -> &'static str {
++        match event {
++            AppEvent::RateLimitsLoaded {
++                origin: RateLimitRefreshOrigin::Periodic,
++                ..
++            } if !queue_is_empty => "periodic-response-queued-event",
++            AppEvent::RateLimitsLoaded {
++                origin: RateLimitRefreshOrigin::Periodic,
++                ..
++            } => "periodic-response-semantic",
++            AppEvent::RateLimitsLoaded {
++                origin: RateLimitRefreshOrigin::Recovery,
++                ..
++            } => "rate-limits-recovery",
++            AppEvent::RateLimitsLoaded { .. } => "rate-limits-other-origin",
++            _ => "app-event-other",
++        }
++    }
++
++    pub(super) fn server_event_category(
++        event: Option<&codex_app_server_client::AppServerEvent>,
++    ) -> &'static str {
++        use codex_app_server_client::AppServerEvent;
++        match event {
++            Some(AppServerEvent::ServerNotification(notification)) => match notification.as_ref() {
++                ServerNotification::McpServerStatusUpdated(_) => "server-mcp-status",
++                ServerNotification::AccountRateLimitsUpdated(_) => "server-account-rate-limits",
++                ServerNotification::AccountUpdated(_) => "server-account-updated",
++                _ => "server-notification-other",
++            },
++            Some(AppServerEvent::ServerRequest(_)) => "server-request",
++            Some(AppServerEvent::Lagged { .. }) => "server-lagged",
++            Some(AppServerEvent::Disconnected { .. }) => "server-disconnected",
++            None => "server-stream-closed",
++        }
++    }
++
 +    pub(super) fn revoke(&mut self, cause: &'static str) {
++        self.trace_revocation(cause);
 +        if self.state.select(self.state.thread_id, false) {
 +            self.emit(cause);
 +        }
 +    }
 +
 +    pub(super) fn emit(&mut self, cause: &'static str) {
-+        let cause = if self.state.expire_after_loop_gap(self.last_poll.elapsed()) {
++        let elapsed = self.last_poll.elapsed();
++        if self.state.eligible && elapsed >= Duration::from_millis(/*millis*/ 750) {
++            self.trace_revocation("loop-gap");
++        }
++        let cause = if self.state.expire_after_loop_gap(elapsed) {
 +            "loop-gap"
 +        } else {
 +            cause
@@ -19293,6 +19365,7 @@ index 0000000..2bff308
 +            return;
 +        };
 +        if let Err(failure) = transport.poll(&mut self.state, self.binding.view()) {
++            self.trace_revocation("native-transport-unavailable");
 +            tracing::warn!(target: "codex_selection_witness", stage = failure.stage, error_kind = ?failure.error.kind(), raw_errno = failure.error.raw_os_error(), sequence = self.state.sequence, generation = self.state.generation, "native witness unavailable");
 +            self.state.select(self.state.thread_id, false);
 +            self.transport = None;
@@ -19314,10 +19387,16 @@ index 0000000..2bff308
 +    ) -> bool {
 +        self.selection_witness_ready()
 +            && queue_is_empty
-+            && pending.is_none_or(|event| self.periodic_rate_limits_preserve_selection(event))
++            && pending.is_none_or(|event| {
++                self.periodic_rate_limits_preserve_selection(event, queue_is_empty)
++            })
 +    }
 +
-+    pub(super) fn periodic_rate_limits_preserve_selection(&self, event: &AppEvent) -> bool {
++    pub(super) fn periodic_rate_limits_preserve_selection(
++        &self,
++        event: &AppEvent,
++        queue_is_empty: bool,
++    ) -> bool {
 +        let AppEvent::RateLimitsLoaded {
 +            origin: RateLimitRefreshOrigin::Periodic,
 +            hard_stop_generation,
@@ -19328,7 +19407,8 @@ index 0000000..2bff308
 +            return false;
 +        };
 +        // Recovery can release queued input; only ordinary display reads retain the binding.
-+        *hard_stop_generation == self.rate_limit_hard_stop_generation
++        queue_is_empty
++            && *hard_stop_generation == self.rate_limit_hard_stop_generation
 +            && !self.rate_limit_refresh_state.has_pending_recovery()
 +            && self.selection_witness_ready()
 +            && self.chat_widget.rate_limits_display_only(response)
@@ -19374,10 +19454,10 @@ index 0000000..2bff308
 +mod adoption_tests;
 diff --git a/codex-rs/tui/src/app/selection_witness_tests.rs b/codex-rs/tui/src/app/selection_witness_tests.rs
 new file mode 100644
-index 0000000..50c3ac1
+index 0000000..9b28404
 --- /dev/null
 +++ b/codex-rs/tui/src/app/selection_witness_tests.rs
-@@ -0,0 +1,233 @@
+@@ -0,0 +1,345 @@
 +use super::*;
 +
 +#[test]
@@ -19611,11 +19691,131 @@ index 0000000..50c3ac1
 +    );
 +    assert!(!witness.state.eligible);
 +}
++
++#[test]
++fn revocation_diagnostics_use_static_categories_without_event_payloads() {
++    use codex_app_server_client::AppServerEvent;
++    use codex_app_server_protocol::McpServerStartupState;
++    use codex_app_server_protocol::McpServerStatusUpdatedNotification;
++
++    let private_payload = "private-event-content-must-not-be-logged";
++    let periodic = AppEvent::RateLimitsLoaded {
++        request_id: 987,
++        origin: RateLimitRefreshOrigin::Periodic,
++        hard_stop_generation: 654,
++        result: Err(private_payload.to_string()),
++    };
++    assert_eq!(
++        SelectionWitness::app_event_category(&periodic, /*queue_is_empty*/ false),
++        "periodic-response-queued-event"
++    );
++    assert_eq!(
++        SelectionWitness::app_event_category(&periodic, /*queue_is_empty*/ true),
++        "periodic-response-semantic"
++    );
++    assert_eq!(
++        SelectionWitness::app_event_category(
++            &AppEvent::FatalExitRequest(private_payload.to_string()),
++            /*queue_is_empty*/ true
++        ),
++        "app-event-other"
++    );
++    let disconnected = AppServerEvent::Disconnected {
++        message: private_payload.to_string(),
++    };
++    assert_eq!(
++        SelectionWitness::server_event_category(Some(&disconnected)),
++        "server-disconnected"
++    );
++    let mcp = AppServerEvent::ServerNotification(Box::new(
++        ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
++            thread_id: Some(private_payload.to_string()),
++            name: private_payload.to_string(),
++            status: McpServerStartupState::Failed,
++            error: Some(private_payload.to_string()),
++            failure_reason: None,
++        }),
++    ));
++    assert_eq!(
++        SelectionWitness::server_event_category(Some(&mcp)),
++        "server-mcp-status"
++    );
++
++    let output = tempfile::NamedTempFile::new().expect("private trace capture");
++    let writer = output.reopen().expect("trace writer");
++    let subscriber = tracing_subscriber::fmt()
++        .with_writer(move || writer.try_clone().expect("trace writer clone"))
++        .with_ansi(false)
++        .without_time()
++        .finish();
++    let mut witness = SelectionWitness {
++        transport: None,
++        receipt_version: Some(ReceiptVersion::V2),
++        state: SelectionState::new(),
++        last_poll: Instant::now(),
++        binding: NativeBinding::default(),
++        attempts: AttemptLedger::default(),
++    };
++    witness.state.connected(Some(123));
++    witness.state.select(Some(ThreadId::new()), true);
++    witness.binding.response = Some(codex_app_server_protocol::ClientSelectionUpdateResponse {
++        status: codex_app_server_protocol::ClientSelectionUpdateStatus::Updated,
++        server_instance_id: private_payload.to_string(),
++        generation: 17,
++        thread_id: Some(private_payload.to_string()),
++        ready: true,
++        lease_ms: 750,
++    });
++    tracing::subscriber::with_default(subscriber, || {
++        witness.trace_revocation(SelectionWitness::server_event_category(Some(&mcp)));
++        witness.state.eligible = false;
++        witness.binding.response.as_mut().unwrap().ready = false;
++        witness.trace_revocation("selection-state-not-ready");
++        witness.state.select(Some(ThreadId::new()), true);
++        witness.last_poll = Instant::now() - Duration::from_millis(/*millis*/ 750);
++        witness.emit("poll");
++        assert!(!witness.state.eligible);
++        let (parent, child) = UnixStream::pair().expect("private transport");
++        drop(parent);
++        witness.transport = Some(Transport::from_stream(child));
++        witness.state.select(Some(ThreadId::new()), true);
++        witness.last_poll = Instant::now();
++        witness.emit("poll");
++        assert!(!witness.state.eligible);
++        assert!(witness.transport.is_none());
++    });
++    let trace = std::fs::read_to_string(output.path()).expect("captured trace");
++    assert!(trace.contains("native selection revocation trigger"));
++    assert!(trace.contains("category=\"server-mcp-status\""));
++    assert!(trace.contains("generation="));
++    assert!(trace.contains("server_generation=17"));
++    assert_eq!(
++        trace
++            .lines()
++            .filter(|line| line.contains("native selection revocation trigger"))
++            .count(),
++        3,
++        "already-unready state must not flood logs"
++    );
++    assert!(trace.contains("category=\"loop-gap\""));
++    assert!(trace.contains("category=\"native-transport-unavailable\""));
++    assert!(!trace.contains(private_payload));
++    assert!(!trace.contains("thread_id"));
++    assert!(!trace.contains("request_id"));
++}
 diff --git a/codex-rs/tui/src/app/startup.rs b/codex-rs/tui/src/app/startup.rs
-index 37add4b..222c175 100644
+index 37add4b..28af22c 100644
 --- a/codex-rs/tui/src/app/startup.rs
 +++ b/codex-rs/tui/src/app/startup.rs
-@@ -1065,10 +1065,22 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -5,6 +5,7 @@
+ //! Queued resume history replaces the provisional loading frame only when it is ready to render.
+ 
+ use super::reconnect::ReconnectState;
++use super::selection_witness::SelectionWitness;
+ use super::*;
+ use crate::session_start::SessionStartAction;
+ use crate::session_start::SessionStartConfig;
+@@ -1065,10 +1066,22 @@ See the Codex keymap documentation for supported actions and examples."
          #[cfg(debug_assertions)]
          let pre_loop_exit_reason: Option<ExitReason> = None;
  
@@ -19638,7 +19838,7 @@ index 37add4b..222c175 100644
                  // Reconnect can dismiss an overlay from the server-event path.
                  if app.overlay.is_none() {
                      if !tui.is_owned_screen() && tui.is_alt_screen_active() {
-@@ -1129,7 +1141,11 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1129,7 +1142,11 @@ See the Codex keymap documentation for supported actions and examples."
                  }
                  // Replay queues history and operations. A buffered closure must not switch
                  // widgets before those app events have been applied.
@@ -19651,10 +19851,30 @@ index 37add4b..222c175 100644
                  let initial_session_header_pending = waiting_for_initial_session_header
                      && app.primary_session_configured.is_some()
                      && has_pending_app_events;
-@@ -1146,8 +1162,47 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1146,8 +1163,69 @@ See the Codex keymap documentation for supported actions and examples."
                      .chat_widget
                      .rate_limit_refresh_interval()
                      .and_then(|interval| app.rate_limit_refresh_state.poll_deadline(interval));
++                if !app.selection_ready_with_app_events(
++                    pending_app_event.as_ref(),
++                    app_event_rx.is_empty(),
++                ) {
++                    selection_witness.trace_revocation(
++                        if let Some(event) = pending_app_event.as_ref() {
++                            SelectionWitness::app_event_category(event, app_event_rx.is_empty())
++                        } else if !app_event_rx.is_empty() {
++                            "pending-app-event"
++                        } else if app
++                            .active_thread_rx
++                            .as_ref()
++                            .is_some_and(|rx| !rx.is_empty())
++                        {
++                            "pending-active-thread-event"
++                        } else {
++                            "selection-state-not-ready"
++                        },
++                    );
++                }
 +                if let Err(error) = selection_witness
 +                    .sync_selection(
 +                        &app_server,
@@ -19693,14 +19913,16 @@ index 37add4b..222c175 100644
 +                            None => app_event_rx.recv().await,
 +                        }
 +                    } => {
-+                        if !app.periodic_rate_limits_preserve_selection(&event)
-+                            && let Err(error) = selection_witness.revoke_ack(&app_server, "app-event").await {
-+                            break Err(error);
++                        if !app.periodic_rate_limits_preserve_selection(&event, app_event_rx.is_empty()) {
++                            selection_witness.trace_revocation(SelectionWitness::app_event_category(&event, app_event_rx.is_empty()));
++                            if let Err(error) = selection_witness.revoke_ack(&app_server, "app-event").await {
++                                break Err(error);
++                            }
 +                        }
                          let is_initial_session_header = matches!(
                              &event,
                              AppEvent::InsertHistoryCell(cell)
-@@ -1182,6 +1237,9 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1182,6 +1260,9 @@ See the Codex keymap documentation for supported actions and examples."
                          waiting_for_initial_session_configured,
                          app.active_thread_rx.is_some()
                      ) && !has_pending_app_events && !app.reconnect.offline => {
@@ -19710,7 +19932,7 @@ index 37add4b..222c175 100644
                          if let Some(event) = active {
                              if let Err(err) = app.handle_active_thread_event(tui, &mut app_server, event).await {
                                  break Err(err);
-@@ -1193,6 +1251,12 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1193,6 +1274,12 @@ See the Codex keymap documentation for supported actions and examples."
                      }
                      event = tui_events.next(), if app.pending_thread_switch_resets == 0
                          && (app.reconnect.offline || !block_terminal_input_for_pending_startup_events) => {
@@ -19723,7 +19945,7 @@ index 37add4b..222c175 100644
                          if let Some(event) = event {
                              if (matches!(
                                  &event,
-@@ -1202,7 +1266,7 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1202,7 +1289,7 @@ See the Codex keymap documentation for supported actions and examples."
                                  && !app.reconnect.offline
                                  && pending_startup_draft.is_none()
                                  && !waiting_for_initial_session_configured
@@ -19732,17 +19954,18 @@ index 37add4b..222c175 100644
                                  && !app.startup_pending_protected_request
                                  && app
                                      .active_thread_rx
-@@ -1226,6 +1290,9 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1226,6 +1313,10 @@ See the Codex keymap documentation for supported actions and examples."
                      }
                      app_server_event = app_server.next_event(), if listen_for_app_server_events && !app.reconnect.offline
                          && (matches!(app.app_server_target, AppServerTarget::Embedded) || !has_pending_app_events) => {
++                        selection_witness.trace_revocation(SelectionWitness::server_event_category(app_server_event.as_ref()));
 +                        if let Err(error) = selection_witness.revoke_ack(&app_server, "server-event").await {
 +                            break Err(error);
 +                        }
                          match app_server_event {
                              Some(event) => app.handle_app_server_event(&app_server, event).await,
                              None => {
-@@ -1237,10 +1304,14 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1237,10 +1328,14 @@ See the Codex keymap documentation for supported actions and examples."
                          AppRunControl::Continue
                      }
                      result = async { match reconnect.as_mut() { Some(future) => future.await, None => std::future::pending().await } }, if reconnect.is_some() && !has_pending_app_events => {
@@ -19757,7 +19980,7 @@ index 37add4b..222c175 100644
                                  listen_for_app_server_events = true;
                                  waiting_for_initial_session_configured = false;
                              }
-@@ -1263,6 +1334,7 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1263,6 +1358,7 @@ See the Codex keymap documentation for supported actions and examples."
                              None => std::future::pending().await,
                          }
                      }, if listen_for_app_server_events => {
@@ -19765,7 +19988,7 @@ index 37add4b..222c175 100644
                          app.refresh_rate_limits(&app_server, RateLimitRefreshOrigin::Periodic);
                          AppRunControl::Continue
                      }
-@@ -1274,6 +1346,7 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1274,6 +1370,7 @@ See the Codex keymap documentation for supported actions and examples."
                              None => std::future::pending().await,
                          }
                      } => {
@@ -19773,7 +19996,7 @@ index 37add4b..222c175 100644
                          app.chat_widget.refresh_goal_status_indicator_for_time_tick();
                          app.chat_widget.refresh_thread_title_progress_for_time_tick();
                          app.chat_widget.refresh_terminal_title();
-@@ -1287,10 +1360,14 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1287,10 +1384,14 @@ See the Codex keymap documentation for supported actions and examples."
                              None => std::future::pending().await,
                          }
                      }, if !has_pending_app_events => {
@@ -19788,7 +20011,7 @@ index 37add4b..222c175 100644
                  };
                  if App::should_stop_waiting_for_initial_session(
                      waiting_for_initial_session_configured,
-@@ -1298,6 +1375,12 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1298,6 +1399,12 @@ See the Codex keymap documentation for supported actions and examples."
                  ) {
                      waiting_for_initial_session_configured = false;
                      let had_active_modal = app.chat_widget.has_active_modal();
@@ -19801,7 +20024,7 @@ index 37add4b..222c175 100644
                      if let Err(err) = app.drain_active_thread_events(tui).await {
                          break Err(err);
                      }
-@@ -1314,7 +1397,10 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1314,7 +1421,10 @@ See the Codex keymap documentation for supported actions and examples."
                              pending_startup_submission = false;
                              app.chat_widget.cancel_startup_submission();
                          }
@@ -19813,7 +20036,7 @@ index 37add4b..222c175 100644
                              app.chat_widget.restore_startup_input_when_ready(
                                  &mut pending_startup_draft,
                                  &mut pending_startup_submission,
-@@ -1322,7 +1408,9 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1322,7 +1432,9 @@ See the Codex keymap documentation for supported actions and examples."
                          }
                          #[cfg(windows)]
                          if terminal_color_probe_pending
@@ -19824,7 +20047,7 @@ index 37add4b..222c175 100644
                          {
                              tui.probe_default_colors_after_protected_startup();
                              terminal_color_probe_pending = false;
-@@ -1332,6 +1420,13 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1332,6 +1444,13 @@ See the Codex keymap documentation for supported actions and examples."
                  }
              }
          };
@@ -19839,10 +20062,10 @@ index 37add4b..222c175 100644
              tracing::warn!(error = %err, "failed to shut down embedded app server");
          }
 diff --git a/codex-rs/tui/src/app/tests/rate_limits.rs b/codex-rs/tui/src/app/tests/rate_limits.rs
-index 460b977..c283dff 100644
+index 460b977..bc9a72e 100644
 --- a/codex-rs/tui/src/app/tests/rate_limits.rs
 +++ b/codex-rs/tui/src/app/tests/rate_limits.rs
-@@ -556,3 +556,58 @@ async fn backend_banner_reads_ignore_older_completions() -> Result<()> {
+@@ -556,3 +556,72 @@ async fn backend_banner_reads_ignore_older_completions() -> Result<()> {
      session.shutdown().await?;
      Ok(())
  }
@@ -19867,9 +20090,10 @@ index 460b977..c283dff 100644
 +        hard_stop_generation: generation,
 +        result: Ok(response.clone()),
 +    };
-+    assert!(
-+        app.periodic_rate_limits_preserve_selection(&event(RateLimitRefreshOrigin::Periodic, 0))
-+    );
++    assert!(app.periodic_rate_limits_preserve_selection(
++        &event(RateLimitRefreshOrigin::Periodic, 0),
++        events.is_empty()
++    ));
 +    let metadata = event(RateLimitRefreshOrigin::Periodic, 0);
 +    assert!(app.selection_ready_with_app_events(Some(&metadata), events.is_empty()));
 +    assert!(!app.selection_ready_with_app_events(Some(&AppEvent::FollowTranscript), true));
@@ -19878,28 +20102,41 @@ index 460b977..c283dff 100644
 +        !app.selection_ready_with_app_events(Some(&metadata), events.is_empty()),
 +        "a newly queued event must invalidate the pre-await readiness snapshot"
 +    );
++    assert!(
++        !app.periodic_rate_limits_preserve_selection(&metadata, events.is_empty()),
++        "a prefetched periodic response must revoke when a semantic event arrives during the selection acknowledgment await"
++    );
 +    assert!(events.try_recv().is_ok());
++    assert!(app.periodic_rate_limits_preserve_selection(&metadata, events.is_empty()));
 +
-+    assert!(
-+        !app.periodic_rate_limits_preserve_selection(&event(RateLimitRefreshOrigin::Recovery, 0))
-+    );
-+    assert!(
-+        !app.periodic_rate_limits_preserve_selection(&event(RateLimitRefreshOrigin::Periodic, 1))
-+    );
++    assert!(!app.periodic_rate_limits_preserve_selection(
++        &event(RateLimitRefreshOrigin::Recovery, 0),
++        events.is_empty()
++    ));
++    assert!(!app.periodic_rate_limits_preserve_selection(
++        &event(RateLimitRefreshOrigin::Periodic, 1),
++        events.is_empty()
++    ));
 +    app.rate_limit_refresh_state.start(
 +        RateLimitRefreshOrigin::Recovery,
 +        &mut app.rate_limit_hard_stop_generation,
 +    );
-+    assert!(!app.periodic_rate_limits_preserve_selection(&event(
-+        RateLimitRefreshOrigin::Periodic,
-+        app.rate_limit_hard_stop_generation
-+    )));
++    assert!(!app.periodic_rate_limits_preserve_selection(
++        &event(
++            RateLimitRefreshOrigin::Periodic,
++            app.rate_limit_hard_stop_generation
++        ),
++        events.is_empty()
++    ));
 +    app.rate_limit_refresh_state.invalidate_recovery();
 +    app.reconnect.offline = true;
-+    assert!(!app.periodic_rate_limits_preserve_selection(&event(
-+        RateLimitRefreshOrigin::Periodic,
-+        app.rate_limit_hard_stop_generation
-+    )));
++    assert!(!app.periodic_rate_limits_preserve_selection(
++        &event(
++            RateLimitRefreshOrigin::Periodic,
++            app.rate_limit_hard_stop_generation
++        ),
++        events.is_empty()
++    ));
 +}
 diff --git a/codex-rs/tui/src/chatwidget/backend_banners.rs b/codex-rs/tui/src/chatwidget/backend_banners.rs
 index e769319..84eda3c 100644
