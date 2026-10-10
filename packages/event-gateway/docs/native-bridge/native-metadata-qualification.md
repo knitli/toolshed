@@ -22,18 +22,19 @@ Subsequent launcher qualification is separate evidence, not a rewritten build re
 
 ## Foreground proof
 
-The frozen [qualifier](native-metadata-launcher-smoke.py), SHA prefix `c7964bf5`,
+The frozen [qualifier](native-metadata-launcher-smoke.py), SHA prefix `ea6ba6fc`,
 uses a fresh private home and a copied ChatGPT auth file. Its `finally` cleanup
 removes that copy after foreground teardown, on success or failure; the original
 source remains untouched. On macOS use `TMPDIR=/private/tmp` for short socket paths.
 
 The startup gate requires 60 seconds elapsed and ten continuously stable seconds
 within 120 seconds. This is measured warmup, not proof that all asynchronous
-plugin/MCP startup has finished. V3 then passed **125.09796 seconds and 209 fresh
+plugin/MCP startup has finished. V3 then passed **125.06128 seconds and 209 fresh
 binding samples**, without input or resize. Two measured rate-limit requests were
-**60.45235 seconds apart**. Resize and composer refusal/restoration checks passed;
+**62.18143 seconds apart**. Resize and composer refusal/restoration checks passed;
 graceful exit returned zero, removed the control socket and stopped the backend.
-The copied auth file was removed.
+The copied auth file was removed. The earlier V3 foreground pass (125.09796
+seconds, requests 60.45235 seconds apart) is preserved separately.
 
 The harness submits no prompts or turn-start requests. Actual model-network calls
 and account-read/turn-start RPC counts remain unknown. The 22 self-checks cover
@@ -43,12 +44,13 @@ failure phases and sanitized diagnostics. On failure, an additional bounded
 time from passive RPC counts. Positive authority transitions are not labeled
 revocations.
 
-The older `d820…c02` binary failed the same frozen `c7964bf5` qualifier after
-60.139 seconds of warmup: both generations changed at passive +1.733818 seconds
+The matching `d820…c02` baseline failed the same frozen `ea6ba6fc` qualifier after
+60.010 seconds of warmup: both generations changed at passive +1.730 seconds
 (three samples). One measured rate-limit request preceded the failure at
-+1.445959 seconds; this timing does not establish causation. The old binary lacks
++1.647 seconds; this timing does not establish causation. The old binary lacks
 the new cause producer, so its empty 11-second capture does not prove no events
-occurred. Its copied auth was removed. V2 passed synthetic recovery/admission
+occurred. Its copied auth was removed.
+V2 passed synthetic recovery/admission
 but failed real-auth stability after 24.465 seconds;
 the exact cause was not retained. V3's successful run and new diagnostics do not
 retroactively explain or prove a fix for that failure.

@@ -406,7 +406,7 @@ def qualify(args):
     return 0 if proof["result"] == "PASS" else 1
 
 
-def self_test():
+def self_test_cause_parser():
     valid_cause = 'native selection revocation trigger category="app-event-other" generation=4 server_generation=9'
     require(parse_revocation(1000, valid_cause) == {
         "timestampUnix": 1000, "side": "tui", "target": "codex_selection_witness",
@@ -433,6 +433,10 @@ def self_test():
     for category in ("loop-gap", "native-transport-unavailable"):
         require(parse_revocation(1000, valid_cause.replace("app-event-other", category)) is not None,
                 "direct emission cause rejected")
+    return valid_cause, server_cause
+
+
+def self_test_failure_capture(valid_cause, server_cause):
     real_monotonic, real_time = time.monotonic, time.time
     with tempfile.TemporaryDirectory(prefix="nm-capture-selftest-") as directory:
         home = Path(directory)
@@ -442,8 +446,10 @@ def self_test():
             clock = [0.0]
             time.monotonic = lambda: clock[0]
             time.time = lambda: 1000 + clock[0]
+
             def advance_capture(*_, timeout):
                 clock[0] += timeout
+
             fake = types.SimpleNamespace(drain=advance_capture)
             proof = {}
             original = AssertionError("original capture failure")
@@ -484,6 +490,9 @@ def self_test():
                     "positive authority transition was reported as revocation")
         finally:
             time.monotonic, time.time = real_monotonic, real_time
+
+
+def self_test_auth_cleanup():
     with tempfile.TemporaryDirectory(prefix="nm-auth-selftest-") as directory:
         root = Path(directory)
         source = root / "dummy-source.json"
@@ -516,6 +525,9 @@ def self_test():
             require(proof["result"] == "FAIL" and not proof["copiedAuthRemoved"]
                     and proof["failureStage"] == (primary or "authCleanup")
                     and "authCleanupFailureType" in proof, "auth cleanup masked primary failure")
+
+
+def self_test_private_helpers():
     helper = helpers()
     private = Path(helper.__file__).parent
     require(stat.S_IMODE(private.stat().st_mode) == 0o700, "helper directory is not private")
@@ -535,6 +547,9 @@ def self_test():
             "private helper drain override lost module globals")
     helper._private_helpers.cleanup()
     require(not private.exists(), "private helpers not cleaned up")
+
+
+def self_test_request_parser():
     request = 'request_id=String("account-rate-limits-12345678-1234-1234-1234-123456789abc")'
     valid = "app-server typed request connection_id=1 " + request
     require(rate_request_times([(1, valid), (2, valid)]) == [1], "duplicate request counted")
@@ -545,10 +560,16 @@ def self_test():
                     valid.replace("123456789abc", "123456789abz"), "", None):
         require(rate_request_times([(1, invalid)]) == [], "ineligible request matched")
     require(rate_request_times([]) == [], "empty request metadata matched")
+
+
+def self_test_terminal_replies():
     for query in (b"\x1b[6n", b"\x1b[?u", b"\x1b[c", b"\x1b]10;?\x07", b"\x1b]11;?\x1b\\"):
         for split in range(len(query)):
             require(len(terminal_replies(query[:split], query[split:])) == 1, "split query reply failed")
         require(not terminal_replies(query, b"ordinary"), "terminal query replayed")
+
+
+def self_test_observation():
     require(PASSIVE_SECONDS >= 125, "passive duration too short")
     real_monotonic, real_time = time.monotonic, time.time
     clock = [0.0]
@@ -593,6 +614,16 @@ def self_test():
                 raise AssertionError("observer accepted unavailable or changed binding")
     finally:
         time.monotonic, time.time = real_monotonic, real_time
+
+
+def self_test():
+    valid_cause, server_cause = self_test_cause_parser()
+    self_test_failure_capture(valid_cause, server_cause)
+    self_test_auth_cleanup()
+    self_test_private_helpers()
+    self_test_request_parser()
+    self_test_terminal_replies()
+    self_test_observation()
     print(json.dumps({"result": "PASS", "checks": [
         "bounded-post-failure-capture", "original-failure-preserved",
         "strict-cause-target-label-and-integers", "server-and-tui-closed-pairs",
