@@ -85,7 +85,7 @@ class ContractWorkflowTests(unittest.TestCase):
             metadata = json.loads(archive.read("metadata.json"))
         self.assertEqual(list(POLICY["FAMILIES"]), metadata["families"])
         self.assertEqual(set(metadata["snapshots"]), {
-            "legacy", "no-start", "native-start", "native-input-recorded", "native-admission",
+            "legacy", "no-start", "native-start", "native-input-recorded", "native-admission", "native-runtime-status",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         for expected in metadata["families"]:
@@ -98,8 +98,14 @@ class ContractWorkflowTests(unittest.TestCase):
                 self.assertEqual(self.api_reads, [f"git/trees/{HEAD}?recursive=1"])
 
     def test_native_admission_mutation_or_omission_rejected_for_all_required_blobs(self):
+        self.assert_mutation_or_omission_rejected("native-admission")
+
+    def test_native_runtime_status_mutation_or_omission_rejected_for_all_required_blobs(self):
+        self.assert_mutation_or_omission_rejected("native-runtime-status")
+
+    def assert_mutation_or_omission_rejected(self, name):
         # PATHS explicitly includes both control fixtures.json and manifest.json.
-        original = self.approved_snapshot("native-admission")
+        original = self.approved_snapshot(name)
         for path in PATHS:
             for missing in (False, True):
                 with self.subTest(path=path, missing=missing):
@@ -112,21 +118,30 @@ class ContractWorkflowTests(unittest.TestCase):
                         self.verify()
 
     def test_native_admission_manifest_source_provenance(self):
+        self.assert_manifest_source_provenance(
+            "native-admission", "038716741534afe804fb75b9eab15dba6ddbee11")
+
+    def test_native_runtime_status_manifest_source_provenance(self):
+        self.assert_manifest_source_provenance(
+            "native-runtime-status", "7675f40a4053795de03458c2741da4e3a475ce29",
+            ("native-runtime-store", "native-admission-gate"))
+
+    def assert_manifest_source_provenance(self, name, control_revision, additional_sources=()):
         # This proves fixture provenance separately from the verifier's raw snapshot hash gate.
-        blobs = self.approved_snapshot("native-admission")
+        blobs = self.approved_snapshot(name)
         event = json.loads(blobs[SNAPSHOT + "event-v1/manifest.json"])
         control = json.loads(blobs[SNAPSHOT + "event-control-v1/manifest.json"])
         self.assertEqual(event["commit"], "ed23882eac491e26e070e3ef26cf8c0e9e702b38")
-        self.assertEqual(control["revision"], "038716741534afe804fb75b9eab15dba6ddbee11")
+        self.assertEqual(control["revision"], control_revision)
         source_root = "apps/os/packages/event-runtime/"
         event_paths = {source_root + path for path in (
             "src/protocol.schema.json", "src/protocol.ts", "src/policy.ts",
             "__tests__/fixtures/protocol-v1.json",
         )}
-        control_paths = {source_root + "src/" + name + ".ts" for name in (
+        control_paths = {source_root + "src/" + source + ".ts" for source in (
             "contracts", "api", "registry", "coordinator", "coordinator-admission",
             "authority-client", "protocol", "policy", "native-admission-contract",
-        )}
+        ) + additional_sources}
         self.assertEqual({entry["originalPath"] for entry in event["files"]}, event_paths)
         self.assertEqual(len(event["files"]), len(event_paths))
         self.assertEqual(set(control["sources"]), control_paths)
