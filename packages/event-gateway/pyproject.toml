@@ -11,7 +11,7 @@ license = "MIT OR Apache-2.0"
 dependencies = [
   "cryptography>=50.0.2,<51",
   "jsonschema>=4.25,<5",
-  "websockets>=15,<17",
+  "websockets>=17.2,<18",
 ]
 
 [project.scripts]
