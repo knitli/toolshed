@@ -508,6 +508,61 @@ class NativeReconciliationTests(unittest.TestCase):
                 self.assert_original_preserved()
 
 
+    def test_missing_original_returns_closed_reconciliation_failure(self):
+        code, result, binding, challenge = self.invoke()
+        self.assertEqual(code, 2)
+        self.assertEqual(result, {
+            "reconciled": False, "reason": "original_pending_commit_missing",
+            "originalHistoricalOutcome": "unknown", "originalPendingCommit": None,
+        })
+        binding.assert_not_called()
+        challenge.assert_not_called()
+        self.assertEqual(self.cloud.status_calls, [])
+        self.assertEqual(self.cloud.intents, [])
+        self.assertEqual(self.cloud.commits, [])
+
+    def test_malformed_original_returns_closed_reconciliation_failure(self):
+        self.pending()
+        self.old_path.write_text("{}")
+        code, result, binding, challenge = self.invoke()
+        self.assertEqual(code, 2)
+        self.assertEqual(result, {
+            "reconciled": False, "reason": "invalid_pending_commit",
+            "originalHistoricalOutcome": "unknown", "originalPendingCommit": None,
+        })
+        self.assertEqual(self.old_path.read_text(), "{}")
+        binding.assert_not_called()
+        challenge.assert_not_called()
+        self.assertEqual(self.cloud.status_calls, [])
+        self.assertEqual(self.cloud.intents, [])
+        self.assertEqual(self.cloud.commits, [])
+
+    def test_noncanonical_link_node_key_is_rejected_before_remote_requests(self):
+        self.pending()
+        with patch.object(self.cloud, "native_challenge", side_effect=KeyboardInterrupt):
+            self.assertEqual(self.invoke()[0], 130)
+        link_path = self.old_path.with_suffix(".reconcile.json")
+        link = json.loads(link_path.read_text())
+        noncanonical = "A" * 42 + "B"
+        self.assertEqual(len(base64.urlsafe_b64decode(noncanonical + "=")), 32)
+        self.assertNotEqual(base64.urlsafe_b64encode(
+            base64.urlsafe_b64decode(noncanonical + "=")).decode().rstrip("="), noncanonical)
+        link["nodePublicKey"] = noncanonical
+        link_path.write_text(json.dumps(link))
+        retained = link_path.read_bytes()
+        self.cloud.status_calls.clear()
+        code, result, _, challenge = self.invoke()
+        self.assertEqual(code, 2)
+        self.assertEqual(result["reason"], "invalid_reconciliation")
+        self.assertEqual(result["originalHistoricalOutcome"], "unknown")
+        challenge.assert_not_called()
+        self.assertEqual(self.cloud.status_calls, [])
+        self.assertEqual(self.cloud.intents, [])
+        self.assertEqual(self.cloud.commits, [])
+        self.assertEqual(link_path.read_bytes(), retained)
+        self.assert_original_preserved()
+
+
 class RuntimeStatusCloudTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.runtime_id, self.node_id = identifier(), identifier()

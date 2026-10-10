@@ -14,7 +14,7 @@ from .daemon import request, serve, status
 from .client_runtime import (
     clear_pending_commit, cloud_identity, load_cloud_client, load_pending_commit,
     pending_commit_summary, save_pending_commit, load_pending_commit_snapshot,
-    load_reconciliation, save_reconciliation,
+    load_reconciliation, save_reconciliation, has_reconciliation, complete_reconciliation,
 )
 from .cloud import CloudError, _iso, _uuid, _native_challenge_request, _same_json_value
 from .security import (
@@ -197,12 +197,12 @@ def _native_lifecycle_context(args, state_dir, operation, context):
 
 
 def _reconcile_native(args, state_dir):
-    original, digest = load_pending_commit_snapshot(state_dir, args.operation, args.original_session_id)
-    if original is None:
-        raise CloudError("original_pending_commit_missing")
-    summary = {"originalHistoricalOutcome": "unknown",
-               "originalPendingCommit": pending_commit_summary(original)}
+    summary = {"originalHistoricalOutcome": "unknown", "originalPendingCommit": None}
     try:
+        original, digest = load_pending_commit_snapshot(state_dir, args.operation, args.original_session_id)
+        if original is None:
+            raise CloudError("original_pending_commit_missing")
+        summary["originalPendingCommit"] = pending_commit_summary(original)
         if args.operation == "transfer":
             raise CloudError("unsupported_transfer_reconciliation")
         if not _uuid(args.session_id) or args.session_id == args.original_session_id:
@@ -311,7 +311,7 @@ def _native_context(args, state_dir, operation, result_key):
 
 
 def _save_pending_before_send(body, *, state_dir, args, cloud, intent,
-                              challenge, evidence, persisted):
+                              challenge, evidence, persisted, current_mapping=None):
     operation = intent["operation"]
     local_evidence = {"observedAt": evidence["observedAt"], "witness": evidence["witness"]}
     pending = {
@@ -322,7 +322,11 @@ def _save_pending_before_send(body, *, state_dir, args, cloud, intent,
         "safeExpiryAt": _iso((_timestamp(challenge["issuedAt"]) + 90_000) / 1000),
     }
     try:
-        save_pending_commit(state_dir, operation, args.session_id, pending)
+        if current_mapping is None:
+            save_pending_commit(state_dir, operation, args.session_id, pending)
+        else:
+            save_pending_commit(state_dir, operation, args.session_id, pending,
+                                current_mapping=current_mapping, node_public_key=cloud.node_public_key)
     except SecurityError as error:
         raise CloudError(error.code) from None
     persisted["artifact"] = pending
@@ -335,6 +339,9 @@ def _commit_native_call(args, state_dir, operation, intent, artifact, cloud, bin
             intent, artifact["challenge"], artifact["evidence"],
             prepared_body=body, recovery=True,
         ))
+    current_mapping = None
+    if operation == "renew" and has_reconciliation(state_dir, args.session_id):
+        current_mapping = _read_native_mapping(state_dir, args.runtime_id)
     try:
         challenge = asyncio.run(cloud.native_challenge(intent))
     except CloudError as error:
@@ -345,7 +352,7 @@ def _commit_native_call(args, state_dir, operation, intent, artifact, cloud, bin
     persist = partial(
         _save_pending_before_send, state_dir=state_dir,
         args=args, cloud=cloud, intent=intent, challenge=challenge,
-        evidence=evidence, persisted=persisted,
+        evidence=evidence, persisted=persisted, current_mapping=current_mapping,
     )
     return asyncio.run(getattr(cloud, operation)(
         intent, challenge, evidence, on_first_send=persist,
@@ -408,6 +415,29 @@ def _native_mapping(args, operation, cloud, response):
             "attachmentGeneration": response["sourceAttachmentGeneration"],
         }
     return mapping, transfer
+
+
+def _read_native_mapping(state_dir, runtime_id):
+    """Read through the existing writer; fall back only when no daemon can answer."""
+    def read_directly():
+        with Store(state_dir) as store:
+            return {"mapping": store.get_attachment(runtime_id)}
+
+    socket_path = state_dir / "control.sock"
+    try:
+        if not (socket_path.exists() or socket_path.is_symlink()):
+            result = read_directly()
+        else:
+            try:
+                result = asyncio.run(request(state_dir, {"command": "get-attachment", "runtimeId": runtime_id}))
+            except (ConnectionRefusedError, FileNotFoundError):
+                result = read_directly()
+    except (StoreError, OSError, ValueError, TimeoutError):
+        raise CloudError("local_mapping_unavailable") from None
+    if not isinstance(result, dict) or set(result) != {"mapping"} or (
+            result["mapping"] is not None and not isinstance(result["mapping"], dict)):
+        raise CloudError("invalid_store_response")
+    return result["mapping"]
 
 
 def _store_native_mapping(state_dir, operation, mapping, transfer):
@@ -526,6 +556,17 @@ def _persist_native_lifecycle(args, state_dir, operation, binding, cloud, respon
         return _target_mapping_failure(
             state_dir, args, operation, cloud, response, mapping, error_code,
         )
+    if operation == "attach" and has_reconciliation(state_dir, args.session_id):
+        try:
+            readback = _read_native_mapping(state_dir, mapping["runtimeId"])
+            if not _same_json_value(readback, mapping):
+                raise CloudError("local_mapping_changed")
+            complete_reconciliation(state_dir, args.session_id, cloud_identity(cloud),
+                                    cloud.node_public_key, response, readback)
+        except (CloudError, SecurityError) as error:
+            return {"remoteStatus": response["status"], "localStatus": "unavailable",
+                    "reason": "reconciliation_completion_unavailable", "lastError": error.code,
+                    "runtimeId": mapping["runtimeId"]}
     if artifact or persisted.get("artifact"):
         pending = artifact or persisted["artifact"]
         try:

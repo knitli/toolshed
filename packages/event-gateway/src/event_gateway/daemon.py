@@ -10,6 +10,7 @@ import signal
 import stat
 
 from .client_runtime import _private_json, load_cloud_client
+from .cloud import _uuid
 from .gateway import Gateway
 from .listener import Listener
 from .native import NativeBridgeAdapter, SessionNativeBridge
@@ -39,6 +40,11 @@ def status(store, dispatch=None):
 def _execute_control_command(store, request_value, dispatch=None):
     if request_value == {"command": "status"}:
         return status(store, dispatch)
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "runtimeId"}
+            and request_value["command"] == "get-attachment"
+            and _uuid(request_value["runtimeId"])):
+        return {"mapping": store.get_attachment(request_value["runtimeId"])}
     if (
         isinstance(request_value, dict)
         and set(request_value) == {"command", "runtimeId"}
