@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import importlib
+import importlib.util
 import json
 import os
 import re
@@ -15,6 +16,7 @@ import time
 import types
 
 FROZEN_SHA = "073ddf6a43248db44345e0a20d09f11ced91740186d741b9038b7f7bea5dd33e"
+PREFLIGHT_SHA = "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c"
 PASSIVE_SECONDS = 125
 
 
@@ -24,16 +26,36 @@ def require(value, message):
 
 
 def helpers():
-    path = Path(__file__).with_name("native-release-launcher-smoke.py")
-    source = path.read_bytes()
-    require(hashlib.sha256(source).hexdigest() == FROZEN_SHA, "frozen helper digest mismatch")
-    module = types.ModuleType("frozen_launcher_smoke")
-    module.__file__ = str(path)
-    # Execute the exact SHA-verified historical helper bytes; a path import would
-    # reread mutable source or cached bytecode after verification.
-    # nosemgrep: python.lang.security.audit.exec-detected.exec-detected
-    exec(compile(source, str(path), "exec"), module.__dict__)  # nosec B102
-    return module
+    origin = Path(__file__).parent
+    pinned = {
+        "native-release-launcher-smoke.py": FROZEN_SHA,
+        "qualification-installed.py": PREFLIGHT_SHA,
+    }
+    sources = {}
+    for name, digest in pinned.items():
+        source = (origin / name).read_bytes()
+        require(hashlib.sha256(source).hexdigest() == digest, "frozen helper digest mismatch")
+        sources[name] = source
+    # Import only fresh private copies of the exact verified bytes. This avoids
+    # rereading mutable original paths or accepting their cached bytecode.
+    temporary = tempfile.TemporaryDirectory(prefix="nm-helper-")
+    try:
+        directory = Path(temporary.name)
+        for name, source in sources.items():
+            fd = os.open(directory / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(source)
+        path = directory / "native-release-launcher-smoke.py"
+        spec = importlib.util.spec_from_file_location("frozen_launcher_smoke", path)
+        require(spec is not None and spec.loader is not None, "private helper loader unavailable")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        # installed_preflight resolves its verified sibling relative to __file__.
+        module._private_helpers = temporary
+        return module
+    except BaseException:
+        temporary.cleanup()
+        raise
 
 
 def terminal_replies(previous, data):
@@ -254,7 +276,25 @@ def qualify(args):
 
 
 def self_test():
-    helpers()
+    helper = helpers()
+    private = Path(helper.__file__).parent
+    require(stat.S_IMODE(private.stat().st_mode) == 0o700, "helper directory is not private")
+    for name, digest in (("native-release-launcher-smoke.py", FROZEN_SHA),
+                         ("qualification-installed.py", PREFLIGHT_SHA)):
+        copied = private / name
+        original = Path(__file__).with_name(name)
+        require(stat.S_IMODE(copied.stat().st_mode) == 0o600, "helper copy is not private")
+        require(hashlib.sha256(copied.read_bytes()).hexdigest() == digest,
+                "private helper pin mismatch")
+        require(hashlib.sha256(original.read_bytes()).hexdigest() == digest,
+                "historical helper changed")
+    require(not (private / "__pycache__").exists(), "unexpected helper bytecode cache")
+    marker = object()
+    helper.drain = marker
+    require(helper.check_non_draw_fences.__globals__["drain"] is marker,
+            "private helper drain override lost module globals")
+    helper._private_helpers.cleanup()
+    require(not private.exists(), "private helpers not cleaned up")
     request = 'request_id=String("account-rate-limits-12345678-1234-1234-1234-123456789abc")'
     valid = "app-server typed request connection_id=1 " + request
     require(rate_request_times([(1, valid), (2, valid)]) == [1], "duplicate request counted")
@@ -314,7 +354,9 @@ def self_test():
     finally:
         time.monotonic, time.time = real_monotonic, real_time
     print(json.dumps({"result": "PASS", "checks": [
-        "frozen-helper-digest", "exact-request-id-parser-and-deduplication",
+        "both-frozen-helper-pins", "private-copy-permissions-and-cleanup",
+        "historical-helpers-unchanged", "helper-module-drain-override",
+        "exact-request-id-parser-and-deduplication",
         "split-terminal-queries", "no-query-replay", "minimum-passive-duration",
         "startup-minimum-warmup-reset-and-deadline", "bounded-stable-observer",
         "unavailable-and-changed-binding-rejected",

@@ -38,23 +38,23 @@ to keep native Unix socket paths within the platform limit. Plugin/MCP initializ
 revoke selection; this warmup does not prove all asynchronous startup is complete.
 
 After warmup, the same full binding remained current across 209 fresh samples
-for 125.077 seconds without input or resize. Two distinct source-defined
-`account-rate-limits-UUID` requests occurred during that interval, 60.357 seconds
+for 125.098 seconds without input or resize. Two distinct source-defined
+`account-rate-limits-UUID` requests occurred during that interval, 60.420 seconds
 apart. These are measured requests, not inferred timer ticks. Real model-network
 calls and account-read/turn-start counts are uninstrumented and reported unknown;
 the harness itself submits zero prompts or turn-start requests.
 
-The previous `d820…c02` binary fails the identical frozen qualifier, changing
-selection generations 2.944 seconds after warmup. Its retained log flush did not
+The previous `d820…c02` binary fails the identical frozen qualifier, losing
+selection availability 1.729 seconds after warmup. Its retained log flush did not
 prove a passive metadata request before failure; this is a regression baseline,
 not an exact attribution of that event. Earlier short-warmup runs and an incorrect
 RPC-log extractor are retained privately and are not counted as passing proofs.
 
 A resize revokes the previous binding, composer input refuses readiness, and
 clearing it restores selection. Graceful exit returns zero, removes the control
-socket and stops the backend. The eight qualifier self-checks cover bounded
+socket and stops the backend. The eleven qualifier self-checks cover bounded
 warmup/observation, unavailable or changed bindings, exact request-ID parsing,
-deduplication and terminal replies.
+deduplication, terminal replies, exact private helper loading and cleanup.
 
 ## Recovery and admission
 

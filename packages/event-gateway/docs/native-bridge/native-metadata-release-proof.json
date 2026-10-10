@@ -1033,7 +1033,7 @@
     }
   },
   "foreground": {
-    "baselineAttribution": "Old binding changed after measured warmup; retained log flush did not prove a passive rate-limit request before failure. No exact event-causality claim.",
+    "baselineAttribution": "Old selection unavailable after measured warmup; retained log flush did not prove a passive rate-limit request before failure. No exact event-causality claim.",
     "green": {
       "backendStopped": true,
       "binarySha256": "9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5",
@@ -1042,13 +1042,13 @@
       "harnessTurnStartRequests": 0,
       "harnessUserPrompts": 0,
       "initialBinding": {
-        "backendPid": 94766,
-        "clientId": "09c24031-d29b-4280-a2a2-b3a6927161b5",
-        "connectionId": "7125001f-01d9-4218-898c-f5d84d5171f7",
-        "generation": 29,
-        "serverGeneration": 27,
-        "serverInstanceId": "01a123df-b96e-79e3-9fb1-dd56e350da1c",
-        "threadId": "01a123df-bd26-7200-9943-e1a0dfe2c93c"
+        "backendPid": 21671,
+        "clientId": "455e1655-96a3-4c8b-8dfe-f78aaa87b3b5",
+        "connectionId": "2e1d886e-e1ab-4a4c-bf66-4865fa29abf0",
+        "generation": 27,
+        "serverGeneration": 25,
+        "serverInstanceId": "01a123e7-84f2-73d0-ac4e-fcfb987052cf",
+        "threadId": "01a123e7-894b-7ce1-a304-e22b7512325d"
       },
       "installedPackagePreflight": {
         "directUrl": {
@@ -1058,7 +1058,7 @@
         "packageRoot": "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway",
         "packageSource": "/opt/coder/toolshed/.worktrees/event-native-metadata/packages/event-gateway/src/event_gateway",
         "preflightSha256": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c",
-        "pycachePrefix": "/private/tmp/qualification-pycache-ovmw600z",
+        "pycachePrefix": "/private/tmp/qualification-pycache-dpy42vkg",
         "verifiedSha256": {
           "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
           "/private/tmp/event-native-metadata-proof/installed/lib/python3.13/site-packages/event_gateway/cli.py": "0322ddbcc5bf5e715a96202787f46aa4e5bf95a738e36ca183e199c146f658f7",
@@ -1091,14 +1091,14 @@
       },
       "passiveObservation": {
         "bindingUnchanged": true,
-        "elapsedSeconds": 125.07656187500106,
-        "endedUnix": 1791603411.905819,
+        "elapsedSeconds": 125.09792329196353,
+        "endedUnix": 1791603922.64541,
         "inputEvents": 0,
         "resizeEvents": 0,
         "samples": 209,
-        "startedUnix": 1791603286.756439
+        "startedUnix": 1791603797.493813
       },
-      "privateEvidenceDirectory": "/private/tmp/nm-j2_iwqbr",
+      "privateEvidenceDirectory": "/private/tmp/nm-4qbgt2qk",
       "provider": "openai",
       "realModelNetworkCalls": null,
       "realModelNetworkCallsEvidence": "Not instrumented; RPC observations are not HTTP-call counts",
@@ -1107,12 +1107,12 @@
         "account/rateLimits/read": {
           "measurement": "Distinct source-defined account-rate-limits-UUID typed-request IDs",
           "passiveIntervalsSeconds": [
-            60.357231855392456
+            60.41987180709839
           ],
           "passiveObserved": 2,
           "passiveOffsetsSeconds": [
-            1.6551311016082764,
-            62.01236295700073
+            1.9621660709381104,
+            62.3820378780365
           ],
           "source": "codex-rs/tui/src/app/background_requests.rs:fetch_account_rate_limits",
           "totalObserved": 4
@@ -1128,22 +1128,22 @@
           "totalObserved": null
         }
       },
-      "runnerSha256": "ff6b997d7e51d2e85e0b87820fbfa10d98ddb9bec5a6a9f3ebb2fe027f149e79",
+      "runnerSha256": "68624ca3fdaa448028e9c63a20521af8c3dd74544524ebcd4259545895e6f9f1",
       "startupSettling": {
-        "continuouslyStableSeconds": 27.975764584029093,
-        "elapsedSeconds": 60.14826966699911,
+        "continuouslyStableSeconds": 28.17642999999225,
+        "elapsedSeconds": 60.01052349997917,
         "minimumWarmupSeconds": 60,
         "requiredStableSeconds": 10,
-        "resets": 11,
-        "samples": 392,
+        "resets": 9,
+        "samples": 403,
         "startupDeadlineSeconds": 120,
         "warmupEvidence": "Measured warmup only; asynchronous startup completion is not proven"
       },
       "terminationExitCode": 0
     },
     "greenArtifact": {
-      "path": "/private/tmp/event-native-metadata-proof/new-reviewed-runner.json",
-      "sha256": "99711878d56a4ddf1fa62b1ca27fa93142884caa70eb5f7e236ec2eca5bc2442"
+      "path": "/private/tmp/event-native-metadata-proof/new-private-loader.json",
+      "sha256": "1580576dc4373f637349469efe09c3390f1799b33555c0d78b24053f9a8690fb"
     },
     "priorForegroundArtifacts": [
       {
@@ -1153,24 +1153,32 @@
       {
         "path": "/private/tmp/event-native-metadata-proof/old-warmup.json",
         "sha256": "f835057d3f6a7c587f1546bc58678d9b417a469da9ef4ce7c1a022fbe6c8b74a"
+      },
+      {
+        "path": "/private/tmp/event-native-metadata-proof/new-reviewed-runner.json",
+        "sha256": "99711878d56a4ddf1fa62b1ca27fa93142884caa70eb5f7e236ec2eca5bc2442"
+      },
+      {
+        "path": "/private/tmp/event-native-metadata-proof/old-reviewed-runner.json",
+        "sha256": "7da0b4f29033a76eb8252c9cdd56157905123ddf0eb0f1e9a50ad48fcaf18bb7"
       }
     ],
     "red": {
       "binarySha256": "d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02",
-      "failureReason": "binding changed during passive metadata observation",
+      "failureReason": "selection unavailable during passive observation",
       "failureStage": "passive",
       "failureType": "AssertionError",
       "frozenHelperSha256": "073ddf6a43248db44345e0a20d09f11ced91740186d741b9038b7f7bea5dd33e",
       "harnessTurnStartRequests": 0,
       "harnessUserPrompts": 0,
       "initialBinding": {
-        "backendPid": 94765,
-        "clientId": "7ab7afe4-51c3-4b7d-9251-82f7ea61f62c",
-        "connectionId": "19d0110d-bf51-4778-b274-1d9841eb4997",
-        "generation": 105,
-        "serverGeneration": 103,
-        "serverInstanceId": "01a123df-b93c-7812-a228-86767d36a0e7",
-        "threadId": "01a123df-bf73-7bb2-9aef-4fb7fcf8f918"
+        "backendPid": 21636,
+        "clientId": "53d91dca-d8cf-4ca1-888f-c2fda135c51c",
+        "connectionId": "3a026532-70b7-43d8-9b53-b65070968d3e",
+        "generation": 61,
+        "serverGeneration": 59,
+        "serverInstanceId": "01a123e7-82c8-7662-a8d6-5d11b1f8e2b4",
+        "threadId": "01a123e7-8533-73f0-9c5f-60df06e94310"
       },
       "installedPackagePreflight": {
         "directUrl": {
@@ -1180,7 +1188,7 @@
         "packageRoot": "/private/tmp/event-native-redraw-proof/installed/lib/python3.13/site-packages/event_gateway",
         "packageSource": "/opt/coder/toolshed/.worktrees/event-native-overnight-canary/packages/event-gateway/src/event_gateway",
         "preflightSha256": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c",
-        "pycachePrefix": "/private/tmp/qualification-pycache-7xwaqyhz",
+        "pycachePrefix": "/private/tmp/qualification-pycache-8o7bn7xr",
         "verifiedSha256": {
           "/private/tmp/event-native-redraw-proof/installed/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
           "/private/tmp/event-native-redraw-proof/installed/lib/python3.13/site-packages/event_gateway/cli.py": "0322ddbcc5bf5e715a96202787f46aa4e5bf95a738e36ca183e199c146f658f7",
@@ -1207,15 +1215,11 @@
       },
       "model": "gpt-6.1-sol",
       "passiveObservation": {
-        "changedBindingFields": [
-          "serverGeneration",
-          "generation"
-        ],
-        "elapsedSeconds": 2.9439944999758154,
-        "samples": 5,
-        "startedUnix": 1791603286.6948118
+        "elapsedSeconds": 1.728580333001446,
+        "samples": 2,
+        "startedUnix": 1791603796.98988
       },
-      "privateEvidenceDirectory": "/private/tmp/nm-sa5iu_r8",
+      "privateEvidenceDirectory": "/private/tmp/nm-il94s2me",
       "provider": "openai",
       "realModelNetworkCalls": null,
       "realModelNetworkCallsEvidence": "Not instrumented; RPC observations are not HTTP-call counts",
@@ -1240,25 +1244,25 @@
           "totalObserved": null
         }
       },
-      "runnerSha256": "ff6b997d7e51d2e85e0b87820fbfa10d98ddb9bec5a6a9f3ebb2fe027f149e79",
+      "runnerSha256": "68624ca3fdaa448028e9c63a20521af8c3dd74544524ebcd4259545895e6f9f1",
       "startupSettling": {
-        "continuouslyStableSeconds": 25.024517374986317,
-        "elapsedSeconds": 60.08510720799677,
+        "continuouslyStableSeconds": 24.84882445796393,
+        "elapsedSeconds": 60.01599266700214,
         "minimumWarmupSeconds": 60,
         "requiredStableSeconds": 10,
-        "resets": 46,
-        "samples": 395,
+        "resets": 21,
+        "samples": 396,
         "startupDeadlineSeconds": 120,
         "warmupEvidence": "Measured warmup only; asynchronous startup completion is not proven"
       }
     },
     "redArtifact": {
-      "path": "/private/tmp/event-native-metadata-proof/old-reviewed-runner.json",
-      "sha256": "7da0b4f29033a76eb8252c9cdd56157905123ddf0eb0f1e9a50ad48fcaf18bb7"
+      "path": "/private/tmp/event-native-metadata-proof/old-private-loader.json",
+      "sha256": "00da687fe9a7b1f943dfb4eb0dd8597ae0e5d97c097583ec82cc3af2accef05a"
     },
     "runner": {
       "path": "/opt/coder/toolshed/.worktrees/event-native-metadata/packages/event-gateway/docs/native-bridge/native-metadata-launcher-smoke.py",
-      "sha256": "ff6b997d7e51d2e85e0b87820fbfa10d98ddb9bec5a6a9f3ebb2fe027f149e79"
+      "sha256": "68624ca3fdaa448028e9c63a20521af8c3dd74544524ebcd4259545895e6f9f1"
     }
   },
   "gatewayChecks": {
