@@ -111,7 +111,7 @@ class SourceReadTests(unittest.IsolatedAsyncioTestCase):
             lambda p: p["items"][0].update(epoch=2),
             lambda p: p["items"][0].update(recordType="raw"),
             lambda p: p["items"][0].update(sourceVersion=1),
-            lambda p: p["items"][0]["value"].update(to={"secret": "bad"}),
+            lambda p: p["items"][0]["value"].update(to={"unexpected": "object"}),
             lambda p: p.update(items=[]),
             lambda p: p.update(extra="secret"),
         ]
