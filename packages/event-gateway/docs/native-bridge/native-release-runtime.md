@@ -1,5 +1,9 @@
 # Native release candidate runtime qualification
 
+This is the historical `3e88…387c` checkpoint. The redraw-fix candidate,
+updated source manifest, and fresh runtime proofs are recorded separately in
+[redraw qualification](native-redraw-qualification.md).
+
 The preserved clean-build candidate `3e88bd929a8c1d6e29dd562c47c9264df5b8f5904847695b8b490ddcf492387c`
 passed a macOS ARM64 two-TUI restart qualification with the corrected
 standalone gateway wheel and an explicit `--no-daemon` qualifier. The
@@ -7,7 +11,7 @@ standalone gateway wheel and an explicit `--no-daemon` qualifier. The
 evidence, executed runner, qualifier, installed reader, wheel, and raw logs.
 
 The preserved binary and build JSON match the earlier clean-build proof. All
-48 patched source hashes match the current native source manifest; no Rust
+48 patched source hashes matched the source manifest at this checkpoint; no Rust
 rebuild was needed. The initial wheel SHA was
 `09be6b33fbdb64224e4f008faa38703821d928c6594963f6c3312944e8294b7b`.
 All 20 packaged modules/contracts match both the wheel archive and the base

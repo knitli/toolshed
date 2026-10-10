@@ -52,8 +52,9 @@ class Model(BaseHTTPRequestHandler):
 def write_config(root, port):
     home = root / "codex-home"
     home.mkdir(mode=0o700)
+    # The synthetic Astra name enables the built-in idle starfield, without model calls.
     (home / "config.toml").write_text(
-        'check_for_update_on_startup=false\nmodel="mock-model"\nmodel_provider="qualification"\n'
+        'check_for_update_on_startup=false\nmodel="mock-astra"\nmodel_provider="qualification"\n'
         '[model_providers.qualification]\nname="Synthetic qualification"\n'
         f'base_url="http://127.0.0.1:{port}"\nwire_api="responses"\nrequires_openai_auth=false\n'
         "[analytics]\nenabled=false\n[feedback]\nenabled=false\n"
@@ -92,6 +93,7 @@ def foreground_process(root, home, argv):
                 "HOME": str(root),
                 "CODEX_HOME": str(home),
                 "TERM": "xterm-256color",
+                "COLORTERM": "truecolor",
             },
         )
         os.close(slave)
@@ -113,11 +115,17 @@ def drain(master, tail):
         data = os.read(master, 65536)
     except OSError:
         return
+    for number, color in ((10, b"dddd/dddd/dddd"), (11, b"1111/1111/1111")):
+        for ending in (b"\x07", b"\x1b\\"):
+            query = f"\x1b]{number};?".encode() + ending
+            if query in bytes(tail[-len(query) + 1:]) + data:
+                os.write(master, f"\x1b]{number};rgb:".encode() + color + b"\x1b\\")
     cursor_query = b"\x1b[6n" in bytes(tail[-3:]) + data
     tail.extend(data)
     del tail[:-16384]
     if cursor_query:
         os.write(master, b"\x1b[1;1R")
+    return len(data)
 
 
 def current_selection(launcher, state):
@@ -159,9 +167,34 @@ def check_selection(status, binding, challenge):
     require(status["automaticWakeEnabled"] is False and status["attached"] is False)
 
 
+def check_redraw_stability(launcher, state, process, master, tail, binding):
+    # Starfield schedules Draw every 150 ms; input/resize are deliberately absent.
+    started = time.monotonic()
+    active_samples = 0
+    for _ in range(6):
+        output_bytes = 0
+        deadline = time.monotonic() + 0.5
+        while time.monotonic() < deadline:
+            require(process.poll() is None, "foreground exited during redraw stability check")
+            output_bytes += drain(master, tail) or 0
+        active_samples += output_bytes > 0
+        selection = current_selection(launcher, state)
+        require(selection is not None, "native selection unavailable after idle redraw")
+        _, status, current, challenge = selection
+        check_selection(status, current, challenge)
+        require(current == binding, "native binding changed after idle redraw")
+    elapsed = time.monotonic() - started
+    require(elapsed >= 3, "redraw stability interval was too short")
+    require(active_samples >= 3, "idle animation produced insufficient terminal output")
+    return {"samples": 6, "activeSamples": active_samples,
+            "elapsedSeconds": elapsed, "bindingUnchanged": True}
+
+
 def quit_foreground(process, master, tail, socket_path, backend_pid):
     os.write(master, b"/quit")
-    time.sleep(0.2)
+    deadline = time.monotonic() + 0.5
+    while time.monotonic() < deadline:
+        drain(master, tail)
     os.write(master, b"\r")
     deadline = time.monotonic() + 15
     while process.poll() is None:
@@ -215,6 +248,9 @@ def qualify(args, launcher, server):
                     launcher, state, process, master, tail
                 )
                 check_selection(status, binding, challenge)
+                stability = check_redraw_stability(
+                    launcher, state, process, master, tail, binding
+                )
                 require(server.calls == 0)
                 code = quit_foreground(
                     process, master, tail, socket_path, binding["backendPid"]
@@ -240,6 +276,7 @@ def qualify(args, launcher, server):
             "status": status,
             "binding": binding,
             "freshChallengeCorrelated": True,
+            "idleRedrawStability": stability,
             "syntheticModelRequests": server.calls,
             "realModelCalls": 0,
             "controlSocketRemoved": True,
@@ -268,7 +305,6 @@ def main():
     finally:
         server.shutdown()
         server.server_close()
-
 
 if __name__ == "__main__":
     main()

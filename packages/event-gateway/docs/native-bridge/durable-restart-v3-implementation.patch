@@ -1,5 +1,5 @@
 diff --git a/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json b/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json
-index 5a70f96..4b2482d 100644
+index 5a70f96f1ade7c59c7dfbf73ccba1706a6d651f8..4b2482d5da6991a39205156df18181736efcecc2 100644
 --- a/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json
 +++ b/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json
 @@ -8404,6 +8404,14 @@
@@ -41,7 +41,7 @@ index 5a70f96..4b2482d 100644
          "$schema": "http://json-schema.org/draft-07/schema#",
          "properties": {
 diff --git a/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json b/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json
-index 76c7ae8..6016962 100644
+index 76c7ae81fc776d1f1965182d8d44c7ad79a14d59..60169628f94096637fdcfb115dcb114b5916ed3a 100644
 --- a/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json
 +++ b/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json
 @@ -4260,6 +4260,14 @@
@@ -12307,7 +12307,7 @@ jP`Gx26&a>#Dqsrmtf$h5?1rysN8q9msJSJBqzh0U_%(CW
 
 diff --git a/codex-rs/app-server-protocol/schema/typescript/v2/ClientSelectionUpdateStatus.ts b/codex-rs/app-server-protocol/schema/typescript/v2/ClientSelectionUpdateStatus.ts
 new file mode 100644
-index 0000000..437ecab
+index 0000000000000000000000000000000000000000..437ecab2a9c037bf8ecd3f71caefd2511d61ceb7
 --- /dev/null
 +++ b/codex-rs/app-server-protocol/schema/typescript/v2/ClientSelectionUpdateStatus.ts
 @@ -0,0 +1,5 @@
@@ -12318,7 +12318,7 @@ index 0000000..437ecab
 +export type ClientSelectionUpdateStatus = "updated" | "stale" | "rejected";
 diff --git a/codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartIfIdleNotStartedReason.ts b/codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartIfIdleNotStartedReason.ts
 new file mode 100644
-index 0000000..7ff5a5e
+index 0000000000000000000000000000000000000000..7ff5a5ed943a24b320671036ba5da36435320b30
 --- /dev/null
 +++ b/codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartIfIdleNotStartedReason.ts
 @@ -0,0 +1,5 @@
@@ -12328,7 +12328,7 @@ index 0000000..7ff5a5e
 +
 +export type ThreadStartIfIdleNotStartedReason = "busy" | "serverDraining" | "selectionExpired" | "selectionChanged" | "permitExpired" | "permitInvalid" | "duplicateConflict" | "receiptCapacity" | "connectionClosed" | "threadUnavailable" | "inputInvalid";
 diff --git a/codex-rs/app-server-protocol/schema/typescript/v2/index.ts b/codex-rs/app-server-protocol/schema/typescript/v2/index.ts
-index d0c9fea..c866806 100644
+index d0c9fea6d0be6cf33e0bf1dc5d82096e532f4896..c866806944bac40c747ebc77364bb17426092bcd 100644
 --- a/codex-rs/app-server-protocol/schema/typescript/v2/index.ts
 +++ b/codex-rs/app-server-protocol/schema/typescript/v2/index.ts
 @@ -64,6 +64,7 @@ export type { ChatgptAuthTokensRefreshParams } from "./ChatgptAuthTokensRefreshP
@@ -12348,7 +12348,7 @@ index d0c9fea..c866806 100644
  export type { ThreadStartResponse } from "./ThreadStartResponse";
  export type { ThreadStartSource } from "./ThreadStartSource";
 diff --git a/codex-rs/app-server-protocol/src/protocol/common.rs b/codex-rs/app-server-protocol/src/protocol/common.rs
-index c37c495..6e3c5b2 100644
+index c37c4956f1c3cbf21f293ca2aa41a6fec209bcfa..6e3c5b2239033e7f716cfffeff4be1cd174fbdd4 100644
 --- a/codex-rs/app-server-protocol/src/protocol/common.rs
 +++ b/codex-rs/app-server-protocol/src/protocol/common.rs
 @@ -545,6 +545,13 @@ client_request_definitions! {
@@ -12385,7 +12385,7 @@ index c37c495..6e3c5b2 100644
          params: v2::ThreadResumeParams,
          inspect_params: true,
 diff --git a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
-index 2e166d5..7e62583 100644
+index 2e166d5506b10996e2da286feb6082d6b8711340..7e625830f145f9b567715f31c1f7aa4785f450a2 100644
 --- a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
 +++ b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
 @@ -920,6 +920,134 @@ pub struct ThreadQueueAddResponse {
@@ -12524,7 +12524,7 @@ index 2e166d5..7e62583 100644
  #[serde(rename_all = "camelCase")]
  #[ts(export_to = "v2/")]
 diff --git a/codex-rs/app-server/src/lib.rs b/codex-rs/app-server/src/lib.rs
-index d1a622c..f331158 100644
+index d1a622ca8cc94ab626e8e377333c9d875cd18451..f33115852cde53fd60e265e165424917abc7f38b 100644
 --- a/codex-rs/app-server/src/lib.rs
 +++ b/codex-rs/app-server/src/lib.rs
 @@ -1156,6 +1156,7 @@ pub async fn run_main_with_transport_options(
@@ -12546,7 +12546,7 @@ index d1a622c..f331158 100644
                  futures::future::join_all(connections.iter().map(
                      |(&connection_id, connection_state)| {
 diff --git a/codex-rs/app-server/src/message_processor.rs b/codex-rs/app-server/src/message_processor.rs
-index 9e9a904..66b8acc 100644
+index 9e9a90437b3fddde282a0d05216907d77fa5a745..66b8accc00905fd7d6c7facd4b78b38d0c2729ae 100644
 --- a/codex-rs/app-server/src/message_processor.rs
 +++ b/codex-rs/app-server/src/message_processor.rs
 @@ -37,6 +37,7 @@ use crate::request_processors::MarketplaceRequestProcessor;
@@ -12692,7 +12692,7 @@ index 9e9a904..66b8acc 100644
                  self.outgoing
                      .cancel_user_verification_request(&ConnectionRequestId {
 diff --git a/codex-rs/app-server/src/request_processors.rs b/codex-rs/app-server/src/request_processors.rs
-index 2f4731a..727d654 100644
+index 2f4731ab23c0abecc4b11af387a5539931d5eaed..727d654a2739a24ee5cd54735fb7137bd37f8fa1 100644
 --- a/codex-rs/app-server/src/request_processors.rs
 +++ b/codex-rs/app-server/src/request_processors.rs
 @@ -555,6 +555,7 @@ mod marketplace_processor;
@@ -12713,7 +12713,7 @@ index 2f4731a..727d654 100644
  pub(crate) use projects::ProjectRequestProcessor;
 diff --git a/codex-rs/app-server/src/request_processors/native_selection_processor.rs b/codex-rs/app-server/src/request_processors/native_selection_processor.rs
 new file mode 100644
-index 0000000..8fad71c
+index 0000000000000000000000000000000000000000..8fad71c29d400c230c0c504f5f542b545713e7ee
 --- /dev/null
 +++ b/codex-rs/app-server/src/request_processors/native_selection_processor.rs
 @@ -0,0 +1,1120 @@
@@ -13839,7 +13839,7 @@ index 0000000..8fad71c
 +mod tests;
 diff --git a/codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs b/codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs
 new file mode 100644
-index 0000000..16d6e79
+index 0000000000000000000000000000000000000000..16d6e79f481f14485e7ac2aa33c27c5d93cf77a4
 --- /dev/null
 +++ b/codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs
 @@ -0,0 +1,907 @@
@@ -14751,7 +14751,7 @@ index 0000000..16d6e79
 +    assert!(lock(&receipts).by_delivery.is_empty());
 +}
 diff --git a/codex-rs/app-server/src/request_processors/thread_lifecycle.rs b/codex-rs/app-server/src/request_processors/thread_lifecycle.rs
-index b0fa49b..4b71d64 100644
+index b0fa49b4babcc5802a9968ea26bc230add7cba17..4b71d64419f6b86098db6df1bc4183bfb3a5ea36 100644
 --- a/codex-rs/app-server/src/request_processors/thread_lifecycle.rs
 +++ b/codex-rs/app-server/src/request_processors/thread_lifecycle.rs
 @@ -325,6 +325,9 @@ pub(super) async fn ensure_listener_task_running(
@@ -14765,7 +14765,7 @@ index b0fa49b..4b71d64 100644
                          &event.msg,
                          EventMsg::RawResponseItem(_) | EventMsg::RawResponseCompleted(_)
 diff --git a/codex-rs/app-server/src/thread_state.rs b/codex-rs/app-server/src/thread_state.rs
-index 8cfbc00..3ae22cc 100644
+index 8cfbc00983aa042873cdd70c4b393dcb7d18cbe5..3ae22cc4db55deded6c6fc3501606fb805fe1c14 100644
 --- a/codex-rs/app-server/src/thread_state.rs
 +++ b/codex-rs/app-server/src/thread_state.rs
 @@ -24,6 +24,8 @@ use codex_rollout::state_db::StateDbHandle;
@@ -14823,7 +14823,7 @@ index 8cfbc00..3ae22cc 100644
          &self,
          connection_id: ConnectionId,
 diff --git a/codex-rs/app-server/tests/suite/v2/thread_start.rs b/codex-rs/app-server/tests/suite/v2/thread_start.rs
-index 3fc8a0a..fbfcf92 100644
+index 3fc8a0a2ed183d4d071c400377e18c3bcc62942d..fbfcf925acc158aac23fb53ae8ad0df7b3632f18 100644
 --- a/codex-rs/app-server/tests/suite/v2/thread_start.rs
 +++ b/codex-rs/app-server/tests/suite/v2/thread_start.rs
 @@ -8,6 +8,8 @@ use app_test_support::to_response;
@@ -15255,7 +15255,7 @@ index 3fc8a0a..fbfcf92 100644
      notification.method == "configWarning"
          && notification
 diff --git a/codex-rs/arg0/src/lib.rs b/codex-rs/arg0/src/lib.rs
-index 5bed3b9..90bf055 100644
+index 5bed3b93efda109906a0d12806265688f8d441ed..90bf0553dc3c2b631d717b3b9e92c323520b5110 100644
 --- a/codex-rs/arg0/src/lib.rs
 +++ b/codex-rs/arg0/src/lib.rs
 @@ -58,8 +58,12 @@ impl Arg0PathEntryGuard {
@@ -15332,7 +15332,7 @@ index 5bed3b9..90bf055 100644
  
      // Regular invocation. Run the async entry point on a thread with the same
 diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
-index bdd7771..4cf610a 100644
+index bdd7771b3aadfd69f46698c14844a6d65e1e65ba..4cf610a0507344725499d3d16484a46eb335e725 100644
 --- a/codex-rs/cli/src/main.rs
 +++ b/codex-rs/cli/src/main.rs
 @@ -1011,11 +1011,18 @@ fn stage_str(stage: Stage) -> &'static str {
@@ -15381,7 +15381,7 @@ index bdd7771..4cf610a 100644
      let daemon_cli_executable = arg0_paths
          .codex_self_exe
 diff --git a/codex-rs/core/src/session/mod.rs b/codex-rs/core/src/session/mod.rs
-index e08a0fa..52e057b 100644
+index e08a0fa5a8d55c89bfdb0476fd0831d0b6079fe2..52e057b0e3dab7fd87ee088f66285161d5fe3e09 100644
 --- a/codex-rs/core/src/session/mod.rs
 +++ b/codex-rs/core/src/session/mod.rs
 @@ -187,6 +187,7 @@ use futures::prelude::*;
@@ -15416,7 +15416,7 @@ index e08a0fa..52e057b 100644
          let (is_subagent, is_paginated_subagent) = {
              let state = self.state.lock().await;
 diff --git a/codex-rs/core/src/session/turn_input.rs b/codex-rs/core/src/session/turn_input.rs
-index d9a5c6a..a705f50 100644
+index d9a5c6a30abb5a2410828ba89cfacc2bdaa65332..a705f507fd2f227cd6f725cf960896a6c0b54696 100644
 --- a/codex-rs/core/src/session/turn_input.rs
 +++ b/codex-rs/core/src/session/turn_input.rs
 @@ -42,6 +42,7 @@ use codex_protocol::turn_input::TurnInput as SubmittedTurnInput;
@@ -15521,7 +15521,7 @@ index d9a5c6a..a705f50 100644
  
  async fn steer(
 diff --git a/codex-rs/core/src/session/turn_input_tests.rs b/codex-rs/core/src/session/turn_input_tests.rs
-index e76b3e2..e67b927 100644
+index e76b3e26840285d02e12a918191ecb8cabe70cd2..e67b927c0daed78ee54b060fe3236dec1211e93f 100644
 --- a/codex-rs/core/src/session/turn_input_tests.rs
 +++ b/codex-rs/core/src/session/turn_input_tests.rs
 @@ -22,6 +22,8 @@ use codex_protocol::protocol::InterAgentCommunication;
@@ -15843,7 +15843,7 @@ index e76b3e2..e67b927 100644
      input: SubmittedTurnInput,
 diff --git a/codex-rs/core/src/tasks/guarded_start.rs b/codex-rs/core/src/tasks/guarded_start.rs
 new file mode 100644
-index 0000000..6e79dd0
+index 0000000000000000000000000000000000000000..6e79dd002454cb7b5ac375dd89f009f58f4b397d
 --- /dev/null
 +++ b/codex-rs/core/src/tasks/guarded_start.rs
 @@ -0,0 +1,268 @@
@@ -16116,7 +16116,7 @@ index 0000000..6e79dd0
 +    }
 +}
 diff --git a/codex-rs/core/src/tasks/mod.rs b/codex-rs/core/src/tasks/mod.rs
-index 28a3b54..2d7a35b 100644
+index 28a3b54b1c6fe481407ae5065bf549679d7e0609..2d7a35b63fc0e6d3f3c74f4bcb3575c82058d753 100644
 --- a/codex-rs/core/src/tasks/mod.rs
 +++ b/codex-rs/core/src/tasks/mod.rs
 @@ -1,4 +1,5 @@
@@ -16126,7 +16126,7 @@ index 28a3b54..2d7a35b 100644
  mod regular;
  mod review;
 diff --git a/codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs b/codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs
-index 7361c20..6915111 100644
+index 7361c20c5fb2a2e1724e6a1ca2a82b222be7b6b9..6915111d44b2177b5f8ff2ee19abbf3aa380b87a 100644
 --- a/codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs
 +++ b/codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs
 @@ -11,6 +11,8 @@ use crate::ExtensionData;
@@ -16139,7 +16139,7 @@ index 7361c20..6915111 100644
      RegularTaskStart,
  }
 diff --git a/codex-rs/protocol/src/turn_input.rs b/codex-rs/protocol/src/turn_input.rs
-index e7c17ea..49eb955 100644
+index e7c17ead2fcdc766055de6a1ce4cac7c14bb7db7..49eb955e302afcab9612075c5c9fc08dd825fa25 100644
 --- a/codex-rs/protocol/src/turn_input.rs
 +++ b/codex-rs/protocol/src/turn_input.rs
 @@ -13,6 +13,7 @@ use serde::Serialize;
@@ -16207,7 +16207,7 @@ index e7c17ea..49eb955 100644
  /// How Core should route submitted turn input.
 diff --git a/codex-rs/state/migrations/0059_native_turn_start_receipts.sql b/codex-rs/state/migrations/0059_native_turn_start_receipts.sql
 new file mode 100644
-index 0000000..9cc884d
+index 0000000000000000000000000000000000000000..9cc884d1a4ef65f473691d6876cf34b3fae9bac0
 --- /dev/null
 +++ b/codex-rs/state/migrations/0059_native_turn_start_receipts.sql
 @@ -0,0 +1,27 @@
@@ -16240,7 +16240,7 @@ index 0000000..9cc884d
 +    ON native_turn_start_receipts (delivery_id);
 diff --git a/codex-rs/state/migrations/0060_native_turn_start_bridge_identity.sql b/codex-rs/state/migrations/0060_native_turn_start_bridge_identity.sql
 new file mode 100644
-index 0000000..ee973cb
+index 0000000000000000000000000000000000000000..ee973cb700807a29ce5a97b52217fdb9593f045a
 --- /dev/null
 +++ b/codex-rs/state/migrations/0060_native_turn_start_bridge_identity.sql
 @@ -0,0 +1,5 @@
@@ -16250,7 +16250,7 @@ index 0000000..ee973cb
 +ALTER TABLE native_turn_start_receipts
 +    ADD COLUMN bridge_client_generation TEXT;
 diff --git a/codex-rs/state/src/lib.rs b/codex-rs/state/src/lib.rs
-index be969b0..e11dbcb 100644
+index be969b08cdad261dd4990193c2277bdb68fdae4e..e11dbcb6ca753507c0f60ef00d302a80cffad26a 100644
 --- a/codex-rs/state/src/lib.rs
 +++ b/codex-rs/state/src/lib.rs
 @@ -80,7 +80,11 @@ pub use runtime::GoalAccountingMode;
@@ -16266,7 +16266,7 @@ index be969b0..e11dbcb 100644
  pub use runtime::SqliteIntegrityCheck;
  pub use runtime::SqliteQueueStore;
 diff --git a/codex-rs/state/src/runtime.rs b/codex-rs/state/src/runtime.rs
-index 14fcd2d..12fb104 100644
+index 14fcd2d1678de5237d85b3ae009733514de1126d..12fb10454df87453868de06b9db9f36069a07439 100644
 --- a/codex-rs/state/src/runtime.rs
 +++ b/codex-rs/state/src/runtime.rs
 @@ -45,6 +45,7 @@ mod goals;
@@ -16290,7 +16290,7 @@ index 14fcd2d..12fb104 100644
  pub use recovery::is_sqlite_corruption_error;
 diff --git a/codex-rs/state/src/runtime/native_receipts.rs b/codex-rs/state/src/runtime/native_receipts.rs
 new file mode 100644
-index 0000000..9ab0a84
+index 0000000000000000000000000000000000000000..9ab0a84b65022c8a8050e1a4f875da54fd75a2fa
 --- /dev/null
 +++ b/codex-rs/state/src/runtime/native_receipts.rs
 @@ -0,0 +1,373 @@
@@ -16669,7 +16669,7 @@ index 0000000..9ab0a84
 +mod tests;
 diff --git a/codex-rs/state/src/runtime/native_receipts_tests.rs b/codex-rs/state/src/runtime/native_receipts_tests.rs
 new file mode 100644
-index 0000000..3d1b409
+index 0000000000000000000000000000000000000000..3d1b409dc87a6f651d2e1ad940d2d529e3c3fc9b
 --- /dev/null
 +++ b/codex-rs/state/src/runtime/native_receipts_tests.rs
 @@ -0,0 +1,625 @@
@@ -17299,7 +17299,7 @@ index 0000000..3d1b409
 +    Ok(())
 +}
 diff --git a/codex-rs/tui/src/app.rs b/codex-rs/tui/src/app.rs
-index 37b5c78..34721f4 100644
+index 37b5c788ad9f514e580c8302598abf8f6994bae1..34721f487e15dcb38a384c66397e5562d6ddf6fd 100644
 --- a/codex-rs/tui/src/app.rs
 +++ b/codex-rs/tui/src/app.rs
 @@ -253,6 +253,7 @@ mod resize_reflow;
@@ -17312,7 +17312,7 @@ index 37b5c78..34721f4 100644
  mod session_picker;
 diff --git a/codex-rs/tui/src/app/selection_adoption_tests.rs b/codex-rs/tui/src/app/selection_adoption_tests.rs
 new file mode 100644
-index 0000000..254c51f
+index 0000000000000000000000000000000000000000..254c51f40d5ea5c0d627927269ddb4ae0858f455
 --- /dev/null
 +++ b/codex-rs/tui/src/app/selection_adoption_tests.rs
 @@ -0,0 +1,274 @@
@@ -17592,7 +17592,7 @@ index 0000000..254c51f
 +}
 diff --git a/codex-rs/tui/src/app/selection_binding.rs b/codex-rs/tui/src/app/selection_binding.rs
 new file mode 100644
-index 0000000..fe235fd
+index 0000000000000000000000000000000000000000..fe235fd8503150addec02e1cc5a63bf9d8ef5deb
 --- /dev/null
 +++ b/codex-rs/tui/src/app/selection_binding.rs
 @@ -0,0 +1,186 @@
@@ -17784,7 +17784,7 @@ index 0000000..fe235fd
 +mod tests;
 diff --git a/codex-rs/tui/src/app/selection_binding_tests.rs b/codex-rs/tui/src/app/selection_binding_tests.rs
 new file mode 100644
-index 0000000..1311414
+index 0000000000000000000000000000000000000000..13114145df2b1ac532219ae0022e7618a925db7f
 --- /dev/null
 +++ b/codex-rs/tui/src/app/selection_binding_tests.rs
 @@ -0,0 +1,45 @@
@@ -17835,7 +17835,7 @@ index 0000000..1311414
 +}
 diff --git a/codex-rs/tui/src/app/selection_bridge.rs b/codex-rs/tui/src/app/selection_bridge.rs
 new file mode 100644
-index 0000000..129dcf4
+index 0000000000000000000000000000000000000000..129dcf480c54cb7fa4ab7b4c9a5ae66b21d643b6
 --- /dev/null
 +++ b/codex-rs/tui/src/app/selection_bridge.rs
 @@ -0,0 +1,563 @@
@@ -18404,7 +18404,7 @@ index 0000000..129dcf4
 +mod tests;
 diff --git a/codex-rs/tui/src/app/selection_bridge_tests.rs b/codex-rs/tui/src/app/selection_bridge_tests.rs
 new file mode 100644
-index 0000000..dea010a
+index 0000000000000000000000000000000000000000..dea010a2044b510036555b6c67878d0bb9d1abf4
 --- /dev/null
 +++ b/codex-rs/tui/src/app/selection_bridge_tests.rs
 @@ -0,0 +1,491 @@
@@ -18901,7 +18901,7 @@ index 0000000..dea010a
 +}
 diff --git a/codex-rs/tui/src/app/selection_witness.rs b/codex-rs/tui/src/app/selection_witness.rs
 new file mode 100644
-index 0000000..5ccd86f
+index 0000000000000000000000000000000000000000..5ccd86f1236d6e2c3601172a6ffdc51aeb5d8374
 --- /dev/null
 +++ b/codex-rs/tui/src/app/selection_witness.rs
 @@ -0,0 +1,440 @@
@@ -19347,7 +19347,7 @@ index 0000000..5ccd86f
 +mod adoption_tests;
 diff --git a/codex-rs/tui/src/app/selection_witness_tests.rs b/codex-rs/tui/src/app/selection_witness_tests.rs
 new file mode 100644
-index 0000000..50c3ac1
+index 0000000000000000000000000000000000000000..50c3ac130010614899ae458bd99710841b4f6d60
 --- /dev/null
 +++ b/codex-rs/tui/src/app/selection_witness_tests.rs
 @@ -0,0 +1,233 @@
@@ -19585,7 +19585,7 @@ index 0000000..50c3ac1
 +    assert!(!witness.state.eligible);
 +}
 diff --git a/codex-rs/tui/src/app/startup.rs b/codex-rs/tui/src/app/startup.rs
-index 37add4b..62fb1cd 100644
+index 37add4bcf6658dedc99d2f6bab17209697d875f4..5202321c86e44b12930557b225a75b8270d947d9 100644
 --- a/codex-rs/tui/src/app/startup.rs
 +++ b/codex-rs/tui/src/app/startup.rs
 @@ -1065,10 +1065,21 @@ See the Codex keymap documentation for supported actions and examples."
@@ -19653,17 +19653,20 @@ index 37add4b..62fb1cd 100644
                          if let Some(event) = active {
                              if let Err(err) = app.handle_active_thread_event(tui, &mut app_server, event).await {
                                  break Err(err);
-@@ -1193,6 +1231,9 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1193,6 +1231,12 @@ See the Codex keymap documentation for supported actions and examples."
                      }
                      event = tui_events.next(), if app.pending_thread_switch_resets == 0
                          && (app.reconnect.offline || !block_terminal_input_for_pending_startup_events) => {
-+                        if let Err(error) = selection_witness.revoke_ack(&app_server, "tui-event").await {
++                        // Repaints keep selection; readiness is rechecked before the next bridge tick.
++                        if !matches!(&event, Some(TuiEvent::Draw))
++                            && let Err(error) = selection_witness.revoke_ack(&app_server, "tui-event").await
++                        {
 +                            break Err(error);
 +                        }
                          if let Some(event) = event {
                              if (matches!(
                                  &event,
-@@ -1226,6 +1267,9 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1226,6 +1270,9 @@ See the Codex keymap documentation for supported actions and examples."
                      }
                      app_server_event = app_server.next_event(), if listen_for_app_server_events && !app.reconnect.offline
                          && (matches!(app.app_server_target, AppServerTarget::Embedded) || !has_pending_app_events) => {
@@ -19673,7 +19676,7 @@ index 37add4b..62fb1cd 100644
                          match app_server_event {
                              Some(event) => app.handle_app_server_event(&app_server, event).await,
                              None => {
-@@ -1237,10 +1281,14 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1237,10 +1284,14 @@ See the Codex keymap documentation for supported actions and examples."
                          AppRunControl::Continue
                      }
                      result = async { match reconnect.as_mut() { Some(future) => future.await, None => std::future::pending().await } }, if reconnect.is_some() && !has_pending_app_events => {
@@ -19688,7 +19691,7 @@ index 37add4b..62fb1cd 100644
                                  listen_for_app_server_events = true;
                                  waiting_for_initial_session_configured = false;
                              }
-@@ -1263,6 +1311,9 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1263,6 +1314,9 @@ See the Codex keymap documentation for supported actions and examples."
                              None => std::future::pending().await,
                          }
                      }, if listen_for_app_server_events => {
@@ -19698,7 +19701,7 @@ index 37add4b..62fb1cd 100644
                          app.refresh_rate_limits(&app_server, RateLimitRefreshOrigin::Periodic);
                          AppRunControl::Continue
                      }
-@@ -1274,6 +1325,9 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1274,6 +1328,9 @@ See the Codex keymap documentation for supported actions and examples."
                              None => std::future::pending().await,
                          }
                      } => {
@@ -19708,7 +19711,7 @@ index 37add4b..62fb1cd 100644
                          app.chat_widget.refresh_goal_status_indicator_for_time_tick();
                          app.chat_widget.refresh_thread_title_progress_for_time_tick();
                          app.chat_widget.refresh_terminal_title();
-@@ -1287,6 +1341,9 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1287,6 +1344,9 @@ See the Codex keymap documentation for supported actions and examples."
                              None => std::future::pending().await,
                          }
                      }, if !has_pending_app_events => {
@@ -19718,7 +19721,7 @@ index 37add4b..62fb1cd 100644
                          crate::session_log::log_commit_tick();
                          app.chat_widget.on_commit_tick();
                          AppRunControl::Continue
-@@ -1298,6 +1355,12 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1298,6 +1358,12 @@ See the Codex keymap documentation for supported actions and examples."
                  ) {
                      waiting_for_initial_session_configured = false;
                      let had_active_modal = app.chat_widget.has_active_modal();
@@ -19731,7 +19734,7 @@ index 37add4b..62fb1cd 100644
                      if let Err(err) = app.drain_active_thread_events(tui).await {
                          break Err(err);
                      }
-@@ -1332,6 +1395,13 @@ See the Codex keymap documentation for supported actions and examples."
+@@ -1332,6 +1398,13 @@ See the Codex keymap documentation for supported actions and examples."
                  }
              }
          };
@@ -19746,7 +19749,7 @@ index 37add4b..62fb1cd 100644
              tracing::warn!(error = %err, "failed to shut down embedded app server");
          }
 diff --git a/codex-rs/tui/src/chatwidget/input_restore.rs b/codex-rs/tui/src/chatwidget/input_restore.rs
-index e1a798b..c18fbbf 100644
+index e1a798b522b62c05c1d0007ec5a668b12154e70f..c18fbbf25013658e4e17cbe1d243d400509ce451 100644
 --- a/codex-rs/tui/src/chatwidget/input_restore.rs
 +++ b/codex-rs/tui/src/chatwidget/input_restore.rs
 @@ -99,6 +99,15 @@ impl ChatWidget {
@@ -19767,7 +19770,7 @@ index e1a798b..c18fbbf 100644
          self.bottom_pane.has_pending_approval() || self.interrupts.has_pending_prompt()
 diff --git a/codex-rs/tui/src/inherited_bridge.rs b/codex-rs/tui/src/inherited_bridge.rs
 new file mode 100644
-index 0000000..27654f6
+index 0000000000000000000000000000000000000000..27654f6ac39fa11be567505ad9449e131c82c0e1
 --- /dev/null
 +++ b/codex-rs/tui/src/inherited_bridge.rs
 @@ -0,0 +1,212 @@
@@ -19984,7 +19987,7 @@ index 0000000..27654f6
 +    Ok(())
 +}
 diff --git a/codex-rs/tui/src/lib.rs b/codex-rs/tui/src/lib.rs
-index 2697cba..7041018 100644
+index 2697cbabd8ded4d7013f7534453971bc9791739b..7041018e35e636bb85be862430b84ab761772c38 100644
 --- a/codex-rs/tui/src/lib.rs
 +++ b/codex-rs/tui/src/lib.rs
 @@ -102,6 +102,10 @@ pub(crate) use worktree_startup::ManagedTuiWorktree;
@@ -20007,7 +20010,7 @@ index 2697cba..7041018 100644
      startup_recovery::scope(async move {
          // Startup retains a large future for the whole session. Keep it off callers' stacks,
 diff --git a/codex-rs/tui/src/main.rs b/codex-rs/tui/src/main.rs
-index 5a196d6..238c8d7 100644
+index 5a196d614a92b240758962ce0f07dfa60d8497be..238c8d71f9ac0d2dc6b0d925be632b6f1e231932 100644
 --- a/codex-rs/tui/src/main.rs
 +++ b/codex-rs/tui/src/main.rs
 @@ -19,8 +19,11 @@ struct TopCli {
@@ -20024,7 +20027,7 @@ index 5a196d6..238c8d7 100644
          let mut inner = top_cli.inner;
          inner
 diff --git a/codex-rs/utils/pty/src/lib.rs b/codex-rs/utils/pty/src/lib.rs
-index c2a0629..adb76b3 100644
+index c2a0629156831c134a55044512f6a59ea64e4136..adb76b3a0706479f57d0b335dc93da5981335bbe 100644
 --- a/codex-rs/utils/pty/src/lib.rs
 +++ b/codex-rs/utils/pty/src/lib.rs
 @@ -65,6 +65,8 @@ mod spawn_helper;
@@ -20037,7 +20040,7 @@ index c2a0629..adb76b3 100644
  #[path = "spawn_helper_tests.rs"]
  mod spawn_helper_tests;
 diff --git a/codex-rs/utils/pty/src/spawn_helper.rs b/codex-rs/utils/pty/src/spawn_helper.rs
-index 488a5c5..4bef2d3 100644
+index 488a5c511349ed76cf7cd5bbf4e0c9793abd9ec2..4bef2d37ae3081e14c03b1afcee80a5d3edcd935 100644
 --- a/codex-rs/utils/pty/src/spawn_helper.rs
 +++ b/codex-rs/utils/pty/src/spawn_helper.rs
 @@ -40,6 +40,14 @@ const HELPER_EXE: &str = "/proc/self/exe";
@@ -20064,7 +20067,7 @@ index 488a5c5..4bef2d3 100644
      }
      if std::fs::metadata(HELPER_EXE).is_ok() {
 diff --git a/sdk/python/src/openai_codex/generated/v2_all.py b/sdk/python/src/openai_codex/generated/v2_all.py
-index 4d7d54a..b4bc474 100644
+index 4d7d54aeb4b849e7446fce17c3c00a1cfdd09edc..b4bc4740f4a6cba2dd7b4e1a342b49d28192ae37 100644
 --- a/sdk/python/src/openai_codex/generated/v2_all.py
 +++ b/sdk/python/src/openai_codex/generated/v2_all.py
 @@ -538,6 +538,12 @@ class ClientInfo(BaseModel):
