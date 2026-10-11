@@ -91,10 +91,16 @@ class NativeHostQualificationTests(unittest.TestCase):
                 self.assertEqual(trace[phase + "ConfigSha256"], hashlib.sha256(data).hexdigest())
 
     def test_launch_always_wraps_inner_unsandboxed_config(self):
-        argv = QUALIFIER.launch_argv("/tmp/profile.sb", "/tmp/cache", "/tmp/state", "/tmp/codex", "/tmp/root")
-        self.assertEqual(argv[:3], ["/usr/bin/sandbox-exec", "-f", "/tmp/profile.sb"])
-        self.assertIn("-I", argv)
-        self.assertEqual(argv[argv.index("--binary-sha256") + 1], QUALIFIER.CLI_SHA)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            profile, cache, state, binary = (root / name for name in ("profile.sb", "cache", "state", "codex"))
+            argv = QUALIFIER.launch_argv(profile, cache, state, binary, root)
+            self.assertEqual(argv[:3], ["/usr/bin/sandbox-exec", "-f", str(profile)])
+            self.assertIn("-I", argv)
+            self.assertIn(f"pycache_prefix={cache}", argv)
+            for flag, value in (("--state-dir", state), ("--codex-binary", binary), ("--cwd", root)):
+                self.assertEqual(argv[argv.index(flag) + 1], str(value))
+            self.assertEqual(argv[argv.index("--binary-sha256") + 1], QUALIFIER.CLI_SHA)
 
     def test_profile_denies_external_network_and_protects_real_home(self):
         with tempfile.TemporaryDirectory() as directory:
