@@ -47,8 +47,10 @@ class ExportPinTests(unittest.TestCase):
             # Resolved executable, fixed arguments, no shell; read this checkout revision.
             pin["revision"] = subprocess.check_output([git, "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()  # nosec B603
             for name in pin["sources"]:
-                (source / Path(name).name).write_text("export const harmless = true;\n")
-                pin["sources"][name] = hashlib.sha256((source / Path(name).name).read_bytes()).hexdigest()
+                source_path = source / name.removeprefix("apps/os/packages/event-runtime/src/")
+                source_path.parent.mkdir(parents=True, exist_ok=True)
+                source_path.write_text("export const harmless = true;\n")
+                pin["sources"][name] = hashlib.sha256(source_path.read_bytes()).hexdigest()
             dependency = scratch / "zod"
             dependency.mkdir()
             (dependency / "package.json").write_text(json.dumps({"version": pin["zodVersion"]}))

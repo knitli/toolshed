@@ -1009,6 +1009,953 @@
       }
     }
   },
+  "githubSourceRead": {
+    "request": {
+      "subject": {
+        "installationId": 1,
+        "repositoryId": 2,
+        "prNumber": 3
+      },
+      "fromVersion": 2,
+      "toVersion": 3
+    },
+    "requests": [
+      {
+        "name": "first-page",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "accepted": true
+      },
+      {
+        "name": "continuation",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "fromVersion": 2,
+          "toVersion": 3,
+          "cursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          }
+        },
+        "accepted": true
+      },
+      {
+        "name": "safe-integer-limit",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "fromVersion": 2,
+          "toVersion": 9007199254740991
+        },
+        "accepted": true
+      },
+      {
+        "name": "unicode-cursor-limit",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "fromVersion": 2,
+          "toVersion": 3,
+          "cursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+            "policyRevision": "p1",
+            "offset": 1
+          }
+        },
+        "accepted": true
+      },
+      {
+        "name": "boolean-identity",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": true,
+            "prNumber": 3
+          },
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "accepted": false
+      },
+      {
+        "name": "unsafe-integer",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "fromVersion": 2,
+          "toVersion": 9007199254740992
+        },
+        "accepted": false
+      },
+      {
+        "name": "reversed-range",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "fromVersion": 4,
+          "toVersion": 3
+        },
+        "accepted": false
+      },
+      {
+        "name": "unknown-request-field",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "fromVersion": 2,
+          "toVersion": 3,
+          "providerBody": "private"
+        },
+        "accepted": false
+      },
+      {
+        "name": "negative-cursor-offset",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "fromVersion": 2,
+          "toVersion": 3,
+          "cursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": -1
+          }
+        },
+        "accepted": false
+      },
+      {
+        "name": "unicode-cursor-over-limit",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "fromVersion": 2,
+          "toVersion": 3,
+          "cursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+            "policyRevision": "p1",
+            "offset": 1
+          }
+        },
+        "accepted": false
+      }
+    ],
+    "results": [
+      {
+        "name": "retained-anchor-page",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "terminal",
+              "recordKey": "state",
+              "value": {
+                "from": null,
+                "to": "open"
+              }
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": false
+        },
+        "accepted": true
+      },
+      {
+        "name": "complete-page",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "terminal",
+              "recordKey": "state",
+              "value": {
+                "from": null,
+                "to": "open"
+              }
+            }
+          ],
+          "nextCursor": null,
+          "complete": true
+        },
+        "accepted": true
+      },
+      {
+        "name": "coverage-unavailable",
+        "value": {
+          "status": "coverage_unavailable"
+        },
+        "accepted": true
+      },
+      {
+        "name": "conflict",
+        "value": {
+          "status": "conflict"
+        },
+        "accepted": true
+      },
+      {
+        "name": "unknown-result-field",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "terminal",
+              "recordKey": "state",
+              "value": {
+                "from": null,
+                "to": "open"
+              }
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": false,
+          "providerBody": "private"
+        },
+        "accepted": false
+      },
+      {
+        "name": "completion-cursor-conflict",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "terminal",
+              "recordKey": "state",
+              "value": {
+                "from": null,
+                "to": "open"
+              }
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": true
+        },
+        "accepted": false
+      },
+      {
+        "name": "future-observation-epoch",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 3,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "terminal",
+              "recordKey": "state",
+              "value": {
+                "from": null,
+                "to": "open"
+              }
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "anchor-item-epoch-mismatch",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 2,
+              "recordType": "terminal",
+              "recordKey": "state",
+              "value": {
+                "from": null,
+                "to": "open"
+              }
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "cursor-observation-epoch-mismatch",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "terminal",
+              "recordKey": "state",
+              "value": {
+                "from": null,
+                "to": "open"
+              }
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 2,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "unknown-item-field",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "terminal",
+              "recordKey": "state",
+              "value": {
+                "from": null,
+                "to": "open"
+              },
+              "providerBody": "private"
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "invalid-terminal-state",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "terminal",
+              "recordKey": "state",
+              "value": {
+                "from": null,
+                "to": "deleted"
+              }
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "version-projection",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "version",
+              "recordKey": "state",
+              "value": {
+                "complete": true,
+                "observedAt": 0,
+                "candidateGeneration": 0,
+                "coverageStartVersion": 1,
+                "candidate": {
+                  "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "baseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "observedMergeSha": null
+                },
+                "state": "open"
+              }
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": false
+        },
+        "accepted": true
+      },
+      {
+        "name": "finding-projection",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "finding",
+              "recordKey": "state",
+              "value": {
+                "sourceId": "review:1",
+                "from": null,
+                "to": {
+                  "presence": "present",
+                  "kind": "review",
+                  "sourceHeadSha": null,
+                  "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "disposition": "open",
+                  "outdated": false
+                }
+              }
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": false
+        },
+        "accepted": true
+      },
+      {
+        "name": "request-projection",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "request",
+              "recordKey": "state",
+              "value": {
+                "kind": "review_request",
+                "identity": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+                "from": null,
+                "to": "present"
+              }
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": false
+        },
+        "accepted": true
+      },
+      {
+        "name": "run-projection",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "run",
+              "recordKey": "state",
+              "value": {
+                "from": null,
+                "to": {
+                  "presence": "present",
+                  "kind": "workflow",
+                  "sourceId": "1",
+                  "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "attempt": 1,
+                  "status": "completed",
+                  "conclusion": "success",
+                  "startedAt": 0,
+                  "completedAt": 1,
+                  "workflowId": 1,
+                  "runNumber": 1
+                }
+              }
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": false
+        },
+        "accepted": true
+      },
+      {
+        "name": "projected-provider-metadata",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordKey": "state",
+              "recordType": "terminal",
+              "value": {
+                "from": null,
+                "to": "open"
+              }
+            }
+          ],
+          "nextCursor": {
+            "subjectKey": "[1,2,3]",
+            "fromVersion": 2,
+            "toVersion": 3,
+            "anchorVersion": 4,
+            "anchorEpoch": 2,
+            "observationEpoch": 1,
+            "revision": "r1",
+            "policyRevision": "p1",
+            "offset": 1
+          },
+          "complete": false
+        },
+        "accepted": true
+      },
+      {
+        "name": "response-byte-limit",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "coverageStartVersion": 1,
+          "anchor": {
+            "sourceVersion": 4,
+            "epoch": 2,
+            "observationEpoch": 1,
+            "observedAt": 0
+          },
+          "items": [
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "terminal",
+              "recordKey": "0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              "value": {
+                "from": null,
+                "to": "open"
+              }
+            },
+            {
+              "phase": "anchor",
+              "sourceVersion": 4,
+              "epoch": 1,
+              "recordType": "terminal",
+              "recordKey": "1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              "value": {
+                "from": null,
+                "to": "open"
+              }
+            }
+          ],
+          "nextCursor": null,
+          "complete": true
+        },
+        "accepted": false
+      }
+    ]
+  },
   "noStartNodeProof": {
     "principal": "adam@knitli.com",
     "binding": {

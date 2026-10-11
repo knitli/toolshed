@@ -63,6 +63,30 @@ class SourceReadTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(CloudError, "^invalid_response$"):
             await self.client.github_source_read(REQUEST)
 
+    async def test_pinned_cloud_request_vectors(self):
+        corpus = json.loads((Path(__file__).resolve().parents[1] /
+            "contracts/event-control-v1/fixtures.json").read_text())["githubSourceRead"]
+        for vector in corpus["requests"]:
+            with self.subTest(vector=vector["name"]):
+                if vector["accepted"]:
+                    self.assertEqual(_github_source_request(vector["value"]), vector["value"])
+                else:
+                    with self.assertRaisesRegex(CloudError, "^invalid_request$"):
+                        await self.client.github_source_read(vector["value"])
+        self.credentials.assert_not_called()
+        self.assertFalse(self.requests)
+
+    async def test_pinned_cloud_result_vectors(self):
+        corpus = json.loads((Path(__file__).resolve().parents[1] /
+            "contracts/event-control-v1/fixtures.json").read_text())["githubSourceRead"]
+        for vector in corpus["results"]:
+            self.result = vector["value"]
+            with self.subTest(vector=vector["name"]):
+                if vector["accepted"]:
+                    self.assertEqual(await self.client.github_source_read(corpus["request"]), vector["value"])
+                else:
+                    with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+                        await self.client.github_source_read(corpus["request"])
 
     async def test_signed_one_page_and_continuation(self):
         self.assertEqual(await self.client.github_source_read(REQUEST), PAGE)
