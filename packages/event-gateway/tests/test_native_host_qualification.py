@@ -180,15 +180,18 @@ class ForegroundOperationTests(unittest.TestCase):
             with self.subTest(failure=failure):
                 release, entered, returned = (threading.Event() for _ in range(3))
                 workers, calls, errors = [], [], []
+
                 def operation(*args):
                     workers.append(threading.current_thread())
                     calls.append(args)
                     entered.set()
                     release.wait()
+
                 def drain(*_):
                     if failure == 'drain-error':
                         raise OSError('drain failed')
                     returned.wait(0.001)
+
                 def invoke():
                     try:
                         QUALIFIER.foreground_operation(
@@ -251,14 +254,17 @@ class GitHubQualificationWiringTests(unittest.TestCase):
             server = SimpleNamespace(server_port=1234, requests=[], main_requests=[],
                                      title_requests=[], errors=[], trace={})
             selected = (root / ('c-' + str(uuid4()) + '.sock'), {}, binding, {})
+
             def config(root, _port):
                 home = root / 'codex-home'
                 home.mkdir()
                 (home / 'config.toml').write_text('model="mock-astra"\n')
                 return home
+
             @contextmanager
             def foreground(*_):
                 yield process, 7
+
             def operation(_state, _session, _binding, command, request):
                 turn = request['clientUserMessageId']
                 if command == 'nativeStart':
@@ -268,11 +274,13 @@ class GitHubQualificationWiringTests(unittest.TestCase):
                     return {'outcome': {'status': 'started', 'turnId': turn}}
                 self.assertEqual(command, 'nativeReceipt')
                 return {'outcome': {'status': 'inputRecorded', 'turnId': turn}}
+
             def prepare(source, nonce, package_source, installed_helper):
                 self.assertEqual(package_source, args.package_source)
                 self.assertEqual(installed_helper, 'verified-installed-helper')
                 source.write_text('retained:' + nonce)
                 return 'synthetic-github-program'
+
             def verify(requests, nonce, source, base_verify):
                 self.assertIs(requests, server.main_requests)
                 self.assertIs(base_verify, QUALIFIER.verify_output)
