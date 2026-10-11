@@ -85,7 +85,7 @@ class ContractWorkflowTests(unittest.TestCase):
             metadata = json.loads(archive.read("metadata.json"))
         self.assertEqual(list(POLICY["FAMILIES"]), metadata["families"])
         self.assertEqual(set(metadata["snapshots"]), {
-            "legacy", "no-start", "native-start", "native-input-recorded", "native-admission", "native-runtime-status",
+            "legacy", "no-start", "native-start", "native-input-recorded", "native-admission", "native-runtime-status", "github-source-readback",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         for expected in metadata["families"]:
@@ -102,6 +102,13 @@ class ContractWorkflowTests(unittest.TestCase):
 
     def test_native_runtime_status_mutation_or_omission_rejected_for_all_required_blobs(self):
         self.assert_mutation_or_omission_rejected("native-runtime-status")
+
+    def test_github_source_readback_mutation_or_omission_rejected_for_all_required_blobs(self):
+        self.assert_mutation_or_omission_rejected("github-source-readback")
+
+    def test_github_source_readback_accepted_with_all_authorized_hashes(self):
+        self.blobs = self.approved_snapshot("github-source-readback")
+        self.assertEqual(self.verify(), "github-source-readback")
 
     def assert_mutation_or_omission_rejected(self, name):
         # PATHS explicitly includes both control fixtures.json and manifest.json.
@@ -126,7 +133,17 @@ class ContractWorkflowTests(unittest.TestCase):
             "native-runtime-status", "7675f40a4053795de03458c2741da4e3a475ce29",
             ("native-runtime-store", "native-admission-gate"))
 
-    def assert_manifest_source_provenance(self, name, control_revision, additional_sources=()):
+    def test_github_source_readback_manifest_source_provenance(self):
+        self.assert_manifest_source_provenance(
+            "github-source-readback", "7d738a387cdbaab795e1538a240c1b85b6b7a0f7",
+            ("native-runtime-store", "native-admission-gate", "github/readback-contract",
+             "read-authority", "request-deadline", "github/host", "github/controller",
+             "github/client", "github/grants", "github/state", "github/ingress"),
+            ("apps/os/packages/gatekeeper-memory/src/principals.ts",
+             "apps/os/packages/openapi-operator/src/access.ts",
+             "apps/os/packages/gatekeeper-messaging/src/agent-token.ts"))
+
+    def assert_manifest_source_provenance(self, name, control_revision, additional_sources=(), external_sources=()):
         # This proves fixture provenance separately from the verifier's raw snapshot hash gate.
         blobs = self.approved_snapshot(name)
         event = json.loads(blobs[SNAPSHOT + "event-v1/manifest.json"])
@@ -141,7 +158,7 @@ class ContractWorkflowTests(unittest.TestCase):
         control_paths = {source_root + "src/" + source + ".ts" for source in (
             "contracts", "api", "registry", "coordinator", "coordinator-admission",
             "authority-client", "protocol", "policy", "native-admission-contract",
-        ) + additional_sources}
+        ) + additional_sources} | set(external_sources)
         self.assertEqual({entry["originalPath"] for entry in event["files"]}, event_paths)
         self.assertEqual(len(event["files"]), len(event_paths))
         self.assertEqual(set(control["sources"]), control_paths)

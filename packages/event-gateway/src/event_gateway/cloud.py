@@ -167,7 +167,8 @@ def _runtime_status_response(value, runtime_id):
 
 
 def _github_text(value, limit):
-    return isinstance(value, str) and len(value.encode("utf-16-le", "surrogatepass")) // 2 <= limit
+    # Pinned Zod 4.5.4 string limits count Unicode code points.
+    return isinstance(value, str) and len(value) <= limit
 
 
 def _github_cursor(value, request, *, code):

@@ -120,7 +120,17 @@ jobs:
                       'event-v1/protocol-v1.json': 'bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3',
                       'event-v1/manifest.json': '87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f',
                       'event-control-v1/fixtures.json': 'a5dca38202380f31950ff0e7f06aa5ff97eee872d7538e83e4f56bea5e7cad82',
-                      'event-control-v1/manifest.json': '65bc6e08a08bae820d6291509bd2efea001cd0a715305dbd8384fd884b9d1c66'}})
+                      'event-control-v1/manifest.json': '65bc6e08a08bae820d6291509bd2efea001cd0a715305dbd8384fd884b9d1c66'}},
+          {'name': 'github-source-readback',
+           'eventRevision': 'ed23882eac491e26e070e3ef26cf8c0e9e702b38',
+           'controlRevision': '7d738a387cdbaab795e1538a240c1b85b6b7a0f7',
+           'hashes': {'event-v1/protocol.schema.json': '583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38',
+                      'event-v1/protocol.ts': 'c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34',
+                      'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+                      'event-v1/protocol-v1.json': 'bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3',
+                      'event-v1/manifest.json': '87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f',
+                      'event-control-v1/fixtures.json': 'a337d1d2dbdf44a72bc41607e04bc5744886c130bafc6a9282438b81570e68bb',
+                      'event-control-v1/manifest.json': '8e18aca5e868d50b9fc4f1024ccfcab49224d615427577f6181184cc2875ec90'}})
 
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
