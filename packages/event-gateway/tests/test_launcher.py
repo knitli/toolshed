@@ -272,7 +272,7 @@ class LauncherTests(unittest.TestCase):
     def test_environment_injection_and_unknown_digest_are_rejected(self):
         for key in ("LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "CODEX_NATIVE_BRIDGE_FD",
                     "CODEX_NATIVE_BRIDGE_RECEIPT_VERSION", "CODEX_SELECTION_WITNESS_FD",
-                    "CODEX_BRIDGE_ADOPTION_PROBE"):
+                    "CODEX_BRIDGE_ADOPTION_PROBE", "CODEX_CODE_MODE_HOST"):
             with self.subTest(key=key), self.assertRaisesRegex(launcher.LaunchError, "unsafe_launch_environment"):
                 launcher.launch_environment({key: ""})
         original = {"HOME": "/owner", "CODEX_HOME": "/explicit"}
@@ -342,7 +342,11 @@ class LauncherTests(unittest.TestCase):
             binary.write_bytes(b"qualified fixture")
             binary.chmod(0o700)
             digest = hashlib.sha256(binary.read_bytes()).hexdigest()
-            with patch.object(launcher, "QUALIFIED_SHA256", digest):
+            companion = root / "codex-code-mode-host"
+            companion.write_bytes(binary.read_bytes())
+            companion.chmod(0o700)
+            with (patch.object(launcher, "QUALIFIED_SHA256", digest),
+                  patch.object(launcher, "QUALIFIED_CODE_MODE_HOST_SHA256", digest)):
                 self.assertEqual(launcher.qualified_binary(binary, digest), binary)
                 with self.assertRaises(FileNotFoundError):
                     launcher.qualified_binary(root / "missing", digest)
@@ -358,6 +362,86 @@ class LauncherTests(unittest.TestCase):
                 with self.assertRaisesRegex(launcher.LaunchError, "native_binary_hash_mismatch"):
                     launcher.qualified_binary(binary, digest)
 
+    def test_companion_requires_exact_sibling_and_shared_file_safety(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            binary = root / "codex"
+            binary.write_bytes(b"cli")
+            binary.chmod(0o700)
+            host = root / "codex-code-mode-host"
+            digest = hashlib.sha256(b"cli").hexdigest()
+            host_digest = hashlib.sha256(b"host").hexdigest()
+            with (patch.object(launcher, "QUALIFIED_SHA256", digest),
+                  patch.object(launcher, "QUALIFIED_CODE_MODE_HOST_SHA256", host_digest)):
+                with self.assertRaises(FileNotFoundError):
+                    launcher.qualified_binary(binary, digest)
+                host.write_bytes(b"host")
+                for mode in (0o600, 0o722, 0o777):
+                    host.chmod(mode)
+                    with self.subTest(mode=mode), self.assertRaisesRegex(
+                            launcher.LaunchError, "unsafe_native_binary"):
+                        launcher.qualified_binary(binary, digest)
+                host.chmod(0o700)
+                self.assertEqual(launcher.qualified_binary(binary, digest), binary)
+                real_fstat = launcher.os.fstat
+                host_inode = host.stat().st_ino
+
+                def foreign_host_owner(descriptor):
+                    info = real_fstat(descriptor)
+                    if info.st_ino == host_inode:
+                        return Mock(st_mode=info.st_mode, st_uid=launcher.os.getuid() + 1)
+                    return info
+
+                with (patch.object(launcher.os, "fstat", side_effect=foreign_host_owner),
+                      self.assertRaisesRegex(launcher.LaunchError, "unsafe_native_binary")):
+                    launcher.qualified_binary(binary, digest)
+                root.chmod(0o777)
+                with self.assertRaisesRegex(launcher.LaunchError, "unsafe_native_binary"):
+                    launcher.qualified_binary(binary, digest)
+                root.chmod(0o700)
+                alias = root / "linked-parent"
+                alias.symlink_to(root, target_is_directory=True)
+                with self.assertRaisesRegex(launcher.LaunchError, "unsafe_native_binary"):
+                    launcher.qualified_binary(alias / binary.name, digest)
+                host.write_bytes(b"other")
+                with self.assertRaisesRegex(launcher.LaunchError, "native_binary_hash_mismatch"):
+                    launcher.qualified_binary(binary, digest)
+                host.unlink()
+                host.symlink_to(binary)
+                with self.assertRaisesRegex(launcher.LaunchError, "unsafe_native_binary"):
+                    launcher.qualified_binary(binary, digest)
+                host.unlink()
+                host.mkdir()
+                with self.assertRaisesRegex(launcher.LaunchError, "unsafe_native_binary"):
+                    launcher.qualified_binary(binary, digest)
+                host.rmdir()
+                launcher.os.mkfifo(host, 0o700)
+                with self.assertRaisesRegex(launcher.LaunchError, "unsafe_native_binary"):
+                    launcher.qualified_binary(binary, digest)
+
+    def test_package_resource_layout_cannot_redirect_qualified_host(self):
+        for layout in ("bin", "codex-resources", "CodexCLI.app/Contents/MacOS", "plain"):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                folder = root / layout
+                folder.mkdir(parents=True)
+                binary = folder / "codex"
+                host = folder / "codex-code-mode-host"
+                for path in (binary, host):
+                    path.write_bytes(b"fixture")
+                    path.chmod(0o700)
+                digest = hashlib.sha256(b"fixture").hexdigest()
+                if layout == "plain":
+                    resource = folder / "codex-resources"
+                    resource.mkdir()
+                    (resource / host.name).write_bytes(b"unreviewed")
+                else:
+                    (root / "codex-package.json").write_text("{}")
+                with (patch.object(launcher, "QUALIFIED_SHA256", digest),
+                      patch.object(launcher, "QUALIFIED_CODE_MODE_HOST_SHA256", digest),
+                      self.assertRaisesRegex(launcher.LaunchError, "unsafe_native_binary_layout")):
+                    launcher.qualified_binary(binary, digest)
+
     def test_promoted_digest_requires_both_reviewed_pin_and_opened_binary_hash(self):
         promoted = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
         superseded = "9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5"
@@ -367,6 +451,9 @@ class LauncherTests(unittest.TestCase):
             binary = Path(directory).resolve() / "codex"
             binary.write_bytes(b"release digest fixture")
             binary.chmod(0o700)
+            companion = binary.with_name("codex-code-mode-host")
+            companion.write_bytes(b"host fixture")
+            companion.chmod(0o700)
             for supplied, actual, error in (
                 (superseded, superseded, "unqualified_native_binary"),
                 (superseded, promoted, "unqualified_native_binary"),
@@ -382,6 +469,9 @@ class LauncherTests(unittest.TestCase):
                 def file_digest(stream, algorithm):
                     self.assertEqual(algorithm, "sha256")
                     self.assertTrue(stat.S_ISREG(launcher.os.fstat(stream.fileno()).st_mode))
+                    if stream.read() == b"host fixture":
+                        return Mock(hexdigest=Mock(return_value=launcher.QUALIFIED_CODE_MODE_HOST_SHA256))
+                    stream.seek(0)
                     self.assertEqual(stream.read(), b"release digest fixture")
                     return Mock(hexdigest=Mock(return_value=actual))
 
@@ -393,7 +483,7 @@ class LauncherTests(unittest.TestCase):
                             launcher.qualified_binary(binary, supplied)
                     else:
                         self.assertEqual(launcher.qualified_binary(binary, supplied), binary)
-                    self.assertEqual(digest.call_count, int(supplied == promoted))
+                    self.assertEqual(digest.call_count, int(supplied == promoted) + int(error is None))
 
     def test_exit_observer_never_reaps(self):
         stop = Mock()

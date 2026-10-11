@@ -24,6 +24,7 @@ from .security import ensure_private_directory
 
 # Exact clean-build executable qualified by the native release checkpoint.
 QUALIFIED_SHA256 = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
+QUALIFIED_CODE_MODE_HOST_SHA256 = "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a"
 BINDING_FIELDS = (
     "clientId", "connectionId", "backendPid", "threadId", "generation",
     "serverInstanceId", "serverGeneration",
@@ -45,7 +46,7 @@ class LaunchError(ValueError):
 def launch_environment(environment):
     """Keep user Codex configuration, refusing injected native/loader authority."""
     if any(key.startswith(("LD_", "DYLD_", "CODEX_NATIVE_BRIDGE_", "CODEX_BRIDGE_ADOPTION_"))
-           or key == "CODEX_SELECTION_WITNESS_FD" for key in environment):
+           or key in ("CODEX_SELECTION_WITNESS_FD", "CODEX_CODE_MODE_HOST") for key in environment):
         raise LaunchError("unsafe_launch_environment")
     return dict(environment)
 
@@ -55,6 +56,23 @@ def qualified_binary(binary, digest):
     binary = Path(binary)
     if not binary.is_absolute() or digest != QUALIFIED_SHA256:
         raise LaunchError("unqualified_native_binary")
+    _qualified_executable(binary, digest)
+    companion = binary.with_name("codex-code-mode-host")
+    _qualified_executable(companion, QUALIFIED_CODE_MODE_HOST_SHA256)
+    # Pinned InstallContext prefers package resources; admit only sibling layouts.
+    directory = binary.parent
+    package = directory.parent if directory.name in ("bin", "codex-resources") else None
+    if (directory.name == "MacOS" and directory.parent.name == "Contents"
+            and directory.parent.parent.name == "CodexCLI.app"):
+        package = directory.parent.parent.parent
+    if ((package is not None and (package / "codex-package.json").exists())
+            or (directory / "codex-resources" / companion.name).exists()):
+        raise LaunchError("unsafe_native_binary_layout")
+    return binary
+
+
+def _qualified_executable(binary, digest):
+    """Apply the same filesystem and content checks to each native executable."""
     if any(part.is_symlink() for part in (binary, *binary.parents)):
         raise LaunchError("unsafe_native_binary")
     for directory in binary.parents:
@@ -65,14 +83,17 @@ def qualified_binary(binary, digest):
         if (info.st_uid not in (0, os.getuid())
                 or (info.st_mode & 0o022 and not sticky_root)):
             raise LaunchError("unsafe_native_binary")
-    with binary.open("rb") as stream:
-        info = os.fstat(stream.fileno())
+    descriptor = os.open(binary, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(descriptor)
         if (not stat.S_ISREG(info.st_mode) or info.st_mode & 0o022
                 or info.st_uid not in (0, os.getuid()) or not info.st_mode & 0o111):
             raise LaunchError("unsafe_native_binary")
-        if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
-            raise LaunchError("native_binary_hash_mismatch")
-    return binary
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
+                raise LaunchError("native_binary_hash_mismatch")
+    finally:
+        os.close(descriptor)
 
 
 def session_path(state_dir, session_id):

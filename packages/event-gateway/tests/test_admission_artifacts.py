@@ -1,6 +1,7 @@
 """Check admission proof's binary trust boundary without booting a native client."""
 
 import hashlib
+import os
 from pathlib import Path
 import runpy
 import tempfile
@@ -24,10 +25,15 @@ class AdmissionArtifactTests(unittest.TestCase):
             binary.write_bytes(b'qualified bytes')
             binary.chmod(0o700)
             digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            host = root / 'codex-code-mode-host'
+            host.write_bytes(b'qualified host bytes')
+            host.chmod(0o700)
+            host_digest = hashlib.sha256(host.read_bytes()).hexdigest()
             args = SimpleNamespace(binary=binary, binary_sha=digest)
             gateway = SimpleNamespace(launcher=launcher)
             native = SimpleNamespace(qualify=Mock(return_value='qualified'))
-            with patch.object(launcher, 'QUALIFIED_SHA256', digest):
+            with (patch.object(launcher, 'QUALIFIED_SHA256', digest),
+                  patch.object(launcher, 'QUALIFIED_CODE_MODE_HOST_SHA256', host_digest)):
                 self.assertEqual(qualify(args, gateway, native), 'qualified')
                 native.qualify.assert_called_once_with(binary, input_recorded=True, receipt_version=3)
                 native.qualify.reset_mock()
@@ -40,7 +46,8 @@ class AdmissionArtifactTests(unittest.TestCase):
                 substituted = root / 'substituted'
                 substituted.write_bytes(b'qualified bytes')
                 substituted.chmod(0o722)
-                with substituted.open('rb') as opened, patch.object(Path, 'open', return_value=opened):
+                with (substituted.open('rb') as opened,
+                      patch.object(launcher.os, 'open', return_value=os.dup(opened.fileno()))):
                     with self.assertRaisesRegex(launcher.LaunchError, 'unsafe_native_binary'):
                         qualify(args, gateway, native)
                 native.qualify.assert_not_called()

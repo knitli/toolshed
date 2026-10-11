@@ -22,6 +22,144 @@ PACKAGER_GLOBALS = PACKAGER["package"].__globals__
 
 
 class NativePackagingTests(unittest.TestCase):
+    def test_host_pins_match_launcher_and_official_release(self):
+        self.assertEqual(PACKAGER["CODE_MODE_HOST_SHA256"], launcher.QUALIFIED_CODE_MODE_HOST_SHA256)
+        self.assertEqual(PACKAGER["CODE_MODE_HOST_ARCHIVE_SHA256"],
+                         "dc70fbc76e9dcae5ae3d5424808c8e7c2df5e0db4ac827ddd4fbe339015aad75")
+        self.assertEqual(PACKAGER["CODE_MODE_HOST_RELEASE_TAG"], "rust-v0.160.0")
+        self.assertEqual(PACKAGER["UPSTREAM_COMMIT"], "a956835d020762cb2b570053af06f643a11c0ecc")
+        self.assertEqual(PACKAGER["HOST_TRIPLE"], "aarch64-apple-darwin")
+
+    def test_host_archive_rejects_fifo_without_blocking(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fifo = Path(directory) / "host.tar.gz"
+            os.mkfifo(fifo)
+            with self.assertRaisesRegex(ValueError, "native_code_mode_host_archive_must_be_regular"):
+                PACKAGER["_verified_code_mode_host"](fifo)
+
+    def test_host_archive_verifies_pins_and_rejects_unsafe_members(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "host.tar.gz"
+            payload = b"host fixture"
+            member_name = PACKAGER["CODE_MODE_HOST_MEMBER"]
+            for scenario in ("valid", "wrong_archive", "wrong_host", "traversal", "absolute",
+                             "symlink", "hardlink", "directory", "duplicate", "extra", "size"):
+                with self.subTest(scenario=scenario):
+                    with tarfile.open(archive, "w:gz") as bundle:
+                        name = {"traversal": "../" + member_name,
+                                "absolute": "/" + member_name}.get(scenario, member_name)
+                        member = tarfile.TarInfo(name)
+                        member.size = len(payload)
+                        member.type = {"symlink": tarfile.SYMTYPE, "hardlink": tarfile.LNKTYPE,
+                                       "directory": tarfile.DIRTYPE}.get(scenario, tarfile.REGTYPE)
+                        member.linkname = "../outside"
+                        bundle.addfile(member, io.BytesIO(payload) if member.isfile() else None)
+                        if scenario in ("duplicate", "extra"):
+                            member.name = member_name if scenario == "duplicate" else "../outside"
+                            bundle.addfile(member, io.BytesIO(payload))
+                    pins = {
+                        "CODE_MODE_HOST_ARCHIVE_SHA256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                        "CODE_MODE_HOST_ARCHIVE_BYTES": archive.stat().st_size,
+                        "CODE_MODE_HOST_SHA256": hashlib.sha256(payload).hexdigest(),
+                        "CODE_MODE_HOST_BYTES": len(payload),
+                    }
+                    if scenario == "wrong_archive":
+                        pins["CODE_MODE_HOST_ARCHIVE_SHA256"] = "0" * 64
+                    if scenario == "wrong_host":
+                        pins["CODE_MODE_HOST_SHA256"] = "0" * 64
+                    if scenario == "size":
+                        pins["CODE_MODE_HOST_BYTES"] += 1
+                    with patch.dict(PACKAGER_GLOBALS, pins):
+                        if scenario == "valid":
+                            self.assertEqual(PACKAGER["_verified_code_mode_host"](archive), payload)
+                        else:
+                            with self.assertRaisesRegex(ValueError, "native_code_mode_host_"):
+                                PACKAGER["_verified_code_mode_host"](archive)
+                    self.assertEqual(list(Path(directory).iterdir()), [archive])
+
+    def test_package_rejects_all_collisions_and_preexisting_outputs_before_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output, evidence, host = root / "codex", root / "evidence.json", root / "codex-code-mode-host"
+            for existing in (output, evidence, host):
+                with self.subTest(existing=existing):
+                    existing.write_bytes(b"preexisting")
+                    with self.assertRaisesRegex(ValueError, "native_output_must_be_new"):
+                        PACKAGER["package"](root, output, evidence, root / "missing.tar.gz")
+                    self.assertEqual(existing.read_bytes(), b"preexisting")
+                    existing.unlink()
+            for cli, record in ((output, output), (host, evidence), (output, host)):
+                with self.assertRaisesRegex(ValueError, "native_output_paths_must_differ"):
+                    PACKAGER["package"](root, cli, record, root / "missing.tar.gz")
+
+    def test_host_write_failure_removes_partial_file_and_cli(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "binary"
+            binary.write_bytes(b"cli")
+            output, host, evidence = root / "codex", root / "codex-code-mode-host", root / "evidence.json"
+            original_chmod = os.fchmod
+            def chmod(fd, mode):
+                if host.exists() and os.fstat(fd).st_ino == host.stat().st_ino:
+                    raise OSError("host chmod failure")
+                original_chmod(fd, mode)
+            with patch("os.fchmod", new=chmod):
+                with self.assertRaisesRegex(OSError, "host chmod failure"):
+                    PACKAGER["_publish_package"](binary, b"host", output, host, evidence, {})
+            self.assertFalse(output.exists())
+            self.assertFalse(host.exists())
+            self.assertFalse(evidence.exists())
+
+    def test_publication_failure_cleans_owned_outputs_and_preserves_replacements(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "binary"
+            binary.write_bytes(b"cli")
+            original_write = PACKAGER["_write_new"]
+            for scenario in ("host_failure", "evidence_failure", "interrupt", "replacement"):
+                with self.subTest(scenario=scenario):
+                    run = root / scenario
+                    run.mkdir()
+                    output, host, evidence = run / "codex", run / "codex-code-mode-host", run / "evidence.json"
+                    replacement = run / "replacement"
+                    replacement.write_bytes(b"other process")
+                    def write(path, contents, mode=None):
+                        if path == host and scenario == "host_failure":
+                            raise OSError("injected failure")
+                        if path == evidence:
+                            if scenario == "replacement":
+                                replacement.replace(host)
+                            if scenario == "interrupt":
+                                raise KeyboardInterrupt
+                            raise OSError("injected failure")
+                        return original_write(path, contents, mode)
+                    with patch.dict(PACKAGER_GLOBALS, {"_write_new": write}):
+                        with self.assertRaises(KeyboardInterrupt if scenario == "interrupt" else OSError):
+                            PACKAGER["_publish_package"](binary, b"host", output, host, evidence, {})
+                    self.assertFalse(output.exists())
+                    self.assertFalse(evidence.exists())
+                    if scenario == "replacement":
+                        self.assertEqual(host.read_bytes(), b"other process")
+                    else:
+                        self.assertFalse(host.exists())
+
+    def test_rollback_attempts_every_output_when_one_unlink_is_denied(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = [root / name for name in ("codex", "codex-code-mode-host", "evidence.json")]
+            owned = [(path, PACKAGER["_write_new"](path, b"ours")) for path in paths]
+            original_unlink = Path.unlink
+            def unlink(path, *args, **kwargs):
+                if path == paths[1]:
+                    raise PermissionError("cleanup denied")
+                return original_unlink(path, *args, **kwargs)
+            with patch.object(Path, "unlink", new=unlink):
+                with self.assertRaisesRegex(PermissionError, "cleanup denied"):
+                    PACKAGER["_cleanup_owned"](owned)
+            self.assertFalse(paths[0].exists())
+            self.assertEqual(paths[1].read_bytes(), b"ours")
+            self.assertFalse(paths[2].exists())
+
     def test_archive_ignores_git_replacement_refs_for_checkout_and_archive(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -282,6 +420,7 @@ class NativePackagingTests(unittest.TestCase):
                 return original_copy(binary, destination)
 
             replacements = {
+                "_verified_code_mode_host": lambda _path: b"mock host",
                 "_binary_evidence": lambda _path: {"path": str(root / "git"), "sha256": "0" * 64},
                 "_clean_checkout": lambda path, _env, _git: path.resolve(strict=True),
                 "_archive_source": archive_source,
@@ -312,7 +451,7 @@ class NativePackagingTests(unittest.TestCase):
             evidence_path = root / "candidate.json"
             state["evidence"] = evidence_path
             with patch.dict(PACKAGER_GLOBALS, replacements), patch("builtins.print"):
-                evidence = PACKAGER["package"](source, output, evidence_path)
+                evidence = PACKAGER["package"](source, output, evidence_path, root / "host.tar.gz")
                 self.assertEqual(evidence["archiveScope"], {
                     "selection": "git archive of the pinned commit without pathspecs",
                     "extractionFilter": "tarfile.data_filter",
@@ -327,6 +466,10 @@ class NativePackagingTests(unittest.TestCase):
                     evidence["binarySha256"], hashlib.sha256(output.read_bytes()).hexdigest()
                 )
 
+                host_output = root / "codex-code-mode-host"
+                self.assertEqual(host_output.read_bytes(), b"mock host")
+                self.assertEqual(evidence["codeModeHost"]["path"], str(host_output.resolve()))
+                host_output.unlink()
                 drift_output = root / "drifted-candidate"
                 drift_evidence = root / "drifted-candidate.json"
                 state.update(
@@ -337,6 +480,7 @@ class NativePackagingTests(unittest.TestCase):
                     PACKAGER["main"]([
                         "--source", str(source), "--output", str(drift_output),
                         "--evidence", str(drift_evidence),
+                        "--code-mode-host-archive", str(root / "host.tar.gz"),
                     ])
                 self.assertEqual(failure.exception.code, 2)
                 self.assertIn("native_patched_source_changed_during_build", stderr.getvalue())
@@ -350,9 +494,36 @@ class NativePackagingTests(unittest.TestCase):
                     scenario="race", build_completed=False, copies=[], evidence=raced_evidence,
                 )
                 with self.assertRaisesRegex(ValueError, "native_output_must_be_new"):
-                    PACKAGER["package"](source, raced_output, raced_evidence)
+                    PACKAGER["package"](source, raced_output, raced_evidence, root / "host.tar.gz")
                 self.assertFalse(raced_output.exists())
+                self.assertFalse(host_output.exists())
                 self.assertEqual(raced_evidence.read_bytes(), b"created during build")
+
+                original_exit = tempfile.TemporaryDirectory.__exit__
+                for replaced in (None, "codex", "codex-code-mode-host", "evidence.json"):
+                    with self.subTest(cleanup_replacement=replaced):
+                        run_dir = root / f"cleanup-{replaced}"
+                        run_dir.mkdir()
+                        cli = run_dir / "codex"
+                        host = run_dir / "codex-code-mode-host"
+                        record = run_dir / "evidence.json"
+                        replacement = run_dir / "replacement"
+                        replacement.write_bytes(b"other process")
+                        state.update(scenario="success", build_completed=False, evidence=record)
+                        def cleanup_failure(context, *args):
+                            self.assertTrue(all(path.exists() for path in (cli, host, record)))
+                            if replaced is not None:
+                                replacement.replace(run_dir / replaced)
+                            original_exit(context, *args)
+                            raise OSError("temporary cleanup failure")
+                        with patch.object(tempfile.TemporaryDirectory, "__exit__", new=cleanup_failure):
+                            with self.assertRaisesRegex(OSError, "temporary cleanup failure"):
+                                PACKAGER["package"](source, cli, record, root / "host.tar.gz")
+                        for path in (cli, host, record):
+                            if path.name == replaced:
+                                self.assertEqual(path.read_bytes(), b"other process")
+                            else:
+                                self.assertFalse(path.exists())
 
     def test_build_env_strips_ambient_build_overrides_and_keeps_selected_cache(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -492,86 +663,6 @@ class NativePackagingTests(unittest.TestCase):
                     real / "candidate",
                     alias / "subdir/../candidate",
                 )
-
-    def test_evidence_failure_cleans_owned_candidate_and_preserves_raced_files(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "source"
-            source.write_bytes(b"candidate")
-            output = root / "codex"
-            evidence = root / "evidence.json"
-            other = root / "other-file"
-            other.write_bytes(b"unrelated")
-            identity = PACKAGER["_copy_new"](source, output)
-            evidence.write_bytes(b"created by another process")
-
-            with self.assertRaisesRegex(ValueError, "native_output_must_be_new"):
-                PACKAGER["_write_evidence"](evidence, {"candidate": True}, output, identity)
-
-            self.assertFalse(output.exists())
-            self.assertEqual(evidence.read_bytes(), b"created by another process")
-            self.assertEqual(other.read_bytes(), b"unrelated")
-
-    def test_evidence_cleanup_permission_error_surfaces_and_preserves_candidate(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "source"
-            source.write_bytes(b"candidate")
-            output = root / "codex"
-            evidence = root / "evidence.json"
-            identity = PACKAGER["_copy_new"](source, output)
-
-            def fail_evidence_write(*_args):
-                raise ValueError("evidence write failed")
-
-            with patch.dict(PACKAGER_GLOBALS, {"_write_new": fail_evidence_write}):
-                with patch.object(Path, "unlink", side_effect=PermissionError("cleanup denied")):
-                    with self.assertRaisesRegex(PermissionError, "cleanup denied"):
-                        PACKAGER["_write_evidence"](
-                            evidence, {"candidate": True}, output, identity
-                        )
-
-            self.assertEqual(output.read_bytes(), b"candidate")
-
-    def test_evidence_failure_preserves_candidate_path_replaced_by_another_process(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "source"
-            source.write_bytes(b"candidate")
-            output = root / "codex"
-            evidence = root / "evidence.json"
-            replacement = root / "replacement"
-            replacement.write_bytes(b"created by another process")
-            identity = PACKAGER["_copy_new"](source, output)
-
-            def replace_then_fail(_path, _contents):
-                output.unlink()
-                replacement.replace(output)
-                raise ValueError("native_output_must_be_new_in_existing_directory")
-
-            with patch.dict(PACKAGER_GLOBALS, {"_write_new": replace_then_fail}):
-                with self.assertRaisesRegex(ValueError, "native_output_must_be_new"):
-                    PACKAGER["_write_evidence"](evidence, {"candidate": True}, output, identity)
-
-            self.assertEqual(output.read_bytes(), b"created by another process")
-
-    def test_evidence_interruption_cleans_owned_candidate(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "source"
-            source.write_bytes(b"candidate")
-            output = root / "codex"
-            evidence = root / "evidence.json"
-            identity = PACKAGER["_copy_new"](source, output)
-
-            def interrupt(*_args):
-                raise KeyboardInterrupt
-
-            with patch.dict(PACKAGER_GLOBALS, {"_write_new": interrupt}):
-                with self.assertRaises(KeyboardInterrupt):
-                    PACKAGER["_write_evidence"](evidence, {"candidate": True}, output, identity)
-
-            self.assertFalse(output.exists())
 
     def test_write_new_failure_does_not_unlink_replacement_file(self):
         with tempfile.TemporaryDirectory() as directory:

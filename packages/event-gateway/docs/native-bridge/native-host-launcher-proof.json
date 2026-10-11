@@ -1,0 +1,136 @@
+{
+  "result": "PASS",
+  "nativeBinarySha256": "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27",
+  "codeModeHostSha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
+  "sourceSha256": "70471731de7a01f2dfea3d2445febd815369abf255f93e4dbdac11aeaf9ae502",
+  "sourceWrittenBeforeSubmission": true,
+  "sourceNonce": "source-nonce-06975e4c68540b70d06f50b85a4a866bb7504ee1a8066c1d20321306d8cf5b4e",
+  "sourceProgram": "text(await tools.exec_command({\"cmd\": \"/bin/cat /private/tmp/nhq-o9z2yhcp/source-ddca8f4a107f78c0898af1c09bd04806.txt\", \"login\": false, \"max_output_tokens\": 1000, \"yield_time_ms\": 1000}));",
+  "toolOutput": {
+    "type": "custom_tool_call_output",
+    "id": "ctco_01a12923-fce5-7f02-911f-905e86669657",
+    "call_id": "offline-source-read",
+    "output": [
+      {
+        "type": "input_text",
+        "text": "Script completed\nWall time 0.1 seconds\nOutput:\n"
+      },
+      {
+        "type": "input_text",
+        "text": "{\"chunk_id\":\"272fbc\",\"wall_time_seconds\":0.000137458,\"exit_code\":0,\"original_token_count\":20,\"output\":\"source-nonce-06975e4c68540b70d06f50b85a4a866bb7504ee1a8066c1d20321306d8cf5b4e\\n\"}"
+      }
+    ]
+  },
+  "nativeStarts": 1,
+  "started": {
+    "clientId": "3b7ee05a-95ef-473a-8b8c-e5237feff651",
+    "serverInstanceId": "01a12923-fb8c-79b0-b8e4-5864c325d771",
+    "serverGeneration": 3,
+    "threadId": "01a12923-fbbd-7502-9963-7b531690ade1",
+    "attemptId": "fa8cdc57-952a-40d7-a176-5a5b0d0a7cd1",
+    "deliveryId": "dly_2db6fe948d11a9ccdc1a298857c2e9bf94a0731cb43afc4411a8f0f51c01f1b7",
+    "clientUserMessageId": "58ab993d-15a6-4b76-ad4f-b74bc6fb62fc",
+    "permitId": "offline-564387169f67ce1634bccf9f44277801",
+    "permitIssuedAt": 1791691586578,
+    "permitExpiresAt": 1791691591578,
+    "generation": 5,
+    "outcome": {
+      "status": "started",
+      "turnId": "58ab993d-15a6-4b76-ad4f-b74bc6fb62fc",
+      "replayed": false
+    }
+  },
+  "receipt": {
+    "clientId": "3b7ee05a-95ef-473a-8b8c-e5237feff651",
+    "serverInstanceId": "01a12923-fb8c-79b0-b8e4-5864c325d771",
+    "serverGeneration": 3,
+    "threadId": "01a12923-fbbd-7502-9963-7b531690ade1",
+    "attemptId": "fa8cdc57-952a-40d7-a176-5a5b0d0a7cd1",
+    "deliveryId": "dly_2db6fe948d11a9ccdc1a298857c2e9bf94a0731cb43afc4411a8f0f51c01f1b7",
+    "clientUserMessageId": "58ab993d-15a6-4b76-ad4f-b74bc6fb62fc",
+    "permitId": "offline-564387169f67ce1634bccf9f44277801",
+    "permitIssuedAt": 1791691586578,
+    "permitExpiresAt": 1791691591578,
+    "generation": 5,
+    "outcome": {
+      "status": "inputRecorded",
+      "turnId": "58ab993d-15a6-4b76-ad4f-b74bc6fb62fc",
+      "itemId": "01a12923-fc7b-7090-afb4-728b77df4f46",
+      "replayed": true
+    }
+  },
+  "binding": {
+    "clientId": "3b7ee05a-95ef-473a-8b8c-e5237feff651",
+    "connectionId": "fa6e9f12-0dfb-49b7-8bbc-b3aa077690ad",
+    "backendPid": 97898,
+    "threadId": "01a12923-fbbd-7502-9963-7b531690ade1",
+    "generation": 5,
+    "serverInstanceId": "01a12923-fb8c-79b0-b8e4-5864c325d771",
+    "serverGeneration": 3
+  },
+  "syntheticModelRequests": 3,
+  "mainTurnModelRequests": 2,
+  "titleModelRequests": 1,
+  "realModelCalls": 0,
+  "authCopied": false,
+  "noAuthorizationHeaders": true,
+  "outerSandboxEnforced": true,
+  "innerSandboxMode": "danger-full-access",
+  "controlSocketRemoved": true,
+  "backendStopped": true,
+  "ownedProcessGroupEmpty": true,
+  "terminationExitCode": 0,
+  "childBytecodeCacheFreshAndEmpty": true,
+  "evidenceKind": "Compact projection of retained offline installed-wheel run",
+  "rawProofSha256": "77b20f03d8e034589b36b66a3ac74750b019431f1dd85835c7e3d4e5236ee1d7",
+  "runnerSha256": "8e543f538bed77ea2cd28a04061bc13858423ca7150e0891ae786ea1d738e36c",
+  "wheelSha256": "5cb6a27a8d6ee0c1b647754299bcde871d0ee6d80db0c769ff011a5469413039",
+  "verifiedInstalledFiles": {
+    "__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+    "cli.py": "2b99b16f3fbc8dd9815e0975a9f983d44e65ce8ea4330afe11909766e6663086",
+    "client_runtime.py": "ecca03a9a2924ebfb5a406d1cf787289c640be48d6a27d654954a8b83a044231",
+    "cloud.py": "5c78fbfc10b0d7c093973b8a6526277fe22f047bc243db4ffd78357849b36d76",
+    "codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+    "contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
+    "contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+    "contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
+    "contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
+    "contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
+    "daemon.py": "fba9d054a56fdad13b75c4da722d7d0548e435078812a157d7857383b37e4b6d",
+    "gateway.py": "7e45b9c92c6ba96f298c6612a890f9df246b13f26682d5ce64eab546a3a27cc6",
+    "launcher.py": "96aa52d7f926a262545104d91cd2825af720ab99ee694b9f73ddda8ac55566d9",
+    "listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
+    "native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
+    "native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
+    "native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
+    "protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+    "security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
+    "store.py": "9123146cd7b2fa32bb17b166cd5f72359159afd760bbd8828f1031989f49aea4"
+  },
+  "frozenHelperSha256": {
+    "native-release-launcher-smoke.py": "073ddf6a43248db44345e0a20d09f11ced91740186d741b9038b7f7bea5dd33e",
+    "qualification-installed.py": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c"
+  },
+  "archiveVerification": {
+    "archiveSha256": "dc70fbc76e9dcae5ae3d5424808c8e7c2df5e0db4ac827ddd4fbe339015aad75",
+    "executableSha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
+    "executableBytes": 65391216,
+    "packagerSha256": "bf95f7e5be1bf518e1ce105d8ac97305dbb95ae1e0bdb1b5ad95e359c99a5fc5"
+  },
+  "limitations": [
+    "Synthetic provider; no real model or GitHub/cloud source read",
+    "Existing qualified CLI reused; no rebuild or owner installation",
+    "Inner sandbox disabled only inside mandatory outer sandbox fixture"
+  ],
+  "outerSandboxPolicy": {
+    "network": "provider loopback port and Unix sockets only",
+    "protectedHome": "operator Codex home and explicit CODEX_HOME",
+    "privateCodexHome": true
+  },
+  "initialConfigSha256": "b211e47bf44e08624a281ffda0f83f7c1d8267dc6d7c18f350542a9eaf55db49",
+  "finalConfigSha256": "9abfeb49208e581cd87e8dfe2cb00f8be4d1f2d6b98fbbdf9b5570b0de58a958",
+  "configSnapshots": {
+    "initial": "approval_policy=\"never\"\nsandbox_mode=\"danger-full-access\"\ncheck_for_update_on_startup=false\nmodel=\"mock-model\"\nmodel_provider=\"qualification\"\n[model_providers.qualification]\nname=\"Synthetic qualification\"\nbase_url=\"http://127.0.0.1:65063/v1\"\nwire_api=\"responses\"\nrequires_openai_auth=false\n[analytics]\nenabled=false\n[feedback]\nenabled=false\n[otel]\nexporter=\"none\"\ntrace_exporter=\"none\"\nmetrics_exporter=\"none\"\n[projects.\"/private/tmp/nhq-o9z2yhcp\"]\ntrust_level=\"trusted\"\n\n[features]\ncode_mode_only=true\ncode_mode_host=true\napps=false\n",
+    "final": "approval_policy=\"never\"\nsandbox_mode=\"danger-full-access\"\ncheck_for_update_on_startup=false\nmodel=\"mock-model\"\nmodel_provider=\"qualification\"\n[model_providers.qualification]\nname=\"Synthetic qualification\"\nbase_url=\"http://127.0.0.1:65063/v1\"\nwire_api=\"responses\"\nrequires_openai_auth=false\n[analytics]\nenabled=false\n[feedback]\nenabled=false\n[otel]\nexporter=\"none\"\ntrace_exporter=\"none\"\nmetrics_exporter=\"none\"\n[projects.\"/private/tmp/nhq-o9z2yhcp\"]\ntrust_level=\"trusted\"\n\n[features]\ncode_mode_only=true\ncode_mode_host=true\napps=false\n\n[tui]\nscreen_reader_detection_done = true\n\n[tui.model_availability_nux]\n\"gpt-6.1-sol\" = 1\n"
+  }
+}
