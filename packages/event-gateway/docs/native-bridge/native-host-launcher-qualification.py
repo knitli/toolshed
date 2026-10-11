@@ -1,5 +1,6 @@
 """Offline installed-wheel qualification of native admission and real source reads."""
 import argparse
+from concurrent.futures import Future
 from contextlib import contextmanager
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,7 +11,6 @@ import os
 from pathlib import Path
 import secrets
 import shlex
-import subprocess  # nosec B404 - Used only for a fixed read-only process inventory command.
 import sys
 import tempfile
 import threading
@@ -20,6 +20,7 @@ from uuid import uuid4
 CLI_SHA = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
 HOST_SHA = "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a"
 HELPERS = {
+    "native-github-source-qualification.py": "04ef38a3d69ca8787856769c6b83956deb88a7576c7e237b33c3b68550dea33a",
     "native-release-launcher-smoke.py": "073ddf6a43248db44345e0a20d09f11ced91740186d741b9038b7f7bea5dd33e",
     "qualification-installed.py": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c",
 }
@@ -187,7 +188,36 @@ def preserve_final_config(trace, path):
         trace.update(config_snapshot(path, "final"))
 
 
-def qualify(args, launcher, smoke, server):
+def foreground_operation(launcher, smoke, process, master, tail, *args):
+    # A blocked PTY writer can starve native receipt handling; keep consuming output.
+    deadline = time.monotonic() + launcher.NATIVE_OPERATION_SECONDS
+    future = Future()
+
+    def invoke():
+        try:
+            future.set_result(launcher.session_native_operation(*args))
+        except BaseException as error:
+            future.set_exception(error)
+
+    # Failure cleanup must not join an unresponsive RPC worker, including at exit.
+    threading.Thread(target=invoke, daemon=True).start()
+    while not future.done():
+        require(process.poll() is None, "launcher exited during native operation")
+        require(time.monotonic() < deadline, "native operation timed out")
+        smoke.drain(master, tail)
+    require(process.poll() is None, "launcher exited during native operation")
+    return future.result()
+
+
+def require_process_group_stopped(pgid):
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return
+    raise AssertionError("owned process group survived cleanup")
+
+
+def qualify(args, launcher, smoke, server, github_fixture=None, installed_helper=None):
     host = args.binary.parent / "codex-code-mode-host"
     require(hashlib.sha256(args.binary.read_bytes()).hexdigest() == CLI_SHA, "CLI digest mismatch")
     require(hashlib.sha256(host.read_bytes()).hexdigest() == HOST_SHA, "host digest mismatch")
@@ -207,8 +237,9 @@ def qualify(args, launcher, smoke, server):
         nonce = "source-nonce-" + secrets.token_hex(32)
         source.write_text(nonce + "\n")
         source.chmod(0o600)
+        server.program = (github_fixture.prepare(source, nonce, args.package_source, installed_helper)
+                          if github_fixture else source_program(source))
         source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
-        server.program = source_program(source)
         require(nonce not in server.program, "fixture must not supply source content")
         profile = root / "offline.sb"
         profile.write_text(sandbox_profile(server.server_port))
@@ -228,7 +259,8 @@ def qualify(args, launcher, smoke, server):
             request = start_request(binding)
             session = socket_path.name[2:-5]
             server.trace.update(binding=binding, request=request, nativeStarts=1)
-            started = launcher.session_native_operation(state, session, binding, "nativeStart", request)
+            started = foreground_operation(launcher, smoke, process, master, tail,
+                                           state, session, binding, "nativeStart", request)
             server.trace["started"] = started
             require(started["outcome"]["status"] == "started", "native Start was not accepted")
             deadline = time.monotonic() + 90
@@ -237,9 +269,11 @@ def qualify(args, launcher, smoke, server):
                 require(time.monotonic() < deadline, "source read timed out: " + tail.decode(errors="replace"))
                 require(not server.errors, str(server.errors))
                 smoke.drain(master, tail)
-            receipt = launcher.session_native_operation(state, session, binding, "nativeReceipt", request)
+            receipt = foreground_operation(launcher, smoke, process, master, tail,
+                                           state, session, binding, "nativeReceipt", request)
             server.trace["receipt"] = receipt
-            output = verify_output(server.main_requests, nonce)
+            output = (github_fixture.verify_output(server.main_requests, nonce, source, verify_output)
+                      if github_fixture else verify_output(server.main_requests, nonce))
             require(all(item.get("client_metadata", {}).get("turn_id") == started["outcome"]["turnId"]
                         and item.get("client_metadata", {}).get("thread_id") == binding["threadId"]
                         for item in server.main_requests), "main provider request identity mismatch")
@@ -248,10 +282,7 @@ def qualify(args, launcher, smoke, server):
             # Wait until the foreground is idle again before sending /quit.
             smoke.wait_selection(launcher, state, process, master, tail)
             code = smoke.quit_foreground(process, master, tail, socket_path, binding["backendPid"])
-        rows = subprocess.run(["/bin/ps", "-axo", "pid=,pgid="], check=True,  # nosec B603 - Fixed absolute executable and constant read-only arguments.
-                              capture_output=True, text=True, timeout=5).stdout.splitlines()
-        require(not any(len(row.split()) == 2 and row.split()[1] == str(process.pid)
-                        for row in rows), "owned process group survived cleanup")
+        require_process_group_stopped(process.pid)
         require(hashlib.sha256(args.binary.read_bytes()).hexdigest() == CLI_SHA, "CLI changed")
         require(hashlib.sha256(host.read_bytes()).hexdigest() == HOST_SHA, "host changed")
         require(len(server.main_requests) == 2 and len(server.title_requests) <= 1 and not server.errors, "unexpected provider activity")
@@ -277,6 +308,7 @@ def main():
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--package-source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--github-source-read", action="store_true")
     args = parser.parse_args()
     if args.output.exists():
         parser.error("output already exists; choose a new proof path")
@@ -294,7 +326,12 @@ def main():
         proof["installedPackagePreflight"] = provenance
         proof["frozenHelperSha256"] = HELPERS
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        proof = qualify(args, launcher, smoke, server)
+        github_fixture = verified_helper("native-github-source-qualification.py") if args.github_source_read else None
+        proof = qualify(args, launcher, smoke, server, github_fixture, helper.__file__)
+        if github_fixture:
+            proof.update(qualification="offline-native-github-source-read", realCloudCalls=0,
+                         syntheticTransportCalls=1, requestSignatureVerified=True,
+                         liveAuthorizationProved=False)
         proof["installedPackagePreflight"] = provenance
         proof["frozenHelperSha256"] = HELPERS
     except Exception as error:
