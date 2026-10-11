@@ -1,6 +1,6 @@
 """Offline installed-wheel qualification of native admission and real source reads."""
 import argparse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future
 from contextlib import contextmanager
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -191,14 +191,22 @@ def preserve_final_config(trace, path):
 def foreground_operation(launcher, smoke, process, master, tail, *args):
     # A blocked PTY writer can starve native receipt handling; keep consuming output.
     deadline = time.monotonic() + launcher.NATIVE_OPERATION_SECONDS
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(launcher.session_native_operation, *args)
-        while not future.done():
-            require(process.poll() is None, "launcher exited during native operation")
-            require(time.monotonic() < deadline, "native operation timed out")
-            smoke.drain(master, tail)
+    future = Future()
+
+    def invoke():
+        try:
+            future.set_result(launcher.session_native_operation(*args))
+        except BaseException as error:
+            future.set_exception(error)
+
+    # Failure cleanup must not join an unresponsive RPC worker, including at exit.
+    threading.Thread(target=invoke, daemon=True).start()
+    while not future.done():
         require(process.poll() is None, "launcher exited during native operation")
-        return future.result()
+        require(time.monotonic() < deadline, "native operation timed out")
+        smoke.drain(master, tail)
+    require(process.poll() is None, "launcher exited during native operation")
+    return future.result()
 
 
 def require_process_group_stopped(pgid):

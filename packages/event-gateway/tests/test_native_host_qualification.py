@@ -173,6 +173,53 @@ class ForegroundOperationTests(unittest.TestCase):
                                                    process, 7, bytearray(), 'one-request')
                 operation.assert_called_once_with('one-request')
 
+    def test_failure_returns_while_native_worker_is_still_blocked(self):
+        import threading
+        from types import SimpleNamespace
+        for failure in ('deadline', 'process-exit', 'drain-error'):
+            with self.subTest(failure=failure):
+                release, entered, returned = (threading.Event() for _ in range(3))
+                workers, calls, errors = [], [], []
+                def operation(*args):
+                    workers.append(threading.current_thread())
+                    calls.append(args)
+                    entered.set()
+                    release.wait()
+                def drain(*_):
+                    if failure == 'drain-error':
+                        raise OSError('drain failed')
+                    returned.wait(0.001)
+                def invoke():
+                    try:
+                        QUALIFIER.foreground_operation(
+                            SimpleNamespace(session_native_operation=operation, NATIVE_OPERATION_SECONDS=0.03),
+                            SimpleNamespace(drain=drain),
+                            SimpleNamespace(poll=lambda: 1 if failure == 'process-exit' else None),
+                            7, bytearray(), 'one-request')
+                    except BaseException as error:
+                        errors.append(error)
+                    finally:
+                        returned.set()
+                caller = threading.Thread(target=invoke, daemon=True)
+                caller.start()
+                try:
+                    self.assertTrue(entered.wait(0.5), 'native worker never started')
+                    self.assertTrue(returned.wait(0.5), 'foreground failure waited for blocked worker')
+                    self.assertTrue(workers[0].is_alive())
+                    self.assertTrue(workers[0].daemon)
+                    self.assertEqual(calls, [('one-request',)])
+                    self.assertEqual(len(errors), 1)
+                    self.assertRegex(str(errors[0]), {
+                        'deadline': 'timed out', 'process-exit': 'launcher exited',
+                        'drain-error': 'drain failed'}[failure])
+                finally:
+                    release.set()
+                    caller.join(1)
+                    for worker in workers:
+                        worker.join(1)
+                    self.assertFalse(caller.is_alive())
+                    self.assertTrue(all(not worker.is_alive() for worker in workers))
+
     def test_only_esrch_proves_owned_process_group_is_empty(self):
         for outcome, error in ((ProcessLookupError(), None), (None, AssertionError),
                                (PermissionError(), PermissionError)):
@@ -183,6 +230,74 @@ class ForegroundOperationTests(unittest.TestCase):
                 else:
                     QUALIFIER.require_process_group_stopped(123)
                 probe.assert_called_once_with(123, 0)
+
+
+class GitHubQualificationWiringTests(unittest.TestCase):
+    def test_github_prepare_and_verified_output_reach_final_proof(self):
+        from contextlib import contextmanager
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from uuid import uuid4
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            binary, host = root / 'codex', root / 'codex-code-mode-host'
+            binary.write_bytes(b'candidate fixture')
+            host.write_bytes(b'host fixture')
+            args = SimpleNamespace(binary=binary, package_source=root / 'src/event_gateway')
+            process = Mock(pid=123)
+            process.poll.return_value = None
+            binding = {key: str(uuid4()) for key in ('clientId', 'serverInstanceId', 'threadId')}
+            binding.update(serverGeneration=1, generation=1, backendPid=456)
+            server = SimpleNamespace(server_port=1234, requests=[], main_requests=[],
+                                     title_requests=[], errors=[], trace={})
+            selected = (root / ('c-' + str(uuid4()) + '.sock'), {}, binding, {})
+            def config(root, _port):
+                home = root / 'codex-home'
+                home.mkdir()
+                (home / 'config.toml').write_text('model="mock-astra"\n')
+                return home
+            @contextmanager
+            def foreground(*_):
+                yield process, 7
+            def operation(_state, _session, _binding, command, request):
+                turn = request['clientUserMessageId']
+                if command == 'nativeStart':
+                    metadata = {'client_metadata': {'turn_id': turn, 'thread_id': binding['threadId']}}
+                    server.main_requests.extend([metadata, metadata])
+                    server.requests.extend(server.main_requests)
+                    return {'outcome': {'status': 'started', 'turnId': turn}}
+                self.assertEqual(command, 'nativeReceipt')
+                return {'outcome': {'status': 'inputRecorded', 'turnId': turn}}
+            def prepare(source, nonce, package_source, installed_helper):
+                self.assertEqual(package_source, args.package_source)
+                self.assertEqual(installed_helper, 'verified-installed-helper')
+                source.write_text('retained:' + nonce)
+                return 'synthetic-github-program'
+            def verify(requests, nonce, source, base_verify):
+                self.assertIs(requests, server.main_requests)
+                self.assertIs(base_verify, QUALIFIER.verify_output)
+                self.assertEqual(source.read_text(), 'retained:' + nonce)
+                return {'correlated': 'validated-github-output'}
+            github = SimpleNamespace(prepare=Mock(side_effect=prepare), verify_output=Mock(side_effect=verify))
+            launcher = SimpleNamespace(session_native_operation=Mock(side_effect=operation),
+                                       NATIVE_OPERATION_SECONDS=1)
+            smoke = SimpleNamespace(write_config=config, foreground_process=foreground,
+                                    wait_selection=Mock(return_value=selected), check_selection=Mock(),
+                                    drain=Mock(), quit_foreground=Mock(return_value=0))
+            with patch.object(QUALIFIER, 'CLI_SHA', hashlib.sha256(binary.read_bytes()).hexdigest()), \
+                    patch.object(QUALIFIER, 'HOST_SHA', hashlib.sha256(host.read_bytes()).hexdigest()), \
+                    patch.object(QUALIFIER, 'require_process_group_stopped') as cleanup:
+                proof = QUALIFIER.qualify(args, launcher, smoke, server, github, 'verified-installed-helper')
+            self.assertEqual(proof['result'], 'PASS')
+            self.assertEqual(proof['sourceProgram'], 'synthetic-github-program')
+            self.assertEqual(server.trace['sourceProgram'], proof['sourceProgram'])
+            self.assertEqual(proof['toolOutput'], {'correlated': 'validated-github-output'})
+            self.assertEqual(proof['sourceSha256'], hashlib.sha256(('retained:' + proof['sourceNonce']).encode()).hexdigest())
+            github.prepare.assert_called_once()
+            github.verify_output.assert_called_once()
+            self.assertEqual([call.args[3] for call in launcher.session_native_operation.call_args_list],
+                             ['nativeStart', 'nativeReceipt'])
+            cleanup.assert_called_once_with(process.pid)
 
 
 if __name__ == "__main__":
