@@ -80,14 +80,18 @@ It never searches PATH for Codex. The executable and its ancestors must be
 owned by the current user or root, without other-user write access (root-owned
 sticky temporary directories are allowed). The executable must match the one
 reviewed digest above; a stock Codex binary or a different rebuild is refused.
-The binary is not distributed in this wheel. Same-user code and configuration
+Its sibling `codex-code-mode-host` must match the pinned official
+`rust-v0.160.0` Apple Silicon executable digest
+`679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a`,
+with the same ownership and permission checks. Host path overrides are refused.
+Neither executable is distributed in this wheel. Same-user code and configuration
 are trusted: hash validation precedes execution but is not an atomic hash/exec
 guarantee against another process running as that user.
 
 Build and qualify a candidate from the pinned upstream source using the
 [native client build workflow](docs/native-bridge/native-client-build.md). It
-records source and binary hashes. Keep its executable and evidence JSON as one
-external artifact pair. Treat `launcherQualified: true` as an operator handoff
+records source and binary hashes. Keep the CLI, its sibling code-mode host and
+evidence JSON together. Treat `launcherQualified: true` as an operator handoff
 check: the evidence is not read by the launcher. `launch` accepts the executable
 path and supplied SHA-256, then checks them against the hard-coded
 `QUALIFIED_SHA256` pin. Admitting a different build requires a separate reviewed

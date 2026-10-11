@@ -77,11 +77,16 @@ class LauncherTerminalIntegrationTests(unittest.TestCase):
             binary.write_text("#!" + sys.executable + "\n" + CHILD)
             binary.chmod(0o700)
             digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            companion = root / "codex-code-mode-host"
+            companion.write_bytes(b"host fixture")
+            companion.chmod(0o700)
+            host_digest = hashlib.sha256(companion.read_bytes()).hexdigest()
             state = root / "state"
             thread_id = str(uuid4())
             script = (
                 "from pathlib import Path; from event_gateway import launcher; "
                 f"launcher.QUALIFIED_SHA256={digest!r}; "
+                f"launcher.QUALIFIED_CODE_MODE_HOST_SHA256={host_digest!r}; "
                 f"raise SystemExit(launcher.launch(Path({str(state)!r}), {str(binary)!r}, "
                 f"{digest!r}, {str(root)!r}, resume={thread_id!r}))"
             )

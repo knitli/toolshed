@@ -2,7 +2,9 @@
 """Rebuild the pinned native Codex candidate without installing it."""
 
 import argparse
+from contextlib import ExitStack
 import hashlib
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -29,6 +31,12 @@ QUALIFIED_SHA256 = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca6
 RUSTC_COMMIT_PREFIX = "59807616e"
 LOCK_VERSION_CHANGES = 159
 HOST_TRIPLE = "aarch64-apple-darwin"
+CODE_MODE_HOST_SHA256 = "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a"
+CODE_MODE_HOST_BYTES = 65391216
+CODE_MODE_HOST_ARCHIVE_SHA256 = "dc70fbc76e9dcae5ae3d5424808c8e7c2df5e0db4ac827ddd4fbe339015aad75"
+CODE_MODE_HOST_ARCHIVE_BYTES = 23825926
+CODE_MODE_HOST_MEMBER = "codex-code-mode-host-aarch64-apple-darwin"
+CODE_MODE_HOST_RELEASE_TAG = "rust-v0.160.0"
 RUSTUP_TOOLCHAIN = "1.95.0"
 BUILD_COMMAND = (
     "rustup run 1.95.0 cargo build --offline --locked -p codex-cli --bin codex "
@@ -147,6 +155,56 @@ def _resolve_output_pair(output, evidence_path):
     if output == evidence_path:
         raise ValueError("native_output_paths_must_differ")
     return output, evidence_path
+
+
+def _verified_code_mode_host(archive_path):
+    """Read one pinned local archive snapshot; never extract archive paths."""
+    descriptor = os.open(archive_path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise ValueError("native_code_mode_host_archive_must_be_regular")
+        archive = source.read(CODE_MODE_HOST_ARCHIVE_BYTES + 1)
+    if (len(archive) != CODE_MODE_HOST_ARCHIVE_BYTES
+            or sha256(archive) != CODE_MODE_HOST_ARCHIVE_SHA256):
+        raise ValueError("native_code_mode_host_archive_pin_mismatch")
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as bundle:
+        member = bundle.next()
+        if (member is None or member.name != CODE_MODE_HOST_MEMBER
+                or not member.isfile() or member.issparse()
+                or member.size != CODE_MODE_HOST_BYTES):
+            raise ValueError("native_code_mode_host_archive_member_mismatch")
+        with bundle.extractfile(member) as executable:
+            contents = executable.read(CODE_MODE_HOST_BYTES + 1)
+        if bundle.next() is not None:
+            raise ValueError("native_code_mode_host_archive_member_mismatch")
+    if len(contents) != CODE_MODE_HOST_BYTES or sha256(contents) != CODE_MODE_HOST_SHA256:
+        raise ValueError("native_code_mode_host_executable_pin_mismatch")
+    return contents
+
+
+def _publish_package(binary, host_contents, output, host_output, evidence_path, evidence):
+    owned = []
+    try:
+        owned.append((output, _copy_new(binary, output)))
+        owned.append((host_output, _write_new(host_output, host_contents, mode=0o755)))
+        contents = (json.dumps(evidence, indent=2, sort_keys=True) + "\n").encode()
+        owned.append((evidence_path, _write_new(evidence_path, contents)))
+    except BaseException:
+        _cleanup_owned(owned)
+        raise
+    return owned
+
+
+def _cleanup_owned(owned):
+    # Attempt every owned cleanup even if one unlink is denied.
+    cleanup_error = None
+    for path, identity in reversed(owned):
+        try:
+            _unlink_if_owned(path, identity)
+        except OSError as error:
+            cleanup_error = error
+    if cleanup_error is not None:
+        raise cleanup_error
 
 
 def _git_environment(env=None):
@@ -381,101 +439,112 @@ def _copy_new(source, destination):
         raise
 
 
-def _write_evidence(evidence_path, evidence, output, output_identity):
-    try:
-        contents = (json.dumps(evidence, indent=2, sort_keys=True) + "\n").encode()
-        _write_new(evidence_path, contents)
-    except BaseException:
-        _unlink_if_owned(output, output_identity)
-        raise
-
-
-def package(source, output, evidence_path):
+def package(source, output, evidence_path, host_archive):
     output, evidence_path = _resolve_output_pair(output, evidence_path)
+    host_output = _resolve_new_output(output.parent / "codex-code-mode-host")
+    if host_output in (output, evidence_path):
+        raise ValueError("native_output_paths_must_differ")
+    host_contents = _verified_code_mode_host(host_archive)
 
     manifest_bytes = SOURCE_MANIFEST.read_bytes()
     patch_bytes = PATCH.read_bytes()
     manifest = verify_manifest(manifest_bytes, patch_bytes)
 
-    with tempfile.TemporaryDirectory(prefix="codex-native-v3-build-") as directory:
-        work = Path(directory)
-        env = _build_env(work)
-        git = _git_executable(env)
-        git_evidence = _binary_evidence(git)
-        source = _clean_checkout(source, env, git)
-        _archive_source(source, work, env, git)
-        git_env = _git_environment(env)
-        git_args = [str(git), "-c", f"core.attributesFile={os.devnull}", "apply"]
-        _run([*git_args, "--check", "--whitespace=error", str(PATCH)], cwd=work, env=git_env)
-        _run([*git_args, "--whitespace=error", str(PATCH)], cwd=work, env=git_env)
-        patched_count, source_before_build = verify_patched_source(work, manifest)
+    with ExitStack() as rollback:
+        with tempfile.TemporaryDirectory(prefix="codex-native-v3-build-") as directory:
+            work = Path(directory)
+            env = _build_env(work)
+            git = _git_executable(env)
+            git_evidence = _binary_evidence(git)
+            source = _clean_checkout(source, env, git)
+            _archive_source(source, work, env, git)
+            git_env = _git_environment(env)
+            git_args = [str(git), "-c", f"core.attributesFile={os.devnull}", "apply"]
+            _run([*git_args, "--check", "--whitespace=error", str(PATCH)], cwd=work, env=git_env)
+            _run([*git_args, "--whitespace=error", str(PATCH)], cwd=work, env=git_env)
+            patched_count, source_before_build = verify_patched_source(work, manifest)
 
-        codex_rs = work / "codex-rs"
-        cargo_configuration = _cargo_configuration(codex_rs, env["CARGO_HOME"])
-        rustup_command, rustc, cargo, toolchain_binaries = _toolchain(env)
-        lock_path = codex_rs / "Cargo.lock"
-        lock_before = tomllib.loads(lock_path.read_text())
-        metadata = _run(
-            [*rustup_command, "cargo", "metadata", "--offline", "--format-version", "1"],
-            cwd=codex_rs, env=env, capture=True,
-        )
-        lock_after_bytes = lock_path.read_bytes()
-        lock_changes = lock_version_changes(lock_before, tomllib.loads(lock_after_bytes.decode()))
-        target_dir = Path(json.loads(metadata.stdout)["target_directory"]).resolve()
-        if not target_dir.is_relative_to(work.resolve()):
-            raise ValueError("native_build_target_must_be_disposable")
+            codex_rs = work / "codex-rs"
+            cargo_configuration = _cargo_configuration(codex_rs, env["CARGO_HOME"])
+            rustup_command, rustc, cargo, toolchain_binaries = _toolchain(env)
+            lock_path = codex_rs / "Cargo.lock"
+            lock_before = tomllib.loads(lock_path.read_text())
+            metadata = _run(
+                [*rustup_command, "cargo", "metadata", "--offline", "--format-version", "1"],
+                cwd=codex_rs, env=env, capture=True,
+            )
+            lock_after_bytes = lock_path.read_bytes()
+            lock_changes = lock_version_changes(lock_before, tomllib.loads(lock_after_bytes.decode()))
+            target_dir = Path(json.loads(metadata.stdout)["target_directory"]).resolve()
+            if not target_dir.is_relative_to(work.resolve()):
+                raise ValueError("native_build_target_must_be_disposable")
 
-        print("Building the pinned Codex CLI in a disposable source archive.", flush=True)
-        _run(
-            [*rustup_command, "cargo", "build", "--offline", "--locked", "-p", "codex-cli", "--bin", "codex",
-             "-p", "codex-tui", "--bin", "codex-tui", "--profile", "dev-small"],
-            cwd=codex_rs, env=env,
-        )
-        if lock_path.read_bytes() != lock_after_bytes:
-            raise ValueError("cargo_lock_changed_during_build")
-        cargo_configuration_after = _cargo_configuration(codex_rs, env["CARGO_HOME"])
-        if cargo_configuration_after != cargo_configuration:
-            raise ValueError("cargo_configuration_changed_during_build")
-        patched_after_count, source_after_build = verify_patched_source(work, manifest)
-        if patched_after_count != patched_count or source_after_build != source_before_build:
-            raise ValueError("native_patched_source_changed_during_build")
+            print("Building the pinned Codex CLI in a disposable source archive.", flush=True)
+            _run(
+                [*rustup_command, "cargo", "build", "--offline", "--locked", "-p", "codex-cli", "--bin", "codex",
+                 "-p", "codex-tui", "--bin", "codex-tui", "--profile", "dev-small"],
+                cwd=codex_rs, env=env,
+            )
+            if lock_path.read_bytes() != lock_after_bytes:
+                raise ValueError("cargo_lock_changed_during_build")
+            cargo_configuration_after = _cargo_configuration(codex_rs, env["CARGO_HOME"])
+            if cargo_configuration_after != cargo_configuration:
+                raise ValueError("cargo_configuration_changed_during_build")
+            patched_after_count, source_after_build = verify_patched_source(work, manifest)
+            if patched_after_count != patched_count or source_after_build != source_before_build:
+                raise ValueError("native_patched_source_changed_during_build")
 
-        binary = target_dir / "dev-small/codex"
-        if binary.is_symlink() or not binary.is_file():
-            raise ValueError("native_cli_build_output_missing")
-        binary_hash = sha256_file(binary)
-        evidence = {
-            "upstreamCommit": UPSTREAM_COMMIT,
-            "archiveScope": {
-                "selection": "git archive of the pinned commit without pathspecs",
-                "extractionFilter": "tarfile.data_filter",
-            },
-            "patchSha256": PATCH_SHA256,
-            "sourceManifestSha256": sha256(manifest_bytes),
-            "patchedFileCount": patched_count,
-            "patchedFileSha256": manifest["fileSha256"],
-            "patchedSourceInventoryBeforeBuildSha256": source_before_build,
-            "patchedSourceInventoryAfterBuildSha256": source_after_build,
-            "rustc": rustc,
-            "cargo": cargo,
-            "gitBinary": git_evidence,
-            "toolchainBinaries": toolchain_binaries,
-            "buildEnvironment": {
-                "allowlistedVariables": sorted(env),
-                "ambientBuildOverridesRemoved": True,
-            },
-            "cargoConfiguration": cargo_configuration,
-            "host": HOST_TRIPLE,
-            "cargoLockLocalVersionChanges": lock_changes,
-            "buildCommand": BUILD_COMMAND,
-            "binarySha256": binary_hash,
-            "binaryBytes": binary.stat().st_size,
-            "launcherQualified": binary_hash == QUALIFIED_SHA256,
-            "launcherSha256": QUALIFIED_SHA256,
-        }
-        output_identity = _copy_new(binary, output)
-
-    _write_evidence(evidence_path, evidence, output, output_identity)
+            binary = target_dir / "dev-small/codex"
+            if binary.is_symlink() or not binary.is_file():
+                raise ValueError("native_cli_build_output_missing")
+            binary_hash = sha256_file(binary)
+            evidence = {
+                "codeModeHost": {
+                    "upstreamCommit": UPSTREAM_COMMIT,
+                    "releaseTag": CODE_MODE_HOST_RELEASE_TAG,
+                    "target": HOST_TRIPLE,
+                    "assetUrl": (
+                        "https://github.com/openai/codex/releases/download/"
+                        f"{CODE_MODE_HOST_RELEASE_TAG}/{CODE_MODE_HOST_MEMBER}.tar.gz"
+                    ),
+                    "archiveSha256": CODE_MODE_HOST_ARCHIVE_SHA256,
+                    "archiveBytes": CODE_MODE_HOST_ARCHIVE_BYTES,
+                    "memberName": CODE_MODE_HOST_MEMBER,
+                    "executableSha256": CODE_MODE_HOST_SHA256,
+                    "executableBytes": len(host_contents),
+                    "path": str(host_output),
+                },
+                "upstreamCommit": UPSTREAM_COMMIT,
+                "archiveScope": {
+                    "selection": "git archive of the pinned commit without pathspecs",
+                    "extractionFilter": "tarfile.data_filter",
+                },
+                "patchSha256": PATCH_SHA256,
+                "sourceManifestSha256": sha256(manifest_bytes),
+                "patchedFileCount": patched_count,
+                "patchedFileSha256": manifest["fileSha256"],
+                "patchedSourceInventoryBeforeBuildSha256": source_before_build,
+                "patchedSourceInventoryAfterBuildSha256": source_after_build,
+                "rustc": rustc,
+                "cargo": cargo,
+                "gitBinary": git_evidence,
+                "toolchainBinaries": toolchain_binaries,
+                "buildEnvironment": {
+                    "allowlistedVariables": sorted(env),
+                    "ambientBuildOverridesRemoved": True,
+                },
+                "cargoConfiguration": cargo_configuration,
+                "host": HOST_TRIPLE,
+                "cargoLockLocalVersionChanges": lock_changes,
+                "buildCommand": BUILD_COMMAND,
+                "binarySha256": binary_hash,
+                "binaryBytes": binary.stat().st_size,
+                "launcherQualified": binary_hash == QUALIFIED_SHA256,
+                "launcherSha256": QUALIFIED_SHA256,
+            }
+            owned = _publish_package(binary, host_contents, output, host_output, evidence_path, evidence)
+            rollback.callback(_cleanup_owned, owned)
+        rollback.pop_all()
     return evidence
 
 
@@ -485,13 +554,15 @@ def main(argv=None):
                         help="clean upstream Codex checkout at the pinned commit")
     parser.add_argument("--output", type=Path, required=True, help="new binary path")
     parser.add_argument("--evidence", type=Path, required=True, help="new JSON evidence path")
+    parser.add_argument("--code-mode-host-archive", type=Path, required=True,
+                        help="local pinned official code-mode host archive (no download)")
     args = parser.parse_args(argv)
     try:
-        evidence = package(args.source, args.output, args.evidence)
+        evidence = package(args.source, args.output, args.evidence, args.code_mode_host_archive)
     except subprocess.CalledProcessError as error:
         detail = error.stderr or error.stdout or "native_packaging_command_failed"
         parser.error(detail.strip()[-2000:])
-    except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
+    except (OSError, ValueError, KeyError, tarfile.TarError, json.JSONDecodeError) as error:
         parser.error(str(error))
     print(json.dumps(evidence, indent=2, sort_keys=True))
     return 0

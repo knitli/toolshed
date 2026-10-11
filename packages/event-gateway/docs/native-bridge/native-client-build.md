@@ -2,29 +2,34 @@
 
 The proposed metadata-fix release pins v3 CLI digest `362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27`; see [metadata qualification](native-metadata-qualification.md). This runbook rebuilds a disposable candidate from upstream Codex `a956835d020762cb2b570053af06f643a11c0ecc`, applies `native-metadata-v1-implementation.patch`, checks all 52 hashes in `native-metadata-v1-source-manifest.json`, and records the toolchain and binary digest. It never installs the client or changes the launcher's digest.
 
-Use a clean checkout of the exact upstream commit, Rust 1.95.0 (`59807616e`), Cargo's existing offline cache, and Apple Silicon macOS. The builder archives the entire pinned Git tree into a temporary directory, with no pathspecs, then applies the reviewed patch and validates the 52 patched source files. Its only outputs are the two new paths you name:
+Use a clean checkout of the exact upstream commit, Rust 1.95.0 (`59807616e`), Cargo's existing offline cache, and Apple Silicon macOS. Supply the matching official [code-mode host archive](https://github.com/openai/codex/releases/download/rust-v0.160.0/codex-code-mode-host-aarch64-apple-darwin.tar.gz) as a local file; the builder never downloads it. Its SHA-256 must be `dc70fbc76e9dcae5ae3d5424808c8e7c2df5e0db4ac827ddd4fbe339015aad75`. The builder archives the entire pinned Git tree into a temporary directory, with no pathspecs, then applies the reviewed patch and validates the 52 patched source files. It creates the two new paths you name and a new `codex-code-mode-host` beside the CLI:
 
 ```sh
 python3 scripts/package_native_client.py \
   --source "$CODEX_SOURCE" \
+  --code-mode-host-archive "$EVENT_CODE_MODE_HOST_ARCHIVE" \
   --output /private/tmp/codex-native-v3 \
   --evidence /private/tmp/codex-native-v3.json
 ```
 
 The builder keeps only `PATH` for Git/Rustup discovery, an isolated `HOME` and `TMPDIR`, the selected `CARGO_HOME` offline cache, `RUSTUP_HOME`, and fixed offline/toolchain settings. It strips other inherited `CARGO_*` and `RUST*` overrides. It rejects Cargo config in the selected cache and all unreviewed working-directory ancestors. The two exact pinned configs are recorded in evidence: the repository-root `.cargo/config.toml` (`b34b20f64e30695e8629ddad8b80885764e947f51e4ce49c6378a3b5a238d25e`) sets `MALLOC_CONF=thp:always` with `force=false`, and `codex-rs/.cargo/config.toml` has SHA-256 `b8ae1cea341beb2d4a3c8fb81f97a96f4aee1fd53f769c57f140dfe949806a80`. Cargo propagates the root setting to its child processes. Any missing or modified pinned config, Cargo-home config, or other ancestor config is rejected.
 
-The evidence contains the upstream commit, full-tree archive selection and extraction filter, patch and file hashes, both accepted Cargo config paths and hashes, Git/Rustup/Cargo/rustc binary paths and hashes, exact Rust/Cargo versions, the 159 build-only lockfile version changes, and the CLI SHA-256. The selected offline Cargo cache remains same-user mutable local state; recording its path and configuration does not remotely attest the cached package bytes. `launcherQualified` is true only when the rebuilt file matches the existing launcher digest. A different digest remains a candidate and is refused by the shipped launcher.
+The evidence contains the upstream commit, full-tree archive selection and extraction filter, patch and file hashes, both accepted Cargo config paths and hashes, Git/Rustup/Cargo/rustc binary paths and hashes, exact Rust/Cargo versions, the 159 build-only lockfile version changes, and the CLI SHA-256. It also records the official host's release tag, target, archive digest, extracted executable digest and byte sizes. Only its expected regular archive member is accepted; links, unexpected members and altered bytes are rejected. The selected offline Cargo cache remains same-user mutable local state; recording its path and configuration does not remotely attest the cached package bytes. `launcherQualified` is true only when the rebuilt file matches the existing launcher digest. A different digest remains a candidate and is refused by the shipped launcher.
 
 ### Artifact handoff
 
-Keep the builder's executable and evidence JSON together as one external artifact
-pair; neither is included in the Python wheel. Treat `launcherQualified: true`
+Keep the builder's CLI, sibling `codex-code-mode-host` and evidence JSON together;
+neither executable is included in the Python wheel. All three outputs must be new
+and distinct. Failed publication removes only files created by that invocation.
+Treat `launcherQualified: true`
 as an operator handoff check: recompute the executable SHA-256 and confirm it
 matches both `binarySha256` and `launcherSha256` in the evidence. When the
 original build predates a reviewed pin promotion, retain that historical
 evidence and use the separately reviewed release proof to identify the
 promoted digest; it must match the current hard-coded launcher pin. The launcher
-does not read the evidence JSON. Pass the absolute executable path and its
+does not read the evidence JSON. It independently verifies the sibling host
+against digest `679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a`
+and rejects host path overrides. Pass the absolute executable path and its
 SHA-256 to `knitli-event-gateway launch`; the CLI checks that digest against the
 hard-coded `QUALIFIED_SHA256` pin again immediately before execution. A
 different build requires a separate reviewed pin update, and changing the

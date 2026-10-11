@@ -343,6 +343,8 @@ def qualify(args):
     proof = {"result": "FAIL", "privateEvidenceDirectory": str(root),
              "frozenHelperSha256": FROZEN_SHA, "runnerSha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
              "binarySha256": args.binary_sha256, "installedPackagePreflight": provenance,
+             "codeModeHost": {"path": str(args.binary.with_name("codex-code-mode-host")),
+                              "sha256": launcher.QUALIFIED_CODE_MODE_HOST_SHA256},
              "model": "gpt-6.1-sol", "provider": "openai", "harnessUserPrompts": 0,
              "harnessTurnStartRequests": 0, "realModelNetworkCalls": None,
              "realModelNetworkCallsEvidence": "Not instrumented; RPC observations are not HTTP-call counts",
