@@ -4,17 +4,17 @@ from contextlib import contextmanager
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import secrets
 import shlex
-import subprocess
+import subprocess  # nosec B404 - Used only for a fixed read-only process inventory command.
 import sys
 import tempfile
 import threading
 import time
-import types
 from uuid import uuid4
 
 CLI_SHA = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
@@ -35,10 +35,23 @@ def verified_helper(name):
     path = Path(__file__).with_name(name)
     data = path.read_bytes()
     require(hashlib.sha256(data).hexdigest() == HELPERS[name], "frozen helper digest mismatch")
-    module = types.ModuleType(name.replace("-", "_"))
-    module.__file__ = str(path)
-    exec(compile(data, str(path), "exec"), module.__dict__)
-    return module
+    # Import a fresh private snapshot of the verified bytes, never the mutable
+    # original path or pre-existing bytecode beside it.
+    temporary = tempfile.TemporaryDirectory(prefix="nhq-helper-")
+    try:
+        snapshot = Path(temporary.name) / name
+        fd = os.open(snapshot, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+        spec = importlib.util.spec_from_file_location(name.replace("-", "_"), snapshot)
+        require(spec is not None and spec.loader is not None, "private helper loader unavailable")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module._private_helper = temporary
+        return module
+    except BaseException:
+        temporary.cleanup()
+        raise
 
 
 def completed(identity):
@@ -178,7 +191,8 @@ def qualify(args, launcher, smoke, server):
     host = args.binary.parent / "codex-code-mode-host"
     require(hashlib.sha256(args.binary.read_bytes()).hexdigest() == CLI_SHA, "CLI digest mismatch")
     require(hashlib.sha256(host.read_bytes()).hexdigest() == HOST_SHA, "host digest mismatch")
-    with tempfile.TemporaryDirectory(prefix="nhq-", dir=Path("/tmp").resolve()) as directory:
+    temporary_root = Path("/tmp").resolve()  # nosec B108 - Short AF_UNIX root; TemporaryDirectory creates a private random child.
+    with tempfile.TemporaryDirectory(prefix="nhq-", dir=temporary_root) as directory:
         root = Path(directory)
         state = root / "state"
         home = smoke.write_config(root, server.server_port)
@@ -234,7 +248,7 @@ def qualify(args, launcher, smoke, server):
             # Wait until the foreground is idle again before sending /quit.
             smoke.wait_selection(launcher, state, process, master, tail)
             code = smoke.quit_foreground(process, master, tail, socket_path, binding["backendPid"])
-        rows = subprocess.run(["/bin/ps", "-axo", "pid=,pgid="], check=True,
+        rows = subprocess.run(["/bin/ps", "-axo", "pid=,pgid="], check=True,  # nosec B603 - Fixed absolute executable and constant read-only arguments.
                               capture_output=True, text=True, timeout=5).stdout.splitlines()
         require(not any(len(row.split()) == 2 and row.split()[1] == str(process.pid)
                         for row in rows), "owned process group survived cleanup")

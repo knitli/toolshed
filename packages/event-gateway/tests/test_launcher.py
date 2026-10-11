@@ -272,13 +272,30 @@ class LauncherTests(unittest.TestCase):
     def test_environment_injection_and_unknown_digest_are_rejected(self):
         for key in ("LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "CODEX_NATIVE_BRIDGE_FD",
                     "CODEX_NATIVE_BRIDGE_RECEIPT_VERSION", "CODEX_SELECTION_WITNESS_FD",
-                    "CODEX_BRIDGE_ADOPTION_PROBE", "CODEX_CODE_MODE_HOST"):
+                    "CODEX_BRIDGE_ADOPTION_PROBE", "CODEX_CODE_MODE_HOST",
+                    "CODEX_CODE_MODE_HOST_PATH"):
             with self.subTest(key=key), self.assertRaisesRegex(launcher.LaunchError, "unsafe_launch_environment"):
                 launcher.launch_environment({key: ""})
-        original = {"HOME": "/owner", "CODEX_HOME": "/explicit"}
+        original = {"HOME": "/owner", "CODEX_HOME": "/explicit", "CUSTOM_SETTING": "kept"}
         self.assertEqual(launcher.launch_environment(original), original)
         with self.assertRaisesRegex(launcher.LaunchError, "unqualified_native_binary"):
             launcher.qualified_binary("/does/not/exist", "f" * 64)
+
+    def test_inherited_host_override_is_rejected_before_native_spawn(self):
+        for key in ("CODEX_CODE_MODE_HOST", "CODEX_CODE_MODE_HOST_PATH"):
+            for value in ("", "/unreviewed/host"):
+                with (self.subTest(key=key, value=value),
+                      patch.dict(launcher.os.environ, {key: value}, clear=True),
+                      patch.object(launcher.threading, "active_count", return_value=1),
+                      patch.object(launcher.os, "isatty", return_value=True),
+                      patch.object(launcher.subprocess, "Popen") as spawn,
+                      patch.object(launcher, "qualified_binary") as qualify,
+                      patch.object(launcher, "ensure_private_directory") as prepare,
+                      self.assertRaisesRegex(launcher.LaunchError, "unsafe_launch_environment")):
+                    launcher.launch("unused", "/qualified/codex", launcher.QUALIFIED_SHA256, ".")
+                spawn.assert_not_called()
+                qualify.assert_not_called()
+                prepare.assert_not_called()
 
     def test_control_accepts_only_bounded_exact_status(self):
         row = witness()

@@ -2,13 +2,13 @@
   "result": "PASS",
   "nativeBinarySha256": "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27",
   "codeModeHostSha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
-  "sourceSha256": "70471731de7a01f2dfea3d2445febd815369abf255f93e4dbdac11aeaf9ae502",
+  "sourceSha256": "c6b564a7d0a8cb1d048275e1791ec109b4b60ea5bb8ff6ae51817ed956997a18",
   "sourceWrittenBeforeSubmission": true,
-  "sourceNonce": "source-nonce-06975e4c68540b70d06f50b85a4a866bb7504ee1a8066c1d20321306d8cf5b4e",
-  "sourceProgram": "text(await tools.exec_command({\"cmd\": \"/bin/cat /private/tmp/nhq-o9z2yhcp/source-ddca8f4a107f78c0898af1c09bd04806.txt\", \"login\": false, \"max_output_tokens\": 1000, \"yield_time_ms\": 1000}));",
+  "sourceNonce": "source-nonce-e9eb35916278636d1b4902f4248d829b42f4b1f464c85f1f2adb383b17f84a5a",
+  "sourceProgram": "text(await tools.exec_command({\"cmd\": \"/bin/cat /private/tmp/nhq-zlrk_u3c/source-5b23e3987bbc727b03bb9e937f66b01b.txt\", \"login\": false, \"max_output_tokens\": 1000, \"yield_time_ms\": 1000}));",
   "toolOutput": {
     "type": "custom_tool_call_output",
-    "id": "ctco_01a12923-fce5-7f02-911f-905e86669657",
+    "id": "ctco_01a1292b-4caf-78c3-beea-a65e65b97bf4",
     "call_id": "offline-source-read",
     "output": [
       {
@@ -17,55 +17,55 @@
       },
       {
         "type": "input_text",
-        "text": "{\"chunk_id\":\"272fbc\",\"wall_time_seconds\":0.000137458,\"exit_code\":0,\"original_token_count\":20,\"output\":\"source-nonce-06975e4c68540b70d06f50b85a4a866bb7504ee1a8066c1d20321306d8cf5b4e\\n\"}"
+        "text": "{\"chunk_id\":\"c8aff7\",\"wall_time_seconds\":0.000126917,\"exit_code\":0,\"original_token_count\":20,\"output\":\"source-nonce-e9eb35916278636d1b4902f4248d829b42f4b1f464c85f1f2adb383b17f84a5a\\n\"}"
       }
     ]
   },
   "nativeStarts": 1,
   "started": {
-    "clientId": "3b7ee05a-95ef-473a-8b8c-e5237feff651",
-    "serverInstanceId": "01a12923-fb8c-79b0-b8e4-5864c325d771",
+    "clientId": "7968b84a-7ed2-4899-81ca-7a9f0f5cf0b4",
+    "serverInstanceId": "01a1292b-4b49-71a0-8bc2-1a3e2a4415dc",
     "serverGeneration": 3,
-    "threadId": "01a12923-fbbd-7502-9963-7b531690ade1",
-    "attemptId": "fa8cdc57-952a-40d7-a176-5a5b0d0a7cd1",
-    "deliveryId": "dly_2db6fe948d11a9ccdc1a298857c2e9bf94a0731cb43afc4411a8f0f51c01f1b7",
-    "clientUserMessageId": "58ab993d-15a6-4b76-ad4f-b74bc6fb62fc",
-    "permitId": "offline-564387169f67ce1634bccf9f44277801",
-    "permitIssuedAt": 1791691586578,
-    "permitExpiresAt": 1791691591578,
+    "threadId": "01a1292b-4b78-7b82-8e79-c918715cc498",
+    "attemptId": "59f1f5ea-f865-401e-968b-ed6384fa8a7f",
+    "deliveryId": "dly_de182ff27c1d7438417ac3532b1c3f2ac212d85ddebbac1f52758fe96444c69a",
+    "clientUserMessageId": "9a4316ce-cd1c-43dd-a152-0fa487b08eb2",
+    "permitId": "offline-94a47d5c2c10f874b35aec9b97e9fafa",
+    "permitIssuedAt": 1791692065743,
+    "permitExpiresAt": 1791692070743,
     "generation": 5,
     "outcome": {
       "status": "started",
-      "turnId": "58ab993d-15a6-4b76-ad4f-b74bc6fb62fc",
+      "turnId": "9a4316ce-cd1c-43dd-a152-0fa487b08eb2",
       "replayed": false
     }
   },
   "receipt": {
-    "clientId": "3b7ee05a-95ef-473a-8b8c-e5237feff651",
-    "serverInstanceId": "01a12923-fb8c-79b0-b8e4-5864c325d771",
+    "clientId": "7968b84a-7ed2-4899-81ca-7a9f0f5cf0b4",
+    "serverInstanceId": "01a1292b-4b49-71a0-8bc2-1a3e2a4415dc",
     "serverGeneration": 3,
-    "threadId": "01a12923-fbbd-7502-9963-7b531690ade1",
-    "attemptId": "fa8cdc57-952a-40d7-a176-5a5b0d0a7cd1",
-    "deliveryId": "dly_2db6fe948d11a9ccdc1a298857c2e9bf94a0731cb43afc4411a8f0f51c01f1b7",
-    "clientUserMessageId": "58ab993d-15a6-4b76-ad4f-b74bc6fb62fc",
-    "permitId": "offline-564387169f67ce1634bccf9f44277801",
-    "permitIssuedAt": 1791691586578,
-    "permitExpiresAt": 1791691591578,
+    "threadId": "01a1292b-4b78-7b82-8e79-c918715cc498",
+    "attemptId": "59f1f5ea-f865-401e-968b-ed6384fa8a7f",
+    "deliveryId": "dly_de182ff27c1d7438417ac3532b1c3f2ac212d85ddebbac1f52758fe96444c69a",
+    "clientUserMessageId": "9a4316ce-cd1c-43dd-a152-0fa487b08eb2",
+    "permitId": "offline-94a47d5c2c10f874b35aec9b97e9fafa",
+    "permitIssuedAt": 1791692065743,
+    "permitExpiresAt": 1791692070743,
     "generation": 5,
     "outcome": {
       "status": "inputRecorded",
-      "turnId": "58ab993d-15a6-4b76-ad4f-b74bc6fb62fc",
-      "itemId": "01a12923-fc7b-7090-afb4-728b77df4f46",
+      "turnId": "9a4316ce-cd1c-43dd-a152-0fa487b08eb2",
+      "itemId": "01a1292b-4c30-77d2-b783-77e43fd75453",
       "replayed": true
     }
   },
   "binding": {
-    "clientId": "3b7ee05a-95ef-473a-8b8c-e5237feff651",
-    "connectionId": "fa6e9f12-0dfb-49b7-8bbc-b3aa077690ad",
-    "backendPid": 97898,
-    "threadId": "01a12923-fbbd-7502-9963-7b531690ade1",
+    "clientId": "7968b84a-7ed2-4899-81ca-7a9f0f5cf0b4",
+    "connectionId": "6e6a5a4a-dc4f-4cad-9c29-30397210a107",
+    "backendPid": 51017,
+    "threadId": "01a1292b-4b78-7b82-8e79-c918715cc498",
     "generation": 5,
-    "serverInstanceId": "01a12923-fb8c-79b0-b8e4-5864c325d771",
+    "serverInstanceId": "01a1292b-4b49-71a0-8bc2-1a3e2a4415dc",
     "serverGeneration": 3
   },
   "syntheticModelRequests": 3,
@@ -82,9 +82,9 @@
   "terminationExitCode": 0,
   "childBytecodeCacheFreshAndEmpty": true,
   "evidenceKind": "Compact projection of retained offline installed-wheel run",
-  "rawProofSha256": "77b20f03d8e034589b36b66a3ac74750b019431f1dd85835c7e3d4e5236ee1d7",
-  "runnerSha256": "8e543f538bed77ea2cd28a04061bc13858423ca7150e0891ae786ea1d738e36c",
-  "wheelSha256": "5cb6a27a8d6ee0c1b647754299bcde871d0ee6d80db0c769ff011a5469413039",
+  "rawProofSha256": "476339a6374a43b6386c48684bdf9b553e7e2e8d09af6f3350629ee431da1dbf",
+  "runnerSha256": "0ff081e84fe8d6b0014f0325ff424c30d54dc608d69abe163d371c125b4ad163",
+  "wheelSha256": "c77ea92a04fcd161270d708273f2d405e84590c92487090cb78f4c186d2dcaef",
   "verifiedInstalledFiles": {
     "__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
     "cli.py": "2b99b16f3fbc8dd9815e0975a9f983d44e65ce8ea4330afe11909766e6663086",
@@ -98,7 +98,7 @@
     "contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
     "daemon.py": "fba9d054a56fdad13b75c4da722d7d0548e435078812a157d7857383b37e4b6d",
     "gateway.py": "7e45b9c92c6ba96f298c6612a890f9df246b13f26682d5ce64eab546a3a27cc6",
-    "launcher.py": "96aa52d7f926a262545104d91cd2825af720ab99ee694b9f73ddda8ac55566d9",
+    "launcher.py": "7b979f8beb1904f9f9392d16beada9b585d5b1da53e235094d184d77ca050966",
     "listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
     "native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
     "native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
@@ -127,10 +127,10 @@
     "protectedHome": "operator Codex home and explicit CODEX_HOME",
     "privateCodexHome": true
   },
-  "initialConfigSha256": "b211e47bf44e08624a281ffda0f83f7c1d8267dc6d7c18f350542a9eaf55db49",
-  "finalConfigSha256": "9abfeb49208e581cd87e8dfe2cb00f8be4d1f2d6b98fbbdf9b5570b0de58a958",
+  "initialConfigSha256": "20ed63d62755c6646bad438a27626098d675b0943c5f809370b92a677db8ad33",
+  "finalConfigSha256": "a38bf01a45f77a5a6226e5151d9925c945d993b05df8d00aae7312ca9ecb6b5c",
   "configSnapshots": {
-    "initial": "approval_policy=\"never\"\nsandbox_mode=\"danger-full-access\"\ncheck_for_update_on_startup=false\nmodel=\"mock-model\"\nmodel_provider=\"qualification\"\n[model_providers.qualification]\nname=\"Synthetic qualification\"\nbase_url=\"http://127.0.0.1:65063/v1\"\nwire_api=\"responses\"\nrequires_openai_auth=false\n[analytics]\nenabled=false\n[feedback]\nenabled=false\n[otel]\nexporter=\"none\"\ntrace_exporter=\"none\"\nmetrics_exporter=\"none\"\n[projects.\"/private/tmp/nhq-o9z2yhcp\"]\ntrust_level=\"trusted\"\n\n[features]\ncode_mode_only=true\ncode_mode_host=true\napps=false\n",
-    "final": "approval_policy=\"never\"\nsandbox_mode=\"danger-full-access\"\ncheck_for_update_on_startup=false\nmodel=\"mock-model\"\nmodel_provider=\"qualification\"\n[model_providers.qualification]\nname=\"Synthetic qualification\"\nbase_url=\"http://127.0.0.1:65063/v1\"\nwire_api=\"responses\"\nrequires_openai_auth=false\n[analytics]\nenabled=false\n[feedback]\nenabled=false\n[otel]\nexporter=\"none\"\ntrace_exporter=\"none\"\nmetrics_exporter=\"none\"\n[projects.\"/private/tmp/nhq-o9z2yhcp\"]\ntrust_level=\"trusted\"\n\n[features]\ncode_mode_only=true\ncode_mode_host=true\napps=false\n\n[tui]\nscreen_reader_detection_done = true\n\n[tui.model_availability_nux]\n\"gpt-6.1-sol\" = 1\n"
+    "initial": "approval_policy=\"never\"\nsandbox_mode=\"danger-full-access\"\ncheck_for_update_on_startup=false\nmodel=\"mock-model\"\nmodel_provider=\"qualification\"\n[model_providers.qualification]\nname=\"Synthetic qualification\"\nbase_url=\"http://127.0.0.1:49307/v1\"\nwire_api=\"responses\"\nrequires_openai_auth=false\n[analytics]\nenabled=false\n[feedback]\nenabled=false\n[otel]\nexporter=\"none\"\ntrace_exporter=\"none\"\nmetrics_exporter=\"none\"\n[projects.\"/private/tmp/nhq-zlrk_u3c\"]\ntrust_level=\"trusted\"\n\n[features]\ncode_mode_only=true\ncode_mode_host=true\napps=false\n",
+    "final": "approval_policy=\"never\"\nsandbox_mode=\"danger-full-access\"\ncheck_for_update_on_startup=false\nmodel=\"mock-model\"\nmodel_provider=\"qualification\"\n[model_providers.qualification]\nname=\"Synthetic qualification\"\nbase_url=\"http://127.0.0.1:49307/v1\"\nwire_api=\"responses\"\nrequires_openai_auth=false\n[analytics]\nenabled=false\n[feedback]\nenabled=false\n[otel]\nexporter=\"none\"\ntrace_exporter=\"none\"\nmetrics_exporter=\"none\"\n[projects.\"/private/tmp/nhq-zlrk_u3c\"]\ntrust_level=\"trusted\"\n\n[features]\ncode_mode_only=true\ncode_mode_host=true\napps=false\n\n[tui]\nscreen_reader_detection_done = true\n\n[tui.model_availability_nux]\n\"gpt-6.1-sol\" = 1\n"
   }
 }

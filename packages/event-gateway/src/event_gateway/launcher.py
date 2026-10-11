@@ -46,7 +46,8 @@ class LaunchError(ValueError):
 def launch_environment(environment):
     """Keep user Codex configuration, refusing injected native/loader authority."""
     if any(key.startswith(("LD_", "DYLD_", "CODEX_NATIVE_BRIDGE_", "CODEX_BRIDGE_ADOPTION_"))
-           or key in ("CODEX_SELECTION_WITNESS_FD", "CODEX_CODE_MODE_HOST") for key in environment):
+           or key in ("CODEX_SELECTION_WITNESS_FD", "CODEX_CODE_MODE_HOST",
+                      "CODEX_CODE_MODE_HOST_PATH") for key in environment):
         raise LaunchError("unsafe_launch_environment")
     return dict(environment)
 

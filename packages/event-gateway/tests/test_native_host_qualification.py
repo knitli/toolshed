@@ -53,7 +53,15 @@ class NativeHostQualificationTests(unittest.TestCase):
 
     def test_frozen_helper_is_verified_before_execution(self):
         helper = QUALIFIER.verified_helper("qualification-installed.py")
-        self.assertTrue(callable(helper.verify_installed))
+        try:
+            self.assertTrue(callable(helper.verify_installed))
+            snapshot = Path(helper.__file__)
+            self.assertNotEqual(snapshot.parent, PATH.parent)
+            self.assertEqual(hashlib.sha256(snapshot.read_bytes()).hexdigest(),
+                             QUALIFIER.HELPERS["qualification-installed.py"])
+            self.assertEqual(snapshot.stat().st_mode & 0o777, 0o600)
+        finally:
+            helper._private_helper.cleanup()
         with patch.object(Path, "read_bytes", return_value=b"raise RuntimeError('executed')"):
             with self.assertRaisesRegex(AssertionError, "digest mismatch"):
                 QUALIFIER.verified_helper("qualification-installed.py")
@@ -89,14 +97,18 @@ class NativeHostQualificationTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--binary-sha256") + 1], QUALIFIER.CLI_SHA)
 
     def test_profile_denies_external_network_and_protects_real_home(self):
-        with patch.object(Path, "home", return_value=Path("/private/tmp/test-user")), \
-                patch.dict(os.environ, {"CODEX_HOME": '/private/tmp/custom "codex"'}):
-            profile = QUALIFIER.sandbox_profile(43210)
-        self.assertIn('(deny network*)', profile)
-        self.assertIn('(remote ip "localhost:43210")', profile)
-        self.assertIn('(subpath "/private/tmp/test-user/.codex")', profile)
-        self.assertIn("(subpath " + json.dumps('/private/tmp/custom "codex"') + ")", profile)
-        self.assertNotIn('(allow network-outbound)', profile)
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory).resolve() / "test-user"
+            codex_home = Path(directory).resolve() / 'custom "codex"'
+            with patch.object(Path, "home", return_value=home), \
+                    patch.dict(os.environ, {"CODEX_HOME": str(codex_home)}):
+                profile = QUALIFIER.sandbox_profile(43210)
+            self.assertIn('(deny network*)', profile)
+            self.assertIn('(remote ip "localhost:43210")', profile)
+            self.assertIn("(subpath " + json.dumps(str(home / ".codex")) + ")", profile)
+            self.assertIn("(subpath " + json.dumps(str(codex_home)) + ")", profile)
+            self.assertNotIn('(allow network-outbound)', profile)
+
 
 
 if __name__ == "__main__":

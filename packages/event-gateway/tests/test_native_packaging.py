@@ -99,6 +99,7 @@ class NativePackagingTests(unittest.TestCase):
             binary.write_bytes(b"cli")
             output, host, evidence = root / "codex", root / "codex-code-mode-host", root / "evidence.json"
             original_chmod = os.fchmod
+
             def chmod(fd, mode):
                 if host.exists() and os.fstat(fd).st_ino == host.stat().st_ino:
                     raise OSError("host chmod failure")
@@ -123,6 +124,7 @@ class NativePackagingTests(unittest.TestCase):
                     output, host, evidence = run / "codex", run / "codex-code-mode-host", run / "evidence.json"
                     replacement = run / "replacement"
                     replacement.write_bytes(b"other process")
+
                     def write(path, contents, mode=None):
                         if path == host and scenario == "host_failure":
                             raise OSError("injected failure")
@@ -149,6 +151,7 @@ class NativePackagingTests(unittest.TestCase):
             paths = [root / name for name in ("codex", "codex-code-mode-host", "evidence.json")]
             owned = [(path, PACKAGER["_write_new"](path, b"ours")) for path in paths]
             original_unlink = Path.unlink
+
             def unlink(path, *args, **kwargs):
                 if path == paths[1]:
                     raise PermissionError("cleanup denied")
@@ -510,6 +513,7 @@ class NativePackagingTests(unittest.TestCase):
                         replacement = run_dir / "replacement"
                         replacement.write_bytes(b"other process")
                         state.update(scenario="success", build_completed=False, evidence=record)
+
                         def cleanup_failure(context, *args):
                             self.assertTrue(all(path.exists() for path in (cli, host, record)))
                             if replaced is not None:
