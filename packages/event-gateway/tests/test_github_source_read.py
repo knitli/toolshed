@@ -41,6 +41,29 @@ class SourceReadTests(unittest.IsolatedAsyncioTestCase):
             private_key=Ed25519PrivateKey.generate(), credentials=self.credentials, send=send,
         )
 
+    async def test_unicode_cursor_revision_codepoint_boundary(self):
+        request = {**REQUEST, "cursor": {**CURSOR, "revision": "😀" * 256}}
+        self.result = {"status": "conflict"}
+        self.assertEqual(await self.client.github_source_read(request), self.result)
+        self.assertEqual(json.loads(self.requests[0]["body"]), request)
+        self.requests.clear()
+        self.credentials.reset_mock()
+        request["cursor"]["revision"] += "😀"
+        with self.assertRaisesRegex(CloudError, "^invalid_request$"):
+            await self.client.github_source_read(request)
+        self.credentials.assert_not_called()
+        self.assertFalse(self.requests)
+
+
+    async def test_unicode_projected_identity_codepoint_boundary(self):
+        self.result["items"][0].update(recordType="request", value={
+            "kind": "review_request", "identity": "😀" * 128, "from": None, "to": "present"})
+        self.assertEqual(await self.client.github_source_read(REQUEST), self.result)
+        self.result["items"][0]["value"]["identity"] += "😀"
+        with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+            await self.client.github_source_read(REQUEST)
+
+
     async def test_signed_one_page_and_continuation(self):
         self.assertEqual(await self.client.github_source_read(REQUEST), PAGE)
         wire = self.requests[0]

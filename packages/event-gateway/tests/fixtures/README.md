@@ -15,7 +15,7 @@ seven snapshot hashes. It records these `knitli/toolshed` snapshot commits:
 | native-input-recorded | 83bd9751b4616298563f8e633bb71520f0dbf347 |
 | native-admission | 3baeb6d5e8fa0fddceacc0c8c7151cdae4fe59c4 |
 | native-runtime-status | d979c715aec6ad00d3d40f622249e9a46bdc179f |
-| github-source-readback | 010dfe241aeb4af94a0aaa4ba994d19c959ee2f0 |
+| github-source-readback | 7c1c27ce5dbbdfc1af786a9f261da9cc7e22d43c |
 
 Snapshots were copied from `packages/event-gateway/contracts/` with `git show`
 and matched against every approved raw SHA-256 before inclusion. Source members
@@ -33,7 +33,12 @@ When deliberately authorizing another family, retain existing fixtures and
 review new source bytes, snapshot bytes, and policy metadata together.
 
 The GitHub source-readback family pins merged cloud `7d738a387cdbaab795e1538a240c1b85b6b7a0f7`
-with twelve control sources, adding `github/readback-contract.ts`. Its request/result
-vectors cover the emitted metadata boundary; the existing event sources and all
-previous family hashes are retained. The snapshot commit above is the reviewed
-consumer candidate, not an assertion that it is deployed or live-qualified.
+with 23 control sources covering the readback schema, delegated authorization and
+deadlines, GitHub host/client/admission, grants, retained pagination and shared
+identity helpers. Its request/result vectors cover the emitted metadata boundary;
+the existing event sources and all previous family hashes are retained. The
+Unicode length fix ships with this authorization; the consumer snapshot rotation
+follows after the trusted-main policy merges. These pins
+preserve the local read path; they do not qualify the external authority service,
+GitHub API or platform runtime. The snapshot commit is the reviewed consumer
+candidate, not an assertion that it is deployed or live-qualified.
