@@ -117,5 +117,73 @@ class NativeHostQualificationTests(unittest.TestCase):
 
 
 
+class ForegroundOperationTests(unittest.TestCase):
+    def test_single_operation_completes_only_when_foreground_is_drained(self):
+        import threading
+        from types import SimpleNamespace
+        released = threading.Event()
+        calls = []
+        drained = []
+
+        def operation(*args):
+            calls.append(args)
+            if not released.wait(0.2):
+                raise TimeoutError('foreground output was not consumed')
+            return {'outcome': {'status': 'inputRecorded'}}
+
+        def drain(master, tail):
+            drained.append((master, tail))
+            released.set()
+
+        launcher = SimpleNamespace(session_native_operation=operation, NATIVE_OPERATION_SECONDS=1)
+        smoke = SimpleNamespace(drain=drain)
+        process = SimpleNamespace(poll=lambda: None)
+        tail = bytearray()
+        result = QUALIFIER.foreground_operation(launcher, smoke, process, 7, tail, 'one-request')
+        self.assertEqual(result, {'outcome': {'status': 'inputRecorded'}})
+        self.assertEqual(calls, [('one-request',)])
+        self.assertTrue(drained)
+        self.assertTrue(all(master == 7 and seen is tail for master, seen in drained))
+
+    def test_operation_exception_propagates_without_retry(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        failure = ValueError('native failure')
+        operation = Mock(side_effect=failure)
+        with self.assertRaises(ValueError) as raised:
+            QUALIFIER.foreground_operation(
+                SimpleNamespace(session_native_operation=operation, NATIVE_OPERATION_SECONDS=1),
+                SimpleNamespace(drain=lambda *_: None), SimpleNamespace(poll=lambda: None),
+                7, bytearray(), 'one-request')
+        self.assertIs(raised.exception, failure)
+        operation.assert_called_once_with('one-request')
+
+    def test_process_exit_and_deadline_fail_closed(self):
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        for exited in (True, False):
+            with self.subTest(exited=exited):
+                operation = Mock(side_effect=lambda *_: threading.Event().wait(0.02))
+                launcher = SimpleNamespace(session_native_operation=operation, NATIVE_OPERATION_SECONDS=1)
+                process = SimpleNamespace(poll=lambda: 1 if exited else None)
+                with patch.object(QUALIFIER.time, 'monotonic', side_effect=[0, 2]), \
+                        self.assertRaisesRegex(AssertionError, 'launcher exited|native operation timed out'):
+                    QUALIFIER.foreground_operation(launcher, SimpleNamespace(drain=lambda *_: None),
+                                                   process, 7, bytearray(), 'one-request')
+                operation.assert_called_once_with('one-request')
+
+    def test_only_esrch_proves_owned_process_group_is_empty(self):
+        for outcome, error in ((ProcessLookupError(), None), (None, AssertionError),
+                               (PermissionError(), PermissionError)):
+            with self.subTest(outcome=outcome), patch.object(QUALIFIER.os, 'killpg', side_effect=outcome) as probe:
+                if error:
+                    with self.assertRaises(error):
+                        QUALIFIER.require_process_group_stopped(123)
+                else:
+                    QUALIFIER.require_process_group_stopped(123)
+                probe.assert_called_once_with(123, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,6 @@
 """Offline installed-wheel qualification of native admission and real source reads."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,7 +11,6 @@ import os
 from pathlib import Path
 import secrets
 import shlex
-import subprocess  # nosec B404 - Used only for a fixed read-only process inventory command.
 import sys
 import tempfile
 import threading
@@ -188,6 +188,27 @@ def preserve_final_config(trace, path):
         trace.update(config_snapshot(path, "final"))
 
 
+def foreground_operation(launcher, smoke, process, master, tail, *args):
+    # A blocked PTY writer can starve native receipt handling; keep consuming output.
+    deadline = time.monotonic() + launcher.NATIVE_OPERATION_SECONDS
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(launcher.session_native_operation, *args)
+        while not future.done():
+            require(process.poll() is None, "launcher exited during native operation")
+            require(time.monotonic() < deadline, "native operation timed out")
+            smoke.drain(master, tail)
+        require(process.poll() is None, "launcher exited during native operation")
+        return future.result()
+
+
+def require_process_group_stopped(pgid):
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return
+    raise AssertionError("owned process group survived cleanup")
+
+
 def qualify(args, launcher, smoke, server, github_fixture=None, installed_helper=None):
     host = args.binary.parent / "codex-code-mode-host"
     require(hashlib.sha256(args.binary.read_bytes()).hexdigest() == CLI_SHA, "CLI digest mismatch")
@@ -230,7 +251,8 @@ def qualify(args, launcher, smoke, server, github_fixture=None, installed_helper
             request = start_request(binding)
             session = socket_path.name[2:-5]
             server.trace.update(binding=binding, request=request, nativeStarts=1)
-            started = launcher.session_native_operation(state, session, binding, "nativeStart", request)
+            started = foreground_operation(launcher, smoke, process, master, tail,
+                                           state, session, binding, "nativeStart", request)
             server.trace["started"] = started
             require(started["outcome"]["status"] == "started", "native Start was not accepted")
             deadline = time.monotonic() + 90
@@ -239,7 +261,8 @@ def qualify(args, launcher, smoke, server, github_fixture=None, installed_helper
                 require(time.monotonic() < deadline, "source read timed out: " + tail.decode(errors="replace"))
                 require(not server.errors, str(server.errors))
                 smoke.drain(master, tail)
-            receipt = launcher.session_native_operation(state, session, binding, "nativeReceipt", request)
+            receipt = foreground_operation(launcher, smoke, process, master, tail,
+                                           state, session, binding, "nativeReceipt", request)
             server.trace["receipt"] = receipt
             output = (github_fixture.verify_output(server.main_requests, nonce, source, verify_output)
                       if github_fixture else verify_output(server.main_requests, nonce))
@@ -251,10 +274,7 @@ def qualify(args, launcher, smoke, server, github_fixture=None, installed_helper
             # Wait until the foreground is idle again before sending /quit.
             smoke.wait_selection(launcher, state, process, master, tail)
             code = smoke.quit_foreground(process, master, tail, socket_path, binding["backendPid"])
-        rows = subprocess.run(["/bin/ps", "-axo", "pid=,pgid="], check=True,  # nosec B603 - Fixed absolute executable and constant read-only arguments.
-                              capture_output=True, text=True, timeout=5).stdout.splitlines()
-        require(not any(len(row.split()) == 2 and row.split()[1] == str(process.pid)
-                        for row in rows), "owned process group survived cleanup")
+        require_process_group_stopped(process.pid)
         require(hashlib.sha256(args.binary.read_bytes()).hexdigest() == CLI_SHA, "CLI changed")
         require(hashlib.sha256(host.read_bytes()).hexdigest() == HOST_SHA, "host changed")
         require(len(server.main_requests) == 2 and len(server.title_requests) <= 1 and not server.errors, "unexpected provider activity")
