@@ -213,6 +213,11 @@ byte limits. Consumer tests exercise these through Python validation and the
 HTTP response boundary. Request identity, pagination binding, and duplicate
 record checks remain separately tested local invariants. These vectors do not
 qualify live authorization, source initialization, delivery, or native wake.
+The source manifest also preserves the delegated read path: authority revalidation
+and deadlines, host admission and GitHub client, grants and principal allowlist,
+controller pagination/projection, subject validation, and shared identity helpers.
+These are offline source provenance, not an executable dependency bundle or proof
+of the external authority service, provider API, or Cloudflare runtime.
 Snapshot verification does not prove that every Python semantic
 edge matches TypeScript: the event-envelope corpus still lacks portable semantic
 boundary vectors. Expanding that corpus and running both validators is an open

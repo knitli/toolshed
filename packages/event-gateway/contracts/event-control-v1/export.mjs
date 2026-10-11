@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { stripTypeScriptTypes } from 'node:module';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
@@ -13,6 +13,10 @@ const names = [
   'contracts.ts', 'api.ts', 'registry.ts', 'coordinator.ts', 'coordinator-admission.ts',
   'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts',
   'native-runtime-store.ts', 'native-admission-gate.ts', 'github/readback-contract.ts',
+  'read-authority.ts', 'request-deadline.ts', 'github/host.ts', 'github/controller.ts',
+  'github/client.ts', 'github/grants.ts', 'github/state.ts', 'github/ingress.ts',
+  '../../gatekeeper-memory/src/principals.ts', '../../openapi-operator/src/access.ts',
+  '../../gatekeeper-messaging/src/agent-token.ts',
 ];
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- Fixed source filenames under the operator-supplied local checkout.
 const source = Object.fromEntries(names.map(name => [name, readFileSync(resolve(base, name), 'utf8')]));
@@ -21,7 +25,7 @@ const revision = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encodi
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- Read package metadata beside the operator-supplied trusted Zod module.
 const zodVersion = JSON.parse(readFileSync(resolve(dirname(zodPath), 'package.json'), 'utf8')).version;
 // eslint-disable-next-line security/detect-object-injection -- Keys come only from the fixed source filename allowlist above.
-const sources = Object.fromEntries(names.map(name => [`apps/os/packages/event-runtime/src/${name}`, createHash('sha256').update(source[name]).digest('hex')]));
+const sources = Object.fromEntries(names.map(name => [`apps/os/${relative(root, resolve(base, name))}`, createHash('sha256').update(source[name]).digest('hex')]));
 if (check) {
   const pinned = JSON.parse(readFileSync(resolve(destination, 'manifest.json'), 'utf8'));
   if (revision !== pinned.revision || zodVersion !== pinned.zodVersion ||

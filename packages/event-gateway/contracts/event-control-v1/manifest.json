@@ -14,7 +14,18 @@
     "apps/os/packages/event-runtime/src/native-admission-contract.ts": "6f3fcdeee95ea967acbbcb9a701e89c2bcb653f2f8fba25b0b019b81b49cab23",
     "apps/os/packages/event-runtime/src/native-runtime-store.ts": "c56c20a16df373e392dfca822c42fa9617c3934d59dab3331831154605e59b44",
     "apps/os/packages/event-runtime/src/native-admission-gate.ts": "e6f9975990b340c7ab12db636da916b5294430274f33599abe5c13fb4f2018af",
-    "apps/os/packages/event-runtime/src/github/readback-contract.ts": "0eecf3862b71b5e59b9ac185f7b742bbcb9d916e1089ee53764ae347e8112fef"
+    "apps/os/packages/event-runtime/src/github/readback-contract.ts": "0eecf3862b71b5e59b9ac185f7b742bbcb9d916e1089ee53764ae347e8112fef",
+    "apps/os/packages/event-runtime/src/read-authority.ts": "57db0a83237b1cf96b74e7f225556e6b1ca3fea61ef7dee71c6db6d79686748b",
+    "apps/os/packages/event-runtime/src/request-deadline.ts": "4bc855f8c5008a7ce26519375999af646dec79a640c141efc75c97beab1c842e",
+    "apps/os/packages/event-runtime/src/github/host.ts": "6960947452b653fbb792f24d946fb37f44c98c24b78ff3091dd571d9dedcfa1f",
+    "apps/os/packages/event-runtime/src/github/controller.ts": "0b4caa85578741c6e9e16b1b7ef8e7b9a8aab40b58fa37f00044063090f5d228",
+    "apps/os/packages/event-runtime/src/github/client.ts": "459c48bc5263a677a09506cfc5c6ad54a73045fda3c29baf85f192f2c20c38d5",
+    "apps/os/packages/event-runtime/src/github/grants.ts": "cda0410f859dc2c34f55703754e62837f41984d6864aabea1bb5beaa4e56c3e9",
+    "apps/os/packages/event-runtime/src/github/state.ts": "1dd388bcb74cf8631820d673122b55bb65585f9a832eefc46bf4237ca35408d4",
+    "apps/os/packages/event-runtime/src/github/ingress.ts": "eff9dbfed0422d33183542e022a349fb468c8d43214df43a2e048f48cae1250c",
+    "apps/os/packages/gatekeeper-memory/src/principals.ts": "f72010c2833e37e176925d0a9eaa2d15f02add6d938038ce0ebd814ece320ebd",
+    "apps/os/packages/openapi-operator/src/access.ts": "7b9ed46f3396a4a2324e608aa72b71b1c35965a54c2a4c9b3043a321939c6a5c",
+    "apps/os/packages/gatekeeper-messaging/src/agent-token.ts": "af2c5344dcb6e652a26d179343b95b70b13608d4df59e39e840abb8f7686d502"
   },
   "fixturesSha256": "a337d1d2dbdf44a72bc41607e04bc5744886c130bafc6a9282438b81570e68bb"
 }

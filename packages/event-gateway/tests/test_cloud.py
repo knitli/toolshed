@@ -47,7 +47,7 @@ class ExportPinTests(unittest.TestCase):
             # Resolved executable, fixed arguments, no shell; read this checkout revision.
             pin["revision"] = subprocess.check_output([git, "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()  # nosec B603
             for name in pin["sources"]:
-                source_path = source / name.removeprefix("apps/os/packages/event-runtime/src/")
+                source_path = scratch / name.removeprefix("apps/os/")
                 source_path.parent.mkdir(parents=True, exist_ok=True)
                 source_path.write_text("export const harmless = true;\n")
                 pin["sources"][name] = hashlib.sha256(source_path.read_bytes()).hexdigest()
@@ -57,19 +57,26 @@ class ExportPinTests(unittest.TestCase):
             (dependency / "index.js").write_text("export const z = {};\n")
             (scratch / "manifest.json").write_text(json.dumps(pin))
             marker = scratch / "must-not-execute"
-            (source / "contracts.ts").write_text(
-                "import {writeFileSync} from 'node:fs';\n"
-                "writeFileSync(process.env.EVENT_EXPORT_TEST_MARKER, 'executed');\n"
-            )
-            # Resolved executable, fixed arguments, no shell; isolated source-pin fixture.
-            result = subprocess.run(  # nosec B603
-                [node, str(exporter), str(scratch), str(dependency / "index.js"), "--check"],
-                capture_output=True, text=True, timeout=10,
-                env={**os.environ, "EVENT_EXPORT_TEST_MARKER": str(marker)},
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertFalse(marker.exists(), "modified source executed before its pin was checked")
-            self.assertIn("source pin mismatch before evaluation", result.stderr)
+            for name in pin["sources"]:
+                source_path = scratch / name.removeprefix("apps/os/")
+                original = source_path.read_text()
+                with self.subTest(source=name):
+                    try:
+                        source_path.write_text(
+                            "import {writeFileSync} from 'node:fs';\n"
+                            "writeFileSync(process.env.EVENT_EXPORT_TEST_MARKER, 'executed');\n"
+                        )
+                        # Resolved executable, fixed arguments, no shell; isolated source-pin fixture.
+                        result = subprocess.run(  # nosec B603
+                            [node, str(exporter), str(scratch), str(dependency / "index.js"), "--check"],
+                            capture_output=True, text=True, timeout=10,
+                            env={**os.environ, "EVENT_EXPORT_TEST_MARKER": str(marker)},
+                        )
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertFalse(marker.exists(), "modified source executed before its pin was checked")
+                        self.assertIn("source pin mismatch before evaluation", result.stderr)
+                    finally:
+                        source_path.write_text(original)
 
 
 class CloudTests(unittest.IsolatedAsyncioTestCase):
