@@ -4,11 +4,11 @@ import asyncio
 import argparse
 import base64
 import copy
-from contextlib import ExitStack
+from datetime import datetime
+from contextlib import ExitStack, contextmanager
 import hashlib
 import http.client
 import importlib.util
-import importlib.metadata
 import json
 from pathlib import Path
 import select
@@ -18,33 +18,92 @@ import tempfile
 import time
 from uuid import UUID, uuid4
 
-if __name__ == '__main__':
+HERE = Path(__file__).resolve().parent
+
+
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def inputs(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('package', 'qualifier', 'binary', 'binary-sha', 'node', 'cloud-source', 'esbuild', 'miniflare', 'output'):
         parser.add_argument('--' + name, required=True)
-    parser.add_argument('--installed', action='store_true', help='Use the installed wheel, without adding source imports')
+    parser.add_argument('--installed', action='store_true', help='Verify the installed wheel against --package/src/event_gateway before imports; requires -I')
     parser.add_argument('--restart-native', action='store_true', help='Recover an expired v3 receipt after native process restart')
     parser.add_argument('--terminal-no-start', action='store_true', help='Qualify actual terminal refusal and durable cloud settlement')
     parser.add_argument('--forget-terminal', action='store_true', help='Restart native before terminal recovery; unknown must stay fenced')
-    args = parser.parse_args()
-    if args.restart_native and args.terminal_no_start:
+    for name, port in (('model', 49731), ('entry', 49732), ('loopback', 49733), ('broker', 49734)):
+        parser.add_argument('--' + name + '-port', type=int, default=port)
+    parsed = parser.parse_args(argv)
+    if parsed.restart_native and parsed.terminal_no_start:
         parser.error('--restart-native and --terminal-no-start are mutually exclusive')
-    if args.forget_terminal and not args.terminal_no_start:
+    if parsed.forget_terminal and not parsed.terminal_no_start:
         parser.error('--forget-terminal requires --terminal-no-start')
-    PACKAGE, QUALIFIER, BINARY = (Path(x).resolve(strict=True) for x in (args.package, args.qualifier, args.binary))
-    BINARY_SHA, NODE = args.binary_sha, str(Path(args.node).resolve(strict=True))
-    BROKER = Path(__file__).with_name('coupled-workerd-broker.mjs')
-    OUTPUT = Path(args.output).resolve()
-    if not args.installed:
+    ports = [getattr(parsed, name + '_port') for name in ('model', 'entry', 'loopback', 'broker')]
+    if len(set(ports)) != 4 or any(not 1024 <= port <= 65535 for port in ports):
+        parser.error('fixture ports must be distinct integers between 1024 and 65535')
+    return parsed
+
+
+def configure(parsed):
+    global PACKAGE, QUALIFIER, BINARY, BINARY_SHA, NODE, BROKER, OUTPUT
+    global serialization, Ed25519PrivateKey, event_gateway, CloudClient, Credentials
+    global Gateway, NativeBridgeAdapter, validate_receipt, Store, IDENTITY, NativeClient
+    PACKAGE, QUALIFIER, BINARY = (Path(x).resolve(strict=True) for x in (parsed.package, parsed.qualifier, parsed.binary))
+    BINARY_SHA, NODE = parsed.binary_sha, str(Path(parsed.node).resolve(strict=True))
+    BROKER, OUTPUT = HERE / 'coupled-workerd-broker.mjs', Path(parsed.output).resolve()
+    parsed.provenance = None
+    if parsed.installed:
+        checks = load_module('coupled_installed', HERE / 'qualification-installed.py')
+        checks.verified_python()
+        parsed.provenance = checks.verify_installed(PACKAGE / 'src/event_gateway')
+        NODE = checks.verified_executable(NODE)
+        checks.verified_executable(BINARY)
+    else:
         sys.path.insert(0, str(PACKAGE / 'src'))
-    # Package selection above deliberately precedes the imports used by this fixture.
-    from cryptography.hazmat.primitives import serialization  # noqa: E402
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
-    import event_gateway  # noqa: E402
-    from event_gateway.cloud import CloudClient, Credentials  # noqa: E402
-    from event_gateway.gateway import Gateway  # noqa: E402
-    from event_gateway.native import NativeBridgeAdapter, validate_receipt  # noqa: E402
-    from event_gateway.store import Store, IDENTITY  # noqa: E402
+    # Verification and fresh bytecode-cache selection precede every package import.
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    import event_gateway
+    from event_gateway.cloud import CloudClient, Credentials
+    from event_gateway.gateway import Gateway
+    from event_gateway.launcher import NativeClient
+    from event_gateway.native import NativeBridgeAdapter, validate_receipt
+    from event_gateway.store import Store, IDENTITY
+
+
+@contextmanager
+def fixed_model_port(launcher, port):
+    factory = launcher.ThreadingHTTPServer
+
+    def server(address, handler):
+        require(address == ('127.0.0.1', 0), 'unexpected native model listener')
+        return factory(('127.0.0.1', port), handler)
+
+    launcher.ThreadingHTTPServer = server
+    try:
+        yield
+    finally:
+        launcher.ThreadingHTTPServer = factory
+
+
+async def admit_runtime(cloud, bridge, runtime_id):
+    # The qualifier has already completed the real private bridge startup exchange.
+    client = NativeClient(bridge)
+    client.ready = True
+    binding = await asyncio.to_thread(client.binding)
+    intent = {'operation': 'attach', 'runtimeId': runtime_id,
+              'expectedRuntimeGeneration': None, 'expectedAttachmentGeneration': None,
+              'expectedNativeBinding': binding}
+    challenge = await cloud.native_challenge(intent)
+    witness = await asyncio.to_thread(client.challenge, challenge['challengeId'], binding)
+    evidence = {key: witness[key] for key in ('observedAt', 'validUntilMonotonic', 'witness')}
+    attached = await cloud.attach(intent, challenge, evidence)
+    return {'intent': intent, 'challenge': challenge, 'evidence': evidence, 'attached': attached}
 
 
 def require(condition, message):
@@ -149,11 +208,6 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
         'meshIp': '100.96.0.1', 'meshPort': 8789, 'agents': ['pilot']})
     fixture('/v1/nodes/complete', {'challengeId': challenge['challengeId'],
             'signature': b64(node_key.sign(challenge['signingPayload'].encode()))})
-    delivery = fixture('/fixture/setup', {'nodeId': node_id, 'runtimeId': runtime_id,
-        'transportPrivateKey': b64(transport_key.private_bytes(serialization.Encoding.DER,
-             serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))})
-    e, signed = delivery['envelope'], delivery['signedDelivery']
-    ident = e['deliveryId']
 
     async def credentials():
         nonlocal auth_calls
@@ -178,6 +232,24 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
             require(json.loads(response[2])['status'] == 'observed', 'real commit before reply loss')
             raise TimeoutError('real workerd committed observation; response deliberately lost')
         return response
+
+    require(fixture('/fixture/admission') == {'runtimes': [], 'native_runtime_bindings': []},
+            'no runtime or native binding before admission')
+    admission_cloud = CloudClient(origin='https://events.example.com', principal='qualification@example.com', agent='pilot',
+        node_id=node_id, node_generation=1, private_key=node_key, credentials=credentials, send=send)
+    admission = await admit_runtime(admission_cloud, bridge, runtime_id)
+    admission['wire'] = wires[:]
+    admission['readback'] = fixture('/fixture/admission')
+    require(len(admission['readback']['runtimes']) == 1 and len(admission['readback']['native_runtime_bindings']) == 1,
+            'actual admission persisted runtime and binding')
+    # Keep historical dispatch/ACK counts separate from the two genuine admission calls.
+    wires.clear()
+    auth_calls = 0
+    delivery = fixture('/fixture/setup', {'nodeId': node_id, 'runtimeId': runtime_id,
+        'transportPrivateKey': b64(transport_key.private_bytes(serialization.Encoding.DER,
+             serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))})
+    e, signed = delivery['envelope'], delivery['signedDelivery']
+    ident = e['deliveryId']
 
     class DelayedNativeAdapter(NativeBridgeAdapter):
         async def submit(self, request):
@@ -210,7 +282,10 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
         store = Store(state)
         try:
             mapping = {key: e[key] for key in IDENTITY}
-            mapping.update(nativeThreadId=witness['threadId'], leaseExpiresAt=time.time()+60)
+            require(all(e[key] == admission['attached'][key] for key in ('runtimeId', 'runtimeGeneration',
+                'nodeId', 'nodeGeneration', 'attachmentGeneration')), 'delivery uses admitted identity')
+            mapping.update(nativeThreadId=witness['threadId'], nativeBinding=admission['attached']['nativeBinding'],
+                sessionId=str(uuid4()), leaseExpiresAt=datetime.fromisoformat(admission['attached']['leaseUntil']).timestamp())
             store.put_attachment(mapping)
             app = gateway(store)
             require(app.accept(signed['body'].encode(), signature=signed['headers']['x-event-signature'],
@@ -261,7 +336,7 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                     require(fixture('/fixture/read') == before, 'unknown leaves coordinator unchanged')
                     require(all(count == 0 for count in model.request_counts.values()), 'unknown causes no model traffic')
                     return {'result': 'PASS', 'qualification': 'fixture-qualified-terminal-lost-on-native-restart',
-                        'binarySha256': BINARY_SHA, 'productionAdmissionProven': False,
+                        'binarySha256': BINARY_SHA, 'productionAdmissionProven': False, 'fixtureAdmission': admission,
                         'nativeProcessRestarted': all(restart_checks.values()), 'restartChecks': restart_checks,
                         'unknownNeverRetriesProven': True,
                         'nativeExchanges': native_exchanges, 'nativeBridgeOpen': not bridge.closed,
@@ -324,12 +399,12 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                     and after['cloud']['manual_sources'][0]['observed_source_state_version'] is None,
                     'submitted delivery retains capacity without observation')
                 return {'result': 'PASS', 'qualification': 'fixture-qualified-terminal-no-start-local-workerd',
-                    'binarySha256': BINARY_SHA, 'productionAdmissionProven': False,
+                    'binarySha256': BINARY_SHA, 'productionAdmissionProven': False, 'fixtureAdmission': admission,
                     'nativeTerminalReceiptDurableAcrossNativeRestart': False, 'nativeProcessRestarted': False,
                     'oldStartNoStartSettlementProven': True, 'original': original, 'terminalReceipt': terminal_receipts[0],
                     'pending': pending, 'before': before, 'settled': settled, 'replacement': replacement, 'after': after,
                     'wire': wires, 'modelRequests': model.request_counts, 'realModelCalls': 0,
-                    'mocks': ['post-persistence submission delay', 'lost native and cloud replies', 'qualified runtime/admin setup',
+                    'mocks': ['post-persistence submission delay', 'lost native and cloud replies', 'admin enablement',
                         'Access/Messaging identity and budget', 'manual source publication', 'queue metrics', 'loopback instead of Mesh']}
             require((await app.dispatch(ident))['status'] == 'submitted', 'real claim and registration')
             before = fixture('/fixture/read')
@@ -389,32 +464,26 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 'oldStartNoStartSettlementProven': False,
                 'realModelCalls': 0, 'modelRequests': model.request_counts,
                 'nativeRequest': request, 'fullInputRecordedReceipt': original['input_recorded_receipt'],
-                'before': before, 'settled': settled, 'wire': wires, 'productionAdmissionProven': False,
-                'mocks': ['qualified runtime/admin setup', 'Access edge/ Messaging credentials and budget',
+                'before': before, 'settled': settled, 'wire': wires, 'productionAdmissionProven': False, 'fixtureAdmission': admission,
+                'mocks': ['admin enablement', 'Access edge/ Messaging credentials and budget',
                           'manual source publication', 'queue metrics', 'loopback instead of Mesh']}
         finally:
             store.close()
 
 
 def main():
-    if args.installed:
-        distribution = importlib.metadata.distribution('knitli-event-gateway')
-        require('event_gateway/native_reader.py' in {str(file) for file in distribution.files or ()},
-                'reader must belong to an installed wheel, not an editable source checkout')
-        require(Path(event_gateway.__file__).resolve() ==
-                Path(distribution.locate_file('event_gateway/__init__.py')).resolve(),
-                'package import must match installed distribution')
     require(hashlib.sha256(BINARY.read_bytes()).hexdigest() == BINARY_SHA, 'frozen native binary')
-    spec = importlib.util.spec_from_file_location('coupled_qualifier', QUALIFIER)
-    launcher = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(launcher)
+    launcher = load_module('coupled_qualifier', QUALIFIER)
     with open(str(OUTPUT) + '.broker.log', 'w') as log:
         # Trusted resolved CLI Node path, fixed broker, argument array, synthetic environment.
         broker = subprocess.Popen([NODE, str(BROKER)], stdout=subprocess.PIPE, stderr=log, text=True,  # nosec B603
             env={'PATH': '/usr/bin:/bin', 'HOME': tempfile.gettempdir(),
+                 'TMPDIR': tempfile.gettempdir(), 'TMP': tempfile.gettempdir(), 'TEMP': tempfile.gettempdir(),
                  'FIXTURE_CLOUD_SOURCE': str(Path(args.cloud_source).resolve(strict=True)),
                  'FIXTURE_ESBUILD': str(Path(args.esbuild).resolve(strict=True)),
-                 'FIXTURE_MINIFLARE': str(Path(args.miniflare).resolve(strict=True))}, cwd=tempfile.gettempdir())
+                 'FIXTURE_MINIFLARE': str(Path(args.miniflare).resolve(strict=True)),
+                 'FIXTURE_ENTRY_PORT': str(args.entry_port), 'FIXTURE_LOOPBACK_PORT': str(args.loopback_port),
+                 'FIXTURE_BROKER_PORT': str(args.broker_port)}, cwd=tempfile.gettempdir())
         try:
             require(select.select([broker.stdout], [], [], 30)[0], 'broker startup deadline')
             address = json.loads(broker.stdout.readline())
@@ -425,10 +494,14 @@ def main():
                 finally:
                     model.release_primary.set()
             launcher.qualify_input_recorded = callback
-            proof = launcher.qualify(BINARY, input_recorded=True, receipt_version=3 if args.restart_native or args.terminal_no_start else 2)
+            with fixed_model_port(launcher, args.model_port):
+                proof = launcher.qualify(BINARY, input_recorded=True, receipt_version=3 if args.restart_native or args.terminal_no_start else 2)
             paths = [Path(__file__), BROKER, BROKER.with_name('coupled-workerd-worker.ts'),
                      BROKER.with_name('coupled-workerd-source-hashes.mjs'), QUALIFIER,
                      *sorted(Path(event_gateway.__file__).parent.glob('*.py'))]
+            paths.append(HERE / 'qualification-installed.py')
+            proof['installedProvenance'] = args.provenance
+            proof['fixturePorts'] = {name: getattr(args, name + '_port') for name in ('model', 'entry', 'loopback', 'broker')}
             proof['cloudBundle'] = address['bundle']
             proof['sourceSha256'] = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
             target = OUTPUT
@@ -444,4 +517,6 @@ def main():
 
 
 if __name__ == '__main__':
+    args = inputs()
+    configure(args)
     main()

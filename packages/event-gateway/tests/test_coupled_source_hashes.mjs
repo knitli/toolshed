@@ -34,3 +34,71 @@ test('hashes only resolved sources inside qualified roots, before reading conten
     assert.equal(read.mock.callCount(), 0, 'validate all paths before any content read');
   }
 });
+
+
+test('fixture ports are fixed, configurable, bounded, and distinct', async () => {
+  const {fixturePorts}=await import('../docs/native-bridge/coupled-workerd-broker.mjs');
+  assert.deepEqual(fixturePorts({}), {ENTRY:49732,LOOPBACK:49733,BROKER:49734});
+  assert.equal(fixturePorts({FIXTURE_ENTRY_PORT:'50100'}).ENTRY,50100);
+  for(const value of ['0','1023','65536','12x','1.5',''])assert.throws(()=>fixturePorts({FIXTURE_ENTRY_PORT:value}),/Invalid/);
+  assert.throws(()=>fixturePorts({FIXTURE_ENTRY_PORT:'49733'}),/distinct/);
+});
+
+test('Miniflare HTTP interception rewrites only one exact loopback listen and restores prototype', async t => {
+  const {Server}=await import('node:net');
+  const {createServer}=await import('node:http');
+  const {interceptLoopbackPort}=await import('../docs/native-bridge/coupled-workerd-broker.mjs');
+  const listen=t.mock.method(Server.prototype,'listen',function(){return this;});
+  const server=createServer();
+  const prototype=Object.getPrototypeOf(server);
+  const before=Object.getOwnPropertyDescriptor(prototype,'listen');
+  const restore=interceptLoopbackPort(49733);
+  const callback=()=>{};
+  try {
+    assert.throws(()=>server.listen(0,'0.0.0.0',callback),/Unexpected/);
+    assert.throws(()=>server.listen({port:0,host:'127.0.0.1'},callback),/Unexpected/);
+    assert.equal(listen.mock.callCount(),0);
+    assert.equal(server.listen(0,'127.0.0.1',callback),server);
+    assert.deepEqual(listen.mock.calls[0].arguments,[49733,'127.0.0.1',callback]);
+    assert.throws(()=>server.listen(0,'127.0.0.1',callback),/Unexpected/);
+  } finally {restore();}
+  assert.deepEqual(Object.getOwnPropertyDescriptor(prototype,'listen'),before);
+  // Failed startup must restore the actual HTTP prototype without masking its error.
+  assert.doesNotThrow(()=>interceptLoopbackPort(49733)(false));
+  assert.deepEqual(Object.getOwnPropertyDescriptor(prototype,'listen'),before);
+  assert.throws(interceptLoopbackPort(49733),/exactly one/);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(prototype,'listen'),before);
+});
+
+test('fixture setup requires prior admission and cannot seed runtime SQL', async () => {
+  const {stripTypeScriptTypes}=await import('node:module');
+  const {runInNewContext}=await import('node:vm');
+  const source=fs.readFileSync(new URL('../docs/native-bridge/coupled-workerd-worker.ts',import.meta.url),'utf8');
+  const script=stripTypeScriptTypes(source).replace(/^import .*;$/gm,'').replace(/export class /g,'class ').replace('export default ','const handler=');
+  let admitted=false,published=0,claimed=0;
+  const statements=[];
+  class AgentCoordinator {
+    constructor(ctx){this.ctx=ctx;}
+    async setEnabled(){}
+    async publishManual(){if(!admitted)throw new Error('runtime_not_admitted');published++;return {runtimeId:'fixture-runtime'};}
+    async claimTransport(){claimed++;return {envelope:{}};}
+  }
+  const FixtureCoordinator=runInNewContext(`${script}\nFixtureCoordinator`,{
+    AgentCoordinator,OwnerRegistry:class {},
+    signedEventRequest:async()=>({text:async()=>'signed',headers:new Map()}),
+  });
+  const coordinator=new FixtureCoordinator({storage:{sql:{exec(sql){
+    statements.push(sql);
+    if(/INSERT\s+INTO\s+runtimes/i.test(sql))admitted=true;
+    return {toArray:()=>[]};
+  }}}},{});
+  const setup={runtimeId:'fixture-runtime',nodeId:'fixture-node',transportPrivateKey:'synthetic'};
+  await assert.rejects(coordinator.fixtureSetup(setup),/runtime_not_admitted/);
+  assert.deepEqual(statements,[],'setup must not write admission SQL');
+  assert.equal(published,0);assert.equal(claimed,0);
+  admitted=true;
+  const result=await coordinator.fixtureSetup(setup);
+  assert.equal(result.signedDelivery.body,'signed');
+  assert.equal(published,1);assert.equal(claimed,1);
+  assert.deepEqual(statements,[]);
+});
