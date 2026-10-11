@@ -58,3 +58,25 @@ cloud source rereading, or useful work after notification. Earlier build and
 live wake/restart evidence remain historical and unchanged. No CLI rebuild,
 trusted contract rotation, owner-client installation or cloud activation is part
 of this packaging repair.
+
+## Offline GitHub command integration
+
+Add `--github-source-read` to the same installed-wheel command to run the
+qualification-only GitHub fixture. The actual pinned code-mode host executes an
+isolated Python process that verifies the installed wheel again, then calls its
+`cli.main` with `github-source-read`. The actual `CloudClient` receives only
+synthetic credential and HTTP ports in that disposable process. No production
+configuration or transport behavior changes.
+
+The synthetic transport verifies the Ed25519 node signature, exact subject and
+version range, endpoint and bounded request options. A fresh review-request
+identity is read from a private schema-valid retained response; it is absent
+from the tool program and initial provider request. The proof requires its exact
+validated CLI output in the existing correlated tool call, thread and turn,
+matching `inputRecorded`, and the existing process/socket cleanup. A malformed
+response or signature cannot produce a successful transport witness.
+
+This proves native-to-installed-command integration with synthetic retained
+source data. It makes zero real model or cloud calls and does not establish
+live authorization, GitHub ingestion, or real model tool selection. The default
+file-read fixture remains available without the flag.

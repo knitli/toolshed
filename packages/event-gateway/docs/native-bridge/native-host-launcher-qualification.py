@@ -20,6 +20,7 @@ from uuid import uuid4
 CLI_SHA = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
 HOST_SHA = "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a"
 HELPERS = {
+    "native-github-source-qualification.py": "04ef38a3d69ca8787856769c6b83956deb88a7576c7e237b33c3b68550dea33a",
     "native-release-launcher-smoke.py": "073ddf6a43248db44345e0a20d09f11ced91740186d741b9038b7f7bea5dd33e",
     "qualification-installed.py": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c",
 }
@@ -187,7 +188,7 @@ def preserve_final_config(trace, path):
         trace.update(config_snapshot(path, "final"))
 
 
-def qualify(args, launcher, smoke, server):
+def qualify(args, launcher, smoke, server, github_fixture=None, installed_helper=None):
     host = args.binary.parent / "codex-code-mode-host"
     require(hashlib.sha256(args.binary.read_bytes()).hexdigest() == CLI_SHA, "CLI digest mismatch")
     require(hashlib.sha256(host.read_bytes()).hexdigest() == HOST_SHA, "host digest mismatch")
@@ -207,8 +208,9 @@ def qualify(args, launcher, smoke, server):
         nonce = "source-nonce-" + secrets.token_hex(32)
         source.write_text(nonce + "\n")
         source.chmod(0o600)
+        server.program = (github_fixture.prepare(source, nonce, args.package_source, installed_helper)
+                          if github_fixture else source_program(source))
         source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
-        server.program = source_program(source)
         require(nonce not in server.program, "fixture must not supply source content")
         profile = root / "offline.sb"
         profile.write_text(sandbox_profile(server.server_port))
@@ -239,7 +241,8 @@ def qualify(args, launcher, smoke, server):
                 smoke.drain(master, tail)
             receipt = launcher.session_native_operation(state, session, binding, "nativeReceipt", request)
             server.trace["receipt"] = receipt
-            output = verify_output(server.main_requests, nonce)
+            output = (github_fixture.verify_output(server.main_requests, nonce, source, verify_output)
+                      if github_fixture else verify_output(server.main_requests, nonce))
             require(all(item.get("client_metadata", {}).get("turn_id") == started["outcome"]["turnId"]
                         and item.get("client_metadata", {}).get("thread_id") == binding["threadId"]
                         for item in server.main_requests), "main provider request identity mismatch")
@@ -277,6 +280,7 @@ def main():
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--package-source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--github-source-read", action="store_true")
     args = parser.parse_args()
     if args.output.exists():
         parser.error("output already exists; choose a new proof path")
@@ -294,7 +298,12 @@ def main():
         proof["installedPackagePreflight"] = provenance
         proof["frozenHelperSha256"] = HELPERS
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        proof = qualify(args, launcher, smoke, server)
+        github_fixture = verified_helper("native-github-source-qualification.py") if args.github_source_read else None
+        proof = qualify(args, launcher, smoke, server, github_fixture, helper.__file__)
+        if github_fixture:
+            proof.update(qualification="offline-native-github-source-read", realCloudCalls=0,
+                         syntheticTransportCalls=1, requestSignatureVerified=True,
+                         liveAuthorizationProved=False)
         proof["installedPackagePreflight"] = provenance
         proof["frozenHelperSha256"] = HELPERS
     except Exception as error:
