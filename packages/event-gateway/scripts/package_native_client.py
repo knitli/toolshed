@@ -263,8 +263,9 @@ def _rustup_executable(env):
         if not candidate.is_file() or not os.access(candidate, os.X_OK):
             continue
         resolved = candidate.resolve(strict=True)
-        if resolved.name == "rustup":
-            return resolved
+        if resolved.name in {"rustup", "rustup-init"}:
+            # Homebrew aliases rustup to rustup-init; argv[0] selects CLI versus installer mode.
+            return candidate.absolute()
     raise ValueError("native_build_requires_rustup_1_95_0_arm64_macos")
 
 

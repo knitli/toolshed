@@ -805,8 +805,74 @@ class NativePackagingTests(unittest.TestCase):
 
             self.assertEqual(
                 PACKAGER["_rustup_executable"]({"PATH": f"{shim}{os.pathsep}{actual}"}),
-                rustup.resolve(),
+                rustup.absolute(),
             )
+
+    def test_rustup_alias_preserves_invocation_mode_and_physical_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            shim = root / "shim"
+            actual = root / "bin"
+            shim.mkdir()
+            actual.mkdir()
+            manager = root / "mise"
+            manager.write_text("#!/bin/sh\nexit 91\n")
+            manager.chmod(0o755)
+            (shim / "rustup").symlink_to(manager)
+            target = root / "rustup-init"
+            payload = b'#!/bin/sh\ncase "$0" in */rustup) echo rustup-mode;; *) echo installer-mode; exit 92;; esac\n'
+            target.write_bytes(payload)
+            target.chmod(0o755)
+            alias = actual / "rustup"
+            alias.symlink_to(target)
+            env = {"PATH": f"{shim}{os.pathsep}{actual}"}
+
+            selected = PACKAGER["_rustup_executable"](env)
+            self.assertEqual(selected, alias)
+            result = PACKAGER["_run"](
+                [selected, "run", "1.95.0"], cwd=root, env=env, capture=True,
+            )
+            self.assertEqual(result.stdout, "rustup-mode\n")
+            self.assertEqual(PACKAGER["_binary_evidence"](selected), {
+                "path": str(target), "sha256": hashlib.sha256(payload).hexdigest(),
+            })
+
+    def test_rustup_discovery_rejects_shim_only_and_nonexecutable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manager = root / "mise"
+            manager.write_bytes(b"manager")
+            manager.chmod(0o755)
+            candidate = root / "rustup"
+            candidate.symlink_to(manager)
+            env = {"PATH": str(root)}
+            with self.assertRaisesRegex(ValueError, "native_build_requires_rustup"):
+                PACKAGER["_rustup_executable"](env)
+            candidate.unlink()
+            candidate.write_bytes(b"not executable")
+            candidate.chmod(0o644)
+            with self.assertRaisesRegex(ValueError, "native_build_requires_rustup"):
+                PACKAGER["_rustup_executable"](env)
+
+    def test_toolchain_rejects_incorrect_release_commit_host_or_cargo(self):
+        valid = {"release": "1.95.0", "commit-hash": "59807616e0000000",
+                 "host": "aarch64-apple-darwin"}
+        for field, wrong in (("release", "1.94.0"), ("commit-hash", "000000000"),
+                             ("host", "x86_64-apple-darwin"), ("cargo", "1.94.0")):
+            with self.subTest(field=field):
+                values = {**valid, **({field: wrong} if field != "cargo" else {})}
+                rustc = "\n".join(f"{key}: {value}" for key, value in values.items())
+                cargo = f"cargo {wrong if field == 'cargo' else '1.95.0'} (fixture)"
+                with patch.dict(PACKAGER_GLOBALS, {
+                    "_rustup_executable": lambda _env: Path("/fixture/rustup"),
+                }), patch.dict(PACKAGER_GLOBALS, {
+                    "_run": unittest.mock.Mock(side_effect=[
+                        subprocess.CompletedProcess([], 0, stdout=rustc),
+                        subprocess.CompletedProcess([], 0, stdout=cargo),
+                    ]),
+                }):
+                    with self.assertRaisesRegex(ValueError, "native_build_requires_rust_1_95_0_arm64_macos"):
+                        PACKAGER["_toolchain"]({"HOME": "/fixture"})
 
     def test_cargo_configuration_accepts_only_pinned_file_and_rejects_home_ancestor(self):
         with tempfile.TemporaryDirectory() as directory:
