@@ -1,0 +1,18 @@
+{
+  "result": "FAIL before broker handshake/native launch",
+  "attempts": 1,
+  "reason": "Miniflare startup listen EPERM at 127.0.0.1; fixed HTTP2 interception recorded zero calls and its cleanup assertion masked initial readiness failure",
+  "frozenInputsUnchanged": true,
+  "profileUnchanged": "543b805aae12a71f9f9300b9685be50ed48b777f732846955faae65ea1de4051",
+  "proofExists": false,
+  "artifacts": {
+    "/private/tmp/native-workerd-recovery-qualification/proof/run.stderr": "f273c8414eb524b506a78be349ff8a731c556a61f3eb5355a75b889e4bc234af",
+    "/private/tmp/native-workerd-recovery-qualification/proof/recovery.json.broker.log": "b7f3638be1d0526aade5c9acb5a1f9f39ef5a912a82378a91bb8a5cb91bdce70",
+    "/private/tmp/native-workerd-recovery-qualification/proof/installed-preflight.json": "6164d98ef49ae3ac409d07121fb00e161b05b30c8c9741ac24e0117f6141c5f1",
+    "/private/tmp/native-workerd-recovery-qualification/proof/owned-processes.json": "c427a454d3aa0e52fb2076492411643862b0f5aadb0037c7545c557ccdd9b9d2",
+    "/private/tmp/native-workerd-recovery-qualification/proof/run.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/private/tmp/native-workerd-recovery-qualification/proof/supervision.json": "2c38f3131ad8792abf44912597a52355c4184e6da48a0078ecc2de6cfe82ebe8",
+    "/private/tmp/native-workerd-recovery-qualification/proof/attempt-one.json": "6236b71feca1258f3e4d860a3f0b4736c503027ef06e70941c988761378623ea"
+  },
+  "supervisorSha256": "7d7d94820853b867fd7a5439a6548dacf3cce56bbfd2187f2d91f39fddb15d31"
+}

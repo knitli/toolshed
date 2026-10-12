@@ -1,0 +1,60 @@
+{
+  "exitCode": 0,
+  "hardTimeout": false,
+  "elapsedSeconds": 8.436135333002312,
+  "error": null,
+  "rootPid": 67455,
+  "ownedProcesses": [
+    {
+      "pid": 67455,
+      "ppid": 67396,
+      "pgid": 67455,
+      "start": "Sun Oct 11 20:14:18 2026",
+      "command": "/private/tmp/native-workerd-recovery-qualification/venv/bin/python -I -B /private/tmp/native-workerd-recovery-qualification/fixture/coupled-workerd.py --installed --terminal-no-start --package /private/tmp/native-workerd-recovery-qualification/package --qualifier /private/tmp/native-workerd-recovery-qualification/fixture/qualify_native_bridge.py --binary /private/tmp/native-workerd-recovery-qualification/candidate/codex --binary-sha 62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3 --node /private/tmp/native-workerd-recovery-qualification/runtime/node --cloud-source /private/tmp/native-workerd-recovery-qualification/cloud/apps/os/packages/event-runtime/src --esbuild /private/tmp/native-workerd-recovery-qualification/cloud/apps/os/node_modules/.pnpm/esbuild@0.28.1/node_modules/esbuild --miniflare /private/tmp/native-workerd-recovery-qualification/cloud/apps/os/node_modules/.pnpm/miniflare@5.20261001.0-alpha_@types+node@26.1.0/node_modules/miniflare --model-port 49731 --entry-port 49732 --loopback-port 49733 --broker-port 49734 --output /private/tmp/native-workerd-recovery-qualification/proof/terminal-no-start/terminal-no-start.json",
+      "firstSeenSeconds": 0.039430083001207095,
+      "lastSeenSeconds": 7.276263250001648
+    },
+    {
+      "pid": 67492,
+      "ppid": 67455,
+      "pgid": 67455,
+      "start": "Sun Oct 11 20:14:19 2026",
+      "command": "/private/tmp/native-workerd-recovery-qualification/runtime/node /private/tmp/native-workerd-recovery-qualification/fixture/coupled-workerd-broker.mjs",
+      "firstSeenSeconds": 0.5455616660037776,
+      "lastSeenSeconds": 7.030489083001157
+    },
+    {
+      "pid": 67494,
+      "ppid": 67492,
+      "pgid": 67455,
+      "start": "Sun Oct 11 20:14:19 2026",
+      "command": "/private/tmp/native-workerd-recovery-qualification/cloud/apps/os/node_modules/.pnpm/@esbuild+darwin-arm64@0.28.1/node_modules/@esbuild/darwin-arm64/bin/esbuild --service=0.28.1 --ping",
+      "firstSeenSeconds": 0.8185905830032425,
+      "lastSeenSeconds": 7.030489666001813
+    },
+    {
+      "pid": 67495,
+      "ppid": 67492,
+      "pgid": 67455,
+      "start": "Sun Oct 11 20:14:19 2026",
+      "command": "/private/tmp/native-workerd-recovery-qualification/cloud/apps/os/node_modules/.pnpm/@cloudflare+workerd-darwin-arm64@1.20261001.1/node_modules/@cloudflare/workerd-darwin-arm64/bin/workerd serve --binary --experimental --socket-addr=entry=127.0.0.1:49732 --external-addr=loopback=127.0.0.1:49733 --control-fd=3 -",
+      "firstSeenSeconds": 0.8185917500013602,
+      "lastSeenSeconds": 7.030489791002765
+    },
+    {
+      "pid": 67505,
+      "ppid": 67455,
+      "pgid": 67505,
+      "start": "Sun Oct 11 20:14:19 2026",
+      "command": "/private/tmp/native-workerd-recovery-qualification/candidate/codex --no-daemon -c check_for_update_on_startup=false -c model_provider=\"qualification\" -c model_providers.qualification.name=\"Synthetic qualification\" -c model_providers.qualification.base_url=\"http://127.0.0.1:49731\" -c model_providers.qualification.wire_api=\"responses\" -c model_providers.qualification.requires_openai_auth=false -c model=\"mock-model\" -c analytics.enabled=false -c feedback.enabled=false -c otel.exporter=\"none\" -c otel.trace_exporter=\"none\" -c otel.metrics_exporter=\"none\" --no-alt-screen -C /private/tmp/native-workerd-recovery-qualification/tmp/native-qualification-v4rnl57d",
+      "firstSeenSeconds": 0.8185921250042156,
+      "lastSeenSeconds": 6.560767708004278
+    }
+  ],
+  "cleanupSignals": [],
+  "processGroups": {
+    "67455": "ESRCH",
+    "67505": "ESRCH"
+  },
+  "remainingOwnedProcesses": []
+}

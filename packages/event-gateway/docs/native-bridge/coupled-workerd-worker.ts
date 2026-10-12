@@ -29,7 +29,6 @@ const queue = { async send(){return {metadata};}, async sendBatch(){return {meta
 export class FixtureCoordinator extends AgentCoordinator {
   constructor(ctx:CoordinatorContext,env:CoordinatorEnv) { super(ctx,{...env,MESSAGE_AUTHORITY:authority as unknown as CoordinatorEnv['MESSAGE_AUTHORITY'],DELIVERY_QUEUE:queue as unknown as CoordinatorEnv['DELIVERY_QUEUE']}); }
   async fixtureSetup(x:FixtureSetup) {
-    this.ctx.storage.sql.exec('INSERT INTO runtimes VALUES (?,1,?,1,1,?,1)',x.runtimeId,x.nodeId,Date.now()+90000);
     await this.setEnabled({enabled:true});
     const job={principal,agent,...await this.publishManual({runtimeId:x.runtimeId,subjectId:'fixture-manual-source'})};
     const transport=await this.claimTransport(job);
@@ -37,6 +36,9 @@ export class FixtureCoordinator extends AgentCoordinator {
     const req=await signedEventRequest({EVENT_TRANSPORT_PRIVATE_KEY:x.transportPrivateKey,EVENT_TRANSPORT_KEY_ID:'fixture-transport',
       MESH:{async fetch(){throw new Error('fixture_no_mesh');}}}, {nodeId:x.nodeId,meshIp:'100.96.0.1',meshPort:8789},transport.envelope);
     return {...transport,signedDelivery:{body:await req.text(),headers:Object.fromEntries(req.headers)}};
+  }
+  async fixtureAdmission() {
+    return Object.fromEntries(['runtimes','native_runtime_bindings'].map(t=>[t,this.ctx.storage.sql.exec(`SELECT * FROM ${t}`).toArray()]));
   }
   async fixtureAlarm() { await this.alarm(); }
   async fixtureRead() {
@@ -53,6 +55,7 @@ export default { async fetch(request:Request,env:FixtureEnv) {
   const registry=env.OWNER_REGISTRY.getByName(ownerRegistryName(principal));
   const coordinator=env.AGENT_COORDINATOR.getByName(coordinatorName(principal,agent));
   if(path==='/fixture/challenge') return Response.json(await registry.createChallenge(await request.json()));
+  if(path==='/fixture/admission') return Response.json(await coordinator.fixtureAdmission());
   if(path==='/fixture/setup') return Response.json(await coordinator.fixtureSetup(await request.json()));
   if(path==='/fixture/read') return Response.json({cloud:await coordinator.fixtureRead(),slots:await registry.fixtureRead(),budget:budget()});
   if(path==='/fixture/alarm') { await coordinator.fixtureAlarm(); return Response.json({ok:true}); }

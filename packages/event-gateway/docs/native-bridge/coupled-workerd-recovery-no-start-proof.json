@@ -1,0 +1,1089 @@
+{
+  "result": "PASS",
+  "qualification": "fixture-qualified-terminal-no-start-local-workerd",
+  "binarySha256": "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3",
+  "productionAdmissionProven": false,
+  "fixtureAdmission": {
+    "intent": {
+      "operation": "attach",
+      "runtimeId": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+      "expectedRuntimeGeneration": null,
+      "expectedAttachmentGeneration": null,
+      "expectedNativeBinding": {
+        "clientId": "7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb",
+        "connectionId": "d16533de-e69d-494e-8a70-88b68ba9a71d",
+        "backendPid": 67505,
+        "threadId": "01a12d75-d6c7-7043-bad8-bfc4703996c5",
+        "generation": 5,
+        "serverInstanceId": "01a12d75-d690-7452-a704-a07f52246599",
+        "serverGeneration": 3
+      }
+    },
+    "challenge": {
+      "challengeId": "bebd726a-05b3-4236-9100-2f5f39e6bcd4",
+      "issuedAt": "2026-10-12T00:14:20.045Z",
+      "expiresAt": "2026-10-12T00:14:50.045Z"
+    },
+    "evidence": {
+      "observedAt": "2026-10-12T00:14:20.048Z",
+      "validUntilMonotonic": 42775.620448958,
+      "witness": {
+        "version": 2,
+        "nonce": 5,
+        "clientId": "7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb",
+        "backendPid": 67505,
+        "connectionId": "d16533de-e69d-494e-8a70-88b68ba9a71d",
+        "threadId": "01a12d75-d6c7-7043-bad8-bfc4703996c5",
+        "generation": 5,
+        "eligible": true,
+        "sequence": 5,
+        "cause": "heartbeat",
+        "serverInstanceId": "01a12d75-d690-7452-a704-a07f52246599",
+        "serverGeneration": 3,
+        "leaseMs": 750
+      }
+    },
+    "attached": {
+      "status": "attached",
+      "runtimeId": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+      "runtimeGeneration": 1,
+      "nodeId": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+      "nodeGeneration": 1,
+      "attachmentGeneration": 1,
+      "leaseUntil": "2026-10-12T00:15:50.062Z",
+      "nativeBinding": {
+        "clientId": "7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb",
+        "connectionId": "d16533de-e69d-494e-8a70-88b68ba9a71d",
+        "backendPid": 67505,
+        "threadId": "01a12d75-d6c7-7043-bad8-bfc4703996c5",
+        "generation": 5,
+        "serverInstanceId": "01a12d75-d690-7452-a704-a07f52246599",
+        "serverGeneration": 3
+      }
+    },
+    "wire": [
+      {
+        "path": "/v1/runtimes/challenge",
+        "body": "{\"operation\":\"attach\",\"runtimeId\":\"2b5db201-443a-4a64-9a57-0d9fd114655c\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"expectedNativeBinding\":{\"clientId\":\"7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb\",\"connectionId\":\"d16533de-e69d-494e-8a70-88b68ba9a71d\",\"backendPid\":67505,\"threadId\":\"01a12d75-d6c7-7043-bad8-bfc4703996c5\",\"generation\":5,\"serverInstanceId\":\"01a12d75-d690-7452-a704-a07f52246599\",\"serverGeneration\":3}}",
+        "proof": {
+          "nodeId": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+          "nodeGeneration": 1,
+          "issuedAt": "2026-10-12T00:14:20.036Z",
+          "nonce": "9ed70a99-d8df-4b65-98bf-618a29458bb9",
+          "signature": "EkmaLLANy4NAHhaEyAG4k0Xm6duuoLzBI2kcO32T-2Zos0iYUnFp0Gg9955UF9T0173YEGrvrVG2Gm567iDjBg"
+        },
+        "responseStatus": 200
+      },
+      {
+        "path": "/v1/runtimes/attach",
+        "body": "{\"challengeId\":\"bebd726a-05b3-4236-9100-2f5f39e6bcd4\",\"runtimeId\":\"2b5db201-443a-4a64-9a57-0d9fd114655c\",\"expectedRuntimeGeneration\":null,\"expectedAttachmentGeneration\":null,\"nativeEvidence\":{\"observedAt\":\"2026-10-12T00:14:20.048Z\",\"witness\":{\"version\":2,\"nonce\":5,\"clientId\":\"7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb\",\"backendPid\":67505,\"connectionId\":\"d16533de-e69d-494e-8a70-88b68ba9a71d\",\"threadId\":\"01a12d75-d6c7-7043-bad8-bfc4703996c5\",\"generation\":5,\"eligible\":true,\"sequence\":5,\"cause\":\"heartbeat\",\"serverInstanceId\":\"01a12d75-d690-7452-a704-a07f52246599\",\"serverGeneration\":3,\"leaseMs\":750}}}",
+        "proof": {
+          "nodeId": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+          "nodeGeneration": 1,
+          "issuedAt": "2026-10-12T00:14:20.059Z",
+          "nonce": "1570e432-6af2-4300-9ad9-1ccaf23d651e",
+          "signature": "AmCIhsmL-3dcJGw6c2_uLHG-_3itTsNE5z4KBxtH5HtQLnLQOY2FsM1zsAhi5yurYFfj26OGXVcmAEoEid89AQ"
+        },
+        "responseStatus": 200
+      }
+    ],
+    "readback": {
+      "runtimes": [
+        {
+          "runtime_id": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+          "runtime_generation": 1,
+          "node_id": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+          "node_generation": 1,
+          "attachment_generation": 1,
+          "lease_until": 1791764150062,
+          "qualified": 1
+        }
+      ],
+      "native_runtime_bindings": [
+        {
+          "runtime_id": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+          "client_id": "7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb",
+          "key_thumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "binding_json": "{\"clientId\":\"7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb\",\"connectionId\":\"d16533de-e69d-494e-8a70-88b68ba9a71d\",\"backendPid\":67505,\"threadId\":\"01a12d75-d6c7-7043-bad8-bfc4703996c5\",\"generation\":5,\"serverInstanceId\":\"01a12d75-d690-7452-a704-a07f52246599\",\"serverGeneration\":3}",
+          "nonce": 5,
+          "sequence": 5
+        }
+      ]
+    }
+  },
+  "nativeTerminalReceiptDurableAcrossNativeRestart": false,
+  "nativeProcessRestarted": false,
+  "oldStartNoStartSettlementProven": true,
+  "original": {
+    "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+    "attempt_id": "31fd5607-b84a-4cad-872d-9d71505cf342",
+    "state": "ambiguous",
+    "envelope": {
+      "agent": "pilot",
+      "attachmentGeneration": 1,
+      "attemptId": "31fd5607-b84a-4cad-872d-9d71505cf342",
+      "canonicalSubject": {
+        "kind": "manual",
+        "subjectId": "fixture-manual-source"
+      },
+      "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+      "eventId": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+      "eventKind": "manual",
+      "eventReference": "ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb",
+      "expiresAt": "2026-10-12T00:15:20.070Z",
+      "issuedAt": "2026-10-12T00:14:20.070Z",
+      "nodeGeneration": 1,
+      "observedAt": "2026-10-12T00:14:20.068Z",
+      "policyRevision": 1,
+      "principal": "qualification@example.com",
+      "reasonCode": "owner_canary",
+      "runtimeGeneration": 1,
+      "runtimeId": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+      "schemaVersion": 1,
+      "source": "manual",
+      "sourceStateVersion": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3"
+    },
+    "admission": {
+      "envelope": {
+        "agent": "pilot",
+        "attachmentGeneration": 1,
+        "attemptId": "31fd5607-b84a-4cad-872d-9d71505cf342",
+        "canonicalSubject": {
+          "kind": "manual",
+          "subjectId": "fixture-manual-source"
+        },
+        "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+        "eventId": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+        "eventKind": "manual",
+        "eventReference": "ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb",
+        "expiresAt": "2026-10-12T00:15:20.070Z",
+        "issuedAt": "2026-10-12T00:14:20.070Z",
+        "nodeGeneration": 1,
+        "observedAt": "2026-10-12T00:14:20.068Z",
+        "policyRevision": 1,
+        "principal": "qualification@example.com",
+        "reasonCode": "owner_canary",
+        "runtimeGeneration": 1,
+        "runtimeId": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+        "schemaVersion": 1,
+        "source": "manual",
+        "sourceStateVersion": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3"
+      },
+      "nodeId": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+      "permitExpiresAt": "2026-10-12T00:14:25.088Z",
+      "permitId": "b78bff44-0765-4891-acdf-f8b5d48029b0",
+      "permitIssuedAt": "2026-10-12T00:14:20.088Z",
+      "status": "admitted"
+    },
+    "native_request": {
+      "attemptId": "31fd5607-b84a-4cad-872d-9d71505cf342",
+      "clientId": "7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb",
+      "clientUserMessageId": "df6e4679-c755-402d-8f3f-defcaa8bd4d5",
+      "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+      "event": {
+        "canonicalSubject": {
+          "kind": "manual",
+          "subjectId": "fixture-manual-source"
+        },
+        "eventId": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+        "eventReference": "ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb",
+        "source": "manual",
+        "sourceStateVersion": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3"
+      },
+      "generation": 5,
+      "permitExpiresAt": 1791764065088,
+      "permitId": "b78bff44-0765-4891-acdf-f8b5d48029b0",
+      "permitIssuedAt": 1791764060088,
+      "receiptVersion": 3,
+      "serverGeneration": 3,
+      "serverInstanceId": "01a12d75-d690-7452-a704-a07f52246599",
+      "threadId": "01a12d75-d6c7-7043-bad8-bfc4703996c5"
+    },
+    "evidence": null,
+    "receipt": null,
+    "settlement": null,
+    "started_receipt": null,
+    "native_ack": null,
+    "input_recorded_receipt": null,
+    "native_observed_ack": null,
+    "reason": "native_outcome_unknown",
+    "fenced": 0,
+    "reserved_bytes": 153094,
+    "updated": 1791764065.134974,
+    "ack_state": null
+  },
+  "terminalReceipt": {
+    "clientId": "7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb",
+    "serverInstanceId": "01a12d75-d690-7452-a704-a07f52246599",
+    "serverGeneration": 3,
+    "threadId": "01a12d75-d6c7-7043-bad8-bfc4703996c5",
+    "attemptId": "31fd5607-b84a-4cad-872d-9d71505cf342",
+    "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+    "clientUserMessageId": "df6e4679-c755-402d-8f3f-defcaa8bd4d5",
+    "permitId": "b78bff44-0765-4891-acdf-f8b5d48029b0",
+    "permitIssuedAt": 1791764060088,
+    "permitExpiresAt": 1791764065088,
+    "outcome": {
+      "status": "terminalNotStarted",
+      "reason": "permitExpired",
+      "receiptId": "01a12d75-eb6d-7fc3-81ba-eae417ee36e9",
+      "replayed": false
+    },
+    "generation": 5
+  },
+  "pending": {
+    "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+    "attempt_id": "31fd5607-b84a-4cad-872d-9d71505cf342",
+    "state": "settlement_pending",
+    "envelope": {
+      "agent": "pilot",
+      "attachmentGeneration": 1,
+      "attemptId": "31fd5607-b84a-4cad-872d-9d71505cf342",
+      "canonicalSubject": {
+        "kind": "manual",
+        "subjectId": "fixture-manual-source"
+      },
+      "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+      "eventId": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+      "eventKind": "manual",
+      "eventReference": "ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb",
+      "expiresAt": "2026-10-12T00:15:20.070Z",
+      "issuedAt": "2026-10-12T00:14:20.070Z",
+      "nodeGeneration": 1,
+      "observedAt": "2026-10-12T00:14:20.068Z",
+      "policyRevision": 1,
+      "principal": "qualification@example.com",
+      "reasonCode": "owner_canary",
+      "runtimeGeneration": 1,
+      "runtimeId": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+      "schemaVersion": 1,
+      "source": "manual",
+      "sourceStateVersion": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3"
+    },
+    "admission": {
+      "envelope": {
+        "agent": "pilot",
+        "attachmentGeneration": 1,
+        "attemptId": "31fd5607-b84a-4cad-872d-9d71505cf342",
+        "canonicalSubject": {
+          "kind": "manual",
+          "subjectId": "fixture-manual-source"
+        },
+        "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+        "eventId": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+        "eventKind": "manual",
+        "eventReference": "ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb",
+        "expiresAt": "2026-10-12T00:15:20.070Z",
+        "issuedAt": "2026-10-12T00:14:20.070Z",
+        "nodeGeneration": 1,
+        "observedAt": "2026-10-12T00:14:20.068Z",
+        "policyRevision": 1,
+        "principal": "qualification@example.com",
+        "reasonCode": "owner_canary",
+        "runtimeGeneration": 1,
+        "runtimeId": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+        "schemaVersion": 1,
+        "source": "manual",
+        "sourceStateVersion": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3"
+      },
+      "nodeId": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+      "permitExpiresAt": "2026-10-12T00:14:25.088Z",
+      "permitId": "b78bff44-0765-4891-acdf-f8b5d48029b0",
+      "permitIssuedAt": "2026-10-12T00:14:20.088Z",
+      "status": "admitted"
+    },
+    "native_request": {
+      "attemptId": "31fd5607-b84a-4cad-872d-9d71505cf342",
+      "clientId": "7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb",
+      "clientUserMessageId": "df6e4679-c755-402d-8f3f-defcaa8bd4d5",
+      "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+      "event": {
+        "canonicalSubject": {
+          "kind": "manual",
+          "subjectId": "fixture-manual-source"
+        },
+        "eventId": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+        "eventReference": "ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb",
+        "source": "manual",
+        "sourceStateVersion": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3"
+      },
+      "generation": 5,
+      "permitExpiresAt": 1791764065088,
+      "permitId": "b78bff44-0765-4891-acdf-f8b5d48029b0",
+      "permitIssuedAt": 1791764060088,
+      "receiptVersion": 3,
+      "serverGeneration": 3,
+      "serverInstanceId": "01a12d75-d690-7452-a704-a07f52246599",
+      "threadId": "01a12d75-d6c7-7043-bad8-bfc4703996c5"
+    },
+    "evidence": {
+      "receiptId": "01a12d75-eb6d-7fc3-81ba-eae417ee36e9",
+      "type": "native_terminal_no_start"
+    },
+    "receipt": {
+      "attemptId": "31fd5607-b84a-4cad-872d-9d71505cf342",
+      "clientId": "7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb",
+      "clientUserMessageId": "df6e4679-c755-402d-8f3f-defcaa8bd4d5",
+      "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+      "generation": 5,
+      "outcome": {
+        "reason": "permitExpired",
+        "receiptId": "01a12d75-eb6d-7fc3-81ba-eae417ee36e9",
+        "replayed": true,
+        "status": "terminalNotStarted"
+      },
+      "permitExpiresAt": 1791764065088,
+      "permitId": "b78bff44-0765-4891-acdf-f8b5d48029b0",
+      "permitIssuedAt": 1791764060088,
+      "serverGeneration": 3,
+      "serverInstanceId": "01a12d75-d690-7452-a704-a07f52246599",
+      "threadId": "01a12d75-d6c7-7043-bad8-bfc4703996c5"
+    },
+    "settlement": null,
+    "started_receipt": null,
+    "native_ack": null,
+    "input_recorded_receipt": null,
+    "native_observed_ack": null,
+    "reason": "native_terminal_no_start",
+    "fenced": 0,
+    "reserved_bytes": 115982,
+    "updated": 1791764065.159063,
+    "ack_state": null
+  },
+  "before": {
+    "cloud": {
+      "attempts": [
+        {
+          "attempt_id": "31fd5607-b84a-4cad-872d-9d71505cf342",
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"97115121-944e-4bf7-9c8a-02d1f4633db6\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3\",\"policyRevision\":1,\"observedAt\":\"2026-10-12T00:14:20.068Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb\",\"runtimeId\":\"2b5db201-443a-4a64-9a57-0d9fd114655c\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"31fd5607-b84a-4cad-872d-9d71505cf342\",\"issuedAt\":\"2026-10-12T00:14:20.070Z\",\"expiresAt\":\"2026-10-12T00:15:20.070Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "state": "admitted",
+          "transport_until": 1791764070070,
+          "permit_id": "b78bff44-0765-4891-acdf-f8b5d48029b0",
+          "permit_until": 1791764065088,
+          "reservation_state": "reserved",
+          "submission_id": null,
+          "turn_id": null,
+          "ack_json": null,
+          "native_observed_ack_json": null,
+          "transport_status": "sending",
+          "transport_reason": null
+        }
+      ],
+      "deliveries": [
+        {
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "event_id": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+          "subject_id": "fixture-manual-source",
+          "source_state_version": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3",
+          "runtime_id": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+          "runtime_generation": 1,
+          "attachment_generation": 1,
+          "node_id": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+          "node_generation": 1,
+          "state": "pending",
+          "reason": null,
+          "created_at": 1791764060068,
+          "retry_until": 1791850460068,
+          "transport_state": "accepted",
+          "transport_failures": 0,
+          "terminal_at": null
+        }
+      ],
+      "native_claims": [
+        {
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "attempt_id": "31fd5607-b84a-4cad-872d-9d71505cf342",
+          "state": "admitted",
+          "permit_id": "b78bff44-0765-4891-acdf-f8b5d48029b0",
+          "permit_issued_at": 1791764060088,
+          "permit_until": 1791764065088,
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"97115121-944e-4bf7-9c8a-02d1f4633db6\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3\",\"policyRevision\":1,\"observedAt\":\"2026-10-12T00:14:20.068Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb\",\"runtimeId\":\"2b5db201-443a-4a64-9a57-0d9fd114655c\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"31fd5607-b84a-4cad-872d-9d71505cf342\",\"issuedAt\":\"2026-10-12T00:14:20.070Z\",\"expiresAt\":\"2026-10-12T00:15:20.070Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "updated_at": 1791764060088
+        }
+      ],
+      "native_correlations": [],
+      "manual_sources": [
+        {
+          "subject_id": "fixture-manual-source",
+          "event_id": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+          "source_state_version": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3",
+          "event_reference": "ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb",
+          "observed_at": "2026-10-12T00:14:20.068Z",
+          "observed_source_state_version": null,
+          "created_at": 1791764060068
+        }
+      ],
+      "slot_intents": [
+        {
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "node_id": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+          "node_generation": 1,
+          "state": "reserved",
+          "updated_at": 1791764060069,
+          "attempts": 1,
+          "next_at": 1791764075069
+        }
+      ],
+      "no_start_settlements": []
+    },
+    "slots": [
+      {
+        "node_id": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+        "agent": "pilot",
+        "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+        "generation": 1
+      }
+    ],
+    "budget": {
+      "used": 1,
+      "remaining": 9,
+      "limit": 10,
+      "windowMs": 3600000
+    }
+  },
+  "settled": {
+    "cloud": {
+      "attempts": [
+        {
+          "attempt_id": "31fd5607-b84a-4cad-872d-9d71505cf342",
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"97115121-944e-4bf7-9c8a-02d1f4633db6\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3\",\"policyRevision\":1,\"observedAt\":\"2026-10-12T00:14:20.068Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb\",\"runtimeId\":\"2b5db201-443a-4a64-9a57-0d9fd114655c\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"31fd5607-b84a-4cad-872d-9d71505cf342\",\"issuedAt\":\"2026-10-12T00:14:20.070Z\",\"expiresAt\":\"2026-10-12T00:15:20.070Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "state": "not_started",
+          "transport_until": 1791764070070,
+          "permit_id": "b78bff44-0765-4891-acdf-f8b5d48029b0",
+          "permit_until": 1791764065088,
+          "reservation_state": "reserved",
+          "submission_id": null,
+          "turn_id": null,
+          "ack_json": null,
+          "native_observed_ack_json": null,
+          "transport_status": "sending",
+          "transport_reason": null
+        }
+      ],
+      "deliveries": [
+        {
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "event_id": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+          "subject_id": "fixture-manual-source",
+          "source_state_version": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3",
+          "runtime_id": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+          "runtime_generation": 1,
+          "attachment_generation": 1,
+          "node_id": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+          "node_generation": 1,
+          "state": "pending",
+          "reason": null,
+          "created_at": 1791764060068,
+          "retry_until": 1791850460068,
+          "transport_state": "accepted",
+          "transport_failures": 0,
+          "terminal_at": null
+        }
+      ],
+      "native_claims": [
+        {
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "attempt_id": "31fd5607-b84a-4cad-872d-9d71505cf342",
+          "state": "not_started",
+          "permit_id": "b78bff44-0765-4891-acdf-f8b5d48029b0",
+          "permit_issued_at": 1791764060088,
+          "permit_until": 1791764065088,
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"97115121-944e-4bf7-9c8a-02d1f4633db6\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3\",\"policyRevision\":1,\"observedAt\":\"2026-10-12T00:14:20.068Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb\",\"runtimeId\":\"2b5db201-443a-4a64-9a57-0d9fd114655c\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"31fd5607-b84a-4cad-872d-9d71505cf342\",\"issuedAt\":\"2026-10-12T00:14:20.070Z\",\"expiresAt\":\"2026-10-12T00:15:20.070Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "updated_at": 1791764065165
+        }
+      ],
+      "native_correlations": [],
+      "manual_sources": [
+        {
+          "subject_id": "fixture-manual-source",
+          "event_id": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+          "source_state_version": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3",
+          "event_reference": "ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb",
+          "observed_at": "2026-10-12T00:14:20.068Z",
+          "observed_source_state_version": null,
+          "created_at": 1791764060068
+        }
+      ],
+      "slot_intents": [
+        {
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "node_id": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+          "node_generation": 1,
+          "state": "reserved",
+          "updated_at": 1791764060069,
+          "attempts": 1,
+          "next_at": 1791764075069
+        }
+      ],
+      "no_start_settlements": [
+        {
+          "attempt_id": "31fd5607-b84a-4cad-872d-9d71505cf342",
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "result_json": "{\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"31fd5607-b84a-4cad-872d-9d71505cf342\",\"permitId\":\"b78bff44-0765-4891-acdf-f8b5d48029b0\",\"nodeGeneration\":1,\"evidence\":{\"type\":\"native_terminal_no_start\",\"receiptId\":\"01a12d75-eb6d-7fc3-81ba-eae417ee36e9\"},\"nodeId\":\"b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55\",\"status\":\"not_started\"}"
+        }
+      ]
+    },
+    "slots": [
+      {
+        "node_id": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+        "agent": "pilot",
+        "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+        "generation": 1
+      }
+    ],
+    "budget": {
+      "used": 1,
+      "remaining": 9,
+      "limit": 10,
+      "windowMs": 3600000
+    }
+  },
+  "replacement": {
+    "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+    "attempt_id": "fa97e5e1-b520-4caf-aea3-5aab441706aa",
+    "state": "submitted",
+    "envelope": {
+      "agent": "pilot",
+      "attachmentGeneration": 1,
+      "attemptId": "fa97e5e1-b520-4caf-aea3-5aab441706aa",
+      "canonicalSubject": {
+        "kind": "manual",
+        "subjectId": "fixture-manual-source"
+      },
+      "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+      "eventId": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+      "eventKind": "manual",
+      "eventReference": "ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb",
+      "expiresAt": "2026-10-12T00:15:20.070Z",
+      "issuedAt": "2026-10-12T00:14:20.070Z",
+      "nodeGeneration": 1,
+      "observedAt": "2026-10-12T00:14:20.068Z",
+      "policyRevision": 1,
+      "principal": "qualification@example.com",
+      "reasonCode": "owner_canary",
+      "runtimeGeneration": 1,
+      "runtimeId": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+      "schemaVersion": 1,
+      "source": "manual",
+      "sourceStateVersion": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3"
+    },
+    "admission": {
+      "envelope": {
+        "agent": "pilot",
+        "attachmentGeneration": 1,
+        "attemptId": "fa97e5e1-b520-4caf-aea3-5aab441706aa",
+        "canonicalSubject": {
+          "kind": "manual",
+          "subjectId": "fixture-manual-source"
+        },
+        "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+        "eventId": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+        "eventKind": "manual",
+        "eventReference": "ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb",
+        "expiresAt": "2026-10-12T00:15:25.187Z",
+        "issuedAt": "2026-10-12T00:14:25.187Z",
+        "nodeGeneration": 1,
+        "observedAt": "2026-10-12T00:14:20.068Z",
+        "policyRevision": 1,
+        "principal": "qualification@example.com",
+        "reasonCode": "owner_canary",
+        "runtimeGeneration": 1,
+        "runtimeId": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+        "schemaVersion": 1,
+        "source": "manual",
+        "sourceStateVersion": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3"
+      },
+      "nodeId": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+      "permitExpiresAt": "2026-10-12T00:14:30.188Z",
+      "permitId": "91fb1cd8-bd37-4347-abbb-42d4e3841a1b",
+      "permitIssuedAt": "2026-10-12T00:14:25.188Z",
+      "status": "admitted"
+    },
+    "native_request": {
+      "attemptId": "fa97e5e1-b520-4caf-aea3-5aab441706aa",
+      "clientId": "7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb",
+      "clientUserMessageId": "20def6a5-fec0-4518-8db0-9bf93cce0fed",
+      "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+      "event": {
+        "canonicalSubject": {
+          "kind": "manual",
+          "subjectId": "fixture-manual-source"
+        },
+        "eventId": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+        "eventReference": "ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb",
+        "source": "manual",
+        "sourceStateVersion": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3"
+      },
+      "generation": 5,
+      "permitExpiresAt": 1791764070188,
+      "permitId": "91fb1cd8-bd37-4347-abbb-42d4e3841a1b",
+      "permitIssuedAt": 1791764065188,
+      "receiptVersion": 3,
+      "serverGeneration": 3,
+      "serverInstanceId": "01a12d75-d690-7452-a704-a07f52246599",
+      "threadId": "01a12d75-d6c7-7043-bad8-bfc4703996c5"
+    },
+    "evidence": null,
+    "receipt": null,
+    "settlement": null,
+    "started_receipt": {
+      "attemptId": "fa97e5e1-b520-4caf-aea3-5aab441706aa",
+      "clientId": "7e04d2c8-aa01-4c79-acdb-a1e66d2ea0fb",
+      "clientUserMessageId": "20def6a5-fec0-4518-8db0-9bf93cce0fed",
+      "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+      "generation": 5,
+      "outcome": {
+        "replayed": false,
+        "status": "started",
+        "turnId": "20def6a5-fec0-4518-8db0-9bf93cce0fed"
+      },
+      "permitExpiresAt": 1791764070188,
+      "permitId": "91fb1cd8-bd37-4347-abbb-42d4e3841a1b",
+      "permitIssuedAt": 1791764065188,
+      "serverGeneration": 3,
+      "serverInstanceId": "01a12d75-d690-7452-a704-a07f52246599",
+      "threadId": "01a12d75-d6c7-7043-bad8-bfc4703996c5"
+    },
+    "native_ack": {
+      "acknowledgedAt": "2026-10-12T00:14:25.240Z",
+      "agent": "pilot",
+      "attachmentGeneration": 1,
+      "attemptId": "fa97e5e1-b520-4caf-aea3-5aab441706aa",
+      "deliveredSourceStateVersion": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3",
+      "deliveryId": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+      "eventId": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+      "nativeCorrelation": {
+        "kind": "native_turn_started",
+        "permitId": "91fb1cd8-bd37-4347-abbb-42d4e3841a1b",
+        "turnId": "20def6a5-fec0-4518-8db0-9bf93cce0fed"
+      },
+      "nodeGeneration": 1,
+      "principal": "qualification@example.com",
+      "runtimeGeneration": 1,
+      "runtimeId": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+      "schemaVersion": 1,
+      "status": "submitted"
+    },
+    "input_recorded_receipt": null,
+    "native_observed_ack": null,
+    "reason": null,
+    "fenced": 0,
+    "reserved_bytes": 112754,
+    "updated": 1791764065.2463732,
+    "ack_state": "submitted"
+  },
+  "after": {
+    "cloud": {
+      "attempts": [
+        {
+          "attempt_id": "31fd5607-b84a-4cad-872d-9d71505cf342",
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"97115121-944e-4bf7-9c8a-02d1f4633db6\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3\",\"policyRevision\":1,\"observedAt\":\"2026-10-12T00:14:20.068Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb\",\"runtimeId\":\"2b5db201-443a-4a64-9a57-0d9fd114655c\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"31fd5607-b84a-4cad-872d-9d71505cf342\",\"issuedAt\":\"2026-10-12T00:14:20.070Z\",\"expiresAt\":\"2026-10-12T00:15:20.070Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "state": "not_started",
+          "transport_until": 1791764070070,
+          "permit_id": "b78bff44-0765-4891-acdf-f8b5d48029b0",
+          "permit_until": 1791764065088,
+          "reservation_state": "reserved",
+          "submission_id": null,
+          "turn_id": null,
+          "ack_json": null,
+          "native_observed_ack_json": null,
+          "transport_status": "sending",
+          "transport_reason": null
+        },
+        {
+          "attempt_id": "fa97e5e1-b520-4caf-aea3-5aab441706aa",
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"97115121-944e-4bf7-9c8a-02d1f4633db6\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3\",\"policyRevision\":1,\"observedAt\":\"2026-10-12T00:14:20.068Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb\",\"runtimeId\":\"2b5db201-443a-4a64-9a57-0d9fd114655c\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"fa97e5e1-b520-4caf-aea3-5aab441706aa\",\"issuedAt\":\"2026-10-12T00:14:25.187Z\",\"expiresAt\":\"2026-10-12T00:15:25.187Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "state": "submitted",
+          "transport_until": 0,
+          "permit_id": "91fb1cd8-bd37-4347-abbb-42d4e3841a1b",
+          "permit_until": 1791764070188,
+          "reservation_state": "reserved",
+          "submission_id": null,
+          "turn_id": "20def6a5-fec0-4518-8db0-9bf93cce0fed",
+          "ack_json": "{\"schemaVersion\":1,\"eventId\":\"97115121-944e-4bf7-9c8a-02d1f4633db6\",\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"fa97e5e1-b520-4caf-aea3-5aab441706aa\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"runtimeId\":\"2b5db201-443a-4a64-9a57-0d9fd114655c\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveredSourceStateVersion\":\"v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3\",\"acknowledgedAt\":\"2026-10-12T00:14:25.240Z\",\"status\":\"submitted\",\"nativeCorrelation\":{\"kind\":\"native_turn_started\",\"permitId\":\"91fb1cd8-bd37-4347-abbb-42d4e3841a1b\",\"turnId\":\"20def6a5-fec0-4518-8db0-9bf93cce0fed\"}}",
+          "native_observed_ack_json": null,
+          "transport_status": "not_started",
+          "transport_reason": null
+        }
+      ],
+      "deliveries": [
+        {
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "event_id": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+          "subject_id": "fixture-manual-source",
+          "source_state_version": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3",
+          "runtime_id": "2b5db201-443a-4a64-9a57-0d9fd114655c",
+          "runtime_generation": 1,
+          "attachment_generation": 1,
+          "node_id": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+          "node_generation": 1,
+          "state": "submitted",
+          "reason": null,
+          "created_at": 1791764060068,
+          "retry_until": 1791850460068,
+          "transport_state": "accepted",
+          "transport_failures": 0,
+          "terminal_at": null
+        }
+      ],
+      "native_claims": [
+        {
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "attempt_id": "fa97e5e1-b520-4caf-aea3-5aab441706aa",
+          "state": "submitted",
+          "permit_id": "91fb1cd8-bd37-4347-abbb-42d4e3841a1b",
+          "permit_issued_at": 1791764065188,
+          "permit_until": 1791764070188,
+          "envelope_json": "{\"schemaVersion\":1,\"eventId\":\"97115121-944e-4bf7-9c8a-02d1f4633db6\",\"source\":\"manual\",\"canonicalSubject\":{\"kind\":\"manual\",\"subjectId\":\"fixture-manual-source\"},\"sourceStateVersion\":\"v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3\",\"policyRevision\":1,\"observedAt\":\"2026-10-12T00:14:20.068Z\",\"principal\":\"qualification@example.com\",\"agent\":\"pilot\",\"eventReference\":\"ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb\",\"runtimeId\":\"2b5db201-443a-4a64-9a57-0d9fd114655c\",\"nodeGeneration\":1,\"runtimeGeneration\":1,\"attachmentGeneration\":1,\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"fa97e5e1-b520-4caf-aea3-5aab441706aa\",\"issuedAt\":\"2026-10-12T00:14:25.187Z\",\"expiresAt\":\"2026-10-12T00:15:25.187Z\",\"eventKind\":\"manual\",\"reasonCode\":\"owner_canary\"}",
+          "updated_at": 1791764065244
+        }
+      ],
+      "native_correlations": [
+        {
+          "correlation_id": "20def6a5-fec0-4518-8db0-9bf93cce0fed",
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "attempt_id": "fa97e5e1-b520-4caf-aea3-5aab441706aa",
+          "kind": "turn"
+        }
+      ],
+      "manual_sources": [
+        {
+          "subject_id": "fixture-manual-source",
+          "event_id": "97115121-944e-4bf7-9c8a-02d1f4633db6",
+          "source_state_version": "v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3",
+          "event_reference": "ref_cbb108b0-90d7-4ed6-a071-7a134afd73fb",
+          "observed_at": "2026-10-12T00:14:20.068Z",
+          "observed_source_state_version": null,
+          "created_at": 1791764060068
+        }
+      ],
+      "slot_intents": [
+        {
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "node_id": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+          "node_generation": 1,
+          "state": "reserved",
+          "updated_at": 1791764060069,
+          "attempts": 1,
+          "next_at": 1791764075069
+        }
+      ],
+      "no_start_settlements": [
+        {
+          "attempt_id": "31fd5607-b84a-4cad-872d-9d71505cf342",
+          "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+          "result_json": "{\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"31fd5607-b84a-4cad-872d-9d71505cf342\",\"permitId\":\"b78bff44-0765-4891-acdf-f8b5d48029b0\",\"nodeGeneration\":1,\"evidence\":{\"type\":\"native_terminal_no_start\",\"receiptId\":\"01a12d75-eb6d-7fc3-81ba-eae417ee36e9\"},\"nodeId\":\"b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55\",\"status\":\"not_started\"}"
+        }
+      ]
+    },
+    "slots": [
+      {
+        "node_id": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+        "agent": "pilot",
+        "delivery_id": "dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833",
+        "generation": 1
+      }
+    ],
+    "budget": {
+      "used": 2,
+      "remaining": 8,
+      "limit": 10,
+      "windowMs": 3600000
+    }
+  },
+  "wire": [
+    {
+      "path": "/v1/dispatch/claim",
+      "body": "{\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"31fd5607-b84a-4cad-872d-9d71505cf342\"}",
+      "proof": {
+        "nodeId": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+        "nodeGeneration": 1,
+        "issuedAt": "2026-10-12T00:14:20.084Z",
+        "nonce": "7f7c0272-49ec-4562-b1a5-731348e42857",
+        "signature": "_tyohCIFm20WW2tdkumD2S1oYfAy7QXV4CgqpqoVIE1-pUkVzXRGyZ2BaCtQ_ZoVbLiCFyG_iCUizuJRP-7OCA"
+      },
+      "responseStatus": 200
+    },
+    {
+      "path": "/v1/dispatch/settle-no-start",
+      "body": "{\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"31fd5607-b84a-4cad-872d-9d71505cf342\",\"nodeGeneration\":1,\"permitId\":\"b78bff44-0765-4891-acdf-f8b5d48029b0\",\"evidence\":{\"receiptId\":\"01a12d75-eb6d-7fc3-81ba-eae417ee36e9\",\"type\":\"native_terminal_no_start\"}}",
+      "proof": {
+        "nodeId": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+        "nodeGeneration": 1,
+        "issuedAt": "2026-10-12T00:14:25.159Z",
+        "nonce": "224f724d-e431-42ce-944d-78e5c433f599",
+        "signature": "a_-d7wzkX15gYKkJx2htJLWg2Go5TcrdDuMQpzYosBVTY0c57wQahqD-tB3YbQbJ0b7js1dsbIpmnGjxDfH2Cg"
+      },
+      "responseStatus": 200
+    },
+    {
+      "path": "/v1/dispatch/settle-no-start",
+      "body": "{\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"31fd5607-b84a-4cad-872d-9d71505cf342\",\"nodeGeneration\":1,\"permitId\":\"b78bff44-0765-4891-acdf-f8b5d48029b0\",\"evidence\":{\"receiptId\":\"01a12d75-eb6d-7fc3-81ba-eae417ee36e9\",\"type\":\"native_terminal_no_start\"}}",
+      "proof": {
+        "nodeId": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+        "nodeGeneration": 1,
+        "issuedAt": "2026-10-12T00:14:25.172Z",
+        "nonce": "566f5234-d9dc-4ee9-ae4e-eb4b20600e08",
+        "signature": "MIqbZW34BBDMdvDVIS42EOFlaraqKoM41oYeg0IXDNPwpuz1g9F1z1Wevb3-GEyu0ZnaulmGuqxciZdo6TmsBQ"
+      },
+      "responseStatus": 200
+    },
+    {
+      "path": "/v1/dispatch/claim",
+      "body": "{\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"attemptId\":\"fa97e5e1-b520-4caf-aea3-5aab441706aa\"}",
+      "proof": {
+        "nodeId": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+        "nodeGeneration": 1,
+        "issuedAt": "2026-10-12T00:14:25.184Z",
+        "nonce": "c6a9c4d4-5252-49f2-a4c4-dd60ee599c03",
+        "signature": "JAE5AmCxY5q_MdvCtAUNQmSekp51vwB0AgG0JZZVVqOb3ptBgmAp8Z5pUpPmVKJM89hfmP3qzEg2FlkcZ3BTDw"
+      },
+      "responseStatus": 200
+    },
+    {
+      "path": "/v1/ack",
+      "body": "{\"acknowledgedAt\":\"2026-10-12T00:14:25.240Z\",\"agent\":\"pilot\",\"attachmentGeneration\":1,\"attemptId\":\"fa97e5e1-b520-4caf-aea3-5aab441706aa\",\"deliveredSourceStateVersion\":\"v1-970ae354-d72a-41a1-9ae4-4abd16e6e7b3\",\"deliveryId\":\"dly_1a70206a1ff084f9617eb9fd3b0b090674c36bff3a3d96baf9a89d2983a0a833\",\"eventId\":\"97115121-944e-4bf7-9c8a-02d1f4633db6\",\"nativeCorrelation\":{\"kind\":\"native_turn_started\",\"permitId\":\"91fb1cd8-bd37-4347-abbb-42d4e3841a1b\",\"turnId\":\"20def6a5-fec0-4518-8db0-9bf93cce0fed\"},\"nodeGeneration\":1,\"principal\":\"qualification@example.com\",\"runtimeGeneration\":1,\"runtimeId\":\"2b5db201-443a-4a64-9a57-0d9fd114655c\",\"schemaVersion\":1,\"status\":\"submitted\"}",
+      "proof": {
+        "nodeId": "b9e4d9e3-faa2-48c9-aed6-3c7b3bfe0e55",
+        "nodeGeneration": 1,
+        "issuedAt": "2026-10-12T00:14:25.241Z",
+        "nonce": "282fe505-55ef-44a4-9ddf-bf85bf0a5abb",
+        "signature": "BwE4Exwa2uL6Zhhxkb7DTrianDUR3XkLNDyOCwHBun14-h3KZRoxE5FnSdZISN5rrt1p-Y62pyYYdBiGArDKAA"
+      },
+      "responseStatus": 200
+    }
+  ],
+  "modelRequests": {
+    "primary": 1,
+    "title": 0,
+    "unknown": 0
+  },
+  "realModelCalls": 0,
+  "mocks": [
+    "post-persistence submission delay",
+    "lost native and cloud replies",
+    "admin enablement",
+    "Access/Messaging identity and budget",
+    "manual source publication",
+    "queue metrics",
+    "loopback instead of Mesh"
+  ],
+  "installedProvenance": {
+    "pycachePrefix": "/private/tmp/native-workerd-recovery-qualification/tmp/qualification-pycache-b9ki_5p5",
+    "version": "0.1.0",
+    "directUrl": {
+      "archive_info": {
+        "hash": "sha256=ebbcfe80569e60ddffdc7a516d81daf63be8b839edea317c83a48e4d099e7b8d",
+        "hashes": {
+          "sha256": "ebbcfe80569e60ddffdc7a516d81daf63be8b839edea317c83a48e4d099e7b8d"
+        }
+      },
+      "url": "file:///private/tmp/coupled-workerd-review-inputs/build-d76/wheels/knitli_event_gateway-0.1.0-py3-none-any.whl"
+    },
+    "packageSource": "/private/tmp/native-workerd-recovery-qualification/package/src/event_gateway",
+    "packageRoot": "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway",
+    "verifiedSha256": {
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/cli.py": "2b99b16f3fbc8dd9815e0975a9f983d44e65ce8ea4330afe11909766e6663086",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/client_runtime.py": "ecca03a9a2924ebfb5a406d1cf787289c640be48d6a27d654954a8b83a044231",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/cloud.py": "baa0da280577cb76d38d8d7383c6b99b4b65c9bc2e2324bbd6fc3ce9d9d138db",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/daemon.py": "fba9d054a56fdad13b75c4da722d7d0548e435078812a157d7857383b37e4b6d",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/gateway.py": "7e45b9c92c6ba96f298c6612a890f9df246b13f26682d5ce64eab546a3a27cc6",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/launcher.py": "7b979f8beb1904f9f9392d16beada9b585d5b1da53e235094d184d77ca050966",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
+      "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/store.py": "9123146cd7b2fa32bb17b166cd5f72359159afd760bbd8828f1031989f49aea4"
+    }
+  },
+  "fixturePorts": {
+    "model": 49731,
+    "entry": 49732,
+    "loopback": 49733,
+    "broker": 49734
+  },
+  "cloudBundle": {
+    "sha256": "38cf6a8ed8b00b3718519bb8303e0176e27ab4cc5da178a532913568f5e0e9f0",
+    "inputs": {
+      "../cloud/apps/os/packages/event-runtime/src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/util.js": "e50c63d70e8b1abf2968936acf22c9e4e96e735f0af6d367785e0948e46553fa",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/core.js": "db75715d529e69c9dec49651c020aa8b67a9620e76024c8a46e917ed8b111ff4",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/errors.js": "2c02617e5e7bfebffa8176901a6ed4894d62d4942ed2ed2804c81239385c0bf9",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/parse.js": "cb65fa29960a4b0becfb3538d5afd5d5ff1fa4c52e8d53e531a9967b71905116",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/regexes.js": "a401e10ad34078b4cfe8da337c21d2d8e20cc2c82b43406b95ae8523100d3c45",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/checks.js": "92a4400fe5964b5bc6db6e9cb37470959d4594ad932e347ca691c59462deeca0",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/doc.js": "8f49aae02f25258170291bb99ece6f58e50480db51ed2ef9f1e1621ebc54540d",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/versions.js": "0040e7f6554f6d3d1569388cde7dbd66c017ad1d3dfcfd731f9e810c429b4811",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/schemas.js": "d19d514ab02c347143f129e2212d63496f2dda4c6ba607cb939f7aa5eb4d8846",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/memoizer.js": "c0f46352b24c7457bd5b89df4d3847aced732d6d74a11f2d44502b8c035a7821",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ar.js": "954b1ecdf9beae18b24a078d888b741d498c4475527b63666cbde681636ce597",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/az.js": "0f3c71cd60e4bb4c0506b0fc2ffdf615abc56dc351517b734953796e9daac5fd",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/be.js": "08c0d312d33bb213b8c8a2688e4e32ac156b980c6786fe1435795fa457b1e735",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/bg.js": "c9dc2ff4a430959c226a28ec71cceda54a4b9c83eb28ad9f27fa984ecc4bbaa0",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/bn.js": "c438a45fb8f142d0c715abdd5bde85f97fdcd7a4ecbb19baa22fa5544b931cf8",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ca.js": "6525cce3d7a7a6486be11a603325ffb40a7a67b88ce2ad5605387f4762c4b4bc",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ckb.js": "858c8ff792ead63bc21433a9d5134cc1a12d6b43fe40a247ade2759f0f5217c3",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/cs.js": "1d5d88fdfc2ddfcb9719f70f8b1367acc87cb7f7f541dfbaa380ee3477119422",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/da.js": "0a16ebf92bc38487863c29be28d49cf015b00d40a72f4723b570e4bca07af306",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/de.js": "b75e66c589a7e664b6527cab5495851c87e9d69e754caa192460642280c164f9",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/el.js": "1d6f7c0a139fc18d7741749cbbe0a385f5737af7563a4915c70deecd878f18ee",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/en.js": "bf9bc721244e649eaf1f69c34c33c6a8ebd08c2e0f65cff8ad4ed0c9005977c3",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/eo.js": "43371beb2bb1cb02591167d95ea6de356ee2f7a6753b6d539ab1d5625676f361",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/es.js": "5610ea1773e87f333322946c0b6e9fcfd0fc0a3155eb773cc1e767aa0e9a6c88",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/fa.js": "c69ee6bdf38106800a979cb5383a4de3f3d45af7d66807ae4abd6fde877a9418",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/fi.js": "703ba6e565c7ce2d442b8e8e0b0051e38171b07e17e249ff522e7125fbfce5a0",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/fr.js": "4ecf245f7f8f22a8af9ba710ebf1bbfd9c69dca2b69972d86e8ae6dba31c4552",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/fr-CA.js": "daef8904651e0d426b54d5642b4e1b6a2e91e1db25bf11a470209550621fd04a",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/gu.js": "7a72be7ef3e973003d0ea87d4a1f525e1273bff0504143977199bea8e7dd09c9",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/he.js": "29455674b3c042f12719f76096b968363f614e5dc2454d1e2c7b480724dc8d95",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/hi.js": "5cd963e4293c850c29e929f9905d982f1efebaca6560209ab03e14e9b4136e05",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/hr.js": "645d68ac923f8ebc21533e6b08bf349600eedb7751f9dd630691cb50d4150a5b",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/hu.js": "3f3f0630d4d0444a41e59cdde46accc9c2ea495083066a9299cf0c40001aca90",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/hy.js": "b9500a95d63ef1280673934af9ccffcc7a9c68e53e5cc4820a1cfb72893684f3",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/id.js": "1ac54626137d02dfd3a7a24edf42a6f06f9f8a01fc920db8c4d18c9320729987",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/is.js": "d16df422e9bce5fa866dc66c89e11a854c78b875368250b2dc6d309bca2ee8c8",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/it.js": "753d91ff007abf517212631a0012370a0b178a7fa787e026e7f5bffcf0f84053",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ja.js": "e86ae224917fd95945de947b3af81c55f9ab250a69e53f3f7ad0635f3f7c0022",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ka.js": "031b439f4720482b427b953d60307cbd2fe2c89079b309c4df23f645d7b709cc",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/km.js": "02c05625e6ade1ff10935a4509555ee4d1f778ddc946ea7aaf016311cb5c3fd4",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/kh.js": "78c3d1991041bb8c8fc0f7c5d745aae422d4c2e4e8f30bae44f3fef4765900a8",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/kn.js": "cd46ade57ca318fd6128884dbdc581a6fae77d349adc3965ee8e768cef67abb2",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ko.js": "8f3a1013116b364df91d6d7fb4d73558277d6cc6b8c36b15771a1a1271cf00ad",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/lt.js": "075f0d917ccca164aaf033e74f20323eac29ba6e6e5f9a7727b756e3ad396760",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/mk.js": "3867d845830499ef1fdb942705a7fd2b4925518cb848e0c44effd8fce66ecf10",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ms.js": "cf6c69c51fc57a63d571ef10b10b9fff5956f2ba9691eb9bf3a35e65a35e4e2e",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ne.js": "5a503c5fb2cd676114fa54d3085758796f63b45d6a0c5a8ef25a8c579625f5a7",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/nl.js": "dd4d6293dd962769503a77de077b2e0ecb4f35879e541a9c525e642ec1172d27",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/nn.js": "de30d64d6c0affc8076c91b3eb15f5a59aa30bc8d705569336dc7878f50a0efc",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/no.js": "909d5b032afc4593c80b33d40c365d7e92933e491d075feb3736471ba30ab432",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ota.js": "7ac7db9c471408796059ae98182b89319d2d220b54e31eab7f6c5bc9da36e048",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ps.js": "bff575c5ea157ba66f882763f047c742fe82b3d88ee58ffc8e2d0089a47b46c1",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/pl.js": "7deb22313f5547c8a76240d155fbc3889366f10b78113c7343ff16a7726a98cc",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/pt.js": "6976fd2b1afa35abe404a04bd2a6780c474fdf3680dc430bea37873a86b0026f",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/pt-BR.js": "6ed21969db4af569b0e7bddd86be996cc4e311f3b2f1279de84029f37988c463",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ro.js": "a9d953e9295f181aad6b4a1b841a271071aa0ad49993c64c9096298f9ac27c7c",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ru.js": "69711d561391804b9ef55d8429b50a4ab0da960aeda8e26d44d9c12e858c7432",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/sk.js": "8368e3997cdb66290adade3353b246cf80f33836860ce23560dab5252ad18a3a",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/sl.js": "76af13e027fd69fc90c66337a9e25da67eecb1414a565407e7fdecd6db485e3a",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/sv.js": "dd4b5a0b37ebe65edf6bed4d0f3889eed08825b7561db424ac65f6be8da58588",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ta.js": "70f11a941273beedbccfa0bd06e7699c46b2591895632b2b5cfd136e3134b09c",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/th.js": "7c43bf69b788629e15e5f569cbb5db86c684d03f8a2143ecabe8fd9b56b67569",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/tk.js": "033b56bbedf63901978158b747636e45efa7f6b3599cba13d9675ebc1908a3cf",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/tr.js": "dad0163bc78c77c600eeea79e22dad5c1826f351e56002ad7099e2212c9d7f3b",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/uk.js": "91b29aabf7b30aa72cb4d67dd2de9d7a1eb33e027dc3603bf2fbbb63870b4a6e",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ua.js": "9391169ffbc72f777a83230b6ffcc3f4cf46ab5945ec540de9ef4609dca1f4cc",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/ur.js": "42de4029904c64a22a31fb1432ba53b423338f0ac1822d2a326f52e764de9da8",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/uz.js": "0428527e1ab1a35f68815786bcb5170c21087fac4a9cf4f1d0160a9abde18c3f",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/vi.js": "9ece89e06392bdbd0b4f36d5b0c18468f0a8cd5755f5ddd0d44adff61072c7d4",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/zh-CN.js": "149874e8079020bdd9fff6d1e7b411cea32745088479590a4b5d9eaa716b0941",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/zh-TW.js": "b9bbf30d36a4d6bbd32e1ada333baf45fff3ad5b0f13a2caf3ae580c041bb5d8",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/yo.js": "0194dd8af94d993ea43ce59bd5b27b8bb0b12a45a43203d669c0483ac25a723b",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/locales/index.js": "2d7e03f825285ae178748fe7186ad8e80bfb1a0eb55ef1e160b4e5f800d8f014",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/registries.js": "f04d4b2c0bc5b4ac2d6610ea34edf2e5260eade18f20976b79916dcdbeb9fa4d",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/compile.js": "888783d09a521996f26f35de24c38460577ee094b433489e5119d0830d922bfc",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/api.js": "4c147782e1baaf518dc52e4041a898e718a171e03fdb5fd2b8dcbffa8545ea54",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/to-json-schema.js": "16cb6032d2810d664102af0dca07d50af7a6a808b5036e33415b38492fc00564",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/json-schema-processors.js": "de52da8e4c33d4c54b44c1515e702a3fac2663b4772d4a343b4891ac2d46af03",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/json-schema-generator.js": "c2e74b910ee71c0d07148442d8306c78860c13fa2d0a215ebd5c9166f6cb8a9e",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/json-schema.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/index.js": "2a0e452323aa5b75b7d7de4879289e2579b9dd2d6af291c0416ba6806ca2199d",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/classic/checks.js": "7543391a9ad5e7df287bbfecaa79844d46af44c75c1de0d43a411d65795d9dd1",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/classic/errors.js": "d32f7c1ef8e2c70072f6f0ec8ba7081bbc331353cc3a7cb4429e5ece91409543",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/classic/parse.js": "11941573401bbef138842c7a523dff554873343fccbf0e8b0a144259d2d703f1",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/classic/schemas.js": "5f05c8227d5ab4579552303f6f3204f8bc57e1341226007dc5fcc8479b055a8a",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/classic/compat.js": "0e948b101771cc0e7b753e54b3f5b486929d3db9bd4c09d98fe4ce86271bcf7b",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/classic/iso.js": "deaa026b7c5302e59719f401248e7866691d8d8a892884dd2b6868b1cb7252d8",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/classic/from-json-schema.js": "e47add3abea25a4980f56df7c7e2fcb31a9fd8ae627c49fa07104e83f4697e91",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/visit.js": "a804062900869e09ea0b975cfa569fd3c70dc33bad7fc30b63872d451cae29f7",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/classic/deep-partial.js": "0abffcc9838e04dc6f091229c1d522fbfd43aab9563316b52d3eb8ff2bacf26d",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/classic/in-out.js": "34370913842ff02d14a9796b11c5ec2af160bdb35a7148edc286e9a9c6fb5c17",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/classic/coerce.js": "fb2efe3b6eacc475c77cbb571b5fb8650d92a10f316dc869e49b722973d83c3c",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/classic/external.js": "92a7244eb7306dd5035e3d2002a5f447cd6b4ec2f510adf08f11df090b0de610",
+      "../cloud/apps/os/node_modules/.pnpm/zod@4.5.4/node_modules/zod/index.js": "32e7efd49a94a765f6d10a1a0a3c02c50c246def17c80c6f0225f85525d98505",
+      "../cloud/apps/os/packages/event-runtime/src/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
+      "../cloud/apps/os/packages/event-runtime/src/delivery.ts": "a0561f468911bf62d7960f1a3363043b0b79a4ede0e50ade2ea1dd4a453a89a3",
+      "../cloud/apps/os/packages/event-runtime/src/github/readback-contract.ts": "0eecf3862b71b5e59b9ac185f7b742bbcb9d916e1089ee53764ae347e8112fef",
+      "../cloud/apps/os/packages/event-runtime/src/contracts.ts": "952e06452079999da38a99f549d8f746bd4b208dd67e5dd5d348bd8f31fbc6dd",
+      "../cloud/apps/os/packages/event-runtime/src/native-admission-canary.ts": "b5358ee9df34a109717316a5d8d47d95c8d519b2d18b08bc53175c6faf2acef0",
+      "../cloud/apps/os/packages/event-runtime/src/native-admission-gate.ts": "e6f9975990b340c7ab12db636da916b5294430274f33599abe5c13fb4f2018af",
+      "../cloud/apps/os/packages/event-runtime/src/registry.ts": "8c3490d50a97d39fad1080c119841cd9a4612c15f758d3d3eff4c6c175124ae8",
+      "../cloud/apps/os/packages/event-runtime/src/request-deadline.ts": "4bc855f8c5008a7ce26519375999af646dec79a640c141efc75c97beab1c842e",
+      "../cloud/apps/os/packages/event-runtime/src/coordinator-admission.ts": "b0f6048e25d023f9caeb215de63dd0ca2c056f3d111aa042d031739b828d831e",
+      "../cloud/apps/os/packages/gatekeeper-messaging/src/agent-token.ts": "af2c5344dcb6e652a26d179343b95b70b13608d4df59e39e840abb8f7686d502",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/classify.js": "858283d1cfc591878eee12c11a0854bbfde6826616aca6a6ab765494c04468e6",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/errors.js": "049a9c17954877dda6befe4404d84a1471d91b53eb4ce1aa592d5f1ca013f374",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/versions.js": "b7c95943eef30864da65a3d0cd029055d765a7d88df5e8868edb6f2acd4ef5c5",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/strict-json.js": "85cd248cf645f6e461745b5e2df79dbf7b41919752bc89779a7c719d9a8732f8",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/digest.js": "c26bbf591a83471e3b7ef9fde37641587529dda363a7aa3a6a2c0786ffb9cb5d",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/references.js": "1e50e2c3975697f19d894014e9c6bc681d8f27608f8e83755eb95fac4062c173",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/manifest.js": "197d566f657d1215ab7a46fa5e9c859a327e8097d8f53b2b15499c267f81da45",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/prepared-call.js": "741bcffdb47859592bb801a7dcc48e7bf172d6bc1cb1ab6b00ba137c4d038b15",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/schema-keywords.js": "dfb0ee0b1d2415d879c38b617cbdeae885f91a3cb43851e2d8eeb27634cfa4b0",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/verify-record.js": "5e43378585542c9ede01238694a2c45fef3ff4234698f479062812025ba69d2a",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/schema-resolver.js": "8f090b5c20a4a633be68387b550a3c5097a9f1002c4a25f898f8b54e9926ea2d",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/serialize.js": "9740914d5447ab3c270bc1780d5b1c40813af0ef5bfa8eddd41e379853ffcf65",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/runtime.js": "186c88d148f884fab25bce818977406ff9790f8ea38111249947de6945cc7e0f",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/admission.js": "cad9513fcc21e283d96beee47b8c048df9215061a5c05044b190557f6615c4f0",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/credential-binding.js": "8f653d036fabcc8a2bccbd5b27a5b70c878d174165256983189e7ecdb66e69b0",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/store.js": "5a4a4f7e5394f39a3cd6ef3d468cb0ccc105441e096773960c50698ca115ca0d",
+      "../cloud/apps/os/node_modules/.pnpm/@knitli+openapi-mcp@1.4.1/node_modules/@knitli/openapi-mcp/dist/runtime/index.js": "21a35fbbbe0b60348af8ce9ce8c9a38e6f4d1eb2f50a069265f3304e81e92d91",
+      "../cloud/apps/os/packages/gatekeeper-openapi/src/provider-contract.ts": "7d3484d27c081b27d4e08b5ae1b16aeadf30f75960b6d4289caf8a34e2a0c759",
+      "../cloud/apps/os/packages/gatekeeper-openapi/src/catalog/contracts.ts": "672acd8e01adbb63df330764cd2ad40358da037049af459f73531916be3968ec",
+      "../cloud/apps/os/packages/gatekeeper-openapi/src/catalog/limits.ts": "6814e39393267e895a590af24ce79b9dc6001b05c7852fe88781ab136529466f",
+      "../cloud/apps/os/packages/gatekeeper-openapi/src/dispatch/limits.ts": "40659ea51595d4f23e10f3e327f343c6eae36e4a79723bf655e023a999f2505a",
+      "../cloud/apps/os/packages/gatekeeper-openapi/src/installation-contracts.ts": "2c7159cc2920545d9184a9d07556900997757efa633f613aa32367fb0e8afdd6",
+      "../cloud/apps/os/packages/gatekeeper-openapi/src/operator/contracts.ts": "290248a537a6f462a6b0f58b0710dba37e363ac3211abec686c2758c9b91170a",
+      "../cloud/apps/os/packages/openapi-operator/src/access.ts": "7b9ed46f3396a4a2324e608aa72b71b1c35965a54c2a4c9b3043a321939c6a5c",
+      "../cloud/apps/os/packages/event-runtime/src/authority-client.ts": "b0d2bf801ac8c31f4d19ce6513b4e9b0e98efac9c8e3458ae642d69568438034",
+      "../cloud/apps/os/packages/event-runtime/src/native-admission-contract.ts": "6f3fcdeee95ea967acbbcb9a701e89c2bcb653f2f8fba25b0b019b81b49cab23",
+      "../cloud/apps/os/packages/event-runtime/src/api.ts": "857b7182689309163348ddcc1475467bd668dadf3271b2bbfd3227b5e76bea1a",
+      "../cloud/apps/os/packages/event-runtime/src/read-authority.ts": "57db0a83237b1cf96b74e7f225556e6b1ca3fea61ef7dee71c6db6d79686748b",
+      "../cloud/apps/os/packages/event-runtime/src/github/state.ts": "1dd388bcb74cf8631820d673122b55bb65585f9a832eefc46bf4237ca35408d4",
+      "../cloud/apps/os/packages/event-runtime/src/github/ingress.ts": "eff9dbfed0422d33183542e022a349fb468c8d43214df43a2e048f48cae1250c",
+      "../cloud/apps/os/packages/event-runtime/src/github/controller.ts": "0b4caa85578741c6e9e16b1b7ef8e7b9a8aab40b58fa37f00044063090f5d228",
+      "../cloud/apps/os/packages/event-runtime/src/github/client.ts": "459c48bc5263a677a09506cfc5c6ad54a73045fda3c29baf85f192f2c20c38d5",
+      "../cloud/apps/os/packages/event-runtime/src/github/grants.ts": "cda0410f859dc2c34f55703754e62837f41984d6864aabea1bb5beaa4e56c3e9",
+      "../cloud/apps/os/packages/event-runtime/src/github/host.ts": "6960947452b653fbb792f24d946fb37f44c98c24b78ff3091dd571d9dedcfa1f",
+      "../cloud/apps/os/packages/event-runtime/src/native-runtime-store.ts": "c56c20a16df373e392dfca822c42fa9617c3934d59dab3331831154605e59b44",
+      "../cloud/apps/os/packages/gatekeeper-memory/src/principals.ts": "f72010c2833e37e176925d0a9eaa2d15f02add6d938038ce0ebd814ece320ebd",
+      "../cloud/apps/os/packages/event-runtime/src/coordinator.ts": "5df4e2082e43eb0aaf24770b6848e29b1a193785f275a6a4a69cb60f5e2379f0",
+      "../fixture/coupled-workerd-worker.ts": "28e1b7aa5bc31ea5e580847611f30a12b24d76513468816040b6a282227bf957"
+    }
+  },
+  "sourceSha256": {
+    "/private/tmp/native-workerd-recovery-qualification/fixture/coupled-workerd.py": "c649c87b458119507ff614cbb0fb1b3f2c10d923f2188f64f532c330dcdc3e55",
+    "/private/tmp/native-workerd-recovery-qualification/fixture/coupled-workerd-broker.mjs": "e3fd8e050f62c223b92c13378847e6271f63888e9826bf70a52e049fa4a52f07",
+    "/private/tmp/native-workerd-recovery-qualification/fixture/coupled-workerd-worker.ts": "28e1b7aa5bc31ea5e580847611f30a12b24d76513468816040b6a282227bf957",
+    "/private/tmp/native-workerd-recovery-qualification/fixture/coupled-workerd-source-hashes.mjs": "0cf80b8f9dc816e7abae13979ed61ca938fdf1a23df6b05d33e4b029ac1e6515",
+    "/private/tmp/native-workerd-recovery-qualification/fixture/qualify_native_bridge.py": "e4068916c0739657186b8be34d087714ad9a544642dc8921a9c502ca1ab9ac11",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/cli.py": "2b99b16f3fbc8dd9815e0975a9f983d44e65ce8ea4330afe11909766e6663086",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/client_runtime.py": "ecca03a9a2924ebfb5a406d1cf787289c640be48d6a27d654954a8b83a044231",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/cloud.py": "baa0da280577cb76d38d8d7383c6b99b4b65c9bc2e2324bbd6fc3ce9d9d138db",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/daemon.py": "fba9d054a56fdad13b75c4da722d7d0548e435078812a157d7857383b37e4b6d",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/gateway.py": "7e45b9c92c6ba96f298c6612a890f9df246b13f26682d5ce64eab546a3a27cc6",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/launcher.py": "7b979f8beb1904f9f9392d16beada9b585d5b1da53e235094d184d77ca050966",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
+    "/private/tmp/native-workerd-recovery-qualification/venv/lib/python3.13/site-packages/event_gateway/store.py": "9123146cd7b2fa32bb17b166cd5f72359159afd760bbd8828f1031989f49aea4",
+    "/private/tmp/native-workerd-recovery-qualification/fixture/qualification-installed.py": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c"
+  }
+}
