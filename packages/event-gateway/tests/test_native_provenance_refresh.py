@@ -15,6 +15,7 @@ V = fixtures.V
 
 class SweepAPI(fixtures.FakeAPI):
     def __init__(self):
+        """Use a valid promotion with mutable artifact metadata."""
         super().__init__()
         self.published = []
         self.deleted = False
@@ -44,7 +45,7 @@ class NativeProvenanceRefreshTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             event = Path(directory) / "event.json"
             event.write_text(json.dumps({}))
-            environment = {"GITHUB_REPOSITORY": V.REPOSITORY, "GH_TOKEN": "fixture",
+            environment = {"GITHUB_REPOSITORY": V.REPOSITORY, "GH_TOKEN": self.id(),
                            "WORKFLOW_SHA": fixtures.MAIN, "GITHUB_EVENT_PATH": str(event),
                            "GITHUB_EVENT_NAME": event_name, "GITHUB_REF": ref,
                            "GITHUB_SERVER_URL": "https://github.com", "GITHUB_RUN_ID": "123"}
