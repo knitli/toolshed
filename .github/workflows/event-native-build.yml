@@ -1,0 +1,70 @@
+name: Native client candidate build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository_id == '1200860702' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.15"
+          python-version: "3.13.14"
+      - name: Prepare isolated toolchain and upstream source
+        shell: bash
+        env:
+          CARGO_HOME: ${{ runner.temp }}/native-cargo
+          RUSTUP_HOME: ${{ runner.temp }}/native-rustup
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          test "$RUNNER_ARCH" = ARM64
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          mkdir -m 700 "$CARGO_HOME" "$RUSTUP_HOME"
+          rustup toolchain install 1.95.0 --profile minimal --no-self-update
+          git init "$RUNNER_TEMP/native-upstream"
+          git -C "$RUNNER_TEMP/native-upstream" remote add origin https://github.com/openai/codex.git
+          git -C "$RUNNER_TEMP/native-upstream" fetch --depth=1 origin a956835d020762cb2b570053af06f643a11c0ecc
+          git -C "$RUNNER_TEMP/native-upstream" checkout --detach FETCH_HEAD
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            https://github.com/openai/codex/releases/download/rust-v0.160.0/codex-code-mode-host-aarch64-apple-darwin.tar.gz \
+            --output "$RUNNER_TEMP/native-host.tar.gz"
+      - name: Build candidate and record provenance
+        shell: bash
+        env:
+          CARGO_HOME: ${{ runner.temp }}/native-cargo
+          RUSTUP_HOME: ${{ runner.temp }}/native-rustup
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.13.14 python packages/event-gateway/scripts/produce_native_ci_artifact.py \
+            --source "$RUNNER_TEMP/native-upstream" \
+            --host-archive "$RUNNER_TEMP/native-host.tar.gz" \
+            --output-dir "$RUNNER_TEMP/native-candidate"
+      - name: Upload immutable candidate
+        id: artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-client-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/native-candidate/codex
+            ${{ runner.temp }}/native-candidate/codex-code-mode-host
+            ${{ runner.temp }}/native-candidate/build-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+      - name: Record external artifact identity
+        env:
+          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.artifact.outputs.artifact-digest }}
+        run: |
+          printf 'Artifact ID: %s\nArchive SHA-256: %s\n' "$ARTIFACT_ID" "$ARTIFACT_DIGEST" >> "$GITHUB_STEP_SUMMARY"

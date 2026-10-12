@@ -2,6 +2,8 @@
 """Rebuild the pinned native Codex candidate without installing it."""
 
 import argparse
+import ast
+import re
 from contextlib import ExitStack
 import hashlib
 import io
@@ -26,8 +28,20 @@ SOURCE_MANIFEST_SHA256 = "8f40ca398770501412963786ade67891749f3c9296a1c82c14d62f
 PINNED_CARGO_CONFIG_SHA256 = "b8ae1cea341beb2d4a3c8fb81f97a96f4aee1fd53f769c57f140dfe949806a80"
 PINNED_SOURCE_ROOT_CARGO_CONFIG_SHA256 = "b34b20f64e30695e8629ddad8b80885764e947f51e4ce49c6378a3b5a238d25e"
 PATCHED_FILE_COUNT = 52
-# Keep the builder standalone; the pin-parity test enforces this launcher constant.
-QUALIFIED_SHA256 = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
+def _launcher_pin(path):
+    """Read one literal launcher digest as data without executing launcher code."""
+    tree = ast.parse(path.read_text())
+    values = [node.value for node in tree.body if isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "QUALIFIED_SHA256"
+                      for target in node.targets)]
+    if (len(values) != 1 or not isinstance(values[0], ast.Constant)
+            or not isinstance(values[0].value, str)
+            or re.fullmatch(r"[0-9a-f]{64}", values[0].value) is None):
+        raise ValueError("native_launcher_pin_must_be_one_literal_digest")
+    return values[0].value
+
+
+QUALIFIED_SHA256 = _launcher_pin(ROOT / "packages/event-gateway/src/event_gateway/launcher.py")
 RUSTC_COMMIT_PREFIX = "59807616e"
 LOCK_VERSION_CHANGES = 159
 HOST_TRIPLE = "aarch64-apple-darwin"
@@ -412,6 +426,7 @@ def _build_env(work):
         "RUSTUP_TOOLCHAIN": RUSTUP_TOOLCHAIN,
         "CARGO_NET_OFFLINE": "true",
         "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
         "LC_ALL": "C",
     }
 
@@ -488,7 +503,8 @@ def _copy_new(source, destination):
         raise
 
 
-def package(source, output, evidence_path, host_archive):
+def package(source, output, evidence_path, host_archive, *, prime_dependencies=False,
+            verify_release=False):
     output, evidence_path = _resolve_output_pair(output, evidence_path)
     host_output = _resolve_new_output(output.parent / "codex-code-mode-host")
     if host_output in (output, evidence_path):
@@ -519,11 +535,22 @@ def package(source, output, evidence_path, host_archive):
             lock_path = codex_rs / "Cargo.lock"
             lock_before = tomllib.loads(lock_path.read_text())
             metadata = _run(
-                [*rustup_command, "cargo", "metadata", "--offline", "--format-version", "1"],
-                cwd=codex_rs, env=env, capture=True,
+                [*rustup_command, "cargo", "metadata",
+                 *([] if prime_dependencies else ["--offline"]), "--format-version", "1"],
+                cwd=codex_rs, env={**env, "CARGO_NET_OFFLINE": "false"}
+                if prime_dependencies else env, capture=True,
             )
             lock_after_bytes = lock_path.read_bytes()
             lock_changes = lock_version_changes(lock_before, tomllib.loads(lock_after_bytes.decode()))
+            if prime_dependencies:
+                _run([*rustup_command, "cargo", "fetch", "--locked"], cwd=codex_rs,
+                     env={**env, "CARGO_NET_OFFLINE": "false"})
+                if lock_path.read_bytes() != lock_after_bytes:
+                    raise ValueError("cargo_lock_changed_during_dependency_prime")
+                metadata = _run(
+                    [*rustup_command, "cargo", "metadata", "--offline", "--locked",
+                     "--format-version", "1"], cwd=codex_rs, env=env, capture=True,
+                )
             target_dir = Path(json.loads(metadata.stdout)["target_directory"]).resolve()
             if not target_dir.is_relative_to(work.resolve()):
                 raise ValueError("native_build_target_must_be_disposable")
@@ -547,6 +574,8 @@ def package(source, output, evidence_path, host_archive):
             if binary.is_symlink() or not binary.is_file():
                 raise ValueError("native_cli_build_output_missing")
             binary_hash = sha256_file(binary)
+            if verify_release and binary_hash != QUALIFIED_SHA256:
+                raise ValueError("native_release_digest_mismatch")
             evidence = {
                 "codeModeHost": {
                     "upstreamCommit": UPSTREAM_COMMIT,
@@ -585,6 +614,8 @@ def package(source, output, evidence_path, host_archive):
                 "cargoConfiguration": cargo_configuration,
                 "host": HOST_TRIPLE,
                 "cargoLockLocalVersionChanges": lock_changes,
+                "normalizedCargoLockSha256": sha256(lock_after_bytes),
+                "dependencyCachePrimed": prime_dependencies,
                 "buildCommand": BUILD_COMMAND,
                 "binarySha256": binary_hash,
                 "binaryBytes": binary.stat().st_size,
@@ -605,9 +636,15 @@ def main(argv=None):
     parser.add_argument("--evidence", type=Path, required=True, help="new JSON evidence path")
     parser.add_argument("--code-mode-host-archive", type=Path, required=True,
                         help="local pinned official code-mode host archive (no download)")
+    parser.add_argument("--prime-dependencies", action="store_true",
+                        help="fetch dependencies before the offline build; isolated CI cache only")
+    parser.add_argument("--verify-release", action="store_true",
+                        help="reject a rebuilt digest mismatch before publishing any outputs")
     args = parser.parse_args(argv)
     try:
-        evidence = package(args.source, args.output, args.evidence, args.code_mode_host_archive)
+        evidence = package(args.source, args.output, args.evidence, args.code_mode_host_archive,
+                           prime_dependencies=args.prime_dependencies,
+                           verify_release=args.verify_release)
     except subprocess.CalledProcessError as error:
         detail = error.stderr or error.stdout or "native_packaging_command_failed"
         parser.error(detail.strip()[-2000:])

@@ -556,6 +556,20 @@ class NativePackagingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unexpected_cargo_lock_change"):
             PACKAGER["lock_version_changes"](before, changed)
 
+    def test_launcher_pin_is_literal_data_and_rejects_ambiguous_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "launcher.py"
+            path.write_text('raise RuntimeError("must not execute")\nQUALIFIED_SHA256 = "' + "a" * 64 + '"\n')
+            self.assertEqual(PACKAGER["_launcher_pin"](path), "a" * 64)
+            for value in ('"a" * 64', '"short"', 'None'):
+                path.write_text("QUALIFIED_SHA256 = " + value)
+                with self.assertRaises(ValueError):
+                    PACKAGER["_launcher_pin"](path)
+            path.write_text('QUALIFIED_SHA256 = "' + "a" * 64 + '"\n'
+                            + 'QUALIFIED_SHA256 = "' + "b" * 64 + '"\n')
+            with self.assertRaises(ValueError):
+                PACKAGER["_launcher_pin"](path)
+
     def test_builder_pin_matches_the_only_launcher_digest(self):
         self.assertEqual(PACKAGER["QUALIFIED_SHA256"], launcher.QUALIFIED_SHA256)
 
@@ -566,6 +580,7 @@ class NativePackagingTests(unittest.TestCase):
             source.mkdir()
             state = {
                 "scenario": "success", "build_completed": False, "copies": [], "evidence": None,
+                "commands": [],
             }
 
             def archive_source(_checkout, work, _env, _git):
@@ -574,7 +589,10 @@ class NativePackagingTests(unittest.TestCase):
                 (codex_rs / "Cargo.lock").write_text("version = 4\n")
 
             def run(command, *, cwd, **_kwargs):
-                if "apply" in command:
+                state["commands"].append((command, _kwargs.get("env", {})))
+                if "fetch" in command:
+                    self.assertIn("--locked", command)
+                elif "apply" in command:
                     pass
                 elif "metadata" in command:
                     return subprocess.CompletedProcess(
@@ -636,7 +654,25 @@ class NativePackagingTests(unittest.TestCase):
             evidence_path = root / "candidate.json"
             state["evidence"] = evidence_path
             with patch.dict(PACKAGER_GLOBALS, replacements), patch("builtins.print"):
-                evidence = PACKAGER["package"](source, output, evidence_path, root / "host.tar.gz")
+                with self.assertRaisesRegex(ValueError, "native_release_digest_mismatch"):
+                    PACKAGER["package"](source, output, evidence_path, root / "host.tar.gz",
+                                        verify_release=True, prime_dependencies=True)
+                cargo_steps = [(c, e) for c, e in state["commands"] if "cargo" in c]
+                self.assertEqual([c[4] for c, _e in cargo_steps],
+                                 ["metadata", "fetch", "metadata", "build"])
+                self.assertEqual([e["CARGO_NET_OFFLINE"] for _c, e in cargo_steps],
+                                 ["false", "false", "true", "true"])
+                self.assertFalse(output.exists())
+                self.assertFalse(evidence_path.exists())
+                self.assertFalse((root / "codex-code-mode-host").exists())
+                self.assertEqual(state["copies"], [])
+                with patch.dict(PACKAGER_GLOBALS, {
+                    "QUALIFIED_SHA256": hashlib.sha256(b"mock native CLI").hexdigest(),
+                }):
+                    evidence = PACKAGER["package"](
+                        source, output, evidence_path, root / "host.tar.gz", verify_release=True,
+                    )
+                self.assertTrue(evidence["launcherQualified"])
                 self.assertEqual(evidence["archiveScope"], {
                     "selection": "git archive of the pinned commit without pathspecs",
                     "extractionFilter": "tarfile.data_filter",
@@ -743,10 +779,12 @@ class NativePackagingTests(unittest.TestCase):
             self.assertEqual(env["RUSTUP_TOOLCHAIN"], PACKAGER["RUSTUP_TOOLCHAIN"])
             self.assertEqual(env["CARGO_NET_OFFLINE"], "true")
             self.assertEqual(env["CARGO_INCREMENTAL"], "0")
+            self.assertEqual(env["CARGO_BUILD_JOBS"], "2")
             self.assertEqual(env["PATH"], "/usr/bin:/bin")
             self.assertEqual(set(env), {
                 "PATH", "HOME", "TMPDIR", "CARGO_HOME", "RUSTUP_HOME",
                 "RUSTUP_TOOLCHAIN", "CARGO_NET_OFFLINE", "CARGO_INCREMENTAL", "LC_ALL",
+                "CARGO_BUILD_JOBS",
             })
 
     def test_rustup_discovery_skips_command_manager_shim(self):
