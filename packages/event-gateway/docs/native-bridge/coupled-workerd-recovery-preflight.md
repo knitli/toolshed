@@ -99,10 +99,20 @@ and `contracts/event-v1`, so the event-control-v1 corpus change does not alter
 its inventory. The original proof was retained without relabeling its source
 commit or repeating the native run.
 
-Final validation on the rebased branch: **479 Python tests, four Node fixture
+Validation before the review fixes: **479 Python tests, four Node fixture
 tests, Ruff, contract synchronization check, and `git diff --check` passed**.
 The Python suite ran with external networking denied and local test sockets
 allowed. The native proof used the stricter four-fixed-port profile below.
+
+Review fixes subsequently declared the runner configuration globals, changed an
+invalid-listener test to a second loopback address, and replaced test-only source
+evaluation with a direct TypeScript import using scoped dependency hooks. Positive
+installed-preflight ordering and settlement-integrity mutation tests were added.
+These changes were checked offline; the archived native runs retain their original
+source hashes and were not rerun. The global declarations change the current Python
+runner hash, so those historical proofs do not certify its exact current bytes.
+Final review-fix checks passed: 481 Python tests, four Node tests, Ruff including
+the runner, contract synchronization, and diff validation.
 
 ## Fixed execution ports
 

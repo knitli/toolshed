@@ -46,6 +46,36 @@ class CoupledWorkerdTests(unittest.TestCase):
                     with self.assertRaisesRegex(AssertionError, "native delay fixture exceeded deadline or native process stopped"):
                         asyncio.run(COUPLED.wait_for_permit_expiry(request, SimpleNamespace(poll=lambda: stopped)))
 
+    def test_observed_recovery_requires_immutable_ack_watermark_and_released_capacity(self):
+        import copy
+        import json
+
+        ack = {'status': 'observed', 'attemptId': 'original'}
+        original = {'native_observed_ack': ack}
+        envelope = {'sourceStateVersion': 'current'}
+        settled = {'slots': [], 'budget': {'used': 1}, 'cloud': {
+            'slot_intents': [], 'attempts': [{'state': 'observed', 'native_observed_ack_json': json.dumps(ack)}],
+            'deliveries': [{'state': 'observed'}], 'native_claims': [{'state': 'observed'}],
+            'manual_sources': [{'observed_source_state_version': 'current'}]}}
+        COUPLED.require_observed_settlement(settled, original, envelope)
+        mutations = (
+            (lambda x: x.update(slots=[{}]), 'real slot drained'),
+            (lambda x: x['cloud'].update(slot_intents=[{}]), 'real slot drained'),
+            (lambda x: x['cloud']['attempts'][0].update(native_observed_ack_json='{}'), 'immutable cloud ACK'),
+            (lambda x: x['cloud']['manual_sources'][0].update(observed_source_state_version='stale'), 'current watermark'),
+            (lambda x: x['budget'].update(used=2), 'one fixture authority charge'),
+        )
+        for change, message in mutations:
+            with self.subTest(message=message), self.assertRaisesRegex(AssertionError, message):
+                altered = copy.deepcopy(settled)
+                change(altered)
+                COUPLED.require_observed_settlement(altered, original, envelope)
+        for table in ('attempts', 'deliveries', 'native_claims'):
+            with self.subTest(table=table), self.assertRaisesRegex(AssertionError, 'actual observed ' + table):
+                altered = copy.deepcopy(settled)
+                altered['cloud'][table][0]['state'] = 'submitted'
+                COUPLED.require_observed_settlement(altered, original, envelope)
+
     def test_restart_requires_death_and_every_identity_rotation(self):
         check = COUPLED.verify_native_restart
         witness = {key: i for i, key in enumerate(("clientId", "serverInstanceId", "backendPid", "threadId"))}
@@ -112,6 +142,40 @@ class CoupledAdmissionTests(unittest.TestCase):
                     runpy.run_path(str(HARNESS), run_name='__main__')
             self.assertEqual(imported, [])
 
+    def test_successful_installed_preflight_precedes_imports_and_retains_provenance(self):
+        import builtins
+        from unittest.mock import Mock
+
+        spec = importlib.util.spec_from_file_location('configured_coupled', HARNESS)
+        configured = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(configured)
+        package = HARNESS.parents[2]
+        parsed = SimpleNamespace(package=str(package), qualifier=str(HARNESS),
+            binary=sys.executable, binary_sha='0' * 64, node=sys.executable,
+            output=str(package / 'unused-proof.json'), installed=True)
+        events = []
+        provenance = {'verified': 'wheel'}
+        checks = SimpleNamespace(
+            verified_python=Mock(side_effect=lambda: events.append('python')),
+            verify_installed=Mock(side_effect=lambda _: events.append('wheel') or provenance),
+            verified_executable=Mock(side_effect=lambda path: events.append('executable') or str(path)))
+        original_import = builtins.__import__
+
+        def record_import(name, *args, **kwargs):
+            if name == 'event_gateway' or name.startswith('event_gateway.'):
+                self.assertEqual(events[:4], ['python', 'wheel', 'executable', 'executable'])
+                events.append('import')
+            return original_import(name, *args, **kwargs)
+
+        with patch.object(configured, 'load_module', return_value=checks), \
+                patch('builtins.__import__', record_import):
+            configured.configure(parsed)
+        checks.verify_installed.assert_called_once_with(package / 'src/event_gateway')
+        self.assertIn('import', events)
+        self.assertIs(parsed.provenance, provenance)
+        self.assertIsNotNone(configured.Gateway)
+        self.assertEqual(configured.PACKAGE, package)
+
     def test_fresh_native_witness_follows_cloud_challenge_and_precedes_attach(self):
         calls = []
         binding = {'threadId': 'selected'}
@@ -166,7 +230,7 @@ class CoupledAdmissionTests(unittest.TestCase):
                 self.assertEqual(launcher.ThreadingHTTPServer(('127.0.0.1', 0), 'handler'), 'model')
                 factory.assert_called_once_with(('127.0.0.1', 49731), 'handler')
                 with self.assertRaisesRegex(AssertionError, 'unexpected native model listener'):
-                    launcher.ThreadingHTTPServer(('0.0.0.0', 0), 'handler')
+                    launcher.ThreadingHTTPServer(('127.0.0.2', 0), 'handler')
                 raise RuntimeError('fixture failure')
         self.assertIs(launcher.ThreadingHTTPServer, factory)
 

@@ -19,6 +19,13 @@ import time
 from uuid import UUID, uuid4
 
 HERE = Path(__file__).resolve().parent
+# configure() fills these only after installed-artifact verification succeeds.
+args = None
+PACKAGE = QUALIFIER = BINARY = BROKER = OUTPUT = None
+BINARY_SHA = NODE = None
+serialization = Ed25519PrivateKey = event_gateway = CloudClient = Credentials = None
+Gateway = NativeBridgeAdapter = validate_receipt = Store = NativeClient = None
+IDENTITY = ()
 
 
 def load_module(name, path):
