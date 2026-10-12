@@ -241,7 +241,7 @@ activate through client responses alone. Search and reads remain available.
 An embedding can provide a host-owned `StatefulActionAuthorizer` through
 `createOpenApiMcpServer`, or use `createStdioActionAuthorizer(templates, approve)`
 from `@knitli/openapi-mcp/stdio`. The built-in elicitation authorizers require an
-`approve(presentation)` callback that authenticates operator approval outside
+`approve(presentation, details)` callback that authenticates operator approval outside
 the MCP requester. Without it they deny. The callback receives the frozen
 presentation bound to the exact prepared-call and credential-binding digests,
 including policy digest and expiry when activating standing authority. It must
@@ -249,6 +249,17 @@ return literal `true` only for that approval; copying the client response or
 always returning `true` defeats this boundary. Requester confirmation is still
 required, but cannot replace the independent approval. Rejection, provider
 errors, expiry, changed bindings, and reused pending state prevent dispatch.
+
+The host-only `details` contains deeply frozen normalized argument values,
+the non-secret credential binding, the complete compiled policy when activating
+standing authority, the approval deadline, and an abort signal. These values
+remain untrusted data; the host must display them safely for informed operator
+approval. They are never included in the redacted MCP presentation. Providers
+must honor the signal and release prompts or other work when aborted. Expiry or
+request cancellation denies promptly; providers that ignore cancellation retain
+a bounded slot until they settle, and exhausted capacity fails closed.
+`compileExactPolicy` and its template/constraint types are exported from
+`@knitli/openapi-mcp/stdio` for constructing exact policies in embeddings.
 Destructive operations require the stronger destructive acknowledgment. An operator
 may supply narrowly bound `exactPolicies` for eligible create/update operations;
 they are not broad scopes or a general confirmation bypass. Do not construct policy

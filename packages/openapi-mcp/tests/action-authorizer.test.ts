@@ -212,6 +212,212 @@ describe("action authorizers", () => {
     },
   );
 
+  test("trusted host sees immutable exact arguments while presentation stays redacted", async () => {
+    const seen: unknown[] = [];
+    const authorizer = createClientElicitationActionAuthorizer({
+      elicitationAvailable: () => true,
+      approve: async (presentation, context) => {
+        expect(Object.isFrozen(context)).toBe(true);
+        expect(Object.isFrozen(context.normalizedArguments)).toBe(true);
+        expect(Object.isFrozen(context.credentialBinding)).toBe(true);
+        expect(Object.isFrozen(context.credentialBinding.scopes)).toBe(true);
+        expect(context.credentialBinding.grantId).toBe("grant_identifier_1");
+        const body = (
+          context.normalizedArguments as {
+            body: { secret: string; nested: string[] };
+          }
+        ).body;
+        expect(Object.isFrozen(body)).toBe(true);
+        expect(Object.isFrozen(body.nested)).toBe(true);
+        expect(JSON.stringify(presentation)).not.toContain(body.secret);
+        seen.push(context.normalizedArguments);
+        return true;
+      },
+    });
+    for (const secret of ["private-first-value", "private-second-value"]) {
+      const args = { body: { secret, nested: [secret] } };
+      const prepared = await call({ normalizedArguments: args });
+      const credential = await binding();
+      const first = await authorizer.authorize(prepared, credential, {
+        kind: "initial",
+      });
+      if (first.status !== "input-required")
+        throw new Error("expected input-required");
+      expect(JSON.stringify(first)).not.toContain(secret);
+      args.body.secret = "caller-mutated";
+      args.body.nested[0] = "caller-mutated";
+      expect(
+        (
+          await authorizer.authorize(
+            prepared,
+            credential,
+            await resumeContext(authorizer, first.requestState),
+          )
+        ).status,
+      ).toBe("authorized");
+      expect(seen.at(-1)).toEqual({ body: { secret, nested: [secret] } });
+    }
+    expect(seen[0]).not.toEqual(seen[1]);
+  });
+
+  test.each(["deadline", "cancel", "pre-aborted"])(
+    "hung trusted approval terminates on %s",
+    async (mode) => {
+      let now = 1_000;
+      let approvals = 0;
+      let providerSignal: AbortSignal | undefined;
+      let expiresAt: number | undefined;
+      let release!: (approved: boolean) => void;
+      let entered!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const approval = new Promise<boolean>((resolve) => {
+        release = resolve;
+      });
+      const controller = new AbortController();
+      const authorizer = createClientElicitationActionAuthorizer({
+        elicitationAvailable: () => true,
+        now: () => now,
+        approve: async (_presentation, context) => {
+          approvals++;
+          entered();
+          providerSignal = context?.signal;
+          expiresAt = context?.expiresAt;
+          return approval;
+        },
+      });
+      const prepared = await call();
+      const credential = await binding();
+      const first = await authorizer.authorize(prepared, credential, {
+        kind: "initial",
+      });
+      if (first.status !== "input-required")
+        throw new Error("expected input-required");
+      const context = await resumeContext(authorizer, first.requestState);
+      if (mode === "deadline") now = 120_999;
+      if (mode === "pre-aborted") controller.abort();
+      const pending = authorizer.authorize(
+        prepared,
+        credential,
+        context,
+        controller.signal,
+      );
+      if (mode !== "pre-aborted") {
+        await started;
+        if (mode === "cancel") controller.abort();
+      }
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          pending,
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error("hung approval did not terminate")),
+              200,
+            );
+          }),
+        ]);
+        expect(result.status).toBe("denied");
+        expect(approvals).toBe(mode === "pre-aborted" ? 0 : 1);
+        if (mode !== "pre-aborted") {
+          expect(expiresAt).toBe(121_000);
+          expect(providerSignal).toBeInstanceOf(AbortSignal);
+          expect(providerSignal?.aborted).toBe(true);
+        }
+      } finally {
+        clearTimeout(timeout);
+        release(true);
+      }
+      expect((await pending).status).toBe("denied");
+      expect(
+        (await authorizer.authorize(prepared, credential, context)).status,
+      ).toBe("denied");
+    },
+  );
+
+  test("unsettled cancelled providers retain capacity until their actual settlement", async () => {
+    let approvals = 0;
+    let entered!: () => void;
+    let release!: (value: boolean) => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<boolean>((resolve) => {
+      release = resolve;
+    });
+    const authorizer = createClientElicitationActionAuthorizer({
+      elicitationAvailable: () => true,
+      limits: { pending: 1 },
+      approve: async () => {
+        approvals++;
+        entered();
+        return gate;
+      },
+    });
+    const prepared = await call();
+    const credential = await binding();
+    const first = await authorizer.authorize(prepared, credential, {
+      kind: "initial",
+    });
+    if (first.status !== "input-required")
+      throw new Error("expected input-required");
+    const context = await resumeContext(authorizer, first.requestState);
+    const controller = new AbortController();
+    const pending = authorizer.authorize(
+      prepared,
+      credential,
+      context,
+      controller.signal,
+    );
+    await started;
+    controller.abort();
+    const result = await Promise.race([
+      pending,
+      Bun.sleep(200).then(() => ({ status: "timed-out" })),
+    ]);
+    try {
+      expect(result.status).toBe("denied");
+      const next = await authorizer.authorize(prepared, credential, {
+        kind: "initial",
+      });
+      if (next.status === "input-required") {
+        expect(
+          (
+            await authorizer.authorize(
+              prepared,
+              credential,
+              await resumeContext(authorizer, next.requestState),
+            )
+          ).status,
+        ).toBe("denied");
+      } else expect(next.status).toBe("denied");
+      expect(approvals).toBe(1);
+    } finally {
+      release(true);
+    }
+    expect((await pending).status).toBe("denied");
+    await Bun.sleep(0);
+    expect(
+      (await authorizer.authorize(prepared, credential, context)).status,
+    ).toBe("denied");
+    const fresh = await authorizer.authorize(prepared, credential, {
+      kind: "initial",
+    });
+    if (fresh.status !== "input-required")
+      throw new Error("expected capacity released");
+    expect(
+      (
+        await authorizer.authorize(
+          prepared,
+          credential,
+          await resumeContext(authorizer, fresh.requestState),
+        )
+      ).status,
+    ).toBe("authorized");
+    expect(approvals).toBe(2);
+  });
+
   test("default authorizer denies authorize and consume", async () => {
     const authorizer = createDenyActionAuthorizer();
     const prepared = await call();

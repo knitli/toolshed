@@ -402,6 +402,7 @@ export interface ActionAuthorizer {
     call: PreparedCall,
     credential: CredentialAuthorizationBinding,
     context: AuthorizationContext,
+    signal?: AbortSignal,
   ): Promise<AuthorizationDecision>;
   consume(
     decision: AuthorizedActionDecision,

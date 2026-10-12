@@ -364,6 +364,7 @@ async function executeAction(
           requestState: state,
           inputResponses: ctx.mcpReq.inputResponses,
         },
+    ctx.mcpReq.signal,
   );
   if (decision.status === "denied") throw new OpenApiMcpError("ACTION_DENIED");
   if (decision.status === "input-required")

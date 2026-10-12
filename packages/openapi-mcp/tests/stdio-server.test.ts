@@ -993,6 +993,51 @@ test("modern: simultaneous requests retain their own elicitation capabilities", 
   expect(c.events).not.toContain("dispatch");
 });
 
+test("modern: cancellation aborts a pending trusted approval without dispatch", async () => {
+  let signal: AbortSignal | undefined;
+  let release!: (approved: boolean) => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const approval = new Promise<boolean>((resolve) => {
+    release = resolve;
+  });
+  const c = await client(
+    "modern",
+    { elicitation: { form: {} } },
+    false,
+    ["widgets-api"],
+    false,
+    {
+      approve: async (_presentation, context) => {
+        signal = context?.signal;
+        entered();
+        return approval;
+      },
+    },
+  );
+  const first = await c.invoke();
+  const resume = {
+    requestState: first.result.requestState,
+    inputResponses: {
+      confirm: { action: "accept", content: { confirm: true } },
+    },
+  };
+  void c.invoke(resume);
+  await started;
+  await c.cancelCurrent();
+  await Bun.sleep(10);
+  expect(signal?.aborted).toBe(true);
+  expect(c.events).not.toContain("dispatch");
+  release(true);
+  await Bun.sleep(10);
+  expect(c.events).not.toContain("consume");
+  expect(c.events).not.toContain("dispatch");
+  const replay = await c.invoke(resume);
+  expect(replay.error ?? replay.result?.isError).toBeTruthy();
+});
+
 test("cancelling one request before consumption leaves the shared boundary usable", async () => {
   const c = await client("modern");
   const first = await c.invoke();

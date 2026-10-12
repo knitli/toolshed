@@ -15,6 +15,7 @@ import type {
   AuthorizationId,
   AuthorizedActionDecision,
   CredentialAuthorizationBinding,
+  JsonObject,
   PreparedCall,
   SafeApprovalPresentation,
   Sha256,
@@ -67,7 +68,17 @@ export interface ClientElicitationAuthorizerOptions
   /** Authenticate operator approval outside the MCP requester; never trust inputResponses. */
   readonly approve?: (
     presentation: SafeApprovalPresentation,
+    context: TrustedActionApprovalContext,
   ) => Promise<boolean>;
+}
+
+/** Host-only values; never include these details in an MCP response. */
+export interface TrustedActionApprovalContext {
+  readonly normalizedArguments: Readonly<JsonObject>;
+  readonly credentialBinding: CredentialAuthorizationBinding;
+  readonly policy?: CompiledExactPolicy;
+  readonly expiresAt: number;
+  readonly signal: AbortSignal;
 }
 
 export interface ExactPolicyAuthorizerOptions
@@ -284,6 +295,7 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
   readonly #policies: readonly CompiledExactPolicy[];
   readonly #pending = new Map<string, PendingConfirmation>();
   readonly #approving = new WeakSet<PendingConfirmation>();
+  #approvalsInFlight = 0;
   readonly #receipts = new Map<AuthorizationId, Receipt>();
   readonly #decisions = new WeakMap<AuthorizedActionDecision, Receipt>();
   readonly #activations = new Map<string, Activation>();
@@ -323,6 +335,7 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
     call: PreparedCall,
     credential: CredentialAuthorizationBinding,
     context: AuthorizationContext,
+    signal?: AbortSignal,
   ): Promise<AuthorizationDecision> {
     let ownedContext: AuthorizationContext | undefined;
     try {
@@ -346,8 +359,14 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
       // Resume is deliberately handled before active-policy matching. An
       // echoed confirmation can never be bypassed by a newly active policy.
       if (ownedContext.kind === "resume") {
-        return await this.#resume(prepared, ownedCredential, ownedContext);
+        return await this.#resume(
+          prepared,
+          ownedCredential,
+          ownedContext,
+          signal,
+        );
       }
+      if (signal?.aborted) return deny("Action request was cancelled");
 
       const now = this.#now();
       this.#prune(now);
@@ -448,6 +467,7 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
     call: PreparedCall,
     credential: CredentialAuthorizationBinding,
     context: Extract<AuthorizationContext, { kind: "resume" }>,
+    signal?: AbortSignal,
   ): Promise<AuthorizationDecision> {
     const payload = this.#requestState.read(context.requestState);
     if (payload === undefined) return deny("Invalid confirmation state");
@@ -461,6 +481,7 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
     }
     const now = this.#now();
     if (
+      signal?.aborted ||
       now >= pending.expiresAt ||
       call.preparedCallDigest !== pending.callDigest ||
       credential.bindingDigest !== pending.credentialBindingDigest
@@ -513,6 +534,7 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
     const newActivation =
       activationKey !== undefined && !this.#activations.has(activationKey);
     if (
+      this.#approvalsInFlight >= this.#limits.pending ||
       this.#receipts.size >= this.#limits.receipts ||
       (newActivation && this.#activations.size >= this.#limits.activations)
     ) {
@@ -523,11 +545,12 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
     // Reserve the pending slot while the independent channel is awaiting approval.
     this.#approving.add(pending);
     try {
-      if ((await this.#approve?.(pending.presentation)) !== true) {
+      if (!(await this.#awaitApproval(pending, call, credential, signal))) {
         return deny("Trusted operator approval was not accepted");
       }
       const approvedAt = this.#now();
       if (
+        signal?.aborted ||
         approvedAt >= pending.expiresAt ||
         this.#pending.get(pending.pendingId) !== pending
       ) {
@@ -573,6 +596,70 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
     }
   }
 
+  async #awaitApproval(
+    pending: PendingConfirmation,
+    call: PreparedCall,
+    credential: CredentialAuthorizationBinding,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const approve = this.#approve;
+    const expiresAt = Math.min(
+      pending.expiresAt,
+      pending.activationExpiresAt ?? pending.expiresAt,
+    );
+    const remaining = expiresAt - this.#now();
+    if (
+      approve === undefined ||
+      signal?.aborted ||
+      !Number.isFinite(remaining) ||
+      remaining <= 0
+    )
+      return false;
+    const controller = new AbortController();
+    let stop: () => void = () => {};
+    const interrupted = new Promise<boolean>((resolve) => {
+      stop = () => {
+        controller.abort();
+        resolve(false);
+      };
+    });
+    const timer = setTimeout(stop, remaining);
+    signal?.addEventListener("abort", stop, { once: true });
+    try {
+      const details = Object.freeze({
+        normalizedArguments: call.normalizedArguments,
+        credentialBinding: credential,
+        ...(pending.policy === undefined ? {} : { policy: pending.policy }),
+        expiresAt,
+        signal: controller.signal,
+      });
+      this.#approvalsInFlight++;
+      let result: Promise<boolean>;
+      try {
+        result = approve(pending.presentation, details);
+      } catch {
+        this.#approvalsInFlight--;
+        return false;
+      }
+      // Providers that ignore cancellation still occupy a bounded slot until they settle.
+      const approval = Promise.resolve(result).then(
+        (accepted) => {
+          this.#approvalsInFlight--;
+          return accepted === true;
+        },
+        () => {
+          this.#approvalsInFlight--;
+          return false;
+        },
+      );
+      return await Promise.race([approval, interrupted]);
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", stop);
+      controller.abort();
+    }
+  }
+
   async #requestConfirmation(
     call: PreparedCall,
     credential: CredentialAuthorizationBinding,
@@ -587,7 +674,10 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
     }
     const now = this.#now();
     this.#prune(now);
-    if (this.#pending.size >= this.#limits.pending) {
+    if (
+      this.#pending.size >= this.#limits.pending ||
+      this.#approvalsInFlight >= this.#limits.pending
+    ) {
       return deny("Authorization capacity is exhausted");
     }
     let pendingId: string | undefined;
