@@ -33,6 +33,45 @@ interface WireResponse {
   };
 }
 
+test("a stalled independent approval deadline does not keep Node alive", () => {
+  const output = execFileSync(
+    process.execPath,
+    [
+      "--experimental-transform-types",
+      "--input-type=module",
+      "-e",
+      `
+        import assert from "node:assert/strict";
+        import { createClientElicitationActionAuthorizer } from ${JSON.stringify(new URL("../src/stdio/authorizer.ts", import.meta.url).href)};
+        import { prepared, credential } from ${JSON.stringify(new URL("./helpers/dispatch-fixtures.ts", import.meta.url).href)};
+
+        const entered = Promise.withResolvers();
+        const authorizer = createClientElicitationActionAuthorizer({
+          elicitationAvailable: () => true,
+          approve: async () => {
+            entered.resolve();
+            return new Promise(() => {});
+          },
+        });
+        const call = await prepared();
+        const snapshot = await credential();
+        const first = await authorizer.authorize(call, snapshot.binding, { kind: "initial" });
+        assert.equal(first.status, "input-required");
+        const requestState = await authorizer.requestStateVerifier(first.requestState);
+        void authorizer.authorize(call, snapshot.binding, {
+          kind: "resume",
+          requestState,
+          inputResponses: { confirm: { action: "accept", content: { confirm: true } } },
+        });
+        await entered.promise;
+        console.log("approval-hook-entered");
+      `,
+    ],
+    { encoding: "utf8", timeout: 3_000 },
+  );
+  assert.equal(output.trim(), "approval-hook-entered");
+});
+
 test("stdio helper consumes real transport plans and permits exactly once under concurrent replay", async () => {
   const directory = mkdtempSync(join(tmpdir(), "stdio-node-tls-"));
   let https: ReturnType<typeof createServer> | undefined;

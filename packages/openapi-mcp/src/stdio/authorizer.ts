@@ -624,6 +624,7 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
       };
     });
     const timer = setTimeout(stop, remaining);
+    timer.unref();
     signal?.addEventListener("abort", stop, { once: true });
     try {
       const details = Object.freeze({
