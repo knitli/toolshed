@@ -25,10 +25,11 @@ from .protocol import (
 class CloudError(ValueError):
     """Only fixed local/server codes escape the credential boundary."""
 
-    def __init__(self, code, *, ambiguous=False):
+    def __init__(self, code, *, ambiguous=False, definitive_refusal=False):
         """Store the error code."""
         self.code = code
         self.ambiguous = ambiguous
+        self.definitive_refusal = definitive_refusal
         super().__init__(code)
 
 
@@ -686,6 +687,9 @@ class CloudClient:
                 status in (400, 403, 409)
                 and error.code not in ("invalid_response", "unavailable", "redirect_refused")
             )
+            if path == "/v1/dispatch/claim":
+                raise CloudError(error.code, ambiguous=not definitive_refusal,
+                                 definitive_refusal=definitive_refusal) from None
             if path in _NATIVE_COMMIT_PATHS and not definitive_refusal:
                 raise CloudError(error.code, ambiguous=True) from None
             raise
@@ -729,18 +733,22 @@ class CloudClient:
     async def claim(self, envelope):
         expected = self._envelope(envelope, historical=True)
         result = await self._post("/v1/dispatch/claim", {key: expected[key] for key in ("deliveryId", "attemptId")})
-        if isinstance(result, dict) and result.get("status") == "over_budget":
-            _closed(result, ("status", "budget"))
-            budget = result["budget"]
-            _closed(budget, ("used", "remaining", "limit", "windowMs"))
-            # Budget counters reject booleans even though isinstance(True, int).
-            if (any(type(budget[key]) is not int or budget[key] < 0 for key in budget)  # pylint: disable=unidiomatic-typecheck
-                    or budget["limit"] != 10 or budget["windowMs"] != 3600000
-                    or budget["used"] < budget["limit"]
-                    or budget["remaining"] != max(0, 10 - budget["used"])):
-                raise CloudError("invalid_response")
-            return result
-        return validate_admission(result, expected, now_ms=self._clock() * 1000, node_id=self.node_id)
+        try:
+            if isinstance(result, dict) and result.get("status") == "over_budget":
+                _closed(result, ("status", "budget"))
+                budget = result["budget"]
+                _closed(budget, ("used", "remaining", "limit", "windowMs"))
+                # Budget counters reject booleans even though isinstance(True, int).
+                if (any(type(budget[key]) is not int or budget[key] < 0 for key in budget)  # pylint: disable=unidiomatic-typecheck
+                        or budget["limit"] != 10 or budget["windowMs"] != 3600000
+                        or budget["used"] < budget["limit"]
+                        or budget["remaining"] != max(0, 10 - budget["used"])):
+                    raise CloudError("invalid_response")
+                return result
+            return validate_admission(result, expected, now_ms=self._clock() * 1000, node_id=self.node_id)
+        except CloudError as error:
+            # A malformed success cannot prove that the cloud did not admit the claim.
+            raise CloudError(error.code, ambiguous=True) from None
 
     async def settle_no_start(self, admission, evidence):
         _closed(admission, ("status", "permitId", "nodeId", "permitIssuedAt", "permitExpiresAt", "envelope"))

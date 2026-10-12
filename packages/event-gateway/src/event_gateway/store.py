@@ -30,6 +30,7 @@ IDENTITY = (
 )
 RETENTION = 7 * 86400
 CLAIM_RESERVE = 262144
+RETRYABLE_CLAIM_REFUSALS = ("conflict", "capacity", "coordinator_capacity", "native_binding_unqualified")
 
 
 def _json(value):
@@ -116,6 +117,9 @@ class Store:
     def _ensure_attempt_columns(self):
         """Add receipt/ack columns missing from older attempt tables."""
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(attempts)")}
+        if "claim_uncertain" not in columns:
+            # Legacy claims may already have been sent without a durable response.
+            self.db.execute("ALTER TABLE attempts ADD COLUMN claim_uncertain INTEGER NOT NULL DEFAULT 1")
         if "started_receipt" not in columns:
             self.db.execute("ALTER TABLE attempts ADD COLUMN started_receipt TEXT")
         if "native_ack" not in columns:
@@ -599,7 +603,8 @@ class Store:
                 return False
             self._capacity(CLAIM_RESERVE + 32768 + len(row["envelope"].encode()) * 6)
             self.db.execute(
-                "INSERT INTO attempts (delivery_id,attempt_id,state,envelope,reserved_bytes,updated) VALUES (?,?,'claiming',?,?,?)",
+                "INSERT INTO attempts (delivery_id,attempt_id,state,envelope,reserved_bytes,updated,claim_uncertain) "
+                "VALUES (?,?,'claiming',?,?,?,0)",
                 (delivery_id, envelope["attemptId"], row["envelope"], CLAIM_RESERVE, self.clock()),
             )
             self.db.execute("UPDATE deliveries SET state='claiming', updated=? WHERE id=?", (self.clock(), delivery_id))
@@ -607,16 +612,53 @@ class Store:
 
     def note_claim_budget(self, delivery_id, attempt_id):
         """Retain the exact claim intent while exposing a known budget refusal."""
+        return self.note_claim_refusal(delivery_id, attempt_id, "over_budget", uncertain=True)
+
+    def note_claim_request(self, delivery_id, attempt_id):
+        """Persist possible admission before sending; return prior uncertainty."""
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             row = self._attempt(delivery_id, attempt_id)
             if row is None or row["state"] != "claiming":
-                return False
-            self.db.execute("UPDATE attempts SET reason='over_budget', updated=? WHERE delivery_id=? AND attempt_id=?",
+                raise StoreError("invalid_transition")
+            self.db.execute("UPDATE attempts SET claim_uncertain=1, updated=? WHERE delivery_id=? AND attempt_id=?",
                             (self.clock(), delivery_id, attempt_id))
-            self.db.execute("UPDATE deliveries SET reason='over_budget', updated=? WHERE id=?",
-                            (self.clock(), delivery_id))
+        return bool(row["claim_uncertain"])
+
+    def note_claim_refusal(self, delivery_id, attempt_id, reason, *, uncertain):
+        """A known retryable refusal preserves any earlier possible admission."""
+        if reason not in ("over_budget", *RETRYABLE_CLAIM_REFUSALS):
+            raise StoreError("invalid_reason")
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id, attempt_id)
+            if row is None or row["state"] != "claiming":
+                raise StoreError("invalid_transition")
+            self.db.execute("UPDATE attempts SET reason=?, claim_uncertain=?, updated=? WHERE delivery_id=? AND attempt_id=?",
+                            (reason, int(uncertain), self.clock(), delivery_id, attempt_id))
+            self.db.execute("UPDATE deliveries SET reason=?, updated=? WHERE id=?",
+                            (reason, self.clock(), delivery_id))
         return True
+
+    def reject_claim(self, delivery_id, attempt_id):
+        """Retain a definitive refusal for deduplication without pending capacity."""
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id, attempt_id)
+            delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+            if (row is None or row["state"] != "claiming" or delivery["state"] != "claiming"
+                    or delivery["submission"] is not None or delivery["turn"] is not None
+                    or any(row[key] is not None for key in (
+                        "admission", "native_request", "evidence", "started_receipt", "input_recorded_receipt"))):
+                raise StoreError("invalid_transition")
+            self._spend(row)
+            self.db.execute(
+                "UPDATE attempts SET state='stale', reason='claim_refused', reserved_bytes=0, updated=? "
+                "WHERE delivery_id=? AND attempt_id=?", (self.clock(), delivery_id, attempt_id))
+            self.db.execute(
+                "UPDATE deliveries SET state='stale', reason='claim_refused', updated=? WHERE id=?",
+                (self.clock(), delivery_id))
+        return self.delivery(delivery_id)
 
     def record_admission(self, delivery_id, admission):
         from .cloud import CloudError, validate_admission

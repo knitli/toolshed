@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import shlex
 import subprocess  # nosec B404 - fixed Git executable and disposable repo fixture, no shell
 import tarfile
 import tempfile
@@ -162,6 +163,187 @@ class NativePackagingTests(unittest.TestCase):
             self.assertFalse(paths[0].exists())
             self.assertEqual(paths[1].read_bytes(), b"ours")
             self.assertFalse(paths[2].exists())
+
+    def test_checkout_and_archive_do_not_execute_local_git_configuration(self):
+        for configuration in ("local", "included", "worktree"):
+            for trigger in ("fsmonitor", "post-index-change", "clean-filter"):
+                with self.subTest(configuration=configuration, trigger=trigger), \
+                        tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    checkout = root / "checkout"
+                    checkout.mkdir()
+                    env = {
+                        "PATH": os.environ.get("PATH", os.defpath), "HOME": str(root),
+                        "TMPDIR": str(root), "GIT_CONFIG_NOSYSTEM": "1",
+                        "GIT_CONFIG_GLOBAL": os.devnull,
+                    }
+                    executable = str(PACKAGER["_git_executable"](env))
+
+                    def git(*args):
+                        return subprocess.run(  # nosec B603 - fixed Git and disposable fixture
+                            [executable, *args], cwd=checkout, env=env, check=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                        ).stdout.strip()
+
+                    git("init", "--quiet")
+                    git("config", "user.name", "Native packaging test")
+                    git("config", "user.email", "native-packaging@example.invalid")
+                    tracked = checkout / "source.txt"
+                    tracked.write_text("pinned source\n")
+                    if trigger == "clean-filter":
+                        (checkout / ".gitattributes").write_text("source.txt filter=fixture\n")
+                    git("add", ".")
+                    git("commit", "--quiet", "-m", "pinned source")
+                    pinned = git("rev-parse", "HEAD")
+                    hooks = root / "hooks"
+                    hooks.mkdir()
+                    marker = root / "executed"
+                    hook = hooks / trigger
+                    hook.write_text(f"#!/bin/sh\nprintf ran > {shlex.quote(str(marker))}\n"
+                                    + ("cat\n" if trigger == "clean-filter" else ""))
+                    hook.chmod(0o755)
+                    key = "core.fsmonitor" if trigger == "fsmonitor" else "core.hooksPath"
+                    value = str(hook if trigger == "fsmonitor" else hooks)
+                    if trigger == "clean-filter":
+                        key, value = "filter.fixture.clean", str(hook)
+                    if configuration == "included":
+                        included = root / "included.config"
+                        git("config", "--file", str(included), key, value)
+                        git("config", "include.path", str(included))
+                    elif configuration == "worktree":
+                        git("config", "extensions.worktreeConfig", "true")
+                        git("config", "--worktree", key, value)
+                    else:
+                        git("config", key, value)
+
+                    def refresh_stat():
+                        mtime = tracked.stat().st_mtime_ns + 1_000_000_000
+                        os.utime(tracked, ns=(mtime, mtime))
+
+                    refresh_stat()
+                    self.assertEqual(git("status", "--porcelain=v1"), "")
+                    self.assertTrue(marker.exists(), "unprotected Git must execute the fixture")
+                    marker.unlink()
+                    refresh_stat()
+                    archive = root / "archive"
+                    archive.mkdir()
+                    with patch.dict(PACKAGER_GLOBALS, {"UPSTREAM_COMMIT": pinned}):
+                        self.assertEqual(PACKAGER["_clean_checkout"](checkout, env), checkout.resolve())
+                        self.assertFalse(marker.exists())
+                        PACKAGER["_archive_source"](checkout, archive, env)
+                        self.assertEqual((archive / "source.txt").read_bytes(), tracked.read_bytes())
+                        (checkout / "untracked.txt").write_text("untracked\n")
+                        with self.assertRaisesRegex(ValueError, "native_source_checkout_must_be_clean"):
+                            PACKAGER["_clean_checkout"](checkout, env)
+                        (checkout / "untracked.txt").unlink()
+                        tracked.write_text("modified source\n")
+                        with self.assertRaisesRegex(ValueError, "native_source_checkout_must_be_clean"):
+                            PACKAGER["_clean_checkout"](checkout, env)
+                    self.assertFalse(marker.exists())
+
+    def test_checkout_preserves_normalization_and_rejects_staged_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory)
+            env = {"PATH": os.defpath, "HOME": directory, "TMPDIR": directory,
+                   "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+            executable = str(PACKAGER["_git_executable"](env))
+
+            def git(*args):
+                return subprocess.run(  # nosec B603 - fixed Git and disposable fixture
+                    [executable, *args], cwd=checkout, env=env, check=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                ).stdout.strip()
+
+            git("init", "--quiet")
+            git("config", "user.name", "Native packaging test")
+            git("config", "user.email", "native-packaging@example.invalid")
+            tracked = checkout / "source.txt"
+            tracked.write_text("pinned source\n")
+            git("add", ".")
+            git("commit", "--quiet", "-m", "pinned source")
+            pinned = git("rev-parse", "HEAD")
+            git("update-index", "--skip-worktree", "source.txt")
+            tracked.write_text("modified source\n")
+            with patch.dict(PACKAGER_GLOBALS, {"UPSTREAM_COMMIT": pinned}):
+                with self.assertRaisesRegex(ValueError, "native_source_checkout_must_be_clean"):
+                    PACKAGER["_clean_checkout"](checkout, env)
+            git("update-index", "--no-skip-worktree", "source.txt")
+            tracked.write_text("pinned source\n")
+            git("config", "core.autocrlf", "true")
+            tracked.unlink()
+            git("checkout", "--", "source.txt")
+            self.assertEqual(tracked.read_bytes(), b"pinned source\r\n")
+            self.assertEqual(git("status", "--porcelain=v1"), "")
+            with tempfile.TemporaryDirectory() as archive_directory, \
+                    patch.dict(PACKAGER_GLOBALS, {"UPSTREAM_COMMIT": pinned}):
+                archive = Path(archive_directory)
+                self.assertEqual(PACKAGER["_clean_checkout"](checkout, env), checkout.resolve())
+                PACKAGER["_archive_source"](checkout, archive, env)
+                self.assertEqual((archive / "source.txt").read_bytes(), b"pinned source\r\n")
+            git("config", "core.autocrlf", "false")
+            tracked.write_text("staged source\n")
+            git("add", ".")
+            tracked.write_text("pinned source\n")
+            with patch.dict(PACKAGER_GLOBALS, {"UPSTREAM_COMMIT": pinned}):
+                with self.assertRaisesRegex(ValueError, "native_source_checkout_must_be_clean"):
+                    PACKAGER["_clean_checkout"](checkout, env)
+
+    def test_sparse_checkout_preserves_omissions_and_archives_the_complete_pin(self):
+        for mode in ("non-cone", "cone", "sparse-index"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                checkout = root / "checkout"
+                checkout.mkdir()
+                env = {"PATH": os.defpath, "HOME": directory, "TMPDIR": directory,
+                       "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+                executable = str(PACKAGER["_git_executable"](env))
+
+                def git(*args):
+                    return subprocess.run(  # nosec B603 - fixed Git and disposable fixture
+                        [executable, *args], cwd=checkout, env=env, check=True,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    ).stdout.strip()
+
+                git("init", "--quiet")
+                git("config", "user.name", "Native packaging test")
+                git("config", "user.email", "native-packaging@example.invalid")
+                names = ("selected/source.txt", "omitted/source.txt", "omitted/space and\nnewline.txt")
+                for name in names:
+                    file = checkout / name
+                    file.parent.mkdir(exist_ok=True)
+                    file.write_text("pinned source\n")
+                git("add", ".")
+                git("commit", "--quiet", "-m", "pinned source")
+                pinned = git("rev-parse", "HEAD")
+                arguments = ["sparse-checkout", "init", "--no-cone" if mode == "non-cone" else "--cone"]
+                if mode == "sparse-index":
+                    arguments.append("--sparse-index")
+                git(*arguments)
+                git("sparse-checkout", "set", "selected")
+                self.assertFalse((checkout / "omitted/source.txt").exists())
+                self.assertEqual(git("status", "--porcelain=v1"), "")
+                source_index = (checkout / ".git/index").read_bytes()
+                with patch.dict(PACKAGER_GLOBALS, {"UPSTREAM_COMMIT": pinned}):
+                    self.assertEqual(PACKAGER["_clean_checkout"](checkout, env), checkout.resolve())
+                    self.assertEqual((checkout / ".git/index").read_bytes(), source_index)
+                    archive = root / "archive"
+                    archive.mkdir()
+                    PACKAGER["_archive_source"](checkout, archive, env)
+                    for name in names:
+                        self.assertEqual((archive / name).read_bytes(), b"pinned source\n")
+                    (checkout / "untracked.txt").write_text("untracked\n")
+                    with self.assertRaisesRegex(ValueError, "native_source_checkout_must_be_clean"):
+                        PACKAGER["_clean_checkout"](checkout, env)
+                    (checkout / "untracked.txt").unlink()
+                    omitted = checkout / "omitted/source.txt"
+                    omitted.parent.mkdir(exist_ok=True)
+                    omitted.symlink_to(root / "missing")
+                    with self.assertRaisesRegex(ValueError, "native_source_checkout_must_be_clean"):
+                        PACKAGER["_clean_checkout"](checkout, env)
+                    omitted.unlink()
+                    (checkout / "selected/source.txt").write_text("modified source\n")
+                    with self.assertRaisesRegex(ValueError, "native_source_checkout_must_be_clean"):
+                        PACKAGER["_clean_checkout"](checkout, env)
 
     def test_archive_ignores_git_replacement_refs_for_checkout_and_archive(self):
         with tempfile.TemporaryDirectory() as directory:

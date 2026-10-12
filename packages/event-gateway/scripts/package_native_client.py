@@ -218,6 +218,12 @@ def _git_environment(env=None):
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_ATTR_NOSYSTEM": "1",
         "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_NO_LAZY_FETCH": "1",
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "core.fsmonitor",
+        "GIT_CONFIG_VALUE_0": "false",
+        "GIT_CONFIG_KEY_1": "core.hooksPath",
+        "GIT_CONFIG_VALUE_1": os.devnull,
     }
 
 
@@ -248,11 +254,11 @@ def _rustup_executable(env):
     raise ValueError("native_build_requires_rustup_1_95_0_arm64_macos")
 
 
-def _run(command, *, cwd, env=None, capture=False, stdout=None):
+def _run(command, *, cwd, env=None, capture=False, stdout=None, input=None):
     return subprocess.run(
         command, cwd=cwd, env=env, check=True, text=True, stdout=stdout or (
             subprocess.PIPE if capture else None
-        ), stderr=subprocess.PIPE if capture else None,
+        ), stderr=subprocess.PIPE if capture else None, input=input,
     )
 
 
@@ -291,11 +297,54 @@ def _clean_checkout(source, env=None, git=None):
             stderr=attributes_file.stderr,
         )
     head = _run([*pinned_git, "rev-parse", "HEAD"], cwd=source, env=git_env, capture=True).stdout.strip()
-    status = _run(
-        [*pinned_git, "status", "--porcelain=v1", "--untracked-files=all"],
+    if head != UPSTREAM_COMMIT:
+        raise ValueError("native_source_checkout_must_be_clean_pinned_commit")
+    staged = _run(
+        [*pinned_git, "diff-index", "--cached", "--raw", "--no-ext-diff", "--no-textconv", UPSTREAM_COMMIT],
         cwd=source, env=git_env, capture=True,
     ).stdout
-    if head != UPSTREAM_COMMIT or status:
+    if staged:
+        raise ValueError("native_source_checkout_must_be_clean_pinned_commit")
+    objects = Path(_run(
+        [*pinned_git, "rev-parse", "--git-path", "objects"],
+        cwd=source, env=git_env, capture=True,
+    ).stdout.strip())
+    if not objects.is_absolute():
+        objects = source / objects
+    # Status can run clean filters too; use fresh config and an index built from the pin.
+    with tempfile.TemporaryDirectory(prefix="codex-native-git-") as directory:
+        isolated_git = [*pinned_git, f"--git-dir={directory}", f"--work-tree={source}"]
+        configuration = _run([*pinned_git, "config", "--null", "--list"],
+                             cwd=source, env=git_env, capture=True).stdout
+        for entry in configuration.split("\0"):
+            key, separator, value = entry.partition("\n")
+            if key in {"core.autocrlf", "core.eol", "core.filemode", "core.symlinks", "core.ignorecase"}:
+                isolated_git.extend(["-c", f"{key}={value if separator else 'true'}"])
+        _run([*pinned_git, "init", "--bare", "--quiet", "--template=", directory],
+             cwd=source, env=git_env, capture=True)
+        isolated_env = {**git_env, "GIT_OBJECT_DIRECTORY": str(objects.resolve(strict=True))}
+        _run([*isolated_git, "update-ref", "HEAD", UPSTREAM_COMMIT],
+             cwd=source, env=isolated_env, capture=True)
+        _run([*isolated_git, "read-tree", UPSTREAM_COMMIT],
+             cwd=source, env=isolated_env, capture=True)
+        entries = _run([*pinned_git, "ls-files", "-t", "-z"],
+                       cwd=source, env=git_env, capture=True).stdout
+        # Preserve sparse omissions without hiding existing files or copying the source index.
+        skipped = []
+        for entry in entries.split("\0"):
+            if entry.startswith("S "):
+                try:
+                    (source / entry[2:]).lstat()
+                except FileNotFoundError:
+                    skipped.append(entry[2:])
+        if skipped:
+            _run([*isolated_git, "update-index", "--skip-worktree", "-z", "--stdin"],
+                 cwd=source, env=isolated_env, capture=True, input="\0".join(skipped) + "\0")
+        status = _run(
+            [*isolated_git, "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=source, env=isolated_env, capture=True,
+        ).stdout
+    if status:
         raise ValueError("native_source_checkout_must_be_clean_pinned_commit")
     return source
 

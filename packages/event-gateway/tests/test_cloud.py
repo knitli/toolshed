@@ -519,6 +519,27 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(status=status), self.assertRaisesRegex(CloudError, f"^{code}$"):
                 await self.client.claim(FIXTURE["original"])
 
+    async def test_claim_distinguishes_definitive_refusals_from_uncertain_responses(self):
+        cases = (
+            (400, {"error": "invalid_request"}, False),
+            (403, {"error": "denied"}, False),
+            (409, {"error": "expired"}, False),
+            (400, {"error": "unrecognized"}, True),
+            (403, {}, True),
+            (503, {"error": "runtime_disabled"}, True),
+            (500, {"error": "secret"}, True),
+            (302, {}, True),
+            (200, {}, True),
+            (200, dict(FIXTURE["admitted"], permitId="invalid"), True),
+            (200, {"status": "over_budget", "budget": {}}, True),
+        )
+        for status, result, ambiguous in cases:
+            self.status, self.result = status, result
+            with self.subTest(status=status, result=result), self.assertRaises(CloudError) as caught:
+                await self.client.claim(FIXTURE["original"])
+            self.assertEqual(caught.exception.ambiguous, ambiguous)
+            self.assertEqual(caught.exception.definitive_refusal, not ambiguous)
+
     async def test_untrusted_wire_body_is_closed_bounded_and_unambiguous(self):
         for raw, headers in ((b" " * 8193 + json.dumps(FIXTURE["admitted"]).encode(), JSON_HEADERS), (b'{}', {"content-type": "text/html"}),
                              (b'{}', {"content-type": None}), (b'{}', {"content-type": 1}),
