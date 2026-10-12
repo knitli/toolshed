@@ -86,9 +86,13 @@ class FakeAPI:
         self.tree = {"truncated": False, "tree": [{"path": path, "type": "blob", "mode": "100644"}
                                                    for path in (V.LAUNCHER, V.PROVENANCE)]}
         self.calls = []
-        self.comparison = "ahead"
+        self.comparison = {"status": "BEHIND", "baseTarget": {"oid": MAIN}, "headTarget": {"oid": BUILD}}
 
     def request(self, endpoint, payload=None):
+        if endpoint == "graphql" and payload["query"] == V.ANCESTRY_QUERY:
+            self.calls.append((endpoint, payload["variables"]["build"]))
+            return {"data": {"repository": {"databaseId": V.REPOSITORY_ID,
+                                             "ref": {"compare": self.comparison}}}}
         if payload is not None:
             raise AssertionError("Verification must not write remotely")
         self.calls.append(endpoint)
@@ -96,7 +100,7 @@ class FakeAPI:
                 "actions/workflows/event-native-build.yml": self.workflow,
                 "actions/runs/123/attempts/2": self.run,
                 "actions/artifacts/456": self.artifact,
-                f"compare/{BUILD}...{MAIN}": {"status": self.comparison}}[endpoint]
+                }[endpoint]
 
     def blob(self, path, revision):
         self.calls.append((path, revision))
@@ -238,13 +242,13 @@ class NativeCIProvenanceTests(unittest.TestCase):
         api = FakeAPI()
         self.assertIn("verified main CI", V.verify_candidate(api, HEAD, MAIN))
         self.assertIn(("download", 456), api.calls)
-        self.assertIn(f"compare/{BUILD}...{MAIN}", api.calls)
+        self.assertIn(("graphql", BUILD), api.calls)
         for path in V.INPUTS.values():
             for revision in (HEAD, MAIN, BUILD):
                 self.assertIn((path, revision), api.calls)
-        for comparison in ("behind", "diverged"):
+        for comparison in ("AHEAD", "DIVERGED"):
             api = FakeAPI()
-            api.comparison = comparison
+            api.comparison["status"] = comparison
             with self.subTest(comparison=comparison), self.assertRaises(ValueError):
                 V.verify_candidate(api, HEAD, MAIN)
             self.assertNotIn(("download", 456), api.calls)
@@ -462,8 +466,10 @@ class ProvenanceDriverTests(unittest.TestCase):
             nonlocal reads
             if endpoint == "":
                 return {"id": V.REPOSITORY_ID}
-            if endpoint.startswith("pulls?"):
-                return [pull]
+            if endpoint == "graphql":
+                return {"data": {"repository": {"databaseId": V.REPOSITORY_ID, "pullRequests": {
+                    "nodes": [{"number": 7, "headRefOid": HEAD}],
+                    "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}
             if endpoint == "pulls/7":
                 reads += 1
                 return {**pull, "head": {"sha": HEAD if reads == 1 else fresh_head}}
@@ -495,7 +501,11 @@ class ProvenanceDriverTests(unittest.TestCase):
 
     def test_supported_events_publish_on_current_head(self):
         events = [("pull_request_target", {"pull_request": {"number": 7, "head": {"sha": HEAD}}}),
-                  ("workflow_run", {}), ("push", {"ref": "refs/heads/main"})]
+                  ("workflow_run", {"workflow_run": {
+                      "name": "Native client candidate build", "path": V.WORKFLOW,
+                      "status": "completed", "event": "workflow_dispatch", "head_branch": "main",
+                      "repository": {"id": V.REPOSITORY_ID}, "head_repository": {"id": V.REPOSITORY_ID}}}),
+                  ("push", {"ref": "refs/heads/main"})]
         for name, event in events:
             with self.subTest(event=name):
                 statuses = self.driver(name, event)
@@ -507,3 +517,104 @@ class ProvenanceDriverTests(unittest.TestCase):
             with self.subTest(options=options):
                 statuses = self.driver("push", {"ref": "refs/heads/main"}, **options)
                 self.assertEqual([status["state"] for status in statuses], ["pending"])
+
+    def gateway_run(self, numbers=(), repository_id=V.REPOSITORY_ID):
+        return {"name": "Event Gateway", "path": ".github/workflows/event-gateway.yml",
+                "status": "completed", "event": "pull_request", "head_sha": HEAD,
+                "repository": {"id": V.REPOSITORY_ID}, "head_repository": {"id": repository_id},
+                "pull_requests": [{"number": number,
+                                   "head": {"sha": HEAD, "repo": {"id": repository_id}},
+                                   "base": {"ref": "main", "repo": {"id": V.REPOSITORY_ID}}}
+                                  for number in numbers]}
+
+    def current_pull(self, number, head=HEAD, repository_id=V.REPOSITORY_ID, base="main", state="open"):
+        return {"number": number, "state": state, "head": {"sha": head, "repo": {"id": repository_id}},
+                "base": {"ref": base, "repo": {"id": V.REPOSITORY_ID}}}
+
+    def workflow_scan(self, run, current):
+        api = unittest.mock.Mock()
+        publications = []
+
+        def request(endpoint, payload=None):
+            if endpoint == "":
+                return {"id": V.REPOSITORY_ID}
+            if endpoint == "graphql":
+                return {"data": {"repository": {"databaseId": V.REPOSITORY_ID, "pullRequests": {
+                    "nodes": [{"number": n, "headRefOid": p["head"]["sha"]} for n, p in current.items()],
+                    "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}
+            if endpoint.startswith("pulls/"):
+                return current[int(endpoint.removeprefix("pulls/"))]
+            if endpoint == "git/ref/heads/main":
+                return {"object": {"sha": MAIN}}
+            if endpoint.startswith("statuses/"):
+                publications.append((endpoint, payload["state"]))
+                return {}
+            raise AssertionError(endpoint)
+
+        api.request.side_effect = request
+        api.blob.return_value = b"unchanged trusted policy"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event.json"
+            path.write_text(json.dumps({"workflow_run": run}))
+            env = {"GITHUB_REPOSITORY": V.REPOSITORY, "GH_TOKEN": str(unittest.mock.sentinel.github_token),
+                   "WORKFLOW_SHA": BUILD, "GITHUB_EVENT_PATH": str(path), "GITHUB_EVENT_NAME": "workflow_run",
+                   "GITHUB_SERVER_URL": "https://github.com", "GITHUB_RUN_ID": "999"}
+            with patch.dict(V.os.environ, env, clear=True), patch.object(V, "GitHub", return_value=api), \
+                    patch.object(V, "verify_candidate", return_value="Verified") as verify, \
+                    patch("sys.stdout", new_callable=io.StringIO):
+                V.main()
+        return publications, [call.args[0] for call in api.request.call_args_list], verify.call_args_list
+
+    def test_gateway_completion_targets_embedded_pull_without_open_scan(self):
+        statuses, endpoints, verified = self.workflow_scan(self.gateway_run([7]), {
+            7: self.current_pull(7), 8: self.current_pull(8, "d" * 40)})
+        self.assertEqual(statuses, [("statuses/" + HEAD, "pending"), ("statuses/" + HEAD, "success")])
+        self.assertNotIn("graphql", endpoints)
+        self.assertNotIn("pulls/8", endpoints)
+        self.assertEqual(len(verified), 1)
+
+    def test_gateway_completion_never_refreshes_stale_closed_or_other_base_pull(self):
+        for pull in (self.current_pull(7, "d" * 40), self.current_pull(7, state="closed"),
+                     self.current_pull(7, base="release"), self.current_pull(7, repository_id=999)):
+            with self.subTest(pull=pull):
+                statuses, endpoints, verified = self.workflow_scan(self.gateway_run([7]), {7: pull})
+                self.assertEqual(statuses, [])
+                self.assertEqual(verified, [])
+                self.assertNotIn("graphql", endpoints)
+
+    def test_gateway_empty_fork_association_filters_head_and_repository(self):
+        statuses, endpoints, verified = self.workflow_scan(self.gateway_run(repository_id=999), {
+            7: self.current_pull(7, repository_id=999), 8: self.current_pull(8),
+            9: self.current_pull(9, "d" * 40, repository_id=999)})
+        self.assertEqual([state for _, state in statuses], ["pending", "success"])
+        self.assertEqual(endpoints.count("graphql"), 1)
+        self.assertNotIn("pulls/9", endpoints)
+        self.assertEqual(len(verified), 1)
+        statuses, _, verified = self.workflow_scan(self.gateway_run(), {9: self.current_pull(9, "d" * 40)})
+        self.assertEqual((statuses, verified), ([], []))
+
+    def test_gateway_multiple_pulls_at_same_head_are_checked_and_deduplicated(self):
+        statuses, endpoints, verified = self.workflow_scan(self.gateway_run([7, 8, 7]), {
+            7: self.current_pull(7), 8: self.current_pull(8)})
+        self.assertEqual([state for _, state in statuses], ["pending", "success", "pending", "success"])
+        self.assertEqual(len(verified), 2)
+        self.assertEqual(endpoints.count("pulls/7"), 3)  # selection, pending, final
+        self.assertEqual(endpoints.count("pulls/8"), 3)
+
+    def test_new_native_build_still_refreshes_different_open_heads(self):
+        run = {"name": "Native client candidate build", "path": V.WORKFLOW,
+               "status": "completed", "event": "workflow_dispatch", "head_branch": "main",
+               "repository": {"id": V.REPOSITORY_ID}, "head_repository": {"id": V.REPOSITORY_ID}}
+        statuses, endpoints, verified = self.workflow_scan(run, {
+            7: self.current_pull(7), 8: self.current_pull(8, "d" * 40)})
+        self.assertEqual(statuses, [("statuses/" + head, state)
+                                   for head in (HEAD, "d" * 40) for state in ("pending", "success")])
+        self.assertEqual(endpoints.count("graphql"), 1)
+        self.assertEqual(len(verified), 2)
+
+    def test_gateway_run_identity_is_validated_before_publication(self):
+        for update in ({"repository": {"id": 999}}, {"head_sha": "invalid"}, {"status": "in_progress"},
+                       {"path": "untrusted.yml"}, {"event": "workflow_dispatch"},
+                       {"head_repository": {"id": True}}, {"pull_requests": None}):
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                self.workflow_scan({**self.gateway_run([7]), **update}, {7: self.current_pull(7)})

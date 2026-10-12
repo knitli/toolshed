@@ -51,6 +51,11 @@ pending and then failure or error if the selected artifact has expired, was
 deleted, or is unavailable. Immutable source bytes are cached by exact commit
 and path only within a sweep; artifact metadata is always read again. The
 main-only manual verifier dispatch can repair a stale status without a push.
+Gateway CI completions refresh only current PRs matching that run's head and
+repository; native build completions and scheduled sweeps refresh all open PRs.
+Sweeps request only PR numbers and head OIDs. Ancestry uses a minimal comparison
+of exact build/main OIDs and status, excluding PR bodies, commit messages and
+file patches. A changed main OID invalidates verification before publication.
 Scheduled jobs can be delayed, so this is periodic invalidation rather than an
 instant deletion notification. Immediately before merging a pin promotion,
 rerun the trusted-main verifier and require its current-head success as well as

@@ -37,6 +37,23 @@ ARCHIVE_LIMIT = 600 * 1024 * 1024
 MEMBERS = {"codex": 500 * 1024 * 1024,
            "codex-code-mode-host": 100 * 1024 * 1024,
            "build-receipt.json": LIMIT}
+OPEN_PULLS_QUERY = """query($cursor: String) {
+  repository(owner: "knitli", name: "toolshed") {
+    databaseId
+    pullRequests(first: 50, after: $cursor, states: OPEN) {
+      nodes { number headRefOid }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}"""
+ANCESTRY_QUERY = """query($build: String!) {
+  repository(owner: "knitli", name: "toolshed") {
+    databaseId
+    ref(qualifiedName: "refs/heads/main") {
+      compare(headRef: $build) { status baseTarget { oid } headTarget { oid } }
+    }
+  }
+}"""
 
 
 def require(condition):
@@ -175,7 +192,10 @@ class GitHub:
         self._blob_cache = {}
 
     def request(self, endpoint, payload=None, *, accept="application/vnd.github+json", response_limit=LIMIT):
-        request = urllib.request.Request(API + endpoint if endpoint else API.rstrip("/"),
+        url = API + endpoint if endpoint else API.rstrip("/")
+        if endpoint == "graphql":
+            url = "https://api.github.com/graphql"
+        request = urllib.request.Request(url,
             data=json.dumps(payload).encode() if payload is not None else None,
             headers={"Authorization": "Bearer " + self.token, "Accept": accept,
                      "Content-Type": "application/json", "X-GitHub-Api-Version": "2022-11-28"})
@@ -226,6 +246,22 @@ class GitHub:
                 output.write(chunk)
 
 
+def require_ancestry(api, build, main):
+    value = api.request("graphql", {"query": ANCESTRY_QUERY, "variables": {"build": build}})
+    require(isinstance(value, dict) and not value.get("errors"))
+    repository = value["data"]["repository"]
+    require(isinstance(repository, dict) and repository.get("databaseId") == REPOSITORY_ID)
+    reference = repository.get("ref")
+    require(isinstance(reference, dict))
+    comparison = reference.get("compare")
+    require(isinstance(comparison, dict) and isinstance(comparison.get("baseTarget"), dict)
+            and isinstance(comparison.get("headTarget"), dict))
+    # Ref.compare has main as base: an ancestor build is behind, not ahead.
+    require(comparison.get("status") in ("BEHIND", "IDENTICAL")
+            and comparison["baseTarget"].get("oid") == main
+            and comparison["headTarget"].get("oid") == build)
+
+
 def verify_candidate(api, head, main):
     require(sha(head, 40) and sha(main, 40))
     tree = api.request(f"git/trees/{head}?recursive=1")
@@ -249,8 +285,7 @@ def verify_candidate(api, head, main):
     run = api.request(f"actions/runs/{selected['runId']}/attempts/{selected['runAttempt']}")
     artifact = api.request(f"actions/artifacts/{selected['artifactId']}")
     verify_metadata(selected, workflow, run, artifact)
-    comparison = api.request(f"compare/{selected['headSha']}...{main}")
-    require(comparison.get("status") in ("ahead", "identical"))
+    require_ancestry(api, selected["headSha"], main)
     inputs = {}
     for name, path in INPUTS.items():
         trusted = api.blob(path, main)
@@ -265,14 +300,24 @@ def verify_candidate(api, head, main):
 
 
 def open_pulls(api):
-    page = 1
+    cursor = None
+    seen = set()
     while True:
-        pulls = api.request(f"pulls?state=open&per_page=50&page={page}")
-        require(isinstance(pulls, list))
-        yield from pulls
-        if len(pulls) < 50:
+        value = api.request("graphql", {"query": OPEN_PULLS_QUERY, "variables": {"cursor": cursor}})
+        require(isinstance(value, dict) and not value.get("errors"))
+        repository = value["data"]["repository"]
+        require(repository["databaseId"] == REPOSITORY_ID)
+        page = repository["pullRequests"]
+        nodes, info = page["nodes"], page["pageInfo"]
+        require(isinstance(nodes, list) and len(nodes) <= 50 and isinstance(info["hasNextPage"], bool))
+        for pull in nodes:
+            require(positive(pull["number"]) and sha(pull["headRefOid"], 40))
+            yield {"number": pull["number"], "head": {"sha": pull["headRefOid"]}}
+        if not info["hasNextPage"]:
             return
-        page += 1
+        cursor = info["endCursor"]
+        require(isinstance(cursor, str) and 0 < len(cursor) <= 1024 and cursor not in seen)
+        seen.add(cursor)
 
 
 def current_policy(api, workflow_sha, main):
@@ -280,14 +325,52 @@ def current_policy(api, workflow_sha, main):
                for path in (SCRIPT, VERIFIER_WORKFLOW, LAUNCHER, *INPUTS.values()))
 
 
-def publish(api, number, head, state, description, workflow_sha):
+def publish(api, number, head, state, description, workflow_sha, verified_main=None):
     pull = api.request(f"pulls/{number}")
     main = api.request("git/ref/heads/main")["object"]["sha"]
-    if pull["state"] != "open" or pull["head"]["sha"] != head or not current_policy(api, workflow_sha, main):
+    if (pull["state"] != "open" or pull["head"]["sha"] != head
+            or verified_main is not None and main != verified_main
+            or not current_policy(api, workflow_sha, main)):
         return False
     api.request(f"statuses/{head}", {"state": state, "context": CONTEXT, "description": description,
         "target_url": os.environ["GITHUB_SERVER_URL"] + "/" + REPOSITORY + "/actions/runs/" + os.environ["GITHUB_RUN_ID"]})
     return True
+
+
+def workflow_run_pulls(api, run):
+    require(isinstance(run, dict) and run.get("status") == "completed"
+            and run.get("repository", {}).get("id") == REPOSITORY_ID)
+    if run.get("name") == "Native client candidate build":
+        require(run.get("path") == WORKFLOW and run.get("event") == "workflow_dispatch"
+                and run.get("head_branch") == "main"
+                and run.get("head_repository", {}).get("id") == REPOSITORY_ID)
+        yield from open_pulls(api)
+        return
+    require(run.get("name") == "Event Gateway"
+            and run.get("path") == ".github/workflows/event-gateway.yml"
+            and run.get("event") in ("pull_request", "push")
+            and sha(run.get("head_sha"), 40)
+            and positive(run.get("head_repository", {}).get("id")))
+    head = run["head_sha"]
+    candidates = run.get("pull_requests")
+    require(isinstance(candidates, list))
+    # Fork workflow payloads may omit the PR association. The fallback reads
+    # only projected PR identities, then fetches metadata for matching heads.
+    if not candidates:
+        candidates = (pull for pull in open_pulls(api) if pull["head"]["sha"] == head)
+    seen = set()
+    for candidate in candidates:
+        number = candidate["number"]
+        require(positive(number))
+        if number in seen:
+            continue
+        seen.add(number)
+        pull = api.request(f"pulls/{number}")
+        if (pull.get("state") == "open" and pull.get("head", {}).get("sha") == head
+                and pull["head"].get("repo", {}).get("id") == run["head_repository"]["id"]
+                and pull.get("base", {}).get("ref") == "main"
+                and pull["base"].get("repo", {}).get("id") == REPOSITORY_ID):
+            yield {"number": number, "head": {"sha": head}}
 
 
 def main():
@@ -299,9 +382,10 @@ def main():
     event_name = os.environ["GITHUB_EVENT_NAME"]
     if event_name == "pull_request_target":
         pulls = [event["pull_request"]]
+    elif event_name == "workflow_run":
+        pulls = workflow_run_pulls(api, event["workflow_run"])
     else:
-        require(event_name == "workflow_run"
-                or event_name == "push" and event.get("ref") == "refs/heads/main"
+        require(event_name == "push" and event.get("ref") == "refs/heads/main"
                 or event_name in ("schedule", "workflow_dispatch")
                 and os.environ.get("GITHUB_REF") == "refs/heads/main")
         pulls = open_pulls(api)
@@ -320,7 +404,7 @@ def main():
                 description, state = "Native pin lacks matching main CI build provenance", "failure"
             except (OSError, urllib.error.URLError):
                 description, state = "Native build provenance unavailable; retry verification", "error"
-            if publish(api, number, head, state, description, workflow_sha):
+            if publish(api, number, head, state, description, workflow_sha, trusted_main):
                 print(f"PR #{number}: {state}")
         except (ValueError, KeyError, TypeError, OSError, urllib.error.URLError):
             failed = True

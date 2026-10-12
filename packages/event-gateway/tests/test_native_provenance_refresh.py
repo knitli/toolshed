@@ -23,6 +23,12 @@ class SweepAPI(fixtures.FakeAPI):
             self.blobs[path, fixtures.MAIN] = b"trusted policy"
 
     def request(self, endpoint, payload=None):
+        if endpoint == "graphql" and payload["query"] == V.OPEN_PULLS_QUERY:
+            return {"data": {"repository": {"databaseId": V.REPOSITORY_ID,
+                    "pullRequests": {"nodes": [{"number": 1, "headRefOid": fixtures.HEAD}],
+                                     "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}
+        if endpoint == "graphql":
+            return super().request(endpoint, payload)
         if payload is not None:
             self.published.append((endpoint, payload))
             return {}
@@ -82,6 +88,24 @@ class NativeProvenanceRefreshTests(unittest.TestCase):
             with self.subTest(event=event), self.assertRaises(ValueError):
                 self.sweep(api, event, "refs/heads/untrusted")
             self.assertEqual(api.published, [])
+
+    def test_final_success_withheld_if_main_changes_after_verification(self):
+        api = SweepAPI()
+        new_main = "e" * 40
+        api.blobs.update({(path, new_main): value for (path, revision), value in list(api.blobs.items())
+                          if revision == fixtures.MAIN})
+        original = api.request
+        reads = 0
+
+        def request(endpoint, payload=None):
+            nonlocal reads
+            if endpoint == "git/ref/heads/main":
+                reads += 1
+                return {"object": {"sha": fixtures.MAIN if reads < 3 else new_main}}
+            return original(endpoint, payload)
+
+        with patch.object(api, "request", side_effect=request):
+            self.assertEqual(self.sweep(api), ["pending"])
 
 
 if __name__ == "__main__":
