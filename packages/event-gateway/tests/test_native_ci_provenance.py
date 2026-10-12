@@ -74,6 +74,7 @@ def metadata(selected):
 
 class FakeAPI:
     def __init__(self):
+        """Initialize a valid build and candidate fixture."""
         self.selected, self.inputs, self.manifest, recipes, members = fixture()
         self.archive = archive_bytes(members)
         self.selected["artifactSha256"] = V.digest(self.archive)
@@ -190,6 +191,7 @@ class NativeCIProvenanceTests(unittest.TestCase):
         for index, vector in enumerate(vectors):
             with self.subTest(index=index), self.assertRaises(ValueError):
                 self.check_archive(vector)
+
         def encrypted(raw):
             data = bytearray(raw)
             for signature, offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):

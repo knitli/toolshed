@@ -44,6 +44,7 @@ class NativeCIProducerTests(unittest.TestCase):
     def test_receipt_binds_actual_outputs_and_rejects_substitution(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+
             def package(_source, binary, evidence, _host, **kwargs):
                 self.assertEqual(kwargs, {"prime_dependencies": True})
                 binary.write_bytes(b"cli")
@@ -61,6 +62,7 @@ class NativeCIProducerTests(unittest.TestCase):
                                  {"codex", "codex-code-mode-host", "build-receipt.json"})
                 self.assertEqual(receipt["inputs"]["producerSha256"],
                                  PRODUCER.builder.sha256_file(Path(PRODUCER.__file__)))
+
                 def substituted(*args, **kwargs):
                     evidence = package(*args, **kwargs)
                     args[1].write_bytes(b"substituted")
