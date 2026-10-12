@@ -444,11 +444,13 @@ class Store:
             )
 
     def _fence(self, runtime_id):
+        # Terminal observation is historical evidence, never dispatchable authority.
         self.db.execute(
             """UPDATE attempts SET fenced=1,
                state=CASE WHEN state IN ('submitting','submitted') THEN 'ambiguous' ELSE state END,
                reason='attachment_detached', updated=?
-               WHERE delivery_id IN (SELECT id FROM deliveries WHERE runtime=?) AND state!='settled'""",
+               WHERE delivery_id IN (SELECT id FROM deliveries WHERE runtime=?)
+               AND state NOT IN ('settled','observed')""",
             (self.clock(), runtime_id),
         )
         self.db.execute(
