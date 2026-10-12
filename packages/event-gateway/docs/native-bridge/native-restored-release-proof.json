@@ -1,0 +1,801 @@
+{
+  "schemaVersion": 1,
+  "result": "PASS",
+  "qualifiedAt": "2026-10-12",
+  "sourceBaseCommit": "0dc3949d2914ca095d24bfd59eb846320e102b4d",
+  "scope": "Offline qualification of the proposed production launcher pin and current installed wheel; no owner-client installation or live cloud qualification",
+  "productionLauncherQualified": true,
+  "liveQualified": false,
+  "realCloudCalls": 0,
+  "realModelCalls": 0,
+  "ownerClientsChanged": false,
+  "runtimePinOverrides": false,
+  "originalAttempt3RetrospectivelyCleared": false,
+  "nativeBinary": {
+    "path": "/private/tmp/event-native-qualification-20261012/native/codex",
+    "sha256": "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3",
+    "bytes": 388895904
+  },
+  "codeModeHost": {
+    "path": "/private/tmp/event-native-qualification-20261012/native/codex-code-mode-host",
+    "sha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
+    "bytes": 65391216
+  },
+  "wheel": {
+    "path": "/opt/coder/toolshed/.local-artifacts/native-qualification-20261012/dist/knitli_event_gateway-0.1.0-py3-none-any.whl",
+    "sha256": "7a284c0154519a5140e0335aeec36d0c5a773a976ea6975cc4aef5820d5ce841",
+    "installedPython": "/private/tmp/event-native-qualification-20261012/installed/bin/python",
+    "installedFiles": 20,
+    "installedFilesUnchangedAfterAllProofs": true
+  },
+  "buildInputVerification": {
+    "buildEvidenceSha256": "6819f5aa2d7b8da5a0bf3580b7dea662ed1cf01aeed44d44e78e84bd5aa1a7ff",
+    "patchSha256": "922c3b2aa733564f67765aec27d4128b96b697441b37b42665b6656a4ad884fb",
+    "manifestSha256": "8f40ca398770501412963786ade67891749f3c9296a1c82c14d62f6257e98469",
+    "upstreamCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+    "toolchainBinaryHashesMatch": {
+      "cargo": true,
+      "rustc": true,
+      "rustup": true
+    },
+    "sourceFileInventoryMatches": true,
+    "beforeAfterInventoryMatches": true,
+    "retainedPatchedSource": [
+      52,
+      "f3619b501e5b6b6725efdfd0be6e4511a752f0a8882092d9ed9424a2850a2445"
+    ],
+    "buildEvidencePath": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/build-evidence.json",
+    "retainedPatchedSourcePath": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source",
+    "upstreamCheckoutPath": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/upstream",
+    "manifestPath": "/opt/coder/toolshed/.worktrees/event-native-qualification-20261012/packages/event-gateway/docs/native-bridge/native-metadata-v1-source-manifest.json",
+    "patchPath": "/opt/coder/toolshed/.worktrees/event-native-qualification-20261012/packages/event-gateway/docs/native-bridge/native-metadata-v1-implementation.patch",
+    "currentBuilderPath": "/opt/coder/toolshed/.worktrees/event-native-qualification-20261012/packages/event-gateway/scripts/package_native_client.py",
+    "currentBuilderSha256": "ad1ab94fcf8d456816ef20e1ad9def4dc63bc944ecfdb990c1359fbd3a42c383",
+    "verifiedPatchedFiles": {
+      "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json",
+        "sha256": "cdb5512b033565c4322f3f7b20b34e45fbbc641d061d10dbf8d2c12dbcf788c3"
+      },
+      "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json",
+        "sha256": "722bb44139cd436422ee0eec79b8d865265b8b774eecee824ef7f7c0a8603052"
+      },
+      "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst",
+        "sha256": "4fd0d9ccd80d6d367ba0fcf1a821edb8f0d96593d52724de917b95a057eaee4c"
+      },
+      "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst",
+        "sha256": "fd00211c425bf0c2a482fb80b0b910dbd26ce9efbed0dcea43ae78926940b451"
+      },
+      "codex-rs/app-server-protocol/schema/typescript/v2/ClientSelectionUpdateStatus.ts": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server-protocol/schema/typescript/v2/ClientSelectionUpdateStatus.ts",
+        "sha256": "9f70edf230a0fde8b1b714b69ec1cf1e2e2c03f74bcb5926d94b54b8dd687f0c"
+      },
+      "codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartIfIdleNotStartedReason.ts": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartIfIdleNotStartedReason.ts",
+        "sha256": "6e3e400e8a68f25219e873ffbf63e53ff068f4f98d9ecd731bbbafffe2f1faae"
+      },
+      "codex-rs/app-server-protocol/schema/typescript/v2/index.ts": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server-protocol/schema/typescript/v2/index.ts",
+        "sha256": "d1bc8d1fef56a4f1205594cd0757178bde740e09680d41bf313081ca3c2ead90"
+      },
+      "codex-rs/app-server-protocol/src/protocol/common.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server-protocol/src/protocol/common.rs",
+        "sha256": "63e02847f7819f62a3d3167931a3b202445740aadf52c60d90cd31183da20f0f"
+      },
+      "codex-rs/app-server-protocol/src/protocol/v2/thread.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+        "sha256": "b5247a33638f2313d9095065892ceec03a07301de66d23da5512597bb6ddb201"
+      },
+      "codex-rs/app-server/src/lib.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server/src/lib.rs",
+        "sha256": "46321d34235f5feffd33231a7390624720dcbfb627ba4222585a96ada3936ed8"
+      },
+      "codex-rs/app-server/src/message_processor.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server/src/message_processor.rs",
+        "sha256": "a47dc09bd9fccc83536dda784010dcc9f8ef16dd586071edbcc47d9f53619c8c"
+      },
+      "codex-rs/app-server/src/request_processors.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server/src/request_processors.rs",
+        "sha256": "eb4235cd2d56d6a5ab09e99d21ced2f720c4c454ff106ca597b928c35b675df2"
+      },
+      "codex-rs/app-server/src/request_processors/native_selection_processor.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+        "sha256": "c43087232b1ee34a023c73bbb928356e6bbc436819c8c829fee13782d7d0ff6b"
+      },
+      "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+        "sha256": "addfccc107b2ebb7d1174bd2cdb44bda0ece0b7feed0c04c3ba6c34be5229865"
+      },
+      "codex-rs/app-server/src/request_processors/thread_lifecycle.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server/src/request_processors/thread_lifecycle.rs",
+        "sha256": "286694f95faaf1419caabfe764b8392c4690ee529bc134f9b73c4091b2160ab9"
+      },
+      "codex-rs/app-server/src/thread_state.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server/src/thread_state.rs",
+        "sha256": "9c9006531cc814599f84fd26a82eb946ae3a9c8a1b2869d40a086f689a4bcbb4"
+      },
+      "codex-rs/app-server/tests/suite/v2/thread_start.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/app-server/tests/suite/v2/thread_start.rs",
+        "sha256": "7eb4133f3aa2cf7406a2c83f78e0221cb4a20a014d632f1736cfb828a6003c75"
+      },
+      "codex-rs/arg0/src/lib.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/arg0/src/lib.rs",
+        "sha256": "8d5b9c1a896f874d81c23e0e5fbe9d8246018843acb369d59a6df9ce8c158f15"
+      },
+      "codex-rs/cli/src/main.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/cli/src/main.rs",
+        "sha256": "de484836dfaeec9294bedd18ab105af14a3cf68a6d6697188b76b890623bf75c"
+      },
+      "codex-rs/core/src/session/mod.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/core/src/session/mod.rs",
+        "sha256": "d4363e380ff2fe9e537c15a26330c497886d566c9cb14531c89db19c019b918c"
+      },
+      "codex-rs/core/src/session/turn_input.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/core/src/session/turn_input.rs",
+        "sha256": "06a1138f66cc9b93302ae2af04de412a978b9db2943e88b9e82a6b6dbb7eae65"
+      },
+      "codex-rs/core/src/session/turn_input_tests.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/core/src/session/turn_input_tests.rs",
+        "sha256": "96a3a87407387bad786ee1664175b46204d453ce38e5f9a3645db18df0d22f1c"
+      },
+      "codex-rs/core/src/tasks/guarded_start.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/core/src/tasks/guarded_start.rs",
+        "sha256": "bc3673aaba4c3d0c467d93af81aae3b51f8abea2a6bdc29016bcca3eb38d752f"
+      },
+      "codex-rs/core/src/tasks/mod.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/core/src/tasks/mod.rs",
+        "sha256": "4167a59e4d411329c62a970015bea3f59bcce8a1ade62e1294a504f7ce464e73"
+      },
+      "codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs",
+        "sha256": "b352df6700d4547951860df6347d4d21a03a546994f6e284f88fccbe5a77083b"
+      },
+      "codex-rs/protocol/src/turn_input.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/protocol/src/turn_input.rs",
+        "sha256": "4355925606639fd7f4c05252485d5d53b520ec0c9729a827c09b0f70edb8658b"
+      },
+      "codex-rs/state/migrations/0059_native_turn_start_receipts.sql": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/state/migrations/0059_native_turn_start_receipts.sql",
+        "sha256": "6a16875992277a8477c1b6a9f378604b7ccbefb8df847b2717234bbcb7dbca9b"
+      },
+      "codex-rs/state/migrations/0060_native_turn_start_bridge_identity.sql": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/state/migrations/0060_native_turn_start_bridge_identity.sql",
+        "sha256": "1023de33eb6a31f67f20c12cf0f2d5105abb1ea0cf22867c6e2359f482a5216e"
+      },
+      "codex-rs/state/src/lib.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/state/src/lib.rs",
+        "sha256": "59544ce0db3de101c005799af99e11897a1c46ec4246e2c4dd4b91561b469bb0"
+      },
+      "codex-rs/state/src/runtime.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/state/src/runtime.rs",
+        "sha256": "76878304339e662224abf8e1d6dc652c397bf43f95286b9f1896be430d782fad"
+      },
+      "codex-rs/state/src/runtime/native_receipts.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/state/src/runtime/native_receipts.rs",
+        "sha256": "ac207a009cb8530747401134dcae29a29385d6a2f016ea421146190f901a294a"
+      },
+      "codex-rs/state/src/runtime/native_receipts_tests.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/state/src/runtime/native_receipts_tests.rs",
+        "sha256": "52ae742a86588562082a21dc18c7d3cb5a0bb9a1d9603bb1d9bd37b3cc8562e5"
+      },
+      "codex-rs/tui/src/app.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/app.rs",
+        "sha256": "fc1301edc1c18d7405eec7b3ec09c0144642bbee6a7324e17e848705e7a3968e"
+      },
+      "codex-rs/tui/src/app/selection_adoption_tests.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/app/selection_adoption_tests.rs",
+        "sha256": "5c432b4e7ac233549b0455e7e2aef3ec6f0944ff97c71850ed45ee1441ada196"
+      },
+      "codex-rs/tui/src/app/selection_binding.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/app/selection_binding.rs",
+        "sha256": "925aa481fee11547f1292903a8358f98e10ee6867dfcbb0fd6907b97522f626c"
+      },
+      "codex-rs/tui/src/app/selection_binding_tests.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/app/selection_binding_tests.rs",
+        "sha256": "2c4518f587dca8b3336023561d673015a6d8e3fb3e336f0ad1bad15527152594"
+      },
+      "codex-rs/tui/src/app/selection_bridge.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/app/selection_bridge.rs",
+        "sha256": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50"
+      },
+      "codex-rs/tui/src/app/selection_bridge_tests.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/app/selection_bridge_tests.rs",
+        "sha256": "8c397acb623d4902567c495a4f93c63487f214c30f1bd2e39c0516ad4b3a0683"
+      },
+      "codex-rs/tui/src/app/selection_witness.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/app/selection_witness.rs",
+        "sha256": "db9157ccc1f57a80f7f0658752e8930db9bbb2b56e5715f5f30239b54f4e13cb"
+      },
+      "codex-rs/tui/src/app/selection_witness_tests.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/app/selection_witness_tests.rs",
+        "sha256": "fb361ea75b72fda061a0507f46a6d474370e8ac732ef63bc2f514169335e7242"
+      },
+      "codex-rs/tui/src/app/startup.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/app/startup.rs",
+        "sha256": "eeee83c92181a459e416af108ce982a30da4d48d433d43fba5d8967cc5bfcd10"
+      },
+      "codex-rs/tui/src/app/tests/rate_limits.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/app/tests/rate_limits.rs",
+        "sha256": "dc6f53da2c7c9703219546be034d1ba70c7c5e2ce3d353527b0d1b9d263152f7"
+      },
+      "codex-rs/tui/src/chatwidget/backend_banners.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/chatwidget/backend_banners.rs",
+        "sha256": "472a5b62771107d0810c87b4f0a53f7455097e3a655ef8c0046e36d94c51f879"
+      },
+      "codex-rs/tui/src/chatwidget/input_restore.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/chatwidget/input_restore.rs",
+        "sha256": "267c942810e4229f3c4e657d2ffba89bc5b7499e0838e8d08f6b44f3b026d70b"
+      },
+      "codex-rs/tui/src/chatwidget/rate_limits.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/chatwidget/rate_limits.rs",
+        "sha256": "824ae52a71abf579848e25fb44ed01ef60418580d4d36df8fac7886f9f880826"
+      },
+      "codex-rs/tui/src/chatwidget/tests/backend_banners_tests.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/chatwidget/tests/backend_banners_tests.rs",
+        "sha256": "f3e9976fe62eb1180d24de25923cbd09416a3517e1695e366b3572ec23b978fb"
+      },
+      "codex-rs/tui/src/inherited_bridge.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/inherited_bridge.rs",
+        "sha256": "c764c770c090a7fc88ba1e74337c049cbfc5424db8c132613696a26dbfe2b9ef"
+      },
+      "codex-rs/tui/src/lib.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/lib.rs",
+        "sha256": "1d8aaf623a50bb71e802e966c26a6a7f237fc0522b27c73d7ed120818028adc5"
+      },
+      "codex-rs/tui/src/main.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/tui/src/main.rs",
+        "sha256": "2ab3b715303495b780224e27b4e9f09a38067c0c283bffaa477997aeae6394b1"
+      },
+      "codex-rs/utils/pty/src/lib.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/utils/pty/src/lib.rs",
+        "sha256": "e84620ebf6ab55db18336fb8c3075a810638c9cc2d517f0522320ad3c6d350e5"
+      },
+      "codex-rs/utils/pty/src/spawn_helper.rs": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/codex-rs/utils/pty/src/spawn_helper.rs",
+        "sha256": "6e6ed848071a77e4f1b9c8059f9d68b24d5b14bd0205f253ef18beba9b62f881"
+      },
+      "sdk/python/src/openai_codex/generated/v2_all.py": {
+        "path": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/dependency-source/sdk/python/src/openai_codex/generated/v2_all.py",
+        "sha256": "9fc11e2f08a244ef26c69118d915573f499c03062c03a39e6b8a83055cab70b0"
+      }
+    },
+    "artifacts": {
+      "codex": {
+        "originalPath": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/codex",
+        "qualifiedPath": "/private/tmp/event-native-qualification-20261012/native/codex",
+        "sha256": "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3",
+        "bytes": 388895904
+      },
+      "codex-code-mode-host": {
+        "originalPath": "/opt/coder/toolshed/.local-artifacts/native-client-restore-20261011/codex-code-mode-host",
+        "qualifiedPath": "/private/tmp/event-native-qualification-20261012/native/codex-code-mode-host",
+        "sha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
+        "bytes": 65391216
+      }
+    },
+    "historicalBuildEvidenceUnchanged": true,
+    "qualificationScope": "Preserved build inputs and candidate verified; no rebuild or reproducibility claim",
+    "toolchainVersionsReadBack": {
+      "rustc": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2",
+      "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+      "matchesCurrentBuilderRequirements": true
+    }
+  },
+  "executedSourceSha256": {
+    "packages/event-gateway/src/event_gateway/launcher.py": "7fc67f93f5f9a1d5281927ad1989ef588354f915722339728be54992037c30f8",
+    "packages/event-gateway/scripts/package_native_client.py": "ad1ab94fcf8d456816ef20e1ad9def4dc63bc944ecfdb990c1359fbd3a42c383",
+    "packages/event-gateway/docs/native-bridge/native-host-launcher-qualification.py": "5172dc602dc2f9f2a82ca02d9f8e713b30c80e51b339a993b0cad7fee83853b3",
+    "packages/event-gateway/docs/native-bridge/native-release-launcher-smoke.py": "073ddf6a43248db44345e0a20d09f11ced91740186d741b9038b7f7bea5dd33e",
+    "packages/event-gateway/docs/native-bridge/durable-restart-v3-qualify.py": "67f30452fa99cbb1ef25b3beefc1a4830ba80f2016a3b5d1d58bb34f3ea69a5c",
+    "packages/event-gateway/scripts/qualify_native_bridge.py": "e4068916c0739657186b8be34d087714ad9a544642dc8921a9c502ca1ab9ac11",
+    "packages/event-gateway/docs/native-bridge/qualification-installed.py": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c"
+  },
+  "fileRead": {
+    "rawProofPath": "/opt/coder/toolshed/.local-artifacts/native-qualification-20261012/host-launcher-proof-secure-path.json",
+    "rawProofSha256": "0b064f779434a7deae192ac6a96210bd9185d085d6c40db6c3ce32ef72da0fb3",
+    "omittedRawFields": [
+      "providerRequests",
+      "trace",
+      "terminalTail"
+    ],
+    "proof": {
+      "result": "PASS",
+      "nativeBinarySha256": "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3",
+      "codeModeHostSha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
+      "sourceSha256": "a0695cd4692e6d92012611c1639b45dd96575a144f35ec91ad1b8b608fd43161",
+      "sourceWrittenBeforeSubmission": true,
+      "sourceNonce": "source-nonce-0b8915a0ee07dec78a4b75cafb2c322d887ff2682320c35c3412d891b490299f",
+      "sourceProgram": "text(await tools.exec_command({\"cmd\": \"/bin/cat /private/tmp/nhq-2iwtze5s/source-ea2d929db05b95af4ebba224c1b8c23a.txt\", \"login\": false, \"max_output_tokens\": 1000, \"yield_time_ms\": 1000}));",
+      "toolOutput": {
+        "type": "custom_tool_call_output",
+        "id": "ctco_01a12e59-1d5b-7a73-9bcb-df1791ae6d6d",
+        "call_id": "offline-source-read",
+        "output": [
+          {
+            "type": "input_text",
+            "text": "Script completed\nWall time 0.1 seconds\nOutput:\n"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"chunk_id\":\"1edb74\",\"wall_time_seconds\":0.000111791,\"exit_code\":0,\"original_token_count\":20,\"output\":\"source-nonce-0b8915a0ee07dec78a4b75cafb2c322d887ff2682320c35c3412d891b490299f\\n\"}"
+          }
+        ]
+      },
+      "nativeStarts": 1,
+      "started": {
+        "clientId": "04048d0c-c2b6-40b5-9396-d157911b8c30",
+        "serverInstanceId": "01a12e59-19b3-7711-9bd5-4f5639e694d1",
+        "serverGeneration": 3,
+        "threadId": "01a12e59-19e2-71e3-b840-ce5c298d4981",
+        "attemptId": "5e2bb7a2-7e93-46a3-b527-4f64d62a9b4b",
+        "deliveryId": "dly_21b0c506af7deb5eeaef793ad2455b5df8839c34e36585c0e81acd7f699ddf3b",
+        "clientUserMessageId": "55343ff1-e7e3-4acf-829a-943262d555e7",
+        "permitId": "offline-d74580e68adccee50e16caf1639cced8",
+        "permitIssuedAt": 1791778953785,
+        "permitExpiresAt": 1791778958785,
+        "generation": 5,
+        "outcome": {
+          "status": "started",
+          "turnId": "55343ff1-e7e3-4acf-829a-943262d555e7",
+          "replayed": false
+        }
+      },
+      "receipt": {
+        "clientId": "04048d0c-c2b6-40b5-9396-d157911b8c30",
+        "serverInstanceId": "01a12e59-19b3-7711-9bd5-4f5639e694d1",
+        "serverGeneration": 3,
+        "threadId": "01a12e59-19e2-71e3-b840-ce5c298d4981",
+        "attemptId": "5e2bb7a2-7e93-46a3-b527-4f64d62a9b4b",
+        "deliveryId": "dly_21b0c506af7deb5eeaef793ad2455b5df8839c34e36585c0e81acd7f699ddf3b",
+        "clientUserMessageId": "55343ff1-e7e3-4acf-829a-943262d555e7",
+        "permitId": "offline-d74580e68adccee50e16caf1639cced8",
+        "permitIssuedAt": 1791778953785,
+        "permitExpiresAt": 1791778958785,
+        "generation": 5,
+        "outcome": {
+          "status": "inputRecorded",
+          "turnId": "55343ff1-e7e3-4acf-829a-943262d555e7",
+          "itemId": "01a12e59-1aa1-7280-8929-d5530ecda1c0",
+          "replayed": true
+        }
+      },
+      "binding": {
+        "clientId": "04048d0c-c2b6-40b5-9396-d157911b8c30",
+        "connectionId": "3e97b7f1-21bd-49a6-88b3-71610537069a",
+        "backendPid": 94992,
+        "threadId": "01a12e59-19e2-71e3-b840-ce5c298d4981",
+        "generation": 5,
+        "serverInstanceId": "01a12e59-19b3-7711-9bd5-4f5639e694d1",
+        "serverGeneration": 3
+      },
+      "syntheticModelRequests": 3,
+      "mainTurnModelRequests": 2,
+      "titleModelRequests": 1,
+      "realModelCalls": 0,
+      "innerSandboxMode": "danger-full-access",
+      "outerSandboxEnforced": true,
+      "authCopied": false,
+      "noAuthorizationHeaders": true,
+      "sandboxProfile": "(version 1)\n(allow default)\n(deny network*)\n(allow network-outbound (remote ip \"localhost:56010\"))\n(allow network* (local unix-socket) (remote unix-socket))\n(deny file-read* (subpath \"/Users/adampoulemanos/.codex\") (subpath \"/private/tmp/event-live-canary-20261010\"))\n",
+      "initialConfigSha256": "061f62f38d38a215409d519eaff4c505eb226c8976aae3e4965a058deccc0760",
+      "finalConfigSha256": "5e2d22bfd97572f218beb8bc8a8fb2f27e8532e36b016a13a375c71287ea12ff",
+      "controlSocketRemoved": true,
+      "backendStopped": true,
+      "ownedProcessGroupEmpty": true,
+      "terminationExitCode": 0,
+      "childBytecodeCacheFreshAndEmpty": true,
+      "installedPackagePreflight": {
+        "pycachePrefix": "/private/var/folders/43/sd8c5gyd4mq1twfp41pj9l_40000gn/T/qualification-pycache-_ff59f1t",
+        "version": "0.1.0",
+        "directUrl": {
+          "url": "file:///opt/coder/toolshed/.local-artifacts/native-qualification-20261012/dist/knitli_event_gateway-0.1.0-py3-none-any.whl",
+          "archive_info": {}
+        },
+        "packageSource": "/opt/coder/toolshed/.worktrees/event-native-qualification-20261012/packages/event-gateway/src/event_gateway",
+        "packageRoot": "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway",
+        "verifiedSha256": {
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/cli.py": "2b99b16f3fbc8dd9815e0975a9f983d44e65ce8ea4330afe11909766e6663086",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/client_runtime.py": "ecca03a9a2924ebfb5a406d1cf787289c640be48d6a27d654954a8b83a044231",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/cloud.py": "fc2b02d92925f89f1de9be7da3cdcf105b51879da6ffe39fed0dd0418752dd72",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/daemon.py": "fba9d054a56fdad13b75c4da722d7d0548e435078812a157d7857383b37e4b6d",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/gateway.py": "d8230d91d917ca513cf379cd1e13439650960d86bb2a26c5292838d03058e591",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/launcher.py": "7fc67f93f5f9a1d5281927ad1989ef588354f915722339728be54992037c30f8",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/store.py": "39074958ecf7ebdb9c327bb5ecd6b91ff0f6a5a794cb8755f0145b593ae2f88a"
+        }
+      },
+      "frozenHelperSha256": {
+        "native-github-source-qualification.py": "04ef38a3d69ca8787856769c6b83956deb88a7576c7e237b33c3b68550dea33a",
+        "native-release-launcher-smoke.py": "073ddf6a43248db44345e0a20d09f11ced91740186d741b9038b7f7bea5dd33e",
+        "qualification-installed.py": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c"
+      },
+      "providerErrors": []
+    }
+  },
+  "githubCommand": {
+    "rawProofPath": "/opt/coder/toolshed/.local-artifacts/native-qualification-20261012/github-source-launcher-proof.json",
+    "rawProofSha256": "39ad8fb170b36e60b4b636105a6886a64e8a441ef552f18bbe987002bcfb49ed",
+    "omittedRawFields": [
+      "providerRequests",
+      "trace",
+      "terminalTail"
+    ],
+    "proof": {
+      "result": "PASS",
+      "nativeBinarySha256": "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3",
+      "codeModeHostSha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
+      "sourceSha256": "a3a0584dec5a6429d017c0c5e5e8e7e15b0358e0402b910ef209aca47023b74d",
+      "sourceWrittenBeforeSubmission": true,
+      "sourceNonce": "source-nonce-16c94f09d93aeef908b7186536f3e28e63e2f0c98b749b68923f20767c5354c6",
+      "sourceProgram": "text(await tools.exec_command({\"cmd\": \"/private/tmp/event-native-qualification-20261012/installed/bin/python -I -B /private/tmp/nhq-h75g5cx0/source-e5a4938b8986a1a55da73cf929608f18.py /private/tmp/nhq-h75g5cx0/source-e5a4938b8986a1a55da73cf929608f18.txt /opt/coder/toolshed/.worktrees/event-native-qualification-20261012/packages/event-gateway/src/event_gateway /private/tmp/nhq-h75g5cx0/source-e5a4938b8986a1a55da73cf929608f18.installed.py\", \"shell\": \"/bin/bash\", \"login\": false, \"max_output_tokens\": 2000, \"yield_time_ms\": 1000}));",
+      "toolOutput": {
+        "type": "custom_tool_call_output",
+        "id": "ctco_01a12e59-75a6-72a2-bc11-dcb0450ff317",
+        "call_id": "offline-source-read",
+        "output": [
+          {
+            "type": "input_text",
+            "text": "Script completed\nWall time 0.3 seconds\nOutput:\n"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"chunk_id\":\"296fe0\",\"wall_time_seconds\":0.109008792,\"exit_code\":0,\"original_token_count\":143,\"output\":\"{\\\"status\\\": \\\"ok\\\", \\\"subject\\\": {\\\"installationId\\\": 1, \\\"repositoryId\\\": 2, \\\"prNumber\\\": 3}, \\\"requestedRange\\\": {\\\"fromVersion\\\": 2, \\\"toVersion\\\": 3}, \\\"coverageStartVersion\\\": 1, \\\"anchor\\\": {\\\"sourceVersion\\\": 3, \\\"epoch\\\": 1, \\\"observationEpoch\\\": 1, \\\"observedAt\\\": 0}, \\\"items\\\": [{\\\"phase\\\": \\\"anchor\\\", \\\"sourceVersion\\\": 3, \\\"epoch\\\": 1, \\\"recordType\\\": \\\"request\\\", \\\"recordKey\\\": \\\"review-request\\\", \\\"value\\\": {\\\"kind\\\": \\\"review_request\\\", \\\"identity\\\": \\\"source-nonce-16c94f09d93aeef908b7186536f3e28e63e2f0c98b749b68923f20767c5354c6\\\", \\\"from\\\": null, \\\"to\\\": \\\"present\\\"}}], \\\"nextCursor\\\": null, \\\"complete\\\": true}\\n\"}"
+          }
+        ]
+      },
+      "nativeStarts": 1,
+      "started": {
+        "clientId": "45358ff1-a7da-4d7b-be40-878f76feda3b",
+        "serverInstanceId": "01a12e59-738a-73d0-b6d6-43fddc61fac4",
+        "serverGeneration": 5,
+        "threadId": "01a12e59-73ad-7600-9800-f7ebc4f4a5b8",
+        "attemptId": "7d2a0806-12f5-42b8-9c91-eebb52843085",
+        "deliveryId": "dly_f3ef7651d4e8acd8a3f30b6b701d84b6508a97b8f8053075f2ae25048b673fdf",
+        "clientUserMessageId": "6cdab40b-bc26-4d06-86a5-597fd420b53d",
+        "permitId": "offline-2abfbd1ee25d5ce8b99508a95aadb231",
+        "permitIssuedAt": 1791778976767,
+        "permitExpiresAt": 1791778981767,
+        "generation": 7,
+        "outcome": {
+          "status": "started",
+          "turnId": "6cdab40b-bc26-4d06-86a5-597fd420b53d",
+          "replayed": false
+        }
+      },
+      "receipt": {
+        "clientId": "45358ff1-a7da-4d7b-be40-878f76feda3b",
+        "serverInstanceId": "01a12e59-738a-73d0-b6d6-43fddc61fac4",
+        "serverGeneration": 5,
+        "threadId": "01a12e59-73ad-7600-9800-f7ebc4f4a5b8",
+        "attemptId": "7d2a0806-12f5-42b8-9c91-eebb52843085",
+        "deliveryId": "dly_f3ef7651d4e8acd8a3f30b6b701d84b6508a97b8f8053075f2ae25048b673fdf",
+        "clientUserMessageId": "6cdab40b-bc26-4d06-86a5-597fd420b53d",
+        "permitId": "offline-2abfbd1ee25d5ce8b99508a95aadb231",
+        "permitIssuedAt": 1791778976767,
+        "permitExpiresAt": 1791778981767,
+        "generation": 7,
+        "outcome": {
+          "status": "inputRecorded",
+          "turnId": "6cdab40b-bc26-4d06-86a5-597fd420b53d",
+          "itemId": "01a12e59-7460-7c82-90fc-25be710774c5",
+          "replayed": true
+        }
+      },
+      "binding": {
+        "clientId": "45358ff1-a7da-4d7b-be40-878f76feda3b",
+        "connectionId": "19e22ae7-048b-400b-a465-97d4acc2f36a",
+        "backendPid": 96471,
+        "threadId": "01a12e59-73ad-7600-9800-f7ebc4f4a5b8",
+        "generation": 7,
+        "serverInstanceId": "01a12e59-738a-73d0-b6d6-43fddc61fac4",
+        "serverGeneration": 5
+      },
+      "syntheticModelRequests": 3,
+      "mainTurnModelRequests": 2,
+      "titleModelRequests": 1,
+      "realModelCalls": 0,
+      "innerSandboxMode": "danger-full-access",
+      "outerSandboxEnforced": true,
+      "authCopied": false,
+      "noAuthorizationHeaders": true,
+      "sandboxProfile": "(version 1)\n(allow default)\n(deny network*)\n(allow network-outbound (remote ip \"localhost:56376\"))\n(allow network* (local unix-socket) (remote unix-socket))\n(deny file-read* (subpath \"/Users/adampoulemanos/.codex\") (subpath \"/private/tmp/event-live-canary-20261010\"))\n",
+      "initialConfigSha256": "cbd7d606fdb113223d1d9d874c97eb60efb025f8505b394514d7b6e01aab5e09",
+      "finalConfigSha256": "512db45c3ff2a1af5cfea761e3865d32f586b87daecc54c615e7ec5bfbd8219c",
+      "controlSocketRemoved": true,
+      "backendStopped": true,
+      "ownedProcessGroupEmpty": true,
+      "terminationExitCode": 0,
+      "childBytecodeCacheFreshAndEmpty": true,
+      "qualification": "offline-native-github-source-read",
+      "realCloudCalls": 0,
+      "syntheticTransportCalls": 1,
+      "requestSignatureVerified": true,
+      "liveAuthorizationProved": false,
+      "installedPackagePreflight": {
+        "pycachePrefix": "/private/var/folders/43/sd8c5gyd4mq1twfp41pj9l_40000gn/T/qualification-pycache-uv0eha9z",
+        "version": "0.1.0",
+        "directUrl": {
+          "url": "file:///opt/coder/toolshed/.local-artifacts/native-qualification-20261012/dist/knitli_event_gateway-0.1.0-py3-none-any.whl",
+          "archive_info": {}
+        },
+        "packageSource": "/opt/coder/toolshed/.worktrees/event-native-qualification-20261012/packages/event-gateway/src/event_gateway",
+        "packageRoot": "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway",
+        "verifiedSha256": {
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/cli.py": "2b99b16f3fbc8dd9815e0975a9f983d44e65ce8ea4330afe11909766e6663086",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/client_runtime.py": "ecca03a9a2924ebfb5a406d1cf787289c640be48d6a27d654954a8b83a044231",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/cloud.py": "fc2b02d92925f89f1de9be7da3cdcf105b51879da6ffe39fed0dd0418752dd72",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/daemon.py": "fba9d054a56fdad13b75c4da722d7d0548e435078812a157d7857383b37e4b6d",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/gateway.py": "d8230d91d917ca513cf379cd1e13439650960d86bb2a26c5292838d03058e591",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/launcher.py": "7fc67f93f5f9a1d5281927ad1989ef588354f915722339728be54992037c30f8",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/store.py": "39074958ecf7ebdb9c327bb5ecd6b91ff0f6a5a794cb8755f0145b593ae2f88a"
+        }
+      },
+      "frozenHelperSha256": {
+        "native-github-source-qualification.py": "04ef38a3d69ca8787856769c6b83956deb88a7576c7e237b33c3b68550dea33a",
+        "native-release-launcher-smoke.py": "073ddf6a43248db44345e0a20d09f11ced91740186d741b9038b7f7bea5dd33e",
+        "qualification-installed.py": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c"
+      },
+      "providerErrors": []
+    }
+  },
+  "lifecycle": {
+    "rawProofPath": "/opt/coder/toolshed/.local-artifacts/native-qualification-20261012/launcher-lifecycle-proof.json",
+    "rawProofSha256": "1f38c99a936f009cb4cd082e2c4e3e0b87b888092ec4b3edcf662dd3ca038c20",
+    "omittedRawFields": [],
+    "proof": {
+      "result": "PASS",
+      "binarySha256": "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3",
+      "nativeBinary": {
+        "path": "/private/tmp/event-native-qualification-20261012/native/codex",
+        "sha256": "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3"
+      },
+      "python": "/private/tmp/event-native-qualification-20261012/installed/bin/python",
+      "argv": [
+        "/private/tmp/event-native-qualification-20261012/installed/bin/python",
+        "-I",
+        "-B",
+        "-X",
+        "pycache_prefix=/private/tmp/nr-p170ubnf/child-pycache",
+        "-m",
+        "event_gateway.cli",
+        "--state-dir",
+        "/private/tmp/nr-p170ubnf/state",
+        "launch",
+        "--codex-binary",
+        "/private/tmp/event-native-qualification-20261012/native/codex",
+        "--binary-sha256",
+        "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3",
+        "--cwd",
+        "/private/tmp/nr-p170ubnf"
+      ],
+      "installedLauncherSha256": "7fc67f93f5f9a1d5281927ad1989ef588354f915722339728be54992037c30f8",
+      "qualifiedBinaryAccepted": true,
+      "foregroundPtyLaunch": true,
+      "status": {
+        "automaticWakeEnabled": false,
+        "attached": false,
+        "receiptVersion": 3,
+        "selection": "selected",
+        "threadId": "01a12e5a-f4f6-71f1-9594-f432e13e33bd",
+        "clientId": "952c7739-3fcb-47ef-b30e-468e87c5d46e",
+        "serverInstanceId": "01a12e5a-f4d2-7fb3-b0ac-e788e91d3193",
+        "serverGeneration": 3,
+        "generation": 5
+      },
+      "binding": {
+        "clientId": "952c7739-3fcb-47ef-b30e-468e87c5d46e",
+        "connectionId": "03d1eb70-d7be-4226-9146-11ff3a94bf55",
+        "backendPid": 2808,
+        "threadId": "01a12e5a-f4f6-71f1-9594-f432e13e33bd",
+        "generation": 5,
+        "serverInstanceId": "01a12e5a-f4d2-7fb3-b0ac-e788e91d3193",
+        "serverGeneration": 3
+      },
+      "freshChallengeCorrelated": true,
+      "idleRedrawStability": {
+        "samples": 6,
+        "activeSamples": 6,
+        "elapsedSeconds": 3.648916582998936,
+        "bindingUnchanged": true
+      },
+      "nonDrawFences": {
+        "resizeRevokedBinding": true,
+        "composerRefusedReadiness": true,
+        "clearedComposerRestoredSelection": true
+      },
+      "syntheticModelRequests": 0,
+      "realModelCalls": 0,
+      "controlSocketRemoved": true,
+      "backendStopped": true,
+      "terminationExitCode": 0,
+      "childBytecodeCacheFreshAndEmpty": true,
+      "installedPackagePreflight": {
+        "pycachePrefix": "/private/tmp/event-native-qualification-20261012/tmp/qualification-pycache-f8uy1rcy",
+        "version": "0.1.0",
+        "directUrl": {
+          "url": "file:///opt/coder/toolshed/.local-artifacts/native-qualification-20261012/dist/knitli_event_gateway-0.1.0-py3-none-any.whl",
+          "archive_info": {}
+        },
+        "packageSource": "/opt/coder/toolshed/.worktrees/event-native-qualification-20261012/packages/event-gateway/src/event_gateway",
+        "packageRoot": "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway",
+        "verifiedSha256": {
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/cli.py": "2b99b16f3fbc8dd9815e0975a9f983d44e65ce8ea4330afe11909766e6663086",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/client_runtime.py": "ecca03a9a2924ebfb5a406d1cf787289c640be48d6a27d654954a8b83a044231",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/cloud.py": "fc2b02d92925f89f1de9be7da3cdcf105b51879da6ffe39fed0dd0418752dd72",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/daemon.py": "fba9d054a56fdad13b75c4da722d7d0548e435078812a157d7857383b37e4b6d",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/gateway.py": "d8230d91d917ca513cf379cd1e13439650960d86bb2a26c5292838d03058e591",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/launcher.py": "7fc67f93f5f9a1d5281927ad1989ef588354f915722339728be54992037c30f8",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
+          "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/store.py": "39074958ecf7ebdb9c327bb5ecd6b91ff0f6a5a794cb8755f0145b593ae2f88a"
+        },
+        "preflightSha256": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c"
+      }
+    }
+  },
+  "twoTuiRecovery": {
+    "rawProofPath": "/opt/coder/toolshed/.local-artifacts/native-qualification-20261012/two-tui-recovery-proof.json",
+    "rawProofSha256": "6c15585c1738359a55946889be812ab9e5216f740ec803efc3e44bccef456cb1",
+    "omittedRawFields": [],
+    "proof": {
+      "binarySha256": "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3",
+      "cloudSettlementProven": false,
+      "exactReceiptRecoveredTwice": true,
+      "installedAdapterModule": "/private/tmp/event-native-qualification-20261012/installed/lib/python3.13/site-packages/event_gateway/native.py",
+      "installedAdapterProven": true,
+      "installedAdapterSha256": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
+      "installedReaderSha256": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
+      "modelRequestCounts": {
+        "primary": 1,
+        "title": 1,
+        "unknown": 0
+      },
+      "mutatedFieldsRejected": [
+        "clientId",
+        "serverInstanceId",
+        "serverGeneration",
+        "threadId",
+        "attemptId",
+        "deliveryId",
+        "clientUserMessageId",
+        "permitId",
+        "permitIssuedAt+permitExpiresAt",
+        "generation",
+        "event.canonicalSubject",
+        "event.eventId",
+        "event.eventReference",
+        "event.source+event.canonicalSubject",
+        "event.sourceStateVersion"
+      ],
+      "nativeOnly": true,
+      "newSelectedThreadId": "01a12e5a-9520-7353-a10f-26cbaf940cc9",
+      "newWitness": {
+        "backendPid": 777,
+        "cause": "state",
+        "clientId": "9115b30a-4bbe-44e3-b0e3-fec81986f00e",
+        "connectionId": "adf6bd98-f153-4bb4-9524-55fedc991911",
+        "eligible": false,
+        "generation": 2,
+        "leaseMs": 750,
+        "nonce": 2,
+        "sequence": 2,
+        "serverGeneration": 0,
+        "serverInstanceId": "01a12e5a-94f8-7500-b56d-01837d37fb82",
+        "threadId": "01a12e5a-9520-7353-a10f-26cbaf940cc9",
+        "version": 2
+      },
+      "oldProcessesStopped": true,
+      "oldRequest": {
+        "attemptId": "ea12fa51-b54c-47c8-acb3-ddf5a3fe9110",
+        "clientId": "4b61ed29-afaf-499d-bd70-e5a3a9745561",
+        "clientUserMessageId": "8845bf33-f4ae-4b0f-99cc-fabf7f8a3fb8",
+        "deliveryId": "dly_527168d12b71455988f775c3f9b8b1562c0c5aed35c144bba9493279f199e610",
+        "event": {
+          "canonicalSubject": {
+            "kind": "manual",
+            "subjectId": "native-qualification"
+          },
+          "eventId": "8e22a6a3-7c7c-477b-a3b2-1f5d4abaa297",
+          "eventReference": "ref_00a44f91-a583-4202-b1d7-67dd865dcc18",
+          "source": "manual",
+          "sourceStateVersion": "qualification-1"
+        },
+        "generation": 5,
+        "permitExpiresAt": 1791779050305,
+        "permitId": "b8ea9fc2-316c-46cd-90d3-703a5e99f212",
+        "permitIssuedAt": 1791779045305,
+        "serverGeneration": 3,
+        "serverInstanceId": "01a12e5a-7f0d-70b3-b8f2-6d2097958c3a",
+        "threadId": "01a12e5a-7f32-77d1-b0d7-e0e93f9ba87e"
+      },
+      "oldStartLocallyRefused": true,
+      "oldStartNoStartSettlementProven": false,
+      "originalAttachmentUnavailable": true,
+      "permitExpired": true,
+      "qualification": "synthetic-native-v3-two-tui-restart",
+      "readerSha256": "e4068916c0739657186b8be34d087714ad9a544642dc8921a9c502ca1ab9ac11",
+      "realModelCalls": 0,
+      "recorded": {
+        "itemId": "01a12e5a-7fff-75e1-b198-a79940e4cc1f",
+        "replayed": true,
+        "status": "inputRecorded",
+        "turnId": "8845bf33-f4ae-4b0f-99cc-fabf7f8a3fb8"
+      }
+    }
+  },
+  "cleanup": {
+    "checkedAtUnix": 1791779198.609051,
+    "artifactPrefix": "/private/tmp/event-native-qualification-20261012/native/",
+    "remainingOwnedNativeProcesses": [],
+    "allStopped": true,
+    "recoveryBytecodeCacheEmpty": true
+  },
+  "recoverySandbox": {
+    "path": "/private/tmp/event-native-qualification-20261012/recovery-offline.sb",
+    "sha256": "ba607994ff36bb6fd25fc0d1289567f091d5810e1f3c617c476f86eb375b2a4c",
+    "profile": "(version 1)\n(allow default)\n(deny network*)\n(allow network-inbound (local ip \"localhost:*\"))\n(allow network-outbound (remote ip \"localhost:*\"))\n(allow network* (local unix-socket) (remote unix-socket))\n(deny file-read* (subpath \"/Users/adampoulemanos/.codex\") (subpath \"/private/tmp/event-live-canary-20261010\"))\n"
+  },
+  "excludedAttempt": {
+    "rawProofPath": "/opt/coder/toolshed/.local-artifacts/native-qualification-20261012/host-launcher-proof.json",
+    "rawProofSha256": "1f13a102df187d811acd76c7ba1143fa294e2bc74772a8987313d72bdcb1a7bb",
+    "omittedRawFields": [],
+    "proof": {
+      "result": "BLOCKED",
+      "realModelCalls": 0,
+      "errorType": "PreflightError",
+      "error": "unsafe artifact ancestor"
+    }
+  },
+  "validation": {
+    "gatewayTests": 502,
+    "gatewaySeconds": 28.894,
+    "gatewayResult": "PASS",
+    "gatewayLogSha256": "2fe966ba0422905132f8f86e161c32917037ca3940190c08ae7a5f554b8e559d",
+    "ruff": "PASS",
+    "contractCheck": "ed23882eac491e26e070e3ef26cf8c0e9e702b38",
+    "rustRebuildOrRetest": false
+  },
+  "historicalEvidencePreserved": {
+    "originalBuildLauncherQualified": false,
+    "priorLiveWakeBinarySha256": "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27",
+    "ambiguousAttemptsResolved": false
+  }
+}

@@ -460,8 +460,8 @@ class LauncherTests(unittest.TestCase):
                     launcher.qualified_binary(binary, digest)
 
     def test_promoted_digest_requires_both_reviewed_pin_and_opened_binary_hash(self):
-        promoted = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
-        superseded = "9e99dd87bf932bc6960fd2ff9c60fc9af73f19667323562483e10f86b17042f5"
+        promoted = "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3"
+        superseded = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
         unqualified_v2 = "9888c1f1631fee081d797189ea4c18809ce3fcac6c44cef4af291da1e263ae78"
         retired = "d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02"
         with tempfile.TemporaryDirectory() as directory:

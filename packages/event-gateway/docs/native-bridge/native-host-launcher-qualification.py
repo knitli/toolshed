@@ -17,7 +17,7 @@ import threading
 import time
 from uuid import uuid4
 
-CLI_SHA = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
+CLI_SHA = "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3"
 HOST_SHA = "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a"
 HELPERS = {
     "native-github-source-qualification.py": "04ef38a3d69ca8787856769c6b83956deb88a7576c7e237b33c3b68550dea33a",
