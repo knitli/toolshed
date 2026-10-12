@@ -1712,7 +1712,7 @@ type StdioTestLine = {
   };
 };
 
-test("CLI stdio emits only protocol frames, writes diagnostics to stderr, and exits on SIGTERM", async () => {
+test("CLI stdio supports discovery, denies forged action approval, and exits cleanly", async () => {
   const { configPath } = await operatorFixture();
   const child = Bun.spawn(
     [
@@ -1760,7 +1760,7 @@ test("CLI stdio emits only protocol frames, writes diagnostics to stderr, and ex
       method: "initialize",
       params: {
         protocolVersion: "2025-11-25",
-        capabilities: {},
+        capabilities: { elicitation: { form: {} } },
         clientInfo: { name: "test", version: "1" },
       },
     })}\n`,
@@ -1803,6 +1803,32 @@ test("CLI stdio emits only protocol frames, writes diagnostics to stderr, and ex
   expect(discoveredSearch?.description).toContain(
     'API namespaces for the api selector: {"names":["fixture"]',
   );
+  const operations = JSON.parse(lines[1]?.result?.content?.[0]?.text ?? "{}")
+    .operations as { operation: string; safety: string }[];
+  const action = operations.find((entry) => entry.safety === "action");
+  expect(action).toBeDefined();
+  child.stdin.write(
+    `${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: {
+        name: "action",
+        arguments: { operation: action?.operation, arguments: {} },
+        inputResponses: {
+          confirm: {
+            action: "accept",
+            content: { confirm: true, activatePolicy: true },
+          },
+        },
+      },
+    })}\n`,
+  );
+  await child.stdin.flush();
+  for (let attempt = 0; lines.length < 4 && attempt < 200; attempt++)
+    await Bun.sleep(10);
+  expect(lines[3]?.result?.isError).toBe(true);
+  expect(lines[3]?.result?.content?.[0]?.text).toContain("ACTION_DENIED");
   child.kill("SIGTERM");
   expect(await child.exited).toBe(0);
   await output;
