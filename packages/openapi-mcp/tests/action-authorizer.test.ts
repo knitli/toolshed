@@ -128,26 +128,42 @@ describe("action authorizers", () => {
     ).toBe("denied");
   });
 
-  test.each(["false", "error"])(
-    "trusted host %s rejects requester acceptance terminally",
-    async (outcome) => {
+  for (const exact of [false, true]) {
+    test.each([
+      "false",
+      "error",
+      "nonboolean",
+    ])(`trusted host %s rejects requester acceptance terminally (exact policy: ${exact})`, async (outcome) => {
       let approvals = 0;
-      const authorizer = createClientElicitationActionAuthorizer({
+      const prepared = await call();
+      const credential = await binding();
+      const options = {
+        now: () => 1_000,
         elicitationAvailable: () => true,
         approve: async () => {
           approvals++;
           if (outcome === "error") throw new Error("private host failure");
-          return false;
+          return outcome === "nonboolean"
+            ? ("true" as unknown as boolean)
+            : false;
         },
-      });
-      const prepared = await call();
-      const credential = await binding();
+      };
+      const authorizer = exact
+        ? createExactPolicyActionAuthorizer({
+            ...options,
+            templates: [await compileExactPolicy(policyTemplate(prepared))],
+          })
+        : createClientElicitationActionAuthorizer(options);
       const first = await authorizer.authorize(prepared, credential, {
         kind: "initial",
       });
       if (first.status !== "input-required")
         throw new Error("expected input-required");
-      const context = await resumeContext(authorizer, first.requestState);
+      const context = await resumeContext(
+        authorizer,
+        first.requestState,
+        exact ? acceptedActivation() : accepted(),
+      );
       expect(
         (await authorizer.authorize(prepared, credential, context)).status,
       ).toBe("denied");
@@ -155,8 +171,8 @@ describe("action authorizers", () => {
         (await authorizer.authorize(prepared, credential, context)).status,
       ).toBe("denied");
       expect(approvals).toBe(1);
-    },
-  );
+    });
+  }
 
   test.each([false, true])(
     "trusted host wait is single-use and rechecks expiry (%s)",
