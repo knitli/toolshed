@@ -255,3 +255,182 @@ class NativeCIProvenanceTests(unittest.TestCase):
                 with self.subTest(revision=revision, path=path), self.assertRaises(ValueError):
                     V.verify_candidate(api, HEAD, MAIN)
                 self.assertNotIn(("download", 456), api.calls)
+
+
+class GitHubTransportTests(unittest.TestCase):
+    def api(self, responses):
+        api = V.GitHub("test-token")
+        opener = unittest.mock.Mock()
+        opener.open.side_effect = responses
+        api.opener = opener
+        return api, opener
+
+    def response(self, value):
+        return io.BytesIO(json.dumps(value).encode())
+
+    def blob_fixture(self, raw):
+        import base64
+        import hashlib
+        oid = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+        metadata = {"type": "file", "encoding": "none", "content": "", "sha": oid, "size": len(raw)}
+        blob = {"encoding": "base64", "content": base64.encodebytes(raw).decode(), "sha": oid, "size": len(raw)}
+        return metadata, blob
+
+    def test_large_patch_uses_pinned_git_blob_and_preserves_bytes(self):
+        raw = (SCRIPT.parents[1] / "docs/native-bridge/native-metadata-v1-implementation.patch").read_bytes()
+        self.assertGreater(len(raw), 1024 * 1024)
+        metadata, blob = self.blob_fixture(raw)
+        api, opener = self.api([self.response(metadata), self.response(blob)])
+        self.assertEqual(api.blob(V.INPUTS["patchSha256"], HEAD), raw)
+        requests = [call.args[0] for call in opener.open.call_args_list]
+        self.assertEqual(requests[1].full_url, V.API + "git/blobs/" + metadata["sha"])
+        self.assertIn("ref=" + HEAD, requests[0].full_url)
+        self.assertEqual(requests[0].get_header("Accept"), "application/vnd.github.object+json")
+        self.assertTrue(all(request.get_header("Authorization") == "Bearer test-token" for request in requests))
+
+    def test_blob_rejects_wrong_identity_size_encoding_and_oversize(self):
+        metadata, blob = self.blob_fixture(b"reviewed bytes")
+        vectors = [({**metadata, "sha": "../other"}, blob),
+                   ({**metadata, "type": "symlink"}, blob),
+                   ({**metadata, "size": V.LIMIT + 1}, blob),
+                   (metadata, {**blob, "sha": "d" * 40}),
+                   (metadata, {**blob, "size": blob["size"] + 1}),
+                   (metadata, {**blob, "encoding": "none"}),
+                   (metadata, {**blob, "content": "!!!!"}),
+                   (metadata, {**blob, "content": "c3Vic3RpdHV0ZWQ="})]
+        for index, (meta, value) in enumerate(vectors):
+            api, _ = self.api([self.response(meta), self.response(value)])
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                api.blob(V.LAUNCHER, HEAD)
+
+    def test_blob_decoded_limit_allows_base64_expansion_but_bounds_response(self):
+        raw = b"x" * V.LIMIT
+        metadata, blob = self.blob_fixture(raw)
+        api, _ = self.api([self.response(metadata), self.response(blob)])
+        self.assertEqual(api.blob(V.LAUNCHER, HEAD), raw)
+        api, _ = self.api([self.response(metadata), io.BytesIO(b" " * (3 * 1024 * 1024 + 1))])
+        with self.assertRaises(ValueError):
+            api.blob(V.LAUNCHER, HEAD)
+
+    def test_request_bounds_response_and_does_not_follow_redirect(self):
+        api, opener = self.api([io.BytesIO(b" " * (V.LIMIT + 1))])
+        with self.assertRaises(ValueError):
+            api.request("pulls")
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.full_url, V.API + "pulls")
+        self.assertIsNone(V.NoRedirect().redirect_request(request, None, 302, "Found", {}, "https://evil.test/"))
+        error = V.urllib.error.HTTPError(request.full_url, 302, "Found", {"Location": "https://evil.test/"}, None)
+        api, opener = self.api([error])
+        with self.assertRaises(V.urllib.error.HTTPError):
+            api.request("pulls")
+        self.assertEqual(opener.open.call_count, 1)
+
+    def redirect(self, location, code=302):
+        return V.urllib.error.HTTPError(V.API + "actions/artifacts/456/zip", code, "Found", {"Location": location}, None)
+
+    def test_download_only_api_gets_token_and_destination_is_exclusive(self):
+        location = "https://production.blob.core.windows.net/container/artifact?signature=secret"
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "artifact.zip"
+            api, opener = self.api([self.redirect(location), io.BytesIO(b"archive")])
+            api.download(456, target)
+            self.assertEqual(target.read_bytes(), b"archive")
+            first, second = [call.args[0] for call in opener.open.call_args_list]
+            self.assertEqual(first.get_header("Authorization"), "Bearer test-token")
+            self.assertEqual(first.full_url, V.API + "actions/artifacts/456/zip")
+            self.assertEqual(second.full_url, location)
+            self.assertIsNone(second.get_header("Authorization"))
+            api, _ = self.api([self.redirect(location), io.BytesIO(b"replacement")])
+            with self.assertRaises(FileExistsError):
+                api.download(456, target)
+            self.assertEqual(target.read_bytes(), b"archive")
+
+    def test_download_rejects_unsafe_redirects_and_bounds_stream(self):
+        locations = ["http://a.blob.core.windows.net/x", "https://evil.test/x",
+                     "https://a.blob.core.windows.net.evil.test/x", "https://blob.core.windows.net/x",
+                     "https://user:secret@a.githubusercontent.com/x", "https://a.githubusercontent.com:444/x"]
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "artifact.zip"
+            for location in locations:
+                api, opener = self.api([self.redirect(location)])
+                with self.subTest(location=location), self.assertRaises(ValueError):
+                    api.download(456, target)
+                self.assertEqual(opener.open.call_count, 1)
+                self.assertFalse(target.exists())
+            location = "https://a.githubusercontent.com/x"
+            api, _ = self.api([self.redirect(location), io.BytesIO(b"12345")])
+            with patch.object(V, "ARCHIVE_LIMIT", 4), self.assertRaises(ValueError):
+                api.download(456, target)
+            self.assertEqual(target.read_bytes(), b"")
+
+    def test_download_rejects_missing_or_repeated_redirect(self):
+        location = "https://a.githubusercontent.com/x"
+        vectors = [[io.BytesIO(b"not a redirect")], [self.redirect(location, 301)],
+                   [self.redirect(location), self.redirect("https://evil.test/x")]]
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "artifact.zip"
+            for responses in vectors:
+                api, opener = self.api(responses)
+                with self.subTest(responses=len(responses)), self.assertRaises((ValueError, V.urllib.error.HTTPError)):
+                    api.download(456, target)
+                self.assertEqual(opener.open.call_count, len(responses))
+                self.assertFalse(target.exists())
+                for call in opener.open.call_args_list[1:]:
+                    self.assertIsNone(call.args[0].get_header("Authorization"))
+
+
+class ProvenanceDriverTests(unittest.TestCase):
+    def driver(self, event_name, event, *, fresh_head=HEAD, policy_changed=False):
+        api = unittest.mock.Mock()
+        pull = {"number": 7, "head": {"sha": HEAD}, "state": "open"}
+        statuses = []
+        reads = 0
+
+        def request(endpoint, payload=None):
+            nonlocal reads
+            if endpoint == "":
+                return {"id": V.REPOSITORY_ID}
+            if endpoint.startswith("pulls?"):
+                return [pull]
+            if endpoint == "pulls/7":
+                reads += 1
+                return {**pull, "head": {"sha": HEAD if reads == 1 else fresh_head}}
+            if endpoint == "git/ref/heads/main":
+                return {"object": {"sha": MAIN}}
+            if endpoint == "statuses/" + HEAD:
+                statuses.append(payload)
+                return {}
+            raise AssertionError(endpoint)
+
+        def blob(path, revision):
+            return b"changed" if policy_changed and reads > 1 and revision == MAIN else b"policy"
+
+        api.request.side_effect = request
+        api.blob.side_effect = blob
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "event.json"
+            event_path.write_text(json.dumps(event))
+            env = {"GITHUB_REPOSITORY": V.REPOSITORY, "GH_TOKEN": "test-token", "WORKFLOW_SHA": BUILD,
+                   "GITHUB_EVENT_PATH": str(event_path), "GITHUB_EVENT_NAME": event_name,
+                   "GITHUB_SERVER_URL": "https://github.com", "GITHUB_RUN_ID": "999"}
+            with patch.dict(V.os.environ, env), patch.object(V, "GitHub", return_value=api), \
+                    patch.object(V, "verify_candidate", return_value="Verified") as verify, \
+                    patch("sys.stdout", new_callable=io.StringIO):
+                V.main()
+                verify.assert_called_once_with(api, HEAD, MAIN)
+        return statuses
+
+    def test_supported_events_publish_on_current_head(self):
+        events = [("pull_request_target", {"pull_request": {"number": 7, "head": {"sha": HEAD}}}),
+                  ("workflow_run", {}), ("push", {"ref": "refs/heads/main"})]
+        for name, event in events:
+            with self.subTest(event=name):
+                statuses = self.driver(name, event)
+                self.assertEqual([status["state"] for status in statuses], ["pending", "success"])
+                self.assertTrue(all(status["context"] == V.CONTEXT for status in statuses))
+
+    def test_final_status_withheld_after_head_or_policy_changes(self):
+        for options in ({"fresh_head": "d" * 40}, {"policy_changed": True}):
+            with self.subTest(options=options):
+                statuses = self.driver("push", {"ref": "refs/heads/main"}, **options)
+                self.assertEqual([status["state"] for status in statuses], ["pending"])

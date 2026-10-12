@@ -173,22 +173,27 @@ class GitHub:
         self.token = token
         self.opener = urllib.request.build_opener(NoRedirect)
 
-    def request(self, endpoint, payload=None):
+    def request(self, endpoint, payload=None, *, accept="application/vnd.github+json", response_limit=LIMIT):
         request = urllib.request.Request(API + endpoint if endpoint else API.rstrip("/"),
             data=json.dumps(payload).encode() if payload is not None else None,
-            headers={"Authorization": "Bearer " + self.token, "Accept": "application/vnd.github+json",
+            headers={"Authorization": "Bearer " + self.token, "Accept": accept,
                      "Content-Type": "application/json", "X-GitHub-Api-Version": "2022-11-28"})
         with self.opener.open(request, timeout=30) as response:
-            raw = response.read(LIMIT + 1)
-        require(len(raw) <= LIMIT)
+            raw = response.read(response_limit + 1)
+        require(len(raw) <= response_limit)
         return json.loads(raw)
 
     def blob(self, path, revision):
         require(sha(revision, 40))
-        value = self.request("contents/" + path + "?" + urllib.parse.urlencode({"ref": revision}))
-        require(value.get("type") == "file" and value.get("encoding") == "base64")
-        raw = base64.b64decode("".join(value["content"].splitlines()), validate=True)
-        require(len(raw) <= LIMIT and value.get("size") == len(raw))
+        value = self.request("contents/" + path + "?" + urllib.parse.urlencode({"ref": revision}),
+                             accept="application/vnd.github.object+json")
+        require(value.get("type") == "file" and sha(value.get("sha"), 40)
+                and positive(value.get("size")) and value["size"] <= LIMIT)
+        blob = self.request("git/blobs/" + value["sha"], response_limit=3 * 1024 * 1024)
+        require(blob.get("sha") == value["sha"] and blob.get("encoding") == "base64"
+                and blob.get("size") == value["size"])
+        raw = base64.b64decode("".join(blob["content"].splitlines()), validate=True)
+        require(len(raw) <= LIMIT and blob["size"] == len(raw))
         return raw
 
     def download(self, artifact_id, destination):
