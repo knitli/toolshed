@@ -20,7 +20,7 @@ from event_gateway.cloud import _iso
 from event_gateway.protocol import derive_delivery_id
 from event_gateway.security import SecurityError, load_or_create_signing_key, public_key_text, sign
 from event_gateway.store import IDENTITY, Store
-from test_daemon import running_daemon
+from test_daemon import control_socket_ready, running_daemon
 from test_gateway_integration import FIXTURE, InjectedBridge
 from test_native_session_proxy import session_fixture, witness
 
@@ -133,7 +133,7 @@ class DaemonDispatchTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(daemon, 'WORKER_INTERVAL', 0.02):
             task = asyncio.create_task(daemon.serve(self.state, dispatch_config=self.config_path))
             try:
-                await self.until(lambda: (self.state / 'control.sock').exists() or task.done())
+                await self.until(lambda: control_socket_ready(self.state / 'control.sock') or task.done())
                 if task.done():
                     await task
                 yield task
