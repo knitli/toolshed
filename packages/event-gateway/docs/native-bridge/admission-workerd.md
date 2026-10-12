@@ -1,9 +1,11 @@
 # Controlled native admission qualification
 
 The recorded proof below is the historical `3e88…387c` checkpoint. The
-[redraw release qualification](native-redraw-qualification.md) contains the
-new candidate and fresh admission proof. The reproduction command targets the
-current promoted artifact; replay the historical proof from Toolshed
+[redraw release qualification](native-redraw-qualification.md) records a later,
+now historical admission proof. For the current executable pair and qualified
+checks, see the [main CI artifact qualification](native-ci-qualification.md).
+Neither historical admission result establishes admission for the current pair.
+Replay this historical proof from Toolshed
 `1d7babb7a6f294ffdc41113f46a377c56834e5f6` with its matching wheel and source.
 
 **PASS, 2026-10-09.** [Recorded proof](admission-workerd-proof.json) passed with
@@ -90,13 +92,17 @@ Prerequisites: a noneditable installed gateway wheel, the qualified native binar
 current `scripts/qualify_native_bridge.py`, Node 24.19.0, esbuild and Miniflare package
 directories, and the cloud event-runtime source directory. No dependency installation
 or deployment is performed. Loopback listeners and a disposable PTY are required.
+Set `EVENT_NATIVE_SHA256` to the digest authorized by that installed wheel's
+launcher, and use its matching executable and qualifier. A retired digest is
+rejected by the current wheel. Choose a new proof output; the command below
+is a rerun recipe, not a recorded PASS for the current executable.
 
 ```sh
 "$EVENT_PYTHON" -I -O admission-workerd.py \
   --package-source "$EVENT_PACKAGE_SOURCE" \
   --qualifier "$EVENT_QUALIFIER" \
   --binary "$EVENT_NATIVE_BINARY" \
-  --binary-sha d82007ca79c2d73cfdf811bcb5efe949831c2652b3114b836f5eefea9f269c02 \
+  --binary-sha "$EVENT_NATIVE_SHA256" \
   --node "$EVENT_NODE" \
   --cloud-source "$EVENT_CLOUD_SRC" \
   --esbuild "$EVENT_ESBUILD_PACKAGE" \
