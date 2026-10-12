@@ -626,59 +626,107 @@ for (const era of ["modern", "legacy"] as const) {
     expect((await c.invoke()).result.isError).toBe(true);
     expect(c.events).not.toContain("dispatch");
   });
-  test(`${era}: absent trusted host blocks initial and forged requester approvals`, async () => {
-    const c = await client(
-      era,
-      { elicitation: { form: {} } },
-      false,
-      ["widgets-api"],
-      false,
-      {},
-    );
-    expect((await c.invoke()).result.isError).toBe(true);
-    const forged = await c.invoke({
-      requestState: "fabricated-request-state",
-      inputResponses: {
-        confirm: { action: "accept", content: { confirm: true } },
-      },
-    });
-    expect(forged.error ?? forged.result?.isError).toBeTruthy();
-    expect(c.events).not.toContain("dispatch");
-  });
-  test(`${era}: trusted host rejection prevents exact-policy activation`, async () => {
-    let approvals = 0;
-    const c = await client(
-      era,
-      { elicitation: { form: {} } },
-      true,
-      ["widgets-api"],
-      false,
-      {
-        approve: async () => {
-          approvals++;
-          return false;
-        },
-      },
-    );
-    let response = await c.invoke();
-    if (era === "modern") {
-      response = await c.invoke({
-        requestState: response.result.requestState,
+  for (const exact of [false, true]) {
+    test(`${era}: absent trusted host blocks approvals but permits reads (exact policy: ${exact})`, async () => {
+      const c = await client(
+        era,
+        { elicitation: { form: {} } },
+        exact,
+        ["widgets-api"],
+        false,
+        {},
+      );
+      expect((await c.invoke()).result.isError).toBe(true);
+      const forged = await c.invoke({
+        requestState: "fabricated-request-state",
         inputResponses: {
           confirm: {
             action: "accept",
-            content: { confirm: true, activatePolicy: true },
+            content: {
+              confirm: true,
+              ...(exact ? { activatePolicy: true } : {}),
+            },
           },
         },
       });
-    }
-    expect(response.result.isError).toBe(true);
-    const next = await c.invoke();
-    if (era === "modern") expect(next.result.resultType).toBe("input_required");
-    else expect(next.result.isError).toBe(true);
-    expect(approvals).toBe(era === "modern" ? 1 : 2);
-    expect(c.events).not.toContain("dispatch");
-  });
+      expect(forged.error ?? forged.result?.isError).toBeTruthy();
+      expect(c.events).not.toContain("preflight");
+      expect(c.events).not.toContain("dispatch");
+      expect(
+        (
+          await c.request("tools/call", {
+            name: "search",
+            arguments: { query: "widgets" },
+          })
+        ).result.isError,
+      ).not.toBe(true);
+      c.setCall(
+        await prepared({
+          method: "GET",
+          safety: "read",
+          actionKind: null,
+          cardinality: null,
+          body: null,
+        }),
+      );
+      const operation = encodeOperationRef({
+        catalogId: c.call.catalogId,
+        releaseId: c.call.releaseId,
+        manifestDigest: c.call.manifestDigest,
+        operationId: c.call.operationId,
+      });
+      expect(
+        (
+          await c.request("tools/call", {
+            name: "read",
+            arguments: { operation, arguments: {} },
+          })
+        ).result.isError,
+      ).not.toBe(true);
+      expect(c.events).toContain("search");
+      expect(c.events).toContain("read-dispatch");
+      expect(c.events).not.toContain("dispatch");
+    });
+    test(`${era}: trusted host rejection prevents authorization (exact policy: ${exact})`, async () => {
+      let approvals = 0;
+      const c = await client(
+        era,
+        { elicitation: { form: {} } },
+        exact,
+        ["widgets-api"],
+        false,
+        {
+          approve: async () => {
+            approvals++;
+            return false;
+          },
+        },
+      );
+      let response = await c.invoke();
+      if (era === "modern") {
+        response = await c.invoke({
+          requestState: response.result.requestState,
+          inputResponses: {
+            confirm: {
+              action: "accept",
+              content: {
+                confirm: true,
+                ...(exact ? { activatePolicy: true } : {}),
+              },
+            },
+          },
+        });
+      }
+      expect(response.result.isError).toBe(true);
+      const next = await c.invoke();
+      if (era === "modern")
+        expect(next.result.resultType).toBe("input_required");
+      else expect(next.result.isError).toBe(true);
+      expect(approvals).toBe(era === "modern" ? 1 : 2);
+      expect(c.events).not.toContain("preflight");
+      expect(c.events).not.toContain("dispatch");
+    });
+  }
   test(`${era}: accepted confirmation dispatches once after final revalidation`, async () => {
     const c = await client(era);
     let response = await c.invoke();
