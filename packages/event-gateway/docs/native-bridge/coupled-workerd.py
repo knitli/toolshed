@@ -111,6 +111,14 @@ def require(condition, message):
         raise AssertionError(message)
 
 
+def require_admitted_delivery(envelope, signed, attached, node_id):
+    require(all(envelope[key] == attached[key] for key in (
+        'runtimeId', 'runtimeGeneration', 'nodeGeneration', 'attachmentGeneration')),
+        'delivery uses admitted identity')
+    require(attached['nodeId'] == node_id and signed['headers']['x-event-audience'] == node_id,
+        'delivery audience uses admitted node')
+
+
 def b64(value):
     return base64.urlsafe_b64encode(value).rstrip(b'=').decode()
 
@@ -282,8 +290,7 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
         store = Store(state)
         try:
             mapping = {key: e[key] for key in IDENTITY}
-            require(all(e[key] == admission['attached'][key] for key in ('runtimeId', 'runtimeGeneration',
-                'nodeId', 'nodeGeneration', 'attachmentGeneration')), 'delivery uses admitted identity')
+            require_admitted_delivery(e, signed, admission['attached'], node_id)
             mapping.update(nativeThreadId=witness['threadId'], nativeBinding=admission['attached']['nativeBinding'],
                 sessionId=str(uuid4()), leaseExpiresAt=datetime.fromisoformat(admission['attached']['leaseUntil']).timestamp())
             store.put_attachment(mapping)

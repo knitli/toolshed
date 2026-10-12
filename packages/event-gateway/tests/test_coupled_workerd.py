@@ -66,6 +66,24 @@ class CoupledWorkerdTests(unittest.TestCase):
 
 
 class CoupledAdmissionTests(unittest.TestCase):
+    def test_delivery_identity_and_signed_audience_match_actual_admission(self):
+        # EventEnvelopeSchema has no nodeId: the signed audience carries it.
+        envelope = {'runtimeId': 'runtime', 'runtimeGeneration': 2,
+                    'nodeGeneration': 3, 'attachmentGeneration': 4}
+        attached = {**envelope, 'nodeId': 'node'}
+        signed = {'headers': {'x-event-audience': 'node'}}
+        COUPLED.require_admitted_delivery(envelope, signed, attached, 'node')
+        for key in envelope:
+            with self.subTest(key=key), self.assertRaisesRegex(AssertionError, 'admitted identity'):
+                COUPLED.require_admitted_delivery({**envelope, key: 'mismatch'}, signed, attached, 'node')
+        for wrong_attached, wrong_signed in (
+            ({**attached, 'nodeId': 'other'}, signed),
+            (attached, {'headers': {'x-event-audience': 'other'}}),
+        ):
+            with self.subTest(attached=wrong_attached, signed=wrong_signed), \
+                    self.assertRaisesRegex(AssertionError, 'admitted node'):
+                COUPLED.require_admitted_delivery(envelope, wrong_signed, wrong_attached, 'node')
+
     def test_installed_preflight_runs_before_any_gateway_import(self):
         import builtins
         import runpy
