@@ -108,7 +108,7 @@ test("stdio helper consumes real transport plans and permits exactly once under 
     });
     const call = await prepared();
     const snapshot = await credential();
-    const authorizer = createStdioActionAuthorizer();
+    const authorizer = createStdioActionAuthorizer([], async () => true);
     boundary = createLocalDispatchBoundary(authorizer, {
       profile,
       allowsManifestOrigin: (context) =>

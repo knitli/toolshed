@@ -5,6 +5,7 @@ import type {
   AuthorizationContext,
   CredentialAuthorizationBinding,
   PreparedCall,
+  SafeApprovalPresentation,
   Sha256,
   VerifiedActionRequestState,
 } from "../src/runtime/types.ts";
@@ -106,6 +107,111 @@ async function resumeContext(
 }
 
 describe("action authorizers", () => {
+  test("requester acceptance cannot authorize without a trusted host provider", async () => {
+    const authorizer = createClientElicitationActionAuthorizer({
+      elicitationAvailable: () => true,
+    });
+    const prepared = await call();
+    const credential = await binding();
+    expect(
+      (await authorizer.authorize(prepared, credential, { kind: "initial" }))
+        .status,
+    ).toBe("denied");
+    expect(
+      (
+        await authorizer.authorize(prepared, credential, {
+          kind: "resume",
+          requestState: {} as VerifiedActionRequestState,
+          inputResponses: accepted(),
+        })
+      ).status,
+    ).toBe("denied");
+  });
+
+  test.each(["false", "error"])(
+    "trusted host %s rejects requester acceptance terminally",
+    async (outcome) => {
+      let approvals = 0;
+      const authorizer = createClientElicitationActionAuthorizer({
+        elicitationAvailable: () => true,
+        approve: async () => {
+          approvals++;
+          if (outcome === "error") throw new Error("private host failure");
+          return false;
+        },
+      });
+      const prepared = await call();
+      const credential = await binding();
+      const first = await authorizer.authorize(prepared, credential, {
+        kind: "initial",
+      });
+      if (first.status !== "input-required")
+        throw new Error("expected input-required");
+      const context = await resumeContext(authorizer, first.requestState);
+      expect(
+        (await authorizer.authorize(prepared, credential, context)).status,
+      ).toBe("denied");
+      expect(
+        (await authorizer.authorize(prepared, credential, context)).status,
+      ).toBe("denied");
+      expect(approvals).toBe(1);
+    },
+  );
+
+  test.each([false, true])(
+    "trusted host wait is single-use and rechecks expiry (%s)",
+    async (expire) => {
+      let now = 1_000;
+      let approvals = 0;
+      let shown: SafeApprovalPresentation | undefined;
+      let release!: (approved: boolean) => void;
+      let entered!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const approval = new Promise<boolean>((resolve) => {
+        release = resolve;
+      });
+      const prepared = await call();
+      const credential = await binding();
+      const authorizer = createClientElicitationActionAuthorizer({
+        elicitationAvailable: () => true,
+        now: () => now,
+        approve: async (presentation) => {
+          approvals++;
+          shown = presentation;
+          entered();
+          return approval;
+        },
+      });
+      const first = await authorizer.authorize(prepared, credential, {
+        kind: "initial",
+      });
+      if (first.status !== "input-required")
+        throw new Error("expected input-required");
+      const context = await resumeContext(authorizer, first.requestState);
+      const pending = authorizer.authorize(prepared, credential, context);
+      await started;
+      expect(Object.isFrozen(shown)).toBe(true);
+      expect(Object.isFrozen(shown?.scopes)).toBe(true);
+      expect(Object.isFrozen(shown?.cardinality)).toBe(true);
+      expect(shown).toMatchObject({
+        preparedCallDigest: prepared.preparedCallDigest,
+        credentialBindingDigest: credential.bindingDigest,
+      });
+      expect(
+        (await authorizer.authorize(prepared, credential, context)).status,
+      ).toBe("denied");
+      if (expire) now += 10 * 60_000;
+      release(true);
+      expect((await pending).status).toBe(expire ? "denied" : "authorized");
+      expect(
+        (await authorizer.authorize(prepared, credential, context)).status,
+      ).toBe("denied");
+      expect(approvals).toBe(1);
+    },
+  );
+
   test("default authorizer denies authorize and consume", async () => {
     const authorizer = createDenyActionAuthorizer();
     const prepared = await call();
@@ -123,6 +229,7 @@ describe("action authorizers", () => {
 
   test("uses a two-entry confirmation and atomically consumes its receipt", async () => {
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       randomBytes: deterministicRandom(),
     });
@@ -162,6 +269,7 @@ describe("action authorizers", () => {
 
   test("replay, decline, malformed acceptance, and opaque-state forgery deny", async () => {
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       randomBytes: deterministicRandom(),
     });
@@ -227,6 +335,7 @@ describe("action authorizers", () => {
 
   test("cancel is a terminal denial that consumes pending state", async () => {
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       randomBytes: deterministicRandom(),
     });
@@ -260,6 +369,7 @@ describe("action authorizers", () => {
   test("a stale verified state cannot delete a reused pending identifier", async () => {
     let now = 1_000;
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       now: () => now,
       randomBytes: (size) => new Uint8Array(size).fill(9),
@@ -300,6 +410,7 @@ describe("action authorizers", () => {
 
   test("changed call or credential across entries consumes pending state and denies", async () => {
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       randomBytes: deterministicRandom(),
     });
@@ -347,6 +458,7 @@ describe("action authorizers", () => {
   test("rejects divergent descriptor and getter views before reserving authorization state", async () => {
     let elicitationChecks = 0;
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => {
         elicitationChecks += 1;
         return true;
@@ -394,6 +506,7 @@ describe("action authorizers", () => {
 
     const policyAuthorizer = createExactPolicyActionAuthorizer({
       templates: [await compileExactPolicy(policyTemplate(prepared))],
+      approve: async () => true,
       elicitationAvailable: () => true,
       randomBytes: deterministicRandom(),
     });
@@ -416,6 +529,7 @@ describe("action authorizers", () => {
   test("ledger clock expiration and tampered HMAC state deny", async () => {
     let now = 1_000;
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       now: () => now,
       randomBytes: deterministicRandom(),
@@ -442,6 +556,7 @@ describe("action authorizers", () => {
 
   test("pending capacity rejects without evicting a live confirmation", async () => {
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       randomBytes: deterministicRandom(),
       limits: { pending: 1 },
@@ -471,6 +586,7 @@ describe("action authorizers", () => {
 
   test("missing elicitation capability denies without minting state", async () => {
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => false,
     });
     expect(
@@ -485,6 +601,7 @@ describe("action authorizers", () => {
   test("expired entries are pruned before pending and receipt capacity checks", async () => {
     let now = 1_000;
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       now: () => now,
       randomBytes: deterministicRandom(),
@@ -527,6 +644,7 @@ describe("action authorizers", () => {
 
   test("receipt exhaustion preserves an accepted pending confirmation", async () => {
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       randomBytes: deterministicRandom(),
       limits: { receipts: 1 },
@@ -565,17 +683,20 @@ describe("action authorizers", () => {
   test("lower-only limits and repeated random collisions fail closed", async () => {
     expect(() =>
       createClientElicitationActionAuthorizer({
+        approve: async () => true,
         elicitationAvailable: () => true,
         limits: { pending: 257 },
       }),
     ).toThrow(RangeError);
     expect(() =>
       createClientElicitationActionAuthorizer({
+        approve: async () => true,
         elicitationAvailable: () => true,
         limits: { receipts: 0 },
       }),
     ).toThrow(RangeError);
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       randomBytes: (size) => new Uint8Array(size).fill(7),
     });
@@ -593,6 +714,7 @@ describe("action authorizers", () => {
 
   test("burns accessor-bearing responses without invoking accessors", async () => {
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       randomBytes: deterministicRandom(),
     });
@@ -636,6 +758,7 @@ describe("action authorizers", () => {
 
   test("rejects accessor-bearing or open authorization contexts without invoking accessors", async () => {
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
     });
     let invoked = false;
@@ -685,6 +808,7 @@ describe("action authorizers", () => {
     "consume rejects a receipt presented with a changed %s",
     async (changedTuple) => {
       const authorizer = createClientElicitationActionAuthorizer({
+        approve: async () => true,
         elicitationAvailable: () => true,
         randomBytes: deterministicRandom(),
       });
@@ -718,6 +842,7 @@ describe("action authorizers", () => {
 
   test("only one concurrent consume succeeds and copied decisions are rejected", async () => {
     const authorizer = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       randomBytes: deterministicRandom(),
     });
@@ -777,11 +902,83 @@ function policyTemplate(prepared: PreparedCall): ExactPolicyTemplate {
 }
 
 describe("exact policy authorizer", () => {
+  test("exact policy without trusted host denies requester activation", async () => {
+    const prepared = await call();
+    const credential = await binding();
+    const authorizer = createExactPolicyActionAuthorizer({
+      templates: [await compileExactPolicy(policyTemplate(prepared))],
+      elicitationAvailable: () => true,
+      now: () => 1_000,
+    });
+    expect(
+      (await authorizer.authorize(prepared, credential, { kind: "initial" }))
+        .status,
+    ).toBe("denied");
+    expect(
+      (
+        await authorizer.authorize(prepared, credential, {
+          kind: "resume",
+          requestState: {} as VerifiedActionRequestState,
+          inputResponses: acceptedActivation(),
+        })
+      ).status,
+    ).toBe("denied");
+  });
+
+  test("trusted host rejection leaves exact policy inactive and sees bound activation", async () => {
+    const prepared = await call();
+    const credential = await binding();
+    const policy = await compileExactPolicy(policyTemplate(prepared));
+    let approvals = 0;
+    let shown: SafeApprovalPresentation | undefined;
+    const authorizer = createExactPolicyActionAuthorizer({
+      templates: [policy],
+      elicitationAvailable: () => true,
+      now: () => 1_000,
+      approve: async (presentation) => {
+        approvals++;
+        shown = presentation;
+        return false;
+      },
+    });
+    const first = await authorizer.authorize(prepared, credential, {
+      kind: "initial",
+    });
+    if (first.status !== "input-required")
+      throw new Error("expected input-required");
+    const context = await resumeContext(
+      authorizer,
+      first.requestState,
+      acceptedActivation(),
+    );
+    expect(
+      (await authorizer.authorize(prepared, credential, context)).status,
+    ).toBe("denied");
+    expect(
+      (await authorizer.authorize(prepared, credential, context)).status,
+    ).toBe("denied");
+    expect(
+      (await authorizer.authorize(prepared, credential, { kind: "initial" }))
+        .status,
+    ).toBe("input-required");
+    expect(Object.isFrozen(shown?.policyActivation)).toBe(true);
+    expect(shown).toMatchObject({
+      preparedCallDigest: prepared.preparedCallDigest,
+      credentialBindingDigest: credential.bindingDigest,
+      policyActivation: {
+        policyDigest: policy.policyDigest,
+        expiresAt: 20_000,
+      },
+    });
+    expect(approvals).toBe(1);
+  });
+
   test("policy activation requires a separate explicit affirmative", async () => {
     const prepared = await call();
     const credential = await binding();
     const authorizer = createExactPolicyActionAuthorizer({
       templates: [await compileExactPolicy(policyTemplate(prepared))],
+      approve: async () => true,
       elicitationAvailable: () => true,
       now: () => 1_000,
       randomBytes: deterministicRandom(),
@@ -825,6 +1022,7 @@ describe("exact policy authorizer", () => {
     const policy = await compileExactPolicy(policyTemplate(prepared));
     const authorizer = createExactPolicyActionAuthorizer({
       templates: [policy],
+      approve: async () => true,
       elicitationAvailable: () => true,
       now: () => now,
       randomBytes: deterministicRandom(),
@@ -886,6 +1084,7 @@ describe("exact policy authorizer", () => {
     const policy = await compileExactPolicy(policyTemplate(base));
     const authorizer = createExactPolicyActionAuthorizer({
       templates: [policy],
+      approve: async () => true,
       elicitationAvailable: () => false,
     });
     const unsafe = await call({ actionKind });
@@ -905,6 +1104,7 @@ describe("exact policy authorizer", () => {
       const base = await call();
       const authorizer = createExactPolicyActionAuthorizer({
         templates: [await compileExactPolicy(policyTemplate(base))],
+        approve: async () => true,
         elicitationAvailable: () => false,
       });
       const changed = await call({ cardinality });
@@ -927,6 +1127,7 @@ describe("exact policy authorizer", () => {
     const credential = await binding();
     const authorizer = createExactPolicyActionAuthorizer({
       templates: [policy],
+      approve: async () => true,
       elicitationAvailable: () => true,
       now: () => 1_000,
       randomBytes: deterministicRandom(),
@@ -962,6 +1163,7 @@ describe("exact policy authorizer", () => {
     const credential = await binding();
     const authorizer = createExactPolicyActionAuthorizer({
       templates: [policy],
+      approve: async () => true,
       elicitationAvailable: () => true,
       now: () => now,
       randomBytes: deterministicRandom(),
@@ -999,6 +1201,7 @@ describe("exact policy authorizer", () => {
     const firstCredential = await binding();
     const authorizer = createExactPolicyActionAuthorizer({
       templates: [policy],
+      approve: async () => true,
       elicitationAvailable: () => true,
       now: () => 1_000,
       randomBytes: deterministicRandom(),
@@ -1047,6 +1250,7 @@ describe("exact policy authorizer", () => {
     ).toBe("input-required");
     const restarted = createExactPolicyActionAuthorizer({
       templates: [policy],
+      approve: async () => true,
       elicitationAvailable: () => true,
       now: () => 1_000,
       randomBytes: deterministicRandom(),
@@ -1068,6 +1272,7 @@ describe("exact policy authorizer", () => {
     });
     const authorizer = createExactPolicyActionAuthorizer({
       templates: [policy],
+      approve: async () => true,
       elicitationAvailable: () => true,
       now: () => 1_000,
       randomBytes: deterministicRandom(),

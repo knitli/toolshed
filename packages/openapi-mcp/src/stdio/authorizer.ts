@@ -16,6 +16,7 @@ import type {
   AuthorizedActionDecision,
   CredentialAuthorizationBinding,
   PreparedCall,
+  SafeApprovalPresentation,
   Sha256,
   VerifiedActionRequestState,
 } from "../runtime/types.ts";
@@ -63,11 +64,15 @@ export interface AuthorizerTestOptions {
 export interface ClientElicitationAuthorizerOptions
   extends AuthorizerTestOptions {
   readonly elicitationAvailable: () => boolean;
+  /** Authenticate operator approval outside the MCP requester; never trust inputResponses. */
+  readonly approve?: (
+    presentation: SafeApprovalPresentation,
+  ) => Promise<boolean>;
 }
 
-export interface ExactPolicyAuthorizerOptions extends AuthorizerTestOptions {
+export interface ExactPolicyAuthorizerOptions
+  extends ClientElicitationAuthorizerOptions {
   readonly templates: readonly CompiledExactPolicy[];
-  readonly elicitationAvailable: () => boolean;
 }
 
 export interface StatefulActionAuthorizer extends ActionAuthorizer {
@@ -82,6 +87,7 @@ interface PendingConfirmation {
   readonly callDigest: Sha256;
   readonly credentialBindingDigest: Sha256;
   readonly expiresAt: number;
+  readonly presentation: SafeApprovalPresentation;
   readonly policy?: CompiledExactPolicy;
   readonly activationExpiresAt?: number;
 }
@@ -271,11 +277,13 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
   ) => Promise<VerifiedActionRequestState>;
 
   readonly #elicitationAvailable: () => boolean;
+  readonly #approve: ClientElicitationAuthorizerOptions["approve"];
   readonly #now: () => number;
   readonly #randomBytes: (size: number) => Uint8Array;
   readonly #limits: InternalLimits;
   readonly #policies: readonly CompiledExactPolicy[];
   readonly #pending = new Map<string, PendingConfirmation>();
+  readonly #approving = new WeakSet<PendingConfirmation>();
   readonly #receipts = new Map<AuthorizationId, Receipt>();
   readonly #decisions = new WeakMap<AuthorizedActionDecision, Receipt>();
   readonly #activations = new Map<string, Activation>();
@@ -286,6 +294,7 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
     policies: readonly CompiledExactPolicy[] = [],
   ) {
     this.#elicitationAvailable = options.elicitationAvailable;
+    this.#approve = options.approve;
     this.#now = options.now ?? Date.now;
     this.#randomBytes = options.randomBytes ?? defaultRandom;
     this.#limits = normalizeLimits(options.limits);
@@ -299,7 +308,11 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
       now: this.#now,
       isPending: (payload) => {
         const pending = this.#pending.get(payload.pendingId);
-        return pending !== undefined && exactPayloadMatch(payload, pending);
+        return (
+          pending !== undefined &&
+          !this.#approving.has(pending) &&
+          exactPayloadMatch(payload, pending)
+        );
       },
     });
     this.requestStateVerifier = this.#requestState.verify;
@@ -439,7 +452,11 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
     const payload = this.#requestState.read(context.requestState);
     if (payload === undefined) return deny("Invalid confirmation state");
     const pending = this.#pending.get(payload.pendingId);
-    if (pending === undefined || !exactPayloadMatch(payload, pending)) {
+    if (
+      pending === undefined ||
+      this.#approving.has(pending) ||
+      !exactPayloadMatch(payload, pending)
+    ) {
       return deny("Invalid confirmation state");
     }
     const now = this.#now();
@@ -499,41 +516,61 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
       this.#receipts.size >= this.#limits.receipts ||
       (newActivation && this.#activations.size >= this.#limits.activations)
     ) {
-      // Capacity denial is retriable and must not spend a valid human answer.
+      // Before independent approval, capacity denial leaves the pending request retriable.
       return deny("Authorization capacity is exhausted");
     }
 
-    let decision: AuthorizedActionDecision;
+    // Reserve the pending slot while the independent channel is awaiting approval.
+    this.#approving.add(pending);
     try {
-      decision = this.#mintReceipt(
+      if ((await this.#approve?.(pending.presentation)) !== true) {
+        return deny("Trusted operator approval was not accepted");
+      }
+      const approvedAt = this.#now();
+      if (
+        approvedAt >= pending.expiresAt ||
+        this.#pending.get(pending.pendingId) !== pending
+      ) {
+        return deny("Confirmation expired or no longer matches");
+      }
+      this.#prune(approvedAt);
+      if (
+        activationKey !== undefined &&
+        !this.#activations.has(activationKey) &&
+        this.#activations.size >= this.#limits.activations
+      ) {
+        return deny("Authorization capacity is exhausted");
+      }
+      const decision = this.#mintReceipt(
         call,
         credential,
         policy ? "exact-policy" : "per-call",
         policy?.policyDigest,
         Math.min(
-          now + RECEIPT_TTL_MS,
+          approvedAt + RECEIPT_TTL_MS,
           activationExpiresAt ?? Number.MAX_SAFE_INTEGER,
         ),
       );
-    } catch {
-      return deny("Authorization capacity is exhausted");
+      if (
+        policy !== undefined &&
+        activationKey !== undefined &&
+        activationExpiresAt !== undefined
+      ) {
+        this.#activations.set(
+          activationKey,
+          Object.freeze({
+            policyDigest: policy.policyDigest,
+            credentialBindingDigest: credential.bindingDigest,
+            expiresAt: activationExpiresAt,
+          }),
+        );
+      }
+      return decision;
+    } finally {
+      if (this.#pending.get(pending.pendingId) === pending) {
+        this.#pending.delete(pending.pendingId);
+      }
     }
-    if (
-      policy !== undefined &&
-      activationKey !== undefined &&
-      activationExpiresAt !== undefined
-    ) {
-      this.#activations.set(
-        activationKey,
-        Object.freeze({
-          policyDigest: policy.policyDigest,
-          credentialBindingDigest: credential.bindingDigest,
-          expiresAt: activationExpiresAt,
-        }),
-      );
-    }
-    this.#pending.delete(pending.pendingId);
-    return decision;
   }
 
   async #requestConfirmation(
@@ -542,6 +579,9 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
     policy?: CompiledExactPolicy,
     activationExpiresAt?: number,
   ): Promise<AuthorizationDecision> {
+    if (this.#approve === undefined) {
+      return deny("Trusted operator approval is unavailable");
+    }
     if (!this.#elicitationAvailable()) {
       return deny("Client elicitation is unavailable");
     }
@@ -564,14 +604,6 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
     if (policy !== undefined && activationExpiresAt === undefined) {
       return deny("Policy activation is invalid");
     }
-    const pending = Object.freeze({
-      pendingId,
-      callDigest: call.preparedCallDigest,
-      credentialBindingDigest: credential.bindingDigest,
-      expiresAt,
-      ...(policy === undefined ? {} : { policy }),
-      ...(activationExpiresAt === undefined ? {} : { activationExpiresAt }),
-    });
     const presentation = renderApproval(
       call,
       credential,
@@ -583,6 +615,15 @@ class LedgerActionAuthorizer implements StatefulActionAuthorizer {
             template: policy.template,
           },
     );
+    const pending = Object.freeze({
+      pendingId,
+      callDigest: call.preparedCallDigest,
+      credentialBindingDigest: credential.bindingDigest,
+      expiresAt,
+      presentation,
+      ...(policy === undefined ? {} : { policy }),
+      ...(activationExpiresAt === undefined ? {} : { activationExpiresAt }),
+    });
     this.#pending.set(pendingId, pending);
     try {
       const requestState = await this.#requestState.mint({

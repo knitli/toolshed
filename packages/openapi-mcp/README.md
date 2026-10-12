@@ -186,7 +186,7 @@ These endpoints and client
 registration must be configured by the operator. The server uses authorization
 code PKCE with S256 and a temporary `127.0.0.1` callback listener on an ephemeral
 port at `/oauth/callback`; the identity provider must support that redirect.
-The client needs URL elicitation for OAuth and form elicitation for confirmation.
+The client needs URL elicitation for OAuth.
 Open the offered authorization URL, finish login, then follow the client's resume
 flow. Unsupported elicitation fails closed.
 
@@ -234,10 +234,21 @@ If an action reports `UPSTREAM_OUTCOME_UNKNOWN`, its error includes the exact
 the uncertain outcome; the server has consumed the authorization and does not
 automatically retry the action.
 
-Actions require server-controlled authorization bound to the prepared request,
-credential profile, release, and argument digest. Review the elicited destination,
-operation, effect, and arguments, then explicitly confirm. Rejection, cancellation,
-expiry, a changed request, or a changed credential binding prevents dispatch.
+The built-in CLI denies actions with `ACTION_DENIED`: MCP client confirmation
+does not prove independent operator approval. Configured `exactPolicies` cannot
+activate through client responses alone. Search and reads remain available.
+
+An embedding can provide a host-owned `StatefulActionAuthorizer` through
+`createOpenApiMcpServer`, or use `createStdioActionAuthorizer(templates, approve)`
+from `@knitli/openapi-mcp/stdio`. The built-in elicitation authorizers require an
+`approve(presentation)` callback that authenticates operator approval outside
+the MCP requester. Without it they deny. The callback receives the frozen
+presentation bound to the exact prepared-call and credential-binding digests,
+including policy digest and expiry when activating standing authority. It must
+return literal `true` only for that approval; copying the client response or
+always returning `true` defeats this boundary. Requester confirmation is still
+required, but cannot replace the independent approval. Rejection, provider
+errors, expiry, changed bindings, and reused pending state prevent dispatch.
 Destructive operations require the stronger destructive acknowledgment. An operator
 may supply narrowly bound `exactPolicies` for eligible create/update operations;
 they are not broad scopes or a general confirmation bypass. Do not construct policy
@@ -369,8 +380,9 @@ parent must be a real, owner-only directory. Generic startup errors are delibera
 to avoid exposing config secrets; validate with `parseOpenApiStdioConfig` in a
 controlled operator process. Missing environment credentials or OAuth elicitation
 must be resolved before a call can proceed. An action refused for lack of
-confirmation needs an elicitation-capable client or an eligible reviewed exact
-policy. Do not retry a changed action with old approval state.
+confirmation needs an embedding with an independent operator approval provider;
+the built-in CLI has no such channel. Do not retry a changed action with old
+approval state.
 
 From the repository, the package checks are:
 
