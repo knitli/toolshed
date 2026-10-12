@@ -33,7 +33,7 @@ qualification inputs and checked the correlated results.
 | Two-TUI restart | Exact expired receipt recovered twice; 15 changed identity probes return Unknown; old Start refused |
 | Three-session gateway/workerd | A/B isolated; busy C2 retained through daemon restart; C1 observed history preserved through explicit attach; stale C2 fenced; one fresh C3 Start; identical observed ACK replay |
 | Cleanup and integrity | All 53 inventoried inputs unchanged; no owned processes/control sockets remain; recovery cache empty |
-| Regression checks | 568 gateway tests, four Node source-boundary checks, Ruff and vendored contract verification pass |
+| Regression checks | 568 gateway tests passed during qualification; after rebasing the test-only socket-readiness fix, all 569 pass. Four Node source-boundary checks, Ruff and vendored contract verification pass |
 
 The historical [restored build](native-restored-qualification.md) remains
 unchanged evidence for its former `62eac2…343a3` digest. It is not relabeled as
