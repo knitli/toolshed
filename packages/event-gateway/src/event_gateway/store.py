@@ -618,6 +618,26 @@ class Store:
                             (self.clock(), delivery_id))
         return True
 
+    def reject_claim(self, delivery_id, attempt_id):
+        """Retain a definitive refusal for deduplication without pending capacity."""
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id, attempt_id)
+            delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+            if (row is None or row["state"] != "claiming" or delivery["state"] != "claiming"
+                    or delivery["submission"] is not None or delivery["turn"] is not None
+                    or any(row[key] is not None for key in (
+                        "admission", "native_request", "evidence", "started_receipt", "input_recorded_receipt"))):
+                raise StoreError("invalid_transition")
+            self._spend(row)
+            self.db.execute(
+                "UPDATE attempts SET state='stale', reason='claim_refused', reserved_bytes=0, updated=? "
+                "WHERE delivery_id=? AND attempt_id=?", (self.clock(), delivery_id, attempt_id))
+            self.db.execute(
+                "UPDATE deliveries SET state='stale', reason='claim_refused', updated=? WHERE id=?",
+                (self.clock(), delivery_id))
+        return self.delivery(delivery_id)
+
     def record_admission(self, delivery_id, admission):
         from .cloud import CloudError, validate_admission
 

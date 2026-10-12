@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import time
 
-from .cloud import _iso
+from .cloud import CloudError, _iso
 from .codex import CodexError
 from .native import NativeError, validate_request, validate_receipt
 from .protocol import parse_envelope, matches_delivery_id
@@ -100,7 +100,14 @@ class Gateway:
     async def _claim(self, delivery_id):
         attempt = self.store.current_attempt(delivery_id)
         try:
-            admission = await asyncio.wait_for(self.authority.claim(attempt["envelope"]), 8)
+            try:
+                admission = await asyncio.wait_for(self.authority.claim(attempt["envelope"]), 8)
+            except CloudError as error:
+                # Pre-send failures cannot rule out an earlier lost claim response.
+                if error.ambiguous or not error.definitive_refusal:
+                    return None
+                self.store.reject_claim(delivery_id, attempt["attempt_id"])
+                return "refused"
             if isinstance(admission, dict) and admission.get("status") == "over_budget":
                 self.store.note_claim_budget(delivery_id, attempt["attempt_id"])
                 return "over_budget"
@@ -233,6 +240,8 @@ class Gateway:
         admission = await self._claim(delivery_id)
         if admission == "over_budget":
             return None, self._row(delivery_id, "over_budget")
+        if admission == "refused":
+            return None, self._row(delivery_id)
         if admission is None:
             return None, self._row(delivery_id, "claim_outcome_unknown")
         return admission, None
@@ -351,6 +360,8 @@ class Gateway:
                 admission = await self._claim(delivery_id)
                 if admission == "over_budget":
                     return self._row(delivery_id, "over_budget")
+                if admission == "refused":
+                    return self._row(delivery_id)
                 if admission is None:
                     return self._row(delivery_id, "claim_outcome_unknown")
                 return await self._retire_local(delivery_id, "recovered_claim_not_submitted")
