@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 from pathlib import Path
+import stat
 import tempfile
 import time
 import unittest
@@ -18,13 +19,22 @@ from event_gateway.store import Store, StoreError
 TEMPORARY_ROOT = Path("/tmp").resolve()  # nosec B108 - private subdirectory with a short Unix socket path
 
 
+def control_socket_ready(path):
+    # The socket appears before the daemon applies its private permissions.
+    try:
+        mode = path.stat().st_mode
+    except FileNotFoundError:
+        return False
+    return stat.S_ISSOCK(mode) and stat.S_IMODE(mode) == 0o600
+
+
 @asynccontextmanager
 async def running_daemon(state_dir):
     task = asyncio.create_task(daemon.serve(state_dir))
     socket_path = Path(state_dir) / "control.sock"
     deadline = asyncio.get_running_loop().time() + 3
     try:
-        while not socket_path.exists():
+        while not control_socket_ready(socket_path):
             if task.done():
                 await task
             if asyncio.get_running_loop().time() >= deadline:
@@ -37,6 +47,39 @@ async def running_daemon(state_dir):
 
 
 class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
+    async def test_readiness_waits_for_private_socket_permissions(self):
+        start_server = asyncio.start_unix_server
+        created, release = asyncio.Event(), asyncio.Event()
+
+        async def delayed_start(*args, **kwargs):
+            server = await start_server(*args, **kwargs)
+            Path(kwargs["path"]).chmod(0o755)
+            created.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                server.close()
+                await server.wait_closed()
+                raise
+            return server
+
+        async def status(state):
+            async with running_daemon(state):
+                return await daemon.request(state, {"command": "status"})
+
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory:
+            state = await self.state_dir(directory, "readiness")
+            with patch.object(asyncio, "start_unix_server", side_effect=delayed_start):
+                request = asyncio.create_task(status(state))
+                try:
+                    await asyncio.wait_for(created.wait(), timeout=3)
+                    await asyncio.sleep(0.03)
+                    self.assertFalse(request.done(), "fixture accepted an unready socket")
+                finally:
+                    release.set()
+                    response = await asyncio.wait_for(request, timeout=3)
+                self.assertFalse(response["automaticWakeEnabled"])
+
     async def test_get_attachment_reads_through_live_writer_with_closed_request(self):
         runtime_id = str(uuid.uuid4())
         mapping = {"runtimeId": runtime_id, "fixture": "private-mapping"}

@@ -21,6 +21,7 @@ from event_gateway.daemon import _execute_control_command
 from event_gateway.protocol import derive_delivery_id
 from event_gateway.security import SecurityError
 from event_gateway.store import IDENTITY, Store
+from test_daemon import control_socket_ready
 
 
 class CliTests(unittest.TestCase):
@@ -936,7 +937,9 @@ class CliTests(unittest.TestCase):
         try:
             socket = self.state / "control.sock"
             deadline = time.monotonic() + 5
-            while not socket.exists() and process.poll() is None and time.monotonic() < deadline:
+            while process.poll() is None and time.monotonic() < deadline:
+                if control_socket_ready(socket):
+                    break
                 time.sleep(0.02)
             self.assertIsNone(process.poll(), "daemon exited before opening control socket")
             self.assertTrue(socket.exists(), "daemon did not open control socket")
