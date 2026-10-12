@@ -260,42 +260,49 @@ class StoreTests(unittest.TestCase):
         with self.assertRaisesRegex(StoreError, "^invalid_transition$"):
             self.store.reject_claim(ident, str(uuid.uuid4()))
         self.assertEqual(list(self.store.db.iterdump()), before)
-        for table in ("deliveries", "attempts"):
+        for statement in ("UPDATE deliveries SET state=?", "UPDATE attempts SET state=?"):
             for state in ("queued", "admitted", "submitting", "ambiguous", "settlement_pending", "observed", "stale"):
-                with self.subTest(table=table, state=state):
-                    self.store.db.execute(f"UPDATE {table} SET state=?", (state,))
+                with self.subTest(statement=statement, state=state):
+                    self.store.db.execute(statement, (state,))
                     self.store.db.commit()
                     before = list(self.store.db.iterdump())
                     with self.assertRaisesRegex(StoreError, "^invalid_transition$"):
                         self.store.reject_claim(ident, self.event["attemptId"])
                     self.assertEqual(list(self.store.db.iterdump()), before)
-                    self.store.db.execute(f"UPDATE {table} SET state='claiming'")
+                    self.store.db.execute(statement, ("claiming",))
                     self.store.db.commit()
 
     def test_reject_claim_preserves_admission_and_native_evidence(self):
         ident = self.store.accept(self.event)["deliveryId"]
         self.store.begin_claim(ident)
-        for table, columns in (("attempts", ("admission", "native_request", "evidence",
-                                            "started_receipt", "input_recorded_receipt")),
-                               ("deliveries", ("submission", "turn"))):
-            for column in columns:
-                with self.subTest(table=table, column=column):
-                    self.store.db.execute(f"UPDATE {table} SET {column}='{{}}'")
-                    self.store.db.commit()
-                    before = list(self.store.db.iterdump())
-                    with self.assertRaisesRegex(StoreError, "^invalid_transition$"):
-                        self.store.reject_claim(ident, self.event["attemptId"])
-                    self.assertEqual(list(self.store.db.iterdump()), before)
-                    self.store.db.execute(f"UPDATE {table} SET {column}=NULL")
-                    self.store.db.commit()
+        for statement in (
+            "UPDATE attempts SET admission=?",
+            "UPDATE attempts SET native_request=?",
+            "UPDATE attempts SET evidence=?",
+            "UPDATE attempts SET started_receipt=?",
+            "UPDATE attempts SET input_recorded_receipt=?",
+            "UPDATE deliveries SET submission=?",
+            "UPDATE deliveries SET turn=?",
+        ):
+            with self.subTest(statement=statement):
+                self.store.db.execute(statement, ("{}",))
+                self.store.db.commit()
+                before = list(self.store.db.iterdump())
+                with self.assertRaisesRegex(StoreError, "^invalid_transition$"):
+                    self.store.reject_claim(ident, self.event["attemptId"])
+                self.assertEqual(list(self.store.db.iterdump()), before)
+                self.store.db.execute(statement, (None,))
+                self.store.db.commit()
 
     def test_reject_claim_rolls_back_both_rows_on_write_failure(self):
         ident = self.store.accept(self.event)["deliveryId"]
         self.store.begin_claim(ident)
-        for table in ("deliveries", "attempts"):
-            with self.subTest(table=table):
-                self.store.db.execute(f"""CREATE TRIGGER reject_write BEFORE UPDATE ON {table}
-                                         BEGIN SELECT RAISE(ABORT, 'write failed'); END""")
+        for statement in (
+            "CREATE TRIGGER reject_write BEFORE UPDATE ON deliveries BEGIN SELECT RAISE(ABORT, 'write failed'); END",
+            "CREATE TRIGGER reject_write BEFORE UPDATE ON attempts BEGIN SELECT RAISE(ABORT, 'write failed'); END",
+        ):
+            with self.subTest(statement=statement):
+                self.store.db.execute(statement)
                 self.store.db.commit()
                 before = list(self.store.db.iterdump())
                 with self.assertRaises(sqlite3.DatabaseError):
