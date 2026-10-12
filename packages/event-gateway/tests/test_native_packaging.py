@@ -262,6 +262,13 @@ class NativePackagingTests(unittest.TestCase):
             git("add", ".")
             git("commit", "--quiet", "-m", "pinned source")
             pinned = git("rev-parse", "HEAD")
+            git("update-index", "--skip-worktree", "source.txt")
+            tracked.write_text("modified source\n")
+            with patch.dict(PACKAGER_GLOBALS, {"UPSTREAM_COMMIT": pinned}):
+                with self.assertRaisesRegex(ValueError, "native_source_checkout_must_be_clean"):
+                    PACKAGER["_clean_checkout"](checkout, env)
+            git("update-index", "--no-skip-worktree", "source.txt")
+            tracked.write_text("pinned source\n")
             git("config", "core.autocrlf", "true")
             tracked.unlink()
             git("checkout", "--", "source.txt")
@@ -280,6 +287,63 @@ class NativePackagingTests(unittest.TestCase):
             with patch.dict(PACKAGER_GLOBALS, {"UPSTREAM_COMMIT": pinned}):
                 with self.assertRaisesRegex(ValueError, "native_source_checkout_must_be_clean"):
                     PACKAGER["_clean_checkout"](checkout, env)
+
+    def test_sparse_checkout_preserves_omissions_and_archives_the_complete_pin(self):
+        for mode in ("non-cone", "cone", "sparse-index"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                checkout = root / "checkout"
+                checkout.mkdir()
+                env = {"PATH": os.defpath, "HOME": directory, "TMPDIR": directory,
+                       "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+                executable = str(PACKAGER["_git_executable"](env))
+
+                def git(*args):
+                    return subprocess.run(  # nosec B603 - fixed Git and disposable fixture
+                        [executable, *args], cwd=checkout, env=env, check=True,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    ).stdout.strip()
+
+                git("init", "--quiet")
+                git("config", "user.name", "Native packaging test")
+                git("config", "user.email", "native-packaging@example.invalid")
+                names = ("selected/source.txt", "omitted/source.txt", "omitted/space and\nnewline.txt")
+                for name in names:
+                    file = checkout / name
+                    file.parent.mkdir(exist_ok=True)
+                    file.write_text("pinned source\n")
+                git("add", ".")
+                git("commit", "--quiet", "-m", "pinned source")
+                pinned = git("rev-parse", "HEAD")
+                arguments = ["sparse-checkout", "init", "--no-cone" if mode == "non-cone" else "--cone"]
+                if mode == "sparse-index":
+                    arguments.append("--sparse-index")
+                git(*arguments)
+                git("sparse-checkout", "set", "selected")
+                self.assertFalse((checkout / "omitted/source.txt").exists())
+                self.assertEqual(git("status", "--porcelain=v1"), "")
+                source_index = (checkout / ".git/index").read_bytes()
+                with patch.dict(PACKAGER_GLOBALS, {"UPSTREAM_COMMIT": pinned}):
+                    self.assertEqual(PACKAGER["_clean_checkout"](checkout, env), checkout.resolve())
+                    self.assertEqual((checkout / ".git/index").read_bytes(), source_index)
+                    archive = root / "archive"
+                    archive.mkdir()
+                    PACKAGER["_archive_source"](checkout, archive, env)
+                    for name in names:
+                        self.assertEqual((archive / name).read_bytes(), b"pinned source\n")
+                    (checkout / "untracked.txt").write_text("untracked\n")
+                    with self.assertRaisesRegex(ValueError, "native_source_checkout_must_be_clean"):
+                        PACKAGER["_clean_checkout"](checkout, env)
+                    (checkout / "untracked.txt").unlink()
+                    omitted = checkout / "omitted/source.txt"
+                    omitted.parent.mkdir(exist_ok=True)
+                    omitted.symlink_to(root / "missing")
+                    with self.assertRaisesRegex(ValueError, "native_source_checkout_must_be_clean"):
+                        PACKAGER["_clean_checkout"](checkout, env)
+                    omitted.unlink()
+                    (checkout / "selected/source.txt").write_text("modified source\n")
+                    with self.assertRaisesRegex(ValueError, "native_source_checkout_must_be_clean"):
+                        PACKAGER["_clean_checkout"](checkout, env)
 
     def test_archive_ignores_git_replacement_refs_for_checkout_and_archive(self):
         with tempfile.TemporaryDirectory() as directory:

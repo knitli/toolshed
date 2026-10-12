@@ -254,11 +254,11 @@ def _rustup_executable(env):
     raise ValueError("native_build_requires_rustup_1_95_0_arm64_macos")
 
 
-def _run(command, *, cwd, env=None, capture=False, stdout=None):
+def _run(command, *, cwd, env=None, capture=False, stdout=None, input=None):
     return subprocess.run(
         command, cwd=cwd, env=env, check=True, text=True, stdout=stdout or (
             subprocess.PIPE if capture else None
-        ), stderr=subprocess.PIPE if capture else None,
+        ), stderr=subprocess.PIPE if capture else None, input=input,
     )
 
 
@@ -327,6 +327,19 @@ def _clean_checkout(source, env=None, git=None):
              cwd=source, env=isolated_env, capture=True)
         _run([*isolated_git, "read-tree", UPSTREAM_COMMIT],
              cwd=source, env=isolated_env, capture=True)
+        entries = _run([*pinned_git, "ls-files", "-t", "-z"],
+                       cwd=source, env=git_env, capture=True).stdout
+        # Preserve sparse omissions without hiding existing files or copying the source index.
+        skipped = []
+        for entry in entries.split("\0"):
+            if entry.startswith("S "):
+                try:
+                    (source / entry[2:]).lstat()
+                except FileNotFoundError:
+                    skipped.append(entry[2:])
+        if skipped:
+            _run([*isolated_git, "update-index", "--skip-worktree", "-z", "--stdin"],
+                 cwd=source, env=isolated_env, capture=True, input="\0".join(skipped) + "\0")
         status = _run(
             [*isolated_git, "status", "--porcelain=v1", "--untracked-files=all"],
             cwd=source, env=isolated_env, capture=True,
