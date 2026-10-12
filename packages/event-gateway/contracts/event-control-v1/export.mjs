@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { stripTypeScriptTypes } from 'node:module';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
@@ -12,7 +12,11 @@ const base = resolve(root, 'packages/event-runtime/src');
 const names = [
   'contracts.ts', 'api.ts', 'registry.ts', 'coordinator.ts', 'coordinator-admission.ts',
   'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts',
-  'native-runtime-store.ts', 'native-admission-gate.ts',
+  'native-runtime-store.ts', 'native-admission-gate.ts', 'github/readback-contract.ts',
+  'read-authority.ts', 'request-deadline.ts', 'github/host.ts', 'github/controller.ts',
+  'github/client.ts', 'github/grants.ts', 'github/state.ts', 'github/ingress.ts',
+  '../../gatekeeper-memory/src/principals.ts', '../../openapi-operator/src/access.ts',
+  '../../gatekeeper-messaging/src/agent-token.ts',
 ];
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- Fixed source filenames under the operator-supplied local checkout.
 const source = Object.fromEntries(names.map(name => [name, readFileSync(resolve(base, name), 'utf8')]));
@@ -21,7 +25,7 @@ const revision = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encodi
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- Read package metadata beside the operator-supplied trusted Zod module.
 const zodVersion = JSON.parse(readFileSync(resolve(dirname(zodPath), 'package.json'), 'utf8')).version;
 // eslint-disable-next-line security/detect-object-injection -- Keys come only from the fixed source filename allowlist above.
-const sources = Object.fromEntries(names.map(name => [`apps/os/packages/event-runtime/src/${name}`, createHash('sha256').update(source[name]).digest('hex')]));
+const sources = Object.fromEntries(names.map(name => [`apps/os/${relative(root, resolve(base, name))}`, createHash('sha256').update(source[name]).digest('hex')]));
 if (check) {
   const pinned = JSON.parse(readFileSync(resolve(destination, 'manifest.json'), 'utf8'));
   if (revision !== pinned.revision || zodVersion !== pinned.zodVersion ||
@@ -294,6 +298,70 @@ const nativeAdmissionFixture = {
   rejections: nativeRejections.map(({ name, value }) => ({ name, value })),
   nodeProofs: nativeNodeProofs,
 };
+// Execute only the pinned DTO module; Worker runtime and provider code stay outside the export.
+const githubContract = await import(dataModule(source['github/readback-contract.ts'].replace("'zod'", JSON.stringify(zod))));
+const githubRequest = { subject: { installationId: 1, repositoryId: 2, prNumber: 3 }, fromVersion: 2, toVersion: 3 };
+const githubCursor = { subjectKey: '[1,2,3]', fromVersion: 2, toVersion: 3,
+  anchorVersion: 4, anchorEpoch: 2, observationEpoch: 1, revision: 'r1', policyRevision: 'p1', offset: 1 };
+const githubPage = { status: 'ok', subject: githubRequest.subject, requestedRange: { fromVersion: 2, toVersion: 3 },
+  coverageStartVersion: 1, anchor: { sourceVersion: 4, epoch: 2, observationEpoch: 1, observedAt: 0 },
+  items: [{ phase: 'anchor', sourceVersion: 4, epoch: 1, recordType: 'terminal', recordKey: 'state',
+    value: { from: null, to: 'open' } }], nextCursor: githubCursor, complete: false };
+const githubRequests = [
+  { name: 'first-page', value: githubRequest, accepted: true },
+  { name: 'continuation', value: { ...githubRequest, cursor: githubCursor }, accepted: true },
+  { name: 'safe-integer-limit', value: { ...githubRequest, toVersion: Number.MAX_SAFE_INTEGER }, accepted: true },
+  { name: 'unicode-cursor-limit', value: { ...githubRequest, cursor: { ...githubCursor, revision: '😀'.repeat(256) } }, accepted: true },
+  { name: 'boolean-identity', value: { ...githubRequest, subject: { ...githubRequest.subject, repositoryId: true } }, accepted: false },
+  { name: 'unsafe-integer', value: { ...githubRequest, toVersion: Number.MAX_SAFE_INTEGER + 1 }, accepted: false },
+  { name: 'reversed-range', value: { ...githubRequest, fromVersion: 4 }, accepted: false },
+  { name: 'unknown-request-field', value: { ...githubRequest, providerBody: 'private' }, accepted: false },
+  { name: 'negative-cursor-offset', value: { ...githubRequest, cursor: { ...githubCursor, offset: -1 } }, accepted: false },
+  { name: 'unicode-cursor-over-limit', value: { ...githubRequest, cursor: { ...githubCursor, revision: '😀'.repeat(257) } }, accepted: false },
+];
+const githubResults = [
+  { name: 'retained-anchor-page', value: githubPage, accepted: true },
+  { name: 'complete-page', value: { ...githubPage, nextCursor: null, complete: true }, accepted: true },
+  { name: 'coverage-unavailable', value: { status: 'coverage_unavailable' }, accepted: true },
+  { name: 'conflict', value: { status: 'conflict' }, accepted: true },
+  { name: 'unknown-result-field', value: { ...githubPage, providerBody: 'private' }, accepted: false },
+  { name: 'completion-cursor-conflict', value: { ...githubPage, complete: true }, accepted: false },
+  { name: 'future-observation-epoch', value: { ...githubPage, anchor: { ...githubPage.anchor, observationEpoch: 3 } }, accepted: false },
+  { name: 'anchor-item-epoch-mismatch', value: { ...githubPage, items: [{ ...githubPage.items[0], epoch: 2 }] }, accepted: false },
+  { name: 'cursor-observation-epoch-mismatch', value: { ...githubPage, nextCursor: { ...githubCursor, observationEpoch: 2 } }, accepted: false },
+  { name: 'unknown-item-field', value: { ...githubPage, items: [{ ...githubPage.items[0], providerBody: 'private' }] }, accepted: false },
+  { name: 'invalid-terminal-state', value: { ...githubPage, items: [{ ...githubPage.items[0], value: { from: null, to: 'deleted' } }] }, accepted: false },
+];
+const githubProjections = {
+  version: { complete: true, observedAt: 0, candidateGeneration: 0, coverageStartVersion: 1,
+    candidate: { headSha: 'a'.repeat(40), baseSha: 'b'.repeat(40), observedMergeSha: null }, state: 'open' },
+  finding: { sourceId: 'review:1', from: null, to: { presence: 'present', kind: 'review', sourceHeadSha: null,
+    fingerprint: 'a'.repeat(64), disposition: 'open', outdated: false } },
+  request: { kind: 'review_request', identity: '😀'.repeat(128), from: null, to: 'present' },
+  run: { from: null, to: { presence: 'present', kind: 'workflow', sourceId: '1', headSha: 'a'.repeat(40),
+    attempt: 1, status: 'completed', conclusion: 'success', startedAt: 0, completedAt: 1, workflowId: 1, runNumber: 1 } },
+};
+for (const [recordType, value] of Object.entries(githubProjections)) {
+  githubResults.push({ name: `${recordType}-projection`, value: { ...githubPage,
+    items: [{ ...githubPage.items[0], recordType, value }] }, accepted: true });
+}
+// The cloud strips provider metadata inside projections; qualify the emitted closed value.
+const projected = githubContract.GitHubSourceReadResultSchema.parse({ ...githubPage,
+  items: [{ ...githubPage.items[0], value: { ...githubPage.items[0].value, providerBody: 'private' } }] });
+if ('providerBody' in projected.items[0].value) throw Error('GitHub projection leaked provider metadata');
+githubResults.push({ name: 'projected-provider-metadata', value: projected, accepted: true });
+const oversizedGithubPage = { ...githubPage, nextCursor: null, complete: true,
+  items: [0, 1].map(i => ({ ...githubPage.items[0], recordKey: String(i) + 'x'.repeat(4095) })) };
+githubResults.push({ name: 'response-byte-limit', value: oversizedGithubPage, accepted: false });
+for (const vector of githubRequests) {
+  if ((githubContract.parseGitHubSourceReadRequest(vector.value) !== null) !== vector.accepted)
+    throw Error(`GitHub request vector disagrees with source: ${vector.name}`);
+}
+for (const vector of githubResults) {
+  if (githubContract.GitHubSourceReadResultSchema.safeParse(vector.value).success !== vector.accepted)
+    throw Error(`GitHub result vector disagrees with source: ${vector.name}`);
+}
+const githubSourceRead = { request: githubRequest, requests: githubRequests, results: githubResults };
 const fixture = { original, admitted, overBudget, claim,
   nativeAck,
   nativeAckNodeProof: { principal: nativeAck.principal, binding: nativeAckBinding, body: nativeAckBody, proof,
@@ -305,6 +373,7 @@ const fixture = { original, admitted, overBudget, claim,
   nodeProof: { principal: original.principal, binding, body, proof, canonical: canonicalNodeProof(original.principal, proof, binding) },
   noStart, localNoStart, noStartResult, localNoStartResult,
   nativeAdmission: nativeAdmissionFixture,
+  githubSourceRead,
   noStartNodeProof: { principal: original.principal, binding: noStartBinding, body: noStartBody, proof,
     canonical: canonicalNodeProof(original.principal, proof, noStartBinding) } };
 const json = value => JSON.stringify(value, null, 2) + '\n';

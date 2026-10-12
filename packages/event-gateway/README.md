@@ -206,8 +206,20 @@ policy so obsolete runs cannot overwrite newer results. Transient reads retry
 within a bounded budget, and unavailable evidence reports an error rather than
 claiming contract drift. Policy-only PRs retain the existing snapshots and can
 pass before the policy lands; dependent consumers remain gated until it lands.
+The control corpus includes GitHub source readback request/result vectors
+exported from the pinned cloud schema using Zod 4.5.4: numeric and Unicode
+limits, projected record types, cursor completion/epoch checks, and response
+byte limits. Consumer tests exercise these through Python validation and the
+HTTP response boundary. Request identity, pagination binding, and duplicate
+record checks remain separately tested local invariants. These vectors do not
+qualify live authorization, source initialization, delivery, or native wake.
+The source manifest also preserves the delegated read path: authority revalidation
+and deadlines, host admission and GitHub client, grants and principal allowlist,
+controller pagination/projection, subject validation, and shared identity helpers.
+These are offline source provenance, not an executable dependency bundle or proof
+of the external authority service, provider API, or Cloudflare runtime.
 Snapshot verification does not prove that every Python semantic
-edge matches TypeScript: the canonical corpus still lacks portable semantic
+edge matches TypeScript: the event-envelope corpus still lacks portable semantic
 boundary vectors. Expanding that corpus and running both validators is an open
 cross-repository qualification gate.
 
