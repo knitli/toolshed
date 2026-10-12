@@ -4,12 +4,12 @@ import asyncio
 import contextlib
 import time
 
-from .cloud import _iso
+from .cloud import CloudError, _iso
 from .codex import CodexError
 from .native import NativeError, validate_request, validate_receipt
 from .protocol import parse_envelope, matches_delivery_id
 from .security import verify
-from .store import StoreError
+from .store import StoreError, RETRYABLE_CLAIM_REFUSALS
 
 
 class Refused(ValueError):
@@ -100,9 +100,22 @@ class Gateway:
     async def _claim(self, delivery_id):
         attempt = self.store.current_attempt(delivery_id)
         try:
-            admission = await asyncio.wait_for(self.authority.claim(attempt["envelope"]), 8)
+            uncertain = self.store.note_claim_request(delivery_id, attempt["attempt_id"])
+            try:
+                admission = await asyncio.wait_for(self.authority.claim(attempt["envelope"]), 8)
+            except CloudError as error:
+                # Pre-send failures cannot rule out an earlier lost claim response.
+                if error.ambiguous or not error.definitive_refusal:
+                    return None
+                if error.code in RETRYABLE_CLAIM_REFUSALS:
+                    self.store.note_claim_refusal(delivery_id, attempt["attempt_id"], error.code, uncertain=uncertain)
+                    return error.code
+                if uncertain:
+                    return None
+                self.store.reject_claim(delivery_id, attempt["attempt_id"])
+                return "refused"
             if isinstance(admission, dict) and admission.get("status") == "over_budget":
-                self.store.note_claim_budget(delivery_id, attempt["attempt_id"])
+                self.store.note_claim_refusal(delivery_id, attempt["attempt_id"], "over_budget", uncertain=uncertain)
                 return "over_budget"
             # No await or post-admission gate may precede this durable write.
             return self.store.record_admission(delivery_id, admission)
@@ -231,8 +244,10 @@ class Gateway:
     async def _admission_or_row(self, delivery_id):
         """Claim admission; return (admission, None) or (None, early row)."""
         admission = await self._claim(delivery_id)
-        if admission == "over_budget":
-            return None, self._row(delivery_id, "over_budget")
+        if admission in ("over_budget", *RETRYABLE_CLAIM_REFUSALS):
+            return None, self._row(delivery_id, admission)
+        if admission == "refused":
+            return None, self._row(delivery_id)
         if admission is None:
             return None, self._row(delivery_id, "claim_outcome_unknown")
         return admission, None
@@ -349,8 +364,10 @@ class Gateway:
                 return self._row(delivery_id)
             if attempt["state"] == "claiming":
                 admission = await self._claim(delivery_id)
-                if admission == "over_budget":
-                    return self._row(delivery_id, "over_budget")
+                if admission in ("over_budget", *RETRYABLE_CLAIM_REFUSALS):
+                    return self._row(delivery_id, admission)
+                if admission == "refused":
+                    return self._row(delivery_id)
                 if admission is None:
                     return self._row(delivery_id, "claim_outcome_unknown")
                 return await self._retire_local(delivery_id, "recovered_claim_not_submitted")

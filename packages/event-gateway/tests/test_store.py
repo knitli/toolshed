@@ -216,6 +216,190 @@ class StoreTests(unittest.TestCase):
         self.store.record_admission(ident, self.admission())
         self.assertEqual(self.store.get(ident)["status"], "admitted")
 
+    def test_reject_claim_releases_capacity_and_retains_dedup_after_restart(self):
+        self.store.max_rows = 1
+        ident = self.store.accept(self.event)["deliveryId"]
+        self.store.begin_claim(ident)
+        self.assertGreater(self.store.current_attempt(ident)["reserved_bytes"], 0)
+        next_event = self.new_event()
+        with self.assertRaisesRegex(StoreError, "pending_capacity"):
+            self.store.accept(next_event)
+        self.store.reject_claim(ident, self.event["attemptId"])
+        attempt = self.store.current_attempt(ident)
+        self.assertEqual((attempt["state"], attempt["reason"], attempt["reserved_bytes"]),
+                         ("stale", "claim_refused", 0))
+        self.assertEqual(self.store.get(ident)["status"], "stale")
+        self.assertEqual(self.store.get(ident)["reason"], "claim_refused")
+        self.assertEqual(self.store.delivery_envelope(ident), self.event)
+        self.assertEqual(attempt["envelope"], self.event)
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.assertEqual(self.store.list_reconcilable(), [])
+        self.assertFalse(self.store.begin_claim(ident))
+        self.assertFalse(self.store.accept(next_event)["duplicate"])
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertEqual(self.store.current_attempt(ident), attempt)
+        self.assertTrue(self.store.accept(dict(self.event, attemptId=str(uuid.uuid4())))["duplicate"])
+        with self.assertRaisesRegex(StoreError, "^invalid_transition$"):
+            self.store.reject_claim(ident, self.event["attemptId"])
+        self.assertEqual(self.store.current_attempt(ident), attempt)
+        self.now += RETENTION - 1
+        self.assertEqual(self.store.cleanup(), 0)
+        self.assertIsNotNone(self.store.get(ident))
+        self.now += RETENTION
+        self.assertEqual(self.store.cleanup(), 1)
+        self.assertIsNone(self.store.get(ident))
+        self.assertIsNone(self.store.current_attempt(ident))
+
+    def test_reject_claim_requires_current_claiming_attempt(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        with self.assertRaisesRegex(StoreError, "^invalid_transition$"):
+            self.store.reject_claim(ident, self.event["attemptId"])
+        self.store.begin_claim(ident)
+        before = list(self.store.db.iterdump())
+        with self.assertRaisesRegex(StoreError, "^invalid_transition$"):
+            self.store.reject_claim(ident, str(uuid.uuid4()))
+        self.assertEqual(list(self.store.db.iterdump()), before)
+        for statement in ("UPDATE deliveries SET state=?", "UPDATE attempts SET state=?"):
+            for state in ("queued", "admitted", "submitting", "ambiguous", "settlement_pending", "observed", "stale"):
+                with self.subTest(statement=statement, state=state):
+                    self.store.db.execute(statement, (state,))
+                    self.store.db.commit()
+                    before = list(self.store.db.iterdump())
+                    with self.assertRaisesRegex(StoreError, "^invalid_transition$"):
+                        self.store.reject_claim(ident, self.event["attemptId"])
+                    self.assertEqual(list(self.store.db.iterdump()), before)
+                    self.store.db.execute(statement, ("claiming",))
+                    self.store.db.commit()
+
+    def test_reject_claim_preserves_admission_and_native_evidence(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        self.store.begin_claim(ident)
+        for statement in (
+            "UPDATE attempts SET admission=?",
+            "UPDATE attempts SET native_request=?",
+            "UPDATE attempts SET evidence=?",
+            "UPDATE attempts SET started_receipt=?",
+            "UPDATE attempts SET input_recorded_receipt=?",
+            "UPDATE deliveries SET submission=?",
+            "UPDATE deliveries SET turn=?",
+        ):
+            with self.subTest(statement=statement):
+                self.store.db.execute(statement, ("{}",))
+                self.store.db.commit()
+                before = list(self.store.db.iterdump())
+                with self.assertRaisesRegex(StoreError, "^invalid_transition$"):
+                    self.store.reject_claim(ident, self.event["attemptId"])
+                self.assertEqual(list(self.store.db.iterdump()), before)
+                self.store.db.execute(statement, (None,))
+                self.store.db.commit()
+
+    def test_reject_claim_rolls_back_both_rows_on_write_failure(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        self.store.begin_claim(ident)
+        for statement in (
+            "CREATE TRIGGER reject_write BEFORE UPDATE ON deliveries BEGIN SELECT RAISE(ABORT, 'write failed'); END",
+            "CREATE TRIGGER reject_write BEFORE UPDATE ON attempts BEGIN SELECT RAISE(ABORT, 'write failed'); END",
+        ):
+            with self.subTest(statement=statement):
+                self.store.db.execute(statement)
+                self.store.db.commit()
+                before = list(self.store.db.iterdump())
+                with self.assertRaises(sqlite3.DatabaseError):
+                    self.store.reject_claim(ident, self.event["attemptId"])
+                self.assertEqual(list(self.store.db.iterdump()), before)
+                self.store.db.execute("DROP TRIGGER reject_write")
+                self.store.db.commit()
+
+    def test_claim_request_uncertainty_survives_restart_and_fence(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        attempt = self.event["attemptId"]
+        self.store.begin_claim(ident)
+        self.assertEqual(self.store.current_attempt(ident)["claim_uncertain"], 0)
+        self.assertIs(self.store.note_claim_request(ident, attempt), False)
+        self.assertEqual(self.store.current_attempt(ident)["claim_uncertain"], 1)
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertIs(self.store.note_claim_request(ident, attempt), True)
+        self.store.detach(self.mapping["runtimeId"])
+        current = self.store.current_attempt(ident)
+        self.assertEqual((current["claim_uncertain"], current["fenced"]), (1, 1))
+        self.assertEqual(current["envelope"], self.event)
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertEqual(self.store.current_attempt(ident), current)
+
+    def test_legacy_claim_migration_defaults_to_uncertain(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        self.store.begin_claim(ident)
+        self.store.db.execute("ALTER TABLE attempts DROP COLUMN claim_uncertain")
+        self.store.db.commit()
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertEqual(self.store.current_attempt(ident)["claim_uncertain"], 1)
+        self.assertIs(self.store.note_claim_request(ident, self.event["attemptId"]), True)
+        fresh = self.new_event()
+        self.store.accept(fresh)
+        self.store.begin_claim(fresh["deliveryId"])
+        self.assertEqual(self.store.current_attempt(fresh["deliveryId"])["claim_uncertain"], 0)
+
+    def test_claim_request_rejects_wrong_attempt_and_rolls_back_write_failure(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        attempt = self.event["attemptId"]
+        self.store.begin_claim(ident)
+        before = list(self.store.db.iterdump())
+        with self.assertRaisesRegex(StoreError, "^invalid_transition$"):
+            self.store.note_claim_request(ident, str(uuid.uuid4()))
+        self.assertEqual(list(self.store.db.iterdump()), before)
+        self.store.db.execute("""CREATE TRIGGER reject_marker BEFORE UPDATE ON attempts
+                                 BEGIN SELECT RAISE(ABORT, 'write failed'); END""")
+        self.store.db.commit()
+        before = list(self.store.db.iterdump())
+        with self.assertRaises(sqlite3.DatabaseError):
+            self.store.note_claim_request(ident, attempt)
+        self.assertEqual(list(self.store.db.iterdump()), before)
+        self.store.db.execute("DROP TRIGGER reject_marker")
+        self.store.db.commit()
+        self.store.record_admission(ident, self.admission())
+        before = list(self.store.db.iterdump())
+        with self.assertRaisesRegex(StoreError, "^invalid_transition$"):
+            self.store.note_claim_request(ident, attempt)
+        self.assertEqual(list(self.store.db.iterdump()), before)
+
+    def test_claim_refusal_restores_prior_uncertainty_only_for_allowed_reasons(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        attempt = self.event["attemptId"]
+        self.store.begin_claim(ident)
+        other = self.new_event()
+        self.store.accept(other)
+        self.store.begin_claim(other["deliveryId"])
+        untouched = self.store.current_attempt(other["deliveryId"])
+        for prior in (False, True):
+            for reason in ("over_budget", "native_binding_unqualified", "capacity", "coordinator_capacity", "conflict"):
+                with self.subTest(prior=prior, reason=reason):
+                    self.assertIs(self.store.note_claim_request(ident, attempt), prior)
+                    before = self.store.current_attempt(ident)
+                    self.store.note_claim_refusal(ident, attempt, reason, uncertain=prior)
+                    self.assertEqual(self.store.current_attempt(ident),
+                                     dict(before, claim_uncertain=int(prior), reason=reason))
+                    self.assertEqual(self.store.get(ident)["reason"], reason)
+                    self.assertEqual(self.store.get(ident)["status"], "claiming")
+                    self.assertEqual(self.store.current_attempt(other["deliveryId"]), untouched)
+            self.store.note_claim_request(ident, attempt)
+        for reason in ("claim_refused", "unknown", "authentication_failed"):
+            with self.subTest(reason=reason):
+                before = list(self.store.db.iterdump())
+                with self.assertRaises(StoreError):
+                    self.store.note_claim_refusal(ident, attempt, reason, uncertain=False)
+                self.assertEqual(list(self.store.db.iterdump()), before)
+        before = list(self.store.db.iterdump())
+        with self.assertRaises(StoreError):
+            self.store.note_claim_refusal(ident, str(uuid.uuid4()), "capacity", uncertain=False)
+        self.assertEqual(list(self.store.db.iterdump()), before)
+        self.store.note_claim_budget(other["deliveryId"], other["attemptId"])
+        self.assertEqual(self.store.current_attempt(other["deliveryId"])["claim_uncertain"], 1)
+        self.assertEqual(self.store.get(other["deliveryId"])["reason"], "over_budget")
+
     def test_claim_capacity_failure_leaves_original_queued(self):
         ident = self.store.accept(self.event)["deliveryId"]
         self.store.max_bytes = self.store._size() + 10000

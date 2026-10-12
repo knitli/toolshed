@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from event_gateway.cloud import _iso
+from event_gateway.cloud import CloudClient, CloudError, Credentials, _iso
 from event_gateway.codex import CodexError
 from event_gateway.gateway import Gateway, Refused, _RuntimeLock
 from event_gateway.native import EVENT_FIELDS, IDENTITY as NATIVE_IDENTITY, NativeBridgeAdapter
@@ -558,6 +558,188 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.settlements, [(self.admissions[self.event['attemptId']], {'type': 'local_not_submitted'})])
         self.assertEqual(self.store.delivery(ident)['status'], 'queued')
         self.assertNotEqual(self.store.delivery_envelope(ident)['attemptId'], self.event['attemptId'])
+
+    async def test_definitive_cloud_refusals_release_capacity_without_native_work(self):
+        async def credentials():
+            return Credentials('access-proof', 'agent-proof')
+
+        for status, code in ((400, 'invalid_request'), (403, 'denied'), (409, 'expired')):
+            with self.subTest(status=status):
+                self.event.update(eventId=str(uuid.uuid4()), attemptId=str(uuid.uuid4()))
+                self.event['deliveryId'] = derive_delivery_id(self.event)
+                self.store.max_rows = 1
+                ident = self.accept()['deliveryId']
+
+                async def send(**_):
+                    return status, {'content-type': 'application/json'}, json.dumps({'error': code}).encode()
+
+                self.gateway.authority = CloudClient(
+                    origin='https://events.example.com', principal=self.event['principal'],
+                    agent=self.event['agent'], node_id=str(uuid.uuid4()),
+                    node_generation=self.event['nodeGeneration'], private_key=self.key,
+                    credentials=credentials, send=send, clock=lambda: self.now,
+                )
+                row = await self.gateway.dispatch(ident)
+                self.assertEqual((row['status'], row['reason']), ('stale', 'claim_refused'))
+                attempt = self.store.current_attempt(ident)
+                self.assertEqual(attempt['state'], 'stale')
+                self.assertEqual(attempt['reserved_bytes'], 0)
+                self.assertEqual(self.store.status()['pending'], 0)
+                self.assertEqual(self.store.list_reconcilable(), [])
+                self.assertTrue(self.accept()['duplicate'])
+                self.restart()
+                self.assertEqual(await self.gateway.reconcile(ident), self.store.delivery(ident))
+                self.assertEqual(await self.gateway.dispatch(ident), self.store.delivery(ident))
+        self.assertEqual(self.submissions, [])
+        self.assertEqual(self.settlements, [])
+        self.gateway.authority = self
+        self.event.update(eventId=str(uuid.uuid4()), attemptId=str(uuid.uuid4()))
+        self.event['deliveryId'] = derive_delivery_id(self.event)
+        self.store.max_rows = 1
+        ident = self.accept()['deliveryId']
+        self.assertEqual((await self.gateway.dispatch(ident))['status'], 'submitted')
+        self.assertEqual(len(self.submissions), 1)
+
+    async def test_definitive_refusal_on_recovery_preserves_earlier_ambiguous_claim(self):
+        ident = self.accept()['deliveryId']
+        self.drop_claim = True
+        await self.gateway.dispatch(ident)
+        self.restart()
+        pending = self.store.current_attempt(ident)
+
+        async def refused(envelope):
+            self.assertEqual(envelope, pending['envelope'])
+            raise CloudError('denied', definitive_refusal=True)
+
+        with patch.object(self, 'claim', refused):
+            row = await self.gateway.reconcile(ident)
+        self.assertEqual((row['status'], row['reason']), ('claiming', 'claim_outcome_unknown'))
+        current = self.store.current_attempt(ident)
+        self.assertEqual(current['attempt_id'], pending['attempt_id'])
+        self.assertEqual(current['claim_uncertain'], 1)
+        self.assertGreater(current['reserved_bytes'], 0)
+        self.assertEqual(self.submissions, [])
+        self.assertEqual(self.settlements, [])
+        self.drop_claim = False
+        self.assertEqual((await self.gateway.reconcile(ident))['status'], 'queued')
+        self.assertEqual(self.claims, [self.event, self.event])
+        self.assertEqual(self.settlements, [
+            (self.admissions[self.event['attemptId']], {'type': 'local_not_submitted'})])
+        self.assertEqual(self.submissions, [])
+
+    async def test_budget_response_cannot_erase_earlier_claim_uncertainty(self):
+        ident = self.accept()['deliveryId']
+        self.drop_claim = True
+        await self.gateway.dispatch(ident)
+        with patch.object(self, 'claim', return_value=copy.deepcopy(CLOUD_FIXTURES['overBudget'])):
+            self.assertEqual((await self.gateway.reconcile(ident))['reason'], 'over_budget')
+        self.restart()
+        with patch.object(self, 'claim', side_effect=CloudError('denied', definitive_refusal=True)):
+            self.assertEqual((await self.gateway.reconcile(ident))['status'], 'claiming')
+        attempt = self.store.current_attempt(ident)
+        self.assertEqual(attempt['claim_uncertain'], 1)
+        self.assertEqual(attempt['envelope'], self.event)
+        self.assertGreater(attempt['reserved_bytes'], 0)
+        self.assertEqual(self.submissions, [])
+        self.assertEqual(self.settlements, [])
+
+    async def test_transient_claim_refusals_recover_exact_original_envelope(self):
+        async def credentials():
+            return Credentials('access-proof', 'agent-proof')
+
+        for code in ('native_binding_unqualified', 'capacity', 'coordinator_capacity', 'conflict'):
+            with self.subTest(code=code):
+                self.event.update(eventId=str(uuid.uuid4()), attemptId=str(uuid.uuid4()))
+                self.event['deliveryId'] = derive_delivery_id(self.event)
+                ident = self.accept()['deliveryId']
+
+                async def send(**_):
+                    return 409, {'content-type': 'application/json'}, json.dumps({'error': code}).encode()
+
+                self.gateway.authority = CloudClient(
+                    origin='https://events.example.com', principal=self.event['principal'],
+                    agent=self.event['agent'], node_id=str(uuid.uuid4()),
+                    node_generation=self.event['nodeGeneration'], private_key=self.key,
+                    credentials=credentials, send=send, clock=lambda: self.now,
+                )
+                self.assertEqual((await self.gateway.dispatch(ident))['status'], 'claiming')
+                self.assertEqual(self.store.current_attempt(ident)['claim_uncertain'], 0)
+                self.restart()
+                self.gateway.authority = self
+                self.assertEqual((await self.gateway.reconcile(ident))['status'], 'queued')
+                self.assertEqual(self.claims[-1], self.event)
+                self.assertEqual(self.settlements[-1], (
+                    self.admissions[self.event['attemptId']], {'type': 'local_not_submitted'}))
+        self.assertEqual(self.submissions, [])
+
+    async def test_cancelled_claim_preserves_durable_uncertainty_after_restart(self):
+        ident = self.accept()['deliveryId']
+        entered = asyncio.Event()
+
+        async def pending(envelope):
+            self.assertEqual(envelope, self.event)
+            self.assertEqual(self.store.current_attempt(ident)['claim_uncertain'], 1)
+            entered.set()
+            await asyncio.Event().wait()
+
+        with patch.object(self, 'claim', pending):
+            task = asyncio.create_task(self.gateway.dispatch(ident))
+            await asyncio.wait_for(entered.wait(), 1)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.restart()
+        with patch.object(self, 'claim', side_effect=CloudError('denied', definitive_refusal=True)):
+            self.assertEqual((await self.gateway.reconcile(ident))['status'], 'claiming')
+        self.assertEqual(self.store.current_attempt(ident)['claim_uncertain'], 1)
+        self.assertEqual(self.submissions, [])
+        self.assertEqual(self.settlements, [])
+
+    async def test_failure_after_claim_marker_preserves_uncertainty(self):
+        ident = self.accept()['deliveryId']
+        mark = self.store.note_claim_request
+
+        def fail_after_marker(*args, **kwargs):
+            mark(*args, **kwargs)
+            raise RuntimeError('interrupted after durable claim marker')
+
+        with patch.object(self.store, 'note_claim_request', fail_after_marker):
+            self.assertEqual((await self.gateway.dispatch(ident))['status'], 'claiming')
+        self.assertEqual(self.claims, [])
+        self.restart()
+        with patch.object(self, 'claim', side_effect=CloudError('denied', definitive_refusal=True)):
+            self.assertEqual((await self.gateway.reconcile(ident))['status'], 'claiming')
+        self.assertEqual(self.store.current_attempt(ident)['claim_uncertain'], 1)
+        self.assertGreater(self.store.current_attempt(ident)['reserved_bytes'], 0)
+        self.assertEqual(self.submissions, [])
+        self.assertEqual(self.settlements, [])
+
+    async def test_failed_initial_refusal_write_preserves_claim(self):
+        ident = self.accept()['deliveryId']
+        with patch.object(self, 'claim', side_effect=CloudError('denied', definitive_refusal=True)), \
+                patch.object(self.store, 'reject_claim', side_effect=StoreError('capacity')) as reject:
+            self.assertEqual((await self.gateway.dispatch(ident))['status'], 'claiming')
+            reject.assert_called_once_with(ident, self.event['attemptId'])
+        self.restart()
+        self.assertEqual(self.store.current_attempt(ident)['claim_uncertain'], 1)
+        self.assertGreater(self.store.current_attempt(ident)['reserved_bytes'], 0)
+        self.assertEqual(self.submissions, [])
+
+    async def test_uncertain_claim_errors_preserve_recovery(self):
+        ident = self.accept()['deliveryId']
+        for error in (CloudError('request_timeout', ambiguous=True), CloudError('credentials_unavailable'),
+                      CloudError('invalid_request'), TimeoutError(), RuntimeError()):
+            with self.subTest(error=type(error).__name__), patch.object(self, 'claim', side_effect=error):
+                self.assertEqual((await self.gateway.dispatch(ident))['status'], 'claiming')
+                self.assertEqual((await self.gateway.reconcile(ident))['reason'], 'claim_outcome_unknown')
+            self.assertEqual(self.store.current_attempt(ident)['envelope'], self.event)
+            self.assertGreater(self.store.current_attempt(ident)['reserved_bytes'], 0)
+        with patch.object(self, 'claim', side_effect=CloudError('denied', definitive_refusal=True)):
+            self.assertEqual((await self.gateway.reconcile(ident))['status'], 'claiming')
+        with patch.object(self.store, 'record_admission', side_effect=CloudError('invalid_response')):
+            self.drop_claim = False
+            self.assertEqual((await self.gateway.reconcile(ident))['status'], 'claiming')
+        self.assertEqual(self.submissions, [])
 
     async def test_lost_settlement_restarts_and_replays_only_settlement(self):
         ident = self.accept()['deliveryId']
