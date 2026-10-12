@@ -936,7 +936,9 @@ class CliTests(unittest.TestCase):
         try:
             socket = self.state / "control.sock"
             deadline = time.monotonic() + 5
-            while not socket.exists() and process.poll() is None and time.monotonic() < deadline:
+            # The socket appears before the daemon applies its private permissions.
+            while (not socket.exists() or stat.S_IMODE(socket.stat().st_mode) != 0o600) \
+                    and process.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.02)
             self.assertIsNone(process.poll(), "daemon exited before opening control socket")
             self.assertTrue(socket.exists(), "daemon did not open control socket")
