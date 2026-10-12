@@ -33,10 +33,14 @@ completion of any rollout stage.
 
 ## Latest controlled evidence
 
-The 2026-10-12 run used the offline-qualified, held promotion candidate from PR
-#81 (native binary SHA-256 `62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3`;
-candidate package source revision `206fcde88551f83bd86df9bc612890e39f60d204`) and
-clean Workerd source commit `29a7a6f3f4b2c4a120b24d8defa8e38f1208de20`. The proof
+The 2026-10-12 run used the offline-qualified, held promotion candidate from
+[PR 81](https://github.com/knitli/toolshed/pull/81). Its native binary SHA-256 is
+`62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3`. The private package
+also includes the Store fix from [PR 84](https://github.com/knitli/toolshed/pull/84).
+The exact package source revision is `9721e3945d0665e8eae2b237d5b61e8339238b63`: native
+candidate base `206fcde88551f83bd86df9bc612890e39f60d204` plus the Store fix. A fresh
+non-editable wheel matches that complete source; this is not the old PR 81 wheel.
+The clean Workerd source commit is `df7cf5b1e4ac3fb40de664c594c934abdda730de`. The proof
 projection contains the exact runner, fixture, helper, installed-package, and
 Workerd bundle hashes. CI artifact provenance remains pending PR #82; this run
 does not treat the held candidate as a main-pinned or production release.
@@ -48,7 +52,14 @@ identical observed-ACK replay after daemon restart. All three native launcher
 groups, backends, and control sockets closed, as did the Workerd process group
 and fixture ports. The public projection maps each summary field to its raw
 proof field. Raw proof SHA-256:
-`c1ec1bc022ce938be3caefdcdada2074f4029305eb9cbde849910e1fa73e90b3`.
+`c8e4d1e080c725b59ac0d00bbac947cb574e6504f6d489c3c3ec72a083a097c6`.
+R18 and diagnostic R19 failed the stricter full-history assertion: reattachment
+rewrote the observed C1 attempt's fence, reason, and timestamp. Neither wrote a
+proof. R20 passes with the Store fix and verifies C1 is observed locally/remotely
+before attach and its complete history is unchanged afterward. The earlier R17
+state-only projection is superseded and retained in Git history; its original
+raw evidence remains private. No failed run was relabeled as PASS.
+
 The separate private causal sidecar keeps only C1/C3 source-nonce hashes and
 their non-reuse assertion; the public artifact carries event labels and the
 boolean assertion only.
@@ -79,8 +90,10 @@ Use explicitly selected, verified artifacts; the runner installs nothing:
   `apps/os/packages/event-runtime/src`, with bundle dependencies available.
   Supply its exact HEAD as `--cloud-commit`; the runner checks equality.
   HEAD alone does not certify a clean tree: retain input hashes and checkout state.
-- A new absolute proof filename whose parent already exists. Existing files and
-  symlinks are rejected. Choose separate stdout/stderr paths and retain failed
+- A new absolute proof filename whose parent already exists. Both it and its
+  sibling `<proof-stem>.private-causal.json` must be absent, including dangling
+  symlinks; the runner checks both before starting any subprocess. Choose separate
+  stdout/stderr paths and retain failed
   run diagnostics without relabeling them as proof.
 
 The three workerd ports must be distinct and between 1024 and 65535. Defaults
@@ -161,6 +174,10 @@ or retarget stale deliveries.
    binding rotates after every completed turn and provide an authorized,
    generation-safe path to resume the retained queue. This local fixture does not
    prove automatic busy-to-idle drain or retarget stale deliveries.
+
+The [continuity source spike](native-continuity-spike.md) identifies candidate
+turn-correlation signals and the missing causal authority contract. It supplies
+research for gate 5, without qualifying that gate.
 
 Record the exact deployed revision, executable/package hashes, session/runtime
 bindings, and redacted causal evidence for each live gate. GitHub ingestion and

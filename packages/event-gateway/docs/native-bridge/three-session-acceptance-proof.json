@@ -1,6 +1,8 @@
 {
   "candidate": {
     "codeModeHostSha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
+    "gatewayStoreFixMergeCommit": "a160fb9111a44f5d206c191cbef8f3ac8e925023",
+    "gatewayStoreFixPullRequest": 84,
     "nativeBinarySha256": "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3",
     "promotionState": "held",
     "pullRequest": 81,
@@ -39,6 +41,7 @@
         "generation",
         "serverGeneration"
       ],
+      "c1HistoryUnchangedThroughAttach": true,
       "c1LocalAfter": {
         "attemptState": "observed",
         "state": "observed"
@@ -47,6 +50,10 @@
         "attemptState": "observed",
         "state": "observed"
       },
+      "c1NativeReceiptStatusesBeforeAttach": [
+        "inputRecorded"
+      ],
+      "c1SettledBeforeAttach": true,
       "c1WorkerdAttemptStatesAfter": [
         "observed"
       ],
@@ -185,11 +192,13 @@
     "productionAdmissionProven": false
   },
   "projectionMap": {
+    "auxiliarySourceSha256.coupledWorkerdSourceHashes": "supplemental tracked-file hash at acceptanceBaseCommit; not present in raw proof",
     "candidate": [
       "candidateStatus",
       "nativeBinarySha256",
       "codeModeHostSha256"
     ],
+    "candidate.gatewayStoreFixMergeCommit": "post-run GitHub merge confirmation; not part of raw qualification proof",
     "controlledEvidence": [
       "nativeCliSessions",
       "nativePtyDrain",
@@ -220,14 +229,14 @@
       "sourceSha256",
       "installedPackageFilesSha256"
     ],
-    "auxiliarySourceSha256.coupledWorkerdSourceHashes": "supplemental tracked-file hash at acceptanceBaseCommit; not present in raw proof"
+    "provenance.supplementalPackageInputs": "externally verified private wheel/source input manifest; these commit fields are not in raw proof"
   },
   "provenance": {
     "acceptanceBaseCommit": "0dc3949d2914ca095d24bfd59eb846320e102b4d",
     "auxiliarySourceSha256": {
       "coupledWorkerdSourceHashes": "0cf80b8f9dc816e7abae13979ed61ca938fdf1a23df6b05d33e4b029ac1e6515"
     },
-    "cloudSourceCommit": "29a7a6f3f4b2c4a120b24d8defa8e38f1208de20",
+    "cloudSourceCommit": "df7cf5b1e4ac3fb40de664c594c934abdda730de",
     "installedPackageFilesSha256": {
       "__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
       "cli.py": "2b99b16f3fbc8dd9815e0975a9f983d44e65ce8ea4330afe11909766e6663086",
@@ -248,16 +257,23 @@
       "native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
       "protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
       "security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
-      "store.py": "39074958ecf7ebdb9c327bb5ecd6b91ff0f6a5a794cb8755f0145b593ae2f88a"
+      "store.py": "30f00d3e8336831cf0d6110fd7469ac0ab6c3a056b0111ffeff55981a01fdc9b"
     },
-    "rawProofSha256": "c1ec1bc022ce938be3caefdcdada2074f4029305eb9cbde849910e1fa73e90b3",
+    "rawProofSha256": "c8e4d1e080c725b59ac0d00bbac947cb574e6504f6d489c3c3ec72a083a097c6",
     "sourceSha256": {
       "broker": "8645cea1d17a07e0867c57f8f8a23fec8a33e9d8bebdebd6bd69423e28423111",
       "installedPreflight": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c",
       "launcherSmoke": "073ddf6a43248db44345e0a20d09f11ced91740186d741b9038b7f7bea5dd33e",
       "nativeHostQualifier": "5172dc602dc2f9f2a82ca02d9f8e713b30c80e51b339a993b0cad7fee83853b3",
-      "runner": "0f8083165be06fe6f8da218efc2d9c859ed7b161a6c50f65502bdff4a1065ca3",
+      "runner": "7e8300d3d5851d63ed0172d9f2c7ae83ce7ba7ed360aabce6888eefca183e6d7",
       "workerFixture": "d485bf9b1e7094f0f38453e9158bb8fdefe67136d68630fc330c2b9a6ab07f01"
+    },
+    "supplementalPackageInputs": {
+      "baseNativeCandidateCommit": "206fcde88551f83bd86df9bc612890e39f60d204",
+      "inputsManifestSha256": "ad2be1dcb7c94e65e9673db67e5ba22663a9e498a109d4b839d7c4c8a1025cb8",
+      "packageSourceCommit": "9721e3945d0665e8eae2b237d5b61e8339238b63",
+      "storeFixCommit": "e1f6b0392359ff680673b11cbb69f1025dd534dc",
+      "wheelSha256": "f62fb16b0666ca63557755fc1e178bf67126da72d20a9037b2fd4373beceb00a"
     },
     "workerdBundleSha256": "d2b7d1baa25352deaf224002c79db5a86dc7af69af751a1b73dfc8c688ce620f",
     "workerdInputsSha256": {
@@ -407,5 +423,23 @@
   },
   "qualification": "controlled-three-real-cli-production-daemon-workerd",
   "result": "PASS",
-  "schemaVersion": 1
+  "schemaVersion": 1,
+  "supersededEvidence": {
+    "defect": "Store reattachment changed observed attempt fenced, reason, and updated fields; R20 uses the Store fix.",
+    "limit": "R17 checked observed states but did not prove complete C1 history immutability.",
+    "projectionCommit": "fb33dd3dc350f8a4b2471f78f663a82e16565655",
+    "rawProofSha256": "c1ec1bc022ce938be3caefdcdada2074f4029305eb9cbde849910e1fa73e90b3",
+    "strictReruns": [
+      {
+        "rawProofWritten": false,
+        "result": "FAIL",
+        "run": "R18"
+      },
+      {
+        "rawProofWritten": false,
+        "result": "FAIL",
+        "run": "R19"
+      }
+    ]
+  }
 }

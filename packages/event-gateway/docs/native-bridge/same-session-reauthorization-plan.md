@@ -68,6 +68,10 @@ owner reauthorization; deny when that evidence is absent. Reconnect, server
 replacement, user selection, and policy changes must remain denied even if the
 final thread ID matches.
 
+The [continuity source spike](native-continuity-spike.md) proposes a sticky
+continuity-break epoch combined with exact native-started turn correlation.
+It remains unqualified; a diagnostic cause string or bare epoch is insufficient.
+
 ## Cloud dependency
 
 The [cloud retention foundation #757](https://github.com/knitli/knitli-site/pull/757)
@@ -86,6 +90,7 @@ and qualify dependency paths; pin reviewed sources/builds; run controlled
 integration; only then run separately authorized live gates from the runbook.
 
 Required behavioral proofs:
+
 - Two successive native turns complete with no manual attach; exact same session
   identity persists, historical requests remain unchanged, and each Start occurs once.
 - Busy C2 survives daemon restart, remains fenced after rotation, and its retained

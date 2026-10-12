@@ -4,10 +4,11 @@
 import argparse
 import asyncio
 import base64
-from contextlib import ExitStack, redirect_stderr, redirect_stdout
+from contextlib import ExitStack, closing, redirect_stderr, redirect_stdout
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
+from functools import partial, partialmethod
 import http.client
 import importlib.util
 from io import StringIO
@@ -23,6 +24,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 from uuid import uuid4
 
 
@@ -44,6 +46,19 @@ identity_fields = ()
 def require(value, message):
     if not value:
         raise AssertionError(message)
+
+
+def require_all(message, *conditions):
+    require(all(conditions), message)
+
+
+def is_exact_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def require_fixture_port(port):
+    require(is_exact_int(port) and 1024 <= port <= 65535,
+            "workerd fixture port outside range")
 
 
 def load_module(name, path):
@@ -201,8 +216,11 @@ def start_broker():
         require(process.stdout is not None and select.select([process.stdout], [], [], 30)[0],
                 "workerd fixture startup timed out")
         address = json.loads(process.stdout.readline())
-        require(type(address.get("port")) is int and isinstance(address.get("secret"), str),
+        require(is_exact_int(address.get("port")) and isinstance(address.get("secret"), str),
                 "workerd fixture handshake invalid")
+        require_fixture_port(address["port"])
+        require(address["port"] == args.broker_port and address["secret"],
+                "workerd fixture handshake did not match the requested broker endpoint")
         return process, broker_log, address
     except BaseException:
         try:
@@ -222,6 +240,7 @@ def start_broker():
 
 
 def port_is_closed(port):
+    require_fixture_port(port)
     probe = socket.socket()
     probe.settimeout(0.25)
     try:
@@ -236,21 +255,28 @@ def port_is_closed(port):
 
 
 def process_group_members(group_id):
-    result = subprocess.run(
+    require(is_exact_int(group_id) and group_id > 1, "process group ID outside range")
+    result = subprocess.run(  # nosec B603 - fixed system ps executable and fixed output-only arguments.
         ["/bin/ps", "-axo", "pgid=,pid="], check=True, capture_output=True,
         text=True, timeout=5,
     )
+    require(isinstance(result.stdout, str) and result.stdout.strip(),
+            "process listing was empty or malformed")
     members = []
     for line in result.stdout.splitlines():
         fields = line.split()
-        if len(fields) == 2 and fields[0].isdigit() and fields[1].isdigit() \
-                and int(fields[0]) == group_id:
-            members.append(int(fields[1]))
+        require(len(fields) == 2 and all(field.isascii() and field.isdecimal() for field in fields),
+                "process listing row was malformed")
+        process_group_id, process_id = map(int, fields)
+        require(process_group_id >= 0 and process_id > 0,
+                "process listing row was outside range")
+        if process_group_id == group_id:
+            members.append(process_id)
     return members
 
 
 def process_is_running(pid):
-    if type(pid) is not int or pid <= 1:
+    if not is_exact_int(pid) or pid <= 1:
         return False
     try:
         os.kill(pid, 0)
@@ -282,7 +308,8 @@ def verify_native_cleanup(process, state, observations, result):
     members_after_cleanup = process_group_members(process.pid)
     backend_pid = observations.get("backendPid")
     socket_path = observations.get("socketPath")
-    backend_stopped = type(backend_pid) is int and not process_is_running(backend_pid)
+    backend_stopped = (is_exact_int(backend_pid) and backend_pid > 1
+                       and not process_is_running(backend_pid))
     socket_owned = False
     if isinstance(socket_path, Path):
         try:
@@ -350,6 +377,21 @@ def configure(parsed):
     global private_key_type, serialization, smoke, host_qualifier, installed_helper, installed_proof
     global identity_fields
     args = parsed
+    output_path = Path(parsed.output)
+    require(output_path.is_absolute() and output_path.name not in ("", ".", ".."),
+            "proof output must be an absolute file path")
+    output_parent = output_path.parent.resolve(strict=True)
+    require(output_parent.is_dir(), "proof output parent must be an existing directory")
+    output_path = output_parent / output_path.name
+    sidecar_path = output_path.with_name(output_path.stem + ".private-causal.json")
+    for candidate, description in ((output_path, "proof output"),
+                                   (sidecar_path, "private causal sidecar")):
+        try:
+            candidate.lstat()
+        except FileNotFoundError:
+            continue
+        require(False, description + " must be new and must not be a symlink")
+    parsed.output = str(output_path)
     require(sys.version_info >= (3, 13), "controlled acceptance requires Python 3.13+")
     package_source = Path(parsed.package_source).resolve(strict=True)
     require(package_source.name == "event_gateway", "package source must end at src/event_gateway")
@@ -362,23 +404,30 @@ def configure(parsed):
     node = Path(installed_helper.verified_executable(parsed.node))
     binary = Path(parsed.binary).resolve(strict=True)
     cloud_source = Path(parsed.cloud_source).resolve(strict=True)
-    require(cloud_source.name == "src" and cloud_source.parent.name == "event-runtime",
+    require(cloud_source.is_dir()
+            and cloud_source.parts[-5:] == ("apps", "os", "packages", "event-runtime", "src"),
             "cloud source must end at apps/os/packages/event-runtime/src")
-    output_path = Path(parsed.output)
-    require(output_path.is_absolute() and output_path.parent.resolve(strict=True).is_dir(),
-            "output must be absolute and its parent must exist")
-    require(not output_path.is_symlink() and not output_path.exists(), "proof output must be new")
+    cloud_checkout = cloud_source.parents[4]
+    require((cloud_checkout / ".git").exists(), "cloud source must be inside a Git checkout")
     git = Path("/usr/bin/git")
     require(git.is_file() and os.access(git, os.X_OK), "system git unavailable")
-    revision = subprocess.run(
-        [str(git), "-C", str(cloud_source), "rev-parse", "HEAD"],
+    git_probe = subprocess.run(  # nosec B603 - fixed read-only git command and validated checkout path.
+        [str(git), "-C", str(cloud_checkout), "rev-parse", "--show-toplevel", "--verify", "HEAD"],
         check=True, capture_output=True, text=True, timeout=10,
-    ).stdout.strip()
+        env={"PATH": "/usr/bin:/bin", "HOME": tempfile.gettempdir(),
+             "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+             "GIT_OPTIONAL_LOCKS": "0"},
+    )
+    git_lines = git_probe.stdout.splitlines()
+    require(len(git_lines) == 2, "Git checkout readback was malformed")
+    git_root = Path(git_lines[0]).resolve(strict=True)
+    require(git_root == cloud_checkout, "cloud source is not the supplied Git checkout")
+    revision = git_lines[1].strip()
     require(revision == parsed.cloud_commit, "cloud source commit differs from proof input")
     require(len(set((parsed.entry_port, parsed.loopback_port, parsed.broker_port))) == 3,
             "workerd fixture ports must be distinct")
-    require(all(1024 <= value <= 65535 for value in (parsed.entry_port, parsed.loopback_port, parsed.broker_port)),
-            "workerd fixture port outside range")
+    for port in (parsed.entry_port, parsed.loopback_port, parsed.broker_port):
+        require_fixture_port(port)
 
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -518,7 +567,7 @@ def native_session(stack, label, shared_state, *, hold=False):
     stack.callback(check_native_cleanup)
     process, master = stack.enter_context(smoke.foreground_process(root, home, argv))
     tail = bytearray()
-    socket_path, status, binding, challenge = wait_shared_selection(
+    socket_path, status, binding, _ = wait_shared_selection(
         state, process, master, tail, known_sockets,
     )
     initially_selected_idle = (status["selection"] == "selected"
@@ -575,17 +624,33 @@ def listener_delivery(port, signed):
 def db_delivery(state, delivery_id):
     db_path = Path(state) / "ledger.sqlite"
     uri = "file:" + str(db_path) + "?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=3) as db:
+    with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
         db.execute("PRAGMA busy_timeout=3000")
         row = db.execute("SELECT state FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
         attempt = db.execute("SELECT state FROM attempts WHERE delivery_id=?", (delivery_id,)).fetchone()
         return {"state": row[0] if row else None, "attemptState": attempt[0] if attempt else None}
 
 
+def db_delivery_history(state, delivery_id):
+    db_path = Path(state) / "ledger.sqlite"
+    uri = "file:" + str(db_path) + "?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
+        db.execute("PRAGMA busy_timeout=3000")
+        db.row_factory = sqlite3.Row
+        delivery = db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+        attempts = db.execute(
+            "SELECT * FROM attempts WHERE delivery_id=? ORDER BY attempt_id", (delivery_id,),
+        ).fetchall()
+        return {
+            "delivery": dict(delivery) if delivery is not None else None,
+            "attempts": [dict(row) for row in attempts],
+        }
+
+
 def db_delivery_envelope_sha256(state, delivery_id):
     db_path = Path(state) / "ledger.sqlite"
     uri = "file:" + str(db_path) + "?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=3) as db:
+    with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
         db.execute("PRAGMA busy_timeout=3000")
         row = db.execute("SELECT envelope FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
         return digest(row[0]) if row else None
@@ -594,7 +659,7 @@ def db_delivery_envelope_sha256(state, delivery_id):
 def db_delivery_reason(state, delivery_id):
     db_path = Path(state) / "ledger.sqlite"
     uri = "file:" + str(db_path) + "?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=3) as db:
+    with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
         db.execute("PRAGMA busy_timeout=3000")
         row = db.execute("SELECT state,reason FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
         return {"state": row[0], "reason": row[1]} if row else None
@@ -618,6 +683,102 @@ def attempts_for(readback, attempt_id):
 
 def native_claims_for(readback, attempt_id):
     return [row for row in readback["cloud"]["native_claims"] if row.get("attempt_id") == attempt_id]
+
+
+def assert_c1_settled(local_delivery, local_attempts, workerd_attempts, workerd_claims,
+                      receipt_statuses):
+    require(isinstance(local_delivery, dict) and local_delivery.get("state") == "observed",
+            "C1 local delivery was not observed before fixture attach")
+    require(len(local_attempts) == 1 and local_attempts[0].get("state") == "observed",
+            "C1 local attempt was not uniquely observed before fixture attach")
+    require(len(workerd_attempts) == 1 and workerd_attempts[0].get("state") == "observed",
+            "C1 Workerd attempt was not uniquely observed before fixture attach")
+    require(len(workerd_claims) == 1, "C1 Workerd claim was not unique before fixture attach")
+    require(receipt_statuses == ["inputRecorded"],
+            "C1 native receipt was not inputRecorded before fixture attach")
+
+
+HISTORY_SAFE_FIELDS = frozenset((
+    "state", "ack_state", "reason", "status", "outcome", "created", "updated",
+    "retain_until", "reserved_bytes", "fenced", "attemptstate", "receiptstatuses",
+))
+
+
+def history_value(field, value):
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        if field.lower() in HISTORY_SAFE_FIELDS and len(value) <= 80:
+            return value
+        return {"sha256": digest(value), "characters": len(value)}
+    encoded = json.dumps(value, sort_keys=True, default=str).encode()
+    return {"type": type(value).__name__, "sha256": digest(encoded), "bytes": len(encoded)}
+
+
+def history_changes(before, after, path="root", field="", changes=None):
+    changes = [] if changes is None else changes
+    if before == after or len(changes) >= 32:
+        return changes
+    if isinstance(before, dict) and isinstance(after, dict):
+        for key in sorted(before.keys() | after.keys(), key=str):
+            if len(changes) >= 32:
+                break
+            child_path = (path + "." + str(key))[:160]
+            if key not in before or key not in after:
+                changes.append({"field": child_path, "beforePresent": key in before,
+                                "afterPresent": key in after})
+            else:
+                history_changes(before[key], after[key], child_path, str(key), changes)
+        return changes
+    if isinstance(before, list) and isinstance(after, list):
+        if len(before) != len(after):
+            changes.append({"field": (path + ".length")[:160],
+                            "before": len(before), "after": len(after)})
+        for index, (old, new) in enumerate(zip(before[:32], after[:32])):
+            if len(changes) >= 32:
+                break
+            history_changes(old, new, (path + "[" + str(index) + "]")[:160], field, changes)
+        return changes
+    changes.append({"field": path[:160], "before": history_value(field, before),
+                    "after": history_value(field, after)})
+    return changes
+
+
+def assert_c1_history_unchanged(before, after):
+    require(isinstance(before, dict) and isinstance(after, dict) and before == after,
+            "C1 history changed during fixture attach; private bounded field diff="
+            + json.dumps(history_changes(before, after), sort_keys=True))
+
+
+def ack_replay_matches(first_ack, retries):
+    if len(retries) < 2:
+        return False
+    last_retry = retries[-1]
+    return (first_ack["bodySha256"] == last_retry["bodySha256"]
+            and first_ack["proofNonceSha256"] != last_retry["proofNonceSha256"])
+
+
+def has_attempt_state(rows, states):
+    return bool(rows) and rows[0].get("state") in states
+
+
+def attachment_matches_current(mapping, status, previous, binding, session_id):
+    return (mapping is not None and status.get("status") == "present"
+            and status.get("runtimeGeneration") == previous["runtimeGeneration"] + 1
+            and status.get("attachmentGeneration") == previous["attachmentGeneration"] + 1
+            and mapping.get("runtimeGeneration") == status.get("runtimeGeneration")
+            and mapping.get("attachmentGeneration") == status.get("attachmentGeneration")
+            and mapping.get("nativeBinding") == binding
+            and mapping.get("sessionId") == session_id)
+
+
+def c3_settled_once(attempts, claims, starts, total_starts, expected_total):
+    return (len(attempts) == 1 and attempts[0].get("state") == "observed"
+            and len(claims) == 1 and len(starts) == 1 and total_starts == expected_total)
+
+
+def pty_drained(row):
+    return row["bytesRead"] > 0 and row["readCount"] > 0
 
 
 TRANSPORT_ATTEMPT_FIELDS = ("state", "reservation_state", "transport_status", "permit_id",
@@ -668,6 +829,947 @@ async def wait_stable_session_binding(session, provider, *, minimum_turn_main_re
     raise AssertionError("native binding/model activity did not stabilize after completed turn")
 
 
+def fixture(ctx, path, body=None):
+    status, _, raw = post(ctx.address["port"], ctx.fixture_secret, path, body)
+    require(status == 200, "workerd fixture rejected " + path)
+    return json.loads(raw)
+
+
+async def send(ctx, **request):
+    require(request["method"] == "POST" and request["url"].startswith(ORIGIN + "/"),
+            "CloudClient left the closed fixture origin")
+    require((request["timeout"], request["max_response_bytes"], request["follow_redirects"])
+            == (5, 8192, False), "CloudClient request limits changed")
+    path = request["url"].removeprefix(ORIGIN)
+    body = json.loads(request["body"])
+    proof = json.loads(request["headers"]["x-event-node-proof"])
+    response = await asyncio.to_thread(
+        post, ctx.address["port"], ctx.fixture_secret, path, request["body"], request["headers"], limit=8192,
+    )
+    response_summary = None
+    if path == "/v1/runtimes/status":
+        try:
+            value = json.loads(response[2])
+            native_binding = value.get("nativeBinding") if isinstance(value, dict) else None
+            response_summary = {
+                "keys": sorted(value) if isinstance(value, dict) else None,
+                "status": value.get("status") if isinstance(value, dict) else None,
+                "generationValues": (
+                    {key: value.get(key) for key in
+                     ("runtimeGeneration", "nodeGeneration", "attachmentGeneration")}
+                    if isinstance(value, dict) else None
+                ),
+                "bindingKeys": sorted(native_binding) if isinstance(native_binding, dict) else None,
+            }
+        except (TypeError, ValueError):
+            response_summary = {"parse": "failed"}
+    ctx.wire_evidence.append({
+        "path": path, "bodySha256": digest(request["body"]), "responseStatus": response[0],
+        "proofNonceSha256": digest(proof["nonce"]),
+        "ackStatus": body.get("status") if path == "/v1/ack" else None,
+        "deliverySha256": digest(body["deliveryId"]) if "deliveryId" in body else None,
+        "responseSummary": response_summary,
+    })
+    if (path == "/v1/ack" and body.get("status") == "observed"
+            and body.get("deliveryId") == ctx.transport["targetDelivery"] and response[0] == 200):
+        if not ctx.transport["firstLost"]:
+            ctx.transport["firstLost"] = True
+            result = json.loads(response[2])
+            require(result.get("status") == "observed", "workerd did not commit observed ACK before loss")
+            ctx.transport["lostReply"].set()
+            raise TimeoutError("controlled lost reply after workerd commit")
+        if ctx.transport["pauseRetry"]:
+            ctx.transport["retryWaiting"].set()
+            await ctx.transport["allowRetry"].wait()
+    return response
+
+
+def observe_session_request(ctx, state_dir, session_id, message, *, native_request=None):
+    label = ctx.session_labels.get(session_id)
+    if message.get("command") == "challenge" and label in ctx.challenge_calls:
+        ctx.challenge_calls[label] += 1
+    if message.get("command") == "nativeStart":
+        require(label in ctx.start_calls, "native Start came from an unknown session")
+        request_value = native_request or {}
+        ctx.start_calls[label].append({
+            "eventId": request_value.get("event", {}).get("eventId"),
+            "attemptId": request_value.get("attemptId"),
+            "threadId": request_value.get("threadId"),
+        })
+    try:
+        result = ctx.original_session_request(state_dir, session_id, message, native_request=native_request)
+    except Exception as error:
+        if message.get("command") == "nativeReceipt" and label in ctx.receipt_errors:
+            ctx.receipt_errors[label].append(getattr(error, "code", str(error)))
+        raise
+    if message.get("command") == "nativeReceipt" and label in ctx.receipt_calls:
+        ctx.receipt_calls[label].append(result.get("outcome", {}).get("status"))
+    return result
+
+
+def observe_list_pending(store, ctx):
+    rows = ctx.original_list_pending(store)
+    ctx.pending_scans.append(len(rows))
+    return rows
+
+
+def observe_list_reconcilable(store, ctx):
+    rows = ctx.original_list_reconcilable(store)
+    ctx.reconcilable_scans.append([row.get("state") for row in rows])
+    return rows
+
+
+async def observe_dispatch(gateway, ctx, delivery_id):
+    label = ctx.dispatch_labels.get(delivery_id, "unlabeled")
+    ctx.dispatch_calls.append(label)
+    try:
+        result = await ctx.original_dispatch(gateway, delivery_id)
+    except Exception as error:
+        ctx.dispatch_errors.append(type(error).__name__)
+        raise
+    ctx.dispatch_results.append({"delivery": label, "status": result.get("status"),
+                             "reason": result.get("reason")})
+    if label == "A" and result.get("status") == "submitted":
+        ctx.submission_returned.set()
+    return result
+
+
+async def observe_reconcile(gateway, ctx, delivery_id):
+    result = await ctx.original_reconcile(gateway, delivery_id)
+    ctx.reconcile_results.append({"status": result.get("status"), "reason": result.get("reason")})
+    return result
+
+
+async def observe_adapter_check(adapter, ctx):
+    try:
+        result = await ctx.original_adapter_check(adapter)
+    except Exception as error:
+        ctx.adapter_checks.append({"result": "error", "error": type(error).__name__,
+                               "code": getattr(error, "code", str(error))})
+        raise
+    ctx.adapter_checks.append({"result": result,
+                           "eligible": adapter.witness.get("eligible") if adapter.witness else None,
+                           "threadMatches": (adapter.witness.get("threadId") == adapter.thread_id
+                                             if adapter.witness else None)})
+    return result
+
+
+async def observe_adapter_reconcile(adapter, ctx, request):
+    try:
+        result = await ctx.original_adapter_reconcile(adapter, request)
+    except Exception as error:
+        ctx.adapter_receipts.append({"result": "error", "error": type(error).__name__,
+                                 "code": getattr(error, "code", str(error))})
+        raise
+    ctx.adapter_receipts.append({"result": result.get("outcome", {}).get("status")})
+    return result
+
+
+def observe_bridge_challenge(bridge, ctx):
+    try:
+        witness = ctx.original_bridge_challenge(bridge)
+    except Exception as error:
+        ctx.bridge_challenge_observations.append({"result": "error",
+                                              "error": type(error).__name__,
+                                              "code": getattr(error, "code", str(error))})
+        raise
+    ctx.bridge_challenge_observations.append({"result": "witness",
+                                          "eligible": witness.get("eligible")})
+    return witness
+
+
+async def initialize_runtime(ctx, resources):
+    for label in ("A", "B", "C"):
+        session = native_session(resources, label, ctx.state, hold=False)
+        ctx.sessions[label] = session
+        ctx.session_labels[session["sessionId"]] = label
+    require(len({session["sessionId"] for session in ctx.sessions.values()}) == 3,
+            "three native sessions did not receive distinct session IDs")
+    for field in ("clientId", "threadId"):
+        require(len({session["binding"][field] for session in ctx.sessions.values()}) == 3,
+                "three native sessions did not receive distinct " + field + " values")
+    ctx.all_initially_selected_idle = all(
+        session["initiallySelectedIdle"] for session in ctx.sessions.values()
+    )
+    require(ctx.all_initially_selected_idle,
+            "one or more native sessions were not selected and idle before delivery")
+
+    ctx.runtime_ids = {label: str(uuid4()) for label in ctx.sessions}
+    ctx.attached = {}
+    for label, session in ctx.sessions.items():
+        try:
+            ctx.attached[label] = await admit_runtime(ctx.admission_cloud, session, ctx.runtime_ids[label])
+        except Exception as error:
+            readback = ctx.fixture("/fixture/admission")
+            stored_clients = []
+            for row in readback["native_runtime_bindings"]:
+                try:
+                    stored_clients.append(digest(json.loads(row["binding_json"])["clientId"]))
+                except (KeyError, TypeError, ValueError):
+                    stored_clients.append("invalid")
+            raise AssertionError("native runtime attach failed: " + json.dumps({
+                "label": label,
+                "code": getattr(error, "code", type(error).__name__),
+                "sessionCount": len(ctx.sessions),
+                "distinctClientHashes": len({digest(value["binding"]["clientId"])
+                                               for value in ctx.sessions.values()}),
+                "distinctThreadHashes": len({digest(value["binding"]["threadId"])
+                                              for value in ctx.sessions.values()}),
+                "clientHashes": {name: digest(value["binding"]["clientId"])
+                                 for name, value in ctx.sessions.items()},
+                "storedClientHashes": stored_clients,
+                "persistedRuntimeCount": len(readback["runtimes"]),
+            }, sort_keys=True)) from None
+    ctx.admission_readback = ctx.fixture("/fixture/admission")
+    require_all("workerd did not persist three independent native attachments",
+                len(ctx.admission_readback["runtimes"]) == 3,
+                len(ctx.admission_readback["native_runtime_bindings"]) == 3)
+
+    ctx.deliveries = {}
+    for label, session in ctx.sessions.items():
+        delivery = ctx.fixture("/fixture/setup", {
+            "runtimeId": ctx.runtime_ids[label], "nodeId": ctx.node_id,
+            "transportPrivateKey": b64(ctx.transport_key.private_bytes(
+                serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )),
+            "subjectId": "three-session-route-" + label.lower(),
+        })
+        envelope = delivery["envelope"]
+        mapping = {key: envelope[key] for key in identity_fields}
+        current = ctx.attached[label]["attached"]
+        mapping.update({
+            "nativeThreadId": current["nativeBinding"]["threadId"],
+            "nativeBinding": current["nativeBinding"],
+            "sessionId": session["sessionId"],
+            "leaseExpiresAt": datetime.fromisoformat(
+                current["leaseUntil"].replace("Z", "+00:00")
+            ).timestamp(),
+        })
+        require(all(mapping[key] == envelope[key] for key in identity_fields),
+                "signed delivery differs from admitted attachment")
+        ctx.deliveries[label] = {"envelope": envelope, "signed": delivery["signedDelivery"],
+                             "mapping": mapping}
+        ctx.dispatch_labels[envelope["deliveryId"]] = label
+
+    pem = ctx.node_key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    key_path = ctx.state / "node-key.pem"
+    descriptor = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(pem)
+    private_json(ctx.state / "credentials.json", {"accessToken": FIXTURE_ACCESS,
+                                               "agentToken": FIXTURE_AGENT})
+    private_json(ctx.state / "cloud.json", {
+        "version": 1, "origin": ORIGIN, "principal": PRINCIPAL, "agent": AGENT,
+        "nodeId": ctx.node_id, "nodeGeneration": 1, "credentialsFile": "credentials.json",
+    })
+    with Store(ctx.state) as store:
+        for label in ("A", "B", "C"):
+            store.put_attachment(ctx.deliveries[label]["mapping"])
+    ctx.listen_port = free_port()
+    private_json(ctx.state / "dispatch.json", {
+        "version": 1, "cloudConfig": "cloud.json", "listenHost": "127.0.0.1",
+        "listenPort": ctx.listen_port,
+        "transportKeys": {"fixture-transport": b64(ctx.transport_key.public_key().public_bytes_raw())},
+    })
+
+
+async def start_daemon(ctx):
+    task = asyncio.create_task(daemon.serve(ctx.state, dispatch_config=ctx.state / "dispatch.json"))
+    await wait_until(lambda: (ctx.state / "control.sock").exists() or task.done(),
+                     "production daemon startup timed out")
+    if task.done():
+        await task
+    status = await daemon.request(ctx.state, {"command": "status"})
+    require(status["automaticWakeEnabled"] is True
+            and status["dispatch"]["listenerReady"]
+            and status["dispatch"]["workerRunning"],
+            "production daemon dispatch path not ready")
+    return task
+
+
+async def stop_daemon(ctx, task):
+    task.cancel()
+    result, = await asyncio.gather(task, return_exceptions=True)
+    require(isinstance(result, asyncio.CancelledError), "production daemon exited unexpectedly")
+    await wait_until(lambda: not (ctx.state / "control.sock").exists(),
+                     "production daemon control socket survived stop")
+
+
+async def deliver(ctx, label, delivery):
+    status, raw = await asyncio.to_thread(listener_delivery, ctx.listen_port, delivery["signed"])
+    require(status == 202, "production listener refused signed " + label + " delivery")
+    return json.loads(raw)
+
+
+async def wait_observed(ctx, label):
+    delivery_id = ctx.deliveries[label]["envelope"]["deliveryId"]
+    await wait_until(lambda: db_delivery(ctx.state, delivery_id)["state"] == "observed",
+                     label + " delivery did not reach observed state")
+    cloud = ctx.fixture("/fixture/read")
+    attempt_id = ctx.deliveries[label]["envelope"]["attemptId"]
+    observed = attempts_for(cloud, attempt_id)
+    require(len(observed) == 1 and observed[0]["state"] == "observed",
+            label + " delivery missing observed Workerd attempt")
+    return cloud
+
+
+async def run_ab_routes(ctx):
+    # Configure A's observed reply loss to stop the first daemon after commit.
+    ctx.transport.update(targetDelivery=ctx.deliveries["A"]["envelope"]["deliveryId"], pauseRetry=True)
+    ctx.daemon_task = await ctx.start_daemon()
+    await ctx.deliver("A-only", ctx.deliveries["A"])
+    await wait_until(ctx.submission_returned.is_set,
+                     "production daemon did not submit A's idle-session event")
+    await ctx.stop_daemon(ctx.daemon_task)
+    ctx.daemon_task = None
+    await wait_until(lambda: ctx.sessions["A"]["process"].poll() is None
+                     and len(ctx.sessions["A"]["provider"].main_requests) >= 2
+                     and launcher.session_status(ctx.sessions["A"]["state"], ctx.sessions["A"]["sessionId"])
+                     .get("selection") == "selected",
+                     "A's native input did not finish while the daemon was stopped")
+    ctx.daemon_task = await ctx.start_daemon()
+    try:
+        await wait_until(ctx.transport["lostReply"].is_set,
+                         "workerd observed-ACK reply was not deliberately lost")
+    except AssertionError as error:
+        local = db_delivery(ctx.state, ctx.deliveries["A"]["envelope"]["deliveryId"])
+        cloud = ctx.fixture("/fixture/read")["cloud"]
+        try:
+            dispatch_status = await daemon.request(ctx.state, {"command": "status"})
+        except Exception as status_error:
+            dispatch_status = {"controlError": type(status_error).__name__}
+        diagnostic = {
+            "nativeStarts": {label: len(ctx.start_calls[label]) for label in ctx.start_calls},
+            "challengeRequests": ctx.challenge_calls,
+            "wirePaths": [row["path"] for row in ctx.wire_evidence[-24:]],
+            "localDelivery": local,
+            "cloudRows": {table: len(cloud[table]) for table in
+                          ("attempts", "deliveries", "native_claims", "slot_intents")},
+            "providerRequests": len(ctx.sessions["A"]["provider"].requests),
+            "providerKinds": list(ctx.sessions["A"]["provider"].requests),
+            "providerErrors": list(ctx.sessions["A"]["provider"].errors),
+            "dispatchStatus": dispatch_status.get("dispatch"),
+            "pendingScans": ctx.pending_scans[-16:],
+            "reconcilableScans": ctx.reconcilable_scans[-8:],
+            "reconcileResults": ctx.reconcile_results[-8:],
+            "receiptCalls": {label: calls[-12:] for label, calls in ctx.receipt_calls.items()},
+            "receiptErrors": {label: calls[-12:] for label, calls in ctx.receipt_errors.items()},
+            "adapterReceipts": ctx.adapter_receipts[-12:],
+            "dispatchCallCount": len(ctx.dispatch_calls),
+            "dispatchResults": ctx.dispatch_results[-8:],
+            "dispatchErrors": ctx.dispatch_errors[-8:],
+            "adapterChecks": ctx.adapter_checks[-12:],
+            "bridgeChallenges": ctx.bridge_challenge_observations[-12:],
+            "daemonTaskDone": ctx.daemon_task.done(),
+            "daemonTaskError": (type(ctx.daemon_task.exception()).__name__
+                                if ctx.daemon_task.done() and ctx.daemon_task.exception() else None),
+            "sessionStates": {label: {
+                "selection": launcher.session_status(session["state"], session["sessionId"]).get("selection"),
+                "attached": launcher.session_status(session["state"], session["sessionId"]).get("attached"),
+            } for label, session in ctx.sessions.items()},
+        }
+        raise AssertionError(str(error) + "; bounded diagnostic="
+                             + json.dumps(diagnostic, sort_keys=True)) from None
+    await wait_until(ctx.transport["retryWaiting"].is_set,
+                     "daemon did not retry exact observed ACK")
+    ctx.state_before_replay = ctx.fixture("/fixture/read")
+    ctx.first_ack = [row for row in ctx.wire_evidence if row["path"] == "/v1/ack"
+                 and row["ackStatus"] == "observed"
+                 and row["deliverySha256"] == digest(ctx.transport["targetDelivery"])][0]
+    await ctx.stop_daemon(ctx.daemon_task)
+    ctx.daemon_task = None
+    ctx.transport["pauseRetry"] = False
+    ctx.transport["allowRetry"].set()
+    ctx.daemon_task = await ctx.start_daemon()
+    await wait_until(lambda: db_delivery(ctx.state, ctx.deliveries["A"]["envelope"]["deliveryId"])["state"]
+                     == "observed", "A ACK was not recovered after daemon restart")
+    ctx.state_after_replay = await ctx.wait_observed("A")
+    ctx.second_acks = [row for row in ctx.wire_evidence if row["path"] == "/v1/ack"
+                    and row["ackStatus"] == "observed"
+                    and row["deliverySha256"] == digest(ctx.transport["targetDelivery"])]
+    require(ack_replay_matches(ctx.first_ack, ctx.second_acks),
+            "daemon restart did not replay identical ACK bytes with fresh proof")
+    require(ctx.state_after_replay == ctx.state_before_replay,
+            "observed-ACK replay changed committed Workerd state")
+    require_all("A-only delivery escaped its native session",
+                len(ctx.start_calls["A"]) == 1, not ctx.start_calls["B"], not ctx.start_calls["C"])
+    ctx.a_route_counts = {label: len(ctx.start_calls[label]) for label in ctx.start_calls}
+
+    await ctx.deliver("B-only", ctx.deliveries["B"])
+    await ctx.wait_observed("B")
+    require_all("B-only delivery escaped its native session",
+                len(ctx.start_calls["A"]) == 1, len(ctx.start_calls["B"]) == 1,
+                not ctx.start_calls["C"])
+    ctx.b_route_counts = {label: len(ctx.start_calls[label]) for label in ctx.start_calls}
+
+
+async def run_busy_stage(ctx):
+    # C's first controlled turn holds its local model request open. A second
+    # signed delivery must remain locally queued without a claim or native Start.
+    c_first = ctx.fixture("/fixture/setup", {
+        "runtimeId": ctx.runtime_ids["C"], "nodeId": ctx.node_id,
+        "transportPrivateKey": b64(ctx.transport_key.private_bytes(
+            serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )),
+        "subjectId": "three-session-c-busy-first",
+    })
+    ctx.c_first_envelope = c_first["envelope"]
+    ctx.dispatch_labels[ctx.c_first_envelope["deliveryId"]] = "C-busy-first"
+    c_first_signed = c_first["signedDelivery"]
+    c_second = ctx.fixture("/fixture/setup", {
+        "runtimeId": ctx.runtime_ids["C"], "nodeId": ctx.node_id,
+        "transportPrivateKey": b64(ctx.transport_key.private_bytes(
+            serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )),
+        "subjectId": "three-session-c-busy-second",
+    })
+    ctx.c_second_envelope = c_second["envelope"]
+    ctx.dispatch_labels[ctx.c_second_envelope["deliveryId"]] = "C-busy-second"
+    c_second_signed = c_second["signedDelivery"]
+    c_second_transport_rows = attempts_for(ctx.fixture("/fixture/read"), ctx.c_second_envelope["attemptId"])
+    ctx.c_second_transport_baseline = transport_attempt_snapshot(c_second_transport_rows)
+    require(ctx.c_second_transport_baseline == {
+        "state": "created", "reservation_state": "none", "transport_status": "sending",
+        "permit_id": None, "submission_id": None, "turn_id": None,
+    }, "fixture did not create the expected unreserved C2 transport-attempt baseline")
+    ctx.sessions["C"]["provider"].hold_next = True
+    ctx.sessions["C"]["provider"].release_hold.clear()
+    c_first_status, _ = await asyncio.to_thread(listener_delivery, ctx.listen_port, c_first_signed)
+    require(c_first_status == 202, "production listener refused C busy-first delivery")
+    await wait_until(ctx.sessions["C"]["provider"].hold_started.is_set,
+                     "C native CLI did not enter the controlled busy state")
+    c_first_id = ctx.c_first_envelope["deliveryId"]
+    await wait_until(lambda: db_delivery(ctx.state, c_first_id)["attemptState"] in
+                     ("submitted", "observed"), "C busy-first event did not reach native Start")
+    c_first_cloud = ctx.fixture("/fixture/read")
+    c_first_attempts = attempts_for(c_first_cloud, ctx.c_first_envelope["attemptId"])
+    require(has_attempt_state(c_first_attempts, ("submitted", "observed")),
+            "C busy-first event did not persist in Workerd")
+    ctx.starts_before_busy_delivery = len(ctx.start_calls["C"])
+    require(ctx.starts_before_busy_delivery == 1, "C busy-first event did not issue exactly one native Start")
+    status, _ = await asyncio.to_thread(listener_delivery, ctx.listen_port, c_second_signed)
+    require(status == 202, "production listener refused C busy delivery")
+    await wait_until(lambda: db_delivery(ctx.state, ctx.c_second_envelope["deliveryId"])["state"] == "queued",
+                     "C busy delivery was not durably queued")
+    ctx.c_second_envelope_sha256 = db_delivery_envelope_sha256(
+        ctx.state, ctx.c_second_envelope["deliveryId"],
+    )
+    require(ctx.c_second_envelope_sha256 is not None,
+            "queued C2 envelope was unavailable for immutability check")
+
+    try:
+        await wait_until(lambda: bool(ctx.c_second_busy_dispositions()),
+                         "production dispatch did not return C's busy disposition", timeout=10)
+    except AssertionError as error:
+        cloud = ctx.fixture("/fixture/read")
+        diagnostic = {
+            "cSecondDispatchCalls": ctx.dispatch_calls.count("C-busy-second"),
+            "cSecondDispatchResults": [row for row in ctx.dispatch_results
+                                        if row["delivery"] == "C-busy-second"][-8:],
+            "localDelivery": db_delivery(ctx.state, ctx.c_second_envelope["deliveryId"]),
+            "attemptCount": len(attempts_for(cloud, ctx.c_second_envelope["attemptId"])),
+            "claimCount": len(native_claims_for(cloud, ctx.c_second_envelope["attemptId"])),
+            "nativeStartCount": len(ctx.start_calls["C"]),
+            "providerRequests": len(ctx.sessions["C"]["provider"].requests),
+            "providerErrors": list(ctx.sessions["C"]["provider"].errors),
+            "daemonTaskDone": ctx.daemon_task.done(),
+        }
+        raise AssertionError(str(error) + "; bounded diagnostic="
+                             + json.dumps(diagnostic, sort_keys=True)) from None
+    await asyncio.sleep(1.5)
+    c_second_cloud = ctx.fixture("/fixture/read")
+    c_second_local = db_delivery(ctx.state, ctx.c_second_envelope["deliveryId"])
+    c_second_attempts = attempts_for(c_second_cloud, ctx.c_second_envelope["attemptId"])
+    c_second_claims = native_claims_for(c_second_cloud, ctx.c_second_envelope["attemptId"])
+    c_second_transport_after_busy = transport_attempt_snapshot(c_second_attempts)
+    c_second_start_calls = [start for label in ctx.start_calls
+                            for start in ctx.start_calls[label]
+                            if start["attemptId"] == ctx.c_second_envelope["attemptId"]]
+    busy_assertions = {
+        "localDelivery": c_second_local,
+        "busyDispositions": ctx.c_second_busy_dispositions()[-4:],
+        "transportAttemptCount": len(c_second_attempts),
+        "transportAttemptBaseline": ctx.c_second_transport_baseline,
+        "transportAttemptAfterBusy": c_second_transport_after_busy,
+        "claimCount": len(c_second_claims),
+        "nativeStartCount": len(c_second_start_calls),
+        "totalCStarts": len(ctx.start_calls["C"]),
+        "expectedCStarts": ctx.starts_before_busy_delivery,
+    }
+    require_all(
+        "C busy delivery did not remain queued after production returned busy; diagnostic="
+        + json.dumps(busy_assertions, sort_keys=True),
+        c_second_local == {"state": "queued", "attemptState": None},
+        bool(ctx.c_second_busy_dispositions()),
+        db_delivery_envelope_sha256(ctx.state, ctx.c_second_envelope["deliveryId"])
+        == ctx.c_second_envelope_sha256,
+        c_second_transport_after_busy == ctx.c_second_transport_baseline,
+        not c_second_claims, not c_second_start_calls,
+        len(ctx.start_calls["C"]) == ctx.starts_before_busy_delivery,
+    )
+    await ctx.stop_daemon(ctx.daemon_task)
+    ctx.daemon_task = None
+    require_all(
+        "stopping the daemon did not retain C's queue while its native turn stayed busy",
+        db_delivery(ctx.state, ctx.c_second_envelope["deliveryId"])
+        == {"state": "queued", "attemptState": None},
+        db_delivery_envelope_sha256(ctx.state, ctx.c_second_envelope["deliveryId"])
+        == ctx.c_second_envelope_sha256,
+        ctx.sessions["C"]["provider"].hold_started.is_set(),
+        not ctx.sessions["C"]["provider"].release_hold.is_set(),
+        len(ctx.start_calls["C"]) == ctx.starts_before_busy_delivery,
+    )
+    ctx.busy_result_count = len(ctx.c_second_busy_dispositions())
+    ctx.daemon_task = await ctx.start_daemon()
+    await wait_until(lambda: len(ctx.c_second_busy_dispositions()) > ctx.busy_result_count,
+                     "restarted daemon did not observe C still busy", timeout=10)
+    await asyncio.sleep(1.0)
+    c_second_cloud_after_restart = ctx.fixture("/fixture/read")
+    c_second_attempts_after_restart = attempts_for(
+        c_second_cloud_after_restart, ctx.c_second_envelope["attemptId"],
+    )
+    c_second_transport_after_restart = transport_attempt_snapshot(c_second_attempts_after_restart)
+    require_all(
+        "restarted busy delivery did not remain queued without cloud or native start",
+        db_delivery(ctx.state, ctx.c_second_envelope["deliveryId"])
+        == {"state": "queued", "attemptState": None},
+        db_delivery_envelope_sha256(ctx.state, ctx.c_second_envelope["deliveryId"])
+        == ctx.c_second_envelope_sha256,
+        c_second_transport_after_restart == ctx.c_second_transport_baseline,
+        not native_claims_for(c_second_cloud_after_restart, ctx.c_second_envelope["attemptId"]),
+        len(ctx.start_calls["C"]) == ctx.starts_before_busy_delivery,
+    )
+    await ctx.stop_daemon(ctx.daemon_task)
+    ctx.daemon_task = None
+    ctx.sessions["C"]["provider"].release_hold.set()
+    ctx.current_binding = await wait_stable_session_binding(
+        ctx.sessions["C"], ctx.sessions["C"]["provider"],
+        minimum_turn_main_requests=2, timeout=75,
+    )
+    ctx.same_binding_after_turn = ctx.current_binding == ctx.sessions["C"]["binding"]
+    queued_while_stopped = db_delivery(ctx.state, ctx.c_second_envelope["deliveryId"])
+    require(queued_while_stopped["state"] == "queued",
+            "C busy delivery did not remain queued while the daemon was stopped")
+    require(not ctx.same_binding_after_turn,
+            "controlled C turn did not rotate its native binding for explicit reattachment")
+
+
+async def run_fixture_attach(ctx):
+    # A changed native identity cannot inherit C2. Use the normal CLI
+    # attach path with Workerd's current generations and fresh native
+    # challenge while the daemon is stopped; Store fences the old queue.
+    c_first_id = ctx.c_first_envelope["deliveryId"]
+    ctx.c_first_before_attach = db_delivery(ctx.state, c_first_id)
+    c_first_local_history_before_attach = db_delivery_history(ctx.state, c_first_id)
+    c_first_workerd_before_attach = ctx.fixture("/fixture/read")
+    ctx.c_first_attempts_before_attach = attempts_for(
+        c_first_workerd_before_attach, ctx.c_first_envelope["attemptId"],
+    )
+    ctx.c_first_claims_before_attach = native_claims_for(
+        c_first_workerd_before_attach, ctx.c_first_envelope["attemptId"],
+    )
+    ctx.c_first_receipts_before_attach = list(ctx.receipt_calls["C"])
+    assert_c1_settled(
+        c_first_local_history_before_attach["delivery"],
+        c_first_local_history_before_attach["attempts"],
+        ctx.c_first_attempts_before_attach, ctx.c_first_claims_before_attach,
+        ctx.c_first_receipts_before_attach,
+    )
+    c_first_history_before_attach = {
+        "localDelivery": c_first_local_history_before_attach["delivery"],
+        "localAttempts": c_first_local_history_before_attach["attempts"],
+        "workerdAttempts": ctx.c_first_attempts_before_attach,
+        "workerdClaims": ctx.c_first_claims_before_attach,
+        "receiptStatuses": ctx.c_first_receipts_before_attach,
+    }
+    with Store(ctx.state) as store:
+        c_mapping_before_attach = store.get_attachment(ctx.runtime_ids["C"])
+    require(c_mapping_before_attach is not None,
+            "C local attachment was missing before fixture attach")
+    require(c_mapping_before_attach["nativeBinding"] == ctx.sessions["C"]["binding"],
+            "C local attachment did not retain its original binding before fixture attach")
+    ctx.changed_binding_fields = sorted(
+        key for key, value in ctx.current_binding.items()
+        if c_mapping_before_attach["nativeBinding"].get(key) != value
+    )
+    require(bool(ctx.changed_binding_fields), "C native binding changed without any field delta")
+    try:
+        ctx.c_status_before_attach = await ctx.admission_cloud.runtime_status(ctx.runtime_ids["C"])
+    except Exception as error:
+        raise AssertionError("runtime status readback failed before fixture attach: "
+                             + json.dumps({"error": type(error).__name__,
+                                           "wire": ctx.wire_evidence[-1:]}, sort_keys=True)) from None
+    require_all("fixture runtime status did not report the stored qualified C attachment",
+                ctx.c_status_before_attach["status"] == "present",
+                ctx.c_status_before_attach["storedQualified"] is True)
+    attach_argv = [
+        "--state-dir", str(ctx.state), "attach",
+        "--runtime-id", ctx.runtime_ids["C"],
+        "--session-id", ctx.sessions["C"]["sessionId"],
+        "--cloud-config", str(ctx.state / "cloud.json"),
+        "--expected-runtime-generation", str(ctx.c_status_before_attach["runtimeGeneration"]),
+        "--expected-attachment-generation", str(ctx.c_status_before_attach["attachmentGeneration"]),
+    ]
+    attach_exit, ctx.attach_result = await asyncio.to_thread(run_cli_capture, attach_argv)
+    require_all("production attach CLI did not commit and persist the fixture binding",
+                attach_exit == 0, ctx.attach_result.get("remoteStatus") == "attached",
+                ctx.attach_result.get("localStatus") == "current")
+    ctx.c_status_after_attach = await ctx.admission_cloud.runtime_status(ctx.runtime_ids["C"])
+    with Store(ctx.state) as store:
+        ctx.c_mapping_after_attach = store.get_attachment(ctx.runtime_ids["C"])
+    attached_current = attachment_matches_current(
+        ctx.c_mapping_after_attach, ctx.c_status_after_attach, ctx.c_status_before_attach,
+        ctx.current_binding, ctx.sessions["C"]["sessionId"],
+    )
+    require(attached_current,
+            "production attach CLI mapping mismatch: "
+            + json.dumps({
+                "exit": attach_exit,
+                "remoteStatus": ctx.attach_result.get("remoteStatus"),
+                "localStatus": ctx.attach_result.get("localStatus"),
+                "statusBefore": {key: ctx.c_status_before_attach.get(key) for key in
+                                 ("status", "runtimeGeneration", "attachmentGeneration")},
+                "statusAfter": {key: ctx.c_status_after_attach.get(key) for key in
+                                ("status", "runtimeGeneration", "attachmentGeneration")},
+                "mappingAfter": ({"runtimeGeneration": ctx.c_mapping_after_attach.get("runtimeGeneration"),
+                                  "attachmentGeneration": ctx.c_mapping_after_attach.get("attachmentGeneration"),
+                                  "bindingMatches": ctx.c_mapping_after_attach.get("nativeBinding")
+                                  == ctx.current_binding,
+                                  "sessionMatches": ctx.c_mapping_after_attach.get("sessionId")
+                                  == ctx.sessions["C"]["sessionId"]}
+                                 if ctx.c_mapping_after_attach else None),
+            }, sort_keys=True))
+    ctx.c_second_after_attach = db_delivery(ctx.state, ctx.c_second_envelope["deliveryId"])
+    ctx.c_second_after_attach_reason = db_delivery_reason(ctx.state, ctx.c_second_envelope["deliveryId"])
+    ctx.c_second_envelope_after_attach_sha256 = db_delivery_envelope_sha256(
+        ctx.state, ctx.c_second_envelope["deliveryId"],
+    )
+    ctx.c_second_cloud_after_attach = ctx.fixture("/fixture/read")
+    ctx.c_second_transport_after_attach = transport_attempt_snapshot(
+        attempts_for(ctx.c_second_cloud_after_attach, ctx.c_second_envelope["attemptId"]),
+    )
+    require_all("explicit attach did not fence old-generation C2 without a claim or native Start",
+                ctx.c_second_after_attach == {"state": "stale", "attemptState": None},
+                ctx.c_second_after_attach_reason == {"state": "stale", "reason": "attachment_detached"},
+                ctx.c_second_transport_after_attach == ctx.c_second_transport_baseline,
+                ctx.c_second_envelope_after_attach_sha256 == ctx.c_second_envelope_sha256,
+                not native_claims_for(ctx.c_second_cloud_after_attach, ctx.c_second_envelope["attemptId"]),
+                len(ctx.start_calls["C"]) == ctx.starts_before_busy_delivery)
+    ctx.c_second_restart_disposition = "stale_after_explicit_fixture_attach"
+    ctx.c_first_after_attach = db_delivery(ctx.state, c_first_id)
+    c_first_local_history_after_attach = db_delivery_history(ctx.state, c_first_id)
+    c_first_workerd_after_attach = ctx.fixture("/fixture/read")
+    ctx.c_first_attempts_after_attach = attempts_for(
+        c_first_workerd_after_attach, ctx.c_first_envelope["attemptId"],
+    )
+    ctx.c_first_claims_after_attach = native_claims_for(
+        c_first_workerd_after_attach, ctx.c_first_envelope["attemptId"],
+    )
+    ctx.c_first_receipts_after_attach = list(ctx.receipt_calls["C"])
+    assert_c1_settled(
+        c_first_local_history_after_attach["delivery"],
+        c_first_local_history_after_attach["attempts"],
+        ctx.c_first_attempts_after_attach, ctx.c_first_claims_after_attach,
+        ctx.c_first_receipts_after_attach,
+    )
+    c_first_history_after_attach = {
+        "localDelivery": c_first_local_history_after_attach["delivery"],
+        "localAttempts": c_first_local_history_after_attach["attempts"],
+        "workerdAttempts": ctx.c_first_attempts_after_attach,
+        "workerdClaims": ctx.c_first_claims_after_attach,
+        "receiptStatuses": ctx.c_first_receipts_after_attach,
+    }
+    assert_c1_history_unchanged(c_first_history_before_attach, c_first_history_after_attach)
+
+
+async def run_post_attach_c3(ctx):
+    # Reuse C's real CLI session with a fresh fixture nonce; its prior
+    # C1 conversation already contains the first nonce by design.
+    ctx.c1_source_nonce_sha256 = ctx.sessions["C"]["provider"].source_nonce_sha256
+    ctx.sessions["C"]["provider"].nonce = "three-session-source-c-after-attach-" + uuid4().hex
+    ctx.c3_source_nonce_sha256 = digest(ctx.sessions["C"]["provider"].nonce)
+    require(ctx.c3_source_nonce_sha256 != ctx.c1_source_nonce_sha256,
+            "post-attach source nonce was reused")
+    ctx.sessions["C"]["provider"].source_nonce_sha256 = ctx.c3_source_nonce_sha256
+    ctx.sessions["C"]["provider"].source_path.write_text(
+        ctx.sessions["C"]["provider"].nonce + "\n",
+    )
+    ctx.sessions["C"]["provider"].turn_main_requests.clear()
+    ctx.sessions["C"]["provider"].turn_title_count = 0
+    ctx.sessions["C"]["provider"].phase = "post-attach"
+    host_qualifier.CALL_ID = "three-session-source-read-" + uuid4().hex
+    c_third = ctx.fixture("/fixture/setup", {
+        "runtimeId": ctx.runtime_ids["C"], "nodeId": ctx.node_id,
+        "transportPrivateKey": b64(ctx.transport_key.private_bytes(
+            serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )),
+        "subjectId": "three-session-c-after-attach",
+    })
+    c_third_envelope = c_third["envelope"]
+    ctx.dispatch_labels[c_third_envelope["deliveryId"]] = "C-after-attach"
+    ctx.daemon_task = await ctx.start_daemon()
+    c_third_status, _ = await asyncio.to_thread(
+        listener_delivery, ctx.listen_port, c_third["signedDelivery"],
+    )
+    require(c_third_status == 202, "production listener refused C delivery after fixture attach")
+    await wait_until(
+        lambda: db_delivery(ctx.state, c_third_envelope["deliveryId"])["state"] == "observed",
+        "new C delivery did not settle after explicit fixture attach", timeout=30,
+    )
+    c_third_workerd = ctx.fixture("/fixture/read")
+    ctx.c_third_attempts = attempts_for(c_third_workerd, c_third_envelope["attemptId"])
+    ctx.c_third_claims = native_claims_for(c_third_workerd, c_third_envelope["attemptId"])
+    ctx.c_third_start_calls = [start for label in ctx.start_calls for start in ctx.start_calls[label]
+                           if start["attemptId"] == c_third_envelope["attemptId"]]
+    require(c3_settled_once(ctx.c_third_attempts, ctx.c_third_claims, ctx.c_third_start_calls,
+                            len(ctx.start_calls["C"]), ctx.starts_before_busy_delivery + 1),
+            "new-generation C delivery did not claim, start, and settle exactly once")
+    c_binding_after_third = await wait_stable_session_binding(
+        ctx.sessions["C"], ctx.sessions["C"]["provider"],
+        minimum_turn_main_requests=2, timeout=45,
+    )
+    ctx.c_binding_fields_after_third = sorted(
+        key for key, value in c_binding_after_third.items()
+        if ctx.c_mapping_after_attach["nativeBinding"].get(key) != value
+    )
+    await ctx.stop_daemon(ctx.daemon_task)
+    ctx.daemon_task = None
+
+
+def build_proof(ctx):
+    pty_drain = {
+        label: {"bytesRead": session["ptyPumpStats"]["bytesRead"],
+                "readCount": session["ptyPumpStats"]["readCount"]}
+        for label, session in ctx.sessions.items()
+    }
+    require(all(pty_drained(row) for row in pty_drain.values()),
+            "one or more native CLI PTYs were not drained during the acceptance run")
+    summaries = {
+        label: {
+            "runtimeSha256": digest(ctx.runtime_ids[label]),
+            "sessionSha256": digest(ctx.sessions[label]["sessionId"]),
+            "threadSha256": digest(ctx.sessions[label]["binding"]["threadId"]),
+            "nativeStartCount": len(ctx.start_calls[label]),
+        "initiallySelectedIdle": ctx.sessions[label]["initiallySelectedIdle"],
+        }
+        for label in ctx.sessions
+    }
+    provider_errors = {label: list(session["provider"].errors)
+                       for label, session in ctx.sessions.items()}
+    require(not any(provider_errors.values()),
+            "synthetic provider rejected a CLI request: "
+            + json.dumps(provider_errors, sort_keys=True))
+    package_files = {
+        str(Path(path).relative_to(ctx.installed_proof["packageRoot"])): file_digest
+        for path, file_digest in ctx.installed_proof["verifiedSha256"].items()
+    }
+    cloud_root = ctx.cloud_source.parents[2]
+    workerd_inputs = {}
+    for path, file_digest in ctx.address["bundle"]["inputs"].items():
+        source = Path(path).resolve(strict=True)
+        try:
+            relative = source.relative_to(cloud_root)
+        except ValueError:
+            continue
+        workerd_inputs[str(relative)] = file_digest
+    ctx.proof = {
+        "result": "PASS",
+        "qualification": "controlled-three-real-cli-production-daemon-workerd",
+        "candidateStatus": "offline-qualified-held-promotion-candidate-pr81",
+        "productionAdmissionProven": False,
+        "liveMeshProven": False,
+        "liveOwnerAccessProven": False,
+        "liveManualCanaryProven": False,
+        "nativeBinarySha256": ctx.args.binary_sha256,
+        "codeModeHostSha256": launcher.QUALIFIED_CODE_MODE_HOST_SHA256,
+        "installedPackageFilesSha256": package_files,
+        "cloudSourceCommit": ctx.args.cloud_commit,
+        "workerdBundleSha256": ctx.address["bundle"]["sha256"],
+        "workerdInputsSha256": workerd_inputs,
+        "productionEntrypoints": ["event_gateway.daemon.serve", "event_gateway.listener.Listener",
+                                  "event_gateway.native.SessionNativeBridge", "event_gateway.gateway.Gateway"],
+        "nativeCliSessions": summaries,
+        "nativePtyDrain": pty_drain,
+        "nativeProcessCleanup": {label: session["processCleanup"]
+                                  for label, session in ctx.sessions.items()},
+        "controlledModelRequests": {label: len(ctx.sessions[label]["provider"].requests)
+                                     for label in ctx.sessions},
+        "admissionReadback": {"runtimes": len(ctx.admission_readback["runtimes"]),
+                               "nativeBindings": len(ctx.admission_readback["native_runtime_bindings"])},
+        "idleDispatch": {"allThreeInitiallySelectedAndIdle": ctx.all_initially_selected_idle,
+                         "eventTriggeredNativeInput": True,
+                         "liveUserWakeQualified": False},
+        "routing": {"AOnly": {"AStarts": ctx.a_route_counts["A"], "BStarts": ctx.a_route_counts["B"],
+                               "CStarts": ctx.a_route_counts["C"], "observed": True},
+                    "BOnly": {"AStarts": ctx.b_route_counts["A"], "BStarts": ctx.b_route_counts["B"],
+                               "CStarts": ctx.b_route_counts["C"], "observed": True}},
+        "busyC": {"dispatchEligible": not bool(ctx.c_second_busy_dispositions()),
+                  "listenerAccepted": True,
+                  "localStateWhileBusy": "queued", "transportAttemptUnchanged": True,
+                  "nativeClaimCreated": False,
+                  "nativeStartWhileBusy": False,
+                  "productionBusyDisposition": "client_unavailable_or_busy",
+                  "busyDispatchCount": len(ctx.c_second_busy_dispositions())},
+        "sourceNonceTransition": {"firstDelivery": "C1", "freshDelivery": "C3",
+                                  "nonReuse": True},
+        "busyDeliveryRestart": {"queuedWhileDaemonStopped": True,
+                                 "restartedWhileNativeTurnBusy": True,
+                                 "queuedAfterBusyRestart": True,
+                                 "transportAttemptUnchanged": True,
+                                 "nativeClaimCreated": False,
+                                 "busyDispatchCountAfterRestart": len(ctx.c_second_busy_dispositions())
+                                 - ctx.busy_result_count,
+                                 "bindingUnchangedAfterFirstTurn": ctx.same_binding_after_turn,
+                                 "disposition": ctx.c_second_restart_disposition,
+                                 "nativeStartCountAtRestart": ctx.starts_before_busy_delivery},
+        "explicitFixtureAttach": {
+            "productionCliPath": True, "syntheticFixtureAuthority": True,
+            "remoteStatus": ctx.attach_result.get("remoteStatus"),
+            "localStatus": ctx.attach_result.get("localStatus"),
+            "runtimeGenerationBefore": ctx.c_status_before_attach["runtimeGeneration"],
+            "runtimeGenerationAfter": ctx.c_status_after_attach["runtimeGeneration"],
+            "attachmentGenerationBefore": ctx.c_status_before_attach["attachmentGeneration"],
+            "attachmentGenerationAfter": ctx.c_status_after_attach["attachmentGeneration"],
+            "bindingChangedFields": ctx.changed_binding_fields,
+            "storedBindingMatchesCurrentSession": True,
+            "c1SettledBeforeAttach": True,
+            "c1HistoryUnchangedThroughAttach": True,
+            "c1LocalBefore": ctx.c_first_before_attach,
+            "c1LocalAfter": ctx.c_first_after_attach,
+            "c1WorkerdAttemptStatesBefore": sorted(
+                row["state"] for row in ctx.c_first_attempts_before_attach
+            ),
+            "c1WorkerdAttemptStatesAfter": sorted(
+                row["state"] for row in ctx.c_first_attempts_after_attach
+            ),
+            "c1WorkerdClaimCountsBeforeAfter": [len(ctx.c_first_claims_before_attach),
+                                                len(ctx.c_first_claims_after_attach)],
+            "c1NativeReceiptStatusesBeforeAttach": ctx.c_first_receipts_before_attach[-8:],
+            "c2LocalAfter": ctx.c_second_after_attach,
+            "c2FenceReason": ctx.c_second_after_attach_reason["reason"],
+            "c2TransportAttemptUnchanged":
+                ctx.c_second_transport_after_attach == ctx.c_second_transport_baseline,
+            "c2EnvelopeImmutableThroughFence":
+                ctx.c_second_envelope_after_attach_sha256 == ctx.c_second_envelope_sha256,
+            "c2ClaimCountAfter": len(native_claims_for(
+                ctx.c_second_cloud_after_attach, ctx.c_second_envelope["attemptId"],
+            )),
+            "c2NativeStartCountAfter": len([start for start in ctx.start_calls["C"]
+                if start["attemptId"] == ctx.c_second_envelope["attemptId"]]),
+        },
+        "postAttachC3": {"listenerAccepted": True, "localState": "observed",
+                         "workerdAttemptCount": len(ctx.c_third_attempts),
+                         "workerdAttemptState": ctx.c_third_attempts[0]["state"],
+                         "workerdClaimCount": len(ctx.c_third_claims),
+                         "nativeStartCount": len(ctx.c_third_start_calls),
+                         "exactlyOneStartOnC": len(ctx.start_calls["C"])
+                         == ctx.starts_before_busy_delivery + 1,
+                         "bindingChangedAfterCompletedTurn": bool(ctx.c_binding_fields_after_third),
+                         "changedBindingFields": ctx.c_binding_fields_after_third},
+        "observedAckRestart": {"daemonRestarted": True, "nativeProcessRestarted": False,
+                                "firstReplyLostAfterWorkerdCommit": True,
+                                "ackBodyBytesIdentical": True, "proofNonceChanged": True,
+                                "nativeStartCount": len(ctx.start_calls["A"])},
+        "fixtureBoundaries": ["synthetic Access and Messaging identity/budget",
+                              "fixture owner manual publication",
+                              "fixture queue and queue metrics", "loopback transport instead of Mesh",
+                              "synthetic local model provider"],
+        "controlledAssertions": {"threeIndependentAttachments": True,
+                                  "aOnlyAndBOnlySessionIsolation": True,
+                                  "busyDeliveryRemainsDurableWithoutStart": True,
+                                  "changedBindingRequiresExplicitAttach": True,
+                                  "oldGenerationDeliveryFencedWithoutStart": True,
+                                  "newGenerationDeliverySettledExactlyOnce": True,
+                                  "observedAckReplayLeavesWorkerdStateUnchanged": True,
+                                  "exactObservedAckRetryAfterDaemonRestart": True},
+        "sourceSha256": {
+            "runner": digest(HERE.joinpath("three-session-workerd.py").read_bytes()),
+            "workerFixture": digest(HERE.joinpath("coupled-workerd-worker.ts").read_bytes()),
+            "broker": digest(HERE.joinpath("coupled-workerd-broker.mjs").read_bytes()),
+            "nativeHostQualifier": digest(Path(host_qualifier.__file__).read_bytes()),
+            "launcherSmoke": digest(Path(smoke.__file__).read_bytes()),
+            "installedPreflight": digest(Path(installed_helper.__file__).read_bytes()),
+        },
+        "cloudWireCount": len(ctx.wire_evidence),
+        "realModelCalls": 0,
+        "evidenceNote": "IDs are represented only by SHA-256; credentials, native mappings, and raw wire bodies are omitted.",
+    }
+    encoded = json.dumps(ctx.proof, sort_keys=True)
+    require_all("proof output contains a credential or native mapping",
+                FIXTURE_ACCESS not in encoded,
+                FIXTURE_AGENT not in encoded,
+                '"nativeBinding":' not in encoded,
+                '"transportPrivateKey":' not in encoded)
+    require(len(encoded.encode()) <= 32_768, "proof exceeds fixed metadata bound")
+    ctx.private_nonce_record = {
+        "sourceNonceSha256": {"C1": ctx.c1_source_nonce_sha256, "C3": ctx.c3_source_nonce_sha256},
+        "nonReuse": ctx.c1_source_nonce_sha256 != ctx.c3_source_nonce_sha256,
+    }
+    return ctx.proof, ctx.private_nonce_record
+
+
+def c_second_busy_dispositions(ctx):
+    return [row for row in ctx.dispatch_results
+            if row["delivery"] == "C-busy-second"
+            and row["reason"] == "client_unavailable_or_busy"]
+
+
+async def cleanup_scenario(ctx):
+    if ctx.daemon_task is not None:
+        ctx.daemon_task.cancel()
+        await asyncio.gather(ctx.daemon_task, return_exceptions=True)
+    if "C" in ctx.sessions:
+        ctx.sessions["C"]["provider"].release_hold.set()
+    restore_observers(ctx)
+    finish_scenario_cleanup(ctx)
+
+
+def finish_scenario_cleanup(ctx):
+    cleanup_error = None
+    try:
+        broker_cleanup = stop_broker(ctx.broker, ctx.broker_log)
+        if ctx.proof is not None:
+            ctx.proof["brokerCleanup"] = broker_cleanup
+    except AssertionError as error:
+        cleanup_error = error
+    if cleanup_error is not None and sys.exc_info()[0] is None:
+        raise cleanup_error
+    if cleanup_error is not None:
+        print(str(cleanup_error), file=sys.stderr)
+    if ctx.private_nonce_record is not None:
+        private_path = Path(ctx.args.output).with_name(Path(ctx.args.output).stem + ".private-causal.json")
+        try:
+            private_json(private_path, ctx.private_nonce_record)
+        except OSError as error:
+            if cleanup_error is None:
+                raise AssertionError("private nonce causal record unavailable: "
+                                     + type(error).__name__) from None
+            print("private nonce causal record unavailable: " + type(error).__name__,
+                  file=sys.stderr)
+    if ctx.state_root.exists():
+        import shutil
+        shutil.rmtree(ctx.state_root)
+
+
+def restore_observers(ctx):
+    client_runtime._send_https = ctx.original_send_https
+    launcher._session_request = ctx.original_session_request
+    Store.list_pending = ctx.original_list_pending
+    Store.list_reconcilable = ctx.original_list_reconcilable
+    daemon.Gateway.dispatch = ctx.original_dispatch
+    daemon.Gateway.reconcile = ctx.original_reconcile
+    daemon.NativeBridgeAdapter.check = ctx.original_adapter_check
+    daemon.NativeBridgeAdapter.reconcile = ctx.original_adapter_reconcile
+    SessionNativeBridge.challenge = ctx.original_bridge_challenge
+
+
 async def run_scenario():
     broker, broker_log, address = start_broker()
     proof = None
@@ -710,905 +1812,51 @@ async def run_scenario():
     adapter_checks = []
     bridge_challenge_observations = []
     fixture_secret = address["secret"]
-
-    def fixture(path, body=None):
-        status, _, raw = post(address["port"], fixture_secret, path, body)
-        require(status == 200, "workerd fixture rejected " + path)
-        return json.loads(raw)
-
-    async def send(**request):
-        nonlocal transport
-        require(request["method"] == "POST" and request["url"].startswith(ORIGIN + "/"),
-                "CloudClient left the closed fixture origin")
-        require((request["timeout"], request["max_response_bytes"], request["follow_redirects"])
-                == (5, 8192, False), "CloudClient request limits changed")
-        path = request["url"].removeprefix(ORIGIN)
-        body = json.loads(request["body"])
-        proof = json.loads(request["headers"]["x-event-node-proof"])
-        response = await asyncio.to_thread(
-            post, address["port"], fixture_secret, path, request["body"], request["headers"], limit=8192,
-        )
-        response_summary = None
-        if path == "/v1/runtimes/status":
-            try:
-                value = json.loads(response[2])
-                native_binding = value.get("nativeBinding") if isinstance(value, dict) else None
-                response_summary = {
-                    "keys": sorted(value) if isinstance(value, dict) else None,
-                    "status": value.get("status") if isinstance(value, dict) else None,
-                    "generationValues": {key: value.get(key) for key in
-                                         ("runtimeGeneration", "nodeGeneration", "attachmentGeneration")}
-                                        if isinstance(value, dict) else None,
-                    "bindingKeys": sorted(native_binding) if isinstance(native_binding, dict) else None,
-                }
-            except (TypeError, ValueError):
-                response_summary = {"parse": "failed"}
-        wire_evidence.append({
-            "path": path, "bodySha256": digest(request["body"]), "responseStatus": response[0],
-            "proofNonceSha256": digest(proof["nonce"]),
-            "ackStatus": body.get("status") if path == "/v1/ack" else None,
-            "deliverySha256": digest(body["deliveryId"]) if "deliveryId" in body else None,
-            "responseSummary": response_summary,
-        })
-        if (path == "/v1/ack" and body.get("status") == "observed"
-                and body.get("deliveryId") == transport["targetDelivery"] and response[0] == 200):
-            if not transport["firstLost"]:
-                transport["firstLost"] = True
-                result = json.loads(response[2])
-                require(result.get("status") == "observed", "workerd did not commit observed ACK before loss")
-                transport["lostReply"].set()
-                raise TimeoutError("controlled lost reply after workerd commit")
-            if transport["pauseRetry"]:
-                transport["retryWaiting"].set()
-                await transport["allowRetry"].wait()
-        return response
-
-    def observe_session_request(state_dir, session_id, message, *, native_request=None):
-        label = session_labels.get(session_id)
-        if message.get("command") == "challenge" and label in challenge_calls:
-            challenge_calls[label] += 1
-        if message.get("command") == "nativeStart":
-            require(label in start_calls, "native Start came from an unknown session")
-            request_value = native_request or {}
-            start_calls[label].append({
-                "eventId": request_value.get("event", {}).get("eventId"),
-                "attemptId": request_value.get("attemptId"),
-                "threadId": request_value.get("threadId"),
-            })
-        try:
-            result = original_session_request(state_dir, session_id, message, native_request=native_request)
-        except Exception as error:
-            if message.get("command") == "nativeReceipt" and label in receipt_errors:
-                receipt_errors[label].append(getattr(error, "code", str(error)))
-            raise
-        if message.get("command") == "nativeReceipt" and label in receipt_calls:
-            receipt_calls[label].append(result.get("outcome", {}).get("status"))
-        return result
-
-    def observe_list_pending(store):
-        rows = original_list_pending(store)
-        pending_scans.append(len(rows))
-        return rows
-
-    def observe_list_reconcilable(store):
-        rows = original_list_reconcilable(store)
-        reconcilable_scans.append([row.get("state") for row in rows])
-        return rows
-
-    async def observe_dispatch(gateway, delivery_id):
-        label = dispatch_labels.get(delivery_id, "unlabeled")
-        dispatch_calls.append(label)
-        try:
-            result = await original_dispatch(gateway, delivery_id)
-        except Exception as error:
-            dispatch_errors.append(type(error).__name__)
-            raise
-        dispatch_results.append({"delivery": label, "status": result.get("status"),
-                                 "reason": result.get("reason")})
-        if label == "A" and result.get("status") == "submitted":
-            submission_returned.set()
-        return result
-
-    async def observe_reconcile(gateway, delivery_id):
-        result = await original_reconcile(gateway, delivery_id)
-        reconcile_results.append({"status": result.get("status"), "reason": result.get("reason")})
-        return result
-
-    async def observe_adapter_check(adapter):
-        try:
-            result = await original_adapter_check(adapter)
-        except Exception as error:
-            adapter_checks.append({"result": "error", "error": type(error).__name__,
-                                   "code": getattr(error, "code", str(error))})
-            raise
-        adapter_checks.append({"result": result,
-                               "eligible": adapter.witness.get("eligible") if adapter.witness else None,
-                               "threadMatches": (adapter.witness.get("threadId") == adapter.thread_id
-                                                 if adapter.witness else None)})
-        return result
-
-    async def observe_adapter_reconcile(adapter, request):
-        try:
-            result = await original_adapter_reconcile(adapter, request)
-        except Exception as error:
-            adapter_receipts.append({"result": "error", "error": type(error).__name__,
-                                     "code": getattr(error, "code", str(error))})
-            raise
-        adapter_receipts.append({"result": result.get("outcome", {}).get("status")})
-        return result
-
-    def observe_bridge_challenge(bridge):
-        try:
-            witness = original_bridge_challenge(bridge)
-        except Exception as error:
-            bridge_challenge_observations.append({"result": "error",
-                                                  "error": type(error).__name__,
-                                                  "code": getattr(error, "code", str(error))})
-            raise
-        bridge_challenge_observations.append({"result": "witness",
-                                              "eligible": witness.get("eligible")})
-        return witness
-
-    launcher._session_request = observe_session_request
-    Store.list_pending = observe_list_pending
-    Store.list_reconcilable = observe_list_reconcilable
-    daemon.Gateway.dispatch = observe_dispatch
-    daemon.Gateway.reconcile = observe_reconcile
-    daemon.NativeBridgeAdapter.check = observe_adapter_check
-    daemon.NativeBridgeAdapter.reconcile = observe_adapter_reconcile
-    SessionNativeBridge.challenge = observe_bridge_challenge
-    client_runtime._send_https = send
+    ctx = SimpleNamespace(**locals())
+    ctx.args = args
+    ctx.installed_proof = installed_proof
+    ctx.cloud_source = cloud_source
+    ctx.fixture = partial(fixture, ctx)
+    ctx.send = partial(send, ctx)
+    ctx.start_daemon = partial(start_daemon, ctx)
+    ctx.stop_daemon = partial(stop_daemon, ctx)
+    ctx.deliver = partial(deliver, ctx)
+    ctx.wait_observed = partial(wait_observed, ctx)
+    ctx.c_second_busy_dispositions = partial(c_second_busy_dispositions, ctx)
+    client_runtime._send_https = ctx.send
+    launcher._session_request = partial(observe_session_request, ctx)
+    Store.list_pending = partialmethod(observe_list_pending, ctx)
+    Store.list_reconcilable = partialmethod(observe_list_reconcilable, ctx)
+    daemon.Gateway.dispatch = partialmethod(observe_dispatch, ctx)
+    daemon.Gateway.reconcile = partialmethod(observe_reconcile, ctx)
+    daemon.NativeBridgeAdapter.check = partialmethod(observe_adapter_check, ctx)
+    daemon.NativeBridgeAdapter.reconcile = partialmethod(observe_adapter_reconcile, ctx)
+    SessionNativeBridge.challenge = partialmethod(observe_bridge_challenge, ctx)
     try:
-        challenge = fixture("/fixture/challenge", {
+        challenge = ctx.fixture("/fixture/challenge", {
             "nodeId": node_id,
             "publicKey": {"kty": "OKP", "crv": "Ed25519",
                           "x": b64(node_key.public_key().public_bytes_raw())},
             "meshIp": "100.96.0.1", "meshPort": 8789, "agents": [AGENT],
         })
-        fixture("/v1/nodes/complete", {
+        ctx.fixture("/v1/nodes/complete", {
             "challengeId": challenge["challengeId"],
             "signature": b64(node_key.sign(challenge["signingPayload"].encode())),
         })
-        admission_cloud = CloudClient(
+        ctx.admission_cloud = CloudClient(
             origin=ORIGIN, principal=PRINCIPAL, agent=AGENT, node_id=node_id,
-            node_generation=1, private_key=node_key, credentials=credentials, send=send,
+            node_generation=1, private_key=node_key, credentials=credentials, send=ctx.send,
         )
-
         with ExitStack() as resources:
-            for label in ("A", "B", "C"):
-                session = native_session(resources, label, state, hold=False)
-                sessions[label] = session
-                session_labels[session["sessionId"]] = label
-            require(len({session["sessionId"] for session in sessions.values()}) == 3,
-                    "three native sessions did not receive distinct session IDs")
-            for field in ("clientId", "threadId"):
-                require(len({session["binding"][field] for session in sessions.values()}) == 3,
-                        "three native sessions did not receive distinct " + field + " values")
-            all_initially_selected_idle = all(
-                session["initiallySelectedIdle"] for session in sessions.values()
-            )
-            require(all_initially_selected_idle,
-                    "one or more native sessions were not selected and idle before delivery")
-
-            runtime_ids = {label: str(uuid4()) for label in sessions}
-            attached = {}
-            for label, session in sessions.items():
-                try:
-                    attached[label] = await admit_runtime(admission_cloud, session, runtime_ids[label])
-                except Exception as error:
-                    readback = fixture("/fixture/admission")
-                    stored_clients = []
-                    for row in readback["native_runtime_bindings"]:
-                        try:
-                            stored_clients.append(digest(json.loads(row["binding_json"])["clientId"]))
-                        except (KeyError, TypeError, ValueError):
-                            stored_clients.append("invalid")
-                    raise AssertionError("native runtime attach failed: " + json.dumps({
-                        "label": label,
-                        "code": getattr(error, "code", type(error).__name__),
-                        "sessionCount": len(sessions),
-                        "distinctClientHashes": len({digest(value["binding"]["clientId"])
-                                                       for value in sessions.values()}),
-                        "distinctThreadHashes": len({digest(value["binding"]["threadId"])
-                                                      for value in sessions.values()}),
-                        "clientHashes": {name: digest(value["binding"]["clientId"])
-                                         for name, value in sessions.items()},
-                        "storedClientHashes": stored_clients,
-                        "persistedRuntimeCount": len(readback["runtimes"]),
-                    }, sort_keys=True)) from None
-            admission_readback = fixture("/fixture/admission")
-            require(len(admission_readback["runtimes"]) == 3
-                    and len(admission_readback["native_runtime_bindings"]) == 3,
-                    "workerd did not persist three independent native attachments")
-
-            deliveries = {}
-            for label, session in sessions.items():
-                delivery = fixture("/fixture/setup", {
-                    "runtimeId": runtime_ids[label], "nodeId": node_id,
-                    "transportPrivateKey": b64(transport_key.private_bytes(
-                        serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
-                        serialization.NoEncryption(),
-                    )),
-                    "subjectId": "three-session-route-" + label.lower(),
-                })
-                envelope = delivery["envelope"]
-                mapping = {key: envelope[key] for key in identity_fields}
-                current = attached[label]["attached"]
-                mapping.update({
-                    "nativeThreadId": current["nativeBinding"]["threadId"],
-                    "nativeBinding": current["nativeBinding"],
-                    "sessionId": session["sessionId"],
-                    "leaseExpiresAt": datetime.fromisoformat(
-                        current["leaseUntil"].replace("Z", "+00:00")
-                    ).timestamp(),
-                })
-                require(all(mapping[key] == envelope[key] for key in identity_fields),
-                        "signed delivery differs from admitted attachment")
-                deliveries[label] = {"envelope": envelope, "signed": delivery["signedDelivery"],
-                                     "mapping": mapping}
-                dispatch_labels[envelope["deliveryId"]] = label
-
-            pem = node_key.private_bytes(
-                serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                serialization.NoEncryption(),
-            )
-            key_path = state / "node-key.pem"
-            descriptor = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(pem)
-            private_json(state / "credentials.json", {"accessToken": FIXTURE_ACCESS,
-                                                       "agentToken": FIXTURE_AGENT})
-            private_json(state / "cloud.json", {
-                "version": 1, "origin": ORIGIN, "principal": PRINCIPAL, "agent": AGENT,
-                "nodeId": node_id, "nodeGeneration": 1, "credentialsFile": "credentials.json",
-            })
-            with Store(state) as store:
-                for label in ("A", "B", "C"):
-                    store.put_attachment(deliveries[label]["mapping"])
-            listen_port = free_port()
-            private_json(state / "dispatch.json", {
-                "version": 1, "cloudConfig": "cloud.json", "listenHost": "127.0.0.1",
-                "listenPort": listen_port,
-                "transportKeys": {"fixture-transport": b64(transport_key.public_key().public_bytes_raw())},
-            })
-
-            async def start_daemon():
-                task = asyncio.create_task(daemon.serve(state, dispatch_config=state / "dispatch.json"))
-                await wait_until(lambda: (state / "control.sock").exists() or task.done(),
-                                 "production daemon startup timed out")
-                if task.done():
-                    await task
-                status = await daemon.request(state, {"command": "status"})
-                require(status["automaticWakeEnabled"] is True
-                        and status["dispatch"]["listenerReady"]
-                        and status["dispatch"]["workerRunning"],
-                        "production daemon dispatch path not ready")
-                return task
-
-            async def stop_daemon(task):
-                task.cancel()
-                result, = await asyncio.gather(task, return_exceptions=True)
-                require(isinstance(result, asyncio.CancelledError), "production daemon exited unexpectedly")
-                await wait_until(lambda: not (state / "control.sock").exists(),
-                                 "production daemon control socket survived stop")
-
-            async def deliver(label, delivery):
-                status, raw = await asyncio.to_thread(listener_delivery, listen_port, delivery["signed"])
-                require(status == 202, "production listener refused signed " + label + " delivery")
-                return json.loads(raw)
-
-            async def wait_observed(label):
-                delivery_id = deliveries[label]["envelope"]["deliveryId"]
-                await wait_until(lambda: db_delivery(state, delivery_id)["state"] == "observed",
-                                 label + " delivery did not reach observed state")
-                cloud = fixture("/fixture/read")
-                attempt_id = deliveries[label]["envelope"]["attemptId"]
-                observed = attempts_for(cloud, attempt_id)
-                require(len(observed) == 1 and observed[0]["state"] == "observed",
-                        label + " delivery missing observed Workerd attempt")
-                return cloud
-
-            # Configure A's observed reply loss to stop the first daemon after commit.
-            transport.update(targetDelivery=deliveries["A"]["envelope"]["deliveryId"], pauseRetry=True)
-            daemon_task = await start_daemon()
-            await deliver("A-only", deliveries["A"])
-            await wait_until(lambda: submission_returned.is_set(),
-                             "production daemon did not submit A's idle-session event")
-            await stop_daemon(daemon_task)
-            daemon_task = None
-            await wait_until(lambda: sessions["A"]["process"].poll() is None
-                             and len(sessions["A"]["provider"].main_requests) >= 2
-                             and launcher.session_status(sessions["A"]["state"], sessions["A"]["sessionId"])
-                             .get("selection") == "selected",
-                             "A's native input did not finish while the daemon was stopped")
-            daemon_task = await start_daemon()
-            try:
-                await wait_until(lambda: transport["lostReply"].is_set(),
-                                 "workerd observed-ACK reply was not deliberately lost")
-            except AssertionError as error:
-                local = db_delivery(state, deliveries["A"]["envelope"]["deliveryId"])
-                cloud = fixture("/fixture/read")["cloud"]
-                try:
-                    dispatch_status = await daemon.request(state, {"command": "status"})
-                except Exception as status_error:
-                    dispatch_status = {"controlError": type(status_error).__name__}
-                diagnostic = {
-                    "nativeStarts": {label: len(start_calls[label]) for label in start_calls},
-                    "challengeRequests": challenge_calls,
-                    "wirePaths": [row["path"] for row in wire_evidence[-24:]],
-                    "localDelivery": local,
-                    "cloudRows": {table: len(cloud[table]) for table in
-                                  ("attempts", "deliveries", "native_claims", "slot_intents")},
-                    "providerRequests": len(sessions["A"]["provider"].requests),
-                    "providerKinds": list(sessions["A"]["provider"].requests),
-                    "providerErrors": list(sessions["A"]["provider"].errors),
-                    "dispatchStatus": dispatch_status.get("dispatch"),
-                    "pendingScans": pending_scans[-16:],
-                    "reconcilableScans": reconcilable_scans[-8:],
-                    "reconcileResults": reconcile_results[-8:],
-                    "receiptCalls": {label: calls[-12:] for label, calls in receipt_calls.items()},
-                    "receiptErrors": {label: calls[-12:] for label, calls in receipt_errors.items()},
-                    "adapterReceipts": adapter_receipts[-12:],
-                    "dispatchCallCount": len(dispatch_calls),
-                    "dispatchResults": dispatch_results[-8:],
-                    "dispatchErrors": dispatch_errors[-8:],
-                    "adapterChecks": adapter_checks[-12:],
-                    "bridgeChallenges": bridge_challenge_observations[-12:],
-                    "daemonTaskDone": daemon_task.done(),
-                    "daemonTaskError": (type(daemon_task.exception()).__name__
-                                        if daemon_task.done() and daemon_task.exception() else None),
-                    "sessionStates": {label: {
-                        "selection": launcher.session_status(session["state"], session["sessionId"]).get("selection"),
-                        "attached": launcher.session_status(session["state"], session["sessionId"]).get("attached"),
-                    } for label, session in sessions.items()},
-                }
-                raise AssertionError(str(error) + "; bounded diagnostic="
-                                     + json.dumps(diagnostic, sort_keys=True)) from None
-            await wait_until(lambda: transport["retryWaiting"].is_set(),
-                             "daemon did not retry exact observed ACK")
-            state_before_replay = fixture("/fixture/read")
-            first_ack = [row for row in wire_evidence if row["path"] == "/v1/ack"
-                         and row["ackStatus"] == "observed"
-                         and row["deliverySha256"] == digest(transport["targetDelivery"])][0]
-            await stop_daemon(daemon_task)
-            daemon_task = None
-            transport["pauseRetry"] = False
-            transport["allowRetry"].set()
-            daemon_task = await start_daemon()
-            await wait_until(lambda: db_delivery(state, deliveries["A"]["envelope"]["deliveryId"])["state"]
-                             == "observed", "A ACK was not recovered after daemon restart")
-            state_after_replay = await wait_observed("A")
-            second_acks = [row for row in wire_evidence if row["path"] == "/v1/ack"
-                            and row["ackStatus"] == "observed"
-                            and row["deliverySha256"] == digest(transport["targetDelivery"])]
-            require(len(second_acks) >= 2 and first_ack["bodySha256"] == second_acks[-1]["bodySha256"]
-                    and first_ack["proofNonceSha256"] != second_acks[-1]["proofNonceSha256"],
-                    "daemon restart did not replay identical ACK bytes with fresh proof")
-            require(state_after_replay == state_before_replay,
-                    "observed-ACK replay changed committed Workerd state")
-            require(len(start_calls["A"]) == 1 and not start_calls["B"] and not start_calls["C"],
-                    "A-only delivery escaped its native session")
-            a_route_counts = {label: len(start_calls[label]) for label in start_calls}
-
-            await deliver("B-only", deliveries["B"])
-            await wait_observed("B")
-            require(len(start_calls["A"]) == 1 and len(start_calls["B"]) == 1
-                    and not start_calls["C"], "B-only delivery escaped its native session")
-            b_route_counts = {label: len(start_calls[label]) for label in start_calls}
-
-            # C's first controlled turn holds its local model request open. A second
-            # signed delivery must remain locally queued without a claim or native Start.
-            c_first = fixture("/fixture/setup", {
-                "runtimeId": runtime_ids["C"], "nodeId": node_id,
-                "transportPrivateKey": b64(transport_key.private_bytes(
-                    serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
-                    serialization.NoEncryption(),
-                )),
-                "subjectId": "three-session-c-busy-first",
-            })
-            c_first_envelope = c_first["envelope"]
-            dispatch_labels[c_first_envelope["deliveryId"]] = "C-busy-first"
-            c_first_signed = c_first["signedDelivery"]
-            c_second = fixture("/fixture/setup", {
-                "runtimeId": runtime_ids["C"], "nodeId": node_id,
-                "transportPrivateKey": b64(transport_key.private_bytes(
-                    serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
-                    serialization.NoEncryption(),
-                )),
-                "subjectId": "three-session-c-busy-second",
-            })
-            c_second_envelope = c_second["envelope"]
-            dispatch_labels[c_second_envelope["deliveryId"]] = "C-busy-second"
-            c_second_signed = c_second["signedDelivery"]
-            c_second_transport_rows = attempts_for(fixture("/fixture/read"), c_second_envelope["attemptId"])
-            c_second_transport_baseline = transport_attempt_snapshot(c_second_transport_rows)
-            require(c_second_transport_baseline == {
-                "state": "created", "reservation_state": "none", "transport_status": "sending",
-                "permit_id": None, "submission_id": None, "turn_id": None,
-            }, "fixture did not create the expected unreserved C2 transport-attempt baseline")
-            sessions["C"]["provider"].hold_next = True
-            sessions["C"]["provider"].release_hold.clear()
-            c_first_status, _ = await asyncio.to_thread(listener_delivery, listen_port, c_first_signed)
-            require(c_first_status == 202, "production listener refused C busy-first delivery")
-            await wait_until(lambda: sessions["C"]["provider"].hold_started.is_set(),
-                             "C native CLI did not enter the controlled busy state")
-            c_first_id = c_first_envelope["deliveryId"]
-            await wait_until(lambda: db_delivery(state, c_first_id)["attemptState"] in
-                             ("submitted", "observed"), "C busy-first event did not reach native Start")
-            c_first_cloud = fixture("/fixture/read")
-            c_first_attempts = attempts_for(c_first_cloud, c_first_envelope["attemptId"])
-            require(c_first_attempts and c_first_attempts[0]["state"] in ("submitted", "observed"),
-                    "C busy-first event did not persist in Workerd")
-            starts_before_busy_delivery = len(start_calls["C"])
-            require(starts_before_busy_delivery == 1, "C busy-first event did not issue exactly one native Start")
-            status, raw = await asyncio.to_thread(listener_delivery, listen_port, c_second_signed)
-            require(status == 202, "production listener refused C busy delivery")
-            await wait_until(lambda: db_delivery(state, c_second_envelope["deliveryId"])["state"] == "queued",
-                             "C busy delivery was not durably queued")
-            c_second_envelope_sha256 = db_delivery_envelope_sha256(
-                state, c_second_envelope["deliveryId"],
-            )
-            require(c_second_envelope_sha256 is not None,
-                    "queued C2 envelope was unavailable for immutability check")
-            def c_second_busy_dispositions():
-                return [row for row in dispatch_results
-                        if row["delivery"] == "C-busy-second"
-                        and row["reason"] == "client_unavailable_or_busy"]
-
-            try:
-                await wait_until(lambda: bool(c_second_busy_dispositions()),
-                                 "production dispatch did not return C's busy disposition", timeout=10)
-            except AssertionError as error:
-                cloud = fixture("/fixture/read")
-                diagnostic = {
-                    "cSecondDispatchCalls": dispatch_calls.count("C-busy-second"),
-                    "cSecondDispatchResults": [row for row in dispatch_results
-                                                if row["delivery"] == "C-busy-second"][-8:],
-                    "localDelivery": db_delivery(state, c_second_envelope["deliveryId"]),
-                    "attemptCount": len(attempts_for(cloud, c_second_envelope["attemptId"])),
-                    "claimCount": len(native_claims_for(cloud, c_second_envelope["attemptId"])),
-                    "nativeStartCount": len(start_calls["C"]),
-                    "providerRequests": len(sessions["C"]["provider"].requests),
-                    "providerErrors": list(sessions["C"]["provider"].errors),
-                    "daemonTaskDone": daemon_task.done(),
-                }
-                raise AssertionError(str(error) + "; bounded diagnostic="
-                                     + json.dumps(diagnostic, sort_keys=True)) from None
-            await asyncio.sleep(1.5)
-            c_second_cloud = fixture("/fixture/read")
-            c_second_local = db_delivery(state, c_second_envelope["deliveryId"])
-            c_second_attempts = attempts_for(c_second_cloud, c_second_envelope["attemptId"])
-            c_second_claims = native_claims_for(c_second_cloud, c_second_envelope["attemptId"])
-            c_second_transport_after_busy = transport_attempt_snapshot(c_second_attempts)
-            c_second_start_calls = [start for label in start_calls
-                                    for start in start_calls[label]
-                                    if start["attemptId"] == c_second_envelope["attemptId"]]
-            busy_assertions = {
-                "localDelivery": c_second_local,
-                "busyDispositions": c_second_busy_dispositions()[-4:],
-                "transportAttemptCount": len(c_second_attempts),
-                "transportAttemptBaseline": c_second_transport_baseline,
-                "transportAttemptAfterBusy": c_second_transport_after_busy,
-                "claimCount": len(c_second_claims),
-                "nativeStartCount": len(c_second_start_calls),
-                "totalCStarts": len(start_calls["C"]),
-                "expectedCStarts": starts_before_busy_delivery,
-            }
-            require(c_second_local == {"state": "queued", "attemptState": None}
-                    and bool(c_second_busy_dispositions())
-                    and db_delivery_envelope_sha256(state, c_second_envelope["deliveryId"])
-                    == c_second_envelope_sha256
-                    and c_second_transport_after_busy == c_second_transport_baseline
-                    and not c_second_claims
-                    and not c_second_start_calls
-                    and len(start_calls["C"]) == starts_before_busy_delivery,
-                    "C busy delivery did not remain queued after production returned busy; diagnostic="
-                    + json.dumps(busy_assertions, sort_keys=True))
-            await stop_daemon(daemon_task)
-            daemon_task = None
-            require(db_delivery(state, c_second_envelope["deliveryId"])
-                    == {"state": "queued", "attemptState": None}
-                    and db_delivery_envelope_sha256(state, c_second_envelope["deliveryId"])
-                    == c_second_envelope_sha256
-                    and sessions["C"]["provider"].hold_started.is_set()
-                    and not sessions["C"]["provider"].release_hold.is_set()
-                    and len(start_calls["C"]) == starts_before_busy_delivery,
-                    "stopping the daemon did not retain C's queue while its native turn stayed busy")
-            busy_result_count = len(c_second_busy_dispositions())
-            daemon_task = await start_daemon()
-            await wait_until(lambda: len(c_second_busy_dispositions()) > busy_result_count,
-                             "restarted daemon did not observe C still busy", timeout=10)
-            await asyncio.sleep(1.0)
-            c_second_cloud_after_restart = fixture("/fixture/read")
-            c_second_attempts_after_restart = attempts_for(
-                c_second_cloud_after_restart, c_second_envelope["attemptId"],
-            )
-            c_second_transport_after_restart = transport_attempt_snapshot(c_second_attempts_after_restart)
-            require(db_delivery(state, c_second_envelope["deliveryId"])
-                    == {"state": "queued", "attemptState": None}
-                    and db_delivery_envelope_sha256(state, c_second_envelope["deliveryId"])
-                    == c_second_envelope_sha256
-                    and c_second_transport_after_restart == c_second_transport_baseline
-                    and not native_claims_for(c_second_cloud_after_restart, c_second_envelope["attemptId"])
-                    and len(start_calls["C"]) == starts_before_busy_delivery,
-                    "restarted busy delivery did not remain queued without cloud or native start")
-            await stop_daemon(daemon_task)
-            daemon_task = None
-            sessions["C"]["provider"].release_hold.set()
-            current_binding = await wait_stable_session_binding(
-                sessions["C"], sessions["C"]["provider"],
-                minimum_turn_main_requests=2, timeout=75,
-            )
-            same_binding_after_turn = current_binding == sessions["C"]["binding"]
-            queued_while_stopped = db_delivery(state, c_second_envelope["deliveryId"])
-            require(queued_while_stopped["state"] == "queued",
-                    "C busy delivery did not remain queued while the daemon was stopped")
-            require(not same_binding_after_turn,
-                    "controlled C turn did not rotate its native binding for explicit reattachment")
-
-            # A changed native identity cannot inherit C2. Use the normal CLI
-            # attach path with Workerd's current generations and fresh native
-            # challenge while the daemon is stopped; Store fences the old queue.
-            c_first_id = c_first_envelope["deliveryId"]
-            c_first_before_attach = db_delivery(state, c_first_id)
-            c_first_workerd_before_attach = fixture("/fixture/read")
-            c_first_attempts_before_attach = attempts_for(
-                c_first_workerd_before_attach, c_first_envelope["attemptId"],
-            )
-            c_first_claims_before_attach = native_claims_for(
-                c_first_workerd_before_attach, c_first_envelope["attemptId"],
-            )
-            c_first_receipts_before_attach = list(receipt_calls["C"])
-            with Store(state) as store:
-                c_mapping_before_attach = store.get_attachment(runtime_ids["C"])
-            require(c_mapping_before_attach is not None
-                    and c_mapping_before_attach["nativeBinding"] == sessions["C"]["binding"],
-                    "C local attachment did not retain its original binding before fixture attach")
-            changed_binding_fields = sorted(
-                key for key, value in current_binding.items()
-                if c_mapping_before_attach["nativeBinding"].get(key) != value
-            )
-            require(bool(changed_binding_fields), "C native binding changed without any field delta")
-            try:
-                c_status_before_attach = await admission_cloud.runtime_status(runtime_ids["C"])
-            except Exception as error:
-                raise AssertionError("runtime status readback failed before fixture attach: "
-                                     + json.dumps({"error": type(error).__name__,
-                                                   "wire": wire_evidence[-1:]}, sort_keys=True)) from None
-            require(c_status_before_attach["status"] == "present"
-                    and c_status_before_attach["storedQualified"] is True,
-                    "fixture runtime status did not report the stored qualified C attachment")
-            attach_argv = [
-                "--state-dir", str(state), "attach",
-                "--runtime-id", runtime_ids["C"],
-                "--session-id", sessions["C"]["sessionId"],
-                "--cloud-config", str(state / "cloud.json"),
-                "--expected-runtime-generation", str(c_status_before_attach["runtimeGeneration"]),
-                "--expected-attachment-generation", str(c_status_before_attach["attachmentGeneration"]),
-            ]
-            attach_exit, attach_result = await asyncio.to_thread(run_cli_capture, attach_argv)
-            require(attach_exit == 0 and attach_result.get("remoteStatus") == "attached"
-                    and attach_result.get("localStatus") == "current",
-                    "production attach CLI did not commit and persist the fixture binding")
-            c_status_after_attach = await admission_cloud.runtime_status(runtime_ids["C"])
-            with Store(state) as store:
-                c_mapping_after_attach = store.get_attachment(runtime_ids["C"])
-            attached_current = (c_mapping_after_attach is not None
-                                and c_status_after_attach["status"] == "present"
-                                and c_status_after_attach["runtimeGeneration"]
-                                == c_status_before_attach["runtimeGeneration"] + 1
-                                and c_status_after_attach["attachmentGeneration"]
-                                == c_status_before_attach["attachmentGeneration"] + 1
-                                and c_mapping_after_attach["runtimeGeneration"]
-                                == c_status_after_attach["runtimeGeneration"]
-                                and c_mapping_after_attach["attachmentGeneration"]
-                                == c_status_after_attach["attachmentGeneration"]
-                                and c_mapping_after_attach["nativeBinding"] == current_binding
-                                and c_mapping_after_attach["sessionId"] == sessions["C"]["sessionId"])
-            require(attached_current,
-                    "production attach CLI mapping mismatch: "
-                    + json.dumps({
-                        "exit": attach_exit,
-                        "remoteStatus": attach_result.get("remoteStatus"),
-                        "localStatus": attach_result.get("localStatus"),
-                        "statusBefore": {key: c_status_before_attach.get(key) for key in
-                                         ("status", "runtimeGeneration", "attachmentGeneration")},
-                        "statusAfter": {key: c_status_after_attach.get(key) for key in
-                                        ("status", "runtimeGeneration", "attachmentGeneration")},
-                        "mappingAfter": ({"runtimeGeneration": c_mapping_after_attach.get("runtimeGeneration"),
-                                          "attachmentGeneration": c_mapping_after_attach.get("attachmentGeneration"),
-                                          "bindingMatches": c_mapping_after_attach.get("nativeBinding")
-                                          == current_binding,
-                                          "sessionMatches": c_mapping_after_attach.get("sessionId")
-                                          == sessions["C"]["sessionId"]}
-                                         if c_mapping_after_attach else None),
-                    }, sort_keys=True))
-            c_second_after_attach = db_delivery(state, c_second_envelope["deliveryId"])
-            c_second_after_attach_reason = db_delivery_reason(state, c_second_envelope["deliveryId"])
-            c_second_envelope_after_attach_sha256 = db_delivery_envelope_sha256(
-                state, c_second_envelope["deliveryId"],
-            )
-            c_second_cloud_after_attach = fixture("/fixture/read")
-            c_second_transport_after_attach = transport_attempt_snapshot(
-                attempts_for(c_second_cloud_after_attach, c_second_envelope["attemptId"]),
-            )
-            require(c_second_after_attach == {"state": "stale", "attemptState": None}
-                    and c_second_after_attach_reason == {
-                        "state": "stale", "reason": "attachment_detached",
-                    }
-                    and c_second_transport_after_attach == c_second_transport_baseline
-                    and c_second_envelope_after_attach_sha256 == c_second_envelope_sha256
-                    and not native_claims_for(c_second_cloud_after_attach, c_second_envelope["attemptId"])
-                    and len(start_calls["C"]) == starts_before_busy_delivery,
-                    "explicit attach did not fence old-generation C2 without a claim or native Start")
-            c_second_restart_disposition = "stale_after_explicit_fixture_attach"
-            c_first_after_attach = db_delivery(state, c_first_id)
-            c_first_workerd_after_attach = fixture("/fixture/read")
-            c_first_attempts_after_attach = attempts_for(
-                c_first_workerd_after_attach, c_first_envelope["attemptId"],
-            )
-            c_first_claims_after_attach = native_claims_for(
-                c_first_workerd_after_attach, c_first_envelope["attemptId"],
-            )
-
-            # Reuse C's real CLI session with a fresh fixture nonce; its prior
-            # C1 conversation already contains the first nonce by design.
-            c1_source_nonce_sha256 = sessions["C"]["provider"].source_nonce_sha256
-            sessions["C"]["provider"].nonce = "three-session-source-c-after-attach-" + uuid4().hex
-            c3_source_nonce_sha256 = digest(sessions["C"]["provider"].nonce)
-            require(c3_source_nonce_sha256 != c1_source_nonce_sha256,
-                    "post-attach source nonce was reused")
-            sessions["C"]["provider"].source_nonce_sha256 = c3_source_nonce_sha256
-            sessions["C"]["provider"].source_path.write_text(
-                sessions["C"]["provider"].nonce + "\n",
-            )
-            sessions["C"]["provider"].turn_main_requests.clear()
-            sessions["C"]["provider"].turn_title_count = 0
-            sessions["C"]["provider"].phase = "post-attach"
-            host_qualifier.CALL_ID = "three-session-source-read-" + uuid4().hex
-            c_third = fixture("/fixture/setup", {
-                "runtimeId": runtime_ids["C"], "nodeId": node_id,
-                "transportPrivateKey": b64(transport_key.private_bytes(
-                    serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
-                    serialization.NoEncryption(),
-                )),
-                "subjectId": "three-session-c-after-attach",
-            })
-            c_third_envelope = c_third["envelope"]
-            dispatch_labels[c_third_envelope["deliveryId"]] = "C-after-attach"
-            daemon_task = await start_daemon()
-            c_third_status, _ = await asyncio.to_thread(
-                listener_delivery, listen_port, c_third["signedDelivery"],
-            )
-            require(c_third_status == 202, "production listener refused C delivery after fixture attach")
-            await wait_until(
-                lambda: db_delivery(state, c_third_envelope["deliveryId"])["state"] == "observed",
-                "new C delivery did not settle after explicit fixture attach", timeout=30,
-            )
-            c_third_workerd = fixture("/fixture/read")
-            c_third_attempts = attempts_for(c_third_workerd, c_third_envelope["attemptId"])
-            c_third_claims = native_claims_for(c_third_workerd, c_third_envelope["attemptId"])
-            c_third_start_calls = [start for label in start_calls for start in start_calls[label]
-                                   if start["attemptId"] == c_third_envelope["attemptId"]]
-            require(len(c_third_attempts) == 1 and c_third_attempts[0]["state"] == "observed"
-                    and len(c_third_claims) == 1 and len(c_third_start_calls) == 1
-                    and len(start_calls["C"]) == starts_before_busy_delivery + 1,
-                    "new-generation C delivery did not claim, start, and settle exactly once")
-            c_binding_after_third = await wait_stable_session_binding(
-                sessions["C"], sessions["C"]["provider"],
-                minimum_turn_main_requests=2, timeout=45,
-            )
-            c_binding_fields_after_third = sorted(
-                key for key, value in c_binding_after_third.items()
-                if c_mapping_after_attach["nativeBinding"].get(key) != value
-            )
-            await stop_daemon(daemon_task)
-            daemon_task = None
-            pty_drain = {
-                label: {"bytesRead": session["ptyPumpStats"]["bytesRead"],
-                        "readCount": session["ptyPumpStats"]["readCount"]}
-                for label, session in sessions.items()
-            }
-            require(all(row["bytesRead"] > 0 and row["readCount"] > 0 for row in pty_drain.values()),
-                    "one or more native CLI PTYs were not drained during the acceptance run")
-            summaries = {
-                label: {
-                    "runtimeSha256": digest(runtime_ids[label]),
-                    "sessionSha256": digest(sessions[label]["sessionId"]),
-                    "threadSha256": digest(sessions[label]["binding"]["threadId"]),
-                    "nativeStartCount": len(start_calls[label]),
-                "initiallySelectedIdle": sessions[label]["initiallySelectedIdle"],
-                }
-                for label in sessions
-            }
-            provider_errors = {label: list(session["provider"].errors)
-                               for label, session in sessions.items()}
-            require(not any(provider_errors.values()),
-                    "synthetic provider rejected a CLI request: "
-                    + json.dumps(provider_errors, sort_keys=True))
-            package_files = {
-                str(Path(path).relative_to(installed_proof["packageRoot"])): file_digest
-                for path, file_digest in installed_proof["verifiedSha256"].items()
-            }
-            cloud_root = cloud_source.parents[2]
-            workerd_inputs = {}
-            for path, file_digest in address["bundle"]["inputs"].items():
-                source = Path(path).resolve(strict=True)
-                try:
-                    relative = source.relative_to(cloud_root)
-                except ValueError:
-                    continue
-                workerd_inputs[str(relative)] = file_digest
-            proof = {
-                "result": "PASS",
-                "qualification": "controlled-three-real-cli-production-daemon-workerd",
-                "candidateStatus": "offline-qualified-held-promotion-candidate-pr81",
-                "productionAdmissionProven": False,
-                "liveMeshProven": False,
-                "liveOwnerAccessProven": False,
-                "liveManualCanaryProven": False,
-                "nativeBinarySha256": args.binary_sha256,
-                "codeModeHostSha256": launcher.QUALIFIED_CODE_MODE_HOST_SHA256,
-                "installedPackageFilesSha256": package_files,
-                "cloudSourceCommit": args.cloud_commit,
-                "workerdBundleSha256": address["bundle"]["sha256"],
-                "workerdInputsSha256": workerd_inputs,
-                "productionEntrypoints": ["event_gateway.daemon.serve", "event_gateway.listener.Listener",
-                                          "event_gateway.native.SessionNativeBridge", "event_gateway.gateway.Gateway"],
-                "nativeCliSessions": summaries,
-                "nativePtyDrain": pty_drain,
-                "nativeProcessCleanup": {label: session["processCleanup"]
-                                          for label, session in sessions.items()},
-                "controlledModelRequests": {label: len(sessions[label]["provider"].requests)
-                                             for label in sessions},
-                "admissionReadback": {"runtimes": len(admission_readback["runtimes"]),
-                                       "nativeBindings": len(admission_readback["native_runtime_bindings"])},
-                "idleDispatch": {"allThreeInitiallySelectedAndIdle": all_initially_selected_idle,
-                                 "eventTriggeredNativeInput": True,
-                                 "liveUserWakeQualified": False},
-                "routing": {"AOnly": {"AStarts": a_route_counts["A"], "BStarts": a_route_counts["B"],
-                                       "CStarts": a_route_counts["C"], "observed": True},
-                            "BOnly": {"AStarts": b_route_counts["A"], "BStarts": b_route_counts["B"],
-                                       "CStarts": b_route_counts["C"], "observed": True}},
-                "busyC": {"dispatchEligible": not bool(c_second_busy_dispositions()),
-                          "listenerAccepted": True,
-                          "localStateWhileBusy": "queued", "transportAttemptUnchanged": True,
-                          "nativeClaimCreated": False,
-                          "nativeStartWhileBusy": False,
-                          "productionBusyDisposition": "client_unavailable_or_busy",
-                          "busyDispatchCount": len(c_second_busy_dispositions())},
-                "sourceNonceTransition": {"firstDelivery": "C1", "freshDelivery": "C3",
-                                          "nonReuse": True},
-                "busyDeliveryRestart": {"queuedWhileDaemonStopped": True,
-                                         "restartedWhileNativeTurnBusy": True,
-                                         "queuedAfterBusyRestart": True,
-                                         "transportAttemptUnchanged": True,
-                                         "nativeClaimCreated": False,
-                                         "busyDispatchCountAfterRestart": len(c_second_busy_dispositions())
-                                         - busy_result_count,
-                                         "bindingUnchangedAfterFirstTurn": same_binding_after_turn,
-                                         "disposition": c_second_restart_disposition,
-                                         "nativeStartCountAtRestart": starts_before_busy_delivery},
-                "explicitFixtureAttach": {
-                    "productionCliPath": True, "syntheticFixtureAuthority": True,
-                    "remoteStatus": attach_result.get("remoteStatus"),
-                    "localStatus": attach_result.get("localStatus"),
-                    "runtimeGenerationBefore": c_status_before_attach["runtimeGeneration"],
-                    "runtimeGenerationAfter": c_status_after_attach["runtimeGeneration"],
-                    "attachmentGenerationBefore": c_status_before_attach["attachmentGeneration"],
-                    "attachmentGenerationAfter": c_status_after_attach["attachmentGeneration"],
-                    "bindingChangedFields": changed_binding_fields,
-                    "storedBindingMatchesCurrentSession": True,
-                    "c1LocalBefore": c_first_before_attach,
-                    "c1LocalAfter": c_first_after_attach,
-                    "c1WorkerdAttemptStatesBefore": sorted(
-                        row["state"] for row in c_first_attempts_before_attach
-                    ),
-                    "c1WorkerdAttemptStatesAfter": sorted(
-                        row["state"] for row in c_first_attempts_after_attach
-                    ),
-                    "c1WorkerdClaimCountsBeforeAfter": [len(c_first_claims_before_attach),
-                                                        len(c_first_claims_after_attach)],
-                    "c1NativeReceiptStatusesBeforeAttach": c_first_receipts_before_attach[-8:],
-                    "c2LocalAfter": c_second_after_attach,
-                    "c2FenceReason": c_second_after_attach_reason["reason"],
-                    "c2TransportAttemptUnchanged":
-                        c_second_transport_after_attach == c_second_transport_baseline,
-                    "c2EnvelopeImmutableThroughFence":
-                        c_second_envelope_after_attach_sha256 == c_second_envelope_sha256,
-                    "c2ClaimCountAfter": len(native_claims_for(
-                        c_second_cloud_after_attach, c_second_envelope["attemptId"],
-                    )),
-                    "c2NativeStartCountAfter": len([start for start in start_calls["C"]
-                        if start["attemptId"] == c_second_envelope["attemptId"]]),
-                },
-                "postAttachC3": {"listenerAccepted": True, "localState": "observed",
-                                 "workerdAttemptCount": len(c_third_attempts),
-                                 "workerdAttemptState": c_third_attempts[0]["state"],
-                                 "workerdClaimCount": len(c_third_claims),
-                                 "nativeStartCount": len(c_third_start_calls),
-                                 "exactlyOneStartOnC": len(start_calls["C"])
-                                 == starts_before_busy_delivery + 1,
-                                 "bindingChangedAfterCompletedTurn": bool(c_binding_fields_after_third),
-                                 "changedBindingFields": c_binding_fields_after_third},
-                "observedAckRestart": {"daemonRestarted": True, "nativeProcessRestarted": False,
-                                        "firstReplyLostAfterWorkerdCommit": True,
-                                        "ackBodyBytesIdentical": True, "proofNonceChanged": True,
-                                        "nativeStartCount": len(start_calls["A"])},
-                "fixtureBoundaries": ["synthetic Access and Messaging identity/budget",
-                                      "fixture owner manual publication",
-                                      "fixture queue and queue metrics", "loopback transport instead of Mesh",
-                                      "synthetic local model provider"],
-                "controlledAssertions": {"threeIndependentAttachments": True,
-                                          "aOnlyAndBOnlySessionIsolation": True,
-                                          "busyDeliveryRemainsDurableWithoutStart": True,
-                                          "changedBindingRequiresExplicitAttach": True,
-                                          "oldGenerationDeliveryFencedWithoutStart": True,
-                                          "newGenerationDeliverySettledExactlyOnce": True,
-                                          "observedAckReplayLeavesWorkerdStateUnchanged": True,
-                                          "exactObservedAckRetryAfterDaemonRestart": True},
-                "sourceSha256": {
-                    "runner": digest(HERE.joinpath("three-session-workerd.py").read_bytes()),
-                    "workerFixture": digest(HERE.joinpath("coupled-workerd-worker.ts").read_bytes()),
-                    "broker": digest(HERE.joinpath("coupled-workerd-broker.mjs").read_bytes()),
-                    "nativeHostQualifier": digest(Path(host_qualifier.__file__).read_bytes()),
-                    "launcherSmoke": digest(Path(smoke.__file__).read_bytes()),
-                    "installedPreflight": digest(Path(installed_helper.__file__).read_bytes()),
-                },
-                "cloudWireCount": len(wire_evidence),
-                "realModelCalls": 0,
-                "evidenceNote": "IDs are represented only by SHA-256; credentials, native mappings, and raw wire bodies are omitted.",
-            }
-            encoded = json.dumps(proof, sort_keys=True)
-            require(FIXTURE_ACCESS not in encoded and FIXTURE_AGENT not in encoded
-                    and '"nativeBinding":' not in encoded
-                    and '"transportPrivateKey":' not in encoded,
-                    "proof output contains a credential or native mapping")
-            require(len(encoded.encode()) <= 32_768, "proof exceeds fixed metadata bound")
-            private_nonce_record = {
-                "sourceNonceSha256": {"C1": c1_source_nonce_sha256, "C3": c3_source_nonce_sha256},
-                "nonReuse": c1_source_nonce_sha256 != c3_source_nonce_sha256,
-            }
-            return proof
+            await initialize_runtime(ctx, resources)
+            await run_ab_routes(ctx)
+            await run_busy_stage(ctx)
+            await run_fixture_attach(ctx)
+            await run_post_attach_c3(ctx)
+            ctx.proof, ctx.private_nonce_record = build_proof(ctx)
+            return ctx.proof
     finally:
-        if daemon_task is not None:
-            daemon_task.cancel()
-            await asyncio.gather(daemon_task, return_exceptions=True)
-        if "C" in sessions:
-            sessions["C"]["provider"].release_hold.set()
-        client_runtime._send_https = original_send_https
-        launcher._session_request = original_session_request
-        Store.list_pending = original_list_pending
-        Store.list_reconcilable = original_list_reconcilable
-        daemon.Gateway.dispatch = original_dispatch
-        daemon.Gateway.reconcile = original_reconcile
-        daemon.NativeBridgeAdapter.check = original_adapter_check
-        daemon.NativeBridgeAdapter.reconcile = original_adapter_reconcile
-        SessionNativeBridge.challenge = original_bridge_challenge
-        cleanup_error = None
-        try:
-            broker_cleanup = stop_broker(broker, broker_log)
-            if proof is not None:
-                proof["brokerCleanup"] = broker_cleanup
-        except AssertionError as error:
-            cleanup_error = error
-        if cleanup_error is not None and sys.exc_info()[0] is None:
-            raise cleanup_error
-        if cleanup_error is not None:
-            print(str(cleanup_error), file=sys.stderr)
-        if private_nonce_record is not None:
-            private_path = Path(args.output).with_name(Path(args.output).stem + ".private-causal.json")
-            try:
-                private_json(private_path, private_nonce_record)
-            except OSError as error:
-                if cleanup_error is None:
-                    raise AssertionError("private nonce causal record unavailable: "
-                                         + type(error).__name__) from None
-                print("private nonce causal record unavailable: " + type(error).__name__,
-                      file=sys.stderr)
-        if state_root.exists():
-            import shutil
-            shutil.rmtree(state_root)
+        await cleanup_scenario(ctx)
 
 
 def cli():
