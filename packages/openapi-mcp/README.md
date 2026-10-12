@@ -8,6 +8,9 @@ The executable artifact format is **5**, runtime contract **1**, and prepared-ca
 format **2**. This package is compiled TypeScript, separate from the Toolshed
 prompt plugins.
 
+The standalone `serve` CLI denies actions because it has no independent operator
+approval provider. Embedded hosts can supply one through `serveOpenApiStdio(config, approve)`.
+
 ## Install and check the runtime
 
 Local serving requires Node `>=24.16.0 <25`. Packed consumers exercise Node 24
@@ -238,7 +241,8 @@ The built-in CLI denies actions with `ACTION_DENIED`: MCP client confirmation
 does not prove independent operator approval. Configured `exactPolicies` cannot
 activate through client responses alone. Search and reads remain available.
 
-An embedding can provide a host-owned `StatefulActionAuthorizer` through
+An embedding can pass the same approval callback as the second argument to
+`serveOpenApiStdio(config, approve)`, provide a host-owned `StatefulActionAuthorizer` through
 `createOpenApiMcpServer`, or use `createStdioActionAuthorizer(templates, approve)`
 from `@knitli/openapi-mcp/stdio`. The built-in elicitation authorizers require an
 `approve(presentation, details)` callback that authenticates operator approval outside

@@ -17,6 +17,7 @@ import {
 import { SqliteCatalogStore } from "../sqlite/catalog-store.ts";
 import { FileGenerationStore } from "../sqlite/generation-store.ts";
 import { createLocalDispatchBoundary } from "../sqlite/guarded-fetch.ts";
+import type { ClientElicitationAuthorizerOptions } from "./authorizer.ts";
 import { type OpenApiStdioConfig, parseOpenApiStdioConfig } from "./config.ts";
 import { compileExactPolicy } from "./exact-policy.ts";
 import { createStdioSearchRuntime } from "./search.ts";
@@ -46,6 +47,7 @@ export {
 /** Owns process-local credentials/catalogs independently of disposable SDK probes. */
 export async function serveOpenApiStdio(
   input: OpenApiStdioConfig,
+  approve?: ClientElicitationAuthorizerOptions["approve"],
 ): Promise<StdioServerHandle> {
   const config = parseOpenApiStdioConfig(input);
   const stores: SqliteCatalogStore[] = [];
@@ -106,7 +108,7 @@ export async function serveOpenApiStdio(
         { store: entry.store, trust: config.trust, generations, limits },
         entry.verified,
       );
-    const authorizer = createStdioActionAuthorizer(templates);
+    const authorizer = createStdioActionAuthorizer(templates, approve);
     const routes: OpenApiServerRoute[] = [];
     for (const profile of config.profiles) {
       const catalogs = admitted.filter(
