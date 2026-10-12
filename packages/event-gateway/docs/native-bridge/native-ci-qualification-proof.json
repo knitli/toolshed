@@ -1,0 +1,305 @@
+{
+  "schemaVersion": 1,
+  "result": "PASS",
+  "qualifiedAt": "2026-10-12",
+  "scope": "Controlled offline qualification of the exact protected-main CI artifact and coherent non-editable wheel",
+  "liveQualified": false,
+  "ownerClientsChanged": false,
+  "realCloudCalls": 0,
+  "realModelCalls": 0,
+  "artifact": {
+    "schemaVersion": 1,
+    "repositoryId": 1200860702,
+    "runId": 38273438173,
+    "runAttempt": 1,
+    "headSha": "7ff224a1fc8a9923e33aeafbd66cfa65efdc8bea",
+    "artifactId": 11758567975,
+    "artifactSha256": "6c84263897f36f40d78513b4710be8d2cd13120175d087ca83f98117be2a4b13",
+    "binarySha256": "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b",
+    "codeModeHostSha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a"
+  },
+  "buildReceiptSha256": "204304d81b1e3d938bcb7a19185c39f74f6aa525e75764964972bcd7cd95b66c",
+  "protectedMainRecipeSha256": {
+    "builderSha256": "190c656282e5364873ab7eb722f31a1d1ae0b7ce9bc63431a8df2ec3e9fd7252",
+    "producerSha256": "d1d47b4beea2e23969a447ff805baeea119655aed490ff3764ae1ac0ea330763",
+    "workflowSha256": "6af28bc91ce449c32cd15d3d0a194c92f17092e16af5622dad4c613efd84400e",
+    "sourceManifestSha256": "8f40ca398770501412963786ade67891749f3c9296a1c82c14d62f6257e98469",
+    "patchSha256": "922c3b2aa733564f67765aec27d4128b96b697441b37b42665b6656a4ad884fb"
+  },
+  "wheelSha256": "764fc60188212825a8a1404689d5125cc48faf201cb22fd36eefd12781641dfb",
+  "installedPackageFilesSha256": {
+    "__init__.py": "c8d3b1e2a5706c34278758e5f3ea820e055f1ec9f1634632cc43e65928458c8e",
+    "cli.py": "2b99b16f3fbc8dd9815e0975a9f983d44e65ce8ea4330afe11909766e6663086",
+    "client_runtime.py": "ecca03a9a2924ebfb5a406d1cf787289c640be48d6a27d654954a8b83a044231",
+    "cloud.py": "fc2b02d92925f89f1de9be7da3cdcf105b51879da6ffe39fed0dd0418752dd72",
+    "codex.py": "562dd1a4b279dca7700a83d5c7e825871a64fca47e376e06883be280881c3b47",
+    "contracts/event-v1/manifest.json": "87728e1fe7530babb2f76419c9fa139e2eb3a5378a2c125aed8c1a7d10552f3f",
+    "contracts/event-v1/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+    "contracts/event-v1/protocol-v1.json": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3",
+    "contracts/event-v1/protocol.schema.json": "583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38",
+    "contracts/event-v1/protocol.ts": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34",
+    "daemon.py": "fba9d054a56fdad13b75c4da722d7d0548e435078812a157d7857383b37e4b6d",
+    "gateway.py": "d8230d91d917ca513cf379cd1e13439650960d86bb2a26c5292838d03058e591",
+    "launcher.py": "fbe251ff9f50af21157902813e60651aac8b2c84513485fe9e4148d1e624edcd",
+    "listener.py": "d933af57ebd462481a9dc74f5a169186237be0908d83169eac7c7525ead9f6c3",
+    "native.py": "25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e",
+    "native_reader.py": "7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a",
+    "native_terminal.py": "d4720187f3744102a26080ecdc4f757d4ab615f08ba4226785483101f8da4960",
+    "protocol.py": "3c670c864a1abb4c1cd1cc539dbdf546af2b889a1d9c56e4944ce2d06f8ab854",
+    "security.py": "961705087eda322c70c16b61f248e9663a9077ec0d3a216698d4ba55dc0d2fb7",
+    "store.py": "30f00d3e8336831cf0d6110fd7469ac0ab6c3a056b0111ffeff55981a01fdc9b"
+  },
+  "rawProofSha256": {
+    "host": "92a90bed7cd4e73880e08cc8e5333293d79a23bcf1d4023dc05a4937203c7570",
+    "github": "9b000795ea50791a918e54ebe0768ad8e18f5ea3fb5bd97a456da58978f083c7",
+    "lifecycle": "19030e343e2353e5f42dacb84e397415f967b13ae53eee40595c610a8cec36c9",
+    "restart": "9289ec4a0c1a77669a451c4480e27165147b97542803ff6b2030e587532f597d",
+    "threeSession": "51f8acaae227fa943ee51d76e545d96be50e084bdfdf4b5b09582e7db3dc711e"
+  },
+  "controlledEvidence": {
+    "host": {
+      "nativeStarts": 1,
+      "mainTurnModelRequests": 2,
+      "titleModelRequests": 1,
+      "controlSocketRemoved": true,
+      "backendStopped": true,
+      "ownedProcessGroupEmpty": true,
+      "terminationExitCode": 0
+    },
+    "github": {
+      "nativeStarts": 1,
+      "syntheticTransportCalls": 1,
+      "requestSignatureVerified": true,
+      "liveAuthorizationProved": false,
+      "controlSocketRemoved": true,
+      "backendStopped": true,
+      "ownedProcessGroupEmpty": true
+    },
+    "lifecycle": {
+      "idleRedrawStability": {
+        "samples": 6,
+        "activeSamples": 6,
+        "elapsedSeconds": 3.6246548749913927,
+        "bindingUnchanged": true
+      },
+      "nonDrawFences": {
+        "resizeRevokedBinding": true,
+        "composerRefusedReadiness": true,
+        "clearedComposerRestoredSelection": true
+      },
+      "controlSocketRemoved": true,
+      "backendStopped": true,
+      "terminationExitCode": 0
+    },
+    "restart": {
+      "exactReceiptRecoveredTwice": true,
+      "mutatedFieldsRejected": [
+        "clientId",
+        "serverInstanceId",
+        "serverGeneration",
+        "threadId",
+        "attemptId",
+        "deliveryId",
+        "clientUserMessageId",
+        "permitId",
+        "permitIssuedAt+permitExpiresAt",
+        "generation",
+        "event.canonicalSubject",
+        "event.eventId",
+        "event.eventReference",
+        "event.source+event.canonicalSubject",
+        "event.sourceStateVersion"
+      ],
+      "oldStartLocallyRefused": true,
+      "originalAttachmentUnavailable": true,
+      "oldProcessesStopped": true,
+      "cloudSettlementProven": false
+    },
+    "threeSession": {
+      "routing": {
+        "AOnly": {
+          "AStarts": 1,
+          "BStarts": 0,
+          "CStarts": 0,
+          "observed": true
+        },
+        "BOnly": {
+          "AStarts": 1,
+          "BStarts": 1,
+          "CStarts": 0,
+          "observed": true
+        }
+      },
+      "busyC": {
+        "dispatchEligible": false,
+        "listenerAccepted": true,
+        "localStateWhileBusy": "queued",
+        "transportAttemptUnchanged": true,
+        "nativeClaimCreated": false,
+        "nativeStartWhileBusy": false,
+        "productionBusyDisposition": "client_unavailable_or_busy",
+        "busyDispatchCount": 5
+      },
+      "busyDeliveryRestart": {
+        "queuedWhileDaemonStopped": true,
+        "restartedWhileNativeTurnBusy": true,
+        "queuedAfterBusyRestart": true,
+        "transportAttemptUnchanged": true,
+        "nativeClaimCreated": false,
+        "busyDispatchCountAfterRestart": 2,
+        "bindingUnchangedAfterFirstTurn": false,
+        "disposition": "stale_after_explicit_fixture_attach",
+        "nativeStartCountAtRestart": 1
+      },
+      "explicitFixtureAttach": {
+        "productionCliPath": true,
+        "syntheticFixtureAuthority": true,
+        "remoteStatus": "attached",
+        "localStatus": "current",
+        "runtimeGenerationBefore": 1,
+        "runtimeGenerationAfter": 2,
+        "attachmentGenerationBefore": 1,
+        "attachmentGenerationAfter": 2,
+        "bindingChangedFields": [
+          "generation",
+          "serverGeneration"
+        ],
+        "storedBindingMatchesCurrentSession": true,
+        "c1SettledBeforeAttach": true,
+        "c1HistoryUnchangedThroughAttach": true,
+        "c1LocalBefore": {
+          "state": "observed",
+          "attemptState": "observed"
+        },
+        "c1LocalAfter": {
+          "state": "observed",
+          "attemptState": "observed"
+        },
+        "c1WorkerdAttemptStatesBefore": [
+          "observed"
+        ],
+        "c1WorkerdAttemptStatesAfter": [
+          "observed"
+        ],
+        "c1WorkerdClaimCountsBeforeAfter": [
+          1,
+          1
+        ],
+        "c1NativeReceiptStatusesBeforeAttach": [
+          "inputRecorded"
+        ],
+        "c2LocalAfter": {
+          "state": "stale",
+          "attemptState": null
+        },
+        "c2FenceReason": "attachment_detached",
+        "c2TransportAttemptUnchanged": true,
+        "c2EnvelopeImmutableThroughFence": true,
+        "c2ClaimCountAfter": 0,
+        "c2NativeStartCountAfter": 0
+      },
+      "postAttachC3": {
+        "listenerAccepted": true,
+        "localState": "observed",
+        "workerdAttemptCount": 1,
+        "workerdAttemptState": "observed",
+        "workerdClaimCount": 1,
+        "nativeStartCount": 1,
+        "exactlyOneStartOnC": true,
+        "bindingChangedAfterCompletedTurn": true,
+        "changedBindingFields": [
+          "generation",
+          "serverGeneration"
+        ]
+      },
+      "observedAckRestart": {
+        "daemonRestarted": true,
+        "nativeProcessRestarted": false,
+        "firstReplyLostAfterWorkerdCommit": true,
+        "ackBodyBytesIdentical": true,
+        "proofNonceChanged": true,
+        "nativeStartCount": 1
+      },
+      "nativeProcessCleanup": {
+        "A": {
+          "launcherExited": true,
+          "processGroupClosed": true,
+          "unexpectedGroupMembersAfterLauncherExit": 0,
+          "backendStopped": true,
+          "controlSocketRemoved": true,
+          "boundedGroupCleanupUsed": false
+        },
+        "B": {
+          "launcherExited": true,
+          "processGroupClosed": true,
+          "unexpectedGroupMembersAfterLauncherExit": 0,
+          "backendStopped": true,
+          "controlSocketRemoved": true,
+          "boundedGroupCleanupUsed": false
+        },
+        "C": {
+          "launcherExited": true,
+          "processGroupClosed": true,
+          "unexpectedGroupMembersAfterLauncherExit": 0,
+          "backendStopped": true,
+          "controlSocketRemoved": true,
+          "boundedGroupCleanupUsed": false
+        }
+      },
+      "brokerCleanup": {
+        "exitCode": 143,
+        "intentionalTermAccepted": true,
+        "ownedProcessGroupClosed": true,
+        "loopbackPortsClosed": true
+      },
+      "sourceNonceTransition": {
+        "firstDelivery": "C1",
+        "freshDelivery": "C3",
+        "nonReuse": true
+      },
+      "nativeStartCounts": {
+        "A": 1,
+        "B": 1,
+        "C": 2
+      }
+    }
+  },
+  "projectionMap": {
+    "artifact": "Verified CI selection; independent metadata, receipt, recipe and physical-byte checks",
+    "controlledEvidence": "Same-named fields in each raw proof; correlated identities/source contents remain private",
+    "installedPackageFilesSha256": "host.installedPackagePreflight.verifiedSha256; package-relative paths only",
+    "rawProofSha256": "SHA-256 of unchanged complete private proofs",
+    "controlledEvidence.threeSession": "Same-named raw proof fields; nativeStartCounts maps nativeCliSessions.<A|B|C>.nativeStartCount",
+    "threeSessionInputs": "Same-named raw fields; workerd inventory digest uses sorted compact JSON encoding of workerdInputsSha256"
+  },
+  "omittedPrivateFields": [
+    "Machine paths",
+    "Session/client/thread/turn/attempt identities",
+    "Synthetic source nonce and contents",
+    "Provider requests",
+    "PTY tails",
+    "Sandbox profiles"
+  ],
+  "limits": [
+    "No owner-client installation, production admission, Mesh or live user wake",
+    "Synthetic providers and source transport; no real model or cloud call",
+    "CI recipe and exact artifact provenance; no bitwise cross-machine rebuild claim",
+    "Three-session Access/Messaging/publication/model are fixtures; loopback replaces Mesh",
+    "C2 becomes stale; fresh C3 requires explicit fixture attachment, not automatic busy-to-idle recovery",
+    "No independent network capture or runner-wide outer sandbox claim"
+  ],
+  "threeSessionInputs": {
+    "cloudSourceCommit": "df7cf5b1e4ac3fb40de664c594c934abdda730de",
+    "workerdBundleSha256": "58f86a68fe34322978724cc640c1827cbfa2547d29e2f778f283114e5d283220",
+    "sourceSha256": {
+      "runner": "7e8300d3d5851d63ed0172d9f2c7ae83ce7ba7ed360aabce6888eefca183e6d7",
+      "workerFixture": "d485bf9b1e7094f0f38453e9158bb8fdefe67136d68630fc330c2b9a6ab07f01",
+      "broker": "8645cea1d17a07e0867c57f8f8a23fec8a33e9d8bebdebd6bd69423e28423111",
+      "nativeHostQualifier": "f8c3ee4da6dddd219be8637d2be171d4869e37c2976bc6ae33ad43c20dfd54a8",
+      "launcherSmoke": "073ddf6a43248db44345e0a20d09f11ced91740186d741b9038b7f7bea5dd33e",
+      "installedPreflight": "22002b7e599c266b512546c67ff383a643846624adb2b188520250d19fcd061c"
+    },
+    "workerdInputCount": 142,
+    "workerdInputInventorySha256": "838d72545c52ec41c26993329c7c198e5e344be1c07a5a52afd1e8e6b2e2c2b9"
+  }
+}

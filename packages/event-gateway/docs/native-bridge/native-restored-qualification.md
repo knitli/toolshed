@@ -1,9 +1,13 @@
 # Restored native build qualification
 
-**PASS, 2026-10-12 UTC.** The restored CLI
+**Historical PASS, 2026-10-12 UTC.** This build is superseded by the
+[main CI artifact qualification](native-ci-qualification.md). Its original evidence
+and digest remain unchanged.
+
+**Original result:** The restored CLI
 `62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3`
 passed the current production launcher and installed command path in a disposable
-consumer. Launcher, builder, and host-qualification pins now agree on this build.
+consumer. Launcher, builder, and host-qualification pins agreed on this build during that run.
 The companion host remains
 `679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a`.
 No runtime pin override, owner-client installation, real model call, or cloud call

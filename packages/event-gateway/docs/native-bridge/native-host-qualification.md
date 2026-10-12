@@ -9,8 +9,8 @@ The launcher verifies both executables and rejects package layouts that could
 select a different host from `codex-resources`.
 
 The current CLI pin is
-`62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3`.
-The [restored-build proof](native-restored-qualification.md) exercises this pin
+`763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b`.
+The [CI artifact qualification](native-ci-qualification.md) exercises this pin
 through the actual installed production launcher.
 The official `rust-v0.160.0` host, from the same upstream commit
 `a956835d020762cb2b570053af06f643a11c0ecc`, is pinned to

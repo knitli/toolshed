@@ -23,7 +23,7 @@ from .native_terminal import run_terminal
 from .security import ensure_private_directory
 
 # Exact clean-build executable qualified by the native release checkpoint.
-QUALIFIED_SHA256 = "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3"
+QUALIFIED_SHA256 = "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b"
 QUALIFIED_CODE_MODE_HOST_SHA256 = "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a"
 BINDING_FIELDS = (
     "clientId", "connectionId", "backendPid", "threadId", "generation",
