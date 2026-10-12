@@ -61,13 +61,10 @@ Recovery and lifecycle runs additionally denied external networking and permitte
 only loopback and Unix sockets, with a clean synthetic environment for native
 processes.
 
-Repeat the actual installed-launcher checks using the commands in
-[native host qualification](native-host-qualification.md), once without and once
-with `--github-source-read`. Use the current wheel and this exact CLI/host pair;
-choose distinct new proof outputs. The current `durable-restart-v3-qualify.py`
-reader, adapter, and qualifier hashes still match the installed consumer and
-support the separate two-TUI check. Its direct bridge proof complements the
-production-launcher checks; it does not exercise production cloud admission.
+This record preserves a historical run. The current wheel and host qualifier
+reject this superseded CLI digest. For current rerun instructions and the
+supported executable pair, use the
+[main CI artifact qualification](native-ci-qualification.md).
 
 Earlier `362074…5f27` live wake evidence, candidate-only proofs, and unknown or
 ambiguous attempts remain historical. This qualification does not resolve those
