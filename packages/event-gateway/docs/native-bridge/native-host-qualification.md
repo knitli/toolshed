@@ -8,14 +8,16 @@ executables and evidence together, and rolls back only its own files on failure.
 The launcher verifies both executables and rejects package layouts that could
 select a different host from `codex-resources`.
 
-The CLI remains pinned to
-`362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27`.
+The current CLI pin is
+`763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b`.
+The [CI artifact qualification](native-ci-qualification.md) exercises this pin
+through the actual installed production launcher.
 The official `rust-v0.160.0` host, from the same upstream commit
 `a956835d020762cb2b570053af06f643a11c0ecc`, is pinned to
 `679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a`.
 See the [build runbook](native-client-build.md) for the archive pin and handoff.
 
-The [retained proof](native-host-launcher-proof.json) passed with an isolated
+The historical `362074…5f27` [retained proof](native-host-launcher-proof.json) passed with an isolated
 installed wheel: one Start, the actual file contents in the correlated tool
 result, and `inputRecorded` for the same turn. Three synthetic provider requests
 were observed: two for the main turn and one for the TUI title. Cleanup removed

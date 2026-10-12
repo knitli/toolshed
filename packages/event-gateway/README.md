@@ -63,12 +63,12 @@ and recovery flow. Installing the reader does not attach or launch a client. See
 
 ### Explicit foreground client
 
-Run from an interactive terminal, naming the exact reviewed v3 prototype:
+Run from an interactive terminal, naming the exact [qualified CI artifact](docs/native-bridge/native-ci-qualification.md):
 
 ```sh
 knitli-event-gateway launch \
   --codex-binary /absolute/path/to/qualified/codex \
-  --binary-sha256 362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27 \
+  --binary-sha256 763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b \
   --cwd /absolute/path/to/project
 ```
 

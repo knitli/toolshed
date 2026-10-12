@@ -33,6 +33,17 @@ completion of any rollout stage.
 
 ## Latest controlled evidence
 
+The protected-main CI artifact rerun passed with CLI `763e5e2b…3717b` and a
+fresh matching wheel. See [CI qualification](native-ci-qualification.md) and its
+[five-proof projection](native-ci-qualification-proof.json) for exact artifact
+identity, hashes, inputs and results. The unchanged runner produced raw proof
+`51f8acaae227fa943ee51d76e545d96be50e084bdfdf4b5b09582e7db3dc711e`.
+This repeats the complete scenario matrix; it does not qualify the live gates.
+Use absolute command arguments and set runner cwd to the same private directory
+as `TMPDIR`, because the broker emits build input paths relative to that directory.
+
+## Historical restored-candidate evidence
+
 The 2026-10-12 run used the offline-qualified, held promotion candidate from
 [PR 81](https://github.com/knitli/toolshed/pull/81). Its native binary SHA-256 is
 `62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3`. The private package

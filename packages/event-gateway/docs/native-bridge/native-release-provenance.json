@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "repositoryId": 1200860702,
+  "runId": 38273438173,
+  "runAttempt": 1,
+  "headSha": "7ff224a1fc8a9923e33aeafbd66cfa65efdc8bea",
+  "artifactId": 11758567975,
+  "artifactSha256": "6c84263897f36f40d78513b4710be8d2cd13120175d087ca83f98117be2a4b13",
+  "binarySha256": "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b",
+  "codeModeHostSha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a"
+}

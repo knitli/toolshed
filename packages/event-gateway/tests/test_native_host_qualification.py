@@ -15,6 +15,11 @@ SPEC.loader.exec_module(QUALIFIER)
 
 
 class NativeHostQualificationTests(unittest.TestCase):
+    def test_qualifier_pins_match_the_production_launcher(self):
+        from event_gateway import launcher
+        self.assertEqual(QUALIFIER.CLI_SHA, launcher.QUALIFIED_SHA256)
+        self.assertEqual(QUALIFIER.HOST_SHA, launcher.QUALIFIED_CODE_MODE_HOST_SHA256)
+
     def test_only_correlated_tool_output_counts(self):
         nonce = "unique-source-nonce"
         output = {"type": "custom_tool_call_output", "call_id": QUALIFIER.CALL_ID,
