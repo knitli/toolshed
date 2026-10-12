@@ -271,7 +271,7 @@ class GitHubTransportTests(unittest.TestCase):
     def blob_fixture(self, raw):
         import base64
         import hashlib
-        oid = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+        oid = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw, usedforsecurity=False).hexdigest()
         metadata = {"type": "file", "encoding": "none", "content": "", "sha": oid, "size": len(raw)}
         blob = {"encoding": "base64", "content": base64.encodebytes(raw).decode(), "sha": oid, "size": len(raw)}
         return metadata, blob
@@ -410,7 +410,8 @@ class ProvenanceDriverTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             event_path = Path(directory) / "event.json"
             event_path.write_text(json.dumps(event))
-            env = {"GITHUB_REPOSITORY": V.REPOSITORY, "GH_TOKEN": "test-token", "WORKFLOW_SHA": BUILD,
+            env = {"GITHUB_REPOSITORY": V.REPOSITORY, "GH_TOKEN": str(unittest.mock.sentinel.github_token),
+                   "WORKFLOW_SHA": BUILD,
                    "GITHUB_EVENT_PATH": str(event_path), "GITHUB_EVENT_NAME": event_name,
                    "GITHUB_SERVER_URL": "https://github.com", "GITHUB_RUN_ID": "999"}
             with patch.dict(V.os.environ, env), patch.object(V, "GitHub", return_value=api), \
