@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import signal
 import sqlite3
-import subprocess
+import subprocess  # nosec B404 - Fixed Git executable and disposable test-owned repositories, no shell.
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -192,16 +192,19 @@ class ThreeSessionSourceTests(unittest.TestCase):
                            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": FIXTURE.os.devnull}
             heads = []
             for repository in (checkout, other):
-                subprocess.run(["/usr/bin/git", "init", "--quiet", "--initial-branch=main", str(repository)],
-                               check=True, capture_output=True, timeout=10, env=environment)
-                subprocess.run(["/usr/bin/git", "-C", str(repository), "-c", "user.name=Fixture",
-                                "-c", "user.email=fixture@example.invalid", "-c", "core.hooksPath=/dev/null",
-                                "commit", "--quiet", "--allow-empty", "-m", repository.name],
-                               check=True, capture_output=True, timeout=10, env=environment)
-                heads.append(subprocess.run(["/usr/bin/git", "-C", str(repository), "rev-parse", "HEAD"],
-                                            check=True, capture_output=True, text=True, timeout=10,
-                                            env=environment).stdout.strip())
-            self.assertNotEqual(*heads)
+                subprocess.run(  # nosec B603 - Fixed Git and private tempfile path; no external input or shell.
+                    ["/usr/bin/git", "init", "--quiet", "--initial-branch=main", str(repository)],
+                    check=True, capture_output=True, timeout=10, env=environment)
+                subprocess.run(  # nosec B603 - Fixed Git, literal commit options, and test-owned repo; hooks disabled.
+                    ["/usr/bin/git", "-C", str(repository), "-c", "user.name=Fixture",
+                     "-c", "user.email=fixture@example.invalid", "-c", "core.hooksPath=/dev/null",
+                     "commit", "--quiet", "--allow-empty", "-m", repository.name],
+                    check=True, capture_output=True, timeout=10, env=environment)
+                heads.append(subprocess.run(  # nosec B603 - Fixed Git reading HEAD from a private test-owned repo.
+                    ["/usr/bin/git", "-C", str(repository), "rev-parse", "HEAD"],
+                    check=True, capture_output=True, text=True, timeout=10,
+                    env=environment).stdout.strip())
+            self.assertNotEqual(heads[0], heads[1])
             parsed.cloud_commit = heads[0]
             hostile = {"GIT_DIR": str(other / ".git"), "GIT_WORK_TREE": str(other)}
             with patch.object(FIXTURE, "load_module", return_value=helper), \
