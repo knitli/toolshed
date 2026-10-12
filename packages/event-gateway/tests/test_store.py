@@ -694,6 +694,66 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.cleanup(), 1)
         self.assertIsNone(self.store.current_attempt(ident))
 
+    def assert_observed_history_preserved(self, operation):
+        ident, admission = self.admitted()
+        attempt = self.event["attemptId"]
+        request = self.request(admission)
+        self.assertTrue(self.store.begin_native(ident, attempt, request))
+        receipt = self.native_input(request)
+        self.store.record_input_recorded(ident, attempt, receipt)
+        submitted = self.native_ack(admission, receipt)
+        observed = self.observed_ack(admission, receipt)
+        self.store.persist_native_ack(ident, attempt, submitted)
+        self.store.complete_native_ack(ident, attempt, submitted, {"status": "submitted", "current": False})
+        self.store.persist_native_ack(ident, attempt, observed, observed=True)
+        self.store.complete_native_ack(ident, attempt, observed,
+                                       {"status": "observed", "current": True}, observed=True)
+
+        def history():
+            return (
+                tuple(self.store.db.execute("SELECT * FROM deliveries WHERE id=?", (ident,)).fetchone()),
+                tuple(self.store.db.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt,)).fetchone()),
+            )
+
+        before = history()
+        self.now += 1  # Make any unintended timestamp rewrite visible.
+        if operation == "attach":
+            self.store.put_attachment(dict(
+                self.mapping, attachmentGeneration=self.mapping["attachmentGeneration"] + 1,
+            ))
+        elif operation == "detach":
+            self.store.detach(self.mapping["runtimeId"])
+        elif operation == "transfer":
+            target, transfer = self.transfer_mapping_and_cas()
+            self.store.put_attachment(target, transfer=transfer)
+        else:
+            self.now = self.mapping["leaseExpiresAt"] + 1
+            self.assertEqual(self.store.list_attachments(), [])
+            self.assertEqual(self.store.cleanup(), 0)
+        self.assertEqual(history(), before)
+        self.assertFalse(self.store.begin_claim(ident))
+        self.assertFalse(self.store.begin_native(ident, attempt, request))
+        self.assertFalse(self.store.begin_submit(ident))
+        self.assertEqual(self.store.list_pending(), [])
+        self.assertEqual(self.store.list_reconcilable(), [])
+        # Replayed acknowledgments remain idempotent after authority changes.
+        self.assertTrue(self.store.complete_native_ack(
+            ident, attempt, observed, {"status": "observed", "current": False}, observed=True,
+        ))
+        self.assertEqual(history(), before)
+
+    def test_reattach_preserves_completed_observed_history(self):
+        self.assert_observed_history_preserved("attach")
+
+    def test_detach_preserves_completed_observed_history(self):
+        self.assert_observed_history_preserved("detach")
+
+    def test_transfer_preserves_completed_observed_history(self):
+        self.assert_observed_history_preserved("transfer")
+
+    def test_expiry_preserves_completed_observed_history(self):
+        self.assert_observed_history_preserved("expiry")
+
     def test_observed_completion_after_detach_preserves_fence(self):
         ident, admission = self.admitted()
         attempt = self.event["attemptId"]
