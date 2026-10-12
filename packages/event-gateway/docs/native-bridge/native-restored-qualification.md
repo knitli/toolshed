@@ -15,6 +15,15 @@ individual results. Raw synthetic provider requests, duplicate trace fields, and
 PTY tails stay in the separately hashed local artifacts; the tracked proof
 identifies those omissions explicitly. The correlated Start, receipt, tool output,
 binding, configuration hashes, and cleanup results are retained in the proof.
+Machine-specific paths in keys, values, and embedded commands use stable root
+labels; repository paths are relative to the checkout. Embedded commands and
+sandbox profiles are descriptive projections, not executable replay instructions.
+The original tracked projection is preserved privately with SHA-256
+`05172c2003ad06a5000d6163ddd1f37844e839bbea1ad709e7f2ffd04736969c`.
+The private `path-projection-private` artifact directory contains that original,
+the normalization script, and the exact mapping of changed keys and values.
+The mapping was checked for an exact round trip, with all existing proof hashes
+and non-path values unchanged. Raw and historical proof artifacts were not edited.
 
 | Check | Result |
 | --- | --- |
@@ -39,9 +48,9 @@ No Rust source changed or rebuild was needed. This does not claim bitwise
 reproducibility: the original build evidence remains unchanged and still records
 `launcherQualified: false` against the former launcher pin.
 
-The first new invocation stopped at installed-wheel preflight because `/opt` and
-`/opt/coder` are group-writable on this machine. It launched no native process.
-The successful runs used fresh private `/private/tmp` copies of the same verified
+The first new invocation stopped at installed-wheel preflight because ancestors of the original
+installation directory are group-writable on the qualification machine. It launched no native process.
+The successful runs used fresh private temporary copies of the same verified
 executables and installed wheel. Ancestor checks were preserved; no shared
 permissions were changed. The host proofs used their mandatory outer sandbox.
 Recovery and lifecycle runs additionally denied external networking and permitted
