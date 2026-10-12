@@ -1,3 +1,45 @@
+# [2.0.0](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.4.1...@knitli/openapi-mcp-v2.0.0) (2026-10-12)
+
+
+* fix(openapi-mcp)!: require independent operator approval ([#79](https://github.com/knitli/toolshed/issues/79)) ([1b7ee88](https://github.com/knitli/toolshed/commit/1b7ee88b2a6aeba1cfe8da373e787a74c481452d))
+
+
+### Bug Fixes
+
+* **event-gateway:** archive complete pinned native source ([fa49ce1](https://github.com/knitli/toolshed/commit/fa49ce13ad1c46770746e86c3c7e52d2debb073d))
+* **event-gateway:** bound durable recovery storage failures ([843e8cf](https://github.com/knitli/toolshed/commit/843e8cf20e3255cf319cfd5f92ade46a4025e4e3))
+* **event-gateway:** bound per-runtime lock table ([d9b543e](https://github.com/knitli/toolshed/commit/d9b543e2d205b168fc7da985cb96e975537d9a15)), closes [#57](https://github.com/knitli/toolshed/issues/57)
+* **event-gateway:** fence confirmed transfers after capacity failures ([82d2339](https://github.com/knitli/toolshed/commit/82d23397883c8d7f386da16e3c86eda9b9bfbdad))
+* **event-gateway:** fence dispatch readiness and admission on shutdown ([3f8679b](https://github.com/knitli/toolshed/commit/3f8679b11fa5ffe2c42301fe918f98e97aa47d50))
+* **event-gateway:** fence native build inputs and proof readback ([f8c1640](https://github.com/knitli/toolshed/commit/f8c1640cb6c7a5117302cae821b13582050f95a6))
+* **event-gateway:** isolate native packaging Git configuration ([#78](https://github.com/knitli/toolshed/issues/78)) ([0667255](https://github.com/knitli/toolshed/commit/0667255477c14e8b33757d61b66d51e53bfaafa4))
+* **event-gateway:** package and verify native code-mode host ([#71](https://github.com/knitli/toolshed/issues/71)) ([a64234b](https://github.com/knitli/toolshed/commit/a64234b48d9d697eeb61e0524715354c27c3c0a9))
+* **event-gateway:** preserve bounded launcher cleanup ([b7eb604](https://github.com/knitli/toolshed/commit/b7eb60476de79c673ee9cc20ae60bdc28f950914))
+* **event-gateway:** preserve cleanup through interrupt signals ([51c3793](https://github.com/knitli/toolshed/commit/51c379322367abc93e108e979e47c88e4faced0c))
+* **event-gateway:** preserve native lifecycle recovery and fencing ([89d07d8](https://github.com/knitli/toolshed/commit/89d07d8bf398fcfde2e6acc21e007de9ed00f6ac))
+* **event-gateway:** preserve native selection through idle redraws ([#64](https://github.com/knitli/toolshed/issues/64)) ([2a52f72](https://github.com/knitli/toolshed/commit/2a52f72d57c2e5b9db525465165f37a12db01699))
+* **event-gateway:** recover presence reads and guard startup cleanup ([00f2f3e](https://github.com/knitli/toolshed/commit/00f2f3e5ed8d9ddfcb2b06c94a733ae6e41ebb96))
+* **event-gateway:** retire definitive cloud claim refusals ([#77](https://github.com/knitli/toolshed/issues/77)) ([406ef34](https://github.com/knitli/toolshed/commit/406ef34a5436875beb090a6e3246a7efbb619a0b))
+* **event-gateway:** verify installed bytes before native qualification ([496d2cd](https://github.com/knitli/toolshed/commit/496d2cd4a7d42a191547a2c39e0ab7b3a8d5bdcc))
+* **openapi-mcp:** finish stdio approval embedding and deadline lifecycle ([#80](https://github.com/knitli/toolshed/issues/80)) ([cbdf0de](https://github.com/knitli/toolshed/commit/cbdf0de0c2206fd43dcfc1ef5c8260a13f1710ae))
+
+
+### Features
+
+* **event-gateway:** attach native clients with durable cloud recovery ([25cba6c](https://github.com/knitli/toolshed/commit/25cba6cbf18328efb6b06a7b4ff36ae0730b390c))
+* **event-gateway:** build pinned native client candidates ([b150eb6](https://github.com/knitli/toolshed/commit/b150eb648077cbaaab27b11f6da3d5f9ce0bbe8e))
+* **event-gateway:** launch explicit qualified native clients ([9a8a3bf](https://github.com/knitli/toolshed/commit/9a8a3bf61e8e553fe4519352b2bb73a279056219))
+* **event-gateway:** qualify supported native client and admission ([0419ac8](https://github.com/knitli/toolshed/commit/0419ac8bfc6ed943a290bf98ca9a2a9306ae7f21))
+* **event-gateway:** wire qualified native session dispatch and recovery ([5666bf4](https://github.com/knitli/toolshed/commit/5666bf46c73e719b695643889349fa680017b617))
+
+
+### BREAKING CHANGES
+
+* built-in stdio actions deny without a trusted host approval provider.
+MCP client confirmation alone no longer authorizes dispatch or exact-policy activation.
+
+* fix(openapi-mcp): bound trusted approvals and expose policy helpers
+
 ## [1.4.1](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v1.4.0...@knitli/openapi-mcp-v1.4.1) (2026-10-08)
 
 
