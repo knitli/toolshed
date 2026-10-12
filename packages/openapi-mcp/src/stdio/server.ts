@@ -27,6 +27,7 @@ import {
 } from "../runtime/versions.ts";
 import type { createLocalDispatchBoundary } from "../sqlite/guarded-fetch.ts";
 import {
+  type ClientElicitationAuthorizerOptions,
   createClientElicitationActionAuthorizer,
   createExactPolicyActionAuthorizer,
   type StatefulActionAuthorizer,
@@ -43,12 +44,20 @@ const requestCapabilities = new AsyncLocalStorage<{
 /** One authorizer across factory instances preserves opaque continuation ownership. */
 export function createStdioActionAuthorizer(
   templates: readonly CompiledExactPolicy[] = [],
+  approve?: ClientElicitationAuthorizerOptions["approve"],
 ): StatefulActionAuthorizer {
   const elicitationAvailable = () =>
     requestCapabilities.getStore()?.form === true;
   return templates.length
-    ? createExactPolicyActionAuthorizer({ templates, elicitationAvailable })
-    : createClientElicitationActionAuthorizer({ elicitationAvailable });
+    ? createExactPolicyActionAuthorizer({
+        templates,
+        elicitationAvailable,
+        approve,
+      })
+    : createClientElicitationActionAuthorizer({
+        elicitationAvailable,
+        approve,
+      });
 }
 
 export interface OpenApiServerRoute {
@@ -355,6 +364,7 @@ async function executeAction(
           requestState: state,
           inputResponses: ctx.mcpReq.inputResponses,
         },
+    ctx.mcpReq.signal,
   );
   if (decision.status === "denied") throw new OpenApiMcpError("ACTION_DENIED");
   if (decision.status === "input-required")
@@ -471,7 +481,7 @@ export function createOpenApiMcpServer(
     "action",
     {
       description:
-        "Request one verified action with client approval or an explicitly activated exact policy.",
+        "Request one verified action with independent operator approval or an explicitly activated exact policy. Actions are denied when a trusted approval provider is unavailable.",
       inputSchema: actionSchema,
     },
     (input, ctx) =>

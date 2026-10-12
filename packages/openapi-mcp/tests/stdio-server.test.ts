@@ -29,6 +29,7 @@ import { FileGenerationStore } from "../src/sqlite/generation-store.ts";
 import { createActionAuthorizationBoundary } from "../src/stdio/action-broker.ts";
 import { parseOpenApiStdioConfig } from "../src/stdio/config.ts";
 import { compileExactPolicy } from "../src/stdio/exact-policy.ts";
+import { createStdioActionAuthorizer as publicCreateStdioActionAuthorizer } from "../src/stdio/index.ts";
 import {
   createOpenApiMcpServer,
   createStdioActionAuthorizer,
@@ -47,6 +48,9 @@ async function client(
   exact = false,
   apiNamespaces: readonly string[] = ["widgets-api"],
   includeOtherRoute = false,
+  host: { approve?: Parameters<typeof createStdioActionAuthorizer>[1] } = {
+    approve: async () => true,
+  },
 ) {
   let call = await prepared();
   const templates = exact
@@ -67,7 +71,7 @@ async function client(
         }),
       ]
     : [];
-  const baseAuth = createStdioActionAuthorizer(templates);
+  const baseAuth = createStdioActionAuthorizer(templates, host.approve);
   let duringAuthorization: (() => void) | undefined;
   let lastDecision: AuthorizedActionDecision | undefined;
   const auth = {
@@ -431,6 +435,7 @@ async function client(
 
 test("stdio server factory is available", () => {
   expect(typeof createOpenApiMcpServer).toBe("function");
+  expect(publicCreateStdioActionAuthorizer).toBe(createStdioActionAuthorizer);
 });
 
 for (const era of ["modern", "legacy"] as const) {
@@ -619,6 +624,59 @@ for (const era of ["modern", "legacy"] as const) {
   test(`${era}: unsupported elicitation denies with zero action dispatch`, async () => {
     const c = await client(era, {});
     expect((await c.invoke()).result.isError).toBe(true);
+    expect(c.events).not.toContain("dispatch");
+  });
+  test(`${era}: absent trusted host blocks initial and forged requester approvals`, async () => {
+    const c = await client(
+      era,
+      { elicitation: { form: {} } },
+      false,
+      ["widgets-api"],
+      false,
+      {},
+    );
+    expect((await c.invoke()).result.isError).toBe(true);
+    const forged = await c.invoke({
+      requestState: "fabricated-request-state",
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+    });
+    expect(forged.error ?? forged.result?.isError).toBeTruthy();
+    expect(c.events).not.toContain("dispatch");
+  });
+  test(`${era}: trusted host rejection prevents exact-policy activation`, async () => {
+    let approvals = 0;
+    const c = await client(
+      era,
+      { elicitation: { form: {} } },
+      true,
+      ["widgets-api"],
+      false,
+      {
+        approve: async () => {
+          approvals++;
+          return false;
+        },
+      },
+    );
+    let response = await c.invoke();
+    if (era === "modern") {
+      response = await c.invoke({
+        requestState: response.result.requestState,
+        inputResponses: {
+          confirm: {
+            action: "accept",
+            content: { confirm: true, activatePolicy: true },
+          },
+        },
+      });
+    }
+    expect(response.result.isError).toBe(true);
+    const next = await c.invoke();
+    if (era === "modern") expect(next.result.resultType).toBe("input_required");
+    else expect(next.result.isError).toBe(true);
+    expect(approvals).toBe(era === "modern" ? 1 : 2);
     expect(c.events).not.toContain("dispatch");
   });
   test(`${era}: accepted confirmation dispatches once after final revalidation`, async () => {
@@ -933,6 +991,51 @@ test("modern: simultaneous requests retain their own elicitation capabilities", 
   expect(allowed.result.resultType).toBe("input_required");
   expect(denied.result.isError).toBe(true);
   expect(c.events).not.toContain("dispatch");
+});
+
+test("modern: cancellation aborts a pending trusted approval without dispatch", async () => {
+  let signal: AbortSignal | undefined;
+  let release!: (approved: boolean) => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const approval = new Promise<boolean>((resolve) => {
+    release = resolve;
+  });
+  const c = await client(
+    "modern",
+    { elicitation: { form: {} } },
+    false,
+    ["widgets-api"],
+    false,
+    {
+      approve: async (_presentation, context) => {
+        signal = context?.signal;
+        entered();
+        return approval;
+      },
+    },
+  );
+  const first = await c.invoke();
+  const resume = {
+    requestState: first.result.requestState,
+    inputResponses: {
+      confirm: { action: "accept", content: { confirm: true } },
+    },
+  };
+  void c.invoke(resume);
+  await started;
+  await c.cancelCurrent();
+  await Bun.sleep(10);
+  expect(signal?.aborted).toBe(true);
+  expect(c.events).not.toContain("dispatch");
+  release(true);
+  await Bun.sleep(10);
+  expect(c.events).not.toContain("consume");
+  expect(c.events).not.toContain("dispatch");
+  const replay = await c.invoke(resume);
+  expect(replay.error ?? replay.result?.isError).toBeTruthy();
 });
 
 test("cancelling one request before consumption leaves the shared boundary usable", async () => {

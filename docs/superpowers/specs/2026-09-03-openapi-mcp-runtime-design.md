@@ -1,5 +1,12 @@
 # OpenAPI MCP Runtime and Local stdio Server — Design
 
+**Security update (2026-10-11):** The client-trust assumption in section 11 is
+superseded: the built-in stdio CLI now denies actions. Client elicitation alone
+cannot authenticate an independent operator. Embeddings must configure an
+authorizer with independent operator approval; the built-in elicitation
+authorizers require a host-owned `approve(presentation)` provider before minting
+receipts or activating policies. The original design text is retained below.
+
 **Date:** 2026-09-03
 **Status:** Approved architecture, implementation pending
 **Scope:** Phase 2 of `@knitli/openapi-mcp`: a public local stdio MCP server for provider-neutral OpenAPI 3.x APIs, including bounded digest-pinned multi-document schemas, and the host-neutral runtime contract later consumed by other hosts.

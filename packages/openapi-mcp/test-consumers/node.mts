@@ -27,8 +27,12 @@ import {
   SqliteCatalogStore,
 } from "@knitli/openapi-mcp/sqlite";
 import {
+  type CompiledExactPolicy,
+  compileExactPolicy,
   createOpenApiMcpServer,
+  type ExactPolicyTemplate,
   parseOpenApiStdioConfig,
+  type TrustedActionApprovalContext,
 } from "@knitli/openapi-mcp/stdio";
 import {
   CLIENT_CAPABILITIES_META_KEY,
@@ -48,6 +52,44 @@ for (const exported of [
   runRuntimeConformanceSuite,
 ])
   assert.equal(typeof exported, "function");
+const exactTemplate: ExactPolicyTemplate = {
+  version: 1,
+  catalogId: "consumer" as ExactPolicyTemplate["catalogId"],
+  releaseId: "known-good" as ExactPolicyTemplate["releaseId"],
+  manifestDigest: "a".repeat(64) as ExactPolicyTemplate["manifestDigest"],
+  operationId: "operation:consumer:createWidget",
+  operationDigest: "b".repeat(64) as ExactPolicyTemplate["operationDigest"],
+  credentialProfileDigest: "c".repeat(
+    64,
+  ) as ExactPolicyTemplate["credentialProfileDigest"],
+  actionKind: "create",
+  cardinality: "single",
+  maxAffected: 1,
+  expiresAt: Date.now() + 60_000,
+  arguments: { kind: "exact", value: { body: { count: 1 } } },
+};
+const exactPolicy: CompiledExactPolicy =
+  await compileExactPolicy(exactTemplate);
+assert.equal(exactPolicy.policyDigest.length, 64);
+assert.equal(
+  canonicalJson(exactPolicy.template.arguments),
+  canonicalJson(exactTemplate.arguments),
+);
+const approvalContext: TrustedActionApprovalContext = {
+  normalizedArguments: { body: { count: 1 } },
+  credentialBinding: {
+    profileId: "consumer",
+    profileDigest: exactTemplate.credentialProfileDigest,
+    grantId: "consumer-grant",
+    audience: "https://api.example.test",
+    scopes: ["widgets.write"],
+    slotsDigest: exactTemplate.manifestDigest,
+    bindingDigest: exactTemplate.operationDigest,
+  },
+  expiresAt: exactTemplate.expiresAt,
+  signal: new AbortController().signal,
+};
+assert.equal(approvalContext.signal.aborted, false);
 const releaseKey = generateKeypair();
 const rollbackKey = generateKeypair();
 const publicKey = (pem: string) =>

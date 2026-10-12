@@ -120,6 +120,7 @@ describe("private action authorization boundary", () => {
   test("consumes a built-in authorizer decision through the snapshotting broker", async () => {
     let randomByte = 0;
     const configured = createClientElicitationActionAuthorizer({
+      approve: async () => true,
       elicitationAvailable: () => true,
       randomBytes(size) {
         const bytes = new Uint8Array(size);

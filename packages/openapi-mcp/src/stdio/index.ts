@@ -26,9 +26,20 @@ import {
   type OpenApiServerRoute,
 } from "./server.ts";
 
+export type {
+  StatefulActionAuthorizer,
+  TrustedActionApprovalContext,
+} from "./authorizer.ts";
 export { type OpenApiStdioConfig, parseOpenApiStdioConfig } from "./config.ts";
 export {
+  type ArgumentConstraint,
+  type CompiledExactPolicy,
+  compileExactPolicy,
+  type ExactPolicyTemplate,
+} from "./exact-policy.ts";
+export {
   createOpenApiMcpServer,
+  createStdioActionAuthorizer,
   type OpenApiMcpServerOptions,
 } from "./server.ts";
 
