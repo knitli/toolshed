@@ -6,7 +6,7 @@ import { OwnerRegistry, ownerRegistryName } from 'fixture-event-runtime/registry
 import { coordinatorName, type EventApiEnvironment } from 'fixture-event-runtime/contracts.ts';
 type Auth = { accessAssertion: string; agentToken: string };
 type AttemptAuth = Auth & { attemptId: string };
-type FixtureSetup = { runtimeId: string; nodeId: string; transportPrivateKey: string };
+type FixtureSetup = { runtimeId: string; nodeId: string; transportPrivateKey: string; subjectId?: string };
 type CoordinatorContext = ConstructorParameters<typeof AgentCoordinator>[0];
 type CoordinatorEnv = ConstructorParameters<typeof AgentCoordinator>[1];
 type FixtureEnv = Omit<EventApiEnvironment, 'OWNER_REGISTRY' | 'AGENT_COORDINATOR'> & {
@@ -30,7 +30,7 @@ export class FixtureCoordinator extends AgentCoordinator {
   constructor(ctx:CoordinatorContext,env:CoordinatorEnv) { super(ctx,{...env,MESSAGE_AUTHORITY:authority as unknown as CoordinatorEnv['MESSAGE_AUTHORITY'],DELIVERY_QUEUE:queue as unknown as CoordinatorEnv['DELIVERY_QUEUE']}); }
   async fixtureSetup(x:FixtureSetup) {
     await this.setEnabled({enabled:true});
-    const job={principal,agent,...await this.publishManual({runtimeId:x.runtimeId,subjectId:'fixture-manual-source'})};
+    const job={principal,agent,...await this.publishManual({runtimeId:x.runtimeId,subjectId:x.subjectId??'fixture-manual-source'})};
     const transport=await this.claimTransport(job);
     if(!transport) throw new Error('fixture_transport_claim_refused');
     const req=await signedEventRequest({EVENT_TRANSPORT_PRIVATE_KEY:x.transportPrivateKey,EVENT_TRANSPORT_KEY_ID:'fixture-transport',
