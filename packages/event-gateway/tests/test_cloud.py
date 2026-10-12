@@ -523,7 +523,7 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         cases = (
             (400, {"error": "invalid_request"}, False),
             (403, {"error": "denied"}, False),
-            (409, {"error": "conflict"}, False),
+            (409, {"error": "expired"}, False),
             (400, {"error": "unrecognized"}, True),
             (403, {}, True),
             (503, {"error": "runtime_disabled"}, True),
