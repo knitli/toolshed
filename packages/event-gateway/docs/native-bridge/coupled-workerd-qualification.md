@@ -1,8 +1,8 @@
 # Controlled native / local gateway / workerd qualification
 
-The current runner repair and pending offline runtime proposal are described in
-[recovery preflight](coupled-workerd-recovery-preflight.md). No new runtime result
-is implied by that repair; the results below retain their historical scope.
+The current candidate-only native-restart and lost-ACK PASS is recorded in
+[recovery qualification](coupled-workerd-recovery-preflight.md). The results below
+retain their historical scope.
 
 Current combined terminal no-start and unknown-after-restart evidence is recorded in
 [terminal no-start qualification](coupled-no-start.md).
