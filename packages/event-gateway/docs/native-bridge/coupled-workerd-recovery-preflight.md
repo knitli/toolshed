@@ -18,8 +18,8 @@ Absolute paths in these unmodified evidence files identify historical inputs;
 reproduction does not require those locations.
 
 This is candidate-only evidence with synthetic authority and a manual source.
-Production admission, production GitHub ingestion, terminal no-start settlement,
-and deployment/promotion are not proved. No launcher pin changed. Earlier proof
+Production admission, production GitHub ingestion, and deployment/promotion are
+not proved. Terminal no-start settlement passed in a separate mode below. No launcher pin changed. Earlier proof
 files retain their historical scope.
 
 | Executed input | Pin |
@@ -61,6 +61,31 @@ fresh bytecode-cache location. `--package` still names the package directory;
 the trusted Python source is its `src/event_gateway` child. The explicit candidate
 binary hash remains a qualification input, not a change to production launcher
 pins. Freeze the companion executable separately before running.
+
+## Separate terminal no-start settlement
+
+**PASS, same frozen candidate and fixture payload.** A separately reviewed,
+180-second-bounded `--terminal-no-start` run completed in 8.44 seconds. The native
+backend actually refused the expired permit with `terminalNotStarted` /
+`permitExpired`; the fixture lost that reply before local persistence. Read-only
+native recovery returned the exact terminal receipt. Workerd committed no-start
+settlement before its reply was also lost, and identical settlement replay with a
+fresh node proof retired the original attempt and permit. Exactly one fresh
+replacement attempt then started. Mock model counts were primary=1, title=0,
+unknown=0; real model calls were zero. Both owned process groups exited, and the
+2,266 staged files and 47 links remained unchanged.
+
+[Exact no-start proof](coupled-workerd-recovery-no-start-proof.json) SHA-256:
+`237535909e72971f8792a2cc3772cf8041fa9a610dede8e48b50313e0ea47e5c`.
+[No-start supervision](coupled-workerd-recovery-no-start-supervision.json) SHA-256:
+`296171d1eed6f93230a2dcdacbd94c8cce37a054992643195ed19c3b273e43be`.
+
+This is a separate mode from the native-restart recorded-input proof above.
+It sets `oldStartNoStartSettlementProven: true` but does **not** restart the native
+process or prove terminal-receipt survival across native restart. Production
+admission remains false in both modes. Reproduce it with the same bounded command
+and frozen inputs below, replacing `--restart-native` with `--terminal-no-start`
+and choosing a fresh exclusive output directory. Do not combine those flags.
 
 ## Rebase and final offline checks
 

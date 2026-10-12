@@ -1,6 +1,7 @@
 # Controlled native / local gateway / workerd qualification
 
-The current candidate-only native-restart and lost-ACK PASS is recorded in
+The current candidate-only native-restart/lost-ACK and separate terminal no-start
+settlement passes are recorded in
 [recovery qualification](coupled-workerd-recovery-preflight.md). The results below
 retain their historical scope.
 
