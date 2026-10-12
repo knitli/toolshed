@@ -1,0 +1,48 @@
+name: Event Native Provenance
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+  workflow_run:
+    workflows: [Event Gateway, Native client candidate build]
+    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/event-native-provenance.yml
+      - .github/workflows/event-native-build.yml
+      - packages/event-gateway/scripts/verify_native_ci_provenance.py
+      - packages/event-gateway/scripts/produce_native_ci_artifact.py
+      - packages/event-gateway/scripts/package_native_client.py
+      - packages/event-gateway/src/event_gateway/launcher.py
+      - packages/event-gateway/docs/native-bridge/native-metadata-v1-source-manifest.json
+      - packages/event-gateway/docs/native-bridge/native-metadata-v1-implementation.patch
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+  statuses: write
+
+concurrency:
+  group: event-native-provenance
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  verify:
+    name: Verify native pin provenance (trusted main)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Candidate branches and downloaded artifacts are data; only this trusted SHA executes.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Revalidate current heads using successful main build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: python3 -I packages/event-gateway/scripts/verify_native_ci_provenance.py
