@@ -172,6 +172,7 @@ class GitHub:
     def __init__(self, token):
         self.token = token
         self.opener = urllib.request.build_opener(NoRedirect)
+        self._blob_cache = {}
 
     def request(self, endpoint, payload=None, *, accept="application/vnd.github+json", response_limit=LIMIT):
         request = urllib.request.Request(API + endpoint if endpoint else API.rstrip("/"),
@@ -185,6 +186,9 @@ class GitHub:
 
     def blob(self, path, revision):
         require(sha(revision, 40))
+        key = (revision, path)
+        if key in self._blob_cache:
+            return self._blob_cache[key]
         value = self.request("contents/" + path + "?" + urllib.parse.urlencode({"ref": revision}),
                              accept="application/vnd.github.object+json")
         require(value.get("type") == "file" and sha(value.get("sha"), 40)
@@ -194,6 +198,9 @@ class GitHub:
                 and blob.get("size") == value["size"])
         raw = base64.b64decode("".join(blob["content"].splitlines()), validate=True)
         require(len(raw) <= LIMIT and blob["size"] == len(raw))
+        # Only validated immutable bytes live in this run-local cache. Mutable
+        # main/head refs and artifact availability are always read afresh.
+        self._blob_cache[key] = raw
         return raw
 
     def download(self, artifact_id, destination):
@@ -293,7 +300,10 @@ def main():
     if event_name == "pull_request_target":
         pulls = [event["pull_request"]]
     else:
-        require(event_name == "workflow_run" or event_name == "push" and event.get("ref") == "refs/heads/main")
+        require(event_name == "workflow_run"
+                or event_name == "push" and event.get("ref") == "refs/heads/main"
+                or event_name in ("schedule", "workflow_dispatch")
+                and os.environ.get("GITHUB_REF") == "refs/heads/main")
         pulls = open_pulls(api)
     failed = False
     for pull in pulls:

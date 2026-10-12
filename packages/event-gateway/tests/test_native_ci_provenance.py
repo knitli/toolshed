@@ -288,6 +288,78 @@ class GitHubTransportTests(unittest.TestCase):
         self.assertEqual(requests[0].get_header("Accept"), "application/vnd.github.object+json")
         self.assertTrue(all(request.get_header("Authorization") == "Bearer test-token" for request in requests))
 
+    def policy_api(self):
+        api = V.GitHub("test-token")
+        current = {"main": MAIN, "head": HEAD, "changed": False}
+        objects = {}
+
+        def request(endpoint, payload=None, **kwargs):
+            if endpoint.startswith("pulls/"):
+                return {"state": "open", "head": {"sha": current["head"]}}
+            if endpoint == "git/ref/heads/main":
+                return {"object": {"sha": current["main"]}}
+            if endpoint.startswith("statuses/"):
+                return {}
+            if endpoint.startswith("contents/"):
+                path, revision = endpoint.removeprefix("contents/").split("?ref=")
+                raw = path.encode()
+                if current["changed"] and revision == current["main"] and path == V.SCRIPT:
+                    raw += b" changed policy"
+                metadata, blob = self.blob_fixture(raw)
+                objects[metadata["sha"]] = blob
+                return metadata
+            if endpoint.startswith("git/blobs/"):
+                return objects[endpoint.removeprefix("git/blobs/")]
+            raise AssertionError(endpoint)
+
+        api.request = unittest.mock.Mock(side_effect=request)
+        return api, current
+
+    def test_multi_pull_publication_fetches_immutable_policy_once_per_revision(self):
+        api, _ = self.policy_api()
+        with patch.dict(V.os.environ, {"GITHUB_SERVER_URL": "https://github.com", "GITHUB_RUN_ID": "999"}):
+            for number in range(1, 16):
+                for state in ("pending", "success"):
+                    self.assertTrue(V.publish(api, number, HEAD, state, "checked", BUILD))
+        endpoints = [call.args[0] for call in api.request.call_args_list]
+        paths = {V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, *V.INPUTS.values()}
+        # Two HTTP reads per path/revision, shared across both phases of all PRs.
+        self.assertEqual(sum(e.startswith("contents/") for e in endpoints), 2 * len(paths))
+        self.assertEqual(sum(e.startswith("git/blobs/") for e in endpoints), 2 * len(paths))
+        self.assertEqual(endpoints.count("git/ref/heads/main"), 30)
+        self.assertEqual(sum(e.startswith("pulls/") for e in endpoints), 30)
+        self.assertEqual(sum(e.startswith("statuses/") for e in endpoints), 30)
+
+    def test_cached_policy_rekeys_changed_main_and_never_caches_mutable_head(self):
+        api, current = self.policy_api()
+        with patch.dict(V.os.environ, {"GITHUB_SERVER_URL": "https://github.com", "GITHUB_RUN_ID": "999"}):
+            self.assertTrue(V.publish(api, 7, HEAD, "pending", "checked", BUILD))
+            current.update(main="d" * 40, changed=True)
+            self.assertFalse(V.publish(api, 7, HEAD, "success", "checked", BUILD))
+            current.update(main=MAIN, head="e" * 40)
+            self.assertFalse(V.publish(api, 7, HEAD, "success", "checked", BUILD))
+        endpoints = [call.args[0] for call in api.request.call_args_list]
+        self.assertIn("contents/" + V.SCRIPT + "?ref=" + "d" * 40, endpoints)
+        self.assertEqual(endpoints.count("pulls/7"), 3)
+        self.assertEqual(endpoints.count("git/ref/heads/main"), 3)
+        self.assertEqual(sum(e.startswith("statuses/") for e in endpoints), 1)
+
+    def test_blob_cache_never_retains_transport_or_validation_failures(self):
+        metadata, blob = self.blob_fixture(b"reviewed bytes")
+        for failure in (V.urllib.error.URLError("offline"),
+                        {**blob, "sha": "d" * 40}):
+            responses = ([failure] if isinstance(failure, Exception) else
+                         [self.response(metadata), self.response(failure)])
+            responses += [self.response(metadata), self.response(blob)]
+            api, opener = self.api(responses)
+            with self.subTest(failure=type(failure).__name__):
+                with self.assertRaises((ValueError, V.urllib.error.URLError)):
+                    api.blob(V.LAUNCHER, HEAD)
+                self.assertEqual(api.blob(V.LAUNCHER, HEAD), b"reviewed bytes")
+                requests = opener.open.call_count
+                self.assertEqual(api.blob(V.LAUNCHER, HEAD), b"reviewed bytes")
+                self.assertEqual(opener.open.call_count, requests)
+
     def test_blob_rejects_wrong_identity_size_encoding_and_oversize(self):
         metadata, blob = self.blob_fixture(b"reviewed bytes")
         vectors = [({**metadata, "sha": "../other"}, blob),
