@@ -90,7 +90,7 @@ test('fixture setup requires prior admission and cannot seed runtime SQL', async
   };
   const worker=new URL('../docs/native-bridge/coupled-workerd-worker.ts',import.meta.url).href;
   const dependencies=new Set(['delivery.ts','api.ts','coordinator.ts','registry.ts','contracts.ts']
-    .map(name=>'fixture-event-runtime/'+name));
+    .map(name=>`fixture-event-runtime/${name}`));
   const hooks=registerHooks({resolve(specifier,context,nextResolve){
     if(context.parentURL===worker&&dependencies.has(specifier))return {url:import.meta.url,shortCircuit:true};
     return nextResolve(specifier,context);
