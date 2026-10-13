@@ -286,6 +286,7 @@ class NativeClient:
         with self.lock:
             try:
                 witness = self.bridge.challenge_readonly()
+                observation_valid_until = self.bridge.observation_valid_until
             except ValueError:
                 return value
         if (not isinstance(witness, dict)
@@ -293,6 +294,7 @@ class NativeClient:
                 or not isinstance(witness.get("cause"), str) or len(witness["cause"]) > 128
                 or not all(key in witness for key in BINDING_FIELDS)
                 or not _valid_binding(_binding(witness))
+                or time.monotonic() >= observation_valid_until
                 or (witness["eligible"] and time.monotonic() >= self.bridge.valid_until)
                 or (self.expected_thread is not None
                     and witness["threadId"] != self.expected_thread)):

@@ -62,6 +62,7 @@ class LauncherTests(unittest.TestCase):
                        {**row, "cause": "x" * 129}, {**row, "cause": None}):
             with self.subTest(result=result):
                 bridge = Mock()
+                bridge.observation_valid_until = float("inf")
                 bridge.challenge_readonly.side_effect = [result]
                 client = launcher.NativeClient(bridge, expected_thread=row["threadId"])
                 client.ready = True
@@ -75,6 +76,7 @@ class LauncherTests(unittest.TestCase):
         bridge = Mock()
         bridge.challenge_readonly.return_value = row
         bridge.valid_until = time.monotonic() + 1
+        bridge.observation_valid_until = bridge.valid_until
         client = launcher.NativeClient(bridge)
         client.ready = True
         self.assertEqual(client.status(), {
@@ -113,6 +115,7 @@ class LauncherTests(unittest.TestCase):
         row = witness()
         bridge = Mock()
         bridge.valid_until = float("inf")
+        bridge.observation_valid_until = float("inf")
         bridge.exchange.return_value = row
         bridge.challenge_readonly.side_effect = [row, {**row, "threadId": str(uuid4())}, row]
         client = launcher.NativeClient(bridge, expected_thread=row["threadId"])
@@ -255,6 +258,7 @@ class LauncherTests(unittest.TestCase):
     def test_ineligible_witness_and_failed_challenge_remain_unattached(self):
         bridge = Mock()
         bridge.valid_until = float("inf")
+        bridge.observation_valid_until = float("inf")
         bridge.challenge_readonly.side_effect = [witness(eligible=False), None, ValueError("invalid")]
         client = launcher.NativeClient(bridge)
         client.synchronize()
@@ -264,6 +268,35 @@ class LauncherTests(unittest.TestCase):
             self.assertFalse(status["attached"])
             self.assertFalse(status["automaticWakeEnabled"])
         bridge.start.assert_not_called()
+
+    def test_ineligible_observation_expires_before_status_publication(self):
+        row = witness(eligible=False, cause="native-revoke", leaseMs=0)
+
+        def handle(channel):
+            self.assertEqual(receive(channel), {"nonce": 1})
+            send(channel, row)
+            self.assertIsNone(receive(channel))
+
+        with peer(handle, receipt_version=3) as bridge:
+            client = launcher.NativeClient(bridge)
+            client.ready = True
+            challenge = bridge.challenge_readonly
+            clock = [1.0]
+
+            def delayed_result():
+                result = challenge()
+                self.assertEqual(result, row)
+                self.assertGreater(bridge.observation_valid_until, clock[0])
+                clock[0] = bridge.observation_valid_until
+                return result
+
+            with (patch.object(launcher.time, "monotonic", side_effect=lambda: clock[0]),
+                  patch.object(bridge, "challenge_readonly", side_effect=delayed_result)):
+                status = client.status()
+            self.assertEqual(status["selection"], "unavailable")
+            self.assertNotIn("nativeObservation", status)
+            self.assertIsNone(bridge.witness)
+            self.assertEqual(bridge.valid_until, 0)
 
     def test_real_reader_short_lease_cannot_publish_expired_selection(self):
         row = witness(leaseMs=1)

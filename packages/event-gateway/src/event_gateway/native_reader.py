@@ -154,6 +154,7 @@ class NativeBridge:
         self.nonce = self.sequence = 0
         self.client_id = self.witness = None
         self.valid_until = 0
+        self.observation_valid_until = 0
         self.closed = False
         self.exchange_lock = threading.Lock()
         self.attempts, self.deliveries, self.messages = {}, {}, set()
@@ -163,6 +164,7 @@ class NativeBridge:
     def close(self):
         self.closed = True
         self.witness = None
+        self.observation_valid_until = 0
         self.pending_presence = None
         self.channel.close()
 
@@ -254,6 +256,7 @@ class NativeBridge:
         require(self.exchange_lock.acquire(blocking=False))
         self.witness = None
         self.valid_until = 0
+        self.observation_valid_until = 0
         try:
             return self._presence_exchange()
         except (OSError, ValueError, UnicodeError, TypeError, RecursionError):
@@ -305,6 +308,7 @@ class NativeBridge:
         if not row["eligible"]:
             # Ineligible diagnostics have a request deadline, never a Start lease.
             self.valid_until = 0
+        self.observation_valid_until = original_issued + WITNESS_SECONDS
         return dict(row)
 
     def start(self, request):
