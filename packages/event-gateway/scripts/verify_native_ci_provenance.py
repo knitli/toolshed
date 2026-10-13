@@ -24,6 +24,13 @@ VERIFIER_WORKFLOW = ".github/workflows/event-native-provenance.yml"
 SCRIPT = "packages/event-gateway/scripts/verify_native_ci_provenance.py"
 LAUNCHER = "packages/event-gateway/src/event_gateway/launcher.py"
 PROVENANCE = "packages/event-gateway/docs/native-bridge/native-release-provenance.json"
+# PR #89 at 98c87baa: exact base/candidate bytes and unchanged native pin pair.
+REVIEWED_LAUNCHER_TRANSITION = (
+    "fbe251ff9f50af21157902813e60651aac8b2c84513485fe9e4148d1e624edcd",
+    "ec9225a2bc907646d3e81898c61e45706cb81df27d95d7c23387075681d8bd12",
+    "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b",
+    "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
+)
 INPUTS = {
     "builderSha256": "packages/event-gateway/scripts/package_native_client.py",
     "producerSha256": "packages/event-gateway/scripts/produce_native_ci_artifact.py",
@@ -92,7 +99,7 @@ def pins(source):
 
 
 def launcher_code(source):
-    """Only the two digest literals may differ from protected main launcher code."""
+    """Normalize only digest literals for the ordinary protected-main comparison."""
     pins(source)
     tree = ast.parse(source)
     for node in tree.body:
@@ -271,9 +278,13 @@ def verify_candidate(api, head, main):
             and entries[LAUNCHER].get("mode") in ("100644", "100755"))
     candidate_source = api.blob(LAUNCHER, head)
     approved_source = api.blob(LAUNCHER, main)
-    require(launcher_code(candidate_source) == launcher_code(approved_source))
     candidate = pins(candidate_source)
     approved = pins(approved_source)
+    require(launcher_code(candidate_source) == launcher_code(approved_source)
+            or (candidate == approved and (
+                digest(approved_source), digest(candidate_source),
+                candidate["QUALIFIED_SHA256"], candidate["QUALIFIED_CODE_MODE_HOST_SHA256"],
+            ) == REVIEWED_LAUNCHER_TRANSITION))
     if candidate == approved:
         return "Current main-authorized native pins unchanged"
     require(entries.get(PROVENANCE, {}).get("type") == "blob"

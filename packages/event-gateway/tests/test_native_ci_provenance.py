@@ -238,6 +238,58 @@ class NativeCIProvenanceTests(unittest.TestCase):
             V.verify_candidate(api, HEAD, MAIN)
         self.assertNotIn(("download", 456), api.calls)
 
+    def observation_transition(self):
+        api = FakeAPI()
+        base = launcher()
+        candidate = base + b"def native_observation():\n    return False\n"
+        api.blobs[V.LAUNCHER, HEAD] = candidate
+        return api, (V.digest(base), V.digest(candidate), "1" * 64, "2" * 64)
+
+    def test_exact_reviewed_launcher_transition_keeps_pins_without_artifact_fetch(self):
+        api, transition = self.observation_transition()
+        with patch.object(V, "REVIEWED_LAUNCHER_TRANSITION", transition, create=True):
+            self.assertIn("unchanged", V.verify_candidate(api, HEAD, MAIN))
+        self.assertEqual(api.calls, [f"git/trees/{HEAD}?recursive=1",
+                                     (V.LAUNCHER, HEAD), (V.LAUNCHER, MAIN)])
+
+    def test_reviewed_transition_rejects_every_other_source_byte_sequence(self):
+        for revision, suffix in ((MAIN, b"# different base\n"),
+                                 (HEAD, b"# different candidate\n"),
+                                 (HEAD, b"def unexpected():\n    return True\n"),
+                                 (HEAD, b'globals()["QUALIFIED_SHA256"] = "bad"\n')):
+            api, transition = self.observation_transition()
+            api.blobs[V.LAUNCHER, revision] += suffix
+            with self.subTest(revision=revision, suffix=suffix), \
+                    patch.object(V, "REVIEWED_LAUNCHER_TRANSITION", transition, create=True), \
+                    self.assertRaises(ValueError):
+                V.verify_candidate(api, HEAD, MAIN)
+
+    def test_reviewed_transition_requires_the_exact_unchanged_pin_pair(self):
+        for index in (2, 3):
+            api, transition = self.observation_transition()
+            wrong_pair = list(transition)
+            wrong_pair[index] = "0" * 64
+            with self.subTest(index=index), \
+                    patch.object(V, "REVIEWED_LAUNCHER_TRANSITION", tuple(wrong_pair), create=True), \
+                    self.assertRaises(ValueError):
+                V.verify_candidate(api, HEAD, MAIN)
+        api, _ = self.observation_transition()
+        api.blobs[V.LAUNCHER, HEAD] = launcher(api.selected["binarySha256"],
+                                               api.selected["codeModeHostSha256"]) + b"def native_observation():\n    return False\n"
+        transition = (V.digest(api.blobs[V.LAUNCHER, MAIN]), V.digest(api.blobs[V.LAUNCHER, HEAD]),
+                      api.selected["binarySha256"], api.selected["codeModeHostSha256"])
+        with patch.object(V, "REVIEWED_LAUNCHER_TRANSITION", transition, create=True), \
+                self.assertRaises(ValueError):
+            V.verify_candidate(api, HEAD, MAIN)
+        self.assertNotIn(("download", 456), api.calls)
+
+    def test_candidate_policy_cannot_authorize_its_own_launcher_change(self):
+        api, transition = self.observation_transition()
+        api.blobs[V.SCRIPT, HEAD] = f"REVIEWED_LAUNCHER_TRANSITION = {transition!r}\n".encode()
+        with self.assertRaises(ValueError):
+            V.verify_candidate(api, HEAD, MAIN)
+        self.assertNotIn((V.SCRIPT, HEAD), api.calls)
+
     def test_verified_promotion_binds_artifact_main_ancestry_and_all_three_recipes(self):
         api = FakeAPI()
         self.assertIn("verified main CI", V.verify_candidate(api, HEAD, MAIN))
