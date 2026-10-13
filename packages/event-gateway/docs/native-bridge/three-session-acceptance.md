@@ -1,7 +1,7 @@
 # Three-session acceptance runbook
 
 **Status: controlled local run passed; live qualification remains open.** The
-[public proof projection](three-session-acceptance-proof.json) records the
+[current public proof projection](three-session-20261013-proof.json) records the
 result and raw-proof provenance without private paths or session IDs. The
 [runner](three-session-workerd.py) writes a separate mode-0600 raw proof only
 after its assertions and cleanup succeed. This evidence does not qualify
@@ -54,10 +54,43 @@ session and C phase. Proof requires exactly two successful main requests for eac
 source-read turn and native idle settlement, with provider errors checked after
 cleanup. These are fixture correctness checks, not live useful-response evidence.
 
-The compatibility change requires a fresh controlled run before it can support
-current qualification evidence; historical proofs below do not qualify this profile.
+The 2026-10-13 controlled run below qualifies this fixture profile within its
+stated local scope; historical proofs remain separate.
 
 ## Latest controlled evidence
+
+Attempt 03 on 2026-10-13 passed in 26.244 seconds with exit 0, unchanged frozen
+inputs, and no remaining owned processes, listeners, or sockets. The
+[dated proof projection](three-session-20261013-proof.json) records source commit
+`a22a40fd123784c7cf870a688f226f22bceb3840`, cloud source
+`e6196b5d2d714f71fce6c06812563c0360a2b551`, all 20 verified installed package files,
+the exact native binary and Workerd bundle, and the raw-proof and supervisor hashes.
+The run used the verified outer sandbox with the short private scratch path.
+
+A and B each received one native Start. C1 stayed busy across the daemon restart;
+C2 remained queued without a claim or Start, then became stale after binding
+rotation and explicit fixture attachment. Fresh C3 received one claim and Start,
+completed its source read, and settled observed. The lost observed ACK reply was
+retried with identical body bytes and a fresh proof nonce.
+
+Independent review checked the frozen assertion chain, artifact hashes, retained
+aggregate proof, and cleanup. **Raw model requests, hold timestamps, signed wire
+bodies, and complete native/gateway/ledger histories were not retained**, so these
+cannot be independently replayed from the surviving artifacts. The private causal
+sidecar retains only C1/C3 nonce hashes and their non-reuse assertion. This is
+controlled runtime-assertion qualification with an evidence-retention limitation.
+
+The daemon's `serve` coroutine restarted inside the harness process; this was not
+an OS process crash or power-loss test. C2 was fenced after binding rotation, so
+this run does not demonstrate deferred C2 delivery under an unchanged binding.
+Production admission, owner Access, Mesh, manual canary, automatic queue draining,
+and live user wake remain unqualified. Attempt 01 failed before selection because
+nested sandbox application and process enumeration were denied. Attempt 02 failed
+before selection with an overlong Unix socket path. Neither wrote a proof; their
+supervisor hashes remain in the dated projection. The historical proof below is
+unchanged.
+
+## Earlier CI artifact evidence
 
 The protected-main CI artifact rerun passed with CLI `763e5e2b…3717b` and a
 fresh matching wheel. See [CI qualification](native-ci-qualification.md) and its
