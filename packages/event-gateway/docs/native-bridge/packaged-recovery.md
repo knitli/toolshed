@@ -137,3 +137,33 @@ three-session runner explicitly selects a separate six-subject fixture profile
 with sequential exact scopes and the same immutable expiry; see
 [three-session acceptance](three-session-acceptance.md#current-manual-canary-fixture-profile).
 Its historical proof does not transfer to that current profile.
+
+## Narrow Core Busy checkpoint (2026-10-13)
+
+The [sanitized proof](native-core-busy-20261013-proof.json) records an independently
+reviewed offline run using a diagnostically instrumented gateway candidate based
+on `98c87baa`, with unchanged installed native binary and code-mode host pins.
+A synthetic provider used no owner/model credentials or real model calls while
+a real owned tool ran. Two native Start RPCs produced one accepted Start and one
+exact fresh `terminalNotStarted/busy` receipt. After barrier release, read-only
+recovery returned InputRecorded for the immutable original request, and that
+exact thread and turn completed. Before obtaining fresh authority and probing,
+the fixture used a fixed two-second schedule of eight read-only observations.
+These samples do not prove continuous stability or authority; this is neither
+a quiescence guarantee nor a production delay requirement.
+Inputs stayed unchanged; supervision exited 0
+with no owned processes, listeners, or sockets remaining. This public projection
+hashes retained private evidence; its helpers and raw journal remain private, so
+it is not a standalone runnable qualification fixture. The Busy receipt exists
+in fixture evidence; retained StateDB has the original InputRecorded record but
+the probe remains pending. Native Busy receipts are process-local by
+[contract](terminal-no-start-checkpoint.md). The gateway persists terminal
+receipts before cloud settlement, as covered by the separate
+[coupled no-start checkpoint](coupled-no-start.md); this launcher-only run does
+not exercise that persistence handoff. Loss before gateway persistence followed
+by native restart leaves the outcome unknown and fenced, with no retry.
+Native Busy persistence, gateway terminal-receipt persistence, restart replay,
+and durable terminal no-start settlement remain unqualified by this run.
+This does not qualify the
+unmodified production gateway, live Mesh, OS crash recovery, same-binding C2
+drain, the seven-case harness, or all of Stage 1. Earlier proofs remain unchanged.
