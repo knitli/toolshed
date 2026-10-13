@@ -6,7 +6,7 @@ import subprocess  # nosec B404 - Fixed interpreter runs only the repository har
 import sys
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 HARNESS = Path(__file__).resolve().parents[1] / "docs/native-bridge/coupled-workerd.py"
@@ -23,6 +23,7 @@ class CoupledWorkerdTests(unittest.TestCase):
         for flags, message in (
             (("--restart-native", "--terminal-no-start"), "are mutually exclusive"),
             (("--forget-terminal",), "requires --terminal-no-start"),
+            (("--restart-inflight",), "requires --restart-native"),
         ):
             with self.subTest(flags=flags):
                 result = subprocess.run(  # nosec B603 - Fixed repository script and dummy args, no shell or user input.
@@ -45,6 +46,142 @@ class CoupledWorkerdTests(unittest.TestCase):
                         patch.object(COUPLED, "asyncio", SimpleNamespace(sleep=cutoff)):
                     with self.assertRaisesRegex(AssertionError, "native delay fixture exceeded deadline or native process stopped"):
                         asyncio.run(COUPLED.wait_for_permit_expiry(request, SimpleNamespace(poll=lambda: stopped)))
+
+    def test_default_restart_releases_response_and_waits_for_idle_before_stop(self):
+        from contextlib import ExitStack, nullcontext
+        import threading
+
+        model = SimpleNamespace(release_primary=threading.Event(), request_counts={'primary': 1})
+        old = SimpleNamespace(pid=101, args=['codex', '-C', '/fixture'], poll=lambda: None)
+        receipt = {'status': 'inputRecorded'}
+        bridge = Mock()
+        bridge.receipt.return_value = receipt
+        idle_checks = []
+
+        def challenge():
+            self.assertTrue(model.release_primary.is_set(), 'default response not released')
+            idle_checks.append(True)
+            return {'eligible': len(idle_checks) == 2}
+
+        def stop(*_):
+            self.assertEqual(len(idle_checks), 2, 'default did not wait for idle')
+            self.assertTrue(model.release_primary.is_set())
+            old.poll = lambda: 0
+
+        bridge.challenge.side_effect = challenge
+        replacement = Mock()
+        launcher = SimpleNamespace(stop_process=stop, native_client=Mock(
+            return_value=nullcontext((replacement, SimpleNamespace(pid=102), {'backendPid': 202}))))
+        with ExitStack() as resources, patch.object(COUPLED, 'verify_native_restart'), \
+                patch.object(COUPLED.time, 'time_ns', return_value=2000000):
+            result = asyncio.run(COUPLED.restart_native(
+                bridge, model, old, {'backendPid': 201}, launcher, resources,
+                {'receiptVersion': 3, 'permitExpiresAt': 1}))
+        self.assertIs(result[0], replacement)
+        self.assertIs(result[-1], receipt)
+        bridge.close.assert_called_once()
+        launcher.native_client.assert_called_once_with(old.args, Path('/fixture'), receipt_version=3)
+
+    def test_inflight_restart_stops_backend_before_releasing_model(self):
+        from contextlib import ExitStack, nullcontext
+        import threading
+
+        events = []
+        model = SimpleNamespace(release_primary=threading.Event(), request_counts={'primary': 1},
+                                primary_response_state='held', primary_response_deadline=float('inf'))
+        old = SimpleNamespace(pid=101, args=['codex', '-C', '/fixture'], poll=lambda: None)
+        new = SimpleNamespace(pid=102)
+        witness = {'backendPid': 201}
+        receipt = {'status': 'inputRecorded'}
+        bridge = Mock()
+        bridge.receipt.return_value = receipt
+        bridge.challenge.side_effect = AssertionError('must not wait for idle')
+
+        def stop(*_):
+            self.assertFalse(model.release_primary.is_set())
+            events.append('stop')
+            old.poll = lambda: 0
+
+        def start(*_, **kwargs):
+            self.assertTrue(model.release_primary.is_set())
+            events.append('start')
+            return nullcontext((Mock(), new, {'backendPid': 202}))
+
+        launcher = SimpleNamespace(stop_process=stop, native_client=start, alive=lambda _: False)
+        with ExitStack() as resources, patch.object(COUPLED, 'verify_native_restart'), \
+                patch.object(COUPLED.time, 'time_ns', return_value=2000000):
+            result = asyncio.run(COUPLED.restart_native(
+                bridge, model, old, witness, launcher, resources,
+                {'receiptVersion': 3, 'permitExpiresAt': 1}, inflight=True))
+        self.assertEqual(events, ['stop', 'start'])
+        self.assertIs(result[-1], receipt)
+        bridge.challenge.assert_not_called()
+
+    def test_inflight_restart_refuses_released_response_or_surviving_backend(self):
+        import threading
+
+        for released, backend_alive in ((True, False), (False, True)):
+            with self.subTest(released=released, backend_alive=backend_alive):
+                model = SimpleNamespace(release_primary=threading.Event(), request_counts={'primary': 1},
+                                primary_response_state='held', primary_response_deadline=float('inf'))
+                if released:
+                    model.release_primary.set()
+                old = SimpleNamespace(pid=101, args=['codex', '-C', '/fixture'], poll=lambda: None)
+                bridge = Mock()
+                bridge.receipt.return_value = {'status': 'inputRecorded'}
+                launcher = Mock()
+                launcher.alive.return_value = backend_alive
+                launcher.stop_process.side_effect = lambda *_: setattr(old, 'poll', lambda: 0)
+                resources = Mock()
+                with patch.object(COUPLED.time, 'time_ns', return_value=2000000), \
+                        self.assertRaisesRegex(AssertionError, 'held primary response|primary response must remain held|stop before releasing'):
+                    asyncio.run(COUPLED.restart_native(
+                        bridge, model, old, {'backendPid': 201}, launcher, resources,
+                        {'receiptVersion': 3, 'permitExpiresAt': 1}, inflight=True))
+                launcher.native_client.assert_not_called()
+                resources.enter_context.assert_not_called()
+                if not released:
+                    self.assertFalse(model.release_primary.is_set())
+
+    def test_inflight_restart_rejects_timeout_or_response_before_or_during_stop(self):
+        from contextlib import ExitStack, nullcontext
+        import threading
+
+        for response_state in ('timed_out', 'responding', 'sent', 'deadline_expired'):
+            for during_stop in (False, True):
+                with self.subTest(response_state=response_state, during_stop=during_stop):
+                    model = SimpleNamespace(release_primary=threading.Event(), request_counts={'primary': 1},
+                                            primary_response_state='held', primary_response_deadline=float('inf'))
+                    old = SimpleNamespace(pid=101, args=['codex', '-C', '/fixture'], poll=lambda: None)
+                    bridge = Mock()
+                    bridge.receipt.return_value = {'status': 'inputRecorded'}
+                    launcher = Mock()
+                    launcher.alive.return_value = False
+
+                    def expire():
+                        if response_state == 'deadline_expired':
+                            model.primary_response_deadline = 0
+                        else:
+                            model.primary_response_state = response_state
+
+                    def stop(*_):
+                        old.poll = lambda: 0
+                        if during_stop:
+                            expire()
+
+                    launcher.stop_process.side_effect = stop
+                    launcher.native_client.return_value = nullcontext((Mock(), Mock(), {}))
+                    if not during_stop:
+                        expire()
+                    with ExitStack() as resources, patch.object(COUPLED, 'verify_native_restart'), \
+                            patch.object(COUPLED.time, 'time_ns', return_value=2000000), \
+                            self.assertRaisesRegex(AssertionError, 'primary response.*held'):
+                        asyncio.run(COUPLED.restart_native(
+                            bridge, model, old, {'backendPid': 201}, launcher, resources,
+                            {'receiptVersion': 3, 'permitExpiresAt': 1}, inflight=True))
+                    launcher.native_client.assert_not_called()
+                    self.assertFalse(model.release_primary.is_set())
+                    self.assertEqual(launcher.stop_process.call_count, int(during_stop))
 
     def test_observed_recovery_requires_immutable_ack_watermark_and_released_capacity(self):
         import copy
@@ -144,7 +281,6 @@ class CoupledAdmissionTests(unittest.TestCase):
 
     def test_successful_installed_preflight_precedes_imports_and_retains_provenance(self):
         import builtins
-        from unittest.mock import Mock
 
         spec = importlib.util.spec_from_file_location('configured_coupled', HARNESS)
         configured = importlib.util.module_from_spec(spec)
@@ -222,7 +358,6 @@ class CoupledAdmissionTests(unittest.TestCase):
         self.assertEqual(result['attached'], {'status': 'attached'})
 
     def test_model_listener_is_fixed_and_restored_on_failure(self):
-        from unittest.mock import Mock
         factory = Mock(return_value='model')
         launcher = SimpleNamespace(ThreadingHTTPServer=factory)
         with self.assertRaisesRegex(RuntimeError, 'fixture failure'):

@@ -549,7 +549,14 @@ class NativeBridgeTests(unittest.TestCase):
         for released in (True, False):
             with self.subTest(released=released):
                 calls = []
-                release = Mock(wait=lambda timeout: calls.append(('wait', timeout)) or released)
+
+                def wait(timeout):
+                    self.assertEqual(server.primary_response_state, 'held')
+                    self.assertGreater(server.primary_response_deadline, time.monotonic())
+                    calls.append(('wait', timeout))
+                    return released
+
+                release = Mock(wait=wait)
                 server = SimpleNamespace(release_primary=release, model_requests=0,
                                          request_counts={'primary': 0, 'title': 0, 'unknown': 0})
                 handler = SimpleNamespace(
@@ -560,6 +567,7 @@ class NativeBridgeTests(unittest.TestCase):
                     send_header=Mock(), end_headers=Mock())
                 native.MockModel.do_POST(handler)
                 self.assertEqual(calls, [('wait', 30), ('response', 200) if released else ('error', 504)])
+                self.assertEqual(server.primary_response_state, 'sent' if released else 'timed_out')
                 if released:
                     self.assertIn(b'response.completed', handler.wfile.getvalue())
                     handler.rfile = io.BytesIO(body)
