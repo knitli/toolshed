@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import copy
 import importlib.util
 import json
@@ -30,10 +31,13 @@ class Crashed(BaseException):
 
 
 PHASE_ORDER = JOURNAL.CASE_ORDER
+RESTART_POINTS = ("R1", "R2", "R3")
 
 
 def manifest():
-    node, attempt, permit, turn, item, receipt = [str(uuid4()) for _ in range(6)]
+    node, attempt, permit, turn, item, receipt, event_id, runtime_id = [
+        str(uuid4()) for _ in range(8)
+    ]
     base = {"deliveryId": "dly_" + "a" * 64, "attemptId": attempt, "nodeGeneration": 1}
     targets = {}
     for action in ("submitted", "observed"):
@@ -53,8 +57,8 @@ def manifest():
                 **base,
                 "status": action,
                 "nativeCorrelation": correlation,
-                "eventId": str(uuid4()),
-                "runtimeId": str(uuid4()),
+                "eventId": event_id,
+                "runtimeId": runtime_id,
                 "schemaVersion": 1,
                 "principal": "fixture@example.invalid",
                 "agent": "fixture-agent",
@@ -147,6 +151,19 @@ def phase_fixture():
     return config, plan
 
 
+def ack_fault_action(request):
+    """Limit the Gateway integration fault hook to submitted/observed ACKs."""
+    url = request["url"]
+    if url.endswith("/v1/dispatch/claim"):
+        return None
+    if url.endswith("/v1/dispatch/settle-no-start"):
+        raise Refused("settle_not_in_ack_integration")
+    action = JOURNAL.decode(request["body"]).get("status")
+    if url.endswith("/v1/ack") and action in ("submitted", "observed"):
+        return action
+    raise Refused("unsupported_ack_integration_route")
+
+
 class Tests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -161,6 +178,54 @@ class Tests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_recovery_schema_versions_require_exact_integer_one(self):
+        config, plan = phase_fixture()
+        self.assertEqual(JOURNAL.manifest_checked(config)["version"], 1)
+        self.assertEqual(JOURNAL.phase_plan_checked(plan, config)["version"], 1)
+
+        for invalid_version in (True, 1.0):
+            with self.subTest(schema="manifest", version=invalid_version):
+                changed_config = copy.deepcopy(config)
+                changed_config["version"] = invalid_version
+                with self.assertRaisesRegex(Refused, "invalid_manifest"):
+                    JOURNAL.manifest_checked(changed_config)
+
+            with self.subTest(schema="phase_plan", version=invalid_version):
+                changed_plan = copy.deepcopy(plan)
+                changed_plan["version"] = invalid_version
+                with self.assertRaisesRegex(Refused, "invalid_phase_plan"):
+                    JOURNAL.phase_plan_checked(changed_plan, config)
+
+    def test_uuid_matches_production_v4_v7_contract(self):
+        self.assertTrue(JOURNAL.uuid(str(uuid4())))
+        self.assertTrue(JOURNAL.uuid("01890f3e-7c00-7000-8000-000000000001"))
+        self.assertFalse(JOURNAL.uuid("01890f3e-7c00-1000-8000-000000000001"))
+        self.assertFalse(JOURNAL.uuid("01890F3E-7C00-7000-8000-000000000001"))
+
+        changed = copy.deepcopy(self.config)
+        changed["targets"]["submitted"]["request"]["eventId"] = (
+            "01890f3e-7c00-1000-8000-000000000001"
+        )
+        with self.assertRaisesRegex(Refused, "invalid_closed_ack_schema"):
+            JOURNAL.manifest_checked(changed)
+
+    def test_gateway_fault_integration_rejects_uncovered_settlement_route(self):
+        self.assertIsNone(
+            ack_fault_action(
+                {
+                    "url": "https://example.invalid/v1/dispatch/claim",
+                    "body": encoded({}),
+                }
+            )
+        )
+        with self.assertRaisesRegex(Refused, "settle_not_in_ack_integration"):
+            ack_fault_action(
+                {
+                    "url": "https://example.invalid/v1/dispatch/settle-no-start",
+                    "body": encoded({}),
+                }
+            )
 
     def open(self, config=None, create=False):
         return Journal(
@@ -338,7 +403,7 @@ class Tests(unittest.TestCase):
             self.open()
 
     def test_expired_abort_write_preserves_original_transport_exception_identity(self):
-        original = TimeoutError("original ambiguous transport timeout")
+        original = TimeoutError("private-test-credential-must-not-be-logged")
 
         async def send(**_request):
             self.now = 2200.0
@@ -347,14 +412,40 @@ class Tests(unittest.TestCase):
         hook = TransportFault(
             self.journal, send, self.durable, self.hold, monotonic=lambda: self.now
         )
-        with self.assertRaises(TimeoutError) as got:
-            self.invoke(hook)
+        with self.assertLogs(JOURNAL.__name__, level="WARNING") as captured:
+            with self.assertRaises(TimeoutError) as got:
+                self.invoke(hook)
         self.assertIs(got.exception, original)
+        diagnostic = "\n".join(captured.output)
+        self.assertIn("recovery_abort_record_failed:journal_refused", diagnostic)
+        self.assertNotIn("private-test-credential", diagnostic)
         state = self.journal.snapshot()
         self.assertEqual(state["sends"], 1)
         self.assertEqual(state["witnesses"], {})
         with self.assertRaises(Refused):
             self.open()
+
+    def test_abort_io_failure_is_reported_without_replacing_transport_failure(self):
+        original = TimeoutError("private-test-credential-must-not-be-logged")
+
+        async def send(**_request):
+            raise original
+
+        def fail_abort(_reason):
+            raise OSError("private path details must not be logged")
+
+        self.journal.abort = fail_abort
+        hook = TransportFault(
+            self.journal, send, self.durable, self.hold, monotonic=lambda: self.now
+        )
+        with self.assertLogs(JOURNAL.__name__, level="WARNING") as captured:
+            with self.assertRaises(TimeoutError) as got:
+                self.invoke(hook)
+        self.assertIs(got.exception, original)
+        diagnostic = "\n".join(captured.output)
+        self.assertIn("recovery_abort_record_failed:journal_io", diagnostic)
+        self.assertNotIn("private-test-credential", diagnostic)
+        self.assertNotIn("private path details", diagnostic)
 
     def test_duplicate_fault_and_duplicate_replay_refused(self):
         with self.assertRaises(Crashed):
@@ -383,11 +474,12 @@ class Tests(unittest.TestCase):
 
     def test_eighth_publication_fifth_start_fourth_restart_refused_persistently(self):
         for counter, limit in [("publication", 7), ("nativeStart", 4), ("restart", 3)]:
-            for i in range(1 if counter == "publication" else 0, limit):
-                self.open().reserve(counter, self.config["subjects"][i])
-            with self.assertRaisesRegex(Refused, "budget_exhausted"):
-                self.open().reserve(counter, "exact-subject")
-            self.assertEqual(self.open().snapshot()["counts"][counter], limit)
+            with self.subTest(counter=counter):
+                for i in range(1 if counter == "publication" else 0, limit):
+                    self.open().reserve(counter, self.config["subjects"][i])
+                with self.assertRaisesRegex(Refused, "budget_exhausted"):
+                    self.open().reserve(counter, "exact-subject")
+                self.assertEqual(self.open().snapshot()["counts"][counter], limit)
 
     def test_reservation_survives_ambiguous_caller_effect(self):
         self.journal.reserve("publication", "case-1")
@@ -426,6 +518,89 @@ class Tests(unittest.TestCase):
         changed["targets"]["observed"]["request"]["extra"] = True
         with self.assertRaises(Refused):
             self.open(changed)
+        changed = copy.deepcopy(self.config)
+        changed["targets"]["submitted"]["request"]["nodeGeneration"] = True
+        with self.assertRaises(Refused):
+            self.open(changed)
+        changed = copy.deepcopy(self.config)
+        changed["targets"]["observed"]["request"]["acknowledgedAt"] = (
+            "2026-02-30T00:00:00.000Z"
+        )
+        with self.assertRaisesRegex(Refused, "invalid_closed_ack_schema"):
+            self.open(changed)
+
+    def test_submitted_and_observed_targets_share_one_event_identity(self):
+        JOURNAL.manifest_checked(self.config)
+        submitted = self.config["targets"]["submitted"]
+        request = submitted["request"]
+        mutations = (
+            (("subject",), "case-1"),
+            (("nodeId",), str(uuid4())),
+            (("request", "deliveryId"), "dly_" + "b" * 64),
+            (("request", "attemptId"), str(uuid4())),
+            (("request", "nodeGeneration"), request["nodeGeneration"] + 1),
+            (("request", "eventId"), str(uuid4())),
+            (("request", "runtimeId"), str(uuid4())),
+            (("request", "principal"), "different@example.invalid"),
+            (("request", "agent"), "different-agent"),
+            (("request", "runtimeGeneration"), request["runtimeGeneration"] + 1),
+            (
+                ("request", "attachmentGeneration"),
+                request["attachmentGeneration"] + 1,
+            ),
+            (
+                ("request", "deliveredSourceStateVersion"),
+                "different-version",
+            ),
+            (("request", "nativeCorrelation", "permitId"), str(uuid4())),
+            (("request", "nativeCorrelation", "turnId"), str(uuid4())),
+        )
+        for path, changed_value in mutations:
+            with self.subTest(path=path):
+                changed = copy.deepcopy(self.config)
+                target = changed["targets"]["observed"]
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = changed_value
+                with self.assertRaisesRegex(Refused, "ack_event_identity_mismatch"):
+                    JOURNAL.manifest_checked(changed)
+
+    def test_ack_timestamps_are_phase_local(self):
+        changed = copy.deepcopy(self.config)
+        changed["targets"]["observed"]["request"]["acknowledgedAt"] = (
+            "2026-10-13T00:00:01.000Z"
+        )
+        JOURNAL.manifest_checked(changed)
+
+    def test_ack_consumer_generation_presence_and_value_match(self):
+        same_consumer = copy.deepcopy(self.config)
+        same_consumer["targets"]["submitted"]["request"]["consumerGeneration"] = 3
+        same_consumer["targets"]["observed"]["request"]["consumerGeneration"] = 3
+        JOURNAL.manifest_checked(same_consumer)
+
+        one_consumer = copy.deepcopy(self.config)
+        one_consumer["targets"]["observed"]["request"]["consumerGeneration"] = 3
+        with self.assertRaisesRegex(Refused, "ack_event_identity_mismatch"):
+            JOURNAL.manifest_checked(one_consumer)
+
+        different_consumers = copy.deepcopy(same_consumer)
+        different_consumers["targets"]["observed"]["request"]["consumerGeneration"] = 4
+        with self.assertRaisesRegex(Refused, "ack_event_identity_mismatch"):
+            JOURNAL.manifest_checked(different_consumers)
+
+    def test_observed_ack_requires_one_valid_item_id(self):
+        changed = copy.deepcopy(self.config)
+        del changed["targets"]["observed"]["request"]["nativeCorrelation"]["itemId"]
+        with self.assertRaisesRegex(Refused, "invalid_native_correlation"):
+            JOURNAL.manifest_checked(changed)
+
+    def test_claim_delivery_id_must_be_canonical(self):
+        for delivery_id in (None, 7, "invalid", "dly_" + "A" * 64):
+            with self.subTest(delivery_id=delivery_id):
+                changed = copy.deepcopy(self.config)
+                changed["claims"][0]["request"]["deliveryId"] = delivery_id
+                with self.assertRaisesRegex(Refused, "invalid_claim"):
+                    JOURNAL.manifest_checked(changed)
 
     def test_concurrent_reservations_have_one_durable_winner_per_case(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -603,7 +778,7 @@ class PhaseTests(unittest.TestCase):
             self.root, self.config, clock=lambda: self.now, phase_plan=self.plan
         )
 
-    def _prepare_a1(self):
+    def _prepare_a1(self, outcome="started"):
         self.orchestrator.begin_case("A1")
         self.orchestrator.publication_intent("A1", b"A1-publication")
         self.orchestrator.publication_result("A1", "accepted", b"accepted")
@@ -612,7 +787,7 @@ class PhaseTests(unittest.TestCase):
         self.orchestrator.claim_result("A1", "accepted", b"permit")
         start = b"A1-start"
         self.orchestrator.start_intent("A1", start)
-        self.orchestrator.start_outcome("A1", start, "started", {"outcome": "started"})
+        self.orchestrator.start_outcome("A1", start, outcome, {"outcome": outcome})
 
     def _transport_fault(self):
         calls = []
@@ -700,6 +875,29 @@ class PhaseTests(unittest.TestCase):
     def _run_send_ack(self, hook, action, *, replay):
         return asyncio.run(self._send_ack(hook, action, replay=replay))
 
+    def _complete_submitted_recovery(self, hook, *, complete=True):
+        with self.assertRaises(Crashed):
+            self._run_send_ack(hook, "submitted", replay=False)
+        self.orchestrator.restart_intent(
+            "R1",
+            "A1",
+            "after_submitted_ack",
+            old_pid=7001,
+            old_start_id="process-1",
+            socket_bytes=b"owned-socket-1",
+        )
+        self.orchestrator.restart_complete("R1", new_pid=7002, new_start_id="process-2")
+        response = self._run_send_ack(hook, "submitted", replay=True)
+        if complete:
+            self.orchestrator.ack_complete(
+                "A1",
+                "submitted",
+                encoded(self.config["targets"]["submitted"]["request"]),
+                response[2],
+                False,
+            )
+        return response
+
     def test_ambiguous_publication_intent_survives_reopen_without_retry(self):
         self.orchestrator.begin_case("A1")
         self.orchestrator.publication_intent("A1", b"A1-publication")
@@ -718,21 +916,13 @@ class PhaseTests(unittest.TestCase):
         self.assertEqual(self.reopen().snapshot()["counts"]["publication"], 1)
 
     def test_native_start_attempt_and_accepted_outcome_budgets_are_separate(self):
-        self.orchestrator.begin_case("A1")
-        self.orchestrator.publication_intent("A1", b"A1-publication")
-        self.orchestrator.publication_result("A1", "accepted", b"accepted")
-        claim = self.config["claims"][0]["request"]
-        self.orchestrator.claim_intent("A1", claim)
-        self.orchestrator.claim_result("A1", "accepted", b"permit")
-        start = b"A1-start"
-        self.orchestrator.start_intent("A1", start)
-        self.orchestrator.start_outcome("A1", start, "unknown", {"outcome": "unknown"})
+        self._prepare_a1(outcome="unknown")
         state = self.reopen().snapshot()
         self.assertEqual(state["counts"]["nativeStart"], 1)
         self.assertEqual(state["phase"]["startAttempts"], 1)
         self.assertEqual(state["phase"]["acceptedStarts"], 0)
         with self.assertRaisesRegex(Refused, "invalid_native_start_intent"):
-            JOURNAL.RecoveryOrchestrator(self.reopen()).start_intent("A1", start)
+            JOURNAL.RecoveryOrchestrator(self.reopen()).start_intent("A1", b"A1-start")
         self.assertEqual(self.reopen().snapshot()["counts"]["nativeStart"], 1)
 
     def test_c2_fails_closed_without_reviewed_native_busy_signal(self):
@@ -765,6 +955,21 @@ class PhaseTests(unittest.TestCase):
         ):
             JOURNAL.phase_plan_checked(fake_busy, self.config)
 
+    def test_c2_requires_valid_binding_and_runtime_generations(self):
+        JOURNAL.phase_plan_checked(self.plan, self.config)
+        mutations = (
+            (lambda case: case.__setitem__("binding", "not-a-dict")),
+            (lambda case: case.__setitem__("runtimeGeneration", 0)),
+            (lambda case: case.__setitem__("attachmentGeneration", True)),
+            (lambda case: case["binding"].__setitem__("generation", True)),
+        )
+        for mutate in mutations:
+            with self.subTest(mutate=mutate):
+                changed = copy.deepcopy(self.plan)
+                mutate(changed["cases"]["C2"])
+                with self.assertRaisesRegex(Refused, "invalid_phase_binding"):
+                    JOURNAL.phase_plan_checked(changed, self.config)
+
     def test_invalid_later_record_discards_earlier_record_in_same_transaction(self):
         before = self.journal.snapshot()
 
@@ -792,25 +997,7 @@ class PhaseTests(unittest.TestCase):
     def test_r2_replay_refusal_precedes_send_and_preserves_readable_journal(self):
         self._prepare_a1()
         hook, calls = self._transport_fault()
-        with self.assertRaises(Crashed):
-            self._run_send_ack(hook, "submitted", replay=False)
-        self.orchestrator.restart_intent(
-            "R1",
-            "A1",
-            "after_submitted_ack",
-            old_pid=7001,
-            old_start_id="process-1",
-            socket_bytes=b"owned-socket-1",
-        )
-        self.orchestrator.restart_complete("R1", new_pid=7002, new_start_id="process-2")
-        submitted_response = self._run_send_ack(hook, "submitted", replay=True)
-        self.orchestrator.ack_complete(
-            "A1",
-            "submitted",
-            encoded(self.config["targets"]["submitted"]["request"]),
-            submitted_response[2],
-            False,
-        )
+        self._complete_submitted_recovery(hook)
         with self.assertRaises(Crashed):
             self._run_send_ack(hook, "observed", replay=False)
         self.orchestrator.restart_intent(
@@ -824,6 +1011,105 @@ class PhaseTests(unittest.TestCase):
         before = self.reopen().snapshot()
         self._assert_replay_refused_without_mutation(hook, calls, "observed", before)
 
+    def test_ack_completion_requires_exact_returned_replay_response(self):
+        self._prepare_a1()
+        hook, _calls = self._transport_fault()
+        self._complete_submitted_recovery(hook, complete=False)
+        before = self.reopen().snapshot()
+        wrong_response = b'{"status":"submitted","current":false,"extra":true}'
+        with self.assertRaisesRegex(Refused, "ack_completion_without_returned_replay"):
+            self.orchestrator.ack_complete(
+                "A1",
+                "submitted",
+                encoded(self.config["targets"]["submitted"]["request"]),
+                wrong_response,
+                False,
+            )
+        after = self.reopen().snapshot()
+        self.assertEqual(after["rows"], before["rows"])
+        self.assertEqual(after["counts"], before["counts"])
+
+    def test_returned_replay_hash_binds_the_captured_response_bytes(self):
+        self._prepare_a1()
+        hook, _calls = self._transport_fault()
+        self._complete_submitted_recovery(hook, complete=False)
+        original_bytes = self.journal.path.read_bytes()
+        for raw in (
+            b'{"status":"submitted","current":true}',
+            b'{"status":"submitted","current":false,"current":true}',
+            b'{"status":"submitted","current":NaN}',
+        ):
+            with self.subTest(raw=raw):
+                rows = [json.loads(line) for line in original_bytes.splitlines()]
+                returned = rows[-1]
+                self.assertEqual(returned["kind"], "returned")
+                returned["value"]["responseRawBase64"] = base64.b64encode(raw).decode(
+                    "ascii"
+                )
+                returned["value"]["responseSha256"] = JOURNAL.digest(raw)
+                payload = {
+                    key: returned[key]
+                    for key in ("sequence", "previous", "kind", "value")
+                }
+                returned["sha256"] = JOURNAL.digest(encoded(payload))
+                self.journal.path.write_bytes(
+                    b"".join(encoded(row) + b"\n" for row in rows)
+                )
+                with self.assertRaisesRegex(Refused, "returned_without_valid_replay"):
+                    self.reopen()
+        self.journal.path.write_bytes(original_bytes)
+
+    def test_restart_identity_must_follow_the_prior_completion(self):
+        self._prepare_a1()
+        hook, _calls = self._transport_fault()
+        self._complete_submitted_recovery(hook)
+        with self.assertRaises(Crashed):
+            self._run_send_ack(hook, "observed", replay=False)
+        before = self.reopen().snapshot()
+        for old_pid, old_start_id in (
+            (7999, "process-2"),
+            (7002, "unrelated-process"),
+        ):
+            with self.subTest(old_pid=old_pid, old_start_id=old_start_id):
+                with self.assertRaisesRegex(Refused, "restart_identity_not_chained"):
+                    self.orchestrator.restart_intent(
+                        "R2",
+                        "A1",
+                        "after_observed_ack_commit",
+                        old_pid=old_pid,
+                        old_start_id=old_start_id,
+                        socket_bytes=b"owned-socket-2",
+                    )
+                after = self.reopen().snapshot()
+                self.assertEqual(after["rows"], before["rows"])
+                self.assertEqual(after["counts"]["restart"], 1)
+        state = JOURNAL._new_phase_state()
+        state["active"] = "C2"
+        state["cases"]["C2"]["queued"] = True
+        state["restartTokens"]["R2"] = {
+            "newPid": 7002,
+            "newStartId": "process-2",
+            "complete": True,
+        }
+        before_state = copy.deepcopy(state)
+        with self.assertRaisesRegex(Refused, "restart_identity_not_chained"):
+            JOURNAL._apply_phase(
+                self.plan,
+                state,
+                {
+                    "op": "restart_intent",
+                    "token": RESTART_POINTS[-1],
+                    "caseId": "C2",
+                    "reason": "after_c2_queued",
+                    "oldPid": 7001,
+                    "oldStartId": "unrelated-process",
+                    "socketSha256": "a" * 64,
+                    "at": self.now,
+                },
+                self.config,
+            )
+        self.assertEqual(state, before_state)
+
     def test_reattach_accepts_only_exact_counter_successor_and_preserves_old_event(
         self,
     ):
@@ -833,14 +1119,16 @@ class PhaseTests(unittest.TestCase):
         new_event = "f" * 64
         result = JOURNAL.validate_reattach(
             self.plan,
-            "C2",
-            "C3",
-            old_event_sha256=old_case["eventSha256"],
-            new_event_sha256=new_event,
-            old_binding=old_case["binding"],
-            new_binding=new_binding,
-            runtime_generation=old_case["runtimeGeneration"] + 1,
-            attachment_generation=old_case["attachmentGeneration"] + 1,
+            {
+                "oldCaseId": "C2",
+                "newCaseId": "C3",
+                "oldEventSha256": old_case["eventSha256"],
+                "newEventSha256": new_event,
+                "oldBinding": old_case["binding"],
+                "newBinding": new_binding,
+                "runtimeGeneration": old_case["runtimeGeneration"] + 1,
+                "attachmentGeneration": old_case["attachmentGeneration"] + 1,
+            },
         )
         self.assertEqual(result["oldEventSha256"], old_case["eventSha256"])
         self.assertEqual(result["newEventSha256"], new_event)
@@ -856,14 +1144,30 @@ class PhaseTests(unittest.TestCase):
             lowered["generation"] -= 2
             JOURNAL.validate_reattach(
                 self.plan,
-                "C2",
-                "C3",
-                old_event_sha256=old_case["eventSha256"],
-                new_event_sha256=new_event,
-                old_binding=old_case["binding"],
-                new_binding=lowered,
-                runtime_generation=old_case["runtimeGeneration"] + 1,
-                attachment_generation=old_case["attachmentGeneration"] + 1,
+                {
+                    "oldCaseId": "C2",
+                    "newCaseId": "C3",
+                    "oldEventSha256": old_case["eventSha256"],
+                    "newEventSha256": new_event,
+                    "oldBinding": old_case["binding"],
+                    "newBinding": lowered,
+                    "runtimeGeneration": old_case["runtimeGeneration"] + 1,
+                    "attachmentGeneration": old_case["attachmentGeneration"] + 1,
+                },
+            )
+        with self.assertRaisesRegex(Refused, "reattach_identity_mismatch"):
+            JOURNAL.validate_reattach(
+                self.plan,
+                {
+                    "oldCaseId": "C2",
+                    "newCaseId": "C3",
+                    "oldEventSha256": old_case["eventSha256"],
+                    "newEventSha256": old_case["eventSha256"],
+                    "oldBinding": old_case["binding"],
+                    "newBinding": new_binding,
+                    "runtimeGeneration": old_case["runtimeGeneration"] + 1,
+                    "attachmentGeneration": old_case["attachmentGeneration"] + 1,
+                },
             )
 
 
@@ -884,8 +1188,12 @@ class ProductionRecoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         try:
             fixture.bridge.outcome = "started"
             fixed_item = str(uuid4())
-            setup = {"journal": None, "hook": None, "startedAt": None, "targets": None}
-            original_ack = fixture.gateway._ack_native
+            setup = {
+                "journal": None,
+                "hook": None,
+                "startedAt": None,
+                "targets": None,
+            }
 
             def durable_readback(action, target, request_sha256):
                 attempt_id = target["request"]["attemptId"]
@@ -932,27 +1240,14 @@ class ProductionRecoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 raise Crashed()
 
             async def send_through_fault(**request):
-                if setup["hook"] is None or request["url"].endswith(
-                    "/v1/dispatch/claim"
-                ):
+                action = ack_fault_action(request)
+                if action is None:
                     return await fixture.send(**request)
-                body = JOURNAL.decode(request["body"])
-                action = body.get("status")
-                state = setup["journal"].snapshot()
-                replay = action in state["held"] and action not in state["returned"]
-                return await setup["hook"].send(
-                    action=action,
-                    replay=replay,
-                    subject="recovery-a1",
-                    operation_started_at=setup["startedAt"],
-                    **request,
-                )
-
-            async def wrapped_ack(delivery_id, attempt_id):
-                setup["startedAt"] = time.monotonic()
-                attempt = fixture.store.current_attempt(delivery_id)
                 if setup["hook"] is None:
-                    submitted = fixture.gateway._native_acknowledgment(attempt)
+                    setup["startedAt"] = time.monotonic()
+                    attempt = fixture.store.current_attempt(fixture.ident)
+                    submitted = JOURNAL.decode(request["body"])
+                    self.assertEqual(action, "submitted")
                     input_receipt = {
                         **{
                             key: attempt["native_request"][key]
@@ -969,11 +1264,12 @@ class ProductionRecoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         **attempt,
                         "input_recorded_receipt": input_receipt,
                     }
+                    # The real submitted ACK already carries the pre-advance
+                    # time. Predict the later observed DTO with a distinct time.
+                    fixture.now += 1
                     observed = fixture.gateway._native_acknowledgment(
                         observed_attempt, observed=True
                     )
-                    # Store serializes immutable ACK DTOs with sorted keys and
-                    # returns that parsed object to CloudClient for wire encoding.
                     submitted = JOURNAL.decode(encoded(submitted))
                     observed = JOURNAL.decode(encoded(observed))
                     base = manifest()
@@ -996,16 +1292,19 @@ class ProductionRecoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
                             },
                         }
                     ]
-                    for action, acknowledgment in (
+                    for phase, acknowledgment in (
                         ("submitted", submitted),
                         ("observed", observed),
                     ):
-                        base["targets"][action] = {
+                        base["targets"][phase] = {
                             "subject": "recovery-a1",
                             "nodeId": fixture.client.node_id,
                             "request": acknowledgment,
                             "wireSha256": JOURNAL.digest(_json(acknowledgment)),
                         }
+                    self.assertNotEqual(
+                        submitted["acknowledgedAt"], observed["acknowledgedAt"]
+                    )
                     base["targets"]["settle"]["subject"] = "recovery-a1"
                     setup["targets"] = base["targets"]
                     journal_dir = (
@@ -1024,10 +1323,17 @@ class ProductionRecoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         hold_after_commit,
                         monotonic=time.monotonic,
                     )
-                    fixture.client._send = send_through_fault
-                return await original_ack(delivery_id, attempt_id)
+                state = setup["journal"].snapshot()
+                replay = action in state["held"] and action not in state["returned"]
+                return await setup["hook"].send(
+                    action=action,
+                    replay=replay,
+                    subject="recovery-a1",
+                    operation_started_at=setup["startedAt"],
+                    **request,
+                )
 
-            fixture.gateway._ack_native = wrapped_ack
+            fixture.client._send = send_through_fault
             with self.assertRaises(Crashed):
                 await fixture.gateway.dispatch(fixture.ident)
             pending = fixture.store.current_attempt(fixture.ident)
@@ -1089,6 +1395,10 @@ class ProductionRecoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 fixture.store.current_attempt(fixture.ident)["ack_state"], "observed"
             )
+            stored = fixture.store.current_attempt(fixture.ident)
+            submitted_timestamp = stored["native_ack"]["acknowledgedAt"]
+            observed_timestamp = stored["native_observed_ack"]["acknowledgedAt"]
+            self.assertNotEqual(submitted_timestamp, observed_timestamp)
             self.assertEqual(
                 set(setup["journal"].snapshot()["returned"]), {"submitted", "observed"}
             )

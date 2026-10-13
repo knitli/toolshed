@@ -1,11 +1,14 @@
 """NOT_READY: fixture-only ports; no network, native, credentials or process launcher."""
 
+import base64
+import binascii
 import copy
 from datetime import datetime
 import fcntl
 import hashlib
 import io
 import json
+import logging
 import math
 import os
 import re
@@ -13,7 +16,6 @@ from pathlib import Path
 import stat
 import time
 from urllib.parse import urlsplit
-from uuid import UUID
 
 LIMITS = {"publication": 7, "nativeStart": 4, "restart": 3}
 MAX_JOURNAL = 1024 * 1024
@@ -83,6 +85,11 @@ def require(value, reason):
         raise Refused(reason)
 
 
+def exact_type(value, expected):
+    """Use exact JSON-native types; in particular, bool must not pass as int."""
+    return type(value) is expected  # pylint: disable=unidiomatic-typecheck
+
+
 def encoded(value):
     return json.dumps(
         value, sort_keys=True, separators=(",", ":"), allow_nan=False
@@ -108,21 +115,68 @@ def decode(raw):
 
 
 def uuid(value):
-    try:
-        return type(value) is str and str(UUID(value)) == value
-    except ValueError:
-        return False
+    """Match the event protocol's lowercase UUID v4/v7 identifier contract."""
+    return (
+        exact_type(value, str)
+        and re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            value,
+        )
+        is not None
+    )
+
+
+def _validate_ack_target_pair(targets):
+    """Require submitted and observed ACKs to refer to the same event/runtime."""
+    submitted = targets["submitted"]
+    observed = targets["observed"]
+    shared_request_fields = (
+        "deliveryId",
+        "attemptId",
+        "nodeGeneration",
+        "eventId",
+        "runtimeId",
+        "schemaVersion",
+        "principal",
+        "agent",
+        "runtimeGeneration",
+        "attachmentGeneration",
+        "deliveredSourceStateVersion",
+    )
+    require(
+        submitted["subject"] == observed["subject"]
+        and submitted["nodeId"] == observed["nodeId"]
+        and all(
+            submitted["request"][key] == observed["request"][key]
+            for key in shared_request_fields
+        )
+        and submitted["request"]["nativeCorrelation"]["permitId"]
+        == observed["request"]["nativeCorrelation"]["permitId"]
+        and submitted["request"]["nativeCorrelation"]["turnId"]
+        == observed["request"]["nativeCorrelation"]["turnId"]
+        and (
+            ("consumerGeneration" in submitted["request"])
+            == ("consumerGeneration" in observed["request"])
+        )
+        and (
+            "consumerGeneration" not in submitted["request"]
+            or submitted["request"]["consumerGeneration"]
+            == observed["request"]["consumerGeneration"]
+        ),
+        "ack_event_identity_mismatch",
+    )
 
 
 def manifest_checked(value):
     require(
-        type(value) is dict
+        exact_type(value, dict)
         and set(value) == {"version", "origin", "subjects", "targets", "claims"}
+        and exact_type(value["version"], int)
         and value["version"] == 1,
         "invalid_manifest",
     )
     origin = value["origin"]
-    require(type(origin) is str, "invalid_origin")
+    require(exact_type(origin, str), "invalid_origin")
     try:
         parsed = urlsplit(origin)
         valid = (
@@ -142,20 +196,20 @@ def manifest_checked(value):
     require(valid, "invalid_origin")
     subjects = value["subjects"]
     require(
-        type(subjects) is list
+        exact_type(subjects, list)
         and 1 <= len(subjects) <= 7
         and len(set(subjects)) == len(subjects)
-        and all(type(s) is str and 0 < len(s) <= 128 for s in subjects),
+        and all(exact_type(s, str) and 0 < len(s) <= 128 for s in subjects),
         "invalid_subjects",
     )
     require(
-        type(value["targets"]) is dict
+        exact_type(value["targets"], dict)
         and set(value["targets"]) == {"submitted", "observed", "settle"},
         "invalid_targets",
     )
     for action, target in value["targets"].items():
         require(
-            type(target) is dict
+            exact_type(target, dict)
             and set(target)
             in (
                 {"subject", "request", "nodeId"},
@@ -171,11 +225,11 @@ def manifest_checked(value):
         )
         request = target["request"]
         require(
-            type(request) is dict
-            and type(request.get("deliveryId")) is str
+            exact_type(request, dict)
+            and exact_type(request.get("deliveryId"), str)
             and re.fullmatch(r"dly_[0-9a-f]{64}", request["deliveryId"])
             and uuid(request.get("attemptId"))
-            and type(request.get("nodeGeneration")) is int
+            and exact_type(request.get("nodeGeneration"), int)
             and request["nodeGeneration"] > 0,
             "invalid_target_identity",
         )
@@ -184,7 +238,7 @@ def manifest_checked(value):
                 set(request)
                 == {"deliveryId", "attemptId", "nodeGeneration", "permitId", "evidence"}
                 and uuid(request["permitId"])
-                and type(request["evidence"]) is dict
+                and exact_type(request["evidence"], dict)
                 and set(request["evidence"]) == {"type", "receiptId"}
                 and request["evidence"]["type"] == "native_terminal_no_start"
                 and uuid(request["evidence"]["receiptId"]),
@@ -209,11 +263,11 @@ def manifest_checked(value):
             }
             require(
                 set(request) in (required, required | {"consumerGeneration"})
-                and type(request["schemaVersion"]) is int
+                and exact_type(request["schemaVersion"], int)
                 and request["schemaVersion"] == 1
                 and all(uuid(request[k]) for k in ("eventId", "runtimeId"))
                 and all(
-                    type(request[k]) is int and 0 < request[k] < 2**53
+                    exact_type(request[k], int) and 0 < request[k] < 2**53
                     for k in (
                         "nodeGeneration",
                         "runtimeGeneration",
@@ -222,24 +276,27 @@ def manifest_checked(value):
                 )
                 and (
                     "consumerGeneration" not in request
-                    or type(request["consumerGeneration"]) is int
+                    or exact_type(request["consumerGeneration"], int)
                     and 0 < request["consumerGeneration"] < 2**53
                 )
                 and all(
-                    type(request[k]) is str and 0 < len(request[k]) <= 256
+                    exact_type(request[k], str) and 0 < len(request[k]) <= 256
                     for k in ("principal", "agent", "deliveredSourceStateVersion")
                 )
-                and type(request["acknowledgedAt"]) is str
+                and exact_type(request["acknowledgedAt"], str)
                 and re.fullmatch(
                     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z",
                     request["acknowledgedAt"],
                 ),
                 "invalid_closed_ack_schema",
             )
-            datetime.fromisoformat(request["acknowledgedAt"].replace("Z", "+00:00"))
+            try:
+                datetime.fromisoformat(request["acknowledgedAt"].replace("Z", "+00:00"))
+            except ValueError:
+                raise Refused("invalid_closed_ack_schema") from None
             require(
                 request.get("status") == action
-                and type(request.get("nativeCorrelation")) is dict,
+                and exact_type(request.get("nativeCorrelation"), dict),
                 "invalid_ack_target",
             )
             correlation = request["nativeCorrelation"]
@@ -257,16 +314,20 @@ def manifest_checked(value):
                 and all(uuid(correlation[k]) for k in keys - {"kind"}),
                 "invalid_native_correlation",
             )
+    _validate_ack_target_pair(value["targets"])
     require(
-        type(value["claims"]) is list and len(value["claims"]) <= 7, "invalid_claims"
+        exact_type(value["claims"], list) and len(value["claims"]) <= 7,
+        "invalid_claims",
     )
     for claim in value["claims"]:
         require(
-            type(claim) is dict
+            exact_type(claim, dict)
             and set(claim) == {"subject", "request"}
             and claim["subject"] in subjects
-            and type(claim["request"]) is dict
+            and exact_type(claim["request"], dict)
             and set(claim["request"]) == {"deliveryId", "attemptId"}
+            and exact_type(claim["request"]["deliveryId"], str)
+            and re.fullmatch(r"dly_[0-9a-f]{64}", claim["request"]["deliveryId"])
             and uuid(claim["request"]["attemptId"]),
             "invalid_claim",
         )
@@ -277,20 +338,39 @@ def manifest_checked(value):
 def valid_response(manifest, action, value):
     target = manifest["targets"][action]
     if action == "settle":
-        return type(value) is dict and encoded(value) == encoded(
+        return exact_type(value, dict) and encoded(value) == encoded(
             {**target["request"], "nodeId": target["nodeId"], "status": "not_started"}
         )
     return (
-        type(value) is dict
+        exact_type(value, dict)
         and set(value) == {"status", "current"}
         and value["status"] == action
-        and type(value["current"]) is bool
+        and exact_type(value["current"], bool)
         and (action != "submitted" or value["current"] is False)
     )
 
 
 def hash_text(value):
-    return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+    return exact_type(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def raw_response_matches(value):
+    """Check the returned replay's captured raw body against its exact digest."""
+    encoded_body = value.get("responseRawBase64")
+    if not exact_type(encoded_body, str):
+        return False
+    try:
+        raw = base64.b64decode(encoded_body, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    if len(raw) > 8192 or base64.b64encode(raw).decode("ascii") != encoded_body:
+        return False
+    if digest(raw) != value.get("responseSha256"):
+        return False
+    try:
+        return encoded(decode(raw)) == encoded(value.get("response"))
+    except (Refused, TypeError, ValueError):
+        return False
 
 
 def target_request_sha256(target):
@@ -299,7 +379,7 @@ def target_request_sha256(target):
 
 def phase_plan_checked(value, manifest):
     require(
-        type(value) is dict
+        exact_type(value, dict)
         and set(value)
         == {
             "version",
@@ -308,18 +388,19 @@ def phase_plan_checked(value, manifest):
             "faultTargets",
             "nativeBusySignal",
         }
+        and exact_type(value["version"], int)
         and value["version"] == 1,
         "invalid_phase_plan",
     )
     require(
         value["order"] == list(CASE_ORDER)
-        and type(value["cases"]) is dict
+        and exact_type(value["cases"], dict)
         and set(value["cases"]) == set(CASE_ORDER),
         "invalid_phase_order",
     )
     cases = value["cases"]
     require(
-        type(value["faultTargets"]) is dict
+        exact_type(value["faultTargets"], dict)
         and value["faultTargets"] == {"submitted": "A1", "observed": "A1"},
         "invalid_fault_targets",
     )
@@ -327,7 +408,7 @@ def phase_plan_checked(value, manifest):
     for case_id in CASE_ORDER:
         case = cases[case_id]
         require(
-            type(case) is dict
+            exact_type(case, dict)
             and set(case)
             == {
                 "subject",
@@ -345,7 +426,7 @@ def phase_plan_checked(value, manifest):
         subjects.append(case["subject"])
         dynamic_c3 = case_id == "C3"
         require(
-            type(case["subject"]) is str
+            exact_type(case["subject"], str)
             and 0 < len(case["subject"]) <= 128
             and (dynamic_c3 or hash_text(case["eventSha256"]))
             and (dynamic_c3 or hash_text(case["publicationSha256"]))
@@ -369,9 +450,9 @@ def phase_plan_checked(value, manifest):
                 case["claimSha256"] is None and case["startSha256"] is None,
                 "c2_must_not_claim_or_start",
             )
-        else:
+        if not dynamic_c3:
             require(
-                type(case["binding"]) is dict
+                exact_type(case["binding"], dict)
                 and set(case["binding"]) == set(NATIVE_BINDING_FIELDS)
                 and all(
                     uuid(case["binding"][key])
@@ -382,15 +463,15 @@ def phase_plan_checked(value, manifest):
                         "serverInstanceId",
                     )
                 )
-                and type(case["binding"]["backendPid"]) is int
+                and exact_type(case["binding"]["backendPid"], int)
                 and 0 < case["binding"]["backendPid"] < 2**32
                 and all(
-                    type(case["binding"][key]) is int
+                    exact_type(case["binding"][key], int)
                     and 0 < case["binding"][key] < 2**53
                     for key in ("generation", "serverGeneration")
                 )
                 and all(
-                    type(case[key]) is int and 0 < case[key] < 2**53
+                    exact_type(case[key], int) and 0 < case[key] < 2**53
                     for key in (
                         "nodeGeneration",
                         "runtimeGeneration",
@@ -401,7 +482,7 @@ def phase_plan_checked(value, manifest):
             )
         if dynamic_c3:
             require(
-                type(case["nodeGeneration"]) is int
+                exact_type(case["nodeGeneration"], int)
                 and 0 < case["nodeGeneration"] < 2**53,
                 "invalid_phase_binding",
             )
@@ -513,6 +594,8 @@ def _apply_fault_projection(plan, state, kind, value):
             "held": False,
             "replay": False,
             "returned": False,
+            "returnedResponseSha256": None,
+            "returnedCurrent": None,
             "witnessed": False,
         },
     )
@@ -544,9 +627,9 @@ def _apply_fault_projection(plan, state, kind, value):
         fault["held"] = True
     elif kind == "replay":
         require(fault["held"] and not fault["replay"], "phase_replay_before_restart")
-        token = "R1" if action == "submitted" else "R2"
+        restart_id = "R1" if action == "submitted" else "R2"
         require(
-            state["restartTokens"].get(token, {}).get("complete") is True,
+            state["restartTokens"].get(restart_id, {}).get("complete") is True,
             "phase_replay_before_owned_restart",
         )
         fault["replay"] = True
@@ -555,12 +638,461 @@ def _apply_fault_projection(plan, state, kind, value):
             fault["replay"] and not fault["returned"], "phase_return_without_replay"
         )
         fault["returned"] = True
+        fault["returnedResponseSha256"] = value["responseSha256"]
+        fault["returnedCurrent"] = value["response"].get("current")
+
+
+def _phase_begin_case(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated begin_case transition to the projected state."""
+    require(
+        state["active"] is None
+        and state["nextIndex"] < len(CASE_ORDER)
+        and case_id == CASE_ORDER[state["nextIndex"]],
+        "case_order_violation",
+    )
+    if state["nextIndex"]:
+        previous = CASE_ORDER[state["nextIndex"] - 1]
+        require(cases[previous]["complete"], "previous_case_incomplete")
+    if case_id == "C2":
+        state["nativeSignalGateRefused"] = plan["nativeBusySignal"] is None
+        require(plan["nativeBusySignal"] is not None, "native_busy_signal_unqualified")
+    if case_id == "C3":
+        require(state["reattached"], "reattach_not_recorded")
+    state["active"] = case_id
+    state["nextIndex"] += 1
+    cases[case_id]["begun"] = True
+
+
+def _phase_publication_intent(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated publication_intent transition to the projected state."""
+    case = cases[case_id]
+    expected = plan["cases"][case_id]
+    if case_id == "C3":
+        require(state["reattachReadback"] is not None, "reattach_not_recorded")
+        expected_event_sha = state["reattachReadback"]["eventSha256"]
+    else:
+        expected_event_sha = expected["eventSha256"]
+    require(
+        state["active"] == case_id
+        and case["publicationIntent"] is None
+        and fields["subject"] == expected["subject"]
+        and fields["eventSha256"] == expected_event_sha
+        and hash_text(fields["requestSha256"])
+        and (
+            expected["publicationSha256"] is None
+            or fields["requestSha256"] == expected["publicationSha256"]
+        ),
+        "invalid_publication_intent",
+    )
+    require(state["publications"] < LIMITS["publication"], "budget_exhausted")
+    case["publicationIntent"] = fields["requestSha256"]
+    state["publications"] += 1
+
+
+def _phase_publication_result(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated publication_result transition to the projected state."""
+    case = cases[case_id]
+    require(
+        state["active"] == case_id
+        and case["publicationIntent"] is not None
+        and case["publicationOutcome"] is None
+        and fields["outcome"] in ("accepted", "refused", "ambiguous")
+        and (
+            (fields["outcome"] == "ambiguous" and fields["responseSha256"] is None)
+            or hash_text(fields["responseSha256"])
+        ),
+        "invalid_publication_result",
+    )
+    case["publicationOutcome"] = fields["outcome"]
+
+
+def _phase_claim_intent(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated claim_intent transition to the projected state."""
+    case = cases[case_id]
+    expected = plan["cases"][case_id]
+    require(
+        state["active"] == case_id
+        and case["publicationOutcome"] == "accepted"
+        and case["claimIntent"] is None
+        and case_id in ("A1", "B1", "C1", "C3", "B2", "A2")
+        and fields["subject"] == expected["subject"]
+        and hash_text(fields["requestSha256"])
+        and (
+            expected["claimSha256"] is None
+            or fields["requestSha256"] == expected["claimSha256"]
+        ),
+        "replacement_claim_fenced",
+    )
+    case["claimIntent"] = fields["requestSha256"]
+
+
+def _phase_claim_result(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated claim_result transition to the projected state."""
+    case = cases[case_id]
+    require(
+        state["active"] == case_id
+        and case["claimIntent"] is not None
+        and case["claimOutcome"] is None
+        and fields["outcome"] in ("accepted", "refused", "ambiguous")
+        and (
+            (fields["outcome"] == "ambiguous" and fields["responseSha256"] is None)
+            or hash_text(fields["responseSha256"])
+        ),
+        "invalid_claim_result",
+    )
+    case["claimOutcome"] = fields["outcome"]
+
+
+def _phase_start_intent(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated start_intent transition to the projected state."""
+    case = cases[case_id]
+    require(
+        state["active"] == case_id
+        and case["claimIntent"] is not None
+        and case["claimOutcome"] == "accepted"
+        and case["startIntent"] is None
+        and case_id in ("A1", "B1", "C1", "C3")
+        and fields["subject"] == plan["cases"][case_id]["subject"]
+        and hash_text(fields["requestSha256"])
+        and (
+            plan["cases"][case_id]["startSha256"] is None
+            or fields["requestSha256"] == plan["cases"][case_id]["startSha256"]
+        ),
+        "invalid_native_start_intent",
+    )
+    require(state["startAttempts"] < LIMITS["nativeStart"], "budget_exhausted")
+    case["startIntent"] = fields["requestSha256"]
+    state["startAttempts"] += 1
+
+
+def _phase_start_outcome(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated start_outcome transition to the projected state."""
+    case = cases[case_id]
+    require(
+        state["active"] == case_id
+        and case["startIntent"] == fields["requestSha256"]
+        and case["startOutcome"] is None
+        and fields["outcome"] in ("started", "terminalNotStarted", "unknown")
+        and hash_text(fields["receiptSha256"]),
+        "invalid_native_start_outcome",
+    )
+    case["startOutcome"] = fields["outcome"]
+    if fields["outcome"] == "started":
+        require(
+            state["acceptedStarts"] < LIMITS["nativeStart"],
+            "accepted_start_budget_exhausted",
+        )
+        state["acceptedStarts"] += 1
+
+
+def _phase_ack_latch(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated ack_latch transition to the projected state."""
+    case = cases[case_id]
+    phase = fields["phase"]
+    target_record = None if manifest is None else manifest["targets"].get(phase)
+    target = None if target_record is None else target_record["request"]
+    require(
+        state["active"] == case_id
+        and case["startOutcome"] == "started"
+        and phase in ("submitted", "observed")
+        and phase not in case["ackLatches"]
+        and hash_text(fields["requestSha256"])
+        and hash_text(fields["storeWitnessSha256"]),
+        "invalid_ack_latch",
+    )
+    require(
+        target is not None
+        and fields["requestSha256"] == target_request_sha256(target_record)
+        and fields["deliveryId"] == target["deliveryId"]
+        and fields["attemptId"] == target["attemptId"]
+        and fields["eventId"] == target["eventId"]
+        and fields["permitId"] == target["nativeCorrelation"]["permitId"]
+        and fields["turnId"] == target["nativeCorrelation"]["turnId"]
+        and fields["itemId"] == target["nativeCorrelation"].get("itemId"),
+        "ack_latch_identity_mismatch",
+    )
+    if phase == "observed":
+        require("submitted" in case["ackLatches"], "observed_before_submitted_latch")
+    case["ackLatches"][phase] = {
+        "requestSha256": fields["requestSha256"],
+        "storeWitnessSha256": fields["storeWitnessSha256"],
+        "deliveryId": fields["deliveryId"],
+        "attemptId": fields["attemptId"],
+        "eventId": fields["eventId"],
+        "permitId": fields["permitId"],
+        "turnId": fields["turnId"],
+        "itemId": fields["itemId"],
+        "complete": None,
+    }
+
+
+def _phase_ack_complete(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated ack_complete transition to the projected state."""
+    case = cases[case_id]
+    phase = fields["phase"]
+    latch = case["ackLatches"].get(phase)
+    require(
+        state["active"] == case_id
+        and latch is not None
+        and latch["complete"] is None
+        and latch["requestSha256"] == fields["requestSha256"]
+        and hash_text(fields["responseSha256"])
+        and exact_type(fields["current"], bool)
+        and (phase != "submitted" or fields["current"] is False),
+        "invalid_ack_completion",
+    )
+    fault = case["faults"].get(phase, {})
+    require(
+        fault.get("returned") is True
+        and fault.get("returnedResponseSha256") == fields["responseSha256"]
+        and fault.get("returnedCurrent") == fields["current"],
+        "ack_completion_without_returned_replay",
+    )
+    latch["complete"] = {
+        "responseSha256": fields["responseSha256"],
+        "current": fields["current"],
+    }
+
+
+def _phase_queue_c2(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated queue_c2 transition to the projected state."""
+    case = cases["C2"]
+    require(
+        state["active"] == "C2"
+        and case["publicationOutcome"] == "accepted"
+        and case["claimIntent"] is None
+        and not case["queued"]
+        and plan["nativeBusySignal"] is not None
+        and hash_text(fields["storeWitnessSha256"]),
+        "c2_queue_unqualified",
+    )
+    case["queued"] = True
+
+
+def _phase_restart_intent(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated restart_intent transition to the projected state."""
+    restart_id = fields["token"]
+    reason_for = {
+        "R1": ("A1", "after_submitted_ack"),
+        "R2": ("A1", "after_observed_ack_commit"),
+        "R3": ("C2", "after_c2_queued"),
+    }
+    require(
+        restart_id in reason_for
+        and restart_id not in state["restartTokens"]
+        and len(state["restartTokens"]) < LIMITS["restart"]
+        and (case_id, fields["reason"]) == reason_for[restart_id]
+        and state["active"] == case_id
+        and exact_type(fields["oldPid"], int)
+        and fields["oldPid"] > 0
+        and exact_type(fields["oldStartId"], str)
+        and 0 < len(fields["oldStartId"]) <= 128
+        and hash_text(fields["socketSha256"]),
+        "invalid_restart_intent",
+    )
+    case = cases[case_id]
+    if restart_id == "R1":
+        require(
+            case["faults"].get("submitted", {}).get("held") is True,
+            "submitted_ack_boundary_missing",
+        )
+    elif restart_id == "R2":
+        require(
+            "R1" in state["restartTokens"]
+            and state["restartTokens"]["R1"]["complete"]
+            and case["ackLatches"].get("submitted", {}).get("complete") is not None
+            and case["faults"].get("observed", {}).get("held") is True,
+            "observed_ack_boundary_missing",
+        )
+    else:
+        require(case["queued"], "c2_queue_boundary_missing")
+    _validate_restart_predecessor(state, restart_id, fields)
+    state["restartTokens"][restart_id] = {
+        "caseId": case_id,
+        "oldPid": fields["oldPid"],
+        "oldStartId": fields["oldStartId"],
+        "socketSha256": fields["socketSha256"],
+        "complete": False,
+    }
+
+
+def _validate_restart_predecessor(state, restart_id, fields):
+    """Bind each later restart intent to the preceding completion identity."""
+    predecessor_id = {"R2": "R1", "R3": "R2"}.get(restart_id)
+    if predecessor_id is None:
+        return
+    predecessor = state["restartTokens"].get(predecessor_id)
+    require(
+        predecessor is not None
+        and predecessor["complete"] is True
+        and fields["oldPid"] == predecessor["newPid"]
+        and fields["oldStartId"] == predecessor["newStartId"],
+        "restart_identity_not_chained",
+    )
+
+
+def _phase_restart_complete(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated restart_complete transition to the projected state."""
+    restart_id = fields["token"]
+    restart = state["restartTokens"].get(restart_id)
+    require(
+        restart is not None
+        and not restart["complete"]
+        and exact_type(fields["newPid"], int)
+        and fields["newPid"] > 0
+        and exact_type(fields["newStartId"], str)
+        and 0 < len(fields["newStartId"]) <= 128
+        and (
+            fields["newPid"] != restart["oldPid"]
+            or fields["newStartId"] != restart["oldStartId"]
+        ),
+        "invalid_restart_completion",
+    )
+    restart.update(
+        newPid=fields["newPid"], newStartId=fields["newStartId"], complete=True
+    )
+
+
+def _phase_reattach(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated reattach transition to the projected state."""
+    require(
+        state["active"] == "C2"
+        and fields["oldCaseId"] == "C2"
+        and fields["newCaseId"] == "C3"
+        and state["cases"]["C2"]["queued"]
+        and state["restartTokens"].get("R3", {}).get("complete") is True
+        and hash_text(fields["oldEventSha256"])
+        and hash_text(fields["newEventSha256"])
+        and fields["oldEventSha256"] == plan["cases"]["C2"]["eventSha256"]
+        and exact_type(fields["oldBinding"], dict)
+        and fields["oldBinding"] == plan["cases"]["C2"]["binding"]
+        and exact_type(fields["newBinding"], dict)
+        and fields["expectedRuntimeGeneration"]
+        == plan["cases"]["C2"]["runtimeGeneration"]
+        and fields["expectedAttachmentGeneration"]
+        == plan["cases"]["C2"]["attachmentGeneration"]
+        and fields["runtimeGeneration"] == fields["expectedRuntimeGeneration"] + 1
+        and fields["attachmentGeneration"] == fields["expectedAttachmentGeneration"] + 1
+        and not state["reattached"],
+        "invalid_reattach",
+    )
+    old, new = fields["oldBinding"], fields["newBinding"]
+    require(
+        set(new) == set(NATIVE_BINDING_FIELDS)
+        and all(
+            uuid(new[key])
+            for key in ("clientId", "connectionId", "threadId", "serverInstanceId")
+        )
+        and exact_type(new["backendPid"], int)
+        and 0 < new["backendPid"] < 2**32
+        and all(
+            exact_type(new[key], int) and 0 < new[key] < 2**53
+            for key in ("generation", "serverGeneration")
+        ),
+        "invalid_reattach_binding",
+    )
+    physical = (
+        "clientId",
+        "connectionId",
+        "backendPid",
+        "threadId",
+        "serverInstanceId",
+    )
+    require(
+        all(old[key] == new[key] for key in physical)
+        and new["generation"] >= old["generation"]
+        and new["serverGeneration"] >= old["serverGeneration"]
+        and (
+            new["generation"] > old["generation"]
+            or new["serverGeneration"] > old["serverGeneration"]
+        )
+        and fields["newEventSha256"] != fields["oldEventSha256"],
+        "reattach_identity_mismatch",
+    )
+    state["reattachReadback"] = {
+        "eventSha256": fields["newEventSha256"],
+        "binding": copy.deepcopy(new),
+        "runtimeGeneration": fields["runtimeGeneration"],
+        "attachmentGeneration": fields["attachmentGeneration"],
+    }
+    state["reattached"] = True
+
+
+def _phase_complete_case(plan, state, fields, manifest, case_id, cases):
+    """Apply the validated complete_case transition to the projected state."""
+    case = cases[case_id]
+    require(
+        state["active"] == case_id
+        and case["publicationOutcome"] == "accepted"
+        and fields["storeAckState"] in ("observed", "queued", "fenced")
+        and (fields["attemptId"] is None or uuid(fields["attemptId"]))
+        and hash_text(fields["storeWitnessSha256"]),
+        "case_completion_unproven",
+    )
+    if case_id == "A1":
+        require(
+            case["startOutcome"] == "started"
+            and state["restartTokens"].get("R1", {}).get("complete") is True
+            and state["restartTokens"].get("R2", {}).get("complete") is True
+            and case["ackLatches"].get("submitted", {}).get("complete") is not None
+            and case["ackLatches"].get("observed", {}).get("complete") is not None
+            and uuid(fields["attemptId"])
+            and fields["attemptId"] == case["ackLatches"]["submitted"]["attemptId"]
+            and fields["attemptId"] == case["ackLatches"]["observed"]["attemptId"]
+            and fields["storeAckState"] == "observed"
+            and case["faults"].get("submitted", {}).get("returned") is True
+            and case["faults"].get("observed", {}).get("returned") is True,
+            "a1_recovery_incomplete",
+        )
+    elif case_id in ("B1", "C1", "C3"):
+        require(
+            case["startOutcome"] == "started"
+            and fields["storeAckState"] == "observed"
+            and uuid(fields["attemptId"]),
+            "successful_start_case_incomplete",
+        )
+    elif case_id == "C2":
+        require(
+            case["queued"]
+            and fields["storeAckState"] == "queued"
+            and state["restartTokens"].get("R3", {}).get("complete") is True,
+            "c2_recovery_incomplete",
+        )
+    elif case_id in ("B2", "A2"):
+        require(
+            case["startIntent"] is None and fields["storeAckState"] == "fenced",
+            "fence_case_started_unexpectedly",
+        )
+        require(
+            case["claimIntent"] is None or case["claimOutcome"] == "refused",
+            "fence_case_cloud_outcome_unproven",
+        )
+    case["complete"] = True
+    state["active"] = None
+
+
+_PHASE_HANDLERS = {
+    "begin_case": _phase_begin_case,
+    "publication_intent": _phase_publication_intent,
+    "publication_result": _phase_publication_result,
+    "claim_intent": _phase_claim_intent,
+    "claim_result": _phase_claim_result,
+    "start_intent": _phase_start_intent,
+    "start_outcome": _phase_start_outcome,
+    "ack_latch": _phase_ack_latch,
+    "ack_complete": _phase_ack_complete,
+    "queue_c2": _phase_queue_c2,
+    "restart_intent": _phase_restart_intent,
+    "restart_complete": _phase_restart_complete,
+    "reattach": _phase_reattach,
+    "complete_case": _phase_complete_case,
+}
 
 
 def _apply_phase(plan, state, value, manifest=None):
     """Validate and apply one ordered, hash-chained phase transition."""
     require(
-        plan is not None and type(value) is dict and "at" in value,
+        plan is not None and exact_type(value, dict) and "at" in value,
         "phase_plan_required",
     )
     operation = value["op"]
@@ -574,396 +1106,46 @@ def _apply_phase(plan, state, value, manifest=None):
     case_id = fields.get("caseId")
     if case_id is not None:
         require(case_id in cases, "unknown_case")
-    if operation == "begin_case":
-        require(
-            state["active"] is None
-            and state["nextIndex"] < len(CASE_ORDER)
-            and case_id == CASE_ORDER[state["nextIndex"]],
-            "case_order_violation",
-        )
-        if state["nextIndex"]:
-            previous = CASE_ORDER[state["nextIndex"] - 1]
-            require(cases[previous]["complete"], "previous_case_incomplete")
-        if case_id == "C2":
-            state["nativeSignalGateRefused"] = plan["nativeBusySignal"] is None
-            require(
-                plan["nativeBusySignal"] is not None, "native_busy_signal_unqualified"
-            )
-        if case_id == "C3":
-            require(state["reattached"], "reattach_not_recorded")
-        state["active"] = case_id
-        state["nextIndex"] += 1
-        cases[case_id]["begun"] = True
-    elif operation == "publication_intent":
-        case = cases[case_id]
-        expected = plan["cases"][case_id]
-        if case_id == "C3":
-            require(state["reattachReadback"] is not None, "reattach_not_recorded")
-            expected_event_sha = state["reattachReadback"]["eventSha256"]
-        else:
-            expected_event_sha = expected["eventSha256"]
-        require(
-            state["active"] == case_id
-            and case["publicationIntent"] is None
-            and fields["subject"] == expected["subject"]
-            and fields["eventSha256"] == expected_event_sha
-            and hash_text(fields["requestSha256"])
-            and (
-                expected["publicationSha256"] is None
-                or fields["requestSha256"] == expected["publicationSha256"]
-            ),
-            "invalid_publication_intent",
-        )
-        require(state["publications"] < LIMITS["publication"], "budget_exhausted")
-        case["publicationIntent"] = fields["requestSha256"]
-        state["publications"] += 1
-    elif operation == "publication_result":
-        case = cases[case_id]
-        require(
-            state["active"] == case_id
-            and case["publicationIntent"] is not None
-            and case["publicationOutcome"] is None
-            and fields["outcome"] in ("accepted", "refused", "ambiguous")
-            and (
-                (fields["outcome"] == "ambiguous" and fields["responseSha256"] is None)
-                or hash_text(fields["responseSha256"])
-            ),
-            "invalid_publication_result",
-        )
-        case["publicationOutcome"] = fields["outcome"]
-    elif operation == "claim_intent":
-        case = cases[case_id]
-        expected = plan["cases"][case_id]
-        require(
-            state["active"] == case_id
-            and case["publicationOutcome"] == "accepted"
-            and case["claimIntent"] is None
-            and case_id in ("A1", "B1", "C1", "C3", "B2", "A2")
-            and fields["subject"] == expected["subject"]
-            and hash_text(fields["requestSha256"])
-            and (
-                expected["claimSha256"] is None
-                or fields["requestSha256"] == expected["claimSha256"]
-            ),
-            "replacement_claim_fenced",
-        )
-        case["claimIntent"] = fields["requestSha256"]
-    elif operation == "claim_result":
-        case = cases[case_id]
-        require(
-            state["active"] == case_id
-            and case["claimIntent"] is not None
-            and case["claimOutcome"] is None
-            and fields["outcome"] in ("accepted", "refused", "ambiguous")
-            and (
-                (fields["outcome"] == "ambiguous" and fields["responseSha256"] is None)
-                or hash_text(fields["responseSha256"])
-            ),
-            "invalid_claim_result",
-        )
-        case["claimOutcome"] = fields["outcome"]
-    elif operation == "start_intent":
-        case = cases[case_id]
-        require(
-            state["active"] == case_id
-            and case["claimIntent"] is not None
-            and case["claimOutcome"] == "accepted"
-            and case["startIntent"] is None
-            and case_id in ("A1", "B1", "C1", "C3")
-            and fields["subject"] == plan["cases"][case_id]["subject"]
-            and hash_text(fields["requestSha256"])
-            and (
-                plan["cases"][case_id]["startSha256"] is None
-                or fields["requestSha256"] == plan["cases"][case_id]["startSha256"]
-            ),
-            "invalid_native_start_intent",
-        )
-        require(state["startAttempts"] < LIMITS["nativeStart"], "budget_exhausted")
-        case["startIntent"] = fields["requestSha256"]
-        state["startAttempts"] += 1
-    elif operation == "start_outcome":
-        case = cases[case_id]
-        require(
-            state["active"] == case_id
-            and case["startIntent"] == fields["requestSha256"]
-            and case["startOutcome"] is None
-            and fields["outcome"] in ("started", "terminalNotStarted", "unknown")
-            and hash_text(fields["receiptSha256"]),
-            "invalid_native_start_outcome",
-        )
-        case["startOutcome"] = fields["outcome"]
-        if fields["outcome"] == "started":
-            require(state["acceptedStarts"] < 4, "accepted_start_budget_exhausted")
-            state["acceptedStarts"] += 1
-    elif operation == "ack_latch":
-        case = cases[case_id]
-        phase = fields["phase"]
-        target_record = None if manifest is None else manifest["targets"].get(phase)
-        target = None if target_record is None else target_record["request"]
-        require(
-            state["active"] == case_id
-            and case["startOutcome"] == "started"
-            and phase in ("submitted", "observed")
-            and phase not in case["ackLatches"]
-            and hash_text(fields["requestSha256"])
-            and hash_text(fields["storeWitnessSha256"]),
-            "invalid_ack_latch",
-        )
-        require(
-            target is not None
-            and fields["requestSha256"] == target_request_sha256(target_record)
-            and fields["deliveryId"] == target["deliveryId"]
-            and fields["attemptId"] == target["attemptId"]
-            and fields["eventId"] == target["eventId"]
-            and fields["permitId"] == target["nativeCorrelation"]["permitId"]
-            and fields["turnId"] == target["nativeCorrelation"]["turnId"]
-            and fields["itemId"] == target["nativeCorrelation"].get("itemId"),
-            "ack_latch_identity_mismatch",
-        )
-        if phase == "observed":
-            require(
-                "submitted" in case["ackLatches"], "observed_before_submitted_latch"
-            )
-        case["ackLatches"][phase] = {
-            "requestSha256": fields["requestSha256"],
-            "storeWitnessSha256": fields["storeWitnessSha256"],
-            "deliveryId": fields["deliveryId"],
-            "attemptId": fields["attemptId"],
-            "eventId": fields["eventId"],
-            "permitId": fields["permitId"],
-            "turnId": fields["turnId"],
-            "itemId": fields["itemId"],
-            "complete": None,
-        }
-    elif operation == "ack_complete":
-        case = cases[case_id]
-        phase = fields["phase"]
-        latch = case["ackLatches"].get(phase)
-        require(
-            state["active"] == case_id
-            and latch is not None
-            and latch["complete"] is None
-            and latch["requestSha256"] == fields["requestSha256"]
-            and hash_text(fields["responseSha256"])
-            and type(fields["current"]) is bool
-            and (phase != "submitted" or fields["current"] is False),
-            "invalid_ack_completion",
-        )
-        latch["complete"] = {
-            "responseSha256": fields["responseSha256"],
-            "current": fields["current"],
-        }
-    elif operation == "queue_c2":
-        case = cases["C2"]
-        require(
-            state["active"] == "C2"
-            and case["publicationOutcome"] == "accepted"
-            and case["claimIntent"] is None
-            and not case["queued"]
-            and plan["nativeBusySignal"] is not None
-            and hash_text(fields["storeWitnessSha256"]),
-            "c2_queue_unqualified",
-        )
-        case["queued"] = True
-    elif operation == "restart_intent":
-        token = fields["token"]
-        reason_for = {
-            "R1": ("A1", "after_submitted_ack"),
-            "R2": ("A1", "after_observed_ack_commit"),
-            "R3": ("C2", "after_c2_queued"),
-        }
-        require(
-            token in reason_for
-            and token not in state["restartTokens"]
-            and len(state["restartTokens"]) < LIMITS["restart"]
-            and (case_id, fields["reason"]) == reason_for[token]
-            and state["active"] == case_id
-            and type(fields["oldPid"]) is int
-            and fields["oldPid"] > 0
-            and type(fields["oldStartId"]) is str
-            and 0 < len(fields["oldStartId"]) <= 128
-            and hash_text(fields["socketSha256"]),
-            "invalid_restart_intent",
-        )
-        case = cases[case_id]
-        if token == "R1":
-            require(
-                case["faults"].get("submitted", {}).get("held") is True,
-                "submitted_ack_boundary_missing",
-            )
-        elif token == "R2":
-            require(
-                "R1" in state["restartTokens"]
-                and state["restartTokens"]["R1"]["complete"]
-                and case["ackLatches"].get("submitted", {}).get("complete") is not None
-                and case["faults"].get("observed", {}).get("held") is True,
-                "observed_ack_boundary_missing",
-            )
-        else:
-            require(case["queued"], "c2_queue_boundary_missing")
-        state["restartTokens"][token] = {
-            "caseId": case_id,
-            "oldPid": fields["oldPid"],
-            "oldStartId": fields["oldStartId"],
-            "socketSha256": fields["socketSha256"],
-            "complete": False,
-        }
-    elif operation == "restart_complete":
-        token = fields["token"]
-        restart = state["restartTokens"].get(token)
-        require(
-            restart is not None
-            and not restart["complete"]
-            and type(fields["newPid"]) is int
-            and fields["newPid"] > 0
-            and type(fields["newStartId"]) is str
-            and 0 < len(fields["newStartId"]) <= 128
-            and (
-                fields["newPid"] != restart["oldPid"]
-                or fields["newStartId"] != restart["oldStartId"]
-            ),
-            "invalid_restart_completion",
-        )
-        restart.update(
-            newPid=fields["newPid"], newStartId=fields["newStartId"], complete=True
-        )
-    elif operation == "reattach":
-        require(
-            state["active"] == "C2"
-            and fields["oldCaseId"] == "C2"
-            and fields["newCaseId"] == "C3"
-            and state["cases"]["C2"]["queued"]
-            and state["restartTokens"].get("R3", {}).get("complete") is True
-            and hash_text(fields["oldEventSha256"])
-            and hash_text(fields["newEventSha256"])
-            and fields["oldEventSha256"] == plan["cases"]["C2"]["eventSha256"]
-            and type(fields["oldBinding"]) is dict
-            and fields["oldBinding"] == plan["cases"]["C2"]["binding"]
-            and type(fields["newBinding"]) is dict
-            and fields["expectedRuntimeGeneration"]
-            == plan["cases"]["C2"]["runtimeGeneration"]
-            and fields["expectedAttachmentGeneration"]
-            == plan["cases"]["C2"]["attachmentGeneration"]
-            and fields["runtimeGeneration"] == fields["expectedRuntimeGeneration"] + 1
-            and fields["attachmentGeneration"]
-            == fields["expectedAttachmentGeneration"] + 1
-            and not state["reattached"],
-            "invalid_reattach",
-        )
-        old, new = fields["oldBinding"], fields["newBinding"]
-        require(
-            set(new) == set(NATIVE_BINDING_FIELDS)
-            and all(
-                uuid(new[key])
-                for key in ("clientId", "connectionId", "threadId", "serverInstanceId")
-            )
-            and type(new["backendPid"]) is int
-            and 0 < new["backendPid"] < 2**32
-            and all(
-                type(new[key]) is int and 0 < new[key] < 2**53
-                for key in ("generation", "serverGeneration")
-            ),
-            "invalid_reattach_binding",
-        )
-        physical = (
-            "clientId",
-            "connectionId",
-            "backendPid",
-            "threadId",
-            "serverInstanceId",
-        )
-        require(
-            all(old[key] == new[key] for key in physical)
-            and new["generation"] >= old["generation"]
-            and new["serverGeneration"] >= old["serverGeneration"]
-            and (
-                new["generation"] > old["generation"]
-                or new["serverGeneration"] > old["serverGeneration"]
-            )
-            and fields["newEventSha256"] != fields["oldEventSha256"],
-            "reattach_identity_mismatch",
-        )
-        state["reattachReadback"] = {
-            "eventSha256": fields["newEventSha256"],
-            "binding": copy.deepcopy(new),
-            "runtimeGeneration": fields["runtimeGeneration"],
-            "attachmentGeneration": fields["attachmentGeneration"],
-        }
-        state["reattached"] = True
-    elif operation == "complete_case":
-        case = cases[case_id]
-        require(
-            state["active"] == case_id
-            and case["publicationOutcome"] == "accepted"
-            and fields["storeAckState"] in ("observed", "queued", "fenced")
-            and (fields["attemptId"] is None or uuid(fields["attemptId"]))
-            and hash_text(fields["storeWitnessSha256"]),
-            "case_completion_unproven",
-        )
-        if case_id == "A1":
-            require(
-                case["startOutcome"] == "started"
-                and state["restartTokens"].get("R1", {}).get("complete") is True
-                and state["restartTokens"].get("R2", {}).get("complete") is True
-                and case["ackLatches"].get("submitted", {}).get("complete") is not None
-                and case["ackLatches"].get("observed", {}).get("complete") is not None
-                and uuid(fields["attemptId"])
-                and fields["attemptId"] == case["ackLatches"]["submitted"]["attemptId"]
-                and fields["attemptId"] == case["ackLatches"]["observed"]["attemptId"]
-                and fields["storeAckState"] == "observed"
-                and case["faults"].get("submitted", {}).get("returned") is True
-                and case["faults"].get("observed", {}).get("returned") is True,
-                "a1_recovery_incomplete",
-            )
-        elif case_id in ("B1", "C1", "C3"):
-            require(
-                case["startOutcome"] == "started"
-                and fields["storeAckState"] == "observed"
-                and uuid(fields["attemptId"]),
-                "successful_start_case_incomplete",
-            )
-        elif case_id == "C2":
-            require(
-                case["queued"]
-                and fields["storeAckState"] == "queued"
-                and state["restartTokens"].get("R3", {}).get("complete") is True,
-                "c2_recovery_incomplete",
-            )
-        elif case_id in ("B2", "A2"):
-            require(
-                case["startIntent"] is None and fields["storeAckState"] == "fenced",
-                "fence_case_started_unexpectedly",
-            )
-            require(
-                case["claimIntent"] is None or case["claimOutcome"] == "refused",
-                "fence_case_cloud_outcome_unproven",
-            )
-        case["complete"] = True
-        state["active"] = None
-    else:
-        raise Refused("invalid_phase_operation")
+    handler = _PHASE_HANDLERS.get(operation)
+    require(handler is not None, "invalid_phase_operation")
+    handler(plan, state, fields, manifest, case_id, cases)
 
 
 def validate_reattach(
     plan,
-    old_case_id,
-    new_case_id,
-    *,
-    old_event_sha256,
-    new_event_sha256,
-    old_binding,
-    new_binding,
-    runtime_generation,
-    attachment_generation,
+    readback,
 ):
-    """Require an exact CAS successor while retaining both original event identities."""
+    """Validate one closed reattach readback without rewriting its old identity."""
+    require(
+        exact_type(readback, dict)
+        and set(readback)
+        == {
+            "oldCaseId",
+            "newCaseId",
+            "oldEventSha256",
+            "newEventSha256",
+            "oldBinding",
+            "newBinding",
+            "runtimeGeneration",
+            "attachmentGeneration",
+        },
+        "invalid_reattach_readback",
+    )
+    old_case_id = readback["oldCaseId"]
+    new_case_id = readback["newCaseId"]
+    old_event_sha256 = readback["oldEventSha256"]
+    new_event_sha256 = readback["newEventSha256"]
+    old_binding = readback["oldBinding"]
+    new_binding = readback["newBinding"]
+    runtime_generation = readback["runtimeGeneration"]
+    attachment_generation = readback["attachmentGeneration"]
     require(old_case_id == "C2" and new_case_id == "C3", "invalid_reattach_cases")
     old = plan["cases"][old_case_id]
     require(
         old_event_sha256 == old["eventSha256"]
         and hash_text(new_event_sha256)
         and old_binding == old["binding"]
-        and type(new_binding) is dict
+        and exact_type(new_binding, dict)
         and set(new_binding) == set(NATIVE_BINDING_FIELDS),
         "reattach_envelope_or_binding_changed",
     )
@@ -972,10 +1154,10 @@ def validate_reattach(
             uuid(new_binding[key])
             for key in ("clientId", "connectionId", "threadId", "serverInstanceId")
         )
-        and type(new_binding["backendPid"]) is int
+        and exact_type(new_binding["backendPid"], int)
         and 0 < new_binding["backendPid"] < 2**32
         and all(
-            type(new_binding[key]) is int and 0 < new_binding[key] < 2**53
+            exact_type(new_binding[key], int) and 0 < new_binding[key] < 2**53
             for key in ("generation", "serverGeneration")
         ),
         "invalid_reattach_binding",
@@ -991,6 +1173,7 @@ def validate_reattach(
         all(old_binding[key] == new_binding[key] for key in physical)
         and new_binding["generation"] >= old_binding["generation"]
         and new_binding["serverGeneration"] >= old_binding["serverGeneration"]
+        and new_event_sha256 != old_event_sha256
         and (
             new_binding["generation"] > old_binding["generation"]
             or new_binding["serverGeneration"] > old_binding["serverGeneration"]
@@ -1018,6 +1201,7 @@ class RecoveryOrchestrator:
     """Phase journal facade; effect owners remain the production caller's responsibility."""
 
     def __init__(self, journal):
+        """Bind the facade to a validated phase-plan journal."""
         require(
             isinstance(journal, Journal) and journal.phase_plan is not None,
             "phase_plan_required",
@@ -1026,7 +1210,7 @@ class RecoveryOrchestrator:
 
     @staticmethod
     def _payload_hash(payload):
-        return digest(payload if type(payload) is bytes else encoded(payload))
+        return digest(payload if exact_type(payload, bytes) else encoded(payload))
 
     def readiness(self):
         """Report blockers; offline fixture state never grants live authority."""
@@ -1111,7 +1295,7 @@ class RecoveryOrchestrator:
 
     def ack_latch(self, case_id, phase, request_bytes, store_witness):
         request = (
-            decode(request_bytes) if type(request_bytes) is bytes else request_bytes
+            decode(request_bytes) if exact_type(request_bytes, bytes) else request_bytes
         )
         correlation = request.get("nativeCorrelation", {})
         self.journal.phase(
@@ -1139,11 +1323,11 @@ class RecoveryOrchestrator:
         )
 
     def restart_intent(
-        self, token, case_id, reason, *, old_pid, old_start_id, socket_bytes
+        self, restart_id, case_id, reason, *, old_pid, old_start_id, socket_bytes
     ):
         self.journal.phase(
             "restart_intent",
-            token=token,
+            token=restart_id,
             caseId=case_id,
             reason=reason,
             oldPid=old_pid,
@@ -1151,9 +1335,12 @@ class RecoveryOrchestrator:
             socketSha256=self._payload_hash(socket_bytes),
         )
 
-    def restart_complete(self, token, *, new_pid, new_start_id):
+    def restart_complete(self, restart_id, *, new_pid, new_start_id):
         self.journal.phase(
-            "restart_complete", token=token, newPid=new_pid, newStartId=new_start_id
+            "restart_complete",
+            token=restart_id,
+            newPid=new_pid,
+            newStartId=new_start_id,
         )
 
     def record_reattach(self, **readback):
@@ -1172,17 +1359,7 @@ class RecoveryOrchestrator:
             },
             "invalid_reattach_readback",
         )
-        facts = validate_reattach(
-            self.journal.phase_plan,
-            readback["oldCaseId"],
-            readback["newCaseId"],
-            old_event_sha256=readback["oldEventSha256"],
-            new_event_sha256=readback["newEventSha256"],
-            old_binding=readback["oldBinding"],
-            new_binding=readback["newBinding"],
-            runtime_generation=readback["runtimeGeneration"],
-            attachment_generation=readback["attachmentGeneration"],
-        )
+        facts = validate_reattach(self.journal.phase_plan, readback)
         self.journal.phase(
             "reattach",
             oldCaseId=readback["oldCaseId"],
@@ -1206,6 +1383,7 @@ class Journal:
     def __init__(
         self, directory, manifest, *, clock=time.time, create=False, phase_plan=None
     ):
+        """Open or create the private fixture journal and validate its contract."""
         self.manifest = manifest_checked(manifest)
         self.phase_plan = (
             None
@@ -1238,8 +1416,7 @@ class Journal:
         self.path = self.directory / "journal.jsonl"
         self._transaction(lambda state, append: None, initialize=create)
 
-    def _read(self, stream):
-        raw = stream.read(MAX_JOURNAL + 1)
+    def _read_rows(self, raw):
         require(
             0 < len(raw) <= MAX_JOURNAL and raw.endswith(b"\n"),
             "truncated_or_oversized_journal",
@@ -1249,9 +1426,9 @@ class Journal:
         for number, line in enumerate(raw.splitlines()):
             row = decode(line)
             require(
-                type(row) is dict
+                exact_type(row, dict)
                 and set(row) == {"sequence", "previous", "kind", "value", "sha256"}
-                and type(row["sequence"]) is int
+                and exact_type(row["sequence"], int)
                 and row["sequence"] == number
                 and row["previous"] == previous,
                 "invalid_journal_record",
@@ -1262,6 +1439,10 @@ class Journal:
             require(row["sha256"] == digest(encoded(payload)), "corrupt_journal_record")
             previous = row["sha256"]
             rows.append(row)
+        return rows
+
+    def _read(self, stream):
+        rows = self._read_rows(stream.read(MAX_JOURNAL + 1))
         header = rows[0]
         require(
             header["kind"] == "header"
@@ -1271,7 +1452,7 @@ class Journal:
         )
         start, expiry = header["value"]["startedAt"], header["value"]["expiresAt"]
         require(
-            type(start) in (int, float)
+            (exact_type(start, int) or exact_type(start, float))
             and math.isfinite(start)
             and expiry == start + 1200,
             "invalid_fixed_deadline",
@@ -1296,299 +1477,325 @@ class Journal:
             "phase": _new_phase_state() if self.phase_plan is not None else None,
         }
         for row in rows[1:]:
-            kind, value = row["kind"], row["value"]
-            require(not state["aborted"], "records_after_abort")
-            phase_mode = self.phase_plan is not None
-            schemas = {
-                "reserve": {"counter", "subject"},
-                "arm": {"action", "caseId"} if phase_mode else {"action"},
-                "hold": {"action", "caseId"} if phase_mode else {"action"},
-                "replay": {"action", "caseId"} if phase_mode else {"action"},
-                "returned": (
-                    {"action", "caseId", "responseSha256", "response"}
-                    if phase_mode
-                    else {"action", "responseSha256", "response"}
-                ),
-                "witness": (
-                    {
-                        "action",
-                        "caseId",
-                        "requestSha256",
-                        "responseSha256",
-                        "response",
-                        "nodeProofNonce",
-                    }
-                    if phase_mode
-                    else {
-                        "action",
-                        "requestSha256",
-                        "responseSha256",
-                        "response",
-                        "nodeProofNonce",
-                    }
-                ),
-                "send": (
-                    {
-                        "action",
-                        "caseId",
-                        "subject",
-                        "requestSha256",
-                        "nonce",
-                        "replay",
-                        "durableBeforeSend",
-                    }
-                    if phase_mode
-                    else {
-                        "action",
-                        "subject",
-                        "requestSha256",
-                        "nonce",
-                        "replay",
-                        "durableBeforeSend",
-                    }
-                ),
-                "abort": {"reason"},
-                "phase": None,
-            }
-            require(
-                kind in schemas
-                and type(value) is dict
-                and (
-                    kind == "phase"
-                    and self.phase_plan is not None
-                    or kind != "phase"
-                    and set(value) == schemas[kind] | {"at"}
-                ),
-                "invalid_closed_record_schema",
-            )
-            require(
-                type(value) is dict
-                and type(value.get("at")) in (int, float)
-                and state["lastTime"] <= value["at"] <= expiry,
-                "invalid_record_time",
-            )
-            state["lastTime"] = value["at"]
-            require(
-                kind
-                in (
-                    "reserve",
-                    "arm",
-                    "send",
-                    "witness",
-                    "hold",
-                    "replay",
-                    "returned",
-                    "abort",
-                    "phase",
-                ),
-                "unknown_record_kind",
-            )
-            if kind == "phase":
-                _apply_phase(self.phase_plan, state["phase"], value, self.manifest)
-                operation = value["op"]
-                if operation == "publication_intent":
-                    subject = value["subject"]
-                    state["reservedSubjects"]["publication"].add(subject)
-                    state["counts"]["publication"] += 1
-                elif operation == "start_intent":
-                    subject = value["subject"]
-                    require(
-                        subject not in state["reservedSubjects"]["nativeStart"],
-                        "duplicate_subject_reservation",
-                    )
-                    state["reservedSubjects"]["nativeStart"].add(subject)
-                    state["counts"]["nativeStart"] += 1
-                elif operation == "restart_intent":
-                    state["counts"]["restart"] += 1
-            elif kind == "reserve":
-                require(
-                    not phase_mode
-                    or value.get("counter")
-                    not in ("publication", "nativeStart", "restart"),
-                    "phase_budget_requires_intent",
-                )
-                require(
-                    value["counter"] in LIMITS
-                    and value["subject"] in self.manifest["subjects"],
-                    "invalid_reservation",
-                )
-                if value["counter"] in ("publication", "nativeStart"):
-                    require(
-                        value["subject"]
-                        not in state["reservedSubjects"][value["counter"]],
-                        "duplicate_subject_reservation",
-                    )
-                state["reservedSubjects"][value["counter"]].add(value["subject"])
-                state["counts"][value["counter"]] += 1
-                require(
-                    state["counts"][value["counter"]] <= LIMITS[value["counter"]],
-                    "budget_corrupt",
-                )
-            elif kind in ("arm", "hold", "replay", "returned"):
-                target = {
-                    "arm": "armed",
-                    "hold": "held",
-                    "replay": "replays",
-                    "returned": "returned",
-                }[kind]
-                action = value["action"]
-                require(
-                    action in self.manifest["targets"] and action not in state[target],
-                    "duplicate_fault_record",
-                )
-                if kind in ("hold", "replay"):
-                    require(
-                        action in state["witnesses"], "fault_without_commit_witness"
-                    )
-                if kind == "replay":
-                    require(action in state["held"], "replay_before_hold")
-                if kind == "returned":
-                    require(
-                        action in state["replays"]
-                        and (action, True) in state["sendKeys"]
-                        and hash_text(value["responseSha256"])
-                        and valid_response(self.manifest, action, value["response"]),
-                        "returned_without_valid_replay",
-                    )
-                state[target].add(action)
-            elif kind == "witness":
-                action = value["action"]
-                require(
-                    action in state["armed"] and action not in state["witnesses"],
-                    "duplicate_commit_witness",
-                )
-                require(
-                    (action, False) in state["sendKeys"]
-                    and value["requestSha256"]
-                    == state["actionSends"][(action, False)]["requestSha256"]
-                    and value["nodeProofNonce"]
-                    == state["actionSends"][(action, False)]["nonce"]
-                    and hash_text(value["responseSha256"])
-                    and valid_response(self.manifest, action, value["response"]),
-                    "invalid_commit_witness",
-                )
-                state["witnesses"][action] = value
-            elif kind == "send":
-                action, replay = value["action"], value["replay"]
-                phase_case = (
-                    None
-                    if not phase_mode
-                    else state["phase"]["cases"].get(value.get("caseId"))
-                )
-                phase_publication = (
-                    phase_case is not None
-                    and phase_case["publicationOutcome"] == "accepted"
-                )
-                require(
-                    type(replay) is bool
-                    and (
-                        value["subject"] in state["reservedSubjects"]["publication"]
-                        or phase_publication
-                    )
-                    and hash_text(value["requestSha256"]),
-                    "unreserved_or_invalid_send",
-                )
-                if action is None:
-                    if phase_mode:
-                        require(
-                            replay is False
-                            and value["durableBeforeSend"] is None
-                            and phase_case is not None
-                            and value["caseId"] == state["phase"]["active"]
-                            and phase_case["claimIntent"] == value["requestSha256"]
-                            and (
-                                value["caseId"] == "C3"
-                                or any(
-                                    item["subject"] == value["subject"]
-                                    and digest(encoded(item["request"]))
-                                    == value["requestSha256"]
-                                    for item in self.manifest["claims"]
-                                )
-                            ),
-                            "invalid_claim_send",
-                        )
-                    else:
-                        require(
-                            not state["armed"]
-                            and replay is False
-                            and value["durableBeforeSend"] is None
-                            and any(
-                                item["subject"] == value["subject"]
-                                and digest(encoded(item["request"]))
-                                == value["requestSha256"]
-                                for item in self.manifest["claims"]
-                            ),
-                            "invalid_claim_send",
-                        )
-                else:
-                    target = self.manifest["targets"].get(action)
-                    durable = value["durableBeforeSend"]
-                    base_witness = {
-                        "action": action,
-                        "subject": value["subject"],
-                        "requestSha256": value["requestSha256"],
-                        "committed": True,
-                    }
-                    if phase_mode and target is not None:
-                        durable_valid = (
-                            type(durable) is dict
-                            and set(durable)
-                            == set(base_witness)
-                            | {
-                                "attemptId",
-                                "ackState",
-                                "nativeReceiptSha256",
-                                "acknowledgmentSha256",
-                            }
-                            and all(
-                                durable.get(key) == item
-                                for key, item in base_witness.items()
-                            )
-                            and durable["attemptId"] == target["request"]["attemptId"]
-                            and durable["acknowledgmentSha256"]
-                            == value["requestSha256"]
-                            and hash_text(durable["nativeReceiptSha256"])
-                            and (
-                                durable["ackState"] is None
-                                if action == "submitted"
-                                else durable["ackState"] == "submitted"
-                            )
-                        )
-                    else:
-                        durable_valid = durable == base_witness
-                    require(
-                        action in self.manifest["targets"]
-                        and action in state["armed"]
-                        and (action, replay) not in state["sendKeys"]
-                        and (not replay or action in state["replays"])
-                        and target is not None
-                        and value["subject"] == target["subject"]
-                        and value["requestSha256"] == target_request_sha256(target)
-                        and durable_valid,
-                        "invalid_action_send",
-                    )
-                    state["sendKeys"].add((action, replay))
-                    state["actionSends"][(action, replay)] = value
-                require(
-                    uuid(value["nonce"]) and value["nonce"] not in state["nonces"],
-                    "reused_node_nonce",
-                )
-                state["nonces"].add(value["nonce"])
-                state["sends"] += 1
-            if phase_mode:
-                _apply_fault_projection(self.phase_plan, state["phase"], kind, value)
-            if kind == "abort":
-                require(
-                    value["reason"]
-                    in (
-                        "transport_failed_without_commit_oracle",
-                        "invalid_success_or_expired_window",
-                        "hold_failed_without_crash",
-                    ),
-                    "invalid_abort",
-                )
-                state["aborted"] = True
+            self._apply_record(state, row, expiry)
         return state
+
+    def _validate_record_schema(self, kind, value, phase_mode):
+        schemas = {
+            "reserve": {"counter", "subject"},
+            "arm": {"action", "caseId"} if phase_mode else {"action"},
+            "hold": {"action", "caseId"} if phase_mode else {"action"},
+            "replay": {"action", "caseId"} if phase_mode else {"action"},
+            "returned": (
+                {
+                    "action",
+                    "caseId",
+                    "responseSha256",
+                    "responseRawBase64",
+                    "response",
+                }
+                if phase_mode
+                else {"action", "responseSha256", "responseRawBase64", "response"}
+            ),
+            "witness": (
+                {
+                    "action",
+                    "caseId",
+                    "requestSha256",
+                    "responseSha256",
+                    "response",
+                    "nodeProofNonce",
+                }
+                if phase_mode
+                else {
+                    "action",
+                    "requestSha256",
+                    "responseSha256",
+                    "response",
+                    "nodeProofNonce",
+                }
+            ),
+            "send": (
+                {
+                    "action",
+                    "caseId",
+                    "subject",
+                    "requestSha256",
+                    "nonce",
+                    "replay",
+                    "durableBeforeSend",
+                }
+                if phase_mode
+                else {
+                    "action",
+                    "subject",
+                    "requestSha256",
+                    "nonce",
+                    "replay",
+                    "durableBeforeSend",
+                }
+            ),
+            "abort": {"reason"},
+            "phase": None,
+        }
+        require(
+            kind in schemas
+            and exact_type(value, dict)
+            and (
+                kind == "phase"
+                and self.phase_plan is not None
+                or kind != "phase"
+                and set(value) == schemas[kind] | {"at"}
+            ),
+            "invalid_closed_record_schema",
+        )
+
+    def _apply_record(self, state, row, expiry):
+        kind, value = row["kind"], row["value"]
+        require(not state["aborted"], "records_after_abort")
+        phase_mode = self.phase_plan is not None
+        self._validate_record_schema(kind, value, phase_mode)
+        require(
+            (exact_type(value.get("at"), int) or exact_type(value.get("at"), float))
+            and state["lastTime"] <= value["at"] <= expiry,
+            "invalid_record_time",
+        )
+        state["lastTime"] = value["at"]
+        require(
+            kind
+            in (
+                "reserve",
+                "arm",
+                "send",
+                "witness",
+                "hold",
+                "replay",
+                "returned",
+                "abort",
+                "phase",
+            ),
+            "unknown_record_kind",
+        )
+        if kind == "phase":
+            self._project_phase_record(state, value)
+        elif kind == "reserve":
+            self._project_reservation(state, value, phase_mode)
+        elif kind in ("arm", "hold", "replay", "returned"):
+            self._project_fault_record(state, kind, value)
+        elif kind == "witness":
+            self._project_witness(state, value)
+        elif kind == "send":
+            self._project_send(state, value, phase_mode)
+        elif kind == "abort":
+            self._project_abort(state, value)
+        if phase_mode:
+            _apply_fault_projection(self.phase_plan, state["phase"], kind, value)
+
+    def _project_phase_record(self, state, value):
+        _apply_phase(self.phase_plan, state["phase"], value, self.manifest)
+        operation = value["op"]
+        if operation == "publication_intent":
+            state["reservedSubjects"]["publication"].add(value["subject"])
+            state["counts"]["publication"] += 1
+        elif operation == "start_intent":
+            subject = value["subject"]
+            require(
+                subject not in state["reservedSubjects"]["nativeStart"],
+                "duplicate_subject_reservation",
+            )
+            state["reservedSubjects"]["nativeStart"].add(subject)
+            state["counts"]["nativeStart"] += 1
+        elif operation == "restart_intent":
+            state["counts"]["restart"] += 1
+
+    def _project_reservation(self, state, value, phase_mode):
+        require(
+            not phase_mode
+            or value.get("counter") not in ("publication", "nativeStart", "restart"),
+            "phase_budget_requires_intent",
+        )
+        counter, subject = value["counter"], value["subject"]
+        require(
+            counter in LIMITS and subject in self.manifest["subjects"],
+            "invalid_reservation",
+        )
+        if counter in ("publication", "nativeStart"):
+            require(
+                subject not in state["reservedSubjects"][counter],
+                "duplicate_subject_reservation",
+            )
+        state["reservedSubjects"][counter].add(subject)
+        state["counts"][counter] += 1
+        require(state["counts"][counter] <= LIMITS[counter], "budget_corrupt")
+
+    def _project_fault_record(self, state, kind, value):
+        target_name = {
+            "arm": "armed",
+            "hold": "held",
+            "replay": "replays",
+            "returned": "returned",
+        }[kind]
+        action = value["action"]
+        require(
+            action in self.manifest["targets"] and action not in state[target_name],
+            "duplicate_fault_record",
+        )
+        if kind in ("hold", "replay"):
+            require(action in state["witnesses"], "fault_without_commit_witness")
+        if kind == "replay":
+            require(action in state["held"], "replay_before_hold")
+        if kind == "returned":
+            require(
+                action in state["replays"]
+                and (action, True) in state["sendKeys"]
+                and hash_text(value["responseSha256"])
+                and raw_response_matches(value)
+                and valid_response(self.manifest, action, value["response"]),
+                "returned_without_valid_replay",
+            )
+        state[target_name].add(action)
+
+    def _project_witness(self, state, value):
+        action = value["action"]
+        require(
+            action in state["armed"] and action not in state["witnesses"],
+            "duplicate_commit_witness",
+        )
+        send = state["actionSends"].get((action, False))
+        require(
+            send is not None
+            and value["requestSha256"] == send["requestSha256"]
+            and value["nodeProofNonce"] == send["nonce"]
+            and hash_text(value["responseSha256"])
+            and valid_response(self.manifest, action, value["response"]),
+            "invalid_commit_witness",
+        )
+        state["witnesses"][action] = value
+
+    def _project_send(self, state, value, phase_mode):
+        action, replay = value["action"], value["replay"]
+        phase_case = (
+            None if not phase_mode else state["phase"]["cases"].get(value.get("caseId"))
+        )
+        phase_publication = (
+            phase_case is not None and phase_case["publicationOutcome"] == "accepted"
+        )
+        require(
+            exact_type(replay, bool)
+            and (
+                value["subject"] in state["reservedSubjects"]["publication"]
+                or phase_publication
+            )
+            and hash_text(value["requestSha256"]),
+            "unreserved_or_invalid_send",
+        )
+        if action is None:
+            self._project_claim_send(state, value, phase_mode, phase_case, replay)
+        else:
+            self._project_action_send(state, value, phase_mode, phase_case, replay)
+        require(
+            uuid(value["nonce"]) and value["nonce"] not in state["nonces"],
+            "reused_node_nonce",
+        )
+        state["nonces"].add(value["nonce"])
+        state["sends"] += 1
+
+    def _project_claim_send(self, state, value, phase_mode, phase_case, replay):
+        if phase_mode:
+            require(
+                replay is False
+                and value["durableBeforeSend"] is None
+                and phase_case is not None
+                and value["caseId"] == state["phase"]["active"]
+                and phase_case["claimIntent"] == value["requestSha256"]
+                and (
+                    value["caseId"] == "C3"
+                    or any(
+                        item["subject"] == value["subject"]
+                        and digest(encoded(item["request"])) == value["requestSha256"]
+                        for item in self.manifest["claims"]
+                    )
+                ),
+                "invalid_claim_send",
+            )
+        else:
+            require(
+                not state["armed"]
+                and replay is False
+                and value["durableBeforeSend"] is None
+                and any(
+                    item["subject"] == value["subject"]
+                    and digest(encoded(item["request"])) == value["requestSha256"]
+                    for item in self.manifest["claims"]
+                ),
+                "invalid_claim_send",
+            )
+
+    def _project_action_send(self, state, value, phase_mode, phase_case, replay):
+        action = value["action"]
+        target = self.manifest["targets"].get(action)
+        durable = value["durableBeforeSend"]
+        base_witness = {
+            "action": action,
+            "subject": value["subject"],
+            "requestSha256": value["requestSha256"],
+            "committed": True,
+        }
+        if phase_mode and target is not None:
+            durable_valid = self._has_phase_witness(
+                durable, base_witness, target, value["requestSha256"], action
+            )
+        else:
+            durable_valid = durable == base_witness
+        require(
+            action in self.manifest["targets"]
+            and action in state["armed"]
+            and (action, replay) not in state["sendKeys"]
+            and (not replay or action in state["replays"])
+            and target is not None
+            and value["subject"] == target["subject"]
+            and value["requestSha256"] == target_request_sha256(target)
+            and durable_valid,
+            "invalid_action_send",
+        )
+        state["sendKeys"].add((action, replay))
+        state["actionSends"][(action, replay)] = value
+
+    @staticmethod
+    def _has_phase_witness(durable, base_witness, target, request_sha256, action):
+        return (
+            exact_type(durable, dict)
+            and set(durable)
+            == set(base_witness)
+            | {
+                "attemptId",
+                "ackState",
+                "nativeReceiptSha256",
+                "acknowledgmentSha256",
+            }
+            and all(durable.get(key) == item for key, item in base_witness.items())
+            and durable["attemptId"] == target["request"]["attemptId"]
+            and durable["acknowledgmentSha256"] == request_sha256
+            and hash_text(durable["nativeReceiptSha256"])
+            and (
+                durable["ackState"] is None
+                if action == "submitted"
+                else durable["ackState"] == "submitted"
+            )
+        )
+
+    @staticmethod
+    def _project_abort(state, value):
+        require(
+            value["reason"]
+            in (
+                "transport_failed_without_commit_oracle",
+                "invalid_success_or_expired_window",
+                "hold_failed_without_crash",
+            ),
+            "invalid_abort",
+        )
+        state["aborted"] = True
 
     def _transaction(self, operation, initialize=False, allow_expired=False):
         flags = os.O_RDWR | os.O_NOFOLLOW
@@ -1612,7 +1819,10 @@ class Journal:
                 "unsafe_journal",
             )
             now = self.clock()
-            require(type(now) in (int, float) and math.isfinite(now), "invalid_clock")
+            require(
+                (exact_type(now, int) or exact_type(now, float)) and math.isfinite(now),
+                "invalid_clock",
+            )
             if created:
                 header_value = {
                     "manifestSha256": self.manifest_hash,
@@ -1733,6 +1943,7 @@ class TransportFault:
         *,
         monotonic=time.monotonic,
     ):
+        """Bind disposable transport and independently supplied readback ports."""
         self.journal, self.original_send = journal, original_send
         self.durable_before_send, self.hold_reply = durable_before_send, hold_reply
         self.monotonic = monotonic
@@ -1746,312 +1957,397 @@ class TransportFault:
         operation_started_at=None,
         **request,
     ):
+        """Persist an exact intent before sending and retain only verified replies."""
+        context = self._prepare_context(
+            action, replay, subject, operation_started_at, request
+        )
+        self._persist_intent(context)
+        try:
+            response = await self.original_send(**request)
+        except BaseException:
+            self._abort_preserving("transport_failed_without_commit_oracle")
+            raise
+        if context["claim"]:
+            return response
+        try:
+            raw, value = self._validate_response(context, response)
+            self._persist_response(context, raw, value)
+        except BaseException:
+            self._abort_preserving("invalid_success_or_expired_window")
+            raise
+        if context["replay"]:
+            return response
+        await self._hold_or_refuse(context)
+
+    def _prepare_context(self, action, replay, subject, operation_started_at, request):
         manifest = self.journal.manifest
         phase_mode = self.journal.phase_plan is not None
+        self._validate_transport_contract(request)
+        if action is not None:
+            self._validate_operation_deadline(operation_started_at)
+        body = decode(request["body"])
+        proof = decode(request["headers"]["x-event-node-proof"])
+        require(exact_type(proof, dict) and uuid(proof.get("nonce")), "invalid_nonce")
+        context = {
+            "action": action,
+            "claim": action is None,
+            "replay": replay,
+            "subject": subject,
+            "operationStartedAt": operation_started_at,
+            "request": request,
+            "manifest": manifest,
+            "phaseMode": phase_mode,
+            "body": body,
+            "proof": proof,
+            "bodySha256": digest(request["body"]),
+        }
+        if context["claim"]:
+            self._validate_claim_context(context)
+        else:
+            self._validate_action_context(context)
+        return context
+
+    @staticmethod
+    def _validate_transport_contract(request):
         require(
             request.get("method") == "POST"
-            and type(request.get("body")) is bytes
+            and exact_type(request.get("body"), bytes)
             and len(request["body"]) <= 4096
             and request.get("follow_redirects") is False
             and request.get("timeout") == 5
             and request.get("max_response_bytes") == 8192,
             "invalid_transport_contract",
         )
-        if action is not None:
-            require(
-                type(operation_started_at) in (int, float)
-                and math.isfinite(operation_started_at)
-                and operation_started_at <= self.monotonic() < operation_started_at + 7,
-                "insufficient_original_operation_deadline",
+
+    def _validate_operation_deadline(self, operation_started_at):
+        require(
+            (
+                exact_type(operation_started_at, int)
+                or exact_type(operation_started_at, float)
             )
-        body = decode(request["body"])
-        proof = decode(request["headers"]["x-event-node-proof"])
-        require(type(proof) is dict and uuid(proof.get("nonce")), "invalid_nonce")
-        body_hash = digest(request["body"])
-        claim = action is None
-        if claim:
+            and math.isfinite(operation_started_at)
+            and operation_started_at <= self.monotonic() < operation_started_at + 7,
+            "insufficient_original_operation_deadline",
+        )
+
+    def _validate_claim_context(self, context):
+        manifest = context["manifest"]
+        request = context["request"]
+        body = context["body"]
+        require(
+            request["url"] == manifest["origin"] + "/v1/dispatch/claim",
+            "unallocated_claim",
+        )
+        if context["phaseMode"]:
+            phase = self.journal.snapshot()["phase"]
+            phase_case = phase["cases"].get(phase["active"])
             require(
-                request["url"] == manifest["origin"] + "/v1/dispatch/claim",
+                phase_case is not None
+                and phase_case["claimIntent"] == context["bodySha256"]
+                and phase["active"] in ("A1", "B1", "C1", "B2", "A2", "C3")
+                and (
+                    phase["active"] == "C3"
+                    or {"subject": context["subject"], "request": body}
+                    in manifest["claims"]
+                ),
                 "unallocated_claim",
             )
-            if phase_mode:
-                phase = self.journal.snapshot()["phase"]
-                phase_case = phase["cases"].get(phase["active"])
-                require(
-                    phase_case is not None
-                    and phase_case["claimIntent"] == body_hash
-                    and phase["active"] in ("A1", "B1", "C1", "B2", "A2", "C3")
-                    and (
-                        phase["active"] == "C3"
-                        or {"subject": subject, "request": body} in manifest["claims"]
-                    ),
-                    "unallocated_claim",
-                )
-            else:
-                require(
-                    {"subject": subject, "request": body} in manifest["claims"],
-                    "unallocated_claim",
-                )
         else:
-            require(action in manifest["targets"], "unallocated_action")
             require(
-                not phase_mode or action in self.journal.phase_plan["faultTargets"],
-                "phase_action_not_fault_allocated",
+                {"subject": context["subject"], "request": body} in manifest["claims"],
+                "unallocated_claim",
             )
-            target = manifest["targets"][action]
-            route = "/v1/dispatch/settle-no-start" if action == "settle" else "/v1/ack"
-            require(
-                subject == target["subject"]
-                and request["url"] == manifest["origin"] + route
-                and encoded(body) == encoded(target["request"])
-                and ("wireSha256" not in target or body_hash == target["wireSha256"]),
-                "target_identity_mismatch",
-            )
-            # Integration must independently read committed production storage here.
-            witness = self.durable_before_send(action, target, body_hash)
-            basic_witness = {
-                "action": action,
-                "subject": subject,
-                "requestSha256": body_hash,
-                "committed": True,
-            }
-            if phase_mode:
-                require(
-                    type(witness) is dict
-                    and set(witness)
-                    == set(basic_witness)
-                    | {
-                        "attemptId",
-                        "ackState",
-                        "nativeReceiptSha256",
-                        "acknowledgmentSha256",
-                    }
-                    and all(
-                        witness.get(key) == value
-                        for key, value in basic_witness.items()
-                    )
-                    and witness["attemptId"] == target["request"]["attemptId"]
-                    and witness["acknowledgmentSha256"] == body_hash
-                    and hash_text(witness["nativeReceiptSha256"])
-                    and (
-                        witness["ackState"] is None
-                        if action == "submitted"
-                        else witness["ackState"] == "submitted"
-                    ),
-                    "local_durability_not_verified",
-                )
-            else:
-                require(
-                    type(witness) is dict
-                    and set(witness) == set(basic_witness)
-                    and witness == basic_witness,
-                    "local_durability_not_verified",
-                )
 
-        def intent(state, append):
+    def _validate_action_context(self, context):
+        action = context["action"]
+        manifest = context["manifest"]
+        require(action in manifest["targets"], "unallocated_action")
+        require(
+            not context["phaseMode"]
+            or action in self.journal.phase_plan["faultTargets"],
+            "phase_action_not_fault_allocated",
+        )
+        target = manifest["targets"][action]
+        route = "/v1/dispatch/settle-no-start" if action == "settle" else "/v1/ack"
+        require(
+            context["subject"] == target["subject"]
+            and context["request"]["url"] == manifest["origin"] + route
+            and encoded(context["body"]) == encoded(target["request"])
+            and (
+                "wireSha256" not in target
+                or context["bodySha256"] == target["wireSha256"]
+            ),
+            "target_identity_mismatch",
+        )
+        witness = self.durable_before_send(action, target, context["bodySha256"])
+        context["target"] = target
+        context["witness"] = witness
+        self._validate_store_witness(context)
+
+    def _validate_store_witness(self, context):
+        action = context["action"]
+        witness = context["witness"]
+        target = context["target"]
+        basic = {
+            "action": action,
+            "subject": context["subject"],
+            "requestSha256": context["bodySha256"],
+            "committed": True,
+        }
+        if not context["phaseMode"]:
             require(
-                subject in state["reservedSubjects"]["publication"],
-                "publication_not_reserved_before_send",
+                exact_type(witness, dict)
+                and set(witness) == set(basic)
+                and witness == basic,
+                "local_durability_not_verified",
             )
-            require(proof["nonce"] not in state["nonces"], "reused_node_nonce")
-            case_id = state["phase"]["active"] if phase_mode else None
-            if phase_mode:
-                phase_case = state["phase"]["cases"].get(case_id)
+            return
+        require(
+            self.journal._has_phase_witness(
+                witness, basic, target, context["bodySha256"], action
+            ),
+            "local_durability_not_verified",
+        )
+
+    def _persist_intent(self, context):
+        self.journal._transaction(
+            lambda state, append: self._append_intent(state, append, context)
+        )
+
+    def _append_intent(self, state, append, context):
+        subject = context["subject"]
+        proof = context["proof"]
+        require(
+            subject in state["reservedSubjects"]["publication"],
+            "publication_not_reserved_before_send",
+        )
+        require(proof["nonce"] not in state["nonces"], "reused_node_nonce")
+        case_id = state["phase"]["active"] if context["phaseMode"] else None
+        phase_case = None
+        if context["phaseMode"]:
+            phase_case = state["phase"]["cases"].get(case_id)
+            require(
+                phase_case is not None
+                and phase_case["publicationOutcome"] == "accepted"
+                and phase_case["publicationIntent"] is not None,
+                "phase_publication_not_accepted",
+            )
+        if context["claim"]:
+            self._append_claim_intent(state, phase_case, context)
+        else:
+            self._append_action_intent(state, append, phase_case, case_id, context)
+        self._append_send_record(append, case_id, context)
+
+    @staticmethod
+    def _append_claim_intent(state, phase_case, context):
+        if context["phaseMode"]:
+            require(
+                phase_case["claimIntent"] == context["bodySha256"]
+                and phase_case["claimOutcome"] is None,
+                "phase_claim_missing_durable_intent",
+            )
+        else:
+            require(not state["armed"], "replacement_claim_fenced_before_network")
+
+    def _append_action_intent(self, state, append, phase_case, case_id, context):
+        action = context["action"]
+        body_hash = context["bodySha256"]
+        witness = context["witness"]
+        if context["replay"]:
+            require(
+                action in state["held"] and action not in state["replays"],
+                "replay_not_allocated",
+            )
+            require(
+                state["witnesses"][action]["requestSha256"] == body_hash,
+                "replay_body_changed",
+            )
+            if context["phaseMode"]:
+                latch = phase_case["ackLatches"].get(action)
                 require(
-                    phase_case is not None
-                    and phase_case["publicationOutcome"] == "accepted"
-                    and phase_case["publicationIntent"] is not None,
-                    "phase_publication_not_accepted",
-                )
-            if claim:
-                if phase_mode:
-                    require(
-                        phase_case["claimIntent"] == body_hash
-                        and phase_case["claimOutcome"] is None,
-                        "phase_claim_missing_durable_intent",
-                    )
-                else:
-                    require(
-                        not state["armed"], "replacement_claim_fenced_before_network"
-                    )
-            elif replay:
-                require(
-                    action in state["held"] and action not in state["replays"],
-                    "replay_not_allocated",
-                )
-                require(
-                    state["witnesses"][action]["requestSha256"] == body_hash,
-                    "replay_body_changed",
-                )
-                if phase_mode:
-                    latch = phase_case["ackLatches"].get(action)
-                    require(
-                        latch is not None
-                        and latch["requestSha256"] == body_hash
-                        and latch["storeWitnessSha256"] == digest(encoded(witness)),
-                        "ack_latch_changed_on_retry",
-                    )
-                append(
-                    "replay",
-                    {"action": action, **({"caseId": case_id} if phase_mode else {})},
-                )
-            else:
-                require(action not in state["armed"], "duplicate_fault")
-                if phase_mode:
-                    phase_case = state["phase"]["cases"][case_id]
-                    latch = phase_case["ackLatches"].get(action)
-                    if latch is None:
-                        ack = body
-                        correlation = ack["nativeCorrelation"]
-                        latch_fields = {
-                            "op": "ack_latch",
-                            "caseId": case_id,
-                            "phase": action,
-                            "requestSha256": body_hash,
-                            "storeWitnessSha256": digest(encoded(witness)),
-                            "deliveryId": ack["deliveryId"],
-                            "attemptId": ack["attemptId"],
-                            "eventId": ack["eventId"],
-                            "permitId": correlation["permitId"],
-                            "turnId": correlation["turnId"],
-                            "itemId": correlation.get("itemId"),
-                        }
-                        append("phase", latch_fields)
-                    else:
-                        require(
-                            latch["requestSha256"] == body_hash
-                            and latch["storeWitnessSha256"] == digest(encoded(witness)),
-                            "ack_latch_changed_on_retry",
-                        )
-                append(
-                    "arm",
-                    {"action": action, **({"caseId": case_id} if phase_mode else {})},
+                    latch is not None
+                    and latch["requestSha256"] == body_hash
+                    and latch["storeWitnessSha256"] == digest(encoded(witness)),
+                    "ack_latch_changed_on_retry",
                 )
             append(
-                "send",
+                "replay",
                 {
                     "action": action,
-                    "subject": subject,
-                    "requestSha256": body_hash,
-                    "nonce": proof["nonce"],
-                    "replay": replay,
-                    "durableBeforeSend": None if claim else witness,
-                    **({"caseId": case_id} if phase_mode else {}),
+                    **({"caseId": case_id} if context["phaseMode"] else {}),
                 },
             )
+            return
+        require(action not in state["armed"], "duplicate_fault")
+        if context["phaseMode"]:
+            self._append_ack_latch(append, phase_case, case_id, context)
+        append(
+            "arm",
+            {"action": action, **({"caseId": case_id} if context["phaseMode"] else {})},
+        )
 
-        self.journal._transaction(intent)
-        try:
-            response = await self.original_send(**request)
-        except BaseException:
-            try:
-                self.journal.abort("transport_failed_without_commit_oracle")
-            except Exception:
-                pass  # Preserve the original failure; the durable intent remains charged.
-            raise
-        if claim:
-            return response
-        try:
-            require(
-                self.monotonic() < operation_started_at + 7, "insufficient_crash_margin"
+    @staticmethod
+    def _append_ack_latch(append, phase_case, case_id, context):
+        action = context["action"]
+        body_hash = context["bodySha256"]
+        witness_hash = digest(encoded(context["witness"]))
+        latch = phase_case["ackLatches"].get(action)
+        if latch is None:
+            ack = context["body"]
+            correlation = ack["nativeCorrelation"]
+            append(
+                "phase",
+                {
+                    "op": "ack_latch",
+                    "caseId": case_id,
+                    "phase": action,
+                    "requestSha256": body_hash,
+                    "storeWitnessSha256": witness_hash,
+                    "deliveryId": ack["deliveryId"],
+                    "attemptId": ack["attemptId"],
+                    "eventId": ack["eventId"],
+                    "permitId": correlation["permitId"],
+                    "turnId": correlation["turnId"],
+                    "itemId": correlation.get("itemId"),
+                },
             )
-            status, headers, raw = response
+            return
+        require(
+            latch["requestSha256"] == body_hash
+            and latch["storeWitnessSha256"] == witness_hash,
+            "ack_latch_changed_on_retry",
+        )
+
+    @staticmethod
+    def _append_send_record(append, case_id, context):
+        append(
+            "send",
+            {
+                "action": context["action"],
+                "subject": context["subject"],
+                "requestSha256": context["bodySha256"],
+                "nonce": context["proof"]["nonce"],
+                "replay": context["replay"],
+                "durableBeforeSend": None if context["claim"] else context["witness"],
+                **({"caseId": case_id} if context["phaseMode"] else {}),
+            },
+        )
+
+    def _validate_response(self, context, response):
+        require(
+            self.monotonic() < context["operationStartedAt"] + 7,
+            "insufficient_crash_margin",
+        )
+        status, headers, raw = response
+        self._validate_response_envelope(status, headers, raw)
+        value = decode(raw)
+        self._validate_response_value(context, value)
+        return raw, value
+
+    @staticmethod
+    def _validate_response_envelope(status, headers, raw):
+        require(
+            exact_type(status, int)
+            and status == 200
+            and exact_type(raw, bytes)
+            and len(raw) <= 8192
+            and headers.get("content-type", "").split(";", 1)[0].strip()
+            == "application/json",
+            "no_accepted_commit_response",
+        )
+
+    @staticmethod
+    def _validate_response_value(context, value):
+        if context["action"] == "settle":
+            target = context["target"]
+            expected = {
+                **target["request"],
+                "nodeId": target["nodeId"],
+                "status": "not_started",
+            }
             require(
-                type(status) is int
-                and status == 200
-                and type(raw) is bytes
-                and len(raw) <= 8192
-                and headers.get("content-type", "").split(";", 1)[0].strip()
-                == "application/json",
-                "no_accepted_commit_response",
+                exact_type(value, dict) and encoded(value) == encoded(expected),
+                "settlement_response_mismatch",
             )
-            value = decode(raw)
-            if action == "settle":
-                expected = {
-                    **target["request"],
-                    "nodeId": target["nodeId"],
-                    "status": "not_started",
-                }
-                require(
-                    type(value) is dict and encoded(value) == encoded(expected),
-                    "settlement_response_mismatch",
-                )
-            else:
-                require(
-                    type(value) is dict
-                    and set(value) == {"status", "current"}
-                    and value["status"] == action
-                    and type(value["current"]) is bool
-                    and (action != "submitted" or value["current"] is False),
-                    "ack_response_mismatch",
-                )
+            return
+        require(
+            exact_type(value, dict)
+            and set(value) == {"status", "current"}
+            and value["status"] == context["action"]
+            and exact_type(value["current"], bool)
+            and (context["action"] != "submitted" or value["current"] is False),
+            "ack_response_mismatch",
+        )
 
-            def captured(state, append):
-                if replay:
-                    require(
-                        action in state["replays"] and action not in state["returned"],
-                        "duplicate_replay_response",
-                    )
-                    append(
-                        "returned",
-                        {
-                            "action": action,
-                            "responseSha256": digest(raw),
-                            "response": value,
-                            **(
-                                {"caseId": state["phase"]["active"]}
-                                if phase_mode
-                                else {}
-                            ),
-                        },
-                    )
-                else:
-                    require(action not in state["witnesses"], "duplicate_fault")
-                    append(
-                        "witness",
-                        {
-                            "action": action,
-                            "requestSha256": body_hash,
-                            "responseSha256": digest(raw),
-                            "response": value,
-                            "nodeProofNonce": proof["nonce"],
-                            **(
-                                {"caseId": state["phase"]["active"]}
-                                if phase_mode
-                                else {}
-                            ),
-                        },
-                    )
-                    append(
-                        "hold",
-                        {
-                            "action": action,
-                            **(
-                                {"caseId": state["phase"]["active"]}
-                                if phase_mode
-                                else {}
-                            ),
-                        },
-                    )
+    def _persist_response(self, context, raw, value):
+        self.journal._transaction(
+            lambda state, append: self._append_response(
+                state, append, context, raw, value
+            )
+        )
 
-            self.journal._transaction(captured)
-        except BaseException:
-            try:
-                self.journal.abort("invalid_success_or_expired_window")
-            except Exception:
-                pass  # Preserve the original failure; the durable intent remains charged.
-            raise
-        if replay:
-            return response
+    @staticmethod
+    def _append_response(state, append, context, raw, value):
+        action = context["action"]
+        case_id = state["phase"]["active"] if context["phaseMode"] else None
+        case_fields = {"caseId": case_id} if context["phaseMode"] else {}
+        if context["replay"]:
+            require(
+                action in state["replays"] and action not in state["returned"],
+                "duplicate_replay_response",
+            )
+            append(
+                "returned",
+                {
+                    "action": action,
+                    "responseSha256": digest(raw),
+                    "responseRawBase64": base64.b64encode(raw).decode("ascii"),
+                    "response": value,
+                    **case_fields,
+                },
+            )
+            return
+        require(action not in state["witnesses"], "duplicate_fault")
+        append(
+            "witness",
+            {
+                "action": action,
+                "requestSha256": context["bodySha256"],
+                "responseSha256": digest(raw),
+                "response": value,
+                "nodeProofNonce": context["proof"]["nonce"],
+                **case_fields,
+            },
+        )
+        append("hold", {"action": action, **case_fields})
+
+    def _abort_preserving(self, reason):
         try:
-            await self.hold_reply(
-                action, operation_started_at + 8
-            )  # Real supervisor must crash its owned OS daemon.
+            self.journal.abort(reason)
+        except BaseException as failure:
+            category = self._abort_failure_category(failure)
+            try:
+                logging.getLogger(__name__).warning(
+                    "recovery_abort_record_failed:%s", category
+                )
+            except BaseException:
+                pass
+
+    @staticmethod
+    def _abort_failure_category(failure):
+        if isinstance(failure, Refused):
+            return "journal_refused"
+        if isinstance(failure, OSError):
+            return "journal_io"
+        return "unexpected"
+
+    async def _hold_or_refuse(self, context):
+        action = context["action"]
+        deadline = context["operationStartedAt"] + 8
+        try:
+            await self.hold_reply(action, deadline)
         except Exception:
-            try:
-                self.journal.abort("hold_failed_without_crash")
-            except Exception:
-                pass  # Preserve the original failure; the durable intent remains charged.
+            self._abort_preserving("hold_failed_without_crash")
             raise
-        self.journal.abort("hold_failed_without_crash")
+        self._abort_preserving("hold_failed_without_crash")
         raise Refused("reply_hold_returned_without_owned_crash")
