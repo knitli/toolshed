@@ -25,6 +25,88 @@ FIXTURE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(FIXTURE)
 
 
+class ThreeSessionContainmentTests(unittest.TestCase):
+    def test_kernel_checks_require_active_denials_and_writable_positive_control(self):
+        for fault in (None, 'unsandboxed', 'owner', 'outside', 'network', 'scratch', 'invalid', 'errno', 'missing'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as directory:
+                scratch = Path(directory)
+                calls = []
+
+                def check(pid, operation, filter_type, *values):
+                    self.assertEqual(pid, os.getpid())
+                    if operation is None:
+                        self.assertEqual(filter_type, 0)
+                        return 0 if fault == 'unsandboxed' else 1
+                    path = os.fsdecode(values[0].value) if values else None
+                    self.assertEqual(filter_type, 1024 | (1 if path is not None else 0))
+                    calls.append((operation, path))
+                    owned = path is not None and Path(path).is_relative_to(scratch)
+                    if fault == 'invalid':
+                        return -1
+                    if fault == 'errno':
+                        FIXTURE.ctypes.set_errno(5)
+                    if owned:
+                        self.assertTrue(Path(path).is_file(), 'positive control must exist')
+                        return 1 if fault == 'scratch' else 0
+                    if fault == 'owner' and operation == b'file-read-data':
+                        return 0
+                    if fault == 'outside' and operation == b'file-write-create':
+                        return 0
+                    if fault == 'network' and operation.startswith(b'network-'):
+                        return 0
+                    return 1
+
+                library = SimpleNamespace(sandbox_check=Mock(side_effect=check))
+                with patch.object(FIXTURE.sys, 'platform', 'darwin'), \
+                        patch.object(Path, 'is_dir', return_value=fault != 'missing'), \
+                        patch.object(FIXTURE.ctypes, 'CDLL', return_value=library), \
+                        patch.object(FIXTURE.ctypes.c_int, 'in_dll', return_value=SimpleNamespace(value=1024)):
+                    if fault is None:
+                        proof = FIXTURE.verify_outer_containment(scratch)
+                        self.assertEqual(proof['mode'], 'verified-outer-sandbox')
+                        self.assertTrue(proof['addressSpecificPolicyRequiresIndependentAudit'])
+                        self.assertEqual(len(calls), 9)
+                    else:
+                        with self.assertRaises(AssertionError):
+                            FIXTURE.verify_outer_containment(scratch)
+                self.assertEqual(list(scratch.iterdir()), [], 'positive control must be removed')
+
+    def test_outer_mode_refuses_unsupported_platform_and_before_broker(self):
+        with patch.object(FIXTURE.sys, 'platform', 'linux'), patch.object(FIXTURE.ctypes, 'CDLL') as load:
+            with self.assertRaisesRegex(AssertionError, 'macOS'):
+                FIXTURE.verify_outer_containment(Path('/fixture'))
+            load.assert_not_called()
+        with patch.object(FIXTURE, 'args', SimpleNamespace(outer_contained=True), create=True), \
+                patch.object(FIXTURE, 'private_temp_root', return_value=Path('/fixture')), \
+                patch.object(FIXTURE, 'verify_outer_containment', side_effect=AssertionError('unsafe outer')), \
+                patch.object(FIXTURE, 'start_broker') as broker:
+            with self.assertRaisesRegex(AssertionError, 'unsafe outer'):
+                asyncio.run(FIXTURE.run_scenario())
+            broker.assert_not_called()
+
+    def test_default_keeps_native_profile_and_outer_mode_requires_recheck(self):
+        profile = Path('/fixture/offline.sb')
+        original = ['/usr/bin/sandbox-exec', '-f', str(profile), FIXTURE.sys.executable, '-I', '-m', 'event_gateway.cli']
+        qualifier = SimpleNamespace(launch_argv=Mock(return_value=original))
+        with patch.object(FIXTURE, 'host_qualifier', qualifier, create=True), \
+                patch.object(FIXTURE, 'binary', Path('/fixture/codex'), create=True), \
+                patch.object(FIXTURE, 'private_temp_root', return_value=Path('/fixture')), \
+                patch.object(FIXTURE, 'verify_outer_containment') as verify, \
+                patch.object(FIXTURE, 'args', SimpleNamespace(outer_contained=False), create=True):
+            self.assertEqual(FIXTURE.native_launch_argv(profile, 'cache', 'state', 'root'), original)
+            verify.assert_not_called()
+            FIXTURE.args.outer_contained = True
+            self.assertEqual(FIXTURE.native_launch_argv(profile, 'cache', 'state', 'root'), original[3:])
+            verify.assert_called_once_with(Path('/fixture'))
+            verify.side_effect = AssertionError('unsafe outer')
+            with self.assertRaisesRegex(AssertionError, 'unsafe outer'):
+                FIXTURE.native_launch_argv(profile, 'cache', 'state', 'root')
+            verify.side_effect = None
+            qualifier.launch_argv.return_value = ['changed-prefix', *original[1:]]
+            with self.assertRaisesRegex(AssertionError, 'prefix changed'):
+                FIXTURE.native_launch_argv(profile, 'cache', 'state', 'root')
+
+
 class ThreeSessionModelTests(unittest.TestCase):
     def provider(self):
         qualifier = FIXTURE.load_module('test_host_qualifier', SCRIPT.with_name('native-host-launcher-qualification.py'))
@@ -134,6 +216,7 @@ class ThreeSessionModelTests(unittest.TestCase):
 
 
 class ThreeSessionProcessTests(unittest.TestCase):
+    @patch.object(FIXTURE.sys, "platform", "linux")
     def test_ps_selects_only_exact_group_with_fixed_bounded_command(self):
         result = SimpleNamespace(stdout="  410 411\n  41 412\n  410\t413\n  0 1\n")
         with patch.object(FIXTURE.subprocess, "run", return_value=result) as run:
@@ -141,6 +224,7 @@ class ThreeSessionProcessTests(unittest.TestCase):
         run.assert_called_once_with(["/bin/ps", "-axo", "pgid=,pid="], check=True,
                                     capture_output=True, text=True, timeout=5)
 
+    @patch.object(FIXTURE.sys, "platform", "linux")
     def test_malformed_ps_output_cannot_prove_group_absent(self):
         vectors = ("", "\n", "PGID PID\n", "410\n", "410 411 extra\n", "410 nope\n",
                    "nope 411\n", "410 -1\n", "410 0\n", "-1 411\n", "٤١٠ 411\n",
@@ -151,10 +235,86 @@ class ThreeSessionProcessTests(unittest.TestCase):
                 with self.assertRaises((AssertionError, ValueError)):
                     FIXTURE.process_group_members(410)
 
+    @patch.object(FIXTURE.sys, "platform", "linux")
     def test_ps_failure_or_timeout_cannot_prove_group_absent(self):
         for error in (subprocess.CalledProcessError(1, "ps"), subprocess.TimeoutExpired("ps", 5)):
             with self.subTest(error=type(error).__name__), \
                     patch.object(FIXTURE.subprocess, "run", side_effect=error), self.assertRaises(type(error)):
+                FIXTURE.process_group_members(410)
+
+    @patch.object(FIXTURE.sys, "platform", "darwin")
+    def test_darwin_lists_exact_group_without_ps_and_tolerates_only_exit_race(self):
+        def listing(buffer, size):
+            if buffer is None:
+                return 4
+            self.assertEqual(size, FIXTURE.ctypes.sizeof(buffer))
+            buffer[:5] = [0, 411, 412, 413, 414]
+            return 5
+
+        library = SimpleNamespace(proc_listallpids=Mock(side_effect=listing))
+        with patch.object(FIXTURE.ctypes, "CDLL", return_value=library) as load, \
+                patch.object(FIXTURE.os, "getpid", return_value=411), \
+                patch.object(FIXTURE.os, "getpgid", side_effect=[410, 41, ProcessLookupError(), 410]), \
+                patch.object(FIXTURE.subprocess, "run") as run:
+            self.assertEqual(FIXTURE.process_group_members(410), [411, 414])
+        load.assert_called_once_with("/usr/lib/libproc.dylib", use_errno=True)
+        run.assert_not_called()
+        self.assertEqual(library.proc_listallpids.argtypes, [FIXTURE.ctypes.c_void_p, FIXTURE.ctypes.c_int])
+        self.assertEqual(library.proc_listallpids.restype, FIXTURE.ctypes.c_int)
+
+    @patch.object(FIXTURE.sys, "platform", "darwin")
+    def test_darwin_rejects_bad_counts_truncation_and_incomplete_rows(self):
+        cases = [(0, None), (-1, None), (100000, None), (1, 0), (1, -1),
+                 (1, 130), (1, "saturated"), (1, [412]), (1, [-1, 411]), (1, [411, 411])]
+        for estimate, result in cases:
+            def listing(buffer, size):
+                if buffer is None:
+                    return estimate
+                if result == "saturated":
+                    return len(buffer)
+                if isinstance(result, list):
+                    buffer[:len(result)] = result
+                    return len(result)
+                return result
+            library = SimpleNamespace(proc_listallpids=Mock(side_effect=listing))
+            with self.subTest(estimate=estimate, result=result), \
+                    patch.object(FIXTURE.ctypes, "CDLL", return_value=library), \
+                    patch.object(FIXTURE.os, "getpid", return_value=411), \
+                    patch.object(FIXTURE.os, "getpgid") as getpgid:
+                with self.assertRaises((AssertionError, ValueError)):
+                    FIXTURE.process_group_members(410)
+                getpgid.assert_not_called()
+                self.assertLessEqual(library.proc_listallpids.call_count, 4)
+
+    @patch.object(FIXTURE.sys, "platform", "darwin")
+    def test_darwin_retries_saturated_snapshot_before_claiming_absence(self):
+        capacities = []
+        def listing(buffer, size):
+            if buffer is None:
+                return 1
+            capacities.append(len(buffer))
+            if len(capacities) == 1:
+                return len(buffer)
+            buffer[:2] = [411, 412]
+            return 2
+        library = SimpleNamespace(proc_listallpids=Mock(side_effect=listing))
+        with patch.object(FIXTURE.ctypes, "CDLL", return_value=library), \
+                patch.object(FIXTURE.os, "getpid", return_value=411), \
+                patch.object(FIXTURE.os, "getpgid", side_effect=[41, 410]):
+            self.assertEqual(FIXTURE.process_group_members(410), [412])
+        self.assertEqual(capacities, [129, 258])
+
+    @patch.object(FIXTURE.sys, "platform", "darwin")
+    def test_darwin_permission_error_cannot_prove_group_absent(self):
+        def listing(buffer, size):
+            if buffer is not None:
+                buffer[0] = 411
+            return 1
+        library = SimpleNamespace(proc_listallpids=Mock(side_effect=listing))
+        with patch.object(FIXTURE.ctypes, "CDLL", return_value=library), \
+                patch.object(FIXTURE.os, "getpid", return_value=411), \
+                patch.object(FIXTURE.os, "getpgid", side_effect=PermissionError("denied")):
+            with self.assertRaises(PermissionError):
                 FIXTURE.process_group_members(410)
 
     def test_invalid_group_ids_rejected_before_subprocess(self):

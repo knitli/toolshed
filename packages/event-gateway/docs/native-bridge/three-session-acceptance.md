@@ -171,6 +171,40 @@ source/artifact hashes before and after execution. See the
 [coupled recovery preflight](coupled-workerd-recovery-preflight.md) for staging
 and supervision principles, not a directly interchangeable command/profile.
 
+## Explicit outer containment on macOS
+
+The default command retains the mandatory per-native `sandbox-exec` profile,
+which permits each native process's own model port and Unix sockets. An already
+sandboxed supervisor cannot apply another seatbelt profile to its descendants.
+For an independently audited outer profile, add `--outer-contained` to the
+command above. This fixture option changes no production launcher behavior.
+
+Before starting the broker and before each native launch, the option checks the
+kernel sandbox is active, creates an owned scratch-only positive control, and
+requires permission-query denials for the real-user home, its `.codex`, the verified installed
+venv's sibling `codex-home`, writes at the existing `/private/tmp` directory, and
+unqualified inbound/outbound network operations. Query errors, missing API
+support, an inactive sandbox, and permissive results refuse execution. It never
+opens owner-state files or contacts an external endpoint. Every negative path probe must be an existing directory, verified using metadata
+only. The outer profile must permit metadata inspection of those exact directory
+roots while denying their contents; missing or inaccessible probe metadata refuses
+execution. Root identities are also checked by the independent supervisor preflight.
+
+Only after those checks does it remove the exact `sandbox-exec -f <profile>`
+prefix from the original verified launch argv. The outer profile permits dynamic
+localhost ports for all disposable services and Unix sockets; its audited bytes
+must deny other network access, protect all owner state, and restrict writes to
+one attempt directory. The kernel's unqualified network query does **not** prove
+all address-specific rules. Retain the exact outer-profile hash and external
+supervisor audit with the proof; `executionContainment` records this limitation.
+
+The sandbox-presence query follows [Chromium's seatbelt implementation](https://chromium.googlesource.com/chromium/src/+/master/sandbox/mac/seatbelt.cc),
+and the permission-query ABI and PATH filter follow [WebKit's sandbox SPI declarations](https://github.com/WebKit/WebKit/blob/main/Source/WTF/wtf/spi/darwin/SandboxSPI.h).
+Darwin cleanup enumerates processes using bounded `libproc` calls and checks each
+process group directly, avoiding setuid `/bin/ps` under containment. Permission
+errors and incomplete/saturated process lists fail closed. Other platforms keep
+the existing bounded `ps` path; outer-contained mode itself requires macOS.
+
 ## Reading the result
 
 Require exit 0, the fresh JSON proof, and the stdout `result: PASS` summary.

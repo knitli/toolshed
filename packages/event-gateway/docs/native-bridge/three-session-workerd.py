@@ -4,6 +4,7 @@
 import argparse
 import asyncio
 import base64
+import ctypes
 from contextlib import ExitStack, closing, redirect_stderr, redirect_stdout
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -197,6 +198,62 @@ def private_temp_root():
     return root
 
 
+def verify_outer_containment(scratch):
+    import pwd
+
+    require(sys.platform == "darwin", "outer containment requires macOS kernel checks")
+    library = ctypes.CDLL("/usr/lib/libsandbox.1.dylib", use_errno=True)
+    check = library.sandbox_check
+    check.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+    check.restype = ctypes.c_int
+    quiet = ctypes.c_int.in_dll(library, "SANDBOX_CHECK_NO_REPORT").value
+    require(quiet > 0 and quiet & 1 == 0, "sandbox no-report flag invalid")
+
+    def query(operation, path=None):
+        ctypes.set_errno(0)
+        arguments = (os.getpid(), operation, quiet if path is None else quiet | 1)
+        result = check(*arguments, ctypes.c_char_p(os.fsencode(path))) if path is not None else check(*arguments)
+        require(result in (0, 1) and ctypes.get_errno() == 0, "sandbox permission query failed")
+        return result
+
+    ctypes.set_errno(0)
+    require(check(os.getpid(), None, 0) == 1 and ctypes.get_errno() == 0,
+            "outer containment requires an active kernel sandbox")
+    owner_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    owner_roots = (owner_home, owner_home / ".codex", Path(sys.prefix).parent / "codex-home")
+    require(all(root.is_absolute() and not root.is_relative_to(scratch) for root in owner_roots),
+            "owner state must be outside fixture scratch")
+    require(all(root.is_dir() for root in owner_roots) and Path("/private/tmp").is_dir(),
+            "containment denial probes require existing directories")
+    with tempfile.NamedTemporaryFile(prefix="outer-containment-", dir=scratch) as probe:
+        probe.write(b"synthetic containment probe\n")
+        probe.flush()
+        for operation in (b"file-read-data", b"file-write-create", b"file-write-data"):
+            require(query(operation, probe.name) == 0, "outer sandbox refused owned scratch control")
+        for root in owner_roots:
+            require(query(b"file-read-data", root) == 1, "outer sandbox permits owner-state reads")
+        require(query(b"file-write-create", "/private/tmp") == 1,
+                "outer sandbox permits writes outside fixture scratch")
+        # NONE tests default denial; address-specific exceptions require an independent profile audit.
+        for operation in (b"network-outbound", b"network-inbound"):
+            require(query(operation) == 1, "outer sandbox permits unqualified network access")
+    return {"mode": "verified-outer-sandbox", "kernelSandboxActive": True,
+            "scratchReadWriteAllowed": True, "ownerStateRootReadDenied": True,
+            "outsideScratchProbeWriteDenied": True, "defaultNetworkDenied": True,
+            "addressSpecificPolicyRequiresIndependentAudit": True}
+
+
+def native_launch_argv(profile, cache, state, root):
+    argv = host_qualifier.launch_argv(profile, cache, state, binary, root)
+    if args.outer_contained:
+        verify_outer_containment(private_temp_root())
+        require(argv[:3] == ["/usr/bin/sandbox-exec", "-f", str(profile)]
+                and len(argv) > 3 and argv[3] == sys.executable,
+                "native sandbox launch prefix changed")
+        return argv[3:]
+    return argv
+
+
 def free_port():
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
@@ -295,6 +352,36 @@ def port_is_closed(port):
 
 def process_group_members(group_id):
     require(is_exact_int(group_id) and group_id > 1, "process group ID outside range")
+    if sys.platform == "darwin":
+        library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        list_pids = library.proc_listallpids
+        list_pids.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        list_pids.restype = ctypes.c_int
+        count = list_pids(None, 0)
+        require(0 < count < 100000, "Darwin process count outside range")
+        capacity = min(count + 128, 100000)
+        for attempt in range(3):
+            pids = (ctypes.c_int * capacity)()
+            count = list_pids(pids, ctypes.sizeof(pids))
+            require(0 < count <= capacity, "Darwin process listing count outside range")
+            if count < capacity:
+                break
+            require(attempt < 2 and capacity < 100000, "Darwin process listing saturated")
+            capacity = min(capacity * 2, 100000)
+        # PID 0 is the kernel; vanished processes are the only acceptable lookup failure.
+        positive_pids = [pid for pid in pids[:count] if pid > 0]
+        require(all(pid >= 0 for pid in pids[:count]) and os.getpid() in positive_pids
+                and len(set(positive_pids)) == len(positive_pids),
+                "Darwin process listing was malformed or incomplete")
+        members = []
+        for pid in positive_pids:
+            try:
+                process_group_id = os.getpgid(pid)
+            except ProcessLookupError:
+                continue
+            if process_group_id == group_id:
+                members.append(pid)
+        return members
     result = subprocess.run(  # nosec B603 - fixed system ps executable and fixed output-only arguments.
         ["/bin/ps", "-axo", "pgid=,pid="], check=True, capture_output=True,
         text=True, timeout=5,
@@ -598,7 +685,7 @@ def native_session(stack, label, shared_state, *, hold=False):
     cache = root / "child-cache"
     cache.mkdir(mode=0o700)
     state = Path(shared_state)
-    argv = host_qualifier.launch_argv(profile, cache, state, binary, root)
+    argv = native_launch_argv(profile, cache, state, root)
     known_sockets = {path.name for path in state.glob("c-*.sock")}
     observations = {}
     cleanup_result = {}
@@ -1646,6 +1733,7 @@ def build_proof(ctx):
         "result": "PASS",
         "qualification": "controlled-three-real-cli-production-daemon-workerd",
         "candidateStatus": "explicit-installed-artifacts-verified-against-source",
+        "executionContainment": ctx.containment,
         "productionAdmissionProven": False,
         "liveMeshProven": False,
         "liveOwnerAccessProven": False,
@@ -1835,6 +1923,8 @@ def restore_observers(ctx):
 
 async def run_scenario():
     temporary_root = private_temp_root()
+    containment = (verify_outer_containment(temporary_root) if args.outer_contained
+                   else {"mode": "per-native-profile"})
     broker, broker_log, address = start_broker()
     proof = None
     private_nonce_record = None
@@ -1928,6 +2018,8 @@ def cli():
     for name in ("package-source", "binary", "binary-sha256", "node", "cloud-source",
                  "esbuild", "miniflare", "output"):
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--outer-contained", action="store_true",
+                        help="Verify an independently audited outer macOS sandbox instead of nesting native profiles")
     parser.add_argument("--cloud-commit", required=True)
     parser.add_argument("--entry-port", type=int, default=49732)
     parser.add_argument("--loopback-port", type=int, default=49733)
