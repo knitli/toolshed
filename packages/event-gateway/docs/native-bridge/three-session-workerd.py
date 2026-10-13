@@ -241,7 +241,9 @@ def verify_outer_containment(scratch):
             require(query(operation, probe.name) == 0, "outer sandbox refused owned scratch control")
         for root in owner_roots:
             require(query(b"file-read-data", root) == 1, "outer sandbox permits owner-state reads")
-        require(query(b"file-write-create", "/private/tmp") == 1,
+        outside_probe = Path("/private/tmp") / f"event-three-denied-{uuid4()}"
+        require(not outside_probe.is_relative_to(scratch), "write denial probe must be outside scratch")
+        require(query(b"file-write-create", outside_probe) == 1,
                 "outer sandbox permits writes outside fixture scratch")
         # NONE tests default denial; address-specific exceptions require an independent profile audit.
         for operation in (b"network-outbound", b"network-inbound"):

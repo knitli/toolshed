@@ -66,6 +66,9 @@ inputs, and no remaining owned processes, listeners, or sockets. The
 `e6196b5d2d714f71fce6c06812563c0360a2b551`, all 20 verified installed package files,
 the exact native binary and Workerd bundle, and the raw-proof and supervisor hashes.
 The run used the verified outer sandbox with the short private scratch path.
+Its frozen guard queried the existing outside directory; the current runner
+now requires denial for a fresh outside child path. The dated proof
+remains evidence for its recorded source revision.
 
 A and B each received one native Start. C1 stayed busy across the daemon restart;
 C2 remained queued without a claim or Start, then became stale after binding
@@ -219,10 +222,10 @@ command above. This fixture option changes no production launcher behavior.
 Before starting the broker and before each native launch, the option checks the
 kernel sandbox is active, creates an owned scratch-only positive control, and
 requires permission-query denials for the real-user home, its `.codex`, the verified installed
-venv's sibling `codex-home`, writes at the existing `/private/tmp` directory, and
+venv's sibling `codex-home`, creation of a fresh child path beneath `/private/tmp`, and
 unqualified inbound/outbound network operations. Query errors, missing API
 support, an inactive sandbox, and permissive results refuse execution. It never
-opens owner-state files or contacts an external endpoint. Every negative path probe must be an existing directory, verified using metadata
+opens owner-state files or contacts an external endpoint. Every owner-state read-denial probe must be an existing directory, verified using metadata
 only. The outer profile must permit metadata inspection of those exact directory
 roots while denying their contents; missing or inaccessible probe metadata refuses
 execution. Root identities are also checked by the independent supervisor preflight.

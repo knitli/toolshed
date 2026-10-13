@@ -50,7 +50,7 @@ class ThreeSessionContainmentTests(unittest.TestCase):
                         return 1 if fault == 'scratch' else 0
                     if fault == 'owner' and operation == b'file-read-data':
                         return 0
-                    if fault == 'outside' and operation == b'file-write-create':
+                    if fault == 'outside' and operation == b'file-write-create' and path != '/private/tmp':
                         return 0
                     if fault == 'network' and operation.startswith(b'network-'):
                         return 0
@@ -66,6 +66,12 @@ class ThreeSessionContainmentTests(unittest.TestCase):
                         self.assertEqual(proof['mode'], 'verified-outer-sandbox')
                         self.assertTrue(proof['addressSpecificPolicyRequiresIndependentAudit'])
                         self.assertEqual(len(calls), 9)
+                        outside = [Path(path) for operation, path in calls
+                                   if operation == b'file-write-create' and not Path(path).is_relative_to(scratch)]
+                        self.assertEqual(len(outside), 1)
+                        self.assertEqual(outside[0].parent, Path('/private/tmp'))
+                        self.assertTrue(outside[0].name.startswith('event-three-denied-'))
+                        self.assertFalse(outside[0].exists())
                     else:
                         with self.assertRaises(AssertionError):
                             FIXTURE.verify_outer_containment(scratch)
