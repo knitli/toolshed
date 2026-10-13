@@ -36,6 +36,11 @@ AGENT = "pilot"
 ORIGIN = "https://events.example.com"
 FIXTURE_ACCESS = "fixture-access"
 FIXTURE_AGENT = "fixture-agent"
+GATEWAY_TEMP_PREFIX = "three-gateway-"
+# tempfile adds eight ASCII characters; launcher.session_path uses c-<UUID>.sock.
+DARWIN_SOCKET_PATH_BYTES = 104
+GATEWAY_SOCKET_SUFFIX = f"/{GATEWAY_TEMP_PREFIX}{'x' * 8}/state/c-{'0' * 36}.sock"
+DARWIN_TEMP_ROOT_BYTES = DARWIN_SOCKET_PATH_BYTES - 1 - len(GATEWAY_SOCKET_SUFFIX.encode("ascii"))
 
 args = None
 binary = node = cloud_source = package_source = None
@@ -195,6 +200,10 @@ def private_temp_root():
     require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
             and not info.st_mode & 0o077, "fixture TMPDIR must be private and owned")
     installed_helper._ancestors(root / "scratch")
+    if sys.platform == "darwin":
+        require(len(os.fsencode(root)) <= DARWIN_TEMP_ROOT_BYTES,
+                f"fixture TMPDIR resolved path must be at most {DARWIN_TEMP_ROOT_BYTES} bytes "
+                "for macOS Unix sockets")
     return root
 
 
@@ -1928,7 +1937,7 @@ async def run_scenario():
     broker, broker_log, address = start_broker()
     proof = None
     private_nonce_record = None
-    state_root = Path(tempfile.mkdtemp(prefix="three-gateway-", dir=temporary_root))
+    state_root = Path(tempfile.mkdtemp(prefix=GATEWAY_TEMP_PREFIX, dir=temporary_root))
     state_root.chmod(0o700)
     state = state_root / "state"
     state.mkdir(mode=0o700)

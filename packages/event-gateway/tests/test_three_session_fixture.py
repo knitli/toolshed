@@ -192,6 +192,7 @@ class ThreeSessionModelTests(unittest.TestCase):
         self.assertEqual(first.qualifier.CALL_ID, first_id)
         self.assertEqual(host.CALL_ID, 'session-specific-call')
 
+    @patch.object(FIXTURE.sys, "platform", "linux")
     def test_temp_root_is_explicit_private_and_ancestry_checked(self):
         helper = FIXTURE.load_module('test_installed_helper', SCRIPT.with_name('qualification-installed.py'))
         with tempfile.TemporaryDirectory() as directory, \
@@ -206,6 +207,30 @@ class ThreeSessionModelTests(unittest.TestCase):
                 with patch.object(helper, '_ancestors', side_effect=ValueError('unsafe ancestor')):
                     with self.assertRaisesRegex(ValueError, 'unsafe ancestor'):
                         FIXTURE.private_temp_root()
+
+    @patch.object(FIXTURE.sys, "platform", "darwin")
+    def test_darwin_temp_root_byte_limit_precedes_broker_in_both_modes(self):
+        self.assertEqual(FIXTURE.DARWIN_TEMP_ROOT_BYTES, 30)
+        info = SimpleNamespace(st_mode=0o40700, st_uid=os.getuid())
+        for outer in (False, True):
+            for tail, allowed in (("a" * 29, True), ("a" * 30, False),
+                                  ("é" * 14 + "a", True), ("é" * 15, False)):
+                root = Path("/" + tail)
+                with self.subTest(outer=outer, root=str(root)), \
+                        patch.dict(os.environ, {"TMPDIR": str(root)}), \
+                        patch.object(Path, 'resolve', return_value=root), \
+                        patch.object(Path, 'lstat', return_value=info), \
+                        patch.object(FIXTURE, 'installed_helper', SimpleNamespace(_ancestors=Mock())), \
+                        patch.object(FIXTURE, 'args', SimpleNamespace(outer_contained=outer)), \
+                        patch.object(FIXTURE, 'verify_outer_containment') as containment, \
+                        patch.object(FIXTURE, 'start_broker') as broker:
+                    if allowed:
+                        self.assertEqual(FIXTURE.private_temp_root(), root)
+                    else:
+                        with self.assertRaisesRegex(AssertionError, 'at most 30 bytes'):
+                            asyncio.run(FIXTURE.run_scenario())
+                        broker.assert_not_called()
+                        containment.assert_not_called()
 
     def test_invalid_temp_root_refuses_before_starting_broker(self):
         with patch.object(FIXTURE, 'private_temp_root', side_effect=ValueError('unsafe TMPDIR')), \

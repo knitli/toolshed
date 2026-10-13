@@ -108,7 +108,11 @@ Use explicitly selected, verified artifacts; the runner installs nothing:
 - Apple Silicon macOS with PTYs, Unix sockets, `sandbox-exec`, and permission for
   disposable loopback listeners and child processes. Scratch uses a private
   temporary directory; native child launch uses the existing host qualifier's sandbox.
-  Set `TMPDIR` to an existing owned mode-0700 directory. Native and gateway scratch
+  Set `TMPDIR` to an existing owned mode-0700 directory whose resolved path is at
+  most 30 filesystem-encoded bytes on macOS (for example, `/private/tmp/et3-03`).
+  The runner checks this before starting the broker: its generated gateway socket
+  suffix needs 73 bytes plus the terminating NUL within macOS's 104-byte limit.
+  Native and gateway scratch
   stay beneath this directory so the external supervisor can bound their writes.
 - Python 3.13+ in a private environment containing a non-editable
   `knitli-event-gateway` wheel and its dependencies. Run with `-I -B`.
