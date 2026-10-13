@@ -246,7 +246,6 @@ class CoupledAdmissionTests(unittest.TestCase):
 
     def test_successful_installed_preflight_precedes_imports_and_retains_provenance(self):
         import builtins
-        from unittest.mock import Mock
 
         spec = importlib.util.spec_from_file_location('configured_coupled', HARNESS)
         configured = importlib.util.module_from_spec(spec)
@@ -324,7 +323,6 @@ class CoupledAdmissionTests(unittest.TestCase):
         self.assertEqual(result['attached'], {'status': 'attached'})
 
     def test_model_listener_is_fixed_and_restored_on_failure(self):
-        from unittest.mock import Mock
         factory = Mock(return_value='model')
         launcher = SimpleNamespace(ThreadingHTTPServer=factory)
         with self.assertRaisesRegex(RuntimeError, 'fixture failure'):

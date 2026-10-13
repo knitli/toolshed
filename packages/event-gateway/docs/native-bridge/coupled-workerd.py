@@ -41,7 +41,8 @@ def inputs(argv=None):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--installed', action='store_true', help='Verify the installed wheel against --package/src/event_gateway before imports; requires -I')
     parser.add_argument('--restart-native', action='store_true', help='Recover an expired v3 receipt after native process restart')
-    parser.add_argument('--restart-inflight', action='store_true', help='Stop native while the synthetic primary response remains held; requires --restart-native')
+    parser.add_argument('--restart-inflight', action='store_true',
+                        help='Stop native while the synthetic primary response remains held; requires --restart-native')
     parser.add_argument('--terminal-no-start', action='store_true', help='Qualify actual terminal refusal and durable cloud settlement')
     parser.add_argument('--forget-terminal', action='store_true', help='Restart native before terminal recovery; unknown must stay fenced')
     for name, port in (('model', 49731), ('entry', 49732), ('loopback', 49733), ('broker', 49734)):

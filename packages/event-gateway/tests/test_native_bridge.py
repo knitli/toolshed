@@ -549,6 +549,7 @@ class NativeBridgeTests(unittest.TestCase):
         for released in (True, False):
             with self.subTest(released=released):
                 calls = []
+
                 def wait(timeout):
                     self.assertEqual(server.primary_response_state, 'held')
                     self.assertGreater(server.primary_response_deadline, time.monotonic())
