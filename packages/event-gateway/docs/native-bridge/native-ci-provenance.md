@@ -35,10 +35,35 @@ Promotion requires the separate trusted-main verifier to check the successful
 producer run and exact attempt, approved recipe inputs, artifact API identity,
 archive digest, and actual executable bytes. A JSON receipt alone is insufficient.
 The verifier must read candidate PR files as data and must not execute candidate
-code. It also requires the candidate launcher AST to match protected main except
+code. Ordinarily, the candidate launcher AST must match protected main except
 for the two digest literals, preventing indirect pin overrides or weakened hash
 checks. Other launcher code changes require a separately reviewed trust-policy
 update before promotion.
+
+The explicit exception for [PR #89](https://github.com/knitli/toolshed/pull/89)
+authorizes only the raw launcher bytes at
+[`98c87baaaf88ea3a65d2ffea980066a1a69f606c`](https://github.com/knitli/toolshed/blob/98c87baaaf88ea3a65d2ffea980066a1a69f606c/packages/event-gateway/src/event_gateway/launcher.py),
+introducing read-only native observations with their original request deadline,
+against the launcher at main baseline `8af65e449a2ea54d45280909e6f3520cc407cd3f`:
+
+| Exact transition component | SHA-256 |
+| --- | --- |
+| Main launcher bytes | `fbe251ff9f50af21157902813e60651aac8b2c84513485fe9e4148d1e624edcd` |
+| Candidate launcher bytes | `ec9225a2bc907646d3e81898c61e45706cb81df27d95d7c23387075681d8bd12` |
+| Unchanged native binary pin | `763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b` |
+| Unchanged code-mode host pin | `679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a` |
+
+All four values must match and both literal pins must equal protected main.
+Raw-byte authorization is independent of Python's AST representation. A later
+launcher edit, including a comment or pin change, cannot use this exception;
+a different logic transition requires another reviewed main-policy update.
+The ordinary AST-equality path and its complete changed-pin artifact verification
+remain unchanged. The running verifier comes from trusted main: editing a
+candidate's verifier cannot authorize that candidate. Current-head/main and
+trusted-policy freshness checks still apply before publishing the status.
+Merge this separate policy before revalidating the observation PR. This exception
+does not establish Codex approval, native runtime qualification, installation or
+deployment; the observation PR retains its independent review and CI gates.
 
 The `Event Gateway / native provenance` status must be required in repository
 rules before relying on platform merge enforcement. Workflow and token-permission
