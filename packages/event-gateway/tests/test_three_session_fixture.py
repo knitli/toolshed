@@ -314,6 +314,7 @@ class ThreeSessionProcessTests(unittest.TestCase):
     @patch.object(FIXTURE.sys, "platform", "darwin")
     def test_darwin_retries_saturated_snapshot_before_claiming_absence(self):
         capacities = []
+
         def listing(buffer, size):
             if buffer is None:
                 return 1
