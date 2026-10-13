@@ -141,6 +141,13 @@ def phase_fixture():
             "attachmentGeneration": None if case_id == "C3" else index + 20,
         }
     config["claims"] = claims
+    a1_claim = next(claim for claim in claims if claim["subject"] == subjects[0])
+    for action in ("submitted", "observed"):
+        request = config["targets"][action]["request"]
+        request["deliveryId"] = a1_claim["request"]["deliveryId"]
+        request["attemptId"] = a1_claim["request"]["attemptId"]
+        for field in ("nodeGeneration", "runtimeGeneration", "attachmentGeneration"):
+            request[field] = cases["A1"][field]
     plan = {
         "version": 1,
         "order": list(PHASE_ORDER),
@@ -594,6 +601,15 @@ class Tests(unittest.TestCase):
         with self.assertRaisesRegex(Refused, "invalid_native_correlation"):
             JOURNAL.manifest_checked(changed)
 
+    def test_observed_ack_item_id_must_differ_from_turn_id(self):
+        changed = copy.deepcopy(self.config)
+        correlation = changed["targets"]["observed"]["request"]["nativeCorrelation"]
+        correlation["itemId"] = correlation["turnId"]
+        with self.assertRaisesRegex(
+            Refused, "observed_item_turn_identity_mismatch"
+        ):
+            JOURNAL.manifest_checked(changed)
+
     def test_claim_delivery_id_must_be_canonical(self):
         for delivery_id in (None, 7, "invalid", "dly_" + "A" * 64):
             with self.subTest(delivery_id=delivery_id):
@@ -789,6 +805,120 @@ class PhaseTests(unittest.TestCase):
         self.orchestrator.start_intent("A1", start)
         self.orchestrator.start_outcome("A1", start, outcome, {"outcome": outcome})
 
+    def test_a1_ack_targets_bind_to_claim_identity_and_phase_generations(self):
+        a1_subject = self.plan["cases"]["A1"]["subject"]
+        a1_claim = next(
+            claim for claim in self.config["claims"] if claim["subject"] == a1_subject
+        )
+        for action in ("submitted", "observed"):
+            request = self.config["targets"][action]["request"]
+            self.assertEqual(
+                (request["deliveryId"], request["attemptId"]),
+                (
+                    a1_claim["request"]["deliveryId"],
+                    a1_claim["request"]["attemptId"],
+                ),
+            )
+            for field in (
+                "nodeGeneration",
+                "runtimeGeneration",
+                "attachmentGeneration",
+            ):
+                self.assertEqual(request[field], self.plan["cases"]["A1"][field])
+
+        mutations = (
+            ("deliveryId", "dly_" + "b" * 64, "phase_ack_claim_mismatch"),
+            ("attemptId", str(uuid4()), "phase_ack_claim_mismatch"),
+            ("nodeGeneration", 2, "phase_ack_generation_mismatch"),
+            ("runtimeGeneration", 2, "phase_ack_generation_mismatch"),
+            ("attachmentGeneration", 2, "phase_ack_generation_mismatch"),
+        )
+        for field, value, reason in mutations:
+            with self.subTest(field=field):
+                changed = copy.deepcopy(self.config)
+                for action in ("submitted", "observed"):
+                    changed["targets"][action]["request"][field] = value
+                checked = JOURNAL.manifest_checked(changed)
+                with self.assertRaisesRegex(Refused, reason):
+                    JOURNAL.phase_plan_checked(self.plan, checked)
+
+    def test_observed_latch_waits_for_completed_submitted_ack_and_r1(self):
+        target = self.config["targets"]["observed"]["request"]
+        fields = {
+            "op": "ack_latch",
+            "caseId": "A1",
+            "phase": "observed",
+            "requestSha256": JOURNAL.target_request_sha256(
+                self.config["targets"]["observed"]
+            ),
+            "storeWitnessSha256": "a" * 64,
+            "deliveryId": target["deliveryId"],
+            "attemptId": target["attemptId"],
+            "eventId": target["eventId"],
+            "permitId": target["nativeCorrelation"]["permitId"],
+            "turnId": target["nativeCorrelation"]["turnId"],
+            "itemId": target["nativeCorrelation"]["itemId"],
+            "at": self.now,
+        }
+        state = JOURNAL._new_phase_state()
+        state["active"] = "A1"
+        case = state["cases"]["A1"]
+        case["startOutcome"] = "started"
+        case["ackLatches"]["submitted"] = {"complete": None}
+        before = copy.deepcopy(state)
+        with self.assertRaisesRegex(Refused, "observed_before_submitted_completion"):
+            JOURNAL._apply_phase(self.plan, state, fields, self.config)
+        self.assertEqual(state, before)
+
+        case["ackLatches"]["submitted"]["complete"] = {
+            "responseSha256": "b" * 64,
+            "current": False,
+        }
+        before = copy.deepcopy(state)
+        with self.assertRaisesRegex(Refused, "observed_before_r1_recovery"):
+            JOURNAL._apply_phase(self.plan, state, fields, self.config)
+        self.assertEqual(state, before)
+
+    def test_required_result_evidence_refuses_none_without_journal_mutation(self):
+        calls = (
+            ("publication response", lambda: self.orchestrator.publication_result("A1", "accepted")),
+            ("claim response", lambda: self.orchestrator.claim_result("A1", "accepted")),
+            ("native receipt", lambda: self.orchestrator.start_outcome("A1", b"start", "started", None)),
+            (
+                "store witness for ACK latch",
+                lambda: self.orchestrator.ack_latch(
+                    "A1",
+                    "submitted",
+                    encoded(self.config["targets"]["submitted"]["request"]),
+                    None,
+                ),
+            ),
+            (
+                "ACK response",
+                lambda: self.orchestrator.ack_complete(
+                    "A1", "submitted", b"request", None, False
+                ),
+            ),
+            (
+                "case completion store witness",
+                lambda: self.orchestrator.complete_case(
+                    "A1",
+                    store_ack_state="observed",
+                    attempt_id=None,
+                    store_witness=None,
+                ),
+            ),
+        )
+        for label, call in calls:
+            with self.subTest(evidence=label):
+                before = self.reopen().snapshot()
+                with self.assertRaisesRegex(Refused, "required_evidence_missing"):
+                    call()
+                after = self.reopen().snapshot()
+                self.assertEqual(after["rows"], before["rows"])
+                self.assertEqual(after["counts"], before["counts"])
+                self.assertEqual(after["phase"], before["phase"])
+
     def _transport_fault(self):
         calls = []
 
@@ -914,6 +1044,18 @@ class PhaseTests(unittest.TestCase):
                 "A1", b"A1-publication"
             )
         self.assertEqual(self.reopen().snapshot()["counts"]["publication"], 1)
+
+    def test_ambiguous_claim_result_may_omit_response_evidence(self):
+        self.orchestrator.begin_case("A1")
+        self.orchestrator.publication_intent("A1", b"A1-publication")
+        self.orchestrator.publication_result("A1", "accepted", b"accepted")
+        claim = self.config["claims"][0]["request"]
+        self.orchestrator.claim_intent("A1", claim)
+        self.orchestrator.claim_result("A1", "ambiguous")
+        self.assertEqual(
+            self.reopen().snapshot()["phase"]["cases"]["A1"]["claimOutcome"],
+            "ambiguous",
+        )
 
     def test_native_start_attempt_and_accepted_outcome_budgets_are_separate(self):
         self._prepare_a1(outcome="unknown")

@@ -314,6 +314,11 @@ def manifest_checked(value):
                 and all(uuid(correlation[k]) for k in keys - {"kind"}),
                 "invalid_native_correlation",
             )
+            if action == "observed":
+                require(
+                    correlation["itemId"] != correlation["turnId"],
+                    "observed_item_turn_identity_mismatch",
+                )
     _validate_ack_target_pair(value["targets"])
     require(
         exact_type(value["claims"], list) and len(value["claims"]) <= 7,
@@ -510,6 +515,29 @@ def phase_plan_checked(value, manifest):
         == set(subjects) - {cases["C2"]["subject"], cases["C3"]["subject"]},
         "phase_claim_coverage",
     )
+    a1_claim = next(
+        claim
+        for claim in manifest["claims"]
+        if claim["subject"] == cases["A1"]["subject"]
+    )
+    for action in ("submitted", "observed"):
+        ack = manifest["targets"][action]["request"]
+        require(
+            ack["deliveryId"] == a1_claim["request"]["deliveryId"]
+            and ack["attemptId"] == a1_claim["request"]["attemptId"],
+            "phase_ack_claim_mismatch",
+        )
+        require(
+            all(
+                ack[field] == cases["A1"][field]
+                for field in (
+                    "nodeGeneration",
+                    "runtimeGeneration",
+                    "attachmentGeneration",
+                )
+            ),
+            "phase_ack_generation_mismatch",
+        )
     for action, case_id in value["faultTargets"].items():
         require(
             manifest["targets"][action]["subject"] == cases[case_id]["subject"],
@@ -812,7 +840,15 @@ def _phase_ack_latch(plan, state, fields, manifest, case_id, cases):
         "ack_latch_identity_mismatch",
     )
     if phase == "observed":
-        require("submitted" in case["ackLatches"], "observed_before_submitted_latch")
+        submitted = case["ackLatches"].get("submitted")
+        require(
+            submitted is not None and submitted["complete"] is not None,
+            "observed_before_submitted_completion",
+        )
+        require(
+            state["restartTokens"].get("R1", {}).get("complete") is True,
+            "observed_before_r1_recovery",
+        )
     case["ackLatches"][phase] = {
         "requestSha256": fields["requestSha256"],
         "storeWitnessSha256": fields["storeWitnessSha256"],
@@ -1210,6 +1246,7 @@ class RecoveryOrchestrator:
 
     @staticmethod
     def _payload_hash(payload):
+        require(payload is not None, "required_evidence_missing")
         return digest(payload if exact_type(payload, bytes) else encoded(payload))
 
     def readiness(self):
