@@ -297,9 +297,14 @@ class NativeBridge:
         )
         self._validate_witness(row, original_issued)
         self.pending_presence = None
-        if resumed or time.monotonic() >= self.valid_until:
+        now = time.monotonic()
+        if (resumed or now >= original_issued + WITNESS_SECONDS
+                or (row["eligible"] and now >= self.valid_until)):
             self.valid_until = 0
             return None
+        if not row["eligible"]:
+            # Ineligible diagnostics have a request deadline, never a Start lease.
+            self.valid_until = 0
         return dict(row)
 
     def start(self, request):

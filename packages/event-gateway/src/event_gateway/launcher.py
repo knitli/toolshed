@@ -288,8 +288,20 @@ class NativeClient:
                 witness = self.bridge.challenge_readonly()
             except ValueError:
                 return value
-        if witness is not None and witness["eligible"] and time.monotonic() < self.bridge.valid_until and (
-                self.expected_thread is None or witness["threadId"] == self.expected_thread):
+        if (not isinstance(witness, dict)
+                or not isinstance(witness.get("eligible"), bool)
+                or not isinstance(witness.get("cause"), str) or len(witness["cause"]) > 128
+                or not all(key in witness for key in BINDING_FIELDS)
+                or not _valid_binding(_binding(witness))
+                or (witness["eligible"] and time.monotonic() >= self.bridge.valid_until)
+                or (self.expected_thread is not None
+                    and witness["threadId"] != self.expected_thread)):
+            return value
+        value["nativeObservation"] = {
+            "eligible": witness["eligible"], "cause": witness["cause"],
+            "binding": _binding(witness),
+        }
+        if witness["eligible"] and time.monotonic() < self.bridge.valid_until:
             value.update(selection="selected", threadId=witness["threadId"],
                          clientId=witness["clientId"],
                          serverInstanceId=witness["serverInstanceId"],

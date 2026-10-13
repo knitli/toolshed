@@ -116,6 +116,14 @@ knitli-event-gateway client-status --session-id PRINTED-SESSION-UUID
 The response reports `selection: selected` with the exact native thread, or
 `selection: unavailable`; `attached` and `automaticWakeEnabled` remain false.
 Status is an observation at query time, never admission or a reusable lease.
+When a fresh validated reply contains a complete binding for the expected thread,
+`nativeObservation` reports only `eligible`, the opaque native `cause` label, and
+`binding` (`clientId`, `connectionId`, `backendPid`, `threadId`, `generation`,
+`serverInstanceId`, `serverGeneration`). Ineligible observations keep
+`selection: unavailable` and grant no Start eligibility, including with a zero
+lease. Missing, malformed, late, incomplete, or wrong-thread replies omit this
+field. The binding supports correlation with independently observed work on the
+owned client; neither ineligibility nor the cause label proves that a tool is busy.
 The owner-only session socket accepts presence, binding and admission witness
 requests, plus conditional Start and exact read-only receipt recovery for an
 explicit mapped session. It exposes no arbitrary native commands. The foreground launcher removes it and closes its bridge when

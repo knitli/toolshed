@@ -19,6 +19,77 @@ from test_native_bridge import peer, receive, send, witness
 
 
 class LauncherTests(unittest.TestCase):
+    def test_ineligible_native_observation_is_correlated_but_not_authorizable(self):
+        row = witness(eligible=False, cause="native-revoke", leaseMs=0)
+        binding = launcher._binding(row)
+
+        def handle(channel):
+            for nonce in range(1, 4):
+                self.assertEqual(receive(channel), {"nonce": nonce})
+                send(channel, {**row, "nonce": nonce, "sequence": nonce})
+            self.assertIsNone(receive(channel))
+
+        with peer(handle, receipt_version=3) as bridge:
+            client = launcher.NativeClient(bridge, expected_thread=row["threadId"])
+            client.ready = True
+            self.assertEqual(client.status(), {
+                "automaticWakeEnabled": False, "attached": False,
+                "receiptVersion": 3, "selection": "unavailable",
+                "nativeObservation": {
+                    "eligible": False, "cause": "native-revoke", "binding": binding,
+                },
+            })
+            self.assertIsNone(bridge.witness)
+            self.assertEqual(bridge.valid_until, 0)
+            with self.assertRaisesRegex(launcher.LaunchError, "native_binding_unavailable"):
+                client.binding()
+            with self.assertRaisesRegex(launcher.LaunchError, "native_binding_changed"):
+                client.challenge(str(uuid4()), binding)
+        self.assertFalse(launcher._valid_native_witness(row))
+        self.assertFalse(launcher._valid_native_witness({**row, "eligible": True}))
+        challenge_id = str(uuid4())
+        with (patch.object(launcher, "_session_request", return_value={
+                  "challengeId": challenge_id, "observedAt": "2026-10-09T12:00:00.000Z",
+                  "validUntilMonotonic": time.monotonic() + 0.5, "witness": row,
+              }), self.assertRaisesRegex(launcher.LaunchError, "invalid_client_challenge")):
+            launcher.session_challenge("unused", str(uuid4()), challenge_id, binding)
+
+    def test_status_omits_unavailable_malformed_or_wrong_thread_observations(self):
+        row = witness(eligible=False, cause="native-revoke", leaseMs=0)
+        for result in (None, ValueError("invalid"), {},
+                       {**row, "threadId": str(uuid4())}, {**row, "threadId": None},
+                       {**row, "backendPid": True}, {**row, "eligible": "false"},
+                       {**row, "cause": "x" * 129}, {**row, "cause": None}):
+            with self.subTest(result=result):
+                bridge = Mock()
+                bridge.challenge_readonly.side_effect = [result]
+                client = launcher.NativeClient(bridge, expected_thread=row["threadId"])
+                client.ready = True
+                self.assertEqual(client.status(), {
+                    "automaticWakeEnabled": False, "attached": False,
+                    "receiptVersion": 3, "selection": "unavailable",
+                })
+
+    def test_eligible_status_preserves_selected_fields_with_closed_observation(self):
+        row = witness()
+        bridge = Mock()
+        bridge.challenge_readonly.return_value = row
+        bridge.valid_until = time.monotonic() + 1
+        client = launcher.NativeClient(bridge)
+        client.ready = True
+        self.assertEqual(client.status(), {
+            "automaticWakeEnabled": False, "attached": False,
+            "receiptVersion": 3, "selection": "selected",
+            **{key: row[key] for key in (
+                "threadId", "clientId", "serverInstanceId", "serverGeneration", "generation",
+            )},
+            "nativeObservation": {
+                "eligible": True, "cause": row["cause"], "binding": launcher._binding(row),
+            },
+        })
+        bridge.valid_until = 0
+        self.assertNotIn("nativeObservation", client.status())
+
     def test_native_numeric_fields_reject_booleans(self):
         row = witness()
         for field in ("version", "nonce", "backendPid", "generation",
