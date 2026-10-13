@@ -1,0 +1,66 @@
+{
+  "result": "PASS",
+  "rawRunResult": "PASS",
+  "date": "2026-10-13",
+  "qualification": "diagnostically-instrumented-offline-native-core-busy",
+  "candidateGatewayCommit": "98c87baaaf88ea3a65d2ffea980066a1a69f606c",
+  "gatewayDiagnosticInstrumentation": true,
+  "independentEvidenceReview": "PASS",
+  "nativeBinarySha256": "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b",
+  "codeModeHostSha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
+  "privateEvidenceSha256": {
+    "proof": "e4a365c1dd552c5a0b8aa00b7aaf83a0e12a0fb890edf8fac92142fbe9e4499a",
+    "supervision": "58d9da540d5099b1185608744a263ce1d434558c497594bf677d6cadbd0395d0",
+    "frozenCandidateManifest": "d30cb79dda6fc50264164126730206fc3e6d8dcb68f08addc0deba00977bd1a0",
+    "journal": "5f65fda4598827aa5db7c85d25cccbd853f8504ed2d764cc947356bdc334a7d3",
+    "bridgeDiagnostics": "39da7a0844d6ac7b22d11a9919ea567dd592d9894c13711cca16f6b226ed2b18"
+  },
+  "checks": {
+    "realOwnedToolRunningAcrossProbe": true,
+    "exactFreshTerminalCoreBusyReceipt": true,
+    "originalImmutableIdentityInputRecorded": true,
+    "originalExactThreadAndTurnCompleted": true,
+    "barrierReleasedAfterBusyRefusal": true,
+    "inputsUnchanged": true,
+    "ownedProcessesListenersSocketsCleared": true,
+    "outerSandboxEnforced": true,
+    "ownerCredentialsCopied": false,
+    "authorizationHeadersAbsent": true
+  },
+  "counts": {
+    "nativeStartRpcs": 2,
+    "acceptedNativeStarts": 1,
+    "coreBusyRefusals": 1,
+    "syntheticModelRequests": 3,
+    "mainTurnModelRequests": 2,
+    "titleModelRequests": 1,
+    "realModelCalls": 0,
+    "liveMeshCalls": 0
+  },
+  "terminalProbeOutcome": {
+    "status": "terminalNotStarted",
+    "reason": "busy",
+    "replayed": false
+  },
+  "fixtureObservationSchedule": {
+    "seconds": 2.0,
+    "readOnlySamples": 8,
+    "continuousAuthorityProven": false
+  },
+  "supervisorExitCode": 0,
+  "supervisorElapsedSeconds": 7.852552957978332,
+  "limits": {
+    "unmodifiedProductionGatewayQualified": false,
+    "installedGatewayQualified": false,
+    "liveMeshQualified": false,
+    "osCrashRecoveryQualified": false,
+    "nativeBusyReceiptPersistenceQualified": false,
+    "gatewayTerminalReceiptPersistenceQualified": false,
+    "busyReceiptRestartReplayQualified": false,
+    "durableTerminalNoStartSettlementQualified": false,
+    "sameBindingC2DrainQualified": false,
+    "sevenCaseHarnessQualified": false,
+    "wholeStage1Qualified": false,
+    "standaloneRunnableQualificationFixture": false
+  }
+}
