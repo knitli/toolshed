@@ -1,15 +1,19 @@
 """Fail-closed boundaries for the disposable three-session acceptance fixture."""
 
 import copy
+import asyncio
 from contextlib import closing
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import signal
 import sqlite3
 import subprocess  # nosec B404 - Fixed Git executable and disposable test-owned repositories, no shell.
 import tempfile
+import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -19,6 +23,114 @@ SCRIPT = Path(__file__).resolve().parents[1] / "docs/native-bridge/three-session
 SPEC = importlib.util.spec_from_file_location("three_session_fixture", SCRIPT)
 FIXTURE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(FIXTURE)
+
+
+class ThreeSessionModelTests(unittest.TestCase):
+    def provider(self):
+        qualifier = FIXTURE.load_module('test_host_qualifier', SCRIPT.with_name('native-host-launcher-qualification.py'))
+        qualifier.CALL_ID = 'session-specific-call'
+        return SimpleNamespace(requests=[], main_requests=[], turn_main_requests=[],
+            turn_title_count=0, phase='initial', errors=[], request_lock=threading.Lock(),
+            active_requests=0, hold_lock=threading.Lock(), hold_next=True,
+            hold_started=threading.Event(), release_hold=Mock(wait=Mock(return_value=True)),
+            hold_state='idle', hold_deadline=0, qualifier=qualifier,
+            nonce='fresh-nonce', program='read source', turn_verified=False)
+
+    def respond(self, server, request):
+        raw = json.dumps(request).encode()
+        handler = SimpleNamespace(server=server, path='/v1/responses',
+            headers={'Content-Length': str(len(raw))}, rfile=io.BytesIO(raw),
+            wfile=io.BytesIO(), send_response=Mock(), send_header=Mock(),
+            end_headers=Mock(), send_error=Mock())
+        with patch.object(FIXTURE, 'host_qualifier', server.qualifier):
+            FIXTURE.ModelProvider._respond(handler)
+        return handler
+
+    def test_title_cannot_consume_primary_hold(self):
+        server = self.provider()
+        self.respond(server, {'tools': [], 'text': {'format': {'schema': {
+            'required': ['title'], 'properties': {'title': {}}}}},
+            'input': 'Generate a concise, single-line task title'})
+        server.release_hold.wait.assert_not_called()
+        self.assertTrue(server.hold_next)
+        self.assertFalse(server.hold_started.is_set())
+
+    def test_extra_main_request_refuses_instead_of_starting_another_tool(self):
+        server = self.provider()
+        server.hold_next = False
+        server.turn_main_requests = [{}, {}]
+        handler = self.respond(server, {'tools': [{'name': 'exec'}]})
+        handler.send_response.assert_not_called()
+        self.assertTrue(server.errors)
+
+    def test_expired_hold_cannot_prove_busy_even_if_event_remains_set(self):
+        server = self.provider()
+        server.hold_started.set()
+        server.hold_state = 'held'
+        server.hold_deadline = time.monotonic() - 1
+        server.release_hold = threading.Event()
+        with self.assertRaisesRegex(AssertionError, 'held'):
+            FIXTURE.require_model_held(server)
+
+    def test_completion_requires_success_idle_and_exact_request_count(self):
+        server = self.provider()
+        server.turn_main_requests = [{}, {}]
+        server.turn_verified = True
+        FIXTURE.require_model_turn_complete(server)
+        for field, value in (('turn_verified', False), ('active_requests', 1),
+                             ('turn_main_requests', [{}, {}, {}]), ('errors', ['late error'])):
+            original = getattr(server, field)
+            setattr(server, field, value)
+            with self.subTest(field=field), self.assertRaises(AssertionError):
+                FIXTURE.require_model_turn_complete(server)
+            setattr(server, field, original)
+
+    def test_source_read_requires_this_sessions_call_and_fresh_nonce(self):
+        for call_id in ('session-specific-call', 'another-session-call'):
+            with self.subTest(call_id=call_id):
+                server = self.provider()
+                server.hold_next = False
+                self.respond(server, {'tools': [{'name': 'exec'}]})
+                self.respond(server, {'tools': [{'name': 'exec'}], 'input': [{
+                    'type': 'custom_tool_call_output', 'call_id': call_id,
+                    'output': [{'text': json.dumps({'exit_code': 0, 'output': 'fresh-nonce\n'})}]}]})
+                self.assertEqual(server.turn_verified, call_id == 'session-specific-call')
+                self.assertEqual(bool(server.errors), call_id != 'session-specific-call')
+
+    def test_providers_have_independent_verifier_call_ids(self):
+        host = self.provider().qualifier
+        with patch.object(FIXTURE, 'host_qualifier', host), \
+                patch.object(FIXTURE, 'ThreadingHTTPServer', side_effect=lambda *_: SimpleNamespace(serve_forever=Mock())), \
+                patch.object(FIXTURE.threading, 'Thread'):
+            first = FIXTURE.make_model(Mock())
+            second = FIXTURE.make_model(Mock())
+        first_id = first.qualifier.CALL_ID
+        self.assertNotEqual(first_id, second.qualifier.CALL_ID)
+        second.qualifier.CALL_ID = 'next-turn'
+        self.assertEqual(first.qualifier.CALL_ID, first_id)
+        self.assertEqual(host.CALL_ID, 'session-specific-call')
+
+    def test_temp_root_is_explicit_private_and_ancestry_checked(self):
+        helper = FIXTURE.load_module('test_installed_helper', SCRIPT.with_name('qualification-installed.py'))
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(FIXTURE, 'installed_helper', helper):
+            root = Path(directory).resolve()
+            with patch.dict(os.environ, {'TMPDIR': str(root)}):
+                self.assertEqual(FIXTURE.private_temp_root(), root)
+                root.chmod(0o777)
+                with self.assertRaisesRegex(AssertionError, 'private'):
+                    FIXTURE.private_temp_root()
+                root.chmod(0o700)
+                with patch.object(helper, '_ancestors', side_effect=ValueError('unsafe ancestor')):
+                    with self.assertRaisesRegex(ValueError, 'unsafe ancestor'):
+                        FIXTURE.private_temp_root()
+
+    def test_invalid_temp_root_refuses_before_starting_broker(self):
+        with patch.object(FIXTURE, 'private_temp_root', side_effect=ValueError('unsafe TMPDIR')), \
+                patch.object(FIXTURE, 'start_broker') as broker:
+            with self.assertRaisesRegex(ValueError, 'unsafe TMPDIR'):
+                asyncio.run(FIXTURE.run_scenario())
+            broker.assert_not_called()
 
 
 class ThreeSessionProcessTests(unittest.TestCase):

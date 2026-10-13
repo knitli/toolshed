@@ -31,6 +31,32 @@ CAS/challenge path and post-attach delivery only. They do **not** establish
 busy-to-idle queue draining, an owner-authorized production reattachment, or
 completion of any rollout stage.
 
+## Current manual-canary fixture profile
+
+The runner explicitly enables a broker profile containing only its six existing
+synthetic subjects: `three-session-route-a`, `three-session-route-b`,
+`three-session-route-c`, `three-session-c-busy-first`,
+`three-session-c-busy-second`, and `three-session-c-after-attach`.
+Each setup call selects one exact subject under the Durable Object concurrency
+barrier, invokes the production manual-publication guard, and restores the
+original scope in `finally`. All selections retain the broker's original
+five-minute expiry; setup never extends it. Unknown subjects fail closed.
+
+This models sequential synthetic deployment scopes, not production authority for
+multiple subjects. Production principal/agent and expiry guards remain active.
+Source rows and delivery identities are preserved: reusing a single subject would
+deduplicate C1/C2 or conflict across A/B and post-attach generations. The default
+coupled recovery broker still admits only `fixture-manual-source`.
+
+The controlled provider now holds only a main request, checks that the hold has
+not expired through daemon restart, and uses separate tool-call identities per
+session and C phase. Proof requires exactly two successful main requests for each
+source-read turn and native idle settlement, with provider errors checked after
+cleanup. These are fixture correctness checks, not live useful-response evidence.
+
+The compatibility change requires a fresh controlled run before it can support
+current qualification evidence; historical proofs below do not qualify this profile.
+
 ## Latest controlled evidence
 
 The protected-main CI artifact rerun passed with CLI `763e5e2b…3717b` and a
@@ -82,6 +108,8 @@ Use explicitly selected, verified artifacts; the runner installs nothing:
 - Apple Silicon macOS with PTYs, Unix sockets, `sandbox-exec`, and permission for
   disposable loopback listeners and child processes. Scratch uses a private
   temporary directory; native child launch uses the existing host qualifier's sandbox.
+  Set `TMPDIR` to an existing owned mode-0700 directory. Native and gateway scratch
+  stay beneath this directory so the external supervisor can bound their writes.
 - Python 3.13+ in a private environment containing a non-editable
   `knitli-event-gateway` wheel and its dependencies. Run with `-I -B`.
   Installed preflight verifies interpreter ownership, wheel RECORD, import path,
