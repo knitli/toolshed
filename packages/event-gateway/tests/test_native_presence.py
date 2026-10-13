@@ -12,6 +12,70 @@ from test_native_bridge import native, peer, receive, send, witness
 
 
 class NativePresenceTests(unittest.TestCase):
+    def test_fresh_ineligible_observation_has_no_start_lease(self):
+        for lease in (0, 750):
+            row = witness(eligible=False, cause="native-revoke", leaseMs=lease)
+
+            def handle(channel):
+                self.assertEqual(receive(channel), {"nonce": 1})
+                send(channel, {**row, "eligible": True, "leaseMs": 750})
+                self.assertEqual(receive(channel), {"nonce": 2})
+                send(channel, {**row, "nonce": 2, "sequence": 2})
+                self.assertIsNone(receive(channel))
+
+            with self.subTest(lease=lease), peer(handle) as bridge:
+                bridge.challenge()
+                self.assertIsNotNone(bridge.witness)
+                self.assertEqual(bridge.challenge_readonly(), {**row, "nonce": 2, "sequence": 2})
+                self.assertEqual(bridge.valid_until, 0)
+                self.assertIsNone(bridge.witness)
+                with self.assertRaises(native_reader.BridgeError):
+                    bridge.start(native.synthetic_request(row))
+                self.assertEqual(bridge.attempts, {})
+
+    def test_late_ineligible_reply_is_discarded_before_fresh_observation(self):
+        row = witness(eligible=False, cause="native-revoke", leaseMs=0)
+        release = threading.Event()
+
+        def handle(channel):
+            self.assertEqual(receive(channel), {"nonce": 1})
+            self.assertTrue(release.wait(1))
+            send(channel, row)
+            self.assertEqual(receive(channel), {"nonce": 2})
+            send(channel, {**row, "nonce": 2, "sequence": 2})
+            self.assertIsNone(receive(channel))
+
+        with peer(handle) as bridge, patch.object(native_reader, "WITNESS_SECONDS", 0.03):
+            self.assertIsNone(bridge.challenge_readonly())
+            release.set()
+            self.assertIsNone(bridge.challenge_readonly())
+            self.assertEqual(bridge.valid_until, 0)
+            self.assertEqual(bridge.challenge_readonly()["sequence"], 2)
+            self.assertIsNone(bridge.witness)
+            self.assertEqual(bridge.valid_until, 0)
+
+    def test_ineligible_validation_latency_consumes_original_deadline(self):
+        row = witness(eligible=False, leaseMs=0)
+
+        def handle(channel):
+            self.assertEqual(receive(channel), {"nonce": 1})
+            send(channel, row)
+            self.assertIsNone(receive(channel))
+
+        with peer(handle) as bridge:
+            validate = bridge._validate_witness
+
+            def delayed_validation(value, issued):
+                validate(value, issued)
+                clock[0] += native_reader.WITNESS_SECONDS
+
+            clock = [1.0]
+            with (patch.object(native_reader.time, "monotonic", side_effect=lambda: clock[0]),
+                  patch.object(bridge, "_validate_witness", side_effect=delayed_validation)):
+                self.assertIsNone(bridge.challenge_readonly())
+            self.assertIsNone(bridge.witness)
+            self.assertEqual(bridge.valid_until, 0)
+
     def test_late_reply_is_discarded_before_fresh_different_thread(self):
         old = witness()
         fresh = {**old, "nonce": 2, "sequence": 2, "threadId": str(uuid4())}
