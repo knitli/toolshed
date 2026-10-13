@@ -47,6 +47,41 @@ class CoupledWorkerdTests(unittest.TestCase):
                     with self.assertRaisesRegex(AssertionError, "native delay fixture exceeded deadline or native process stopped"):
                         asyncio.run(COUPLED.wait_for_permit_expiry(request, SimpleNamespace(poll=lambda: stopped)))
 
+    def test_default_restart_releases_response_and_waits_for_idle_before_stop(self):
+        from contextlib import ExitStack, nullcontext
+        import threading
+
+        model = SimpleNamespace(release_primary=threading.Event(), request_counts={'primary': 1})
+        old = SimpleNamespace(pid=101, args=['codex', '-C', '/fixture'], poll=lambda: None)
+        receipt = {'status': 'inputRecorded'}
+        bridge = Mock()
+        bridge.receipt.return_value = receipt
+        idle_checks = []
+
+        def challenge():
+            self.assertTrue(model.release_primary.is_set(), 'default response not released')
+            idle_checks.append(True)
+            return {'eligible': len(idle_checks) == 2}
+
+        def stop(*_):
+            self.assertEqual(len(idle_checks), 2, 'default did not wait for idle')
+            self.assertTrue(model.release_primary.is_set())
+            old.poll = lambda: 0
+
+        bridge.challenge.side_effect = challenge
+        replacement = Mock()
+        launcher = SimpleNamespace(stop_process=stop, native_client=Mock(
+            return_value=nullcontext((replacement, SimpleNamespace(pid=102), {'backendPid': 202}))))
+        with ExitStack() as resources, patch.object(COUPLED, 'verify_native_restart'), \
+                patch.object(COUPLED.time, 'time_ns', return_value=2000000):
+            result = asyncio.run(COUPLED.restart_native(
+                bridge, model, old, {'backendPid': 201}, launcher, resources,
+                {'receiptVersion': 3, 'permitExpiresAt': 1}))
+        self.assertIs(result[0], replacement)
+        self.assertIs(result[-1], receipt)
+        bridge.close.assert_called_once()
+        launcher.native_client.assert_called_once_with(old.args, Path('/fixture'), receipt_version=3)
+
     def test_inflight_restart_stops_backend_before_releasing_model(self):
         from contextlib import ExitStack, nullcontext
         import threading
