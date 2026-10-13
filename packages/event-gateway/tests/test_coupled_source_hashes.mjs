@@ -89,11 +89,12 @@ test('Miniflare HTTP interception rewrites only one exact loopback listen and re
 
 test('fixture setup requires prior admission and cannot seed runtime SQL', async t => {
   let admitted=false,published=0,claimed=0;
+  let inspectPublication=()=>{};
   const statements=[];
   AgentCoordinator=class {
-    constructor(ctx){this.ctx=ctx;}
+    constructor(ctx,env){this.ctx=ctx;this.env=env;}
     async setEnabled(){}
-    async publishManual(){if(!admitted)throw new Error('runtime_not_admitted');published++;return {runtimeId:'fixture-runtime'};}
+    async publishManual(input){if(!admitted)throw new Error('runtime_not_admitted');await inspectPublication(this.env,input);published++;return {runtimeId:'fixture-runtime'};}
     async claimTransport(){claimed++;return {envelope:{}};}
   };
   const worker=new URL('../docs/native-bridge/coupled-workerd-worker.ts',import.meta.url).href;
@@ -119,4 +120,35 @@ test('fixture setup requires prior admission and cannot seed runtime SQL', async
   assert.equal(result.signedDelivery.body,'signed');
   assert.equal(published,1);assert.equal(claimed,1);
   assert.deepEqual(statements,[]);
+
+  const original=JSON.stringify({subjectId:'fixture-manual-source',expiresAt:'2026-10-13T12:05:00.000Z'});
+  let locked=false,barriers=0;
+  const scoped=new FixtureCoordinator({storage:coordinator.ctx.storage,async blockConcurrencyWhile(callback){
+    assert.equal(locked,false);
+    locked=true;barriers++;
+    try{return await callback();}finally{locked=false;}
+  }},{FIXTURE_THREE_SESSION_CANARY:'true',EVENT_MANUAL_CANARY:original});
+  const subjects=['three-session-route-a','three-session-route-b','three-session-route-c',
+    'three-session-c-busy-first','three-session-c-busy-second','three-session-c-after-attach'];
+  inspectPublication=(env,input)=>{
+    assert.equal(locked,true,'scope change must be inside concurrency barrier');
+    assert.deepEqual(JSON.parse(env.EVENT_MANUAL_CANARY),{
+      subjectId:input.subjectId,expiresAt:'2026-10-13T12:05:00.000Z',
+    });
+  };
+  for(const subjectId of subjects){
+    await scoped.fixtureSetup({...setup,subjectId});
+    assert.equal(scoped.env.EVENT_MANUAL_CANARY,original,'scope restored after success');
+  }
+  const publications=published;
+  for(const subjectId of ['fixture-manual-source','unknown','three-session-route-a-extra',undefined]){
+    await assert.rejects(scoped.fixtureSetup({...setup,subjectId}),/fixture_manual_subject_refused/);
+    assert.equal(scoped.env.EVENT_MANUAL_CANARY,original);
+  }
+  assert.equal(published,publications,'unknown subjects must never call production publication');
+  inspectPublication=()=>{throw new Error('manual_disabled');};
+  await assert.rejects(scoped.fixtureSetup({...setup,subjectId:subjects[0]}),/manual_disabled/);
+  assert.equal(scoped.env.EVENT_MANUAL_CANARY,original,'scope restored after production guard rejection');
+  assert.equal(barriers,11);
+  assert.deepEqual(statements,[],'scope selection must not alter source or runtime SQL');
 });

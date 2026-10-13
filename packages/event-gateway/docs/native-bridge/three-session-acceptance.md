@@ -1,7 +1,7 @@
 # Three-session acceptance runbook
 
 **Status: controlled local run passed; live qualification remains open.** The
-[public proof projection](three-session-acceptance-proof.json) records the
+[current public proof projection](three-session-20261013-proof.json) records the
 result and raw-proof provenance without private paths or session IDs. The
 [runner](three-session-workerd.py) writes a separate mode-0600 raw proof only
 after its assertions and cleanup succeed. This evidence does not qualify
@@ -31,7 +31,69 @@ CAS/challenge path and post-attach delivery only. They do **not** establish
 busy-to-idle queue draining, an owner-authorized production reattachment, or
 completion of any rollout stage.
 
+## Current manual-canary fixture profile
+
+The runner explicitly enables a broker profile containing only its six existing
+synthetic subjects: `three-session-route-a`, `three-session-route-b`,
+`three-session-route-c`, `three-session-c-busy-first`,
+`three-session-c-busy-second`, and `three-session-c-after-attach`.
+Each setup call selects one exact subject under the Durable Object concurrency
+barrier, invokes the production manual-publication guard, and restores the
+original scope in `finally`. All selections retain the broker's original
+five-minute expiry; setup never extends it. Unknown subjects fail closed.
+
+This models sequential synthetic deployment scopes, not production authority for
+multiple subjects. Production principal/agent and expiry guards remain active.
+Source rows and delivery identities are preserved: reusing a single subject would
+deduplicate C1/C2 or conflict across A/B and post-attach generations. The default
+coupled recovery broker still admits only `fixture-manual-source`.
+
+The controlled provider now holds only a main request, checks that the hold has
+not expired through daemon restart, and uses separate tool-call identities per
+session and C phase. Proof requires exactly two successful main requests for each
+source-read turn and native idle settlement, with provider errors checked after
+cleanup. These are fixture correctness checks, not live useful-response evidence.
+
+The 2026-10-13 controlled run below qualifies this fixture profile within its
+stated local scope; historical proofs remain separate.
+
 ## Latest controlled evidence
+
+Attempt 03 on 2026-10-13 passed in 26.244 seconds with exit 0, unchanged frozen
+inputs, and no remaining owned processes, listeners, or sockets. The
+[dated proof projection](three-session-20261013-proof.json) records source commit
+`a22a40fd123784c7cf870a688f226f22bceb3840`, cloud source
+`e6196b5d2d714f71fce6c06812563c0360a2b551`, all 20 verified installed package files,
+the exact native binary and Workerd bundle, and the raw-proof and supervisor hashes.
+The run used the verified outer sandbox with the short private scratch path.
+Its frozen guard queried the existing outside directory; the current runner
+now requires denial for a fresh outside child path. The dated proof
+remains evidence for its recorded source revision.
+
+A and B each received one native Start. C1 stayed busy across the daemon restart;
+C2 remained queued without a claim or Start, then became stale after binding
+rotation and explicit fixture attachment. Fresh C3 received one claim and Start,
+completed its source read, and settled observed. The lost observed ACK reply was
+retried with identical body bytes and a fresh proof nonce.
+
+Independent review checked the frozen assertion chain, artifact hashes, retained
+aggregate proof, and cleanup. **Raw model requests, hold timestamps, signed wire
+bodies, and complete native/gateway/ledger histories were not retained**, so these
+cannot be independently replayed from the surviving artifacts. The private causal
+sidecar retains only C1/C3 nonce hashes and their non-reuse assertion. This is
+controlled runtime-assertion qualification with an evidence-retention limitation.
+
+The daemon's `serve` coroutine restarted inside the harness process; this was not
+an OS process crash or power-loss test. C2 was fenced after binding rotation, so
+this run does not demonstrate deferred C2 delivery under an unchanged binding.
+Production admission, owner Access, Mesh, manual canary, automatic queue draining,
+and live user wake remain unqualified. Attempt 01 failed before selection because
+nested sandbox application and process enumeration were denied. Attempt 02 failed
+before selection with an overlong Unix socket path. Neither wrote a proof; their
+supervisor hashes remain in the dated projection. The historical proof below is
+unchanged.
+
+## Earlier CI artifact evidence
 
 The protected-main CI artifact rerun passed with CLI `763e5e2b…3717b` and a
 fresh matching wheel. See [CI qualification](native-ci-qualification.md) and its
@@ -82,6 +144,12 @@ Use explicitly selected, verified artifacts; the runner installs nothing:
 - Apple Silicon macOS with PTYs, Unix sockets, `sandbox-exec`, and permission for
   disposable loopback listeners and child processes. Scratch uses a private
   temporary directory; native child launch uses the existing host qualifier's sandbox.
+  Set `TMPDIR` to an existing owned mode-0700 directory whose resolved path is at
+  most 30 filesystem-encoded bytes on macOS (for example, `/private/tmp/et3-03`).
+  The runner checks this before starting the broker: its generated gateway socket
+  suffix needs 73 bytes plus the terminating NUL within macOS's 104-byte limit.
+  Native and gateway scratch
+  stay beneath this directory so the external supervisor can bound their writes.
 - Python 3.13+ in a private environment containing a non-editable
   `knitli-event-gateway` wheel and its dependencies. Run with `-I -B`.
   Installed preflight verifies interpreter ownership, wheel RECORD, import path,
@@ -142,6 +210,40 @@ individual harness timeouts do not provide a global execution deadline. Retain
 source/artifact hashes before and after execution. See the
 [coupled recovery preflight](coupled-workerd-recovery-preflight.md) for staging
 and supervision principles, not a directly interchangeable command/profile.
+
+## Explicit outer containment on macOS
+
+The default command retains the mandatory per-native `sandbox-exec` profile,
+which permits each native process's own model port and Unix sockets. An already
+sandboxed supervisor cannot apply another seatbelt profile to its descendants.
+For an independently audited outer profile, add `--outer-contained` to the
+command above. This fixture option changes no production launcher behavior.
+
+Before starting the broker and before each native launch, the option checks the
+kernel sandbox is active, creates an owned scratch-only positive control, and
+requires permission-query denials for the real-user home, its `.codex`, the verified installed
+venv's sibling `codex-home`, creation of a fresh child path beneath `/private/tmp`, and
+unqualified inbound/outbound network operations. Query errors, missing API
+support, an inactive sandbox, and permissive results refuse execution. It never
+opens owner-state files or contacts an external endpoint. Every owner-state read-denial probe must be an existing directory, verified using metadata
+only. The outer profile must permit metadata inspection of those exact directory
+roots while denying their contents; missing or inaccessible probe metadata refuses
+execution. Root identities are also checked by the independent supervisor preflight.
+
+Only after those checks does it remove the exact `sandbox-exec -f <profile>`
+prefix from the original verified launch argv. The outer profile permits dynamic
+localhost ports for all disposable services and Unix sockets; its audited bytes
+must deny other network access, protect all owner state, and restrict writes to
+one attempt directory. The kernel's unqualified network query does **not** prove
+all address-specific rules. Retain the exact outer-profile hash and external
+supervisor audit with the proof; `executionContainment` records this limitation.
+
+The sandbox-presence query follows [Chromium's seatbelt implementation](https://chromium.googlesource.com/chromium/src/+/master/sandbox/mac/seatbelt.cc),
+and the permission-query ABI and PATH filter follow [WebKit's sandbox SPI declarations](https://github.com/WebKit/WebKit/blob/main/Source/WTF/wtf/spi/darwin/SandboxSPI.h).
+Darwin cleanup enumerates processes using bounded `libproc` calls and checks each
+process group directly, avoiding setuid `/bin/ps` under containment. Permission
+errors and incomplete/saturated process lists fail closed. Other platforms keep
+the existing bounded `ps` path; outer-contained mode itself requires macOS.
 
 ## Reading the result
 

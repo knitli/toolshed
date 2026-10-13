@@ -15,6 +15,8 @@ type FixtureEnv = Omit<EventApiEnvironment, 'OWNER_REGISTRY' | 'AGENT_COORDINATO
   AGENT_COORDINATOR: DurableObjectNamespace<FixtureCoordinator>;
 };
 const principal = 'qualification@example.com', agent = 'pilot';
+const threeSessionSubjects = new Set(['three-session-route-a','three-session-route-b','three-session-route-c',
+  'three-session-c-busy-first','three-session-c-busy-second','three-session-c-after-attach']);
 const reservations = new Set<string>();
 const budget = () => ({ used: reservations.size, remaining: 10-reservations.size, limit: 10, windowMs: 3600000 });
 const valid = (x:Auth) => x.accessAssertion === 'fixture-access' && x.agentToken === 'fixture-agent';
@@ -27,8 +29,24 @@ const authority = {
 const metadata = { metrics:{ backlogCount:0,backlogBytes:0 } };
 const queue = { async send(){return {metadata};}, async sendBatch(){return {metadata};}, async metrics(){return metadata.metrics;} };
 export class FixtureCoordinator extends AgentCoordinator {
-  constructor(ctx:CoordinatorContext,env:CoordinatorEnv) { super(ctx,{...env,MESSAGE_AUTHORITY:authority as unknown as CoordinatorEnv['MESSAGE_AUTHORITY'],DELIVERY_QUEUE:queue as unknown as CoordinatorEnv['DELIVERY_QUEUE']}); }
+  readonly #threeSession: boolean;
+  constructor(ctx:CoordinatorContext,env:CoordinatorEnv & {FIXTURE_THREE_SESSION_CANARY?:string}) {
+    super(ctx,{...env,MESSAGE_AUTHORITY:authority as unknown as CoordinatorEnv['MESSAGE_AUTHORITY'],DELIVERY_QUEUE:queue as unknown as CoordinatorEnv['DELIVERY_QUEUE']});
+    this.#threeSession=env.FIXTURE_THREE_SESSION_CANARY==='true';
+  }
   async fixtureSetup(x:FixtureSetup) {
+    if(!this.#threeSession)return this.#setup(x);
+    return this.ctx.blockConcurrencyWhile(async()=>{
+      if(!threeSessionSubjects.has(x.subjectId??''))throw new Error('fixture_manual_subject_refused');
+      const original=this.env.EVENT_MANUAL_CANARY;
+      const scope=JSON.parse(original??'');
+      // Sequential synthetic deployment scopes retain the one broker deadline.
+      this.env.EVENT_MANUAL_CANARY=JSON.stringify({...scope,subjectId:x.subjectId});
+      try{return await this.#setup(x);}
+      finally{this.env.EVENT_MANUAL_CANARY=original;}
+    });
+  }
+  async #setup(x:FixtureSetup) {
     await this.setEnabled({enabled:true});
     const job={principal,agent,...await this.publishManual({runtimeId:x.runtimeId,subjectId:x.subjectId??'fixture-manual-source'})};
     const transport=await this.claimTransport(job);

@@ -4,6 +4,7 @@
 import argparse
 import asyncio
 import base64
+import ctypes
 from contextlib import ExitStack, closing, redirect_stderr, redirect_stdout
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,6 +20,7 @@ import select
 import signal
 import socket
 import sqlite3
+import stat
 import subprocess  # nosec B404 - launches only the supplied Node fixture broker.
 import sys
 import tempfile
@@ -34,6 +36,11 @@ AGENT = "pilot"
 ORIGIN = "https://events.example.com"
 FIXTURE_ACCESS = "fixture-access"
 FIXTURE_AGENT = "fixture-agent"
+GATEWAY_TEMP_PREFIX = "three-gateway-"
+# tempfile adds eight ASCII characters; launcher.session_path uses c-<UUID>.sock.
+DARWIN_SOCKET_PATH_BYTES = 104
+GATEWAY_SOCKET_SUFFIX = f"/{GATEWAY_TEMP_PREFIX}{'x' * 8}/state/c-{'0' * 36}.sock"
+DARWIN_TEMP_ROOT_BYTES = DARWIN_SOCKET_PATH_BYTES - 1 - len(GATEWAY_SOCKET_SUFFIX.encode("ascii"))
 
 args = None
 binary = node = cloud_source = package_source = None
@@ -99,50 +106,64 @@ class ModelProvider(BaseHTTPRequestHandler):
             size = int(self.headers["Content-Length"])
             require(0 < size < 4_000_000, "model request outside bound")
             request = json.loads(self.rfile.read(size))
-            kind = host_qualifier.request_kind(request)
-            self.server.requests.append(kind)
-            if kind == "main":
-                self.server.main_requests.append(request)
-                self.server.turn_main_requests.append(request)
-            main_requests = len(self.server.turn_main_requests)
+            qualifier = self.server.qualifier
+            kind = qualifier.request_kind(request)
+            with self.server.request_lock:
+                self.server.requests.append(kind)
+                if kind == "main":
+                    self.server.main_requests.append(request)
+                    self.server.turn_main_requests.append(request)
+                    require(len(self.server.turn_main_requests) <= 2, "extra main request")
+                else:
+                    self.server.turn_title_count += 1
+                    require(self.server.turn_title_count == 1, "extra title request")
+                main_requests = len(self.server.turn_main_requests)
             with self.server.hold_lock:
-                hold = self.server.hold_next
+                hold = kind == "main" and self.server.hold_next
                 self.server.hold_next = False if hold else self.server.hold_next
+                if hold:
+                    self.server.hold_deadline = time.monotonic() + 60
+                    self.server.hold_state = "held"
+                    self.server.hold_started.set()
             if hold:
-                self.server.hold_started.set()
-                require(self.server.release_hold.wait(60), "controlled model hold expired")
+                released = self.server.release_hold.wait(60)
+                with self.server.hold_lock:
+                    self.server.hold_state = "released" if released else "timed_out"
+                require(released, "controlled model hold expired")
             if kind == "title":
-                self.server.turn_title_count += 1
-                require(self.server.turn_title_count == 1, "extra title request")
                 item = {"type": "message", "role": "assistant", "id": "three-title",
                         "content": [{"type": "output_text", "text": '{"title":"Controlled event"}'}]}
                 events = [{"type": "response.output_item.done", "item": item},
-                          host_qualifier.completed("three-title")]
-            elif main_requests % 2 == 1:
-                item = {"type": "custom_tool_call", "call_id": host_qualifier.CALL_ID,
+                          qualifier.completed("three-title")]
+            elif main_requests == 1:
+                item = {"type": "custom_tool_call", "call_id": qualifier.CALL_ID,
                         "name": "exec", "input": self.server.program}
                 events = [{"type": "response.created", "response": {"id": "three-main-" + str(main_requests)}},
                           {"type": "response.output_item.done", "item": item},
-                          host_qualifier.completed("three-main-" + str(main_requests))]
+                          qualifier.completed("three-main-" + str(main_requests))]
             else:
-                host_qualifier.verify_output(self.server.turn_main_requests[-2:], self.server.nonce)
+                qualifier.verify_output(self.server.turn_main_requests, self.server.nonce)
                 identity = "three-main-" + str(main_requests)
                 item = {"type": "message", "role": "assistant", "id": identity,
                         "content": [{"type": "output_text", "text": "Offline read completed."}]}
                 events = [{"type": "response.output_item.done", "item": item},
-                          host_qualifier.completed(identity)]
+                          qualifier.completed(identity)]
             payload = "".join("data: " + json.dumps(event) + "\n\n" for event in events).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+            if kind == "main" and main_requests == 2:
+                with self.server.request_lock:
+                    self.server.turn_verified = True
         except Exception as error:
-            self.server.errors.append({"type": type(error).__name__, "message": str(error)[:160],
-                                       "phase": self.server.phase,
-                                       "kind": locals().get("kind"),
-                                       "mainCount": len(self.server.main_requests),
-                                       "turnMainCount": len(self.server.turn_main_requests)})
+            with self.server.request_lock:
+                self.server.errors.append({"type": type(error).__name__, "message": str(error)[:160],
+                                           "phase": self.server.phase,
+                                           "kind": locals().get("kind"),
+                                           "mainCount": len(self.server.main_requests),
+                                           "turnMainCount": len(self.server.turn_main_requests)})
             self.send_error(500)
 
 
@@ -157,6 +178,91 @@ def stop_model(server, thread):
 def model_idle(server):
     with server.request_lock:
         return server.active_requests == 0
+
+
+def require_model_held(server):
+    with server.hold_lock:
+        require(server.hold_state == "held" and time.monotonic() < server.hold_deadline
+                and server.hold_started.is_set() and not server.release_hold.is_set(),
+                "primary model response is no longer held")
+
+
+def require_model_turn_complete(server):
+    with server.request_lock:
+        require(server.active_requests == 0 and server.turn_verified
+                and len(server.turn_main_requests) == 2 and not server.errors,
+                "source-read turn must complete successfully with exactly two main requests")
+
+
+def private_temp_root():
+    root = Path(os.environ["TMPDIR"]).resolve(strict=True)
+    info = root.lstat()
+    require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+            and not info.st_mode & 0o077, "fixture TMPDIR must be private and owned")
+    installed_helper._ancestors(root / "scratch")
+    if sys.platform == "darwin":
+        require(len(os.fsencode(root)) <= DARWIN_TEMP_ROOT_BYTES,
+                f"fixture TMPDIR resolved path must be at most {DARWIN_TEMP_ROOT_BYTES} bytes "
+                "for macOS Unix sockets")
+    return root
+
+
+def verify_outer_containment(scratch):
+    import pwd
+
+    require(sys.platform == "darwin", "outer containment requires macOS kernel checks")
+    library = ctypes.CDLL("/usr/lib/libsandbox.1.dylib", use_errno=True)
+    check = library.sandbox_check
+    check.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+    check.restype = ctypes.c_int
+    quiet = ctypes.c_int.in_dll(library, "SANDBOX_CHECK_NO_REPORT").value
+    require(quiet > 0 and quiet & 1 == 0, "sandbox no-report flag invalid")
+
+    def query(operation, path=None):
+        ctypes.set_errno(0)
+        arguments = (os.getpid(), operation, quiet if path is None else quiet | 1)
+        result = check(*arguments, ctypes.c_char_p(os.fsencode(path))) if path is not None else check(*arguments)
+        require(result in (0, 1) and ctypes.get_errno() == 0, "sandbox permission query failed")
+        return result
+
+    ctypes.set_errno(0)
+    require(check(os.getpid(), None, 0) == 1 and ctypes.get_errno() == 0,
+            "outer containment requires an active kernel sandbox")
+    owner_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    owner_roots = (owner_home, owner_home / ".codex", Path(sys.prefix).parent / "codex-home")
+    require(all(root.is_absolute() and not root.is_relative_to(scratch) for root in owner_roots),
+            "owner state must be outside fixture scratch")
+    require(all(root.is_dir() for root in owner_roots) and Path("/private/tmp").is_dir(),
+            "containment denial probes require existing directories")
+    with tempfile.NamedTemporaryFile(prefix="outer-containment-", dir=scratch) as probe:
+        probe.write(b"synthetic containment probe\n")
+        probe.flush()
+        for operation in (b"file-read-data", b"file-write-create", b"file-write-data"):
+            require(query(operation, probe.name) == 0, "outer sandbox refused owned scratch control")
+        for root in owner_roots:
+            require(query(b"file-read-data", root) == 1, "outer sandbox permits owner-state reads")
+        outside_probe = Path("/private/tmp") / f"event-three-denied-{uuid4()}"
+        require(not outside_probe.is_relative_to(scratch), "write denial probe must be outside scratch")
+        require(query(b"file-write-create", outside_probe) == 1,
+                "outer sandbox permits writes outside fixture scratch")
+        # NONE tests default denial; address-specific exceptions require an independent profile audit.
+        for operation in (b"network-outbound", b"network-inbound"):
+            require(query(operation) == 1, "outer sandbox permits unqualified network access")
+    return {"mode": "verified-outer-sandbox", "kernelSandboxActive": True,
+            "scratchReadWriteAllowed": True, "ownerStateRootReadDenied": True,
+            "outsideScratchProbeWriteDenied": True, "defaultNetworkDenied": True,
+            "addressSpecificPolicyRequiresIndependentAudit": True}
+
+
+def native_launch_argv(profile, cache, state, root):
+    argv = host_qualifier.launch_argv(profile, cache, state, binary, root)
+    if args.outer_contained:
+        verify_outer_containment(private_temp_root())
+        require(argv[:3] == ["/usr/bin/sandbox-exec", "-f", str(profile)]
+                and len(argv) > 3 and argv[3] == sys.executable,
+                "native sandbox launch prefix changed")
+        return argv[3:]
+    return argv
 
 
 def free_port():
@@ -202,6 +308,7 @@ def start_broker():
         "TMP": tempfile.gettempdir(),
         "TEMP": tempfile.gettempdir(),
         "FIXTURE_CLOUD_SOURCE": str(cloud_source),
+        "FIXTURE_THREE_SESSION_CANARY": "true",
         "FIXTURE_ESBUILD": str(Path(args.esbuild).resolve(strict=True)),
         "FIXTURE_MINIFLARE": str(Path(args.miniflare).resolve(strict=True)),
         "FIXTURE_ENTRY_PORT": str(args.entry_port),
@@ -256,6 +363,36 @@ def port_is_closed(port):
 
 def process_group_members(group_id):
     require(is_exact_int(group_id) and group_id > 1, "process group ID outside range")
+    if sys.platform == "darwin":
+        library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        list_pids = library.proc_listallpids
+        list_pids.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        list_pids.restype = ctypes.c_int
+        count = list_pids(None, 0)
+        require(0 < count < 100000, "Darwin process count outside range")
+        capacity = min(count + 128, 100000)
+        for attempt in range(3):
+            pids = (ctypes.c_int * capacity)()
+            count = list_pids(pids, ctypes.sizeof(pids))
+            require(0 < count <= capacity, "Darwin process listing count outside range")
+            if count < capacity:
+                break
+            require(attempt < 2 and capacity < 100000, "Darwin process listing saturated")
+            capacity = min(capacity * 2, 100000)
+        # PID 0 is the kernel; vanished processes are the only acceptable lookup failure.
+        positive_pids = [pid for pid in pids[:count] if pid > 0]
+        require(all(pid >= 0 for pid in pids[:count]) and os.getpid() in positive_pids
+                and len(set(positive_pids)) == len(positive_pids),
+                "Darwin process listing was malformed or incomplete")
+        members = []
+        for pid in positive_pids:
+            try:
+                process_group_id = os.getpgid(pid)
+            except ProcessLookupError:
+                continue
+            if process_group_id == group_id:
+                members.append(pid)
+        return members
     result = subprocess.run(  # nosec B603 - fixed system ps executable and fixed output-only arguments.
         ["/bin/ps", "-axo", "pgid=,pid="], check=True, capture_output=True,
         text=True, timeout=5,
@@ -454,17 +591,24 @@ def configure(parsed):
 
 
 def make_model(stack, hold=False):
+    # Each provider owns its verifier globals; C3 cannot change A/B's call identity.
+    qualifier = load_module("three_session_model_qualifier", host_qualifier.__file__)
+    qualifier.CALL_ID = "three-session-source-read-" + uuid4().hex
     server = ThreadingHTTPServer(("127.0.0.1", 0), ModelProvider)
+    server.qualifier = qualifier
     server.requests = []
     server.main_requests = []
     server.turn_main_requests = []
     server.turn_title_count = 0
+    server.turn_verified = False
     server.phase = "initial"
     server.errors = []
     server.request_lock = threading.Lock()
     server.active_requests = 0
     server.hold_lock = threading.Lock()
     server.hold_next = hold
+    server.hold_state = "idle"
+    server.hold_deadline = 0
     server.hold_started = threading.Event()
     server.release_hold = threading.Event()
     if not hold:
@@ -529,7 +673,7 @@ def start_pty_pump(stack, master, tail):
 
 
 def native_session(stack, label, shared_state, *, hold=False):
-    temporary = tempfile.TemporaryDirectory(prefix="three-native-", dir="/private/tmp")
+    temporary = tempfile.TemporaryDirectory(prefix="three-native-", dir=private_temp_root())
     root = Path(temporary.name)
     root.chmod(0o700)
     stack.callback(temporary.cleanup)
@@ -552,7 +696,7 @@ def native_session(stack, label, shared_state, *, hold=False):
     cache = root / "child-cache"
     cache.mkdir(mode=0o700)
     state = Path(shared_state)
-    argv = host_qualifier.launch_argv(profile, cache, state, binary, root)
+    argv = native_launch_argv(profile, cache, state, root)
     known_sockets = {path.name for path in state.glob("c-*.sock")}
     observations = {}
     cleanup_result = {}
@@ -821,6 +965,7 @@ async def wait_stable_session_binding(session, provider, *, minimum_turn_main_re
         if settled and previous == observation:
             stable_observations += 1
             if stable_observations >= 8:
+                require_model_turn_complete(provider)
                 return binding
         else:
             stable_observations = 0
@@ -1205,6 +1350,9 @@ async def run_ab_routes(ctx):
                 len(ctx.start_calls["A"]) == 1, len(ctx.start_calls["B"]) == 1,
                 not ctx.start_calls["C"])
     ctx.b_route_counts = {label: len(ctx.start_calls[label]) for label in ctx.start_calls}
+    for label in ("A", "B"):
+        await wait_stable_session_binding(ctx.sessions[label], ctx.sessions[label]["provider"],
+                                          minimum_turn_main_requests=2)
 
 
 async def run_busy_stage(ctx):
@@ -1238,12 +1386,15 @@ async def run_busy_stage(ctx):
         "state": "created", "reservation_state": "none", "transport_status": "sending",
         "permit_id": None, "submission_id": None, "turn_id": None,
     }, "fixture did not create the expected unreserved C2 transport-attempt baseline")
-    ctx.sessions["C"]["provider"].hold_next = True
-    ctx.sessions["C"]["provider"].release_hold.clear()
+    with ctx.sessions["C"]["provider"].hold_lock:
+        ctx.sessions["C"]["provider"].hold_next = True
+        ctx.sessions["C"]["provider"].hold_started.clear()
+        ctx.sessions["C"]["provider"].release_hold.clear()
     c_first_status, _ = await asyncio.to_thread(listener_delivery, ctx.listen_port, c_first_signed)
     require(c_first_status == 202, "production listener refused C busy-first delivery")
     await wait_until(ctx.sessions["C"]["provider"].hold_started.is_set,
                      "C native CLI did not enter the controlled busy state")
+    require_model_held(ctx.sessions["C"]["provider"])
     c_first_id = ctx.c_first_envelope["deliveryId"]
     await wait_until(lambda: db_delivery(ctx.state, c_first_id)["attemptState"] in
                      ("submitted", "observed"), "C busy-first event did not reach native Start")
@@ -1313,8 +1464,10 @@ async def run_busy_stage(ctx):
         not c_second_claims, not c_second_start_calls,
         len(ctx.start_calls["C"]) == ctx.starts_before_busy_delivery,
     )
+    require_model_held(ctx.sessions["C"]["provider"])
     await ctx.stop_daemon(ctx.daemon_task)
     ctx.daemon_task = None
+    require_model_held(ctx.sessions["C"]["provider"])
     require_all(
         "stopping the daemon did not retain C's queue while its native turn stayed busy",
         db_delivery(ctx.state, ctx.c_second_envelope["deliveryId"])
@@ -1335,6 +1488,7 @@ async def run_busy_stage(ctx):
         c_second_cloud_after_restart, ctx.c_second_envelope["attemptId"],
     )
     c_second_transport_after_restart = transport_attempt_snapshot(c_second_attempts_after_restart)
+    require_model_held(ctx.sessions["C"]["provider"])
     require_all(
         "restarted busy delivery did not remain queued without cloud or native start",
         db_delivery(ctx.state, ctx.c_second_envelope["deliveryId"])
@@ -1347,6 +1501,7 @@ async def run_busy_stage(ctx):
     )
     await ctx.stop_daemon(ctx.daemon_task)
     ctx.daemon_task = None
+    require_model_held(ctx.sessions["C"]["provider"])
     ctx.sessions["C"]["provider"].release_hold.set()
     ctx.current_binding = await wait_stable_session_binding(
         ctx.sessions["C"], ctx.sessions["C"]["provider"],
@@ -1491,6 +1646,7 @@ async def run_fixture_attach(ctx):
 async def run_post_attach_c3(ctx):
     # Reuse C's real CLI session with a fresh fixture nonce; its prior
     # C1 conversation already contains the first nonce by design.
+    require_model_turn_complete(ctx.sessions["C"]["provider"])
     ctx.c1_source_nonce_sha256 = ctx.sessions["C"]["provider"].source_nonce_sha256
     ctx.sessions["C"]["provider"].nonce = "three-session-source-c-after-attach-" + uuid4().hex
     ctx.c3_source_nonce_sha256 = digest(ctx.sessions["C"]["provider"].nonce)
@@ -1502,8 +1658,11 @@ async def run_post_attach_c3(ctx):
     )
     ctx.sessions["C"]["provider"].turn_main_requests.clear()
     ctx.sessions["C"]["provider"].turn_title_count = 0
+    ctx.sessions["C"]["provider"].turn_verified = False
     ctx.sessions["C"]["provider"].phase = "post-attach"
-    host_qualifier.CALL_ID = "three-session-source-read-" + uuid4().hex
+    qualifier = load_module("three_session_c3_qualifier", host_qualifier.__file__)
+    qualifier.CALL_ID = "three-session-source-read-" + uuid4().hex
+    ctx.sessions["C"]["provider"].qualifier = qualifier
     c_third = ctx.fixture("/fixture/setup", {
         "runtimeId": ctx.runtime_ids["C"], "nodeId": ctx.node_id,
         "transportPrivateKey": b64(ctx.transport_key.private_bytes(
@@ -1544,6 +1703,8 @@ async def run_post_attach_c3(ctx):
 
 
 def build_proof(ctx):
+    for session in ctx.sessions.values():
+        require_model_turn_complete(session["provider"])
     pty_drain = {
         label: {"bytesRead": session["ptyPumpStats"]["bytesRead"],
                 "readCount": session["ptyPumpStats"]["readCount"]}
@@ -1582,7 +1743,8 @@ def build_proof(ctx):
     ctx.proof = {
         "result": "PASS",
         "qualification": "controlled-three-real-cli-production-daemon-workerd",
-        "candidateStatus": "offline-qualified-held-promotion-candidate-pr81",
+        "candidateStatus": "explicit-installed-artifacts-verified-against-source",
+        "executionContainment": ctx.containment,
         "productionAdmissionProven": False,
         "liveMeshProven": False,
         "liveOwnerAccessProven": False,
@@ -1771,10 +1933,13 @@ def restore_observers(ctx):
 
 
 async def run_scenario():
+    temporary_root = private_temp_root()
+    containment = (verify_outer_containment(temporary_root) if args.outer_contained
+                   else {"mode": "per-native-profile"})
     broker, broker_log, address = start_broker()
     proof = None
     private_nonce_record = None
-    state_root = Path(tempfile.mkdtemp(prefix="three-gateway-", dir="/private/tmp"))
+    state_root = Path(tempfile.mkdtemp(prefix=GATEWAY_TEMP_PREFIX, dir=temporary_root))
     state_root.chmod(0o700)
     state = state_root / "state"
     state.mkdir(mode=0o700)
@@ -1853,8 +2018,8 @@ async def run_scenario():
             await run_busy_stage(ctx)
             await run_fixture_attach(ctx)
             await run_post_attach_c3(ctx)
-            ctx.proof, ctx.private_nonce_record = build_proof(ctx)
-            return ctx.proof
+        ctx.proof, ctx.private_nonce_record = build_proof(ctx)
+        return ctx.proof
     finally:
         await cleanup_scenario(ctx)
 
@@ -1864,6 +2029,8 @@ def cli():
     for name in ("package-source", "binary", "binary-sha256", "node", "cloud-source",
                  "esbuild", "miniflare", "output"):
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--outer-contained", action="store_true",
+                        help="Verify an independently audited outer macOS sandbox instead of nesting native profiles")
     parser.add_argument("--cloud-commit", required=True)
     parser.add_argument("--entry-port", type=int, default=49732)
     parser.add_argument("--loopback-port", type=int, default=49733)
