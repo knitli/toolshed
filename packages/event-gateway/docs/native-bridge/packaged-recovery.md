@@ -95,3 +95,27 @@ Restart, bounded ACK polling, and observed-settlement helpers preserve the prior
 The combined proof was rerun with the rebuilt wheel after these changes; the
 source manifest includes the hashing helper and the corrected semantic driver
 as separate provenance (the driver is not wheel content).
+
+## In-flight fault checkpoint (runner implemented; native execution pending)
+
+Add `--restart-inflight` to the installed `--restart-native` command above to
+stop the old TUI/backend after durable InputRecorded and permit expiry while the
+single synthetic primary model response remains held. The runner checks that
+both old processes have stopped before releasing that response. Explicit response
+lifecycle state and the unchanged 30-second hold deadline must still report held
+both before stopping and after confirmed shutdown; timeout or response transmission
+refuses the proof even when the release event remains unset. The runner then uses the
+existing new-process read-only receipt recovery and exact lost-ACK replay checks.
+The default restart scenario still waits for idle before stopping native.
+
+The new proof fields are `nativeInFlightRestartProven` and
+`restart.stoppedBeforeHeldModelResponseReleased`; neither is evidence until a
+fresh controlled native run succeeds. `interruptedTurnCompletionProven` stays
+false: recovering InputRecorded proves Core observation, not model completion,
+a useful response, or permission to start a replacement turn. No reattachment,
+lease-renewal service, automatic queue drain, or live rollout is introduced.
+
+Use a fresh private wheel/environment matching the current package source,
+explicit qualified native artifacts and qualifier, a pinned clean cloud source,
+and the existing bounded external supervisor. Retain failed-run logs separately;
+the historical packaged-recovery proof above does not qualify this new checkpoint.

@@ -41,11 +41,14 @@ def inputs(argv=None):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--installed', action='store_true', help='Verify the installed wheel against --package/src/event_gateway before imports; requires -I')
     parser.add_argument('--restart-native', action='store_true', help='Recover an expired v3 receipt after native process restart')
+    parser.add_argument('--restart-inflight', action='store_true', help='Stop native while the synthetic primary response remains held; requires --restart-native')
     parser.add_argument('--terminal-no-start', action='store_true', help='Qualify actual terminal refusal and durable cloud settlement')
     parser.add_argument('--forget-terminal', action='store_true', help='Restart native before terminal recovery; unknown must stay fenced')
     for name, port in (('model', 49731), ('entry', 49732), ('loopback', 49733), ('broker', 49734)):
         parser.add_argument('--' + name + '-port', type=int, default=port)
     parsed = parser.parse_args(argv)
+    if parsed.restart_inflight and not parsed.restart_native:
+        parser.error('--restart-inflight requires --restart-native')
     if parsed.restart_native and parsed.terminal_no_start:
         parser.error('--restart-native and --terminal-no-start are mutually exclusive')
     if parsed.forget_terminal and not parsed.terminal_no_start:
@@ -148,7 +151,13 @@ def verify_native_restart(old_process, native_process, witness, new_witness, lau
     return checks
 
 
-async def restart_native(bridge, model, native_process, witness, launcher, resources, request):
+def require_primary_held(model):
+    require(getattr(model, 'primary_response_state', None) == 'held'
+            and time.monotonic() < getattr(model, 'primary_response_deadline', 0)
+            and not model.release_primary.is_set(), 'primary response must remain held before native recovery')
+
+
+async def restart_native(bridge, model, native_process, witness, launcher, resources, request, *, inflight=False):
     wire_request = {key: value for key, value in request.items() if key != 'receiptVersion'}
     require(request['receiptVersion'] == 3, 'explicit durable reader identity')
     deadline = time.monotonic() + 12
@@ -159,15 +168,25 @@ async def restart_native(bridge, model, native_process, witness, launcher, resou
             break
         require(time.monotonic() < deadline and native_process.poll() is None, 'native input deadline')
         await asyncio.sleep(.05)
-    model.release_primary.set()
+    if not inflight:
+        model.release_primary.set()
     deadline = time.monotonic() + 12
-    while time.time_ns() // 1_000_000 <= request['permitExpiresAt'] or not bridge.challenge()['eligible']:
+    while time.time_ns() // 1_000_000 <= request['permitExpiresAt'] or (not inflight and not bridge.challenge()['eligible']):
         require(time.monotonic() < deadline and native_process.poll() is None, 'expiry and idle wait')
         await asyncio.sleep(.05)
     old_process = native_process
     native_args = list(old_process.args)
     root = Path(native_args[native_args.index('-C') + 1])
+    if inflight:
+        require_primary_held(model)
+        require(not model.release_primary.is_set() and model.request_counts['primary'] == 1
+                and old_process.poll() is None, 'native fault requires one held primary response and live TUI')
     launcher.stop_process(old_process, witness['backendPid'])
+    if inflight:
+        require(old_process.poll() is not None and not launcher.alive(witness['backendPid']),
+                'native processes must stop before releasing held response')
+        require_primary_held(model)
+        model.release_primary.set()
     bridge.close()
     bridge, native_process, new_witness = resources.enter_context(
         launcher.native_client(native_args, root, receipt_version=3))
@@ -432,7 +451,7 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 request = prior['native_request']
                 old_process = native_process
                 bridge, native_process, new_witness, recorded = await restart_native(
-                    bridge, model, native_process, witness, launcher, resources, request)
+                    bridge, model, native_process, witness, launcher, resources, request, inflight=args.restart_inflight)
                 store.close()
                 store = Store(state)
                 app = gateway(store)
@@ -443,6 +462,7 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 restart = {'oldPid': old_process.pid, 'newPid': native_process.pid,
                            'oldWitness': witness, 'newWitness': new_witness,
                            'expiredBeforeRecovery': True, 'oldAttachmentUnavailable': True,
+                           'stoppedBeforeHeldModelResponseReleased': args.restart_inflight,
                            'gatewayReceiptAbsentBeforeRecovery': True, 'independentlyRecorded': recorded}
             result = await await_observed_ack(app, ident, native_process, lambda: drop_reply)
             require(result['reason'] == 'native_observed_ack_pending', 'lost reply remains pending')
@@ -474,6 +494,8 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 and model.request_counts['unknown'] == 0, 'one mock-model primary')
             return {'result': 'PASS', 'qualification': 'fixture-qualified-native-local-workerd',
                 'binarySha256': BINARY_SHA, 'nativeProcessRestarted': restart is not None, 'localStoreRestarted': True,
+                'nativeInFlightRestartProven': args.restart_inflight,
+                'interruptedTurnCompletionProven': False,
                 'restart': restart, 'installedPackage': args.installed,
                 'oldStartNoStartSettlementProven': False,
                 'realModelCalls': 0, 'modelRequests': model.request_counts,

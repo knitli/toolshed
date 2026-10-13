@@ -102,10 +102,15 @@ class MockModel(BaseHTTPRequestHandler):
             self.send_error(400)
             return
         release = getattr(self.server, "release_primary", None)
-        if kind == "primary" and self.server.request_counts["primary"] == 1 and release is not None:
+        held_primary = kind == "primary" and self.server.request_counts["primary"] == 1 and release is not None
+        if held_primary:
+            self.server.primary_response_deadline = time.monotonic() + 30
+            self.server.primary_response_state = "held"
             if not release.wait(30):
+                self.server.primary_response_state = "timed_out"
                 self.send_error(504)
                 return
+            self.server.primary_response_state = "responding"
         response_text = (
             '{"title":"Qualify native bridge"}'
             if kind == "title"
@@ -138,6 +143,8 @@ class MockModel(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+        if held_primary:
+            self.server.primary_response_state = "sent"
 
 
 def qualify_terminal_retry(bridge, server, process, witness):
