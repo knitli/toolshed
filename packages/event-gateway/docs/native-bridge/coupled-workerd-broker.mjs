@@ -4,6 +4,10 @@ import {createRequire} from 'node:module';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {sourceHashes} from './coupled-workerd-source-hashes.mjs';
+export function fixtureManualCanary(now=Date.now()) {
+  return JSON.stringify({subjectId:'fixture-manual-source',expiresAt:new Date(now+5*60_000).toISOString()});
+}
+
 export function fixturePorts(env=process.env) {
   const ports=Object.fromEntries(Object.entries({ENTRY:49732,LOOPBACK:49733,BROKER:49734}).map(([name,fallback])=>{
     const value=env[`FIXTURE_${name}_PORT`]??String(fallback);
@@ -47,7 +51,7 @@ const secret=randomUUID();
 const restoreLoopback=interceptLoopbackPort(ports.LOOPBACK);
 let mf;
 try {mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-10-05',cf:false,host:'127.0.0.1',port:ports.ENTRY,
-  bindings:{FIXTURE_SECRET:secret,EVENT_ENABLED:'true',EVENT_NATIVE_BINDING_ENABLED:'true',EVENT_NATIVE_BINDING_CANARY:JSON.stringify({principal:'qualification@example.com',agent:'pilot'}),EVENT_MANUAL_ENABLED:'true',EVENT_HOST:'events.example.com',ACCESS_ISSUER:'https://access.test',ACCESS_EVENT_AUD:'event-aud',ACCESS_UI_AUD:'ui-aud'},
+  bindings:{FIXTURE_SECRET:secret,EVENT_ENABLED:'true',EVENT_NATIVE_BINDING_ENABLED:'true',EVENT_NATIVE_BINDING_CANARY:JSON.stringify({principal:'qualification@example.com',agent:'pilot'}),EVENT_MANUAL_ENABLED:'true',EVENT_MANUAL_CANARY:fixtureManualCanary(),EVENT_HOST:'events.example.com',ACCESS_ISSUER:'https://access.test',ACCESS_EVENT_AUD:'event-aud',ACCESS_UI_AUD:'ui-aud'},
   durableObjects:{OWNER_REGISTRY:{className:'FixtureRegistry',useSQLite:true},AGENT_COORDINATOR:{className:'FixtureCoordinator',useSQLite:true}},
 }));} catch(error) {restoreLoopback(false);throw error;}
 const paths=new Set(['/fixture/challenge','/fixture/admission','/fixture/setup','/fixture/read','/fixture/alarm','/v1/nodes/complete','/v1/runtimes/status','/v1/runtimes/challenge','/v1/runtimes/attach','/v1/dispatch/claim','/v1/dispatch/settle-no-start','/v1/ack']);

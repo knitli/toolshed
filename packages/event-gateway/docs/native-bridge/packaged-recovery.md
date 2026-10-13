@@ -119,3 +119,9 @@ Use a fresh private wheel/environment matching the current package source,
 explicit qualified native artifacts and qualifier, a pinned clean cloud source,
 and the existing bounded external supervisor. Retain failed-run logs separately;
 the historical packaged-recovery proof above does not qualify this new checkpoint.
+
+The disposable broker supplies the current cloud manual-publication guard with
+only `fixture-manual-source`, expiring five minutes after broker setup. This
+scope is a fixture binding, never a production guard override. The shared
+three-session runner uses different subjects and is not covered by this scope;
+its historical proof does not transfer to a fresh run against the current guard.

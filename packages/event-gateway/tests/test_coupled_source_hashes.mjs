@@ -45,6 +45,14 @@ test('hashes only resolved sources inside qualified roots, before reading conten
 });
 
 
+test('manual fixture canary has one fixed subject and a five-minute startup lifetime', async () => {
+  const {fixtureManualCanary}=await import('../docs/native-bridge/coupled-workerd-broker.mjs');
+  const now=Date.parse('2026-10-13T12:00:00.000Z');
+  assert.deepEqual(JSON.parse(fixtureManualCanary(now)),{
+    subjectId:'fixture-manual-source',expiresAt:'2026-10-13T12:05:00.000Z',
+  });
+});
+
 test('fixture ports are fixed, configurable, bounded, and distinct', async () => {
   const {fixturePorts}=await import('../docs/native-bridge/coupled-workerd-broker.mjs');
   assert.deepEqual(fixturePorts({}), {ENTRY:49732,LOOPBACK:49733,BROKER:49734});
