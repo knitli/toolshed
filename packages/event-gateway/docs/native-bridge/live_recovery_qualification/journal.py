@@ -4,6 +4,7 @@ import copy
 from datetime import datetime
 import fcntl
 import hashlib
+import io
 import json
 import math
 import os
@@ -1612,34 +1613,26 @@ class Journal:
             )
             now = self.clock()
             require(type(now) in (int, float) and math.isfinite(now), "invalid_clock")
-            rows = []
-
-            def append(kind, value):
-                nonlocal rows
-                payload = {
-                    "sequence": len(rows),
-                    "previous": rows[-1]["sha256"] if rows else "0" * 64,
-                    "kind": kind,
-                    "value": value if kind == "header" else {**value, "at": now},
+            if created:
+                header_value = {
+                    "manifestSha256": self.manifest_hash,
+                    "startedAt": now,
+                    "expiresAt": now + 1200,
                 }
-                row = {**payload, "sha256": digest(encoded(payload))}
-                raw = encoded(row) + b"\n"
-                stream.seek(0, os.SEEK_END)
-                require(stream.tell() + len(raw) <= MAX_JOURNAL, "journal_full")
-                stream.write(raw)
+                payload = {
+                    "sequence": 0,
+                    "previous": "0" * 64,
+                    "kind": "header",
+                    "value": header_value,
+                }
+                header_raw = (
+                    encoded({**payload, "sha256": digest(encoded(payload))}) + b"\n"
+                )
+                require(len(header_raw) <= MAX_JOURNAL, "journal_full")
+                self._read(io.BytesIO(header_raw))
+                stream.write(header_raw)
                 stream.flush()
                 os.fsync(stream.fileno())
-                rows.append(row)
-
-            if created:
-                append(
-                    "header",
-                    {
-                        "manifestSha256": self.manifest_hash,
-                        "startedAt": now,
-                        "expiresAt": now + 1200,
-                    },
-                )
                 directory_fd = os.open(
                     self.directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
                 )
@@ -1648,15 +1641,48 @@ class Journal:
                 finally:
                     os.close(directory_fd)
             stream.seek(0)
-            state = self._read(stream)
+            planned = stream.read(MAX_JOURNAL + 1)
+            state = self._read(io.BytesIO(planned))
             rows = state["rows"]
+            pending = []
             if not allow_expired:
                 require(not state["aborted"], "run_aborted")
                 require(
                     state["lastTime"] <= now < state["expiresAt"],
                     "expired_or_regressed_clock",
                 )
-            return operation(state, append)
+
+            def append(kind, value):
+                nonlocal planned
+                payload = {
+                    "sequence": len(rows),
+                    "previous": rows[-1]["sha256"],
+                    "kind": kind,
+                    "value": {**value, "at": now},
+                }
+                row = {**payload, "sha256": digest(encoded(payload))}
+                raw = encoded(row) + b"\n"
+                candidate_size = len(planned) + len(raw)
+                require(candidate_size <= MAX_JOURNAL, "journal_full")
+                candidate = planned + raw
+                # Validate the entire prospective chain before exposing any of
+                # this transaction's records on disk. In particular, a valid
+                # first record cannot authorize a later invalid record in the
+                # same send intent.
+                self._read(io.BytesIO(candidate))
+                pending.append(raw)
+                rows.append(row)
+                planned = candidate
+
+            result = operation(state, append)
+            if pending:
+                stream.seek(0, os.SEEK_END)
+                batch = b"".join(pending)
+                written = stream.write(batch)
+                require(written == len(batch), "journal_write_failed")
+                stream.flush()
+                os.fsync(stream.fileno())
+            return result
 
     def snapshot(self):
         return self._transaction(lambda state, _append: state, allow_expired=True)
@@ -1686,13 +1712,7 @@ class Journal:
         """Durably apply one validated phase transition before its external effect."""
         require(self.phase_plan is not None, "phase_plan_required")
 
-        def record(state, append):
-            _apply_phase(
-                self.phase_plan,
-                state["phase"],
-                {"op": operation, **fields, "at": state["lastTime"]},
-                self.manifest,
-            )
+        def record(_state, append):
             append("phase", {"op": operation, **fields})
 
         return self._transaction(record)
@@ -1896,12 +1916,6 @@ class TransportFault:
                             "turnId": correlation["turnId"],
                             "itemId": correlation.get("itemId"),
                         }
-                        _apply_phase(
-                            self.journal.phase_plan,
-                            state["phase"],
-                            {**latch_fields, "at": state["lastTime"]},
-                            manifest,
-                        )
                         append("phase", latch_fields)
                     else:
                         require(

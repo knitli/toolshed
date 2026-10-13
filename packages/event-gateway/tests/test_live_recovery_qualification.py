@@ -603,6 +603,103 @@ class PhaseTests(unittest.TestCase):
             self.root, self.config, clock=lambda: self.now, phase_plan=self.plan
         )
 
+    def _prepare_a1(self):
+        self.orchestrator.begin_case("A1")
+        self.orchestrator.publication_intent("A1", b"A1-publication")
+        self.orchestrator.publication_result("A1", "accepted", b"accepted")
+        claim = self.config["claims"][0]["request"]
+        self.orchestrator.claim_intent("A1", claim)
+        self.orchestrator.claim_result("A1", "accepted", b"permit")
+        start = b"A1-start"
+        self.orchestrator.start_intent("A1", start)
+        self.orchestrator.start_outcome("A1", start, "started", {"outcome": "started"})
+
+    def _transport_fault(self):
+        calls = []
+
+        def durable_readback(action, target, request_sha256):
+            return {
+                "action": action,
+                "subject": target["subject"],
+                "requestSha256": request_sha256,
+                "committed": True,
+                "attemptId": target["request"]["attemptId"],
+                "ackState": None if action == "submitted" else "submitted",
+                "nativeReceiptSha256": "a" * 64,
+                "acknowledgmentSha256": request_sha256,
+            }
+
+        async def original_send(**request):
+            calls.append(copy.deepcopy(request))
+            action = JOURNAL.decode(request["body"])["status"]
+            return (
+                200,
+                {"content-type": "application/json"},
+                encoded({"status": action, "current": False}),
+            )
+
+        async def hold_reply(_action, _deadline):
+            raise Crashed()
+
+        return (
+            TransportFault(
+                self.journal,
+                original_send,
+                durable_readback,
+                hold_reply,
+                monotonic=lambda: self.now,
+            ),
+            calls,
+        )
+
+    async def _send_ack(self, hook, action, *, replay):
+        request = self.config["targets"][action]["request"]
+        return await hook.send(
+            action=action,
+            replay=replay,
+            subject=self.config["targets"][action]["subject"],
+            operation_started_at=self.now,
+            method="POST",
+            url=self.config["origin"] + "/v1/ack",
+            body=encoded(request),
+            headers={
+                "x-event-node-proof": json.dumps(
+                    {"nonce": str(uuid4()), "signature": "fixture"}
+                )
+            },
+            timeout=5,
+            max_response_bytes=8192,
+            follow_redirects=False,
+        )
+
+    def _assert_replay_refused_without_mutation(self, hook, calls, action, before):
+        send_error = None
+        try:
+            self._run_send_ack(hook, action, replay=True)
+        except Refused as error:
+            send_error = error
+        read_error = None
+        after = None
+        try:
+            after = self.reopen().snapshot()
+        except Refused as error:
+            read_error = error
+        self.assertEqual(
+            (
+                str(send_error) if send_error else None,
+                len(calls),
+                str(read_error) if read_error else None,
+            ),
+            ("phase_replay_before_owned_restart", before["sends"], None),
+        )
+        self.assertEqual(after["counts"], before["counts"])
+        self.assertEqual(after["reservedSubjects"], before["reservedSubjects"])
+        self.assertEqual(after["phase"], before["phase"])
+        self.assertEqual(after["sends"], before["sends"])
+
+    def _run_send_ack(self, hook, action, *, replay):
+        return asyncio.run(self._send_ack(hook, action, replay=replay))
+
     def test_ambiguous_publication_intent_survives_reopen_without_retry(self):
         self.orchestrator.begin_case("A1")
         self.orchestrator.publication_intent("A1", b"A1-publication")
@@ -667,6 +764,65 @@ class PhaseTests(unittest.TestCase):
             Refused, "native_busy_signal_requires_reviewed_bridge_proof"
         ):
             JOURNAL.phase_plan_checked(fake_busy, self.config)
+
+    def test_invalid_later_record_discards_earlier_record_in_same_transaction(self):
+        before = self.journal.snapshot()
+
+        def invalid_batch(_state, append):
+            append("phase", {"op": "begin_case", "caseId": "A1"})
+            append("phase", {"op": "begin_case", "caseId": "A1"})
+
+        with self.assertRaisesRegex(Refused, "case_order_violation"):
+            self.journal._transaction(invalid_batch)
+
+        after = self.reopen().snapshot()
+        self.assertEqual(after["counts"], before["counts"])
+        self.assertEqual(after["reservedSubjects"], before["reservedSubjects"])
+        self.assertEqual(after["phase"], before["phase"])
+        self.assertEqual(after["rows"], before["rows"])
+
+    def test_r1_replay_refusal_precedes_send_and_preserves_readable_journal(self):
+        self._prepare_a1()
+        hook, calls = self._transport_fault()
+        with self.assertRaises(Crashed):
+            self._run_send_ack(hook, "submitted", replay=False)
+        before = self.reopen().snapshot()
+        self._assert_replay_refused_without_mutation(hook, calls, "submitted", before)
+
+    def test_r2_replay_refusal_precedes_send_and_preserves_readable_journal(self):
+        self._prepare_a1()
+        hook, calls = self._transport_fault()
+        with self.assertRaises(Crashed):
+            self._run_send_ack(hook, "submitted", replay=False)
+        self.orchestrator.restart_intent(
+            "R1",
+            "A1",
+            "after_submitted_ack",
+            old_pid=7001,
+            old_start_id="process-1",
+            socket_bytes=b"owned-socket-1",
+        )
+        self.orchestrator.restart_complete("R1", new_pid=7002, new_start_id="process-2")
+        submitted_response = self._run_send_ack(hook, "submitted", replay=True)
+        self.orchestrator.ack_complete(
+            "A1",
+            "submitted",
+            encoded(self.config["targets"]["submitted"]["request"]),
+            submitted_response[2],
+            False,
+        )
+        with self.assertRaises(Crashed):
+            self._run_send_ack(hook, "observed", replay=False)
+        self.orchestrator.restart_intent(
+            "R2",
+            "A1",
+            "after_observed_ack_commit",
+            old_pid=7002,
+            old_start_id="process-2",
+            socket_bytes=b"owned-socket-2",
+        )
+        before = self.reopen().snapshot()
+        self._assert_replay_refused_without_mutation(hook, calls, "observed", before)
 
     def test_reattach_accepts_only_exact_counter_successor_and_preserves_old_event(
         self,
