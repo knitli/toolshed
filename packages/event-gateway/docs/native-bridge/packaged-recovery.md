@@ -167,3 +167,49 @@ and durable terminal no-start settlement remain unqualified by this run.
 This does not qualify the
 unmodified production gateway, live Mesh, OS crash recovery, same-binding C2
 drain, the seven-case harness, or all of Stage 1. Earlier proofs remain unchanged.
+
+## Gateway terminal Busy handoff checkpoint (2026-10-13)
+
+The [sanitized handoff proof](native-gateway-handoff-20261013-proof.json) records
+an independently reviewed offline v6 run of the production Gateway listener,
+dispatch, and Store paths from candidate `98c87baa`, with gateway diagnostic
+instrumentation and the cloud HTTPS transport replaced by an offline fake.
+This is a pinned historical candidate, not qualification of the latest production
+source or installed gateway. The native binary and code-mode host pins were
+unchanged. Synthetic provider requests used no owner/model credentials; the
+fake cloud used fixture credentials and verified signed node requests.
+
+One signed delivery, one claim, and one granted permit produced one actual fresh
+Core `terminalNotStarted/busy` receipt while the original owned tool was running.
+The gateway committed the exact Busy receipt and receipt UUID before the fake
+cloud committed settlement. After losing that response, the fixture SIGKILLed
+and reaped the first gateway daemon, then started a new daemon with the same
+configuration, key, and durable state. Replay sent the identical settlement body
+with a fresh signed nonce, received HTTP 200, and reached local `settled` state
+before SIGTERM and clean exit. The attempt remained unchanged after exit.
+There was no replacement claim, replay native Start, or replay native receipt
+lookup. Across the run, two native Starts produced one accepted original and
+one Busy refusal. The native process stayed alive through the gateway restart.
+The fixture repeated the fixed two-second schedule of eight read-only observations
+before probing; these samples establish neither continuous authority nor global
+quiescence and are not a production delay requirement.
+
+After releasing the tool barrier with the matching nonce, read-only recovery
+returned InputRecorded for the immutable original request, and the exact original
+thread and turn completed. Two primary and one title request reached the synthetic
+provider; real model and live Mesh calls were zero. Supervision exited 0 in
+8.749918 seconds, with the v6 inputs unchanged and no owned processes, listeners,
+or sockets remaining. Private journal, proof, supervision, diagnostics, and frozen
+manifest hashes bind this projection to retained evidence; raw identities, keys,
+prompts, paths, and fixture helpers remain private. It is not a standalone runnable
+qualification fixture.
+
+This qualifies gateway persistence and daemon-crash settlement replay only for
+this received terminal-Busy handoff. Native terminal Busy receipts remain
+process-local; native restart and loss before gateway persistence are not covered.
+The fake cloud does not establish production cloud settlement or live Cloud/Mesh
+behavior. Installed deployment, same-binding C2 drain, global idle, the seven-case
+harness, and all of Stage 1 remain unqualified. The earlier v5 false start remains
+a retained blocked run (supervisor exit 1): its fixture expected two challenges where the production path
+required three; it did not establish a production bug. Earlier proofs are unchanged,
+and the v6 input check makes no claim about all historical scratch bytes.
