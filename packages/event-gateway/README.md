@@ -124,6 +124,9 @@ When a fresh validated reply contains a complete binding for the expected thread
 lease. Missing, malformed, late, incomplete, or wrong-thread replies omit this
 field. The binding supports correlation with independently observed work on the
 owned client; neither ineligibility nor the cause label proves that a tool is busy.
+The observed `eligible` flag can remain true while `selection` becomes unavailable
+if its local lease expires before the final selection check. This diagnostic flag
+grants no Start authority; Core independently checks that the thread is idle.
 The owner-only session socket accepts presence, binding and admission witness
 requests, plus conditional Start and exact read-only receipt recovery for an
 explicit mapped session. It exposes no arbitrary native commands. The foreground launcher removes it and closes its bridge when

@@ -92,6 +92,26 @@ class LauncherTests(unittest.TestCase):
         bridge.valid_until = 0
         self.assertNotIn("nativeObservation", client.status())
 
+    def test_observed_eligibility_does_not_extend_selection_lease(self):
+        row = witness()
+        bridge = Mock()
+        bridge.challenge_readonly.return_value = row
+        bridge.observation_valid_until = 20
+        bridge.valid_until = 10
+        client = launcher.NativeClient(bridge)
+        client.ready = True
+        with patch.object(launcher.time, "monotonic", side_effect=[9.8, 9.9, 10.0]):
+            self.assertEqual(client.status(), {
+                "automaticWakeEnabled": False, "attached": False,
+                "receiptVersion": 3, "selection": "unavailable",
+                "nativeObservation": {
+                    "eligible": True, "cause": row["cause"],
+                    "binding": launcher._binding(row),
+                },
+            })
+        bridge.challenge.assert_not_called()
+        bridge.start.assert_not_called()
+
     def test_native_numeric_fields_reject_booleans(self):
         row = witness()
         for field in ("version", "nonce", "backendPid", "generation",
