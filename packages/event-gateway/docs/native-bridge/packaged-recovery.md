@@ -96,7 +96,7 @@ The combined proof was rerun with the rebuilt wheel after these changes; the
 source manifest includes the hashing helper and the corrected semantic driver
 as separate provenance (the driver is not wheel content).
 
-## In-flight fault checkpoint (runner implemented; native execution pending)
+## In-flight fault checkpoint (controlled run passed — 2026-10-13)
 
 Add `--restart-inflight` to the installed `--restart-native` command above to
 stop the old TUI/backend after durable InputRecorded and permit expiry while the
@@ -108,10 +108,20 @@ refuses the proof even when the release event remains unset. The runner then use
 existing new-process read-only receipt recovery and exact lost-ACK replay checks.
 The default restart scenario still waits for idle before stopping native.
 
-The new proof fields are `nativeInFlightRestartProven` and
-`restart.stoppedBeforeHeldModelResponseReleased`; neither is evidence until a
-fresh controlled native run succeeds. `interruptedTurnCompletionProven` stays
-false: recovering InputRecorded proves Core observation, not model completion,
+The [sanitized proof](native-inflight-recovery-proof.json) records a fresh
+installed-package run against cloud `03a2911f`, using the protected-main native
+binary `763e5e2b…3717b`. Both in-flight proof fields are true. The original exact
+Core receipt was recovered after permit expiry through rotated native identities;
+one claim and one primary model request produced identical observed-ACK replay
+bytes with a fresh nonce. Capacity was released and the budget charged once.
+Independent evidence review passed. Supervision exited 0 in 9.126 seconds with
+unchanged inputs and no owned processes, listeners or sockets remaining.
+
+Attempts 1–3 remain failed: unsafe scratch ancestry, incomplete bundle resolution,
+and an obsolete synthetic manual scope. None was relabeled as a pass. The final
+run reports an expected synthetic BrokenPipe after deliberate client death.
+`interruptedTurnCompletionProven` stays false: recovering InputRecorded proves
+Core observation, not model completion,
 a useful response, or permission to start a replacement turn. No reattachment,
 lease-renewal service, automatic queue drain, or live rollout is introduced.
 

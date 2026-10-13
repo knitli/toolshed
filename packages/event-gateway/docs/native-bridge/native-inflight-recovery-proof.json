@@ -1,0 +1,51 @@
+{
+  "result": "PASS",
+  "qualification": "controlled-installed-native-inflight-recovery",
+  "date": "2026-10-13",
+  "producerCommit": "e8522305c714c1df2cf0bc8db226a50baf4cc1e1",
+  "cloudSourceCommit": "03a2911f97aa161b4d7a827b701801bdb69310b9",
+  "rawProofSha256": "f2e39e0de8989ae8f425c38cbbe513c8a5cd7d2ede22d4420750750c1f8f2ccc",
+  "supervisionSha256": "df88ecc238ebf8fd0dacd0df58daa8be680a4c5debb5d5e465d8025424a182e1",
+  "nativeBinarySha256": "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b",
+  "runnerSha256": "76da76d474b47fbcffa9edb098ba495755666104687921dd0a840a64bba3e0cc",
+  "qualifierSha256": "ebf1fed24edf631f5598079d00a21ccb6c956aa72df9dbdd8308f2434dd62580",
+  "brokerSha256": "49f4910814d803d99324c6cf5f3b71b2699e43d9afcc26bc69512649ba291d0a",
+  "cloudBundleSha256": "8f9cccfbe8c42a148b084c4d910271345e01c84278f36092b8ecd55ca327674b",
+  "checks": {
+    "installedRuntimeMatchesSource": true,
+    "heldResponseAcrossConfirmedNativeDeath": true,
+    "permitExpiredBeforeReadOnlyRecovery": true,
+    "oldAttachmentUnavailable": true,
+    "gatewayReceiptAbsentBeforeRecovery": true,
+    "exactCoreReceiptRecovered": true,
+    "oneClaimAndPrimaryRequest": true,
+    "immutableObservedAckReplay": true,
+    "freshReplayNonce": true,
+    "coordinatorObserved": true,
+    "capacityReleased": true,
+    "budgetChargedOnce": true,
+    "inputsUnchanged": true,
+    "ownedProcessesPortsSocketsCleared": true
+  },
+  "modelRequests": {
+    "primary": 1,
+    "title": 1,
+    "unknown": 0
+  },
+  "realModelCalls": 0,
+  "supervisorElapsedSeconds": 9.125726333004422,
+  "limits": {
+    "interruptedTurnCompletionProven": false,
+    "productionAdmissionProven": false,
+    "liveMeshProven": false,
+    "threeSessionAcceptanceProven": false,
+    "terminalNoStartSettlementProven": false,
+    "unattendedBusyQueueDrainProven": false
+  },
+  "retainedFailures": [
+    "attempt01: unsafe temporary ancestry; stopped before native",
+    "attempt02: incomplete bundle dependencies; stopped before native",
+    "attempt03: missing bounded synthetic manual scope; native startup only"
+  ],
+  "expectedDiagnostic": "Synthetic response write encounters BrokenPipe after deliberate old-client death."
+}
