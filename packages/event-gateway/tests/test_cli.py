@@ -96,7 +96,7 @@ class CliTests(unittest.TestCase):
             async def attach(self, intent, request_challenge, request_evidence, *, on_first_send=None):
                 self.asserted = (intent, request_challenge, request_evidence)
                 if on_first_send:
-                    on_first_send(b'{"prepared":"body"}')
+                    on_first_send(b'{"prepared":"body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}')
                 return response
 
             renew = attach
@@ -273,7 +273,7 @@ class CliTests(unittest.TestCase):
                         return challenge
 
                     async def attach(self, *_args, on_first_send=None):
-                        on_first_send(b'{"prepared":"body"}')
+                        on_first_send(b'{"prepared":"body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}')
                         return response
 
                 output = io.StringIO()
@@ -312,7 +312,7 @@ class CliTests(unittest.TestCase):
                         "expiresAt": "2026-10-09T12:00:30.000Z"}
 
             async def attach(self, *_args, on_first_send=None):
-                on_first_send(b'{"prepared":"body"}')
+                on_first_send(b'{"prepared":"body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}')
                 raise CloudError("request_timeout", ambiguous=True)
 
         output = io.StringIO()
@@ -333,7 +333,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(value["pendingCommit"]["operation"], "attach")
         self.assertTrue(self.state.exists())
         pending = cli.load_pending_commit(self.state, "attach", session_id)
-        self.assertEqual(base64.b64decode(pending["bodyB64"]), b'{"prepared":"body"}')
+        self.assertEqual(base64.b64decode(pending["bodyB64"]), b'{"prepared":"body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}')
 
     def test_pending_commit_survives_launcher_transport_oserror_and_timeout(self):
         for error in (OSError("launcher socket disappeared"), TimeoutError("launcher timed out")):
@@ -412,7 +412,7 @@ class CliTests(unittest.TestCase):
                     return challenge
 
                 async def attach(self, _intent, _challenge, _evidence, *, on_first_send=None):
-                    on_first_send(b'{"prepared":"body"}')
+                    on_first_send(b'{"prepared":"body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}')
                     return response
 
             async def daemon_request(_state_dir, _command):
@@ -544,7 +544,7 @@ class CliTests(unittest.TestCase):
                 return challenge
 
             async def attach(self, _intent, _challenge, _evidence, *, on_first_send=None):
-                on_first_send(b'{"loser":"body"}')
+                on_first_send(b'{"loser":"body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}')
 
         original_save = cli.save_pending_commit
 
@@ -569,7 +569,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result["reason"], "commit_outcome_unknown")
         self.assertEqual(result["lastError"], "pending_commit_exists")
         pending = cli.load_pending_commit(self.state, "attach", session_id)
-        self.assertEqual(base64.b64decode(pending["bodyB64"]), b'{"loser":"body"}')
+        self.assertEqual(base64.b64decode(pending["bodyB64"]), b'{"loser":"body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}')
 
     def test_pending_commit_past_safe_cutoff_stays_unknown_without_retry(self):
         runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
@@ -640,7 +640,7 @@ class CliTests(unittest.TestCase):
 
             async def transfer(self, intent, saved_challenge, evidence, *, on_first_send=None):
                 self.commit = (intent, saved_challenge, evidence)
-                on_first_send(b'{"exact":"body"}')
+                on_first_send(b'{"exact":"body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}')
                 return response
 
         fake = FakeCloud()
@@ -725,7 +725,7 @@ class CliTests(unittest.TestCase):
                                    prepared_body=None, recovery=False):
                     self.recoveries.append(recovery)
                     if on_first_send is not None:
-                        on_first_send(b'{"transfer":"exact-body"}')
+                        on_first_send(b'{"transfer":"exact-body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}')
                     return response
 
             fake = FakeCloud()
@@ -865,7 +865,7 @@ class CliTests(unittest.TestCase):
                 return challenge
 
             async def transfer(self, _intent, _challenge, _evidence, *, on_first_send=None):
-                on_first_send(b'{"commit":"confirmed"}')
+                on_first_send(b'{"commit":"confirmed","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}')
                 return response
 
         def limited_store(state_dir):

@@ -19,31 +19,12 @@ from unittest.mock import Mock, call, patch
 from uuid import uuid4
 
 from event_gateway import native_reader
+from native_witness import witness
 
 path = Path(__file__).parents[1] / "scripts" / "qualify_native_bridge.py"
 spec = importlib.util.spec_from_file_location("qualify_native_bridge", path)
 native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
-
-
-def witness(nonce=1, **changes):
-    return {
-        "version": 2,
-        "nonce": nonce,
-        "clientId": str(uuid4()),
-        "backendPid": 123,
-        "connectionId": str(uuid4()),
-        "threadId": str(uuid4()),
-        "generation": 2,
-        "eligible": True,
-        "sequence": 1,
-        "cause": "heartbeat",
-        "serverInstanceId": str(uuid4()),
-        "serverGeneration": 1,
-        "leaseMs": 750,
-        "nativeCoreTurnState": "idle",
-        **changes,
-    }
 
 
 def send(channel, row):

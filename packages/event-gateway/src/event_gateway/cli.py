@@ -343,9 +343,9 @@ def _native_context(args, state_dir, operation, result_key):
 
 
 def _save_pending_before_send(body, *, state_dir, args, cloud, intent,
-                              challenge, evidence, persisted, current_mapping=None):
+                              challenge, persisted, current_mapping=None):
     operation = intent["operation"]
-    local_evidence = {"observedAt": evidence["observedAt"], "witness": evidence["witness"]}
+    local_evidence = json.loads(body)["nativeEvidence"]
     pending = {
         "version": 1, "operation": operation, "sessionId": args.session_id,
         "cloudIdentity": cloud_identity(cloud), "intent": intent,
@@ -384,7 +384,7 @@ def _commit_native_call(args, state_dir, operation, intent, artifact, cloud, bin
     persist = partial(
         _save_pending_before_send, state_dir=state_dir,
         args=args, cloud=cloud, intent=intent, challenge=challenge,
-        evidence=evidence, persisted=persisted, current_mapping=current_mapping,
+        persisted=persisted, current_mapping=current_mapping,
     )
     return asyncio.run(getattr(cloud, operation)(
         intent, challenge, evidence, on_first_send=persist,

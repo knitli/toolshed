@@ -6,25 +6,11 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from event_gateway.launcher import BINDING_FIELDS, LaunchError, NativeClient, session_challenge
+from native_witness import witness as native_witness
 
 
 def witness(state="idle"):
-    return {
-        "version": 2,
-        "nonce": 1,
-        "clientId": str(uuid4()),
-        "backendPid": 123,
-        "connectionId": str(uuid4()),
-        "threadId": str(uuid4()),
-        "generation": 2,
-        "eligible": True,
-        "sequence": 1,
-        "cause": "heartbeat",
-        "serverInstanceId": str(uuid4()),
-        "serverGeneration": 3,
-        "leaseMs": 750,
-        "nativeCoreTurnState": state,
-    }
+    return native_witness(serverGeneration=3, nativeCoreTurnState=state)
 
 
 class Bridge:

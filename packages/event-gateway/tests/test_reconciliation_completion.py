@@ -166,7 +166,9 @@ class ReconciliationCompletionTests(unittest.TestCase):
         async def renew(intent, challenge, evidence, *, on_first_send=None,
                         prepared_body=None, recovery=False):
             if on_first_send:
-                on_first_send(b'{"fixture":"renew"}')
+                on_first_send(json.dumps({"nativeEvidence": {
+                    "observedAt": evidence["observedAt"], "witness": evidence["witness"],
+                }}).encode())
             return {**f.response, "status": "renewed", "leaseUntil": _iso(time.time() + 180)}
 
         args = ["--state-dir", str(f.state), "renew", "--runtime-id", f.runtime_id,
