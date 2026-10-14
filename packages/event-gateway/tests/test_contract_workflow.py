@@ -85,7 +85,8 @@ class ContractWorkflowTests(unittest.TestCase):
             metadata = json.loads(archive.read("metadata.json"))
         self.assertEqual(list(POLICY["FAMILIES"]), metadata["families"])
         self.assertEqual(set(metadata["snapshots"]), {
-            "legacy", "no-start", "native-start", "native-input-recorded", "native-admission", "native-runtime-status", "github-source-readback", "github-source-control",
+            "legacy", "no-start", "native-start", "native-input-recorded",
+            "native-admission", "native-runtime-status", "github-source-readback", "github-source-control",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         for expected in metadata["families"]:
