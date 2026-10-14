@@ -1,0 +1,346 @@
+diff --git a/packages/event-gateway/src/event_gateway/launcher.py b/packages/event-gateway/src/event_gateway/launcher.py
+index 8d7e9c5..30698ba 100644
+--- a/packages/event-gateway/src/event_gateway/launcher.py
++++ b/packages/event-gateway/src/event_gateway/launcher.py
+@@ -176,13 +176,14 @@ def _valid_native_witness(value):
+             and set(value) == {
+                 "version", "nonce", "clientId", "backendPid", "connectionId", "threadId",
+                 "generation", "eligible", "sequence", "cause", "serverInstanceId",
+-                "serverGeneration", "leaseMs",
++                "serverGeneration", "leaseMs", "nativeCoreTurnState",
+             }
+             and isinstance(value["version"], int) and not isinstance(value["version"], bool)
+             and value["version"] == 2
+             and isinstance(value["nonce"], int) and not isinstance(value["nonce"], bool)
+             and 0 <= value["nonce"] <= 2**53 - 1
+             and value["eligible"] is True
++            and value["nativeCoreTurnState"] in ("busy", "idle", "unknown")
+             and isinstance(value["cause"], str) and len(value["cause"]) <= 128
+             and isinstance(value["sequence"], int) and not isinstance(value["sequence"], bool)
+             and 0 < value["sequence"] <= 2**53 - 1
+diff --git a/packages/event-gateway/src/event_gateway/native.py b/packages/event-gateway/src/event_gateway/native.py
+index d1be29f..8523489 100644
+--- a/packages/event-gateway/src/event_gateway/native.py
++++ b/packages/event-gateway/src/event_gateway/native.py
+@@ -172,6 +172,7 @@ class NativeBridgeAdapter:
+         except Exception:
+             raise NativeError("native_unavailable") from None
+         if (not isinstance(witness, dict) or witness.get("eligible") is not True
++                or witness.get("nativeCoreTurnState") not in ("busy", "idle", "unknown")
+                 or witness.get("threadId") != self.thread_id
+                 or (self.binding is not None and any(
+                     type(witness.get(key)) is not type(value) or witness.get(key) != value
+@@ -179,6 +180,8 @@ class NativeBridgeAdapter:
+                 or any(not _native_uuid(witness.get(key)) for key in ("clientId", "serverInstanceId", "threadId"))
+                 or any(not _uint(witness.get(key)) for key in ("generation", "serverGeneration"))):
+             return "unavailable"
++        if witness["nativeCoreTurnState"] != "idle":
++            return "unavailable"
+         self.witness = dict(witness)
+         return "available"
+ 
+diff --git a/packages/event-gateway/src/event_gateway/native_reader.py b/packages/event-gateway/src/event_gateway/native_reader.py
+index 6c0f192..187e345 100644
+--- a/packages/event-gateway/src/event_gateway/native_reader.py
++++ b/packages/event-gateway/src/event_gateway/native_reader.py
+@@ -37,7 +37,7 @@ IDENTITY = (
+ WITNESS_FIELDS = set(
+     (
+         "version nonce clientId backendPid connectionId threadId generation "
+-        "eligible sequence cause serverInstanceId serverGeneration leaseMs"
++        "eligible sequence cause serverInstanceId serverGeneration leaseMs nativeCoreTurnState"
+     ).split()
+ )
+ IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+@@ -238,6 +238,7 @@ class NativeBridge:
+         require(
+             type(row["eligible"]) is bool  # pylint: disable=unidiomatic-typecheck
+             and isinstance(row["cause"], str) and len(row["cause"]) <= 128
++            and row["nativeCoreTurnState"] in ("busy", "idle", "unknown")
+         )
+         for key in ("serverGeneration", "leaseMs"):
+             require(row[key] is None or uint(row[key]))
+diff --git a/packages/event-gateway/tests/test_core_turn_idle_spike.py b/packages/event-gateway/tests/test_core_turn_idle_spike.py
+new file mode 100644
+index 0000000..fca151c
+--- /dev/null
++++ b/packages/event-gateway/tests/test_core_turn_idle_spike.py
+@@ -0,0 +1,88 @@
++"""Offline checks for the disposable Core-active-turn witness DTO."""
++
++import time
++import unittest
++from unittest.mock import patch
++from uuid import uuid4
++
++from event_gateway.launcher import BINDING_FIELDS, LaunchError, NativeClient, session_challenge
++
++
++def witness(state="idle"):
++    return {
++        "version": 2,
++        "nonce": 1,
++        "clientId": str(uuid4()),
++        "backendPid": 123,
++        "connectionId": str(uuid4()),
++        "threadId": str(uuid4()),
++        "generation": 2,
++        "eligible": True,
++        "sequence": 1,
++        "cause": "heartbeat",
++        "serverInstanceId": str(uuid4()),
++        "serverGeneration": 3,
++        "leaseMs": 750,
++        "nativeCoreTurnState": state,
++    }
++
++
++class Bridge:
++    def __init__(self, row):
++        self.row = row
++        self.valid_until = time.monotonic() + 0.5
++
++    def challenge(self):
++        return dict(self.row)
++
++
++class CoreTurnIdleChallengeTests(unittest.TestCase):
++    def test_launcher_challenge_preserves_state_and_exact_seven_field_binding(self):
++        row = witness("busy")
++        bridge = Bridge(row)
++        client = NativeClient(bridge, expected_thread=row["threadId"])
++        client.ready = True
++        binding = {key: row[key] for key in BINDING_FIELDS}
++        challenge_id = str(uuid4())
++
++        with patch("event_gateway.launcher._session_request",
++                   side_effect=lambda _state, _session, request: client.challenge(
++                       request["challengeId"], request["expectedBinding"])):
++            observed = session_challenge("unused", str(uuid4()), challenge_id, binding)
++
++        self.assertEqual(observed["witness"], row)
++        self.assertEqual(set(binding), set(BINDING_FIELDS))
++        self.assertEqual(observed["witness"]["nativeCoreTurnState"], "busy")
++
++    def test_launcher_rejects_missing_state_or_changed_binding(self):
++        row = witness()
++        self.assertTrue(NativeClient.__module__ == "event_gateway.launcher")
++        client = NativeClient(Bridge(row), expected_thread=row["threadId"])
++        client.ready = True
++        binding = {key: row[key] for key in BINDING_FIELDS}
++        missing = dict(row)
++        del missing["nativeCoreTurnState"]
++        from event_gateway.launcher import _valid_native_witness
++        self.assertFalse(_valid_native_witness(missing))
++        for malformed_state in ("running", None, True, []):
++            malformed = dict(row, nativeCoreTurnState=malformed_state)
++            self.assertFalse(_valid_native_witness(malformed))
++        with self.assertRaisesRegex(LaunchError, "^native_binding_changed$"):
++            changed = dict(binding, generation=binding["generation"] + 1)
++            client.challenge(str(uuid4()), changed)
++
++    def test_expired_lease_and_wrong_thread_fail_closed(self):
++        row = witness("idle")
++        bridge = Bridge(row)
++        client = NativeClient(bridge, expected_thread=str(uuid4()))
++        client.ready = True
++        binding = {key: row[key] for key in BINDING_FIELDS}
++
++        with self.assertRaisesRegex(LaunchError, "^native_binding_changed$"):
++            client.challenge(str(uuid4()), binding)
++
++        client = NativeClient(bridge, expected_thread=row["threadId"])
++        client.ready = True
++        bridge.valid_until = time.monotonic() - 0.001
++        with self.assertRaisesRegex(LaunchError, "^native_binding_changed$"):
++            client.challenge(str(uuid4()), binding)
+diff --git a/packages/event-gateway/tests/test_gateway.py b/packages/event-gateway/tests/test_gateway.py
+index 57fdea9..a866395 100644
+--- a/packages/event-gateway/tests/test_gateway.py
++++ b/packages/event-gateway/tests/test_gateway.py
+@@ -351,6 +351,51 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
+         self.assertEqual(witnessed[0]['state'], 'submitting')
+         self.assertEqual(witnessed[0]['native_request'], self.submissions[0])
+ 
++    async def test_core_busy_or_unknown_snapshot_stops_before_claim(self):
++        ident = self.accept()['deliveryId']
++        owner = self
++
++        class CoreStateBridge:
++            receipt_version = 3
++
++            def __init__(self):
++                self.state = 'busy'
++
++            def challenge(self):
++                witness = {
++                    'eligible': True,
++                    'clientId': str(uuid.uuid4()),
++                    'serverInstanceId': str(uuid.uuid4()),
++                    'serverGeneration': 1,
++                    'threadId': owner.mapping['nativeThreadId'],
++                    'generation': 2,
++                }
++                if self.state != 'missing':
++                    witness['nativeCoreTurnState'] = self.state
++                return witness
++
++            def start(self, request):
++                return {'status': 'terminalNotStarted', 'reason': 'busy',
++                        'receiptId': str(uuid.uuid4()), 'replayed': False}
++
++            def restore_attempt(self, request):
++                pass
++
++            def receipt(self, request):
++                return {'status': 'unknown'}
++
++        bridge = CoreStateBridge()
++        self.gateway.adapter_factory = lambda mapping: NativeBridgeAdapter(mapping, bridge)
++        for state in ('busy', 'unknown', 'malformed', None, 'missing'):
++            bridge.state = state
++            row = await self.gateway.dispatch(ident)
++            self.assertEqual(row['status'], 'queued')
++            self.assertEqual(row['reason'], 'client_unavailable_or_busy')
++            self.assertEqual(self.claims, [], 'Core busy or unknown must stop before cloud claim')
++        bridge.state = 'idle'
++        await self.gateway.dispatch(ident)
++        self.assertEqual(len(self.claims), 1, 'an idle snapshot may enter admission')
++
+     async def _v3_ambiguous_bridge(self, *, lost_response=False):
+         ident = self.accept()['deliveryId']
+         witnessed = []
+@@ -362,7 +407,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
+             def challenge(self):
+                 return {'eligible': True, 'clientId': str(uuid.uuid4()),
+                         'serverInstanceId': str(uuid.uuid4()), 'serverGeneration': 1,
+-                        'threadId': owner.mapping['nativeThreadId'], 'generation': 2}
++                        'threadId': owner.mapping['nativeThreadId'], 'generation': 2,
++                        'nativeCoreTurnState': 'idle'}
+ 
+             def start(self, request):
+                 owner.submissions.append(copy.deepcopy(request))
+diff --git a/packages/event-gateway/tests/test_native.py b/packages/event-gateway/tests/test_native.py
+index cc8c68f..905b0a3 100644
+--- a/packages/event-gateway/tests/test_native.py
++++ b/packages/event-gateway/tests/test_native.py
+@@ -35,7 +35,7 @@ class Bridge:
+         """Initialize a recording bridge with the supplied request identity."""
+         self.witness = {**{key: item[key] for key in (
+             "clientId", "generation", "serverInstanceId", "serverGeneration", "threadId",
+-        )}, "eligible": True}
++        )}, "eligible": True, "nativeCoreTurnState": "idle"}
+         self.outcome = {"status": "unknown"}
+         self.calls = []
+ 
+@@ -211,7 +211,9 @@ class NativeAdapterTests(unittest.IsolatedAsyncioTestCase):
+     async def test_check_requires_eligible_selected_thread_and_clears_old_witness(self):
+         self.assertEqual(await self.adapter.check(), "available")
+         for witness in (None, {}, {**self.bridge.witness, "eligible": 1},
+-                        {**self.bridge.witness, "threadId": str(uuid.uuid4())}):
++                        {**self.bridge.witness, "threadId": str(uuid.uuid4())},
++                        {**self.bridge.witness, "nativeCoreTurnState": "busy"},
++                        {**self.bridge.witness, "nativeCoreTurnState": "unknown"}):
+             self.bridge.witness = witness
+             self.assertEqual(await self.adapter.check(), "unavailable")
+             with self.assertRaisesRegex(NativeError, "^native_unavailable$"):
+diff --git a/packages/event-gateway/tests/test_native_bridge.py b/packages/event-gateway/tests/test_native_bridge.py
+index 7496219..d6cbd81 100644
+--- a/packages/event-gateway/tests/test_native_bridge.py
++++ b/packages/event-gateway/tests/test_native_bridge.py
+@@ -41,6 +41,7 @@ def witness(nonce=1, **changes):
+         "serverInstanceId": str(uuid4()),
+         "serverGeneration": 1,
+         "leaseMs": 750,
++        "nativeCoreTurnState": "idle",
+         **changes,
+     }
+ 
+@@ -923,6 +924,9 @@ class NativeBridgeTests(unittest.TestCase):
+             {"serverGeneration": True},
+             {"serverInstanceId": None},
+             {"sequence": 0},
++            {"nativeCoreTurnState": "running"},
++            {"nativeCoreTurnState": None},
++            {"nativeCoreTurnState": []},
+             {"prompt": "forbidden"},
+         ):
+             with self.subTest(changes=changes):
+@@ -941,6 +945,17 @@ class NativeBridgeTests(unittest.TestCase):
+                         with self.assertRaises(native.BridgeError):
+                             client.challenge()
+ 
++        def missing_core_state_peer(channel):
++            receive(channel)
++            row = witness()
++            del row["nativeCoreTurnState"]
++            send(channel, row)
++            self.assertIsNone(receive(channel))
++
++        with peer(missing_core_state_peer) as client:
++            with self.assertRaises(native.BridgeError):
++                client.challenge()
++
+         def expired_witness_peer(channel):
+             receive(channel)
+             send(channel, witness())
+@@ -1015,6 +1030,23 @@ class NativeBridgeTests(unittest.TestCase):
+             self.assertEqual(client.challenge(), row)
+             self.assertLessEqual(client.valid_until, before + 0.8)
+ 
++    def test_remaining_sample_lease_is_not_restarted_after_socket_delay(self):
++        row = witness(leaseMs=120)
++
++        def handler(channel):
++            receive(channel)
++            time.sleep(0.025)
++            send(channel, row)
++            self.assertIsNone(receive(channel))
++
++        before = time.monotonic()
++        with peer(handler) as client:
++            self.assertEqual(client.challenge(), row)
++            self.assertLessEqual(
++                client.valid_until, before + 0.121,
++                "a remaining lease is not restarted when the challenge response arrives",
++            )
++
+     def test_loopback_mock_returns_synthetic_sse(self):
+         import http.client
+ 
+--- a/packages/event-gateway/tests/test_gateway_integration.py
++++ b/packages/event-gateway/tests/test_gateway_integration.py
+@@ -27,7 +27,8 @@
+         """Bind the fake bridge to the durable ledger and selected thread."""
+         self.path = path
+         self.witness = {"eligible": True, "clientId": str(uuid.uuid4()), "generation": 2,
+-                        "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 1, "threadId": thread_id}
++                        "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 1,
++                        "threadId": thread_id, "nativeCoreTurnState": "idle"}
+         self.calls, self.at_start = [], []
+         self.outcome = "terminalNotStarted"
+         self.retained = {}
+--- a/packages/event-gateway/tests/test_daemon_dispatch.py
++++ b/packages/event-gateway/tests/test_daemon_dispatch.py
+@@ -43,7 +43,8 @@
+         self.bridge = InjectedBridge(self.state, thread)
+         self.bridge.receipt_version = 3
+         self.bridge.outcome = 'started'
+-        binding = {key: value for key, value in self.bridge.witness.items() if key != 'eligible'}
++        binding = {key: value for key, value in self.bridge.witness.items()
++                   if key not in {'eligible', 'nativeCoreTurnState'}}
+         binding.update(connectionId=str(uuid.uuid4()), backendPid=123)
+         self.bridge.witness.update(binding)
+         self.mapping.update(leaseExpiresAt=now + 600, nativeThreadId=thread,
+--- a/packages/event-gateway/tests/test_launcher_terminal_integration.py
++++ b/packages/event-gateway/tests/test_launcher_terminal_integration.py
+@@ -46,7 +46,8 @@
+         row = dict(version=2, nonce=request["nonce"], clientId=identity,
+                    backendPid=os.getpid(), connectionId=identity, threadId=thread_id,
+                    generation=1, eligible=True, sequence=sequence, cause="mock",
+-                   serverInstanceId=identity, serverGeneration=1, leaseMs=750)
++                   serverInstanceId=identity, serverGeneration=1, leaseMs=750,
++                   nativeCoreTurnState="idle")
+         stream.write(json.dumps(row).encode() + b"\n")
+ 
+ threading.Thread(target=bridge, daemon=True).start()
