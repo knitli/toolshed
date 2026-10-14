@@ -652,6 +652,12 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
     def test_failed_stage_retains_database_before_resource_and_state_cleanup(self):
         self.run_retention_scenario("stage-failure")
 
+    def test_partial_database_preserves_original_failure_and_missing_table_diagnostics(self):
+        self.run_retention_scenario("partial-failure")
+
+    def test_partial_database_cannot_produce_success(self):
+        self.run_retention_scenario("partial-success")
+
     def test_final_archive_hash_includes_exit_snapshot_and_late_handler_write(self):
         self.run_retention_scenario("success")
 
@@ -691,6 +697,8 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                         ("CREATE TABLE deliveries (evidence TEXT)", "INSERT INTO deliveries VALUES (?)"),
                         ("CREATE TABLE attempts (evidence TEXT)", "INSERT INTO attempts VALUES (?)"),
                     ):
+                        if outcome.startswith("partial") and "attachments" not in create:
+                            continue
                         db.execute(create)
                         db.execute(insert, ("before-failure",))
                     db.commit()
@@ -705,6 +713,8 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 FIXTURE.record_evidence(ctx, "nativeExchange", {"outcome": {"status": "inputRecorded"}})
                 if outcome == "stage-failure":
                     raise RuntimeError("injected stage failure")
+                if outcome == "partial-failure":
+                    raise ValueError("original partial ledger failure")
                 if outcome == "write-failure":
                     ctx.evidence_bytes = 64 * 1024 * 1024
 
@@ -712,8 +722,12 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             if outcome == "success":
                 proof = asyncio.run(FIXTURE.run_scenario())
             else:
-                error, message = ((RuntimeError, "injected stage failure") if outcome == "stage-failure"
-                                  else (AssertionError, "bounded archive"))
+                error, message = {
+                    "stage-failure": (RuntimeError, "injected stage failure"),
+                    "partial-failure": (ValueError, "original partial ledger failure"),
+                    "partial-success": (AssertionError, "checkpoint ledger is incomplete"),
+                    "write-failure": (AssertionError, "bounded archive"),
+                }[outcome]
                 with self.assertRaisesRegex(error, message):
                     asyncio.run(FIXTURE.run_scenario())
             archive = output.with_suffix(".private-evidence.jsonl")
@@ -721,7 +735,11 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             self.assertEqual(archive.stat().st_mode & 0o777, 0o600)
             if outcome != "write-failure":
                 self.assertEqual({row["value"]["table"] for row in records if row["kind"] == "database"},
-                                 {"attachments", "deliveries", "attempts"})
+                                 {"attachments"} if outcome.startswith("partial")
+                                 else {"attachments", "deliveries", "attempts"})
+            if outcome.startswith("partial"):
+                self.assertEqual({row["value"]["table"] for row in records
+                                  if row["kind"] == "missingLedgerTable"}, {"deliveries", "attempts"})
             if outcome == "success":
                 self.assertEqual(proof["privateEvidence"]["sha256"], FIXTURE.digest(archive.read_bytes()))
                 self.assertEqual(proof["privateEvidence"]["bytes"], archive.stat().st_size)

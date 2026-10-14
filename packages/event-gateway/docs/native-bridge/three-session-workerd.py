@@ -297,17 +297,30 @@ def record_evidence(ctx, kind, value):
 def snapshot_evidence(ctx, stage):
     record_evidence(ctx, "checkpoint", stage)
     database = ctx.state / "ledger.sqlite"
+    missing = []
     if database.exists():
         with closing(sqlite3.connect("file:" + str(database) + "?mode=ro", uri=True, timeout=3)) as db:
             db.row_factory = sqlite3.Row
+            present = {row[0] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('attachments', 'deliveries', 'attempts')",
+            )}
             for table, query in (("attachments", "SELECT * FROM attachments"),
                                  ("deliveries", "SELECT * FROM deliveries"),
                                  ("attempts", "SELECT * FROM attempts")):
+                if table not in present:
+                    missing.append(table)
+                    record_evidence(ctx, "missingLedgerTable", {"stage": stage, "table": table})
+                    continue
                 rows = db.execute(query).fetchmany(4097)
                 require(len(rows) <= 4096, "private database snapshot exceeds row bound")
                 record_evidence(ctx, "database", {"stage": stage, "table": table,
                                                 "rows": [dict(row) for row in rows]})
+    else:
+        missing = ["attachments", "deliveries", "attempts"]
+        record_evidence(ctx, "missingLedgerDatabase", {"stage": stage, "tables": missing})
     ctx.fixture("/fixture/read")
+    return missing
 
 
 def post(address, secret, path, body=None, headers=None, *, limit=65_536):
@@ -2073,7 +2086,7 @@ async def run_scenario():
                 for stage, action in (("ab", run_ab_routes), ("busy", run_busy_stage),
                                       ("attach", run_fixture_attach), ("c3", run_post_attach_c3)):
                     await action(ctx)
-                    snapshot_evidence(ctx, stage)
+                    require(not snapshot_evidence(ctx, stage), "checkpoint ledger is incomplete")
             finally:
                 # Persist while native scratch and the broker still exist, including failed stages.
                 try:
@@ -2081,7 +2094,9 @@ async def run_scenario():
                         await ctx.stop_daemon(ctx.daemon_task)
                         ctx.daemon_task = None
                 finally:
-                    snapshot_evidence(ctx, "exit:" + stage)
+                    failed = sys.exc_info()[0] is not None
+                    missing = snapshot_evidence(ctx, "exit:" + stage)
+                    require(failed or not missing, "exit checkpoint ledger is incomplete")
         ctx.proof, ctx.private_nonce_record = build_proof(ctx)
         ctx.proof["privateEvidence"] = {"sha256": digest(ctx.evidence_path.read_bytes()),
                                         "bytes": ctx.evidence_bytes}
