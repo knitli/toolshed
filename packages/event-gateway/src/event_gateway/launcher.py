@@ -176,13 +176,14 @@ def _valid_native_witness(value):
             and set(value) == {
                 "version", "nonce", "clientId", "backendPid", "connectionId", "threadId",
                 "generation", "eligible", "sequence", "cause", "serverInstanceId",
-                "serverGeneration", "leaseMs",
+                "serverGeneration", "leaseMs", "nativeCoreTurnState",
             }
             and isinstance(value["version"], int) and not isinstance(value["version"], bool)
             and value["version"] == 2
             and isinstance(value["nonce"], int) and not isinstance(value["nonce"], bool)
             and 0 <= value["nonce"] <= 2**53 - 1
             and value["eligible"] is True
+            and value["nativeCoreTurnState"] in ("busy", "idle", "unknown")
             and isinstance(value["cause"], str) and len(value["cause"]) <= 128
             and isinstance(value["sequence"], int) and not isinstance(value["sequence"], bool)
             and 0 < value["sequence"] <= 2**53 - 1

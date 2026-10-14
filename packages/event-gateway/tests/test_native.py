@@ -35,7 +35,7 @@ class Bridge:
         """Initialize a recording bridge with the supplied request identity."""
         self.witness = {**{key: item[key] for key in (
             "clientId", "generation", "serverInstanceId", "serverGeneration", "threadId",
-        )}, "eligible": True}
+        )}, "eligible": True, "nativeCoreTurnState": "idle"}
         self.outcome = {"status": "unknown"}
         self.calls = []
 
@@ -211,7 +211,9 @@ class NativeAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_check_requires_eligible_selected_thread_and_clears_old_witness(self):
         self.assertEqual(await self.adapter.check(), "available")
         for witness in (None, {}, {**self.bridge.witness, "eligible": 1},
-                        {**self.bridge.witness, "threadId": str(uuid.uuid4())}):
+                        {**self.bridge.witness, "threadId": str(uuid.uuid4())},
+                        {**self.bridge.witness, "nativeCoreTurnState": "busy"},
+                        {**self.bridge.witness, "nativeCoreTurnState": "unknown"}):
             self.bridge.witness = witness
             self.assertEqual(await self.adapter.check(), "unavailable")
             with self.assertRaisesRegex(NativeError, "^native_unavailable$"):

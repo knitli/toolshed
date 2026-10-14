@@ -37,7 +37,7 @@ IDENTITY = (
 WITNESS_FIELDS = set(
     (
         "version nonce clientId backendPid connectionId threadId generation "
-        "eligible sequence cause serverInstanceId serverGeneration leaseMs"
+        "eligible sequence cause serverInstanceId serverGeneration leaseMs nativeCoreTurnState"
     ).split()
 )
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
@@ -238,6 +238,7 @@ class NativeBridge:
         require(
             type(row["eligible"]) is bool  # pylint: disable=unidiomatic-typecheck
             and isinstance(row["cause"], str) and len(row["cause"]) <= 128
+            and row["nativeCoreTurnState"] in ("busy", "idle", "unknown")
         )
         for key in ("serverGeneration", "leaseMs"):
             require(row[key] is None or uint(row[key]))

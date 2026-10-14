@@ -46,7 +46,8 @@ def bridge():
         row = dict(version=2, nonce=request["nonce"], clientId=identity,
                    backendPid=os.getpid(), connectionId=identity, threadId=thread_id,
                    generation=1, eligible=True, sequence=sequence, cause="mock",
-                   serverInstanceId=identity, serverGeneration=1, leaseMs=750)
+                   serverInstanceId=identity, serverGeneration=1, leaseMs=750,
+                   nativeCoreTurnState="idle")
         stream.write(json.dumps(row).encode() + b"\n")
 
 threading.Thread(target=bridge, daemon=True).start()
