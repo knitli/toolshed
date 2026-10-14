@@ -85,7 +85,8 @@ class ContractWorkflowTests(unittest.TestCase):
             metadata = json.loads(archive.read("metadata.json"))
         self.assertEqual(list(POLICY["FAMILIES"]), metadata["families"])
         self.assertEqual(set(metadata["snapshots"]), {
-            "legacy", "no-start", "native-start", "native-input-recorded", "native-admission", "native-runtime-status", "github-source-readback",
+            "legacy", "no-start", "native-start", "native-input-recorded",
+            "native-admission", "native-runtime-status", "github-source-readback", "github-source-control",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         for expected in metadata["families"]:
@@ -142,6 +143,43 @@ class ContractWorkflowTests(unittest.TestCase):
             ("apps/os/packages/gatekeeper-memory/src/principals.ts",
              "apps/os/packages/openapi-operator/src/access.ts",
              "apps/os/packages/gatekeeper-messaging/src/agent-token.ts"))
+
+    def test_github_source_control_mutation_or_omission_rejected(self):
+        self.assert_mutation_or_omission_rejected("github-source-control")
+
+    def test_github_source_control_manifest_source_provenance(self):
+        self.assert_manifest_source_provenance(
+            "github-source-control", "c25ade9233013d97d56ed0fdfddf75453071066b",
+            ("native-runtime-store", "native-admission-gate", "github/readback-contract",
+             "read-authority", "request-deadline", "github/host", "github/controller",
+             "github/client", "github/grants", "github/state", "github/ingress",
+             "github/source-control", "github/watches", "manual-canary", "manual-canary-scope",
+             "native-admission-canary", "admin-api", "admin-types"),
+            ("apps/os/packages/gatekeeper-memory/src/principals.ts",
+             "apps/os/packages/openapi-operator/src/access.ts",
+             "apps/os/packages/gatekeeper-messaging/src/agent-token.ts",
+             "apps/os/packages/gatekeeper-memory/src/auth.ts",
+             "apps/os/packages/gatekeeper-memory/src/admin-security.ts"))
+        control = json.loads(self.approved_snapshot("github-source-control")[
+            SNAPSHOT + "event-control-v1/manifest.json"])
+        self.assertEqual(len(control["sources"]), 32)
+        self.assertEqual(control["zodVersion"], "4.6.5")
+
+    def test_github_source_control_rejects_changed_or_omitted_source_hashes(self):
+        original = self.approved_snapshot("github-source-control")
+        path = SNAPSHOT + "event-control-v1/manifest.json"
+        for source in json.loads(original[path])["sources"]:
+            for missing in (False, True):
+                with self.subTest(source=source, missing=missing):
+                    manifest = json.loads(original[path])
+                    if missing:
+                        del manifest["sources"][source]
+                    else:
+                        manifest["sources"][source] = "0" * 64
+                    self.blobs = original.copy()
+                    self.blobs[path] = (json.dumps(manifest, indent=2) + "\n").encode()
+                    with self.assertRaises(ValueError):
+                        self.verify()
 
     def assert_manifest_source_provenance(self, name, control_revision, additional_sources=(), external_sources=()):
         # This proves fixture provenance separately from the verifier's raw snapshot hash gate.
