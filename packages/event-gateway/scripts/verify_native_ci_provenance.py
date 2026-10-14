@@ -24,10 +24,10 @@ VERIFIER_WORKFLOW = ".github/workflows/event-native-provenance.yml"
 SCRIPT = "packages/event-gateway/scripts/verify_native_ci_provenance.py"
 LAUNCHER = "packages/event-gateway/src/event_gateway/launcher.py"
 PROVENANCE = "packages/event-gateway/docs/native-bridge/native-release-provenance.json"
-# PR #89 at 98c87baa: exact base/candidate bytes and unchanged native pin pair.
+# Reviewed Core-idle consumer: exact source bytes, with both release pins unchanged.
 REVIEWED_LAUNCHER_TRANSITION = (
-    "fbe251ff9f50af21157902813e60651aac8b2c84513485fe9e4148d1e624edcd",
     "ec9225a2bc907646d3e81898c61e45706cb81df27d95d7c23387075681d8bd12",
+    "4ca29e5aec4aa7bbe753d2910839b1d77002b6ccbf7941d3358d3518aee8cfed",
     "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b",
     "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
 )
