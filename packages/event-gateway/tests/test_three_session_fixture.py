@@ -697,36 +697,10 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             patches.enter_context(patch.object(FIXTURE, "build_proof", return_value=({}, None)))
 
             async def fail(ctx, resources):
-                state_roots.append(ctx.state_root)
-                descriptors.extend((ctx.evidence.fd, ctx.evidence.directory_fd))
-                with closing(sqlite3.connect(ctx.state / "ledger.sqlite")) as db:
-                    for create, insert in (
-                        ("CREATE TABLE attachments (evidence TEXT)", "INSERT INTO attachments VALUES (?)"),
-                        ("CREATE TABLE deliveries (evidence TEXT)", "INSERT INTO deliveries VALUES (?)"),
-                        ("CREATE TABLE attempts (evidence TEXT)", "INSERT INTO attempts VALUES (?)"),
-                    ):
-                        if outcome.startswith("partial") and "attachments" not in create:
-                            continue
-                        db.execute(create)
-                        db.execute(insert, ("before-failure",))
-                    db.commit()
-
-                def verify_archive_before_cleanup():
-                    records = [json.loads(line) for line in ctx.evidence_path.read_text().splitlines()]
-                    if outcome != "write-failure":
-                        self.assertTrue(any(row.get("kind") == "database" for row in records))
-                        FIXTURE.record_evidence(ctx, "lateProviderResponse", {"joined": True})
-                    resource_closed.append(True)
-                resources.callback(verify_archive_before_cleanup)
-                FIXTURE.record_evidence(ctx, "nativeExchange", {"outcome": {"status": "inputRecorded"}})
-                if outcome == "stage-failure":
-                    raise RuntimeError("injected stage failure")
-                if outcome == "partial-failure":
-                    raise ValueError("original partial ledger failure")
-                if outcome == "write-failure":
-                    ctx.evidence.size = 64 * 1024 * 1024
+                self.prepare_retention_stage(ctx, resources, outcome, state_roots, descriptors, resource_closed)
 
             patches.enter_context(patch.object(FIXTURE, "initialize_runtime", side_effect=fail))
+            proof = None
             if outcome == "success":
                 proof = asyncio.run(FIXTURE.run_scenario())
             else:
@@ -739,30 +713,63 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 }[outcome]
                 with self.assertRaisesRegex(error, message):
                     asyncio.run(FIXTURE.run_scenario())
-            archive = output.with_suffix(".private-evidence.jsonl")
-            records = [json.loads(line) for line in archive.read_text().splitlines()]
-            self.assertEqual(archive.stat().st_mode & 0o777, 0o600)
-            if outcome != "write-failure":
-                self.assertEqual({row["value"]["table"] for row in records if row["kind"] == "database"},
-                                 {"attachments"} if outcome.startswith("partial")
-                                 else {"attachments", "deliveries", "attempts"})
-            if outcome.startswith("partial"):
-                self.assertEqual({row["value"]["table"] for row in records
-                                  if row["kind"] == "missingLedgerTable"}, {"deliveries", "attempts"})
-            if outcome == "success":
-                self.assertEqual(proof["privateEvidence"]["sha256"], FIXTURE.digest(archive.read_bytes()))
-                self.assertEqual(proof["privateEvidence"]["bytes"], archive.stat().st_size)
-                self.assertEqual(records[-1]["kind"], "lateProviderResponse")
-                self.assertIn("exit:c3", [row["value"] for row in records if row["kind"] == "checkpoint"])
+            self.assert_retention_archive(outcome, output, proof)
             self.assertEqual(resource_closed, [True])
-            self.assertTrue(any(row["kind"] == "nativeExchange" for row in records))
-            self.assertTrue(any(row["kind"] == "cloudFixture" for row in records))
             self.assertFalse(output.exists(), "failed stages must not produce PASS proof")
             self.assertTrue(all(not path.exists() for path in state_roots))
             stop.assert_called_once()
             for descriptor in descriptors:
                 with self.assertRaises(OSError):
                     os.fstat(descriptor)
+
+    def prepare_retention_stage(self, ctx, resources, outcome, state_roots, descriptors, resource_closed):
+        state_roots.append(ctx.state_root)
+        descriptors.extend((ctx.evidence.fd, ctx.evidence.directory_fd))
+        with closing(sqlite3.connect(ctx.state / "ledger.sqlite")) as db:
+            for create, insert in (
+                ("CREATE TABLE attachments (evidence TEXT)", "INSERT INTO attachments VALUES (?)"),
+                ("CREATE TABLE deliveries (evidence TEXT)", "INSERT INTO deliveries VALUES (?)"),
+                ("CREATE TABLE attempts (evidence TEXT)", "INSERT INTO attempts VALUES (?)"),
+            ):
+                if outcome.startswith("partial") and "attachments" not in create:
+                    continue
+                db.execute(create)
+                db.execute(insert, ("before-failure",))
+            db.commit()
+
+        def verify_archive_before_cleanup():
+            records = [json.loads(line) for line in ctx.evidence_path.read_text().splitlines()]
+            if outcome != "write-failure":
+                self.assertTrue(any(row.get("kind") == "database" for row in records))
+                FIXTURE.record_evidence(ctx, "lateProviderResponse", {"joined": True})
+            resource_closed.append(True)
+        resources.callback(verify_archive_before_cleanup)
+        FIXTURE.record_evidence(ctx, "nativeExchange", {"outcome": {"status": "inputRecorded"}})
+        if outcome == "stage-failure":
+            raise RuntimeError("injected stage failure")
+        if outcome == "partial-failure":
+            raise ValueError("original partial ledger failure")
+        if outcome == "write-failure":
+            ctx.evidence.size = 64 * 1024 * 1024
+
+    def assert_retention_archive(self, outcome, output, proof):
+        archive = output.with_suffix(".private-evidence.jsonl")
+        records = [json.loads(line) for line in archive.read_text().splitlines()]
+        self.assertEqual(archive.stat().st_mode & 0o777, 0o600)
+        if outcome != "write-failure":
+            self.assertEqual({row["value"]["table"] for row in records if row["kind"] == "database"},
+                             {"attachments"} if outcome.startswith("partial")
+                             else {"attachments", "deliveries", "attempts"})
+        if outcome.startswith("partial"):
+            self.assertEqual({row["value"]["table"] for row in records
+                              if row["kind"] == "missingLedgerTable"}, {"deliveries", "attempts"})
+        if outcome == "success":
+            self.assertEqual(proof["privateEvidence"]["sha256"], FIXTURE.digest(archive.read_bytes()))
+            self.assertEqual(proof["privateEvidence"]["bytes"], archive.stat().st_size)
+            self.assertEqual(records[-1]["kind"], "lateProviderResponse")
+            self.assertIn("exit:c3", [row["value"] for row in records if row["kind"] == "checkpoint"])
+        self.assertTrue(any(row["kind"] == "nativeExchange" for row in records))
+        self.assertTrue(any(row["kind"] == "cloudFixture" for row in records))
 
     def test_archive_bound_and_replacement_refuse_without_overwriting_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
