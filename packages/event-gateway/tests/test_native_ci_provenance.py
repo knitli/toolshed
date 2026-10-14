@@ -112,6 +112,14 @@ class FakeAPI:
 
 
 class NativeCIProvenanceTests(unittest.TestCase):
+    def test_push_trigger_covers_every_trusted_policy_input(self):
+        workflow = (SCRIPT.parents[3] / V.VERIFIER_WORKFLOW).read_text()
+        push = workflow.split("\n  push:\n", 1)[1]
+        paths = push.split("\n    paths:\n", 1)[1].split("\n\n", 1)[0]
+        triggered = {line.removeprefix("      - ") for line in paths.splitlines()}
+        required = {V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, *V.INPUTS.values()}
+        self.assertFalse(required - triggered, required - triggered)
+
     def test_pins_parse_literals_without_executing_candidate(self):
         with tempfile.TemporaryDirectory() as directory:
             marker = Path(directory) / "executed"
