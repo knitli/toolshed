@@ -238,6 +238,49 @@ class NativeCIProvenanceTests(unittest.TestCase):
             V.verify_candidate(api, HEAD, MAIN)
         self.assertNotIn(("download", 456), api.calls)
 
+    def core_idle_transition(self):
+        source = (SCRIPT.parents[3] / V.LAUNCHER).read_bytes()
+        # Replay the reviewed two-line witness change; retain this fixture after pin promotion.
+        for name, value in zip(("QUALIFIED_SHA256", "QUALIFIED_CODE_MODE_HOST_SHA256"),
+                               V.REVIEWED_LAUNCHER_TRANSITION[2:]):
+            source = source.replace(V.pins(source)[name].encode(), value.encode())
+        old_fields = b'"serverGeneration", "leaseMs",'
+        new_fields = b'"serverGeneration", "leaseMs", "nativeCoreTurnState",'
+        check = b'            and value["nativeCoreTurnState"] in ("busy", "idle", "unknown")\n'
+        base = source.replace(new_fields, old_fields).replace(check, b"")
+        candidate = base.replace(old_fields, new_fields).replace(
+            b'            and value["eligible"] is True\n',
+            b'            and value["eligible"] is True\n' + check)
+        api = FakeAPI()
+        api.blobs[V.LAUNCHER, MAIN] = base
+        api.blobs[V.LAUNCHER, HEAD] = candidate
+        return api
+
+    def test_reviewed_core_idle_source_passes_but_source_mutations_fail(self):
+        api = self.core_idle_transition()
+        self.assertNotEqual(V.launcher_code(api.blobs[V.LAUNCHER, MAIN]),
+                            V.launcher_code(api.blobs[V.LAUNCHER, HEAD]))
+        self.assertIn("unchanged", V.verify_candidate(api, HEAD, MAIN))
+        self.assertEqual(api.calls, [f"git/trees/{HEAD}?recursive=1",
+                                     (V.LAUNCHER, HEAD), (V.LAUNCHER, MAIN)])
+        for revision in (MAIN, HEAD):
+            api = self.core_idle_transition()
+            api.blobs[V.LAUNCHER, revision] += b"# unreviewed source bytes\n"
+            with self.subTest(revision=revision), self.assertRaises(ValueError):
+                V.verify_candidate(api, HEAD, MAIN)
+            self.assertNotIn(("download", 456), api.calls)
+
+    def test_reviewed_core_idle_source_cannot_also_promote_attested_binary(self):
+        api = self.core_idle_transition()
+        source = api.blobs[V.LAUNCHER, HEAD]
+        source = source.replace(V.pins(source)["QUALIFIED_SHA256"].encode(),
+                                api.selected["binarySha256"].encode())
+        api.blobs[V.LAUNCHER, HEAD] = source
+        with self.assertRaises(ValueError):
+            V.verify_candidate(api, HEAD, MAIN)
+        self.assertEqual(api.calls, [f"git/trees/{HEAD}?recursive=1",
+                                     (V.LAUNCHER, HEAD), (V.LAUNCHER, MAIN)])
+
     def observation_transition(self):
         api = FakeAPI()
         base = launcher()

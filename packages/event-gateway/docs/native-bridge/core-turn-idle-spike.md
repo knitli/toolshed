@@ -115,6 +115,13 @@ attempt-6 bridge proof also does not qualify the installed launcher, change a
 pin, enable delivery, or establish a live wake. Promotion needs a separately
 qualified paired native source/binary and Python consumer.
 
+Release order is the exact unchanged-pin launcher policy on main, then the
+reviewed Python consumer with existing pins, then the attested native pin
+promotion. Hold client installation until the final paired release: the interim
+consumer rejects the old binary's witnesses because they lack
+`nativeCoreTurnState`. The policy transition does not authorize a simultaneous
+launcher logic and executable pin change.
+
 ## Limits and follow-up
 
 The snapshot is read under Core's lock at selection-update time, then conveyed
