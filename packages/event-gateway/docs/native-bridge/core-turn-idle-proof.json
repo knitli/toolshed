@@ -1,0 +1,241 @@
+{
+  "checks": {
+    "fullUpstreamRustWorkspaceSuite": "not run",
+    "nativeRust": [
+      {
+        "command": "just write-app-server-schema",
+        "result": "passed; protocol JSON, TypeScript, and precomputed schema exports regenerated; schema fixture consistent"
+      },
+      {
+        "command": "just test -p codex-app-server-protocol --cargo-profile dev-small",
+        "passed": 313
+      },
+      {
+        "command": "just test -p codex-core --cargo-profile dev-small core_turn_activity_tracks_reservation_until_task_completion",
+        "passed": 1
+      },
+      {
+        "command": "just test -p codex-app-server --cargo-profile dev-small client_selection_update_reports_core_busy_during_tool_and_idle_after_completion",
+        "passed": 1
+      },
+      {
+        "command": "just test -p codex-tui --cargo-profile dev-small selection_",
+        "leakyTests": 1,
+        "passed": 218
+      },
+      {
+        "command": "just test -p codex-tui --cargo-profile dev-small delayed_challenge_refreshes_from_original_sample_deadline",
+        "passed": 1
+      },
+      {
+        "command": "just test -p codex-tui --cargo-profile dev-small fragmented_challenge_survives_state_burst",
+        "passed": 1
+      },
+      {
+        "command": "just fmt-check",
+        "result": "passed"
+      }
+    ],
+    "pythonPackage": {
+      "baseCommit": "ba696db45b3d19fac11963c46e125e8d2cfe8eb8",
+      "command": "python -B -m unittest discover -s tests -v",
+      "python": "3.13.14",
+      "result": "passed",
+      "tests": 655
+    },
+    "sdkGeneration": {
+      "command": "not recorded; separate pinned SDK typewriter invocation, not just write-app-server-schema",
+      "generatedOutputChangedFromPostV1Baseline": false,
+      "result": "passed; generated SDK tree matched the post-native-metadata-v1 qualified baseline",
+      "sourceFilesCompared": 87
+    },
+    "nativePatchReplay": {
+      "baseCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+      "cumulativePrerequisite": {
+        "file": "native-metadata-v1-implementation.patch",
+        "patchSha256": "922c3b2aa733564f67765aec27d4128b96b697441b37b42665b6656a4ad884fb",
+        "manifestFile": "native-metadata-v1-source-manifest.json",
+        "manifestSha256": "8f40ca398770501412963786ade67891749f3c9296a1c82c14d62f6257e98469",
+        "matchedFiles": 52
+      },
+      "incrementalIdlePatch": {
+        "file": "core-turn-idle-native.patch",
+        "patchSha256": "a27af5ad6be69969597636b149a47d4d3e915f109dba5433b394227131aaa54a",
+        "matchedFiles": 18
+      },
+      "result": "passed; independent clean-source replay applied native-metadata-v1 first, then the idle patch; all patch outputs matched",
+      "fullSourceTreeFilesMatchedAfterPublicCargoLockNormalization": 8264,
+      "applyLayout": {
+        "repositoryRoot": "full Codex repository at a956; contains codex-rs/ and sdk/python/",
+        "cumulativePrerequisite": "git apply -p1 from the full Codex repository root; manifest paths are relative to that root",
+        "incrementalIdlePatch": "git apply -p1 --directory=codex-rs from the same full Codex repository root"
+      }
+    },
+    "nativeCargoLockNormalization": {
+      "mechanism": "existing packages/event-gateway/scripts/package_native_client.py allowlist normalization followed by cargo metadata",
+      "localPackageVersionEntriesNormalized": 159,
+      "from": "0.0.0",
+      "to": "0.160.0",
+      "externalPackageVersionsChanged": 0,
+      "beforeSha256": "5553f06583159ed64666b6eb4beea3154e06b612e6312528131bdc226a6a860c",
+      "afterSha256": "f0ea6b033508c394980bfc011907947beffcb7f7b1a56addbff90196617c14a4",
+      "bitForBitBinaryReproductionClaimed": false
+    }
+  },
+  "format": "native-core-idle-proof-v1",
+  "limits": [
+    "The Core snapshot is observational, not a reservation; idle can become busy before the remote claim.",
+    "Busy/unknown suppresses initial dispatch only; exact ambiguous-operation recovery is not gated by a later busy snapshot.",
+    "The promoted launcher pin remains unchanged and does not emit nativeCoreTurnState; this experiment does not qualify production delivery or a live wake."
+  ],
+  "patches": {
+    "native": {
+      "file": "core-turn-idle-native.patch",
+      "format": "git diff --binary",
+      "replayedFiles": {
+        "app-server-protocol/schema/json/codex_app_server_protocol.schemas.json": "142ad94c857574cf8a0800dea715cf1931d7cc76d3bc8a7995547311be774f68",
+        "app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json": "3c46172094539c3cba8176e4aec8bb91aee6a9652620a3bdcd1a72bf10501368",
+        "app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst": "8595a8f7e6fdec897033a877d5c353a20ccda87391b8dff203b46ffeba1f66c1",
+        "app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst": "73173d2e8d66f0839bd762209cf1f256aa4398e4ebae7a3a8c0bed28fa7ce351",
+        "app-server-protocol/schema/typescript/v2/NativeCoreTurnState.ts": "679f487448941d019ed6c5252b36a15959655167600fffcfcc47f077fecb4983",
+        "app-server-protocol/schema/typescript/v2/index.ts": "577455c0621a49852467b18005a320487f38dd2eec8c3ffe6ee76d839d9c0439",
+        "app-server-protocol/src/protocol/v2/thread.rs": "4b3cae028c22edd5f5fd0ee3720929bdcd508bf5a1a61fc0e8405711d88c7c66",
+        "app-server/src/message_processor.rs": "46a19af1c89830f48dcb6fdf60427db38222eb57f1ccfb31cdfeb3fa17b3212e",
+        "app-server/src/request_processors/native_selection_processor.rs": "c20a22c8a3db20e10f12fc17cb4afcc51d09afc6c98d3e539d89397f8aa2c7aa",
+        "app-server/tests/suite/v2/thread_unsubscribe.rs": "281d8411c04588ef20bc02af611bdd9c3c14c5df926f58475d18f59058a912a1",
+        "core/src/codex_thread.rs": "1d3fb4fd4dd12f2b7458698dd50dd1f33d5306021744413d3bbaef44b122b098",
+        "core/src/session/session.rs": "bab44c099760269e2a549f3ff7da1645b4c19550ebe01d861c79c8f9be0ca88a",
+        "core/src/session/tests.rs": "cda0d48e5f40a7f32bb8fcc67708b7d604735d3e2acc6e5df759fa4aab9b4981",
+        "tui/src/app/selection_binding.rs": "4241ae32bb56423b5d1d5497aeeb27730af5868b445bc3284c3af46c9bd63b86",
+        "tui/src/app/selection_binding_tests.rs": "be5fe7106c77406621174527c976332acc8c5ec262a3d12ee341e223a5a811ba",
+        "tui/src/app/selection_bridge_tests.rs": "b174101c99f658de3a2de3396f8bda866d2681221c1533d2ac4ff6d29007d184",
+        "tui/src/app/selection_witness.rs": "9d7b094ffa10cc6ce471c2241e4809d8a0e4bab7920ec4b4b5b9b44455df0b23",
+        "tui/src/app/selection_witness_tests.rs": "04b6abc551b951940841ef8733696fed80e938f0b453462308fb06f0f4788681"
+      },
+      "sha256": "a27af5ad6be69969597636b149a47d4d3e915f109dba5433b394227131aaa54a"
+    },
+    "python": {
+      "file": "core-turn-idle-python.patch",
+      "replayedFiles": {
+        "src/event_gateway/launcher.py": "4ca29e5aec4aa7bbe753d2910839b1d77002b6ccbf7941d3358d3518aee8cfed",
+        "src/event_gateway/native.py": "b1c2ca487161fb0300b838c165c0f64bb01d76912f9c6a7025ea921b204e0e19",
+        "src/event_gateway/native_reader.py": "73896266cbf27b7feb67f167c81dadf8f2403ad87439e8336ec28e1214b5c777",
+        "tests/test_core_turn_idle_spike.py": "80de9c6cb9a983e67c99a29a6b6f3c4886f6b3b6afc58c0bd9f57828879cb599",
+        "tests/test_daemon_dispatch.py": "bd4f82df8d5fc8cac9f172dd023a20e9787157f9f14dff4e4ab7ab6fe6827396",
+        "tests/test_gateway.py": "df0950880e54069504c2196737515ce5a06fde7768e89337cff8fc72ec14d9eb",
+        "tests/test_gateway_integration.py": "c28cd7c0d9cd68b7f90471e43bf3c79c96eb13a1b01b3890d7dae858a8b2b466",
+        "tests/test_launcher_terminal_integration.py": "5d34617319f25f729461872de475dc09f9f163f90f0be91c44d38522ede8cf95",
+        "tests/test_native.py": "b645262960b9c9fb6f0ca1fa0c754342787b6ddc99fd8c8c496d6151145ffaf3",
+        "tests/test_native_bridge.py": "e9ff9b16504cbdb120ccf139d51812f44c17070668ba026b2979e55f128b211c"
+      },
+      "sha256": "655c083b4e7764ce147701f5c7afdf362d6a684941c8733039d7ac8791d7f434"
+    }
+  },
+  "productionPromotion": false,
+  "runtime": {
+    "attempt5": {
+      "cleanupVerified": true,
+      "proofSha256": "d8b33cdc0bf0a2cfff9d6b833eb00a67c28378f3bedb3fe94835b29327f3e971",
+      "reason": "AF_UNIX control-socket path exceeded the platform limit before Popen",
+      "result": "failed-before-native-launch",
+      "runtimeExecuted": false
+    },
+    "attempt6": {
+      "actualToolActiveObserved": true,
+      "automaticWakeEnabled": false,
+      "bindingChangedOnCompletion": true,
+      "bindingFields": [
+        "backendPid",
+        "clientId",
+        "connectionId",
+        "generation",
+        "serverGeneration",
+        "serverInstanceId",
+        "threadId"
+      ],
+      "busyDispatchWitness": {
+        "leaseMs": 672,
+        "remainingLeaseMs": 657,
+        "state": "busy"
+      },
+      "busyWitness": {
+        "leaseMs": 696,
+        "remainingLeaseMs": 670,
+        "state": "busy"
+      },
+      "cleanupVerified": {
+        "allOwnedProcessGroupsEmpty": true,
+        "candidateRootReaped": true,
+        "controlSocketRemoved": true,
+        "scratchRootRemoved": true
+      },
+      "cloudCalls": 0,
+      "freshIdleWitness": {
+        "adapter": "available",
+        "leaseMs": 734,
+        "remainingLeaseMs": 718,
+        "state": "idle"
+      },
+      "gatewayDispatch": {
+        "attemptCreated": false,
+        "claimCalls": 0,
+        "reason": "client_unavailable_or_busy",
+        "status": "queued"
+      },
+      "mockProviderRequests": {
+        "main": 2,
+        "title": 1,
+        "toolCalls": 1
+      },
+      "nativeExecutionProven": true,
+      "nativeStartCalls": 0,
+      "networkBoundary": "loopback-only mock provider; a git-remote-http helper was observed during startup; no external attempt or success is inferred",
+      "oldBindingRejection": "native_binding_changed",
+      "proofSha256": "d9e6c0b098f726a0013587da83eea69c846633540743746e47c7c7b1ca8328b9",
+      "realModelCalls": 0,
+      "result": "passed",
+      "runtimeExecuted": true
+    }
+  },
+  "scope": "bounded experimental Core active-turn observation spike",
+  "sourceBases": {
+    "native": {
+      "baseFileCount": 8263,
+      "baseInventorySha256": "917c16e82701dfe7271fb89099d85b6fb05db0bae6863a579959d04c64ee10da",
+      "commit": "a956835d020762cb2b570053af06f643a11c0ecc",
+      "experimentalBinarySha256": "90082e14225da4b04112245be3cef404e3aec9c7ecde2395686ae30299c91029",
+      "repository": "codex-rs",
+      "patchChain": {
+        "instruction": "Apply native-metadata-v1 to the clean a956 base first; core-turn-idle-native.patch is incremental and does not apply directly to raw a956.",
+        "cumulativePrerequisitePatch": {
+          "file": "native-metadata-v1-implementation.patch",
+          "sha256": "922c3b2aa733564f67765aec27d4128b96b697441b37b42665b6656a4ad884fb",
+          "manifestFile": "native-metadata-v1-source-manifest.json",
+          "manifestSha256": "8f40ca398770501412963786ade67891749f3c9296a1c82c14d62f6257e98469",
+          "files": 52
+        },
+        "incrementalIdlePatch": {
+          "file": "core-turn-idle-native.patch",
+          "sha256": "a27af5ad6be69969597636b149a47d4d3e915f109dba5433b394227131aaa54a",
+          "files": 18
+        },
+        "applyLayout": {
+          "repositoryRoot": "full Codex repository at a956; contains codex-rs/ and sdk/python/",
+          "cumulativePrerequisite": "git apply -p1 from the full Codex repository root; manifest paths are relative to that root",
+          "incrementalIdlePatch": "git apply -p1 --directory=codex-rs from the same full Codex repository root"
+        }
+      }
+    },
+    "pythonConsumer": {
+      "publicReplayBase": "ba696db45b3d19fac11963c46e125e8d2cfe8eb8",
+      "publicReplayPackageFilesMatchQualifiedCandidate": 10,
+      "qualifiedCandidateBase": "cf85e25692141e4000e80c796da38cacf558b686"
+    },
+    "pythonSdkGeneration": {
+      "generatedOutputChangedFromPostNativeMetadataV1Baseline": false,
+      "idlePatchIncludesSdkFiles": false,
+      "sourceFileCount": 87,
+      "treeSha256": "04d7e1699681c972c9539c36d1477d0eea382392a48b00fc7d8a8774f477ab3f"
+    }
+  }
+}
