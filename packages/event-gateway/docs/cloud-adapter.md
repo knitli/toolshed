@@ -112,9 +112,14 @@ as permission to create a new native attempt or attachment request.
 
 ## Separate control-plane source pin
 
-`contracts/event-control-v1/manifest.json` pins the exact Event source files from
-the OS snapshot candidate `7675f40a4053795de03458c2741da4e3a475ce29`, plus the Zod version and
-fixture SHA-256. It does not modify the earlier frozen `event-v1` transport pin.
+`contracts/event-control-v1/manifest.json` pins 32 Event source paths from
+the immutable OS revision `c25ade9233013d97d56ed0fdfddf75453071066b`, plus the Zod version and
+fixture SHA-256. The source chain includes delegated read authority, GitHub
+source-control and watches, manual/native canary boundaries, admin API/types,
+and memory authentication/admin security. These are offline provenance pins;
+production source activation, delivery, and native attachment remain disabled
+by default, and no live qualification is established by this rotation. It does
+not modify the earlier frozen `event-v1` transport pin.
 In `--check` mode, the exporter verifies the committed revision, every source
 hash and installed Zod version before evaluating source. A mismatch stops before
 any data-module import. It then executes the pinned source's claim/settlement
@@ -136,7 +141,7 @@ canonical bytes and signatures, successful response DTOs, and named rejection
 cases against the Python client. `tests/test_runtime_status_contract.py` checks
 the exported historical status, request rejections, and signed node-proof vectors.
 
-From `packages/event-gateway`, using Node 24.19.0 and the pinned Zod 4.5.4 module:
+From `packages/event-gateway`, using Node 24.19.0 and the pinned Zod 4.6.5 module:
 
 ```sh
 node contracts/event-control-v1/export.mjs /path/to/pinned-os/apps/os /path/to/zod/index.js --check

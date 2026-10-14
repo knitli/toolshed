@@ -218,15 +218,20 @@ within a bounded budget, and unavailable evidence reports an error rather than
 claiming contract drift. Policy-only PRs retain the existing snapshots and can
 pass before the policy lands; dependent consumers remain gated until it lands.
 The control corpus includes GitHub source readback request/result vectors
-exported from the pinned cloud schema using Zod 4.5.4: numeric and Unicode
+exported from the pinned cloud schema using Zod 4.6.5: numeric and Unicode
 limits, projected record types, cursor completion/epoch checks, and response
 byte limits. Consumer tests exercise these through Python validation and the
 HTTP response boundary. Request identity, pagination binding, and duplicate
 record checks remain separately tested local invariants. These vectors do not
 qualify live authorization, source initialization, delivery, or native wake.
-The source manifest also preserves the delegated read path: authority revalidation
-and deadlines, host admission and GitHub client, grants and principal allowlist,
-controller pagination/projection, subject validation, and shared identity helpers.
+The control manifest pins 32 source paths at
+`c25ade9233013d97d56ed0fdfddf75453071066b`, preserving the delegated read path:
+authority revalidation and deadlines, host admission and GitHub client, grants
+and principal allowlist, controller pagination/projection, subject validation,
+and shared identity helpers. It also includes source-control and watches, manual
+and native canary boundaries, admin API/types, and memory authentication/admin
+security. Production source activation, delivery, and native attachment remain
+disabled by default; this rotation does not enable them.
 These are offline source provenance, not an executable dependency bundle or proof
 of the external authority service, provider API, or Cloudflare runtime.
 Snapshot verification does not prove that every Python semantic
