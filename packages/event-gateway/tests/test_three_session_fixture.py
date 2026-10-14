@@ -17,6 +17,7 @@ import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
+from uuid import uuid4
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "docs/native-bridge/three-session-workerd.py"
@@ -673,7 +674,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             for name, value in globals_.items():
                 patches.enter_context(patch.object(FIXTURE, name, value))
             patches.enter_context(patch.object(FIXTURE, "private_temp_root", return_value=root))
-            patches.enter_context(patch.object(FIXTURE, "start_broker", return_value=(None, None, {"secret": "fixture", "port": 12345})))
+            patches.enter_context(patch.object(FIXTURE, "start_broker", return_value=(None, None, {"secret": uuid4().hex, "port": 12345})))
             stop = patches.enter_context(patch.object(FIXTURE, "stop_broker", return_value={}))
             patches.enter_context(patch.object(FIXTURE, "post", return_value=(200, {}, b'{"challengeId":"id","signingPayload":"payload"}')))
             state_roots = []
@@ -685,10 +686,15 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             async def fail(ctx, resources):
                 state_roots.append(ctx.state_root)
                 with closing(sqlite3.connect(ctx.state / "ledger.sqlite")) as db:
-                    for table in ("attachments", "deliveries", "attempts"):
-                        db.execute("CREATE TABLE " + table + " (evidence TEXT)")
-                        db.execute("INSERT INTO " + table + " VALUES (?)", ("before-failure",))
+                    for create, insert in (
+                        ("CREATE TABLE attachments (evidence TEXT)", "INSERT INTO attachments VALUES (?)"),
+                        ("CREATE TABLE deliveries (evidence TEXT)", "INSERT INTO deliveries VALUES (?)"),
+                        ("CREATE TABLE attempts (evidence TEXT)", "INSERT INTO attempts VALUES (?)"),
+                    ):
+                        db.execute(create)
+                        db.execute(insert, ("before-failure",))
                     db.commit()
+
                 def verify_archive_before_cleanup():
                     records = [json.loads(line) for line in ctx.evidence_path.read_text().splitlines()]
                     if outcome != "write-failure":

@@ -300,8 +300,10 @@ def snapshot_evidence(ctx, stage):
     if database.exists():
         with closing(sqlite3.connect("file:" + str(database) + "?mode=ro", uri=True, timeout=3)) as db:
             db.row_factory = sqlite3.Row
-            for table in ("attachments", "deliveries", "attempts"):
-                rows = db.execute("SELECT * FROM " + table).fetchmany(4097)  # fixed table names only.
+            for table, query in (("attachments", "SELECT * FROM attachments"),
+                                 ("deliveries", "SELECT * FROM deliveries"),
+                                 ("attempts", "SELECT * FROM attempts")):
+                rows = db.execute(query).fetchmany(4097)
                 require(len(rows) <= 4096, "private database snapshot exceeds row bound")
                 record_evidence(ctx, "database", {"stage": stage, "table": table,
                                                 "rows": [dict(row) for row in rows]})
