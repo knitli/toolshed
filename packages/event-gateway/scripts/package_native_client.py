@@ -20,14 +20,14 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[3]
 DOCS = ROOT / "packages/event-gateway/docs/native-bridge"
-PATCH = DOCS / "native-metadata-v1-implementation.patch"
-SOURCE_MANIFEST = DOCS / "native-metadata-v1-source-manifest.json"
+PATCH = DOCS / "native-core-idle-v1-implementation.patch"
+SOURCE_MANIFEST = DOCS / "native-core-idle-v1-source-manifest.json"
 UPSTREAM_COMMIT = "a956835d020762cb2b570053af06f643a11c0ecc"
-PATCH_SHA256 = "922c3b2aa733564f67765aec27d4128b96b697441b37b42665b6656a4ad884fb"
-SOURCE_MANIFEST_SHA256 = "8f40ca398770501412963786ade67891749f3c9296a1c82c14d62f6257e98469"
+PATCH_SHA256 = "ef74b28f308d4eb16556771cbfc47f3db00d83165e332f546edd9b65b6b302db"
+SOURCE_MANIFEST_SHA256 = "8c6f136f215deb4dca30b4d230eede5eaf8e65c1850635b199b62457a7759924"
 PINNED_CARGO_CONFIG_SHA256 = "b8ae1cea341beb2d4a3c8fb81f97a96f4aee1fd53f769c57f140dfe949806a80"
 PINNED_SOURCE_ROOT_CARGO_CONFIG_SHA256 = "b34b20f64e30695e8629ddad8b80885764e947f51e4ce49c6378a3b5a238d25e"
-PATCHED_FILE_COUNT = 52
+PATCHED_FILE_COUNT = 57
 def _launcher_pin(path):
     """Read one literal launcher digest as data without executing launcher code."""
     tree = ast.parse(path.read_text())

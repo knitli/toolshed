@@ -63,6 +63,10 @@ class NativeCIProducerTests(unittest.TestCase):
                 self.assertEqual(receipt["inputs"]["producerSha256"],
                                  PRODUCER.builder.sha256_file(Path(PRODUCER.__file__)))
 
+                self.assertEqual(receipt["inputs"]["sourceManifestSha256"],
+                                 PRODUCER.builder.SOURCE_MANIFEST_SHA256)
+                self.assertEqual(receipt["inputs"]["patchSha256"], PRODUCER.builder.PATCH_SHA256)
+
                 def substituted(*args, **kwargs):
                     evidence = package(*args, **kwargs)
                     args[1].write_bytes(b"substituted")

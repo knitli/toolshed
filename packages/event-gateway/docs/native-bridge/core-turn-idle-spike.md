@@ -32,6 +32,8 @@ decision.
    The state remains separate from the seven binding fields and cannot replace
    any of them.
 
+The [candidate builder](native-client-build.md) now carries the cumulative native patch and complete output manifest. That recipe change does not promote the experimental binary or the Python consumer patch. The incremental replay below remains the historical spike procedure.
+
 ## Reproducing the native source patch chain
 
 The idle patch is incremental; it does **not** apply directly to raw Codex

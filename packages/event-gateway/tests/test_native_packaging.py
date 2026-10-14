@@ -528,11 +528,26 @@ class NativePackagingTests(unittest.TestCase):
             with self.subTest(path=relative):
                 self.assertEqual(hashlib.sha256((docs / relative).read_bytes()).hexdigest(), expected)
 
+    def test_current_recipe_covers_every_changed_file_and_rejects_tampering(self):
+        manifest_bytes = PACKAGER["SOURCE_MANIFEST"].read_bytes()
+        patch_bytes = PACKAGER["PATCH"].read_bytes()
+        manifest = PACKAGER["verify_manifest"](manifest_bytes, patch_bytes)
+        changed = [shlex.split(line)[3].removeprefix("b/")
+                   for line in patch_bytes.decode().splitlines() if line.startswith("diff --git ")]
+        self.assertEqual(len(changed), len(set(changed)))
+        self.assertEqual(set(changed), set(manifest["fileSha256"]))
+        self.assertIn("codex-rs/core/src/session/session.rs", changed)
+        for source, implementation in ((manifest_bytes + b" ", patch_bytes),
+                                        (manifest_bytes, patch_bytes + b" ")):
+            with self.subTest(manifest_changed=source != manifest_bytes), \
+                    self.assertRaisesRegex(ValueError, "native_source_manifest_mismatch"):
+                PACKAGER["verify_manifest"](source, implementation)
+
     def test_manifest_rejects_a_missing_patched_file(self):
         manifest_bytes = PACKAGER["SOURCE_MANIFEST"].read_bytes()
         patch_bytes = PACKAGER["PATCH"].read_bytes()
         manifest = PACKAGER["verify_manifest"](manifest_bytes, patch_bytes)
-        self.assertEqual(manifest["fileCount"], 52)
+        self.assertEqual(manifest["fileCount"], PACKAGER["PATCHED_FILE_COUNT"])
         manifest["fileCount"] -= 1
         removed = manifest["files"].pop()
         del manifest["fileSha256"][removed["path"]]

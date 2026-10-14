@@ -1,0 +1,384 @@
+{
+  "baseCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "scope": "Cumulative native-metadata-v1 source plus reviewed Core active-turn busy/idle/unknown observation, bounded local selection lease, generated protocol exports, and source tests. No admission reservation or installed-client promotion.",
+  "fileCount": 57,
+  "binaryPatch": true,
+  "patchSha256": "ef74b28f308d4eb16556771cbfc47f3db00d83165e332f546edd9b65b6b302db",
+  "cleanPinnedApply": {
+    "base": "a956835d020762cb2b570053af06f643a11c0ecc",
+    "cleanApply": "PASS",
+    "patchedBytesMatch": "PASS",
+    "mismatches": 0
+  },
+  "excludedBuildOnlyFiles": [
+    "codex-rs/Cargo.lock"
+  ],
+  "sourceChain": {
+    "prerequisitePatchSha256": "922c3b2aa733564f67765aec27d4128b96b697441b37b42665b6656a4ad884fb",
+    "prerequisiteManifestSha256": "8f40ca398770501412963786ade67891749f3c9296a1c82c14d62f6257e98469",
+    "incrementalPatchSha256": "a27af5ad6be69969597636b149a47d4d3e915f109dba5433b394227131aaa54a",
+    "incrementalOutputsMatched": 18
+  },
+  "replayVerification": {
+    "completeRepositoryFilesMatched": 8793,
+    "qualifiedNativeSourceFilesCompared": 8264,
+    "qualifiedNativeSourceDifferences": [
+      "Cargo.lock"
+    ],
+    "cargoLockNormalization": {
+      "localPackageVersionEntries": 159,
+      "from": "0.0.0",
+      "to": "0.160.0",
+      "externalPackageVersionsChanged": 0,
+      "beforeSha256": "5553f06583159ed64666b6eb4beea3154e06b612e6312528131bdc226a6a860c",
+      "afterSha256": "f0ea6b033508c394980bfc011907947beffcb7f7b1a56addbff90196617c14a4"
+    },
+    "bitForBitBinaryReproductionClaimed": false
+  },
+  "fileSha256": {
+    "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json": "142ad94c857574cf8a0800dea715cf1931d7cc76d3bc8a7995547311be774f68",
+    "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json": "3c46172094539c3cba8176e4aec8bb91aee6a9652620a3bdcd1a72bf10501368",
+    "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst": "8595a8f7e6fdec897033a877d5c353a20ccda87391b8dff203b46ffeba1f66c1",
+    "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst": "73173d2e8d66f0839bd762209cf1f256aa4398e4ebae7a3a8c0bed28fa7ce351",
+    "codex-rs/app-server-protocol/schema/typescript/v2/ClientSelectionUpdateStatus.ts": "9f70edf230a0fde8b1b714b69ec1cf1e2e2c03f74bcb5926d94b54b8dd687f0c",
+    "codex-rs/app-server-protocol/schema/typescript/v2/NativeCoreTurnState.ts": "679f487448941d019ed6c5252b36a15959655167600fffcfcc47f077fecb4983",
+    "codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartIfIdleNotStartedReason.ts": "6e3e400e8a68f25219e873ffbf63e53ff068f4f98d9ecd731bbbafffe2f1faae",
+    "codex-rs/app-server-protocol/schema/typescript/v2/index.ts": "577455c0621a49852467b18005a320487f38dd2eec8c3ffe6ee76d839d9c0439",
+    "codex-rs/app-server-protocol/src/protocol/common.rs": "63e02847f7819f62a3d3167931a3b202445740aadf52c60d90cd31183da20f0f",
+    "codex-rs/app-server-protocol/src/protocol/v2/thread.rs": "4b3cae028c22edd5f5fd0ee3720929bdcd508bf5a1a61fc0e8405711d88c7c66",
+    "codex-rs/app-server/src/lib.rs": "46321d34235f5feffd33231a7390624720dcbfb627ba4222585a96ada3936ed8",
+    "codex-rs/app-server/src/message_processor.rs": "46a19af1c89830f48dcb6fdf60427db38222eb57f1ccfb31cdfeb3fa17b3212e",
+    "codex-rs/app-server/src/request_processors.rs": "eb4235cd2d56d6a5ab09e99d21ced2f720c4c454ff106ca597b928c35b675df2",
+    "codex-rs/app-server/src/request_processors/native_selection_processor.rs": "c20a22c8a3db20e10f12fc17cb4afcc51d09afc6c98d3e539d89397f8aa2c7aa",
+    "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs": "addfccc107b2ebb7d1174bd2cdb44bda0ece0b7feed0c04c3ba6c34be5229865",
+    "codex-rs/app-server/src/request_processors/thread_lifecycle.rs": "286694f95faaf1419caabfe764b8392c4690ee529bc134f9b73c4091b2160ab9",
+    "codex-rs/app-server/src/thread_state.rs": "9c9006531cc814599f84fd26a82eb946ae3a9c8a1b2869d40a086f689a4bcbb4",
+    "codex-rs/app-server/tests/suite/v2/thread_start.rs": "7eb4133f3aa2cf7406a2c83f78e0221cb4a20a014d632f1736cfb828a6003c75",
+    "codex-rs/app-server/tests/suite/v2/thread_unsubscribe.rs": "281d8411c04588ef20bc02af611bdd9c3c14c5df926f58475d18f59058a912a1",
+    "codex-rs/arg0/src/lib.rs": "8d5b9c1a896f874d81c23e0e5fbe9d8246018843acb369d59a6df9ce8c158f15",
+    "codex-rs/cli/src/main.rs": "de484836dfaeec9294bedd18ab105af14a3cf68a6d6697188b76b890623bf75c",
+    "codex-rs/core/src/codex_thread.rs": "1d3fb4fd4dd12f2b7458698dd50dd1f33d5306021744413d3bbaef44b122b098",
+    "codex-rs/core/src/session/mod.rs": "d4363e380ff2fe9e537c15a26330c497886d566c9cb14531c89db19c019b918c",
+    "codex-rs/core/src/session/session.rs": "bab44c099760269e2a549f3ff7da1645b4c19550ebe01d861c79c8f9be0ca88a",
+    "codex-rs/core/src/session/tests.rs": "cda0d48e5f40a7f32bb8fcc67708b7d604735d3e2acc6e5df759fa4aab9b4981",
+    "codex-rs/core/src/session/turn_input.rs": "06a1138f66cc9b93302ae2af04de412a978b9db2943e88b9e82a6b6dbb7eae65",
+    "codex-rs/core/src/session/turn_input_tests.rs": "96a3a87407387bad786ee1664175b46204d453ce38e5f9a3645db18df0d22f1c",
+    "codex-rs/core/src/tasks/guarded_start.rs": "bc3673aaba4c3d0c467d93af81aae3b51f8abea2a6bdc29016bcca3eb38d752f",
+    "codex-rs/core/src/tasks/mod.rs": "4167a59e4d411329c62a970015bea3f59bcce8a1ade62e1294a504f7ce464e73",
+    "codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs": "b352df6700d4547951860df6347d4d21a03a546994f6e284f88fccbe5a77083b",
+    "codex-rs/protocol/src/turn_input.rs": "4355925606639fd7f4c05252485d5d53b520ec0c9729a827c09b0f70edb8658b",
+    "codex-rs/state/migrations/0059_native_turn_start_receipts.sql": "6a16875992277a8477c1b6a9f378604b7ccbefb8df847b2717234bbcb7dbca9b",
+    "codex-rs/state/migrations/0060_native_turn_start_bridge_identity.sql": "1023de33eb6a31f67f20c12cf0f2d5105abb1ea0cf22867c6e2359f482a5216e",
+    "codex-rs/state/src/lib.rs": "59544ce0db3de101c005799af99e11897a1c46ec4246e2c4dd4b91561b469bb0",
+    "codex-rs/state/src/runtime.rs": "76878304339e662224abf8e1d6dc652c397bf43f95286b9f1896be430d782fad",
+    "codex-rs/state/src/runtime/native_receipts.rs": "ac207a009cb8530747401134dcae29a29385d6a2f016ea421146190f901a294a",
+    "codex-rs/state/src/runtime/native_receipts_tests.rs": "52ae742a86588562082a21dc18c7d3cb5a0bb9a1d9603bb1d9bd37b3cc8562e5",
+    "codex-rs/tui/src/app.rs": "fc1301edc1c18d7405eec7b3ec09c0144642bbee6a7324e17e848705e7a3968e",
+    "codex-rs/tui/src/app/selection_adoption_tests.rs": "5c432b4e7ac233549b0455e7e2aef3ec6f0944ff97c71850ed45ee1441ada196",
+    "codex-rs/tui/src/app/selection_binding.rs": "4241ae32bb56423b5d1d5497aeeb27730af5868b445bc3284c3af46c9bd63b86",
+    "codex-rs/tui/src/app/selection_binding_tests.rs": "be5fe7106c77406621174527c976332acc8c5ec262a3d12ee341e223a5a811ba",
+    "codex-rs/tui/src/app/selection_bridge.rs": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50",
+    "codex-rs/tui/src/app/selection_bridge_tests.rs": "b174101c99f658de3a2de3396f8bda866d2681221c1533d2ac4ff6d29007d184",
+    "codex-rs/tui/src/app/selection_witness.rs": "9d7b094ffa10cc6ce471c2241e4809d8a0e4bab7920ec4b4b5b9b44455df0b23",
+    "codex-rs/tui/src/app/selection_witness_tests.rs": "04b6abc551b951940841ef8733696fed80e938f0b453462308fb06f0f4788681",
+    "codex-rs/tui/src/app/startup.rs": "eeee83c92181a459e416af108ce982a30da4d48d433d43fba5d8967cc5bfcd10",
+    "codex-rs/tui/src/app/tests/rate_limits.rs": "dc6f53da2c7c9703219546be034d1ba70c7c5e2ce3d353527b0d1b9d263152f7",
+    "codex-rs/tui/src/chatwidget/backend_banners.rs": "472a5b62771107d0810c87b4f0a53f7455097e3a655ef8c0046e36d94c51f879",
+    "codex-rs/tui/src/chatwidget/input_restore.rs": "267c942810e4229f3c4e657d2ffba89bc5b7499e0838e8d08f6b44f3b026d70b",
+    "codex-rs/tui/src/chatwidget/rate_limits.rs": "824ae52a71abf579848e25fb44ed01ef60418580d4d36df8fac7886f9f880826",
+    "codex-rs/tui/src/chatwidget/tests/backend_banners_tests.rs": "f3e9976fe62eb1180d24de25923cbd09416a3517e1695e366b3572ec23b978fb",
+    "codex-rs/tui/src/inherited_bridge.rs": "c764c770c090a7fc88ba1e74337c049cbfc5424db8c132613696a26dbfe2b9ef",
+    "codex-rs/tui/src/lib.rs": "1d8aaf623a50bb71e802e966c26a6a7f237fc0522b27c73d7ed120818028adc5",
+    "codex-rs/tui/src/main.rs": "2ab3b715303495b780224e27b4e9f09a38067c0c283bffaa477997aeae6394b1",
+    "codex-rs/utils/pty/src/lib.rs": "e84620ebf6ab55db18336fb8c3075a810638c9cc2d517f0522320ad3c6d350e5",
+    "codex-rs/utils/pty/src/spawn_helper.rs": "6e6ed848071a77e4f1b9c8059f9d68b24d5b14bd0205f253ef18beba9b62f881",
+    "sdk/python/src/openai_codex/generated/v2_all.py": "9fc11e2f08a244ef26c69118d915573f499c03062c03a39e6b8a83055cab70b0"
+  },
+  "files": [
+    {
+      "path": "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json",
+      "sha256": "142ad94c857574cf8a0800dea715cf1931d7cc76d3bc8a7995547311be774f68",
+      "bytes": 713538
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json",
+      "sha256": "3c46172094539c3cba8176e4aec8bb91aee6a9652620a3bdcd1a72bf10501368",
+      "bytes": 612320
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst",
+      "sha256": "8595a8f7e6fdec897033a877d5c353a20ccda87391b8dff203b46ffeba1f66c1",
+      "bytes": 162457
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst",
+      "sha256": "73173d2e8d66f0839bd762209cf1f256aa4398e4ebae7a3a8c0bed28fa7ce351",
+      "bytes": 156567
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/ClientSelectionUpdateStatus.ts",
+      "sha256": "9f70edf230a0fde8b1b714b69ec1cf1e2e2c03f74bcb5926d94b54b8dd687f0c",
+      "bytes": 229
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/NativeCoreTurnState.ts",
+      "sha256": "679f487448941d019ed6c5252b36a15959655167600fffcfcc47f077fecb4983",
+      "bytes": 300
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartIfIdleNotStartedReason.ts",
+      "sha256": "6e3e400e8a68f25219e873ffbf63e53ff068f4f98d9ecd731bbbafffe2f1faae",
+      "bytes": 408
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/typescript/v2/index.ts",
+      "sha256": "577455c0621a49852467b18005a320487f38dd2eec8c3ffe6ee76d839d9c0439",
+      "bytes": 47383
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/common.rs",
+      "sha256": "63e02847f7819f62a3d3167931a3b202445740aadf52c60d90cd31183da20f0f",
+      "bytes": 174267
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+      "sha256": "4b3cae028c22edd5f5fd0ee3720929bdcd508bf5a1a61fc0e8405711d88c7c66",
+      "bytes": 82871
+    },
+    {
+      "path": "codex-rs/app-server/src/lib.rs",
+      "sha256": "46321d34235f5feffd33231a7390624720dcbfb627ba4222585a96ada3936ed8",
+      "bytes": 66088
+    },
+    {
+      "path": "codex-rs/app-server/src/message_processor.rs",
+      "sha256": "46a19af1c89830f48dcb6fdf60427db38222eb57f1ccfb31cdfeb3fa17b3212e",
+      "bytes": 83154
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors.rs",
+      "sha256": "eb4235cd2d56d6a5ab09e99d21ced2f720c4c454ff106ca597b928c35b675df2",
+      "bytes": 34980
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/native_selection_processor.rs",
+      "sha256": "c20a22c8a3db20e10f12fc17cb4afcc51d09afc6c98d3e539d89397f8aa2c7aa",
+      "bytes": 44814
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs",
+      "sha256": "addfccc107b2ebb7d1174bd2cdb44bda0ece0b7feed0c04c3ba6c34be5229865",
+      "bytes": 31878
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/thread_lifecycle.rs",
+      "sha256": "286694f95faaf1419caabfe764b8392c4690ee529bc134f9b73c4091b2160ab9",
+      "bytes": 34443
+    },
+    {
+      "path": "codex-rs/app-server/src/thread_state.rs",
+      "sha256": "9c9006531cc814599f84fd26a82eb946ae3a9c8a1b2869d40a086f689a4bcbb4",
+      "bytes": 24405
+    },
+    {
+      "path": "codex-rs/app-server/tests/suite/v2/thread_start.rs",
+      "sha256": "7eb4133f3aa2cf7406a2c83f78e0221cb4a20a014d632f1736cfb828a6003c75",
+      "bytes": 80486
+    },
+    {
+      "path": "codex-rs/app-server/tests/suite/v2/thread_unsubscribe.rs",
+      "sha256": "281d8411c04588ef20bc02af611bdd9c3c14c5df926f58475d18f59058a912a1",
+      "bytes": 23051
+    },
+    {
+      "path": "codex-rs/arg0/src/lib.rs",
+      "sha256": "8d5b9c1a896f874d81c23e0e5fbe9d8246018843acb369d59a6df9ce8c158f15",
+      "bytes": 29372
+    },
+    {
+      "path": "codex-rs/cli/src/main.rs",
+      "sha256": "de484836dfaeec9294bedd18ab105af14a3cf68a6d6697188b76b890623bf75c",
+      "bytes": 177759
+    },
+    {
+      "path": "codex-rs/core/src/codex_thread.rs",
+      "sha256": "1d3fb4fd4dd12f2b7458698dd50dd1f33d5306021744413d3bbaef44b122b098",
+      "bytes": 44643
+    },
+    {
+      "path": "codex-rs/core/src/session/mod.rs",
+      "sha256": "d4363e380ff2fe9e537c15a26330c497886d566c9cb14531c89db19c019b918c",
+      "bytes": 210839
+    },
+    {
+      "path": "codex-rs/core/src/session/session.rs",
+      "sha256": "bab44c099760269e2a549f3ff7da1645b4c19550ebe01d861c79c8f9be0ca88a",
+      "bytes": 94197
+    },
+    {
+      "path": "codex-rs/core/src/session/tests.rs",
+      "sha256": "cda0d48e5f40a7f32bb8fcc67708b7d604735d3e2acc6e5df759fa4aab9b4981",
+      "bytes": 477741
+    },
+    {
+      "path": "codex-rs/core/src/session/turn_input.rs",
+      "sha256": "06a1138f66cc9b93302ae2af04de412a978b9db2943e88b9e82a6b6dbb7eae65",
+      "bytes": 30657
+    },
+    {
+      "path": "codex-rs/core/src/session/turn_input_tests.rs",
+      "sha256": "96a3a87407387bad786ee1664175b46204d453ce38e5f9a3645db18df0d22f1c",
+      "bytes": 46416
+    },
+    {
+      "path": "codex-rs/core/src/tasks/guarded_start.rs",
+      "sha256": "bc3673aaba4c3d0c467d93af81aae3b51f8abea2a6bdc29016bcca3eb38d752f",
+      "bytes": 11217
+    },
+    {
+      "path": "codex-rs/core/src/tasks/mod.rs",
+      "sha256": "4167a59e4d411329c62a970015bea3f59bcce8a1ade62e1294a504f7ce464e73",
+      "bytes": 38553
+    },
+    {
+      "path": "codex-rs/ext/extension-api/src/contributors/turn_lifecycle.rs",
+      "sha256": "b352df6700d4547951860df6347d4d21a03a546994f6e284f88fccbe5a77083b",
+      "bytes": 2933
+    },
+    {
+      "path": "codex-rs/protocol/src/turn_input.rs",
+      "sha256": "4355925606639fd7f4c05252485d5d53b520ec0c9729a827c09b0f70edb8658b",
+      "bytes": 10904
+    },
+    {
+      "path": "codex-rs/state/migrations/0059_native_turn_start_receipts.sql",
+      "sha256": "6a16875992277a8477c1b6a9f378604b7ccbefb8df847b2717234bbcb7dbca9b",
+      "bytes": 996
+    },
+    {
+      "path": "codex-rs/state/migrations/0060_native_turn_start_bridge_identity.sql",
+      "sha256": "1023de33eb6a31f67f20c12cf0f2d5105abb1ea0cf22867c6e2359f482a5216e",
+      "bytes": 163
+    },
+    {
+      "path": "codex-rs/state/src/lib.rs",
+      "sha256": "59544ce0db3de101c005799af99e11897a1c46ec4246e2c4dd4b91561b469bb0",
+      "bytes": 6480
+    },
+    {
+      "path": "codex-rs/state/src/runtime.rs",
+      "sha256": "76878304339e662224abf8e1d6dc652c397bf43f95286b9f1896be430d782fad",
+      "bytes": 27630
+    },
+    {
+      "path": "codex-rs/state/src/runtime/native_receipts.rs",
+      "sha256": "ac207a009cb8530747401134dcae29a29385d6a2f016ea421146190f901a294a",
+      "bytes": 14652
+    },
+    {
+      "path": "codex-rs/state/src/runtime/native_receipts_tests.rs",
+      "sha256": "52ae742a86588562082a21dc18c7d3cb5a0bb9a1d9603bb1d9bd37b3cc8562e5",
+      "bytes": 21533
+    },
+    {
+      "path": "codex-rs/tui/src/app.rs",
+      "sha256": "fc1301edc1c18d7405eec7b3ec09c0144642bbee6a7324e17e848705e7a3968e",
+      "bytes": 51516
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_adoption_tests.rs",
+      "sha256": "5c432b4e7ac233549b0455e7e2aef3ec6f0944ff97c71850ed45ee1441ada196",
+      "bytes": 10772
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_binding.rs",
+      "sha256": "4241ae32bb56423b5d1d5497aeeb27730af5868b445bc3284c3af46c9bd63b86",
+      "bytes": 7977
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_binding_tests.rs",
+      "sha256": "be5fe7106c77406621174527c976332acc8c5ec262a3d12ee341e223a5a811ba",
+      "bytes": 4979
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_bridge.rs",
+      "sha256": "ce20533db15be26aee969d45a19ae1dd03b46aafd3d9be5037e04065abaa7c50",
+      "bytes": 20064
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_bridge_tests.rs",
+      "sha256": "b174101c99f658de3a2de3396f8bda866d2681221c1533d2ac4ff6d29007d184",
+      "bytes": 17519
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_witness.rs",
+      "sha256": "9d7b094ffa10cc6ce471c2241e4809d8a0e4bab7920ec4b4b5b9b44455df0b23",
+      "bytes": 17633
+    },
+    {
+      "path": "codex-rs/tui/src/app/selection_witness_tests.rs",
+      "sha256": "04b6abc551b951940841ef8733696fed80e938f0b453462308fb06f0f4788681",
+      "bytes": 15709
+    },
+    {
+      "path": "codex-rs/tui/src/app/startup.rs",
+      "sha256": "eeee83c92181a459e416af108ce982a30da4d48d433d43fba5d8967cc5bfcd10",
+      "bytes": 69563
+    },
+    {
+      "path": "codex-rs/tui/src/app/tests/rate_limits.rs",
+      "sha256": "dc6f53da2c7c9703219546be034d1ba70c7c5e2ce3d353527b0d1b9d263152f7",
+      "bytes": 23098
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/backend_banners.rs",
+      "sha256": "472a5b62771107d0810c87b4f0a53f7455097e3a655ef8c0046e36d94c51f879",
+      "bytes": 24075
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/input_restore.rs",
+      "sha256": "267c942810e4229f3c4e657d2ffba89bc5b7499e0838e8d08f6b44f3b026d70b",
+      "bytes": 31044
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/rate_limits.rs",
+      "sha256": "824ae52a71abf579848e25fb44ed01ef60418580d4d36df8fac7886f9f880826",
+      "bytes": 25984
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/tests/backend_banners_tests.rs",
+      "sha256": "f3e9976fe62eb1180d24de25923cbd09416a3517e1695e366b3572ec23b978fb",
+      "bytes": 24528
+    },
+    {
+      "path": "codex-rs/tui/src/inherited_bridge.rs",
+      "sha256": "c764c770c090a7fc88ba1e74337c049cbfc5424db8c132613696a26dbfe2b9ef",
+      "bytes": 7318
+    },
+    {
+      "path": "codex-rs/tui/src/lib.rs",
+      "sha256": "1d8aaf623a50bb71e802e966c26a6a7f237fc0522b27c73d7ed120818028adc5",
+      "bytes": 146102
+    },
+    {
+      "path": "codex-rs/tui/src/main.rs",
+      "sha256": "2ab3b715303495b780224e27b4e9f09a38067c0c283bffaa477997aeae6394b1",
+      "bytes": 1871
+    },
+    {
+      "path": "codex-rs/utils/pty/src/lib.rs",
+      "sha256": "e84620ebf6ab55db18336fb8c3075a810638c9cc2d517f0522320ad3c6d350e5",
+      "bytes": 2531
+    },
+    {
+      "path": "codex-rs/utils/pty/src/spawn_helper.rs",
+      "sha256": "6e6ed848071a77e4f1b9c8059f9d68b24d5b14bd0205f253ef18beba9b62f881",
+      "bytes": 8474
+    },
+    {
+      "path": "sdk/python/src/openai_codex/generated/v2_all.py",
+      "sha256": "9fc11e2f08a244ef26c69118d915573f499c03062c03a39e6b8a83055cab70b0",
+      "bytes": 398089
+    }
+  ]
+}

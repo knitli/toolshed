@@ -231,6 +231,19 @@ class NativeCIProvenanceTests(unittest.TestCase):
             with self.subTest(source=source), self.assertRaises(ValueError):
                 V.verify_candidate(api, HEAD, MAIN)
 
+    def test_build_foundation_allows_unchanged_release_but_requires_reviewed_recipe_for_promotion(self):
+        api = FakeAPI()
+        api.blobs[V.LAUNCHER, HEAD] = launcher()
+        for path in V.INPUTS.values():
+            api.blobs[path, HEAD] += b" new Core-idle recipe"
+        self.assertIn("unchanged", V.verify_candidate(api, HEAD, MAIN))
+        self.assertNotIn(("download", 456), api.calls)
+        api.blobs[V.LAUNCHER, HEAD] = launcher(api.selected["binarySha256"],
+                                               api.selected["codeModeHostSha256"])
+        with self.assertRaises(ValueError):
+            V.verify_candidate(api, HEAD, MAIN)
+        self.assertNotIn(("download", 456), api.calls)
+
     def test_changed_pins_require_producer_selection(self):
         api = FakeAPI()
         api.tree["tree"] = api.tree["tree"][:1]
@@ -333,7 +346,7 @@ class GitHubTransportTests(unittest.TestCase):
         return metadata, blob
 
     def test_large_patch_uses_pinned_git_blob_and_preserves_bytes(self):
-        raw = (SCRIPT.parents[1] / "docs/native-bridge/native-metadata-v1-implementation.patch").read_bytes()
+        raw = (SCRIPT.parents[3] / V.INPUTS["patchSha256"]).read_bytes()
         self.assertGreater(len(raw), 1024 * 1024)
         metadata, blob = self.blob_fixture(raw)
         api, opener = self.api([self.response(metadata), self.response(blob)])
