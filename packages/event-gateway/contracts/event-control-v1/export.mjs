@@ -17,6 +17,9 @@ const names = [
   'github/client.ts', 'github/grants.ts', 'github/state.ts', 'github/ingress.ts',
   '../../gatekeeper-memory/src/principals.ts', '../../openapi-operator/src/access.ts',
   '../../gatekeeper-messaging/src/agent-token.ts',
+  'github/source-control.ts', 'github/watches.ts', 'manual-canary.ts',
+  'manual-canary-scope.ts', 'native-admission-canary.ts', 'admin-api.ts', 'admin-types.ts',
+  '../../gatekeeper-memory/src/auth.ts', '../../gatekeeper-memory/src/admin-security.ts',
 ];
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- Fixed source filenames under the operator-supplied local checkout.
 const source = Object.fromEntries(names.map(name => [name, readFileSync(resolve(base, name), 'utf8')]));
