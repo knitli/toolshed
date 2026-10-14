@@ -15,6 +15,7 @@ def witness(state="idle"):
 
 class Bridge:
     def __init__(self, row):
+        """Store the witness with a fresh half-second lease."""
         self.row = row
         self.valid_until = time.monotonic() + 0.5
 

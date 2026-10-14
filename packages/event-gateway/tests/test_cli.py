@@ -333,7 +333,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(value["pendingCommit"]["operation"], "attach")
         self.assertTrue(self.state.exists())
         pending = cli.load_pending_commit(self.state, "attach", session_id)
-        self.assertEqual(base64.b64decode(pending["bodyB64"]), b'{"prepared":"body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}')
+        self.assertEqual(
+            base64.b64decode(pending["bodyB64"]),
+            b'{"prepared":"body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}',
+        )
 
     def test_pending_commit_survives_launcher_transport_oserror_and_timeout(self):
         for error in (OSError("launcher socket disappeared"), TimeoutError("launcher timed out")):
@@ -569,7 +572,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result["reason"], "commit_outcome_unknown")
         self.assertEqual(result["lastError"], "pending_commit_exists")
         pending = cli.load_pending_commit(self.state, "attach", session_id)
-        self.assertEqual(base64.b64decode(pending["bodyB64"]), b'{"loser":"body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}')
+        self.assertEqual(
+            base64.b64decode(pending["bodyB64"]),
+            b'{"loser":"body","nativeEvidence":{"observedAt":"2026-10-09T12:00:00.100Z","witness":{"fixture":true}}}',
+        )
 
     def test_pending_commit_past_safe_cutoff_stays_unknown_without_retry(self):
         runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
