@@ -3,6 +3,7 @@
 import copy
 import asyncio
 from contextlib import ExitStack, closing
+from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import io
 import json
@@ -664,6 +665,9 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
     def test_evidence_write_failure_still_cleans_owned_resources(self):
         self.run_retention_scenario("write-failure")
 
+    def test_evidence_fsync_failure_still_closes_resources_and_descriptors(self):
+        self.run_retention_scenario("fsync-failure")
+
     def run_retention_scenario(self, outcome):
         with tempfile.TemporaryDirectory() as directory, ExitStack() as patches:
             root = Path(directory)
@@ -684,13 +688,17 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             stop = patches.enter_context(patch.object(FIXTURE, "stop_broker", return_value={}))
             patches.enter_context(patch.object(FIXTURE, "post", return_value=(200, {}, b'{"challengeId":"id","signingPayload":"payload"}')))
             state_roots = []
+            descriptors = []
             resource_closed = []
+            if outcome == "fsync-failure":
+                patches.enter_context(patch.object(FIXTURE.os, "fsync", side_effect=OSError("fsync failed")))
             for name in ("run_ab_routes", "run_busy_stage", "run_fixture_attach", "run_post_attach_c3"):
                 patches.enter_context(patch.object(FIXTURE, name, AsyncMock()))
             patches.enter_context(patch.object(FIXTURE, "build_proof", return_value=({}, None)))
 
             async def fail(ctx, resources):
                 state_roots.append(ctx.state_root)
+                descriptors.extend((ctx.evidence.fd, ctx.evidence.directory_fd))
                 with closing(sqlite3.connect(ctx.state / "ledger.sqlite")) as db:
                     for create, insert in (
                         ("CREATE TABLE attachments (evidence TEXT)", "INSERT INTO attachments VALUES (?)"),
@@ -716,7 +724,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 if outcome == "partial-failure":
                     raise ValueError("original partial ledger failure")
                 if outcome == "write-failure":
-                    ctx.evidence_bytes = 64 * 1024 * 1024
+                    ctx.evidence.size = 64 * 1024 * 1024
 
             patches.enter_context(patch.object(FIXTURE, "initialize_runtime", side_effect=fail))
             if outcome == "success":
@@ -727,6 +735,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     "partial-failure": (ValueError, "original partial ledger failure"),
                     "partial-success": (AssertionError, "checkpoint ledger is incomplete"),
                     "write-failure": (AssertionError, "bounded archive"),
+                    "fsync-failure": (OSError, "fsync failed"),
                 }[outcome]
                 with self.assertRaisesRegex(error, message):
                     asyncio.run(FIXTURE.run_scenario())
@@ -751,26 +760,224 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             self.assertFalse(output.exists(), "failed stages must not produce PASS proof")
             self.assertTrue(all(not path.exists() for path in state_roots))
             stop.assert_called_once()
+            for descriptor in descriptors:
+                with self.assertRaises(OSError):
+                    os.fstat(descriptor)
 
     def test_archive_bound_and_replacement_refuse_without_overwriting_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "evidence.jsonl"
-            FIXTURE.private_json(path, {"original": True})
-            original = path.read_bytes()
-            ctx = SimpleNamespace(evidence_path=path, evidence_lock=threading.Lock(),
-                                  evidence_bytes=64 * 1024 * 1024)
-            with self.assertRaisesRegex(AssertionError, "bounded archive"):
-                FIXTURE.record_evidence(ctx, "new", {})
-            self.assertEqual(path.read_bytes(), original)
-            ctx.evidence_bytes = 0
-            with self.assertRaisesRegex(AssertionError, "evidence changed"):
-                FIXTURE.record_evidence(ctx, "new", {})
-            self.assertEqual(path.read_bytes(), original)
+            with FIXTURE.evidence_archive(path) as evidence:
+                original = path.read_bytes()
+                ctx = SimpleNamespace(evidence=evidence)
+                evidence.size = 64 * 1024 * 1024
+                with self.assertRaisesRegex(AssertionError, "bounded archive"):
+                    FIXTURE.record_evidence(ctx, "new", {})
+                self.assertEqual(path.read_bytes(), original)
+                evidence.size = 0
+                with self.assertRaisesRegex(AssertionError, "evidence changed"):
+                    FIXTURE.record_evidence(ctx, "new", {})
+                self.assertEqual(path.read_bytes(), original)
 
     def test_fifth_start_refuses_before_forwarding_to_native(self):
         forward = Mock()
         ctx = SimpleNamespace(session_labels={"session": "C"}, start_calls={"A": [{}], "B": [{}], "C": [{}, {}]},
-                              original_session_request=forward)
+                              original_session_request=forward,
+                              evidence=SimpleNamespace(lock=threading.Condition(), closing=False, sealed=False))
         with self.assertRaisesRegex(AssertionError, "four native Start attempt cap"):
             FIXTURE.observe_session_request(ctx, None, "session", {"command": "nativeStart"})
         forward.assert_not_called()
+
+
+    def observer_context(self, evidence, forward):
+        return SimpleNamespace(evidence=evidence, original_session_request=forward,
+                               session_labels={"session": "C"}, start_calls={"A": [], "B": [], "C": []},
+                               challenge_calls={"C": 0}, receipt_errors={"C": []}, receipt_calls={"C": []})
+
+    def test_same_size_replacement_and_hardlink_never_receive_records_or_seal(self):
+        for replacement in ("same-size", "hardlink", "mode"):
+            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "evidence.jsonl"
+                with FIXTURE.evidence_archive(path) as evidence:
+                    ctx = SimpleNamespace(evidence=evidence)
+                    original = path.read_bytes()
+                    if replacement == "same-size":
+                        path.rename(path.with_suffix(".original"))
+                        path.write_bytes(b"x" * len(original))
+                        path.chmod(0o600)
+                    elif replacement == "hardlink":
+                        os.link(path, path.with_suffix(".link"))
+                    else:
+                        path.chmod(0o644)
+                    before = path.read_bytes()
+                    with self.assertRaisesRegex(AssertionError, "evidence changed"):
+                        FIXTURE.record_evidence(ctx, "must-not-write", {})
+                    self.assertEqual(path.read_bytes(), before)
+                    evidence.drained = True
+                    with self.assertRaises(AssertionError):
+                        FIXTURE.seal_evidence(ctx)
+                with self.assertRaises(OSError):
+                    os.fstat(evidence.fd)
+
+    def test_concurrent_fourth_and_fifth_start_reserve_once_even_when_forward_fails(self):
+        with tempfile.TemporaryDirectory() as directory, FIXTURE.evidence_archive(Path(directory) / "evidence") as evidence:
+            entered, release = threading.Event(), threading.Event()
+            barrier = threading.Barrier(2)
+
+            def forward(*args, **kwargs):
+                entered.set()
+                self.assertTrue(release.wait(5))
+                raise OSError("ambiguous native outcome")
+
+            ctx = self.observer_context(evidence, Mock(side_effect=forward))
+            ctx.start_calls = {"A": [{}], "B": [{}], "C": [{}]}
+
+            def attempt():
+                barrier.wait(5)
+                try:
+                    FIXTURE.observe_session_request(ctx, None, "session", {"command": "nativeStart"})
+                except (OSError, AssertionError) as error:
+                    return str(error)
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(attempt) for _ in range(2)]
+                try:
+                    self.assertTrue(entered.wait(5))
+                finally:
+                    release.set()
+                outcomes = [future.result(5) for future in futures]
+            self.assertEqual(ctx.original_session_request.call_count, 1)
+            self.assertEqual(sum(map(len, ctx.start_calls.values())), 4)
+            self.assertIn("ambiguous native outcome", outcomes)
+            self.assertIn("four native Start attempt cap exhausted", outcomes)
+            self.assertEqual(evidence.active, 0)
+
+    def test_cancelled_to_thread_finishes_before_seal_and_new_operations_refuse(self):
+        with tempfile.TemporaryDirectory() as directory, FIXTURE.evidence_archive(Path(directory) / "evidence") as evidence:
+            entered, release = threading.Event(), threading.Event()
+            outer_finished = threading.Event()
+
+            def forward(*args, **kwargs):
+                entered.set()
+                self.assertTrue(release.wait(5))
+                return {"outcome": {"status": "inputRecorded"}}
+
+            ctx = self.observer_context(evidence, Mock(side_effect=forward))
+
+            def outer_observer():
+                FIXTURE.observe_session_request(ctx, None, "session", {"command": "nativeReceipt"})
+                FIXTURE.record_evidence(ctx, "outerObserverFinished", {})
+                outer_finished.set()
+
+            async def scenario():
+                asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=1))
+                worker = asyncio.create_task(asyncio.to_thread(outer_observer))
+                while not entered.is_set():
+                    await asyncio.sleep(0)
+                queued = asyncio.create_task(asyncio.to_thread(
+                    FIXTURE.observe_session_request, ctx, None, "session", {"command": "nativeStart"}))
+                await asyncio.sleep(0)
+                worker.cancel()
+                await asyncio.gather(worker, return_exceptions=True)
+                drain = asyncio.create_task(FIXTURE.drain_native_observers(ctx))
+                await asyncio.sleep(0)
+                self.assertFalse(drain.done())
+                with self.assertRaisesRegex(AssertionError, "observers are closed"):
+                    FIXTURE.observe_session_request(ctx, None, "session", {"command": "nativeStart"})
+                release.set()
+                await drain
+                queued_result, = await asyncio.gather(queued, return_exceptions=True)
+                self.assertIsInstance(queued_result, AssertionError)
+                self.assertIn("observers are closed", str(queued_result))
+                self.assertTrue(outer_finished.is_set())
+                sealed = FIXTURE.seal_evidence(ctx)
+                self.assertEqual(sealed["sha256"], FIXTURE.digest(evidence.path.read_bytes()))
+                with self.assertRaisesRegex(AssertionError, "sealed"):
+                    FIXTURE.record_evidence(ctx, "late", {})
+
+            try:
+                asyncio.run(scenario())
+            finally:
+                release.set()
+            self.assertEqual(ctx.original_session_request.call_count, 1)
+            records = [json.loads(line) for line in evidence.path.read_text().splitlines()]
+            self.assertEqual(records[-1]["kind"], "outerObserverFinished")
+
+    def test_fsync_file_then_parent_precedes_hash_and_failure_closes_descriptor(self):
+        for failing_call in (None, 1, 2):
+            with self.subTest(failing_call=failing_call), tempfile.TemporaryDirectory() as directory:
+                calls = []
+                real_fsync, real_read = os.fsync, os.read
+                with FIXTURE.evidence_archive(Path(directory) / "evidence") as evidence:
+                    ctx = SimpleNamespace(evidence=evidence)
+                    evidence.drained = True
+
+                    def sync(fd):
+                        calls.append("file" if fd == evidence.fd else "parent")
+                        if len(calls) == failing_call:
+                            raise OSError("fsync failed")
+                        real_fsync(fd)
+
+                    def read(fd, size):
+                        calls.append("hash-read")
+                        return real_read(fd, size)
+
+                    with patch.object(FIXTURE.os, "fsync", side_effect=sync), \
+                            patch.object(FIXTURE.os, "read", side_effect=read):
+                        if failing_call:
+                            with self.assertRaisesRegex(OSError, "fsync failed"):
+                                FIXTURE.seal_evidence(ctx)
+                            self.assertNotIn("hash-read", calls)
+                        else:
+                            proof = FIXTURE.seal_evidence(ctx)
+                            self.assertEqual(calls[:3], ["file", "parent", "hash-read"])
+                            self.assertEqual(proof["bytes"], evidence.path.stat().st_size)
+                with self.assertRaises(OSError):
+                    os.fstat(evidence.fd)
+
+
+    def test_broker_setup_failure_closes_both_archive_descriptors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            real_close = os.close
+            with patch.object(FIXTURE, "args", SimpleNamespace(output=str(root / "proof.json"), outer_contained=False)), \
+                    patch.object(FIXTURE, "private_temp_root", return_value=root), \
+                    patch.object(FIXTURE, "start_broker", side_effect=RuntimeError("broker failed")), \
+                    patch.object(FIXTURE.os, "close", wraps=real_close) as close:
+                with self.assertRaisesRegex(RuntimeError, "broker failed"):
+                    asyncio.run(FIXTURE.run_scenario())
+            self.assertEqual(close.call_count, 2)
+            for call in close.call_args_list:
+                with self.assertRaises(OSError):
+                    os.fstat(call.args[0])
+
+
+    def test_provider_last_record_is_synced_before_native_scratch_removal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with FIXTURE.evidence_archive(root / "evidence") as evidence:
+                ctx = SimpleNamespace(evidence=evidence)
+                order = []
+                real_sync = FIXTURE.sync_evidence
+
+                def model(stack, **kwargs):
+                    def finish():
+                        FIXTURE.record_evidence(ctx, "providerLastResponse", {})
+                        order.append("provider-joined")
+                    stack.callback(finish)
+                    return SimpleNamespace()
+
+                def sync(context):
+                    self.assertTrue(list(root.glob("three-native-*")))
+                    real_sync(context)
+                    order.append("durable")
+
+                with patch.object(FIXTURE, "private_temp_root", return_value=root), \
+                        patch.object(FIXTURE, "make_model", side_effect=model), \
+                        patch.object(FIXTURE, "host_qualifier", SimpleNamespace(
+                            source_program=Mock(side_effect=RuntimeError("setup failure")))), \
+                        patch.object(FIXTURE, "sync_evidence", side_effect=sync):
+                    with self.assertRaisesRegex(RuntimeError, "setup failure"), ExitStack() as resources:
+                        FIXTURE.native_session(resources, "C", ctx)
+                self.assertEqual(order, ["provider-joined", "durable"])
+                self.assertFalse(list(root.glob("three-native-*")))
