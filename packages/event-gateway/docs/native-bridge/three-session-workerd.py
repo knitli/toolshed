@@ -106,6 +106,8 @@ class ModelProvider(BaseHTTPRequestHandler):
             size = int(self.headers["Content-Length"])
             require(0 < size < 4_000_000, "model request outside bound")
             request = json.loads(self.rfile.read(size))
+            if getattr(self.server, "evidence", None):
+                self.server.evidence("providerRequest", {"phase": self.server.phase, "request": request})
             qualifier = self.server.qualifier
             kind = qualifier.request_kind(request)
             with self.server.request_lock:
@@ -149,6 +151,8 @@ class ModelProvider(BaseHTTPRequestHandler):
                 events = [{"type": "response.output_item.done", "item": item},
                           qualifier.completed(identity)]
             payload = "".join("data: " + json.dumps(event) + "\n\n" for event in events).encode()
+            if getattr(self.server, "evidence", None):
+                self.server.evidence("providerResponse", {"phase": self.server.phase, "events": events})
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(payload)))
@@ -276,6 +280,32 @@ def private_json(path, value):
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(descriptor, "wb") as stream:
         stream.write(raw)
+
+
+def record_evidence(ctx, kind, value):
+    raw = (json.dumps({"kind": kind, "value": value}, separators=(",", ":")) + "\n").encode()
+    with ctx.evidence_lock:
+        require(len(raw) <= 4_100_000 and ctx.evidence_bytes + len(raw) <= 64 * 1024 * 1024,
+                "private evidence exceeds bounded archive")
+        descriptor = os.open(ctx.evidence_path, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW)
+        with os.fdopen(descriptor, "wb") as stream:
+            require(os.fstat(stream.fileno()).st_size == ctx.evidence_bytes, "private evidence changed")
+            stream.write(raw)
+        ctx.evidence_bytes += len(raw)
+
+
+def snapshot_evidence(ctx, stage):
+    record_evidence(ctx, "checkpoint", stage)
+    database = ctx.state / "ledger.sqlite"
+    if database.exists():
+        with closing(sqlite3.connect("file:" + str(database) + "?mode=ro", uri=True, timeout=3)) as db:
+            db.row_factory = sqlite3.Row
+            for table in ("attachments", "deliveries", "attempts"):
+                rows = db.execute("SELECT * FROM " + table).fetchmany(4097)  # fixed table names only.
+                require(len(rows) <= 4096, "private database snapshot exceeds row bound")
+                record_evidence(ctx, "database", {"stage": stage, "table": table,
+                                                "rows": [dict(row) for row in rows]})
+    ctx.fixture("/fixture/read")
 
 
 def post(address, secret, path, body=None, headers=None, *, limit=65_536):
@@ -522,7 +552,8 @@ def configure(parsed):
     output_path = output_parent / output_path.name
     sidecar_path = output_path.with_name(output_path.stem + ".private-causal.json")
     for candidate, description in ((output_path, "proof output"),
-                                   (sidecar_path, "private causal sidecar")):
+                                   (sidecar_path, "private causal sidecar"),
+                                   (output_path.with_suffix(".private-evidence.jsonl"), "private evidence")):
         try:
             candidate.lstat()
         except FileNotFoundError:
@@ -595,7 +626,10 @@ def make_model(stack, hold=False):
     qualifier = load_module("three_session_model_qualifier", host_qualifier.__file__)
     qualifier.CALL_ID = "three-session-source-read-" + uuid4().hex
     server = ThreadingHTTPServer(("127.0.0.1", 0), ModelProvider)
+    # server_close must join handlers before the archive receives its final hash.
+    server.daemon_threads = False
     server.qualifier = qualifier
+    server.evidence = None
     server.requests = []
     server.main_requests = []
     server.turn_main_requests = []
@@ -672,12 +706,13 @@ def start_pty_pump(stack, master, tail):
     return stats
 
 
-def native_session(stack, label, shared_state, *, hold=False):
+def native_session(stack, label, shared_state, *, hold=False, evidence=None):
     temporary = tempfile.TemporaryDirectory(prefix="three-native-", dir=private_temp_root())
     root = Path(temporary.name)
     root.chmod(0o700)
     stack.callback(temporary.cleanup)
     provider = make_model(stack, hold=hold)
+    provider.evidence = evidence
     provider.nonce = "three-session-source-" + label.lower() + "-" + uuid4().hex
     provider.source_nonce_sha256 = digest(provider.nonce)
     source = root / "fixture-source.txt"
@@ -977,7 +1012,9 @@ async def wait_stable_session_binding(session, provider, *, minimum_turn_main_re
 def fixture(ctx, path, body=None):
     status, _, raw = post(ctx.address["port"], ctx.fixture_secret, path, body)
     require(status == 200, "workerd fixture rejected " + path)
-    return json.loads(raw)
+    value = json.loads(raw)
+    record_evidence(ctx, "cloudFixture", {"path": path, "response": value})
+    return value
 
 
 async def send(ctx, **request):
@@ -991,6 +1028,9 @@ async def send(ctx, **request):
     response = await asyncio.to_thread(
         post, ctx.address["port"], ctx.fixture_secret, path, request["body"], request["headers"], limit=8192,
     )
+    record_evidence(ctx, "cloudWire", {"path": path, "request": body,
+                                      "proof": proof, "status": response[0],
+                                      "response": response[2].decode()})
     response_summary = None
     if path == "/v1/runtimes/status":
         try:
@@ -1035,6 +1075,7 @@ def observe_session_request(ctx, state_dir, session_id, message, *, native_reque
         ctx.challenge_calls[label] += 1
     if message.get("command") == "nativeStart":
         require(label in ctx.start_calls, "native Start came from an unknown session")
+        require(sum(map(len, ctx.start_calls.values())) < 4, "four native Start attempt cap exhausted")
         request_value = native_request or {}
         ctx.start_calls[label].append({
             "eventId": request_value.get("event", {}).get("eventId"),
@@ -1044,9 +1085,14 @@ def observe_session_request(ctx, state_dir, session_id, message, *, native_reque
     try:
         result = ctx.original_session_request(state_dir, session_id, message, native_request=native_request)
     except Exception as error:
+        record_evidence(ctx, "nativeError", {"session": label, "request": message,
+                                            "nativeRequest": native_request, "error": str(error)[:160]})
         if message.get("command") == "nativeReceipt" and label in ctx.receipt_errors:
             ctx.receipt_errors[label].append(getattr(error, "code", str(error)))
         raise
+    row = {"session": label, "sessionId": session_id, "request": message, "nativeRequest": native_request,
+           "response": result, "receivedAt": time.monotonic()}
+    record_evidence(ctx, "nativeExchange", row)
     if message.get("command") == "nativeReceipt" and label in ctx.receipt_calls:
         ctx.receipt_calls[label].append(result.get("outcome", {}).get("status"))
     return result
@@ -1125,7 +1171,9 @@ def observe_bridge_challenge(bridge, ctx):
 
 async def initialize_runtime(ctx, resources):
     for label in ("A", "B", "C"):
-        session = native_session(resources, label, ctx.state, hold=False)
+        session = native_session(resources, label, ctx.state, hold=False,
+                                 evidence=lambda kind, value, label=label: record_evidence(
+                                     ctx, kind, {"session": label, **value}))
         ctx.sessions[label] = session
         ctx.session_labels[session["sessionId"]] = label
     require(len({session["sessionId"] for session in ctx.sessions.values()}) == 3,
@@ -1861,7 +1909,7 @@ def build_proof(ctx):
         },
         "cloudWireCount": len(ctx.wire_evidence),
         "realModelCalls": 0,
-        "evidenceNote": "IDs are represented only by SHA-256; credentials, native mappings, and raw wire bodies are omitted.",
+        "evidenceNote": "Public IDs are SHA-256 only; raw wire bodies and native mappings remain in the private mode-0600 evidence archive.",
     }
     encoded = json.dumps(ctx.proof, sort_keys=True)
     require_all("proof output contains a credential or native mapping",
@@ -1936,6 +1984,10 @@ async def run_scenario():
     temporary_root = private_temp_root()
     containment = (verify_outer_containment(temporary_root) if args.outer_contained
                    else {"mode": "per-native-profile"})
+    evidence_path = Path(args.output).with_suffix(".private-evidence.jsonl")
+    private_json(evidence_path, {"kind": "archive", "version": 1})
+    evidence_bytes = evidence_path.stat().st_size
+    evidence_lock = threading.Lock()
     broker, broker_log, address = start_broker()
     proof = None
     private_nonce_record = None
@@ -2013,12 +2065,24 @@ async def run_scenario():
             node_generation=1, private_key=node_key, credentials=credentials, send=ctx.send,
         )
         with ExitStack() as resources:
-            await initialize_runtime(ctx, resources)
-            await run_ab_routes(ctx)
-            await run_busy_stage(ctx)
-            await run_fixture_attach(ctx)
-            await run_post_attach_c3(ctx)
+            stage = "initialize"
+            try:
+                await initialize_runtime(ctx, resources)
+                for stage, action in (("ab", run_ab_routes), ("busy", run_busy_stage),
+                                      ("attach", run_fixture_attach), ("c3", run_post_attach_c3)):
+                    await action(ctx)
+                    snapshot_evidence(ctx, stage)
+            finally:
+                # Persist while native scratch and the broker still exist, including failed stages.
+                try:
+                    if ctx.daemon_task is not None:
+                        await ctx.stop_daemon(ctx.daemon_task)
+                        ctx.daemon_task = None
+                finally:
+                    snapshot_evidence(ctx, "exit:" + stage)
         ctx.proof, ctx.private_nonce_record = build_proof(ctx)
+        ctx.proof["privateEvidence"] = {"sha256": digest(ctx.evidence_path.read_bytes()),
+                                        "bytes": ctx.evidence_bytes}
         return ctx.proof
     finally:
         await cleanup_scenario(ctx)

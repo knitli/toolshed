@@ -2,7 +2,7 @@
 
 import copy
 import asyncio
-from contextlib import closing
+from contextlib import ExitStack, closing
 import importlib.util
 import io
 import json
@@ -16,7 +16,7 @@ import threading
 import time
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "docs/native-bridge/three-session-workerd.py"
@@ -645,3 +645,108 @@ class ThreeSessionHistoricalReceiptTests(unittest.TestCase):
         after["receiptStatuses"].append("unknown")
         with self.assertRaises(AssertionError):
             FIXTURE.assert_c1_history_unchanged(before, after)
+
+
+class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
+    def test_failed_stage_retains_database_before_resource_and_state_cleanup(self):
+        self.run_retention_scenario("stage-failure")
+
+    def test_final_archive_hash_includes_exit_snapshot_and_late_handler_write(self):
+        self.run_retention_scenario("success")
+
+    def test_evidence_write_failure_still_cleans_owned_resources(self):
+        self.run_retention_scenario("write-failure")
+
+    def run_retention_scenario(self, outcome):
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as patches:
+            root = Path(directory)
+            output = root / "proof.json"
+            key = Mock()
+            key.public_key.return_value.public_bytes_raw.return_value = b"key"
+            key.sign.return_value = b"signature"
+            globals_ = {
+                "args": SimpleNamespace(output=str(output), outer_contained=False),
+                "private_key_type": SimpleNamespace(generate=lambda: key),
+                "launcher": Mock(), "Store": Mock(), "daemon": Mock(),
+                "SessionNativeBridge": Mock(), "client_runtime": Mock(), "CloudClient": Mock(),
+            }
+            for name, value in globals_.items():
+                patches.enter_context(patch.object(FIXTURE, name, value))
+            patches.enter_context(patch.object(FIXTURE, "private_temp_root", return_value=root))
+            patches.enter_context(patch.object(FIXTURE, "start_broker", return_value=(None, None, {"secret": "fixture", "port": 12345})))
+            stop = patches.enter_context(patch.object(FIXTURE, "stop_broker", return_value={}))
+            patches.enter_context(patch.object(FIXTURE, "post", return_value=(200, {}, b'{"challengeId":"id","signingPayload":"payload"}')))
+            state_roots = []
+            resource_closed = []
+            for name in ("run_ab_routes", "run_busy_stage", "run_fixture_attach", "run_post_attach_c3"):
+                patches.enter_context(patch.object(FIXTURE, name, AsyncMock()))
+            patches.enter_context(patch.object(FIXTURE, "build_proof", return_value=({}, None)))
+
+            async def fail(ctx, resources):
+                state_roots.append(ctx.state_root)
+                with closing(sqlite3.connect(ctx.state / "ledger.sqlite")) as db:
+                    for table in ("attachments", "deliveries", "attempts"):
+                        db.execute("CREATE TABLE " + table + " (evidence TEXT)")
+                        db.execute("INSERT INTO " + table + " VALUES (?)", ("before-failure",))
+                    db.commit()
+                def verify_archive_before_cleanup():
+                    records = [json.loads(line) for line in ctx.evidence_path.read_text().splitlines()]
+                    if outcome != "write-failure":
+                        self.assertTrue(any(row.get("kind") == "database" for row in records))
+                        FIXTURE.record_evidence(ctx, "lateProviderResponse", {"joined": True})
+                    resource_closed.append(True)
+                resources.callback(verify_archive_before_cleanup)
+                FIXTURE.record_evidence(ctx, "nativeExchange", {"outcome": {"status": "inputRecorded"}})
+                if outcome == "stage-failure":
+                    raise RuntimeError("injected stage failure")
+                if outcome == "write-failure":
+                    ctx.evidence_bytes = 64 * 1024 * 1024
+
+            patches.enter_context(patch.object(FIXTURE, "initialize_runtime", side_effect=fail))
+            if outcome == "success":
+                proof = asyncio.run(FIXTURE.run_scenario())
+            else:
+                error, message = ((RuntimeError, "injected stage failure") if outcome == "stage-failure"
+                                  else (AssertionError, "bounded archive"))
+                with self.assertRaisesRegex(error, message):
+                    asyncio.run(FIXTURE.run_scenario())
+            archive = output.with_suffix(".private-evidence.jsonl")
+            records = [json.loads(line) for line in archive.read_text().splitlines()]
+            self.assertEqual(archive.stat().st_mode & 0o777, 0o600)
+            if outcome != "write-failure":
+                self.assertEqual({row["value"]["table"] for row in records if row["kind"] == "database"},
+                                 {"attachments", "deliveries", "attempts"})
+            if outcome == "success":
+                self.assertEqual(proof["privateEvidence"]["sha256"], FIXTURE.digest(archive.read_bytes()))
+                self.assertEqual(proof["privateEvidence"]["bytes"], archive.stat().st_size)
+                self.assertEqual(records[-1]["kind"], "lateProviderResponse")
+                self.assertIn("exit:c3", [row["value"] for row in records if row["kind"] == "checkpoint"])
+            self.assertEqual(resource_closed, [True])
+            self.assertTrue(any(row["kind"] == "nativeExchange" for row in records))
+            self.assertTrue(any(row["kind"] == "cloudFixture" for row in records))
+            self.assertFalse(output.exists(), "failed stages must not produce PASS proof")
+            self.assertTrue(all(not path.exists() for path in state_roots))
+            stop.assert_called_once()
+
+    def test_archive_bound_and_replacement_refuse_without_overwriting_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.jsonl"
+            FIXTURE.private_json(path, {"original": True})
+            original = path.read_bytes()
+            ctx = SimpleNamespace(evidence_path=path, evidence_lock=threading.Lock(),
+                                  evidence_bytes=64 * 1024 * 1024)
+            with self.assertRaisesRegex(AssertionError, "bounded archive"):
+                FIXTURE.record_evidence(ctx, "new", {})
+            self.assertEqual(path.read_bytes(), original)
+            ctx.evidence_bytes = 0
+            with self.assertRaisesRegex(AssertionError, "evidence changed"):
+                FIXTURE.record_evidence(ctx, "new", {})
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_fifth_start_refuses_before_forwarding_to_native(self):
+        forward = Mock()
+        ctx = SimpleNamespace(session_labels={"session": "C"}, start_calls={"A": [{}], "B": [{}], "C": [{}, {}]},
+                              original_session_request=forward)
+        with self.assertRaisesRegex(AssertionError, "four native Start attempt cap"):
+            FIXTURE.observe_session_request(ctx, None, "session", {"command": "nativeStart"})
+        forward.assert_not_called()

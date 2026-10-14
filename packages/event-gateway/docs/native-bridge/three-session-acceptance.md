@@ -170,7 +170,7 @@ Use explicitly selected, verified artifacts; the runner installs nothing:
   Supply its exact HEAD as `--cloud-commit`; the runner checks equality.
   HEAD alone does not certify a clean tree: retain input hashes and checkout state.
 - A new absolute proof filename whose parent already exists. Both it and its
-  sibling `<proof-stem>.private-causal.json` must be absent, including dangling
+  siblings `<proof-stem>.private-causal.json` and `<proof-stem>.private-evidence.jsonl` must be absent, including dangling
   symlinks; the runner checks both before starting any subprocess. Choose separate
   stdout/stderr paths and retain failed
   run diagnostics without relabeling them as proof.
@@ -253,6 +253,8 @@ session labels and an exact mapping from summary fields to raw proof keys. Retai
 the mode-0600 raw proof, private causal sidecar, and execution logs with the input
 manifest; do not publish private paths, session IDs, or nonce hashes. No proof
 file or a nonzero exit means that run has not passed.
+
+New runs also retain `<proof-stem>.private-evidence.jsonl`, a mode-0600 raw causal archive containing provider exchanges, native receipts/observations, cloud wire/readbacks, and local database checkpoints before scratch cleanup. Keep it private with the input manifest and logs, including failed-run evidence. Records are capped at 4,100,000 bytes and the archive at 64 MiB; exceeding either bound fails qualification. After provider handlers and resource cleanup finish, the PASS proof records the final archive SHA-256 and byte count. Verify both against the retained file before accepting the run. This retention does not change the historical runs described above or establish the pending Core-idle busy gate.
 
 This PASS is controlled integration evidence only. Access identity,
 Messaging identity/budget, owner manual publication, queues/metrics, and model
