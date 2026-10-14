@@ -1,6 +1,6 @@
 # Trusted contract fixtures
 
-`trusted-contract-families.zip` contains immutable Git blob bytes for all seven
+`trusted-contract-families.zip` contains immutable Git blob bytes for all eight
 approved contract families. Tests read members with `ZipFile.read`; nothing is
 extracted or executed, and tests require neither network access nor Git history.
 
@@ -42,3 +42,20 @@ follows after the trusted-main policy merges. These pins
 preserve the local read path; they do not qualify the external authority service,
 GitHub API or platform runtime. The snapshot commit is the reviewed consumer
 candidate, not an assertion that it is deployed or live-qualified.
+
+The `github-source-control` family is a prepared export of cloud commit
+`c25ade9233013d97d56ed0fdfddf75453071066b`, using Node 24.19.0 and the deployed
+lockfile's Zod 4.6.5. Its metadata snapshot identifier is `prepared-export:` plus
+that cloud commit; no consumer snapshot commit exists at authorization time.
+The separate consumer rotation will copy these exact reviewed bytes.
+
+Its 32-source inventory adds source-control, watches, manual-canary and scope,
+native-admission-canary, admin-api and admin-types, and shared auth/admin-security
+to the prior 23-source readback inventory. Each source was read with `git show`
+at the immutable cloud commit and checked against its manifest hash. All four
+transport source blobs match the retained `ed23882` pin byte-for-byte; control
+fixture bytes also remain unchanged. All seven previous policy entries and
+archive source/snapshot bytes are retained. Tests check the entire new family,
+all required snapshot mutations/omissions, all 32 source hashes and omissions,
+and the exact source inventory. This is provenance authorization, not deployment
+or source activation, publication, native delivery, or live qualification.
