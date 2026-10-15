@@ -6,7 +6,6 @@ from contextlib import ExitStack
 import importlib.util
 import io
 import json
-import subprocess
 import sys
 from pathlib import Path
 import tempfile
@@ -314,7 +313,7 @@ class PairedInstallTests(unittest.TestCase):
             with self.subTest(rewrite_record=rewrite_record):
                 if rewrite_record:
                     write_record()
-                with self.assertRaises(subprocess.CalledProcessError):
+                with self.assertRaises(INSTALL.subprocess.CalledProcessError):
                     INSTALL.verify_destination(destination, source, helper, {'binarySha256': 'fixture-native-digest'})
                 self.assertFalse(marker.exists(), 'unverified launcher must never be imported')
 
@@ -342,10 +341,15 @@ class PairedInstallTests(unittest.TestCase):
         self.assertEqual(self.existing.read_bytes(), b'keep working installation')
 
     def test_cli_prerequisites_refuse_before_preflight_or_install(self):
+        flags = {name: getattr(sys.flags, name) for name in dir(sys.flags) if not name.startswith('_')}
+        implementation = vars(sys.implementation)
         defaults = {'platform': 'darwin', 'version_info': (3, 13),
-                    'flags': SimpleNamespace(isolated=1), 'implementation': SimpleNamespace(name='cpython')}
-        faults = ({'platform': 'linux'}, {'version_info': (3, 12)}, {'flags': SimpleNamespace(isolated=0)},
-                  {'implementation': SimpleNamespace(name='pypy')}, {'machine': 'x86_64'}, {'token': ''})
+                    'flags': SimpleNamespace(**{**flags, 'isolated': 1}),
+                    'implementation': SimpleNamespace(**{**implementation, 'name': 'cpython'})}
+        faults = ({'platform': 'linux'}, {'version_info': (3, 12)},
+                  {'flags': SimpleNamespace(**{**flags, 'isolated': 0})},
+                  {'implementation': SimpleNamespace(**{**implementation, 'name': 'pypy'})},
+                  {'machine': 'x86_64'}, {'missing_token': True})
         for fault in faults:
             with self.subTest(fault=fault), ExitStack() as stack:
                 runtime = {**defaults, **{key: value for key, value in fault.items() if key in defaults}}
@@ -356,7 +360,9 @@ class PairedInstallTests(unittest.TestCase):
                     '--destination', str(self.destination),
                 ]))
                 stack.enter_context(patch.object(INSTALL.platform, 'machine', return_value=fault.get('machine', 'arm64')))
-                stack.enter_context(patch.dict(INSTALL.os.environ, {'GITHUB_TOKEN': fault.get('token', 'fixture-token')}))
+                stack.enter_context(patch.dict(INSTALL.os.environ, {'GITHUB_TOKEN': 'fixture-token'}))
+                if fault.get('missing_token'):
+                    INSTALL.os.environ.pop('GITHUB_TOKEN', None)
                 preflight = stack.enter_context(patch.object(INSTALL, 'preflight'))
                 install = stack.enter_context(patch.object(INSTALL, 'install'))
                 with self.assertRaises(ValueError):
@@ -386,7 +392,7 @@ class PairedInstallTests(unittest.TestCase):
         self.wheel.write_bytes(wheel_bytes(self.api.payload, self.api.project))
         plan = self.preflight()
         self.assertEqual(plan['requirements'].strip(), '')
-        real_run = subprocess.run
+        real_run = INSTALL.subprocess.run
         pip_calls = []
         deny_network = ('import runpy, socket, sys\n'
                         'def deny(*args, **kwargs): raise RuntimeError("network forbidden in offline fixture")\n'
@@ -406,3 +412,22 @@ class PairedInstallTests(unittest.TestCase):
         self.assertEqual(result['environment'], str(self.destination))
         self.assertEqual(INSTALL.V.digest((self.destination / 'native/codex').read_bytes()), result['binarySha256'])
         self.assertEqual(self.existing.read_bytes(), b'keep working installation')
+
+    def test_identity_failure_rolls_back_only_new_empty_destination(self):
+        plan = self.preflight()
+        original_stat = INSTALL.os.stat
+
+        def interrupted(path, *args, **kwargs):
+            if path == self.destination.name and kwargs.get('dir_fd') is not None:
+                raise InterruptedError('identity lookup interrupted')
+            return original_stat(path, *args, **kwargs)
+
+        with patch.object(INSTALL.os, 'stat', side_effect=interrupted), patch.object(INSTALL, 'install_wheel') as installer:
+            with self.assertRaisesRegex(InterruptedError, 'identity lookup interrupted'):
+                INSTALL.install(plan)
+        installer.assert_not_called()
+        self.unchanged()
+        self.destination.mkdir()
+        with self.assertRaises(FileExistsError):
+            INSTALL.create_destination(self.destination)
+        self.assertTrue(self.destination.is_dir(), 'creation failure must preserve existing entry')

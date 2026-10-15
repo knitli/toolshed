@@ -63,6 +63,7 @@ def destination_path(value):
 def create_destination(path):
     """Create exclusively beneath validated handles, never through a swapped symlink."""
     parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    created = False
     try:
         for component in path.parts[1:-1]:
             child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
@@ -73,8 +74,16 @@ def create_destination(path):
             require(info.st_uid in (0, os.getuid()) and (not info.st_mode & 0o022 or sticky),
                     "unsafe_destination_parent")
         os.mkdir(path.name, mode=0o700, dir_fd=parent)
+        created = True
         return parent, os.stat(path.name, dir_fd=parent, follow_symlinks=False)
-    except BaseException:
+    except BaseException as error:
+        if created:
+            try:
+                os.rmdir(path.name, dir_fd=parent)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                error.add_note('Empty destination rollback failed; active installation was not touched')
         os.close(parent)
         raise
 
