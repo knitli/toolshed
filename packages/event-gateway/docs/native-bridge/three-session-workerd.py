@@ -87,6 +87,7 @@ def b64(value):
 
 class ModelServer(ThreadingHTTPServer):
     def __init__(self, *args, **kwargs):
+        """Track accepted sockets so shutdown can unblock every handler before joining."""
         self.connections = set()
         self.connections_lock = threading.Lock()
         super().__init__(*args, **kwargs)
