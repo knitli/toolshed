@@ -469,7 +469,7 @@ class ThreeSessionSourceTests(unittest.TestCase):
         for name in ("proof.private-evidence.jsonl", ".private-evidence.jsonl"):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory).resolve()
-                parsed, helper, _ = self.inputs(root)
+                parsed, _, _ = self.inputs(root)
                 output = root / name
                 parsed.output = str(output)
                 archive = output.with_suffix(".private-evidence.jsonl")
@@ -683,7 +683,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 path = Path(directory) / "evidence.jsonl"
                 with FIXTURE.evidence_archive(path) as evidence:
                     ctx = SimpleNamespace(evidence=evidence, address={"port": 12345},
-                                          fixture_secret="fixture", wire_evidence=[])
+                                          fixture_secret=uuid4().hex, wire_evidence=[])
                     response = (status, {"content-type": "application/json"}, b'{"error":"bad \xff"}')
                     with patch.object(FIXTURE, "post", return_value=response):
                         actual = asyncio.run(FIXTURE.send(
@@ -704,7 +704,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             with FIXTURE.evidence_archive(path) as evidence:
                 entered, release, completed = threading.Event(), threading.Event(), threading.Event()
                 ctx = SimpleNamespace(evidence=evidence, address={"port": 12345},
-                                      fixture_secret="fixture", wire_evidence=[])
+                                      fixture_secret=uuid4().hex, wire_evidence=[])
                 response = (200, {}, b'{"status":"committed"}')
 
                 def post(*args, **kwargs):

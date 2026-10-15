@@ -1126,6 +1126,7 @@ async def send(ctx, **request):
     path = request["url"].removeprefix(ORIGIN)
     body = json.loads(request["body"])
     proof = json.loads(request["headers"]["x-event-node-proof"])
+
     def exchange():
         response = post(ctx.address["port"], ctx.fixture_secret, path,
                         request["body"], request["headers"], limit=8192)
