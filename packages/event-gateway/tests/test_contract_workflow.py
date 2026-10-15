@@ -87,7 +87,7 @@ class ContractWorkflowTests(unittest.TestCase):
         self.assertEqual(set(metadata["snapshots"]), {
             "legacy", "no-start", "native-start", "native-input-recorded",
             "native-admission", "native-runtime-status", "github-source-readback", "github-source-control",
-            "github-watch-control",
+            "github-watch-control", "github-watch-owner-rpc",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         for expected in metadata["families"]:
@@ -198,6 +198,71 @@ class ContractWorkflowTests(unittest.TestCase):
         self.assertEqual(len(control["sources"]), 34)
         self.assertEqual(control["zodVersion"], "4.6.5")
 
+    def test_github_watch_owner_rpc_accepted_with_all_authorized_hashes(self):
+        self.blobs = self.approved_snapshot("github-watch-owner-rpc")
+        self.assertEqual(self.verify(), "github-watch-owner-rpc")
+
+    def test_github_watch_owner_rpc_requires_its_complete_authorization(self):
+        self.blobs = self.approved_snapshot("github-watch-owner-rpc")
+        legacy = tuple(entry for entry in POLICY["FAMILIES"] if entry["name"] != "github-watch-owner-rpc")
+        with self.assertRaisesRegex(ValueError, "contract family not authorized"):
+            self.verify(legacy)
+
+    def test_github_watch_owner_rpc_mutation_or_omission_rejected(self):
+        self.assert_mutation_or_omission_rejected("github-watch-owner-rpc")
+
+    def test_github_watch_owner_rpc_manifest_source_provenance(self):
+        self.assert_manifest_source_provenance(
+            "github-watch-owner-rpc", "b152b1b92fec860354cacd406b0d72274a97713c",
+            ("native-runtime-store", "native-admission-gate", "github/readback-contract",
+             "read-authority", "request-deadline", "github/host", "github/controller",
+             "github/client", "github/grants", "github/state", "github/ingress",
+             "github/source-control", "github/watches", "github/watch-store", "github/watch-control-internal",
+             "github/watch-kernel", "github/watch-owner-proof",
+             "manual-canary", "manual-canary-scope",
+             "native-admission-canary", "admin-api", "admin-types"),
+            ("apps/os/packages/gatekeeper-memory/src/principals.ts",
+             "apps/os/packages/openapi-operator/src/access.ts",
+             "apps/os/packages/gatekeeper-messaging/src/agent-token.ts",
+             "apps/os/packages/gatekeeper-memory/src/auth.ts",
+             "apps/os/packages/gatekeeper-memory/src/admin-security.ts"),
+            event_revision="59940bde10db5584247c8648c985f246f546226f")
+        control = json.loads(self.approved_snapshot("github-watch-owner-rpc")[
+            SNAPSHOT + "event-control-v1/manifest.json"])
+        self.assertEqual(len(control["sources"]), 36)
+        self.assertEqual(control["zodVersion"], "4.6.5")
+
+    def test_github_watch_owner_rpc_rejects_changed_or_omitted_source_hashes(self):
+        self.assert_source_hash_mutation_or_omission_rejected("github-watch-owner-rpc")
+
+    def test_github_watch_owner_rpc_semantic_corpus(self):
+        blobs = self.approved_snapshot("github-watch-owner-rpc")
+        vectors = json.loads(blobs[SNAPSHOT + "event-v1/protocol-v1.json"])["semanticVectors"]
+        self.assertEqual(sum(len(vectors[key]) for key in
+                             ("rawCases", "digestCases", "bindingCases")), 45)
+        check = runpy.run_path(str(PACKAGE / "scripts/check_semantic_vectors.py"))["check"]
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = Path(directory) / "semantic.json"
+            corpus.write_text(json.dumps(vectors))
+            with redirect_stdout(io.StringIO()) as output:
+                check(corpus)
+        self.assertEqual(output.getvalue().strip(), "PASS: 45 canonical semantic verdicts")
+
+    def test_github_watch_owner_rpc_rejects_self_rehashed_semantic_verdict(self):
+        self.blobs = self.approved_snapshot("github-watch-owner-rpc")
+        path = SNAPSHOT + "event-v1/protocol-v1.json"
+        fixture = json.loads(self.blobs[path])
+        fixture["semanticVectors"]["rawCases"][0]["expectedError"] = "invalid_schema"
+        self.blobs[path] = (json.dumps(fixture, indent=2) + "\n").encode()
+        manifest_path = SNAPSHOT + "event-v1/manifest.json"
+        manifest = json.loads(self.blobs[manifest_path])
+        for entry in manifest["files"]:
+            if entry["file"] == "protocol-v1.json":
+                entry["sha256"] = hashlib.sha256(self.blobs[path]).hexdigest()
+        self.blobs[manifest_path] = (json.dumps(manifest, indent=2) + "\n").encode()
+        with self.assertRaisesRegex(ValueError, "contract family not authorized"):
+            self.verify()
+
     def test_github_source_control_rejects_changed_or_omitted_source_hashes(self):
         self.assert_source_hash_mutation_or_omission_rejected("github-source-control")
 
@@ -220,12 +285,14 @@ class ContractWorkflowTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         self.verify()
 
-    def assert_manifest_source_provenance(self, name, control_revision, additional_sources=(), external_sources=()):
+    def assert_manifest_source_provenance(
+            self, name, control_revision, additional_sources=(), external_sources=(),
+            event_revision="ed23882eac491e26e070e3ef26cf8c0e9e702b38"):
         # This proves fixture provenance separately from the verifier's raw snapshot hash gate.
         blobs = self.approved_snapshot(name)
         event = json.loads(blobs[SNAPSHOT + "event-v1/manifest.json"])
         control = json.loads(blobs[SNAPSHOT + "event-control-v1/manifest.json"])
-        self.assertEqual(event["commit"], "ed23882eac491e26e070e3ef26cf8c0e9e702b38")
+        self.assertEqual(event["commit"], event_revision)
         self.assertEqual(control["revision"], control_revision)
         source_root = "apps/os/packages/event-runtime/"
         event_paths = {source_root + path for path in (

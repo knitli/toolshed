@@ -1,6 +1,6 @@
 # Trusted contract fixtures
 
-`trusted-contract-families.zip` contains immutable Git blob bytes for all nine
+`trusted-contract-families.zip` contains immutable Git blob bytes for all ten
 contract families. Tests read members with `ZipFile.read`; nothing is
 extracted or executed, and tests require neither network access nor Git history.
 
@@ -71,3 +71,17 @@ bytes remain intact. Tests check the complete family, every snapshot mutation or
 omission, all 34 source hashes and omissions, and the exact source inventory.
 This fixture records provenance only; it does not enable the public watch kernel,
 rotate the consumer snapshot, or qualify deployment, native delivery, or recovery.
+
+The `github-watch-owner-rpc` family uses actual event merge
+`59940bde10db5584247c8648c985f246f546226f` and control merge
+`b152b1b92fec860354cacd406b0d72274a97713c`. Its `prepared-export:` identifier
+uses the event revision. Four event sources include the embedded 45-case semantic
+corpus; 36 control sources add `github/watch-kernel.ts` and
+`github/watch-owner-proof.ts`, with Zod 4.6.5. Every source hash was independently
+checked against its immutable revision; all 36 control sources also match the
+event revision. The control fixture bytes are unchanged. All nine prior policy
+entries and archived members are retained. Tests cover authorization, every
+required snapshot and source-hash mutation/omission, closed provenance, all 45
+semantic verdicts, and a changed verdict with a self-rehashed event manifest.
+This authorizes exact bytes only; consumer rotation and runtime qualification
+remain separate.
