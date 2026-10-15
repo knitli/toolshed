@@ -245,8 +245,15 @@ byte limits. Consumer tests exercise these through Python validation and the
 HTTP response boundary. Request identity, pagination binding, and duplicate
 record checks remain separately tested local invariants. These vectors do not
 qualify live authorization, source initialization, delivery, or native wake.
-The control manifest pins 32 source paths at
-`c25ade9233013d97d56ed0fdfddf75453071066b`, preserving the delegated read path:
+The `github-watch-control` snapshot was exported from the actual merged cloud
+revision and authorized by the trusted-main policy in Toolshed #105 before this
+consumer rotation. The added watch-store and internal watch-control pins record
+existing runtime imports; they do not expose a public watch API or adopt watches.
+Watch-kernel and owner-proof modules remain outside this selected source pin:
+at the pinned cloud revision they have no production caller.
+
+The control manifest pins 34 source paths at
+`ccdb861eb9126ccd8319d50da5cd6689f91435dd`, preserving the delegated read path:
 authority revalidation and deadlines, host admission and GitHub client, grants
 and principal allowlist, controller pagination/projection, subject validation,
 and shared identity helpers. It also includes source-control and watches, manual

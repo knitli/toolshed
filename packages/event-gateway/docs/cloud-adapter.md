@@ -112,8 +112,15 @@ as permission to create a new native attempt or attachment request.
 
 ## Separate control-plane source pin
 
-`contracts/event-control-v1/manifest.json` pins 32 Event source paths from
-the immutable OS revision `c25ade9233013d97d56ed0fdfddf75453071066b`, plus the Zod version and
+The `github-watch-control` snapshot was exported from the actual merged cloud
+revision and authorized by the trusted-main policy in Toolshed #105 before this
+consumer rotation. The added watch-store and internal watch-control pins record
+existing runtime imports; they do not expose a public watch API or adopt watches.
+Watch-kernel and owner-proof modules remain outside this selected source pin:
+at the pinned cloud revision they have no production caller.
+
+`contracts/event-control-v1/manifest.json` pins 34 Event source paths from
+the immutable OS revision `ccdb861eb9126ccd8319d50da5cd6689f91435dd`, plus the Zod version and
 fixture SHA-256. The source chain includes delegated read authority, GitHub
 source-control and watches, manual/native canary boundaries, admin API/types,
 and memory authentication/admin security. These are offline provenance pins;
