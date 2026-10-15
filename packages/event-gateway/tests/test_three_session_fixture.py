@@ -1070,6 +1070,64 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                         with self.assertRaises(OSError):
                             os.fstat(fd)
 
+    def test_proof_only_mutation_refuses_pass_and_preserves_unknown_replacement(self):
+        for mutation in ("rename", "replace", "overwrite", None):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                target, archive = root / "proof.json", root / "proof.private-evidence.jsonl"
+                descriptors = []
+                real_fsync = os.fsync
+                mutated = False
+                original_archive = None
+
+                async def scenario(directory_fd, publication_stack):
+                    nonlocal original_archive
+                    evidence = publication_stack.enter_context(FIXTURE.evidence_archive(archive, directory_fd))
+                    descriptors.extend((directory_fd, evidence.fd, evidence.directory_fd))
+                    evidence.drained = True
+                    proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
+                    original_archive = archive.read_bytes()
+                    return proof, evidence
+
+                def sync(fd):
+                    nonlocal mutated
+                    if descriptors and fd == descriptors[0] and target.exists() and not mutated:
+                        mutated = True
+                        raw = target.read_bytes()
+                        if mutation in ("rename", "replace"):
+                            target.rename(root / "original-proof")
+                        if mutation == "replace":
+                            target.write_bytes(raw)
+                            target.chmod(0o600)
+                        if mutation == "overwrite":
+                            target.write_bytes(raw.replace(b"sha256", b"SHA256"))
+                    real_fsync(fd)
+
+                real_fdopen = os.fdopen
+
+                def fdopen(fd, *args, **kwargs):
+                    descriptors.append(fd)
+                    return real_fdopen(fd, *args, **kwargs)
+
+                with patch.object(FIXTURE, "cli", return_value=SimpleNamespace(output=str(target))), \
+                        patch.object(FIXTURE, "configure"), \
+                        patch.object(FIXTURE, "run_scenario", side_effect=scenario), \
+                        patch.object(FIXTURE.os, "fsync", side_effect=sync), \
+                        patch.object(FIXTURE.os, "fdopen", side_effect=fdopen), \
+                        patch("builtins.print") as output:
+                    if mutation:
+                        with self.assertRaises((AssertionError, OSError)):
+                            FIXTURE.main()
+                        output.assert_not_called()
+                        self.assertEqual(target.exists(), mutation == "replace")
+                    else:
+                        FIXTURE.main()
+                        self.assertEqual(json.loads(output.call_args.args[0])["result"], "PASS")
+                self.assertEqual(archive.read_bytes(), original_archive)
+                for fd in descriptors:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
+
     def test_proof_parent_replacement_refuses_pass_and_never_writes_in_replacement(self):
         for replace_at in ("scenario", "proof-open", "sidecar-open", None):
             with self.subTest(replace_at=replace_at), tempfile.TemporaryDirectory() as directory:

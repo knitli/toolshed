@@ -2302,20 +2302,29 @@ def main():
             require(len(encoded) <= 32_768, "proof exceeds fixed metadata bound")
             verify_parent()
             verify_evidence(evidence)
-            descriptor = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            descriptor = os.open(target.name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                  0o600, dir_fd=directory)
-            with os.fdopen(descriptor, "wb") as stream:
+            with os.fdopen(descriptor, "w+b") as stream:
                 proof_identity = os.fstat(stream.fileno())
                 stream.write(encoded)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.fsync(directory)
-            verify_parent()
-            current_archive = seal_evidence(SimpleNamespace(evidence=evidence))
-            require(all(current_archive[key] == proof["privateEvidence"][key]
-                        for key in ("sha256", "bytes")), "private evidence changed before publication")
-            print(json.dumps({"result": "PASS", "proof": str(target),
-                              "productionAdmissionProven": False, "nativeCliSessions": 3}))
+                os.fsync(directory)
+                verify_parent()
+                current_archive = seal_evidence(SimpleNamespace(evidence=evidence))
+                require(all(current_archive[key] == proof["privateEvidence"][key]
+                            for key in ("sha256", "bytes")), "private evidence changed before publication")
+                opened = os.fstat(stream.fileno())
+                named = os.stat(target.name, dir_fd=directory, follow_symlinks=False)
+                require(all(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600
+                            and info.st_uid == os.getuid() and info.st_nlink == 1
+                            and (info.st_dev, info.st_ino) == (proof_identity.st_dev, proof_identity.st_ino)
+                            and info.st_size == len(encoded) for info in (opened, named)),
+                        "proof output changed before publication")
+                stream.seek(0)
+                require(stream.read(32_769) == encoded, "proof output changed before publication")
+                print(json.dumps({"result": "PASS", "proof": str(target),
+                                  "productionAdmissionProven": False, "nativeCliSessions": 3}))
     except BaseException:
         if proof_identity is not None:
             try:
