@@ -1,7 +1,7 @@
 # Trusted contract fixtures
 
-`trusted-contract-families.zip` contains immutable Git blob bytes for all eight
-approved contract families. Tests read members with `ZipFile.read`; nothing is
+`trusted-contract-families.zip` contains immutable Git blob bytes for all nine
+contract families. Tests read members with `ZipFile.read`; nothing is
 extracted or executed, and tests require neither network access nor Git history.
 
 `metadata.json` freezes the policy entries, including revision labels and all
@@ -59,3 +59,15 @@ archive source/snapshot bytes are retained. Tests check the entire new family,
 all required snapshot mutations/omissions, all 32 source hashes and omissions,
 and the exact source inventory. This is provenance authorization, not deployment
 or source activation, publication, native delivery, or live qualification.
+
+The `github-watch-control` family records cloud commit
+`ccdb861eb9126ccd8319d50da5cd6689f91435dd` as a `prepared-export:` snapshot,
+using Zod 4.6.5. Its 34-source inventory adds `github/watch-store.ts` and
+`github/watch-control-internal.ts` to the source-control inventory. Each source
+blob is read at the pinned commit and checked against the manifest hash.
+The four event source blobs retain the `ed23882` revision, and the control
+fixture corpus is unchanged. All eight prior families and their source/snapshot
+bytes remain intact. Tests check the complete family, every snapshot mutation or
+omission, all 34 source hashes and omissions, and the exact source inventory.
+This fixture records provenance only; it does not enable the public watch kernel,
+rotate the consumer snapshot, or qualify deployment, native delivery, or recovery.
