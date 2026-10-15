@@ -103,6 +103,27 @@ class ThreeSessionFixedPortTests(unittest.TestCase):
                 broker.assert_not_called()
                 archive.assert_not_called()
 
+    def test_cleanup_requires_every_selected_fixed_port_closed(self):
+        ports = list(range(49732, 49739))
+        for occupied in [None, *ports]:
+            with self.subTest(occupied=occupied):
+                process = Mock(pid=410, returncode=0)
+                process.poll.return_value = 0
+                broker_log = io.BytesIO()
+                with patch.object(FIXTURE, "args", self.parsed()), \
+                        patch.object(FIXTURE, "process_group_members", return_value=[]), \
+                        patch.object(FIXTURE.time, "monotonic", side_effect=(0, 6)), \
+                        patch.object(FIXTURE, "port_is_closed", side_effect=lambda port: port != occupied) as probe:
+                    if occupied is not None:
+                        with self.assertRaisesRegex(AssertionError, "portsClosed=False"):
+                            FIXTURE.stop_broker(process, broker_log)
+                        self.assertIn(occupied, [call.args[0] for call in probe.call_args_list])
+                    else:
+                        proof = FIXTURE.stop_broker(process, broker_log)
+                        self.assertTrue(proof["loopbackPortsClosed"])
+                        self.assertEqual([call.args[0] for call in probe.call_args_list], ports)
+                self.assertTrue(broker_log.closed)
+
     def test_model_bind_uses_explicit_port_or_uncontained_ephemeral_default(self):
         host = SimpleNamespace(__file__=str(SCRIPT.with_name('native-host-launcher-qualification.py')))
         with patch.object(FIXTURE, 'host_qualifier', host, create=True), \
@@ -2073,11 +2094,14 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             self.assertFalse(FIXTURE.core_busy_observation(row, binding, 10.5, set()))
             self.assertFalse(FIXTURE.core_busy_observation(row, binding, 10.1, {1}))
             for field, value in (("generation", 4), ("eligible", False), ("nonce", True),
-                                 ("nonce", -1), ("nonce", 2**53), ("nonce", "1")):
+                                 ("nonce", -1), ("nonce", 2**53), ("nonce", "1"),
+                                 ("leaseMs", None), ("leaseMs", "750"), ("leaseMs", True),
+                                 ("leaseMs", 0), ("leaseMs", -1), ("leaseMs", 2**53),
+                                 ("leaseMs", float("nan"))):
                 bad = copy.deepcopy(row)
                 bad["response"]["witness"][field] = value
                 self.assertFalse(FIXTURE.core_busy_observation(bad, binding, 10.1, set()))
-            for field in ("nativeCoreTurnState", "nonce", "version", "sequence", "cause"):
+            for field in ("nativeCoreTurnState", "nonce", "version", "sequence", "cause", "leaseMs"):
                 bad = copy.deepcopy(row)
                 del bad["response"]["witness"][field]
                 self.assertFalse(FIXTURE.core_busy_observation(bad, binding, 10.1, set()))

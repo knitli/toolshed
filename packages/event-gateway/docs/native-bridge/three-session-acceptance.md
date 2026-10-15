@@ -196,6 +196,8 @@ artifact and Git validation and the containment checks, every selected port must
 be closed before the evidence archive is created or the broker/native sessions
 start. Git validation therefore still precedes occupancy probes. These probes
 are not reservations: a later bind can fail if another process takes a port.
+Cleanup also requires every selected port to be closed after the native providers,
+daemon, and broker have stopped; a remaining listener refuses PASS.
 The old four-port recovery profile cannot be reused unchanged. Audit the outer
 profile for the seven selected ports before execution; do not supply operator
 credentials or real model configuration.

@@ -552,7 +552,7 @@ def core_busy_observation(row, binding, now, seen):
             and all(type(witness.get(key)) is type(value) and witness.get(key) == value
                     for key, value in binding.items())
             and witness.get("eligible") is True and witness.get("nativeCoreTurnState") == "busy"
-            and type(nonce) is int and nonce not in seen
+            and is_exact_int(nonce) and nonce not in seen
             and type(deadline) in (int, float) and math.isfinite(deadline)
             and now < deadline <= row["receivedAt"] + min(witness["leaseMs"], 750) / 1000)
 
@@ -765,7 +765,7 @@ def stop_broker(process, broker_log):
             except ProcessLookupError:
                 pass
             process.wait(timeout=5)
-    ports = (args.entry_port, args.loopback_port, args.broker_port)
+    ports = fixture_ports(args)
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         if not process_group_members(process.pid) and all(port_is_closed(port) for port in ports):
