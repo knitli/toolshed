@@ -276,16 +276,19 @@ def free_port():
         return reservation.getsockname()[1]
 
 
-def private_json(path, value):
+def private_json(path, value, *, directory_fd=None):
     raw = (json.dumps(value, separators=(",", ":")) + "\n").encode()
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    descriptor = os.open(path if directory_fd is None else path.name,
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600, dir_fd=directory_fd)
     with os.fdopen(descriptor, "wb") as stream:
         stream.write(raw)
 
 
 @contextmanager
-def evidence_archive(path):
-    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+def evidence_archive(path, directory_fd=None):
+    directory = (os.dup(directory_fd) if directory_fd is not None else
+                 os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
     descriptor, evidence = None, None
     try:
         descriptor = os.open(path.name, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -293,7 +296,7 @@ def evidence_archive(path):
         evidence = SimpleNamespace(fd=descriptor, directory_fd=directory, path=path,
                                    identity=os.fstat(descriptor), directory_identity=os.fstat(directory),
                                    lock=threading.Condition(), size=0, sealed=False, failed=False,
-                                   closing=False, active=0, drained=False)
+                                   closing=False, active=0, drained=False, drain_error=None)
         record_evidence(SimpleNamespace(evidence=evidence), "archive", {"version": 1})
         yield evidence
     finally:
@@ -307,11 +310,11 @@ def evidence_archive(path):
 
 
 def verify_evidence(evidence):
-    opened, named = os.fstat(evidence.fd), evidence.path.lstat()
     parent = evidence.path.parent.lstat()
     require(stat.S_ISDIR(parent.st_mode) and (parent.st_dev, parent.st_ino)
             == (evidence.directory_identity.st_dev, evidence.directory_identity.st_ino),
             "private evidence directory changed")
+    opened, named = os.fstat(evidence.fd), evidence.path.lstat()
     require(all(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600
                 and info.st_uid == os.getuid() and info.st_nlink == 1
                 and (info.st_dev, info.st_ino) == (evidence.identity.st_dev, evidence.identity.st_ino)
@@ -368,13 +371,20 @@ async def drain_native_observers(ctx):
         ctx.evidence.closing = True
         if ctx.evidence.drained:
             return
+        if ctx.evidence.drain_error is not None:
+            raise ctx.evidence.drain_error
     # Cancellation does not stop to_thread work, including callers outside the inner observer.
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", RuntimeWarning)
-        await asyncio.get_running_loop().shutdown_default_executor(timeout=30)
-    with ctx.evidence.lock:
-        require(ctx.evidence.active == 0, "native observers did not drain")
-        ctx.evidence.drained = True
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            await asyncio.get_running_loop().shutdown_default_executor(timeout=30)
+        with ctx.evidence.lock:
+            require(ctx.evidence.active == 0, "native observers did not drain")
+            ctx.evidence.drained = True
+    except BaseException as error:
+        with ctx.evidence.lock:
+            ctx.evidence.drain_error = error
+        raise
 
 
 def snapshot_evidence(ctx, stage):
@@ -382,7 +392,7 @@ def snapshot_evidence(ctx, stage):
     database = ctx.state / "ledger.sqlite"
     missing = []
     if database.exists():
-        with closing(sqlite3.connect("file:" + str(database) + "?mode=ro", uri=True, timeout=3)) as db:
+        with closing(sqlite3.connect(database.absolute().as_uri() + "?mode=ro", uri=True, timeout=3)) as db:
             db.row_factory = sqlite3.Row
             db.execute("BEGIN")
             present = {row[0] for row in db.execute(
@@ -903,7 +913,7 @@ def listener_delivery(port, signed):
 
 def db_delivery(state, delivery_id):
     db_path = Path(state) / "ledger.sqlite"
-    uri = "file:" + str(db_path) + "?mode=ro"
+    uri = db_path.absolute().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
         db.execute("PRAGMA busy_timeout=3000")
         row = db.execute("SELECT state FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
@@ -913,7 +923,7 @@ def db_delivery(state, delivery_id):
 
 def db_delivery_history(state, delivery_id):
     db_path = Path(state) / "ledger.sqlite"
-    uri = "file:" + str(db_path) + "?mode=ro"
+    uri = db_path.absolute().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
         db.execute("PRAGMA busy_timeout=3000")
         db.row_factory = sqlite3.Row
@@ -929,7 +939,7 @@ def db_delivery_history(state, delivery_id):
 
 def db_delivery_envelope_sha256(state, delivery_id):
     db_path = Path(state) / "ledger.sqlite"
-    uri = "file:" + str(db_path) + "?mode=ro"
+    uri = db_path.absolute().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
         db.execute("PRAGMA busy_timeout=3000")
         row = db.execute("SELECT envelope FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
@@ -938,7 +948,7 @@ def db_delivery_envelope_sha256(state, delivery_id):
 
 def db_delivery_reason(state, delivery_id):
     db_path = Path(state) / "ledger.sqlite"
-    uri = "file:" + str(db_path) + "?mode=ro"
+    uri = db_path.absolute().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
         db.execute("PRAGMA busy_timeout=3000")
         row = db.execute("SELECT state,reason FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
@@ -1112,10 +1122,10 @@ async def wait_stable_session_binding(session, provider, *, minimum_turn_main_re
 
 def fixture(ctx, path, body=None):
     status, _, raw = post(ctx.address["port"], ctx.fixture_secret, path, body)
+    record_evidence(ctx, "cloudFixture", {"path": path, "status": status,
+                                          "response": raw.decode("utf-8", errors="replace")})
     require(status == 200, "workerd fixture rejected " + path)
-    value = json.loads(raw)
-    record_evidence(ctx, "cloudFixture", {"path": path, "response": value})
-    return value
+    return json.loads(raw)
 
 
 async def send(ctx, **request):
@@ -1128,8 +1138,17 @@ async def send(ctx, **request):
     proof = json.loads(request["headers"]["x-event-node-proof"])
 
     def exchange():
-        response = post(ctx.address["port"], ctx.fixture_secret, path,
-                        request["body"], request["headers"], limit=8192)
+        attempt = {"path": path, "request": body, "proof": proof}
+        record_evidence(ctx, "cloudAttempt", attempt)
+        try:
+            response = post(ctx.address["port"], ctx.fixture_secret, path,
+                            request["body"], request["headers"], limit=8192)
+        except Exception as error:
+            try:
+                record_evidence(ctx, "cloudError", {**attempt, "error": type(error).__name__})
+            except Exception:
+                raise error
+            raise
         # A canceled await must not discard evidence from an HTTP request that still completes.
         record_evidence(ctx, "cloudWire", {"path": path, "request": body,
                                           "proof": proof, "status": response[0],
@@ -1202,10 +1221,13 @@ def record_session_request(ctx, state_dir, session_id, message, *, native_reques
     try:
         result = ctx.original_session_request(state_dir, session_id, message, native_request=native_request)
     except Exception as error:
-        record_evidence(ctx, "nativeError", {"session": label, "request": message,
-                                            "nativeRequest": native_request, "error": str(error)[:160]})
         if message.get("command") == "nativeReceipt" and label in ctx.receipt_errors:
             ctx.receipt_errors[label].append(getattr(error, "code", str(error)))
+        try:
+            record_evidence(ctx, "nativeError", {"session": label, "request": message,
+                                                "nativeRequest": native_request, "error": str(error)[:160]})
+        except Exception:
+            raise error
         raise
     row = {"session": label, "sessionId": session_id, "request": message, "nativeRequest": native_request,
            "response": result, "receivedAt": time.monotonic()}
@@ -2060,30 +2082,34 @@ async def cleanup_scenario(ctx):
 
 
 def finish_scenario_cleanup(ctx):
-    cleanup_error = None
     try:
-        broker_cleanup = stop_broker(ctx.broker, ctx.broker_log)
-        if ctx.proof is not None:
-            ctx.proof["brokerCleanup"] = broker_cleanup
-    except AssertionError as error:
-        cleanup_error = error
-    if cleanup_error is not None and sys.exc_info()[0] is None:
-        raise cleanup_error
-    if cleanup_error is not None:
-        print(str(cleanup_error), file=sys.stderr)
-    if ctx.private_nonce_record is not None:
-        private_path = Path(ctx.args.output).with_name(Path(ctx.args.output).stem + ".private-causal.json")
+        cleanup_error = None
         try:
-            private_json(private_path, ctx.private_nonce_record)
-        except OSError as error:
-            if cleanup_error is None:
-                raise AssertionError("private nonce causal record unavailable: "
-                                     + type(error).__name__) from None
-            print("private nonce causal record unavailable: " + type(error).__name__,
-                  file=sys.stderr)
-    if ctx.state_root.exists():
-        import shutil
-        shutil.rmtree(ctx.state_root)
+            broker_cleanup = stop_broker(ctx.broker, ctx.broker_log)
+            if ctx.proof is not None:
+                ctx.proof["brokerCleanup"] = broker_cleanup
+        except AssertionError as error:
+            cleanup_error = error
+        if cleanup_error is not None and sys.exc_info()[0] is None:
+            raise cleanup_error
+        if cleanup_error is not None:
+            print(str(cleanup_error), file=sys.stderr)
+        if ctx.private_nonce_record is not None:
+            private_path = Path(ctx.args.output).with_name(Path(ctx.args.output).stem + ".private-causal.json")
+            try:
+                verify_evidence(ctx.evidence)
+                private_json(private_path, ctx.private_nonce_record, directory_fd=ctx.evidence.directory_fd)
+                verify_evidence(ctx.evidence)
+            except OSError as error:
+                if cleanup_error is None:
+                    raise AssertionError("private nonce causal record unavailable: "
+                                         + type(error).__name__) from None
+                print("private nonce causal record unavailable: " + type(error).__name__,
+                      file=sys.stderr)
+    finally:
+        if ctx.state_root.exists():
+            import shutil
+            shutil.rmtree(ctx.state_root)
 
 
 def restore_observers(ctx):
@@ -2098,12 +2124,12 @@ def restore_observers(ctx):
     SessionNativeBridge.challenge = ctx.original_bridge_challenge
 
 
-async def run_scenario():
+async def run_scenario(directory_fd=None):
     temporary_root = private_temp_root()
     containment = (verify_outer_containment(temporary_root) if args.outer_contained
                    else {"mode": "per-native-profile"})
     evidence_path = Path(args.output).with_suffix(".private-evidence.jsonl")
-    with evidence_archive(evidence_path) as evidence:
+    with evidence_archive(evidence_path, directory_fd) as evidence:
         broker, broker_log, address = start_broker()
         proof = None
         private_nonce_record = None
@@ -2232,15 +2258,30 @@ def main():
     output = Path(parsed.output)
     target = output.parent.resolve(strict=True) / output.name
     require(not target.exists() and not target.is_symlink(), "proof output already exists")
-    proof = asyncio.run(run_scenario())
-    encoded = (json.dumps(proof, indent=2) + "\n").encode()
-    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(encoded)
-        stream.flush()
-        os.fsync(stream.fileno())
-    print(json.dumps({"result": "PASS", "proof": str(target),
-                      "productionAdmissionProven": False, "nativeCliSessions": 3}))
+    directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        identity = os.fstat(directory)
+
+        def verify_parent():
+            current = target.parent.lstat()
+            require(stat.S_ISDIR(current.st_mode) and (current.st_dev, current.st_ino)
+                    == (identity.st_dev, identity.st_ino), "proof output directory changed")
+
+        proof = asyncio.run(run_scenario(directory))
+        encoded = (json.dumps(proof, indent=2) + "\n").encode()
+        verify_parent()
+        descriptor = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=directory)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.fsync(directory)
+        verify_parent()
+        print(json.dumps({"result": "PASS", "proof": str(target),
+                          "productionAdmissionProven": False, "nativeCliSessions": 3}))
+    finally:
+        os.close(directory)
 
 
 if __name__ == "__main__":

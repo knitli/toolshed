@@ -677,6 +677,219 @@ class ThreeSessionHistoricalReceiptTests(unittest.TestCase):
 
 
 class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
+    def test_fixture_archives_failure_responses_without_request_secrets(self):
+        for status, raw, error in ((503, b"unavailable\xff", AssertionError),
+                                   (200, b"not json", json.JSONDecodeError)):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "evidence"
+                with FIXTURE.evidence_archive(path) as evidence:
+                    ctx = SimpleNamespace(evidence=evidence, address={"port": 12345}, fixture_secret="secret")
+                    with patch.object(FIXTURE, "post", return_value=(status, {}, raw)):
+                        with self.assertRaises(error):
+                            FIXTURE.fixture(ctx, "/fixture/setup", {"transportPrivateKey": "PRIVATE"})
+                    records = [json.loads(line) for line in path.read_text().splitlines()]
+                    self.assertEqual(records[-1], {"kind": "cloudFixture", "value": {
+                        "path": "/fixture/setup", "status": status,
+                        "response": raw.decode("utf-8", errors="replace"),
+                    }})
+                    self.assertNotIn("PRIVATE", path.read_text())
+                    self.assertNotIn("transportPrivateKey", path.read_text())
+
+    def test_native_error_survives_failed_archive_and_retains_receipt_bookkeeping(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with FIXTURE.evidence_archive(Path(directory) / "evidence") as evidence:
+                failure = RuntimeError("original native failure")
+
+                def native(*args, **kwargs):
+                    evidence.size = 64 * 1024 * 1024
+                    raise failure
+
+                ctx = SimpleNamespace(evidence=evidence, session_labels={"session": "A"},
+                                      receipt_errors={"A": []}, original_session_request=native)
+                with self.assertRaises(RuntimeError) as raised:
+                    FIXTURE.observe_session_request(ctx, None, "session", {"command": "nativeReceipt"})
+                self.assertIs(raised.exception, failure)
+                self.assertEqual(ctx.receipt_errors["A"], [str(failure)])
+                self.assertEqual(evidence.active, 0)
+                self.assertTrue(evidence.failed)
+                evidence.drained = True
+                with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                    FIXTURE.seal_evidence(ctx)
+
+    def test_parent_replacement_cleanup_removes_owned_state_and_preserves_refusal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent, moved, state = root / "output", root / "original", root / "state"
+            parent.mkdir()
+            state.mkdir()
+            (state / "private-key").write_text("private")
+            with FIXTURE.evidence_archive(parent / "evidence") as evidence:
+                ctx = SimpleNamespace(evidence=evidence, broker=None, broker_log=None, proof={},
+                                      private_nonce_record={}, state_root=state,
+                                      args=SimpleNamespace(output=str(parent / "proof.json")))
+                parent.rename(moved)
+                parent.mkdir()
+                with patch.object(FIXTURE, "stop_broker", return_value={}):
+                    with self.assertRaisesRegex(AssertionError, "private evidence directory changed"):
+                        FIXTURE.finish_scenario_cleanup(ctx)
+                self.assertFalse(state.exists())
+                self.assertEqual(list(parent.iterdir()), [])
+
+    def test_failed_executor_shutdown_is_not_retried_during_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state"
+            state.mkdir()
+            with FIXTURE.evidence_archive(root / "evidence") as evidence:
+                ctx = SimpleNamespace(evidence=evidence, daemon_task=None, sessions={},
+                                      broker=None, broker_log=None, proof=None,
+                                      private_nonce_record=None, state_root=state)
+                first, second = TimeoutError("first shutdown"), RuntimeError("second shutdown")
+                shutdown = AsyncMock(side_effect=[first, second])
+
+                async def scenario():
+                    loop = asyncio.get_running_loop()
+                    with patch.object(loop, "shutdown_default_executor", shutdown):
+                        try:
+                            await FIXTURE.drain_native_observers(ctx)
+                        finally:
+                            await FIXTURE.cleanup_scenario(ctx)
+
+                with patch.object(FIXTURE, "restore_observers") as restore, \
+                        patch.object(FIXTURE, "stop_broker", return_value={}):
+                    with self.assertRaises(TimeoutError) as raised:
+                        asyncio.run(scenario())
+                self.assertIs(raised.exception, first)
+                shutdown.assert_awaited_once_with(timeout=30)
+                restore.assert_called_once_with(ctx)
+                self.assertFalse(state.exists())
+                self.assertFalse(evidence.drained)
+                self.assertFalse(evidence.sealed)
+                with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                    FIXTURE.seal_evidence(ctx)
+
+    def test_transport_failure_is_archived_before_real_cloud_retry(self):
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from event_gateway.cloud import CloudClient, Credentials
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.jsonl"
+            with FIXTURE.evidence_archive(path) as evidence:
+                ctx = SimpleNamespace(evidence=evidence, address={"port": 12345},
+                                      fixture_secret=uuid4().hex, wire_evidence=[])
+                failure = TimeoutError("response lost after commit")
+                calls = []
+
+                def post(*args, **kwargs):
+                    calls.append(args)
+                    records = [json.loads(line) for line in path.read_text().splitlines()]
+                    self.assertEqual(records[-1]["kind"], "cloudAttempt")
+                    if len(calls) == 1:
+                        raise failure
+                    self.assertEqual([row["kind"] for row in records[-3:]],
+                                     ["cloudAttempt", "cloudError", "cloudAttempt"])
+                    self.assertEqual(records[-2]["value"]["error"], "TimeoutError")
+                    return 200, {"content-type": "application/json"}, b'{"status":"attached"}'
+
+                async def send(**request):
+                    return await FIXTURE.send(ctx, **request)
+
+                async def credentials():
+                    return Credentials(uuid4().hex, uuid4().hex)
+
+                client = CloudClient(origin=FIXTURE.ORIGIN, principal=FIXTURE.PRINCIPAL,
+                                     agent=FIXTURE.AGENT, node_id=str(uuid4()), node_generation=1,
+                                     private_key=Ed25519PrivateKey.generate(),
+                                     credentials=credentials, send=send)
+                with patch.object(FIXTURE, "post", side_effect=post):
+                    result = asyncio.run(client._retry_native_commit(
+                        "/v1/runtimes/attach", {}, b"{}", lambda *args, **kwargs: None, lambda value: value,
+                    ))
+                self.assertEqual(result, {"status": "attached"})
+                self.assertEqual(len(calls), 2)
+                records = [json.loads(line) for line in path.read_text().splitlines()]
+                attempts = [row["value"] for row in records if row["kind"] == "cloudAttempt"]
+                self.assertNotEqual(attempts[0]["proof"]["nonce"], attempts[1]["proof"]["nonce"])
+                self.assertEqual(attempts[0]["request"], attempts[1]["request"])
+
+    def test_transport_error_survives_failed_error_record_and_archive_cannot_seal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with FIXTURE.evidence_archive(Path(directory) / "evidence") as evidence:
+                ctx = SimpleNamespace(evidence=evidence, address={"port": 12345},
+                                      fixture_secret=uuid4().hex, wire_evidence=[])
+                failure = TimeoutError("original transport error")
+
+                def fail(*args, **kwargs):
+                    evidence.size = 64 * 1024 * 1024
+                    raise failure
+
+                with patch.object(FIXTURE, "post", side_effect=fail):
+                    with self.assertRaises(TimeoutError) as raised:
+                        asyncio.run(FIXTURE.send(
+                            ctx, method="POST", url=FIXTURE.ORIGIN + "/v1/runtimes/attach",
+                            timeout=5, max_response_bytes=8192, follow_redirects=False,
+                            body=b"{}", headers={"x-event-node-proof": '{"nonce":"nonce"}'},
+                        ))
+                self.assertIs(raised.exception, failure)
+                self.assertTrue(evidence.failed)
+                evidence.drained = True
+                with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                    FIXTURE.seal_evidence(ctx)
+
+    def test_proof_parent_replacement_refuses_pass_and_never_writes_in_replacement(self):
+        for replace_at in ("scenario", "proof-open", "sidecar-open", None):
+            with self.subTest(replace_at=replace_at), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                parent, moved = root / "output", root / "original"
+                parent.mkdir()
+                target = parent / "proof.json"
+                parsed = SimpleNamespace(output=str(target))
+                original_open = os.open
+                seen_fds = []
+
+                def replace():
+                    parent.rename(moved)
+                    parent.mkdir()
+
+                async def scenario(directory_fd):
+                    seen_fds.append(directory_fd)
+                    with FIXTURE.evidence_archive(target.with_suffix(".private-evidence.jsonl"), directory_fd) as evidence:
+                        evidence.drained = True
+                        proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
+                        FIXTURE.private_json(parent / "proof.private-causal.json", {},
+                                             directory_fd=evidence.directory_fd)
+                        FIXTURE.verify_evidence(evidence)
+                    if replace_at == "scenario":
+                        replace()
+                    return proof
+
+                def open_proof(path, *args, **kwargs):
+                    if kwargs.get("dir_fd") is not None and (
+                            (path == target.name and replace_at == "proof-open")
+                            or (path == "proof.private-causal.json" and replace_at == "sidecar-open")):
+                        replace()
+                    return original_open(path, *args, **kwargs)
+
+                with patch.object(FIXTURE, "cli", return_value=parsed), \
+                        patch.object(FIXTURE, "configure"), \
+                        patch.object(FIXTURE, "run_scenario", side_effect=scenario), \
+                        patch.object(FIXTURE.os, "open", side_effect=open_proof), \
+                        patch("builtins.print") as output:
+                    if replace_at:
+                        with self.assertRaisesRegex(AssertionError, "directory changed"):
+                            FIXTURE.main()
+                        output.assert_not_called()
+                        self.assertEqual(list(parent.iterdir()), [])
+                        self.assertTrue((moved / "proof.private-evidence.jsonl").is_file())
+                    else:
+                        FIXTURE.main()
+                        self.assertEqual(json.loads(output.call_args.args[0])["result"], "PASS")
+                        proof = json.loads(target.read_text())
+                        self.assertEqual(proof["privateEvidence"]["sha256"],
+                                         FIXTURE.digest((parent / "proof.private-evidence.jsonl").read_bytes()))
+                with self.assertRaises(OSError):
+                    os.fstat(seen_fds[0])
+
     def test_invalid_utf8_cloud_response_is_recorded_without_changing_exchange(self):
         for status in (200, 502):
             with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
@@ -1085,8 +1298,8 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             archive_fds, closed = {}, []
 
             @contextmanager
-            def archive(path):
-                with real_archive(path) as evidence:
+            def archive(path, directory_fd=None):
+                with real_archive(path, directory_fd) as evidence:
                     for fd in (evidence.fd, evidence.directory_fd):
                         info = os.fstat(fd)
                         archive_fds[fd] = (info.st_dev, info.st_ino)
@@ -1117,7 +1330,8 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
 
     def test_snapshot_stays_consistent_when_writer_commits_between_tables(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve() / "ledger?query#fragment"
+            root.mkdir()
             database = root / "ledger.sqlite"
             with closing(sqlite3.connect(database)) as writer:
                 writer.execute("PRAGMA journal_mode=WAL")
@@ -1141,12 +1355,22 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                             writer.execute(query)
                         writer.commit()
 
+                real_connect = sqlite3.connect
+
+                def connect(*args, **kwargs):
+                    db = real_connect(*args, **kwargs)
+                    with self.assertRaisesRegex(sqlite3.OperationalError, "readonly"):
+                        db.execute("CREATE TABLE should_not_exist (value TEXT)")
+                    return db
+
                 ctx = SimpleNamespace(state=root, fixture=Mock())
-                with patch.object(FIXTURE, "record_evidence", side_effect=record):
+                with patch.object(FIXTURE, "record_evidence", side_effect=record), \
+                        patch.object(FIXTURE.sqlite3, "connect", side_effect=connect):
                     self.assertEqual(FIXTURE.snapshot_evidence(ctx, "concurrent-write"), [])
                 self.assertEqual([row["rows"] for row in records], [[{"version": 0}]] * 3)
                 self.assertEqual(writer.execute("SELECT version FROM attempts").fetchone()[0], 1)
                 ctx.fixture.assert_called_once_with("/fixture/read")
+                self.assertFalse((root.parent / "ledger").exists())
 
 
     def test_provider_last_record_is_synced_before_native_scratch_removal(self):

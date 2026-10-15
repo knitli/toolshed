@@ -171,7 +171,7 @@ Use explicitly selected, verified artifacts; the runner installs nothing:
   HEAD alone does not certify a clean tree: retain input hashes and checkout state.
 - A new absolute proof filename whose parent already exists. Both it and its
   siblings `<proof-stem>.private-causal.json` and `<proof-stem>.private-evidence.jsonl` must be absent, including dangling
-  symlinks; the runner checks both before starting any subprocess. Choose separate
+  symlinks; the runner checks all three paths before starting any subprocess. Choose separate
   stdout/stderr paths and retain failed
   run diagnostics without relabeling them as proof.
 
