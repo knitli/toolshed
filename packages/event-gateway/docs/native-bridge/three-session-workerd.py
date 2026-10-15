@@ -312,6 +312,11 @@ def free_port():
         return reservation.getsockname()[1]
 
 
+def require_private_output_directory(info):
+    require_all("proof output directory must be owned mode 0700",
+                stat.S_ISDIR(info.st_mode), info.st_uid == os.getuid(), stat.S_IMODE(info.st_mode) == 0o700)
+
+
 def verify_private_json(artifact):
     opened = os.fstat(artifact.fd)
     named = os.stat(artifact.path, dir_fd=artifact.directory_fd, follow_symlinks=False)
@@ -749,7 +754,7 @@ def configure(parsed):
     require(output_path.is_absolute() and output_path.name not in ("", ".", ".."),
             "proof output must be an absolute file path")
     output_parent = output_path.parent.resolve(strict=True)
-    require(output_parent.is_dir(), "proof output parent must be an existing directory")
+    require_private_output_directory(output_parent.lstat())
     output_path = output_parent / output_path.name
     sidecar_path = output_path.with_name(output_path.stem + ".private-causal.json")
     for candidate, description in ((output_path, "proof output"),
@@ -2402,8 +2407,10 @@ def main():
     proof_identity = None
     try:
         identity = os.fstat(directory)
+        require_private_output_directory(identity)
 
         def verify_parent():
+            require_private_output_directory(os.fstat(directory))
             current = target.parent.lstat()
             require(stat.S_ISDIR(current.st_mode) and (current.st_dev, current.st_ino)
                     == (identity.st_dev, identity.st_ino), "proof output directory changed")

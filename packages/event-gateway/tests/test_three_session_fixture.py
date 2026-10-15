@@ -678,7 +678,7 @@ class ThreeSessionArtifactFailureTests(unittest.TestCase):
                     os.fstat(fd)
 
     def test_causal_sidecar_stays_pinned_until_pass(self):
-        for mutation in ("rename", "replace", "disappear", "bytes", "mode", "hardlink", None):
+        for mutation in ("rename", "replace", "disappear", "bytes", "mode", "hardlink", "parent-mode", None):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 target, sidecar = root / "proof.json", root / "proof.private-causal.json"
@@ -715,6 +715,8 @@ class ThreeSessionArtifactFailureTests(unittest.TestCase):
                             sidecar.chmod(0o644)
                         elif mutation == "hardlink":
                             os.link(sidecar, root / "sidecar-link")
+                        elif mutation == "parent-mode":
+                            root.chmod(0o755)
                     fd = original_open(path, *args, **kwargs)
                     descriptors.append(fd)
                     return fd
@@ -790,6 +792,23 @@ class ThreeSessionSourceTests(unittest.TestCase):
         helper = Mock()
         helper.verified_executable.return_value = str(node)
         return parsed, helper, cloud
+
+    def test_output_directory_must_be_private_and_owned_before_subprocess(self):
+        for mode, foreign_owner in ((0o755, False), (0o770, False), (0o700, True)):
+            with self.subTest(mode=mode, foreign_owner=foreign_owner), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                parsed, _, _ = self.inputs(root)
+                root.chmod(mode)
+                actual_uid = os.getuid()
+                with patch.object(FIXTURE.os, "getuid", return_value=actual_uid + int(foreign_owner)), \
+                        patch.object(FIXTURE, "load_module") as load, \
+                        patch.object(FIXTURE.subprocess, "run") as run, \
+                        patch.object(FIXTURE.subprocess, "Popen") as popen:
+                    with self.assertRaisesRegex(AssertionError, "owned mode 0700"):
+                        FIXTURE.configure(parsed)
+                    load.assert_not_called()
+                    run.assert_not_called()
+                    popen.assert_not_called()
 
     def test_evidence_suffix_output_has_distinct_archive_checked_before_subprocess(self):
         for name in ("proof.private-evidence.jsonl", ".private-evidence.jsonl"):
@@ -1480,7 +1499,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             with self.subTest(replace_at=replace_at), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory).resolve()
                 parent, moved = root / "output", root / "original"
-                parent.mkdir()
+                parent.mkdir(mode=0o700)
                 target = parent / "proof.json"
                 parsed = SimpleNamespace(output=str(target))
                 original_open = os.open
@@ -1488,7 +1507,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
 
                 def replace():
                     parent.rename(moved)
-                    parent.mkdir()
+                    parent.mkdir(mode=0o700)
 
                 async def scenario(directory_fd, publication_stack):
                     seen_fds.append(directory_fd)
