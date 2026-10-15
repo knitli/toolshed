@@ -1012,9 +1012,15 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     return result
 
                 ctx = self.observer_context(evidence, native)
-                returned = FIXTURE.observe_session_request(ctx, None, "session", {"command": "nativeReceipt"})
-                self.assertIs(returned, result)
-                self.assertEqual(ctx.receipt_calls["C"], ["inputRecorded"])
+                diagnostic = io.StringIO()
+                sinks = [diagnostic, Mock(write=Mock(side_effect=OSError("sink full"))),
+                         Mock(write=Mock(side_effect=ValueError("sink closed")))]
+                for sink in sinks:
+                    with self.subTest(sink=type(sink).__name__), patch.object(FIXTURE.sys, "stderr", sink):
+                        returned = FIXTURE.observe_session_request(ctx, None, "session", {"command": "nativeReceipt"})
+                    self.assertIs(returned, result)
+                self.assertEqual(diagnostic.getvalue(), "native exchange evidence unavailable: AssertionError\n")
+                self.assertEqual(ctx.receipt_calls["C"], ["inputRecorded"] * 3)
                 self.assertEqual(evidence.active, 0)
                 self.assertTrue(evidence.failed)
                 evidence.drained = True

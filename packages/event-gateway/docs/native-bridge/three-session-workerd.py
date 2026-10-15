@@ -5,7 +5,7 @@ import argparse
 import asyncio
 import base64
 import ctypes
-from contextlib import ExitStack, closing, contextmanager, redirect_stderr, redirect_stdout
+from contextlib import ExitStack, closing, contextmanager, redirect_stderr, redirect_stdout, suppress
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
@@ -1327,8 +1327,9 @@ def record_session_request(ctx, state_dir, session_id, message, *, native_reques
            "response": result, "receivedAt": time.monotonic()}
     try:
         record_evidence(ctx, "nativeExchange", row)
-    except Exception:
-        pass  # record_evidence already latched failure; preserve the native response.
+    except Exception as error:
+        with suppress(OSError, ValueError):
+            print("native exchange evidence unavailable: " + type(error).__name__, file=sys.stderr)
     if message.get("command") == "nativeReceipt" and label in ctx.receipt_calls:
         ctx.receipt_calls[label].append(result.get("outcome", {}).get("status"))
     return result
