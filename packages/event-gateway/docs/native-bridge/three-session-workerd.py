@@ -2465,9 +2465,10 @@ def cli():
     parser.add_argument("--entry-port", type=int, default=49732)
     parser.add_argument("--loopback-port", type=int, default=49733)
     parser.add_argument("--broker-port", type=int, default=49734)
-    parser.add_argument("--listener-port", type=int, help="Fixed daemon port; required with --outer-contained")
+    parser.add_argument("--listener-port", type=int,
+                        help="Fixed daemon port; supply with --model-ports (required with --outer-contained)")
     parser.add_argument("--model-ports", type=int, nargs=3, metavar=("A", "B", "C"),
-                        help="Fixed model provider ports by session; required with --outer-contained")
+                        help="Fixed model ports; supply with --listener-port (required with --outer-contained)")
     return parser.parse_args()
 
 
