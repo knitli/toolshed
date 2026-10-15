@@ -20,7 +20,7 @@ code runs in disposable workerd.
 | B-only event | B receives one native Start and reaches observed; A remains at one and C at zero. |
 | Submitted A across daemon restart | Stop the daemon after submission, let A finish, then recover its native receipt through daemon reconciliation. |
 | Lost observed ACK reply | Workerd commits A's observed ACK before simulated reply loss; restart the daemon and replay identical ACK body bytes with a fresh node-proof nonce, without another native Start or changes to the compared workerd readback. |
-| Busy C | Hold C's first synthetic model request open; accept a second signed delivery into the local durable queue and observe production dispatch return `client_unavailable_or_busy`. The fixture creates a transport-attempt row before delivery; prove it stays in its original unreserved state, with no native claim or additional native Start. |
+| Busy C | Hold C's first synthetic model request open; accept a second signed delivery into the local durable queue and observe production dispatch return `client_unavailable_or_busy` backed by a fresh, current-binding native challenge with `nativeCoreTurnState: busy`. Unavailability alone cannot satisfy this gate. The fixture creates a transport-attempt row before delivery; prove it stays in its original unreserved state, with no native claim or additional native Start. |
 | Queued C across daemon restart | Stop and restart the daemon while C remains held; confirm C2 stays queued with its original unreserved transport-attempt state and unchanged stored envelope, with no native claim or Start. |
 | Binding change and explicit reattachment | After C1 completes, compare the settled launcher binding with its original attachment. Run the production `attach` CLI against synthetic Workerd using current runtime/attachment generations and a fresh native challenge. Prove C2 becomes locally `stale` with `attachment_detached`, retaining its unchanged envelope and Workerd transport row, with no claim or Start. |
 | Fresh C3 after reattachment | Publish a new synthetic C3 event only after the explicit fixture attach. Require one current-generation Workerd claim, one native Start on C, and observed settlement. Record post-turn binding-field changes. This does not prove automatic draining of C2 or successive unattended events. |
@@ -184,13 +184,49 @@ Use explicitly selected, verified artifacts; the runner installs nothing:
   access; ACLs and privileged access must also preserve exclusive trusted control.
   It does not isolate processes sharing the owner's UID.
 
-The three workerd ports must be distinct and between 1024 and 65535. Defaults
-are entry `49732`, internal loopback `49733`, and broker `49734`. Native model
-providers and the gateway listener use dynamically selected loopback ports;
-there is no `--model-port` option. The older four-fixed-port recovery profile
-cannot be reused unchanged for this procedure. Establish suitable execution
-containment and supervision for these listeners before running; do not supply
-operator credentials or real model configuration.
+The seven loopback ports are Workerd entry `19432`, internal loopback `19433`,
+broker `19434`, gateway listener `19435`, and model providers A/B/C
+`19436`/`19437`/`19438` in the example below. All supplied ports must be distinct
+integers between 1024 and 65535. A complete fixed set must also fall outside the
+host automatic ephemeral ranges (Darwin default and high ranges, or Linux
+`ip_local_port_range`). Preflight reads these settings without a subprocess and
+refuses overlap, unreadable settings, or unsupported hosts before archive creation
+or process startup. The example uses `19432`–`19438`; verify the actual host ranges
+and authorize the same complete set in the audited outer profile and command.
+These example ports do not update any profile or binary pin; audit the matching
+candidate profile and manifest before execution. Use a fresh controlled host and
+keep its ephemeral-range settings unchanged throughout qualification. The range
+check is a point-in-time observation, not protection against later administrator
+changes. `--outer-contained` requires `--listener-port`
+and exactly three `--model-ports`. In either profile, these options must be supplied
+together; the default per-native profile supports omitting both for dynamic ports.
+
+Port shape is validated before artifact inspection or Git subprocesses. After
+artifact and Git validation and the containment checks, every selected port must
+allow a temporary bind before the evidence archive is created or the broker/native
+sessions start, including refusal of bound sockets that are not listening. The
+probe intentionally omits `SO_REUSEADDR` so wildcard-bound sockets also block it,
+even when those sockets enable address reuse. This conservative check can reject
+ports in `TIME_WAIT`: wait and retry, or select a fresh complete port set permitted
+by the audited outer profile. Do not weaken the outer policy or fall back to
+unapproved ports. Git validation therefore still precedes occupancy probes. These
+probes are not reservations: a later bind can fail if another process explicitly
+takes a port. Excluding automatic ephemeral ranges prevents the fixture’s own
+outgoing clients from automatically consuming a selected fixed port.
+Cleanup checks every selected IPv4 loopback port within the existing five-second
+wait after the native providers, daemon, and broker have stopped. On Darwin it
+holds simultaneous `SO_REUSEADDR` probes for `127.0.0.1` and `0.0.0.0`: both must
+bind, allowing completed connections in `TIME_WAIT` while rejecting live loopback
+or wildcard bindings, including non-listening sockets. The probes never enable
+`SO_REUSEPORT`. Other platforms retain the conservative strict-bind check, which
+can refuse `TIME_WAIT`; the Darwin cleanup behavior is not a portable guarantee.
+These checks prove availability only at observation time and do not reserve ports
+or establish absence of sockets on unrelated addresses or families. A late bind
+collision fails the attempt. Cleanup does not fall back to other ports or extend
+the wait indefinitely.
+The old four-port recovery profile cannot be reused unchanged. Audit the outer
+profile for the seven selected ports before execution; do not supply operator
+credentials or real model configuration.
 
 ## Command
 
@@ -209,7 +245,8 @@ package root:
   --cloud-commit "$EVENT_CLOUD_COMMIT" \
   --esbuild "$EVENT_ESBUILD_PACKAGE" \
   --miniflare "$EVENT_MINIFLARE_PACKAGE" \
-  --entry-port 49732 --loopback-port 49733 --broker-port 49734 \
+  --entry-port 19432 --loopback-port 19433 --broker-port 19434 \
+  --listener-port 19435 --model-ports 19436 19437 19438 \
   --output "$EVENT_PROOF_OUTPUT" \
   > "$EVENT_RUN_STDOUT" 2> "$EVENT_RUN_STDERR"
 ```
@@ -233,7 +270,7 @@ The default command retains the mandatory per-native `sandbox-exec` profile,
 which permits each native process's own model port and Unix sockets. An already
 sandboxed supervisor cannot apply another seatbelt profile to its descendants.
 For an independently audited outer profile, add `--outer-contained` to the
-command above. This fixture option changes no production launcher behavior.
+command above, retaining all seven explicit ports. This fixture option changes no production launcher behavior.
 
 Before starting the broker and before each native launch, the option checks the
 kernel sandbox is active, creates an owned scratch-only positive control, and
@@ -247,8 +284,8 @@ roots while denying their contents; missing or inaccessible probe metadata refus
 execution. Root identities are also checked by the independent supervisor preflight.
 
 Only after those checks does it remove the exact `sandbox-exec -f <profile>`
-prefix from the original verified launch argv. The outer profile permits dynamic
-localhost ports for all disposable services and Unix sockets; its audited bytes
+prefix from the original verified launch argv. The outer profile permits the seven selected
+loopback ports for disposable services and the required Unix sockets; its audited bytes
 must deny other network access, protect all owner state, and restrict writes to
 one attempt directory. The kernel's unqualified network query does **not** prove
 all address-specific rules. Retain the exact outer-profile hash and external
@@ -278,7 +315,7 @@ SHA-256 and byte count with the proof before accepting it. A mismatch or any
 untrusted concurrent modification invalidates the attempt; another final check
 cannot provide isolation from a hostile writer.
 
-New runs also retain `<proof-stem>.private-evidence.jsonl`, a mode-0600 raw causal archive containing provider exchanges, native receipts/observations, cloud wire/readbacks, and local database checkpoints before scratch cleanup. Keep it private with the input manifest and logs, including failed-run evidence. Records are capped at 4,100,000 bytes and the archive at 64 MiB; exceeding either bound fails qualification. Appends and hashing use the original file descriptor, with file and parent identity checks. Native executor work drains and provider handlers join before sealing; the archive and its parent directory are flushed before cleanup and final hashing. After resource cleanup finishes, the PASS proof records the final archive SHA-256 and byte count. Verify both against the retained file before accepting the run. This retention does not change the historical runs described above or establish the pending Core-idle busy gate.
+New runs also retain `<proof-stem>.private-evidence.jsonl`, a mode-0600 raw causal archive containing provider exchanges, native receipts/observations, cloud wire/readbacks, and local database checkpoints before scratch cleanup. Keep it private with the input manifest and logs, including failed-run evidence. Records are capped at 4,100,000 bytes and the archive at 64 MiB; exceeding either bound fails qualification. Appends and hashing use the original file descriptor, with file and parent identity checks. Native executor work drains and provider handlers join before sealing; the archive and its parent directory are flushed before cleanup and final hashing. After resource cleanup finishes, the PASS proof records the final archive SHA-256 and byte count. Verify both against the retained file before accepting the run. This retention does not change the historical runs described above. New runs require a fresh matching challenge, an unexpired authoritative Core-busy witness, and a nonce not previously accepted for C2 on each counted busy dispatch, including after daemon restart. A C2 unavailability disposition without this evidence fails the attempt immediately; a later valid response cannot clear that failure. The archive retains these observations as `c2CoreBusy`; the final proof reports their distinct nonce count as `privateEvidence.coreBusyNonces`. C2 must still have zero native claims and zero native Starts while its original transport attempt remains unchanged. The integrated gate has not yet been exercised against real native sessions. The scenario remains bounded to four native Starts and five daemon starts.
 
 This PASS is controlled integration evidence only. Access identity,
 Messaging identity/budget, owner manual publication, queues/metrics, and model

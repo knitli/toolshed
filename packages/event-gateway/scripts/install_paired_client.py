@@ -106,6 +106,7 @@ def wheel_payload(data, expected, project):
     metadata = BytesParser().parsebytes(files[distribution + 'METADATA'])
     require(metadata.get_all('Name') == [project['name']] and metadata.get_all('Version') == [project['version']]
             and metadata.get_all('Requires-Python') == [project['requires-python']], "wheel_metadata_mismatch")
+
     # Hatch canonicalizes specifier order; compare the same comma-separated bounds.
     def requirement(value):
         match = re.fullmatch(r'([A-Za-z0-9_-]+)([<>=!~].*)', value.replace(' ', ''))
