@@ -14,6 +14,7 @@ import http.client
 import importlib.util
 from io import StringIO
 import json
+import math
 import os
 from pathlib import Path
 import select
@@ -66,6 +67,30 @@ def is_exact_int(value):
 def require_fixture_port(port):
     require(is_exact_int(port) and 1024 <= port <= 65535,
             "workerd fixture port outside range")
+
+
+def fixture_ports(parsed):
+    listener_port = getattr(parsed, "listener_port", None)
+    model_ports = getattr(parsed, "model_ports", None)
+    if getattr(parsed, "outer_contained", False):
+        require(listener_port is not None and model_ports is not None,
+                "outer containment requires listener and three model ports")
+    ports = [parsed.entry_port, parsed.loopback_port, parsed.broker_port]
+    if listener_port is not None:
+        ports.append(listener_port)
+    if model_ports is not None:
+        require(isinstance(model_ports, (list, tuple)) and len(model_ports) == 3,
+                "exactly three model ports required")
+        ports.extend(model_ports)
+    for port in ports:
+        require_fixture_port(port)
+    require(len(set(ports)) == len(ports), "fixture ports must be distinct")
+    return ports
+
+
+def preflight_ports(parsed):
+    for port in fixture_ports(parsed):
+        require(port_is_closed(port), "fixture port already listening or unavailable")
 
 
 def load_module(name, path):
@@ -514,6 +539,24 @@ def snapshot_evidence(ctx, stage):
     return missing
 
 
+def core_busy_observation(row, binding, now, seen):
+    request, response = row["request"], row["response"]
+    witness = response.get("witness", {})
+    deadline = response.get("validUntilMonotonic")
+    nonce = witness.get("nonce")
+    return (request.get("command") == "challenge"
+            and response.get("challengeId") == request.get("challengeId")
+            and isinstance(request.get("challengeId"), str) and bool(request["challengeId"])
+            and request.get("expectedBinding") == binding
+            and launcher._valid_native_witness(witness)
+            and all(type(witness.get(key)) is type(value) and witness.get(key) == value
+                    for key, value in binding.items())
+            and witness.get("eligible") is True and witness.get("nativeCoreTurnState") == "busy"
+            and type(nonce) is int and nonce not in seen
+            and type(deadline) in (int, float) and math.isfinite(deadline)
+            and now < deadline <= row["receivedAt"] + min(witness["leaseMs"], 750) / 1000)
+
+
 def post(address, secret, path, body=None, headers=None, *, limit=65_536):
     connection = http.client.HTTPConnection("127.0.0.1", address, timeout=8)
     try:
@@ -749,6 +792,7 @@ def configure(parsed):
     global Store, CloudClient, Credentials, SessionNativeBridge
     global private_key_type, serialization, smoke, host_qualifier, installed_helper, installed_proof
     global identity_fields
+    fixture_ports(parsed)
     args = parsed
     output_path = Path(parsed.output)
     require(output_path.is_absolute() and output_path.name not in ("", ".", ".."),
@@ -798,10 +842,6 @@ def configure(parsed):
     require(git_root == cloud_checkout, "cloud source is not the supplied Git checkout")
     revision = git_lines[1].strip()
     require(revision == parsed.cloud_commit, "cloud source commit differs from proof input")
-    require(len(set((parsed.entry_port, parsed.loopback_port, parsed.broker_port))) == 3,
-            "workerd fixture ports must be distinct")
-    for port in (parsed.entry_port, parsed.loopback_port, parsed.broker_port):
-        require_fixture_port(port)
 
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -827,11 +867,14 @@ def configure(parsed):
     identity_fields = IDENTITY
 
 
-def make_model(stack, hold=False):
+def make_model(stack, hold=False, *, port=0):
     # Each provider owns its verifier globals; C3 cannot change A/B's call identity.
     qualifier = load_module("three_session_model_qualifier", host_qualifier.__file__)
     qualifier.CALL_ID = "three-session-source-read-" + uuid4().hex
-    server = ModelServer(("127.0.0.1", 0), ModelProvider)
+    require(is_exact_int(port), "model port must be an integer")
+    if port != 0:
+        require_fixture_port(port)
+    server = ModelServer(("127.0.0.1", port), ModelProvider)
     # server_close must join handlers before the archive receives its final hash.
     server.daemon_threads = False
     server.qualifier = qualifier
@@ -919,7 +962,9 @@ def native_session(stack, label, ctx, *, hold=False):
     stack.callback(temporary.cleanup)
     # ExitStack joins the provider, persists its last records, then removes native scratch.
     stack.push(partial(persist_evidence, ctx))
-    provider = make_model(stack, hold=hold)
+    model_ports = getattr(args, "model_ports", None)
+    port = model_ports[("A", "B", "C").index(label)] if model_ports is not None else 0
+    provider = make_model(stack, hold=hold, port=port)
     provider.evidence = lambda kind, value: record_evidence(ctx, kind, {"session": label, **value})
     provider.nonce = "three-session-source-" + label.lower() + "-" + uuid4().hex
     provider.source_nonce_sha256 = digest(provider.nonce)
@@ -1341,6 +1386,8 @@ def record_session_request(ctx, state_dir, session_id, message, *, native_reques
     except Exception as error:
         with suppress(OSError, ValueError):
             print("native exchange evidence unavailable: " + type(error).__name__, file=sys.stderr)
+    if message.get("command") == "challenge" and label == "C":
+        ctx.c_challenges.append(row)
     if message.get("command") == "nativeReceipt" and label in ctx.receipt_calls:
         ctx.receipt_calls[label].append(result.get("outcome", {}).get("status"))
     return result
@@ -1361,11 +1408,19 @@ def observe_list_reconcilable(store, ctx):
 async def observe_dispatch(gateway, ctx, delivery_id):
     label = ctx.dispatch_labels.get(delivery_id, "unlabeled")
     ctx.dispatch_calls.append(label)
+    challenge_offset = len(ctx.c_challenges)
     try:
         result = await ctx.original_dispatch(gateway, delivery_id)
     except Exception as error:
         ctx.dispatch_errors.append(type(error).__name__)
         raise
+    if label == "C-busy-second" and result.get("reason") == "client_unavailable_or_busy":
+        observations = [row for row in ctx.c_challenges[challenge_offset:]
+                        if core_busy_observation(row, ctx.sessions["C"]["binding"],
+                                                 time.monotonic(), ctx.c_busy_nonces)]
+        require(bool(observations), "C2 busy disposition lacks fresh authoritative Core-busy evidence")
+        ctx.c_busy_nonces.update(row["response"]["witness"]["nonce"] for row in observations)
+        record_evidence(ctx, "c2CoreBusy", observations)
     ctx.dispatch_results.append({"delivery": label, "status": result.get("status"),
                              "reason": result.get("reason")})
     if label == "A" and result.get("status") == "submitted":
@@ -1511,7 +1566,8 @@ async def initialize_runtime(ctx, resources):
     with Store(ctx.state) as store:
         for label in ("A", "B", "C"):
             store.put_attachment(ctx.deliveries[label]["mapping"])
-    ctx.listen_port = free_port()
+    configured_listener = getattr(args, "listener_port", None)
+    ctx.listen_port = configured_listener if configured_listener is not None else free_port()
     private_json(ctx.state / "dispatch.json", {
         "version": 1, "cloudConfig": "cloud.json", "listenHost": "127.0.0.1",
         "listenPort": ctx.listen_port,
@@ -2284,6 +2340,7 @@ async def run_scenario(directory_fd=None, publication_stack=None):
     temporary_root = private_temp_root()
     containment = (verify_outer_containment(temporary_root) if args.outer_contained
                    else {"mode": "per-native-profile"})
+    preflight_ports(args)
     evidence_path = Path(args.output).with_suffix(".private-evidence.jsonl")
     with ExitStack() as local_stack:
         evidence = (publication_stack if publication_stack is not None else local_stack).enter_context(
@@ -2330,6 +2387,7 @@ async def run_scenario(directory_fd=None, publication_stack=None):
         adapter_checks = []
         bridge_challenge_observations = []
         fixture_secret = address["secret"]
+        c_challenges, c_busy_nonces = [], set()
         ctx = SimpleNamespace(**locals())
         ctx.args = args
         ctx.installed_proof = installed_proof
@@ -2378,6 +2436,7 @@ async def run_scenario(directory_fd=None, publication_stack=None):
                     await finish_stage(ctx, stage, sys.exc_info()[1])
             ctx.proof, ctx.private_nonce_record = build_proof(ctx)
             ctx.proof["privateEvidence"] = seal_evidence(ctx)
+            ctx.proof["privateEvidence"]["coreBusyNonces"] = len(ctx.c_busy_nonces)
             return ctx.proof, evidence
         finally:
             await cleanup_scenario(ctx)
@@ -2394,6 +2453,9 @@ def cli():
     parser.add_argument("--entry-port", type=int, default=49732)
     parser.add_argument("--loopback-port", type=int, default=49733)
     parser.add_argument("--broker-port", type=int, default=49734)
+    parser.add_argument("--listener-port", type=int, help="Fixed daemon port; required with --outer-contained")
+    parser.add_argument("--model-ports", type=int, nargs=3, metavar=("A", "B", "C"),
+                        help="Fixed model provider ports by session; required with --outer-contained")
     return parser.parse_args()
 
 

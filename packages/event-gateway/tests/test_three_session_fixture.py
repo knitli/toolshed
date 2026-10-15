@@ -22,11 +22,117 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
+from event_gateway import launcher
+
 
 SCRIPT = Path(__file__).resolve().parents[1] / "docs/native-bridge/three-session-workerd.py"
 SPEC = importlib.util.spec_from_file_location("three_session_fixture", SCRIPT)
 FIXTURE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(FIXTURE)
+
+
+class ThreeSessionFixedPortTests(unittest.TestCase):
+    def parsed(self, **changes):
+        fields = dict(entry_port=49732, loopback_port=49733, broker_port=49734,
+                      listener_port=49735, model_ports=[49736, 49737, 49738], outer_contained=True)
+        return SimpleNamespace(**(fields | changes))
+
+    def test_cli_preserves_dynamic_defaults_and_accepts_all_fixed_ports(self):
+        base = ["fixture", "--package-source", "/source", "--binary", "/codex", "--binary-sha256", "hash",
+                "--node", "/node", "--cloud-source", "/cloud", "--cloud-commit", "commit",
+                "--esbuild", "/esbuild", "--miniflare", "/miniflare", "--output", "/proof"]
+        with patch.object(FIXTURE.sys, "argv", base):
+            parsed = FIXTURE.cli()
+            self.assertIsNone(parsed.listener_port)
+            self.assertIsNone(parsed.model_ports)
+            self.assertEqual(FIXTURE.fixture_ports(parsed), [49732, 49733, 49734])
+        with patch.object(FIXTURE.sys, "argv", base + ["--outer-contained", "--listener-port", "49735",
+                                                       "--model-ports", "49736", "49737", "49738"]):
+            self.assertEqual(FIXTURE.fixture_ports(FIXTURE.cli()), list(range(49732, 49739)))
+
+    def test_containment_requires_complete_distinct_valid_ports_before_probing(self):
+        faults = [dict(listener_port=None), dict(model_ports=None), dict(model_ports=[49736, 49737]),
+                  dict(listener_port=49732), dict(model_ports=[49736, 49735, 49738]),
+                  dict(model_ports=[49736, 49736, 49738])]
+        for value in (True, False, 0, 1023, 65536, "49735", 49735.0):
+            faults.extend([dict(listener_port=value), dict(model_ports=[49736, value, 49738])])
+        for fault in faults:
+            with self.subTest(fault=fault), patch.object(FIXTURE, "port_is_closed") as probe:
+                with self.assertRaises(AssertionError):
+                    FIXTURE.preflight_ports(self.parsed(**fault))
+                probe.assert_not_called()
+        with patch.object(FIXTURE, "port_is_closed", return_value=True) as probe:
+            FIXTURE.preflight_ports(self.parsed())
+            self.assertEqual([call.args[0] for call in probe.call_args_list], list(range(49732, 49739)))
+
+    def test_occupied_port_blocks_scenario_before_any_process_or_archive(self):
+        for occupied in range(49732, 49739):
+            with self.subTest(occupied=occupied), patch.object(FIXTURE, "args", self.parsed(), create=True), \
+                    patch.object(FIXTURE, "private_temp_root", return_value=Path('/fixture')), \
+                    patch.object(FIXTURE, "verify_outer_containment"), \
+                    patch.object(FIXTURE, "port_is_closed", side_effect=lambda port: port != occupied), \
+                    patch.object(FIXTURE, "start_broker") as broker, \
+                    patch.object(FIXTURE, "evidence_archive") as archive:
+                with self.assertRaisesRegex(AssertionError, "already listening"):
+                    asyncio.run(FIXTURE.run_scenario())
+                broker.assert_not_called()
+                archive.assert_not_called()
+
+    def test_model_bind_uses_explicit_port_or_uncontained_ephemeral_default(self):
+        host = SimpleNamespace(__file__=str(SCRIPT.with_name('native-host-launcher-qualification.py')))
+        with patch.object(FIXTURE, 'host_qualifier', host, create=True), \
+                patch.object(FIXTURE, 'ThreadingHTTPServer', side_effect=lambda *_: SimpleNamespace(serve_forever=Mock())) as server, \
+                patch.object(FIXTURE.threading, 'Thread'):
+            FIXTURE.make_model(Mock())
+            self.assertEqual(server.call_args.args[0], ('127.0.0.1', 0))
+            FIXTURE.make_model(Mock(), port=49736)
+            self.assertEqual(server.call_args.args[0], ('127.0.0.1', 49736))
+
+    def test_dispatch_config_uses_fixed_listener_or_legacy_dynamic_selection(self):
+        for configured in (49735, None):
+            with self.subTest(configured=configured), tempfile.TemporaryDirectory() as directory:
+                key = Mock()
+                key.private_bytes.return_value = b'fixture-key'
+                key.public_key.return_value.public_bytes_raw.return_value = b'fixture-public-key'
+                ctx = SimpleNamespace(state=Path(directory), sessions={}, session_labels={}, dispatch_labels={},
+                                      admission_cloud=Mock(), node_id=str(uuid4()), node_key=key, transport_key=key)
+                ctx.fixture = lambda path, *_: ({'runtimes': [1, 2, 3], 'native_runtime_bindings': [1, 2, 3]}
+                                                if path == '/fixture/admission' else
+                                                {'envelope': {'deliveryId': str(uuid4())}, 'signedDelivery': {}})
+                sessions = [{'sessionId': str(uuid4()), 'initiallySelectedIdle': True,
+                             'binding': {'clientId': str(uuid4()), 'threadId': str(uuid4())}} for _ in range(3)]
+                attached = {'attached': {'nativeBinding': {'threadId': str(uuid4())},
+                                         'leaseUntil': '2099-01-01T00:00:00.000Z'}}
+
+                @contextmanager
+                def store(_state):
+                    yield Mock()
+
+                with patch.object(FIXTURE, 'args', self.parsed(listener_port=configured)), \
+                        patch.object(FIXTURE, 'native_session', side_effect=sessions), \
+                        patch.object(FIXTURE, 'admit_runtime', AsyncMock(return_value=attached)), \
+                        patch.object(FIXTURE, 'serialization', Mock()), \
+                        patch.object(FIXTURE, 'identity_fields', ()), \
+                        patch.object(FIXTURE, 'Store', store), \
+                        patch.object(FIXTURE, 'private_json') as write, \
+                        patch.object(FIXTURE, 'free_port', return_value=49999) as dynamic, ExitStack() as resources:
+                    asyncio.run(FIXTURE.initialize_runtime(ctx, resources))
+                    expected = configured if configured is not None else 49999
+                    self.assertEqual(ctx.listen_port, expected)
+                    self.assertEqual(write.call_args.args[1]['listenPort'], expected)
+                    self.assertEqual(dynamic.call_count, 0 if configured is not None else 1)
+
+    def test_native_labels_select_the_fixed_model_triple_or_dynamic_default(self):
+        for ports in ([49736, 49737, 49738], None):
+            for index, label in enumerate(('A', 'B', 'C')):
+                with self.subTest(ports=ports, label=label), tempfile.TemporaryDirectory() as directory, \
+                        patch.object(FIXTURE, 'args', self.parsed(model_ports=ports), create=True), \
+                        patch.object(FIXTURE, 'private_temp_root', return_value=Path(directory)), \
+                        patch.object(FIXTURE, 'sync_evidence'), \
+                        patch.object(FIXTURE, 'make_model', side_effect=RuntimeError('stop before native launch')) as model:
+                    with self.assertRaisesRegex(RuntimeError, 'stop before native launch'), ExitStack() as resources:
+                        FIXTURE.native_session(resources, label, SimpleNamespace())
+                    self.assertEqual(model.call_args.kwargs['port'], ports[index] if ports else 0)
 
 
 class ThreeSessionContainmentTests(unittest.TestCase):
@@ -787,8 +893,9 @@ class ThreeSessionSourceTests(unittest.TestCase):
         cloud.mkdir(parents=True)
         parsed = SimpleNamespace(package_source=str(package), binary=str(binary), node=str(node),
                                  cloud_source=str(cloud), cloud_commit="a" * 40,
-                                 output=str(root / "proof.json"), entry_port=True,
-                                 loopback_port=49733, broker_port=49734)
+                                 output=str(root / "proof.json"), entry_port=49732,
+                                 loopback_port=49733, broker_port=49734,
+                                 binary_sha256="not-a-qualified-binary-pin")
         helper = Mock()
         helper.verified_executable.return_value = str(node)
         return parsed, helper, cloud
@@ -809,6 +916,23 @@ class ThreeSessionSourceTests(unittest.TestCase):
                     load.assert_not_called()
                     run.assert_not_called()
                     popen.assert_not_called()
+
+    def test_configure_requires_fixed_outer_ports_before_native_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            parsed, helper, cloud = self.inputs(root)
+            parsed.entry_port = 49732
+            parsed.outer_contained = True
+            checkout = cloud.parents[4]
+            (checkout / '.git').write_text('gitdir: unused mocked path')
+            with patch.object(FIXTURE, 'load_module', return_value=helper) as module, \
+                    patch.object(FIXTURE.subprocess, 'run') as readback, \
+                    patch.object(FIXTURE.subprocess, 'Popen') as process:
+                with self.assertRaisesRegex(AssertionError, 'outer containment requires'):
+                    FIXTURE.configure(parsed)
+                module.assert_not_called()
+                readback.assert_not_called()
+                process.assert_not_called()
 
     def test_evidence_suffix_output_has_distinct_archive_checked_before_subprocess(self):
         for name in ("proof.private-evidence.jsonl", ".private-evidence.jsonl"):
@@ -887,9 +1011,8 @@ class ThreeSessionSourceTests(unittest.TestCase):
             hostile = {"GIT_DIR": str(other / ".git"), "GIT_WORK_TREE": str(other)}
             with patch.object(FIXTURE, "load_module", return_value=helper), \
                     patch.dict(FIXTURE.os.environ, hostile):
-                # Reaching the later invalid-port gate proves the actual Git
-                # subprocess checked the selected checkout and its own HEAD.
-                with self.assertRaisesRegex(AssertionError, "port outside range"):
+                # Reaching native pin validation proves Git checked this checkout and HEAD.
+                with self.assertRaisesRegex(AssertionError, "installed launcher pin differs"):
                     FIXTURE.configure(parsed)
 
     def test_cloud_path_must_be_directory_in_exact_checkout_layout_before_git(self):
@@ -922,7 +1045,7 @@ class ThreeSessionSourceTests(unittest.TestCase):
             outputs = [(str(root) + "\n" + parsed.cloud_commit + "\n", "supplied Git checkout"),
                        (str(checkout) + "\n" + "b" * 40 + "\n", "commit differs"),
                        (str(checkout) + "\n", "readback was malformed"),
-                       (str(checkout) + "\n" + parsed.cloud_commit + "\n", "port outside range")]
+                       (str(checkout) + "\n" + parsed.cloud_commit + "\n", "installed launcher pin differs")]
             for stdout, message in outputs:
                 with self.subTest(message=message), patch.object(FIXTURE, "load_module", return_value=helper), \
                         patch.object(FIXTURE.subprocess, "run", return_value=SimpleNamespace(stdout=stdout)) as run:
@@ -1705,6 +1828,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             for name, value in globals_.items():
                 patches.enter_context(patch.object(FIXTURE, name, value))
             patches.enter_context(patch.object(FIXTURE, "private_temp_root", return_value=root))
+            patches.enter_context(patch.object(FIXTURE, "preflight_ports"))
             patches.enter_context(patch.object(FIXTURE, "start_broker", return_value=(None, None, {"secret": uuid4().hex, "port": 12345})))
             stop = patches.enter_context(patch.object(FIXTURE, "stop_broker", return_value={}))
             patches.enter_context(patch.object(FIXTURE, "post", return_value=(200, {}, b'{"challengeId":"id","signingPayload":"payload"}')))
@@ -1905,6 +2029,85 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     FIXTURE.record_evidence(ctx, "new", {})
                 self.assertEqual(path.read_bytes(), original)
 
+    def test_busy_requires_current_bound_core_witness_not_unavailability(self):
+        binding = {"clientId": str(uuid4()), "backendPid": 42, "connectionId": str(uuid4()),
+                   "threadId": str(uuid4()), "serverInstanceId": str(uuid4()), "serverGeneration": 2,
+                   "generation": 3}
+        row = {"request": {"command": "challenge", "challengeId": "fresh", "expectedBinding": binding},
+               "receivedAt": 10.0, "response": {"challengeId": "fresh", "validUntilMonotonic": 10.5,
+               "witness": {**binding, "version": 2, "nonce": 1, "sequence": 1, "cause": "heartbeat",
+                           "leaseMs": 750, "eligible": True, "nativeCoreTurnState": "busy"}}}
+        with patch.object(FIXTURE, "launcher", launcher):
+            self.assertTrue(launcher._valid_native_witness(row["response"]["witness"]))
+            self.assertTrue(FIXTURE.core_busy_observation(row, binding, 10.1, set()))
+            for changed in ("unknown", "idle", None):
+                bad = copy.deepcopy(row)
+                bad["response"]["witness"]["nativeCoreTurnState"] = changed
+                self.assertFalse(FIXTURE.core_busy_observation(bad, binding, 10.1, set()))
+            self.assertFalse(FIXTURE.core_busy_observation(row, binding, 10.5, set()))
+            self.assertFalse(FIXTURE.core_busy_observation(row, binding, 10.1, {1}))
+            for field, value in (("generation", 4), ("eligible", False), ("nonce", True),
+                                 ("nonce", -1), ("nonce", 2**53), ("nonce", "1")):
+                bad = copy.deepcopy(row)
+                bad["response"]["witness"][field] = value
+                self.assertFalse(FIXTURE.core_busy_observation(bad, binding, 10.1, set()))
+            for field in ("nativeCoreTurnState", "nonce", "version", "sequence", "cause"):
+                bad = copy.deepcopy(row)
+                del bad["response"]["witness"][field]
+                self.assertFalse(FIXTURE.core_busy_observation(bad, binding, 10.1, set()))
+            bad = copy.deepcopy(row)
+            bad["response"]["challengeId"] = "replayed"
+            self.assertFalse(FIXTURE.core_busy_observation(bad, binding, 10.1, set()))
+            bad["response"]["challengeId"] = "fresh"
+            bad["response"]["validUntilMonotonic"] = float("nan")
+            self.assertFalse(FIXTURE.core_busy_observation(bad, binding, 10.1, set()))
+
+
+    def test_busy_dispatch_requires_a_new_challenge_and_archives_accepted_witness(self):
+        binding = {"clientId": str(uuid4()), "backendPid": 42, "connectionId": str(uuid4()),
+                   "threadId": str(uuid4()), "serverInstanceId": str(uuid4()), "serverGeneration": 2,
+                   "generation": 3}
+        row = {"request": {"command": "challenge", "challengeId": "fresh", "expectedBinding": binding},
+               "receivedAt": 10.0, "response": {"challengeId": "fresh", "validUntilMonotonic": 10.5,
+               "witness": {**binding, "version": 2, "nonce": 1, "sequence": 1, "cause": "heartbeat",
+                           "leaseMs": 750, "eligible": True, "nativeCoreTurnState": "busy"}}}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence"
+            with FIXTURE.evidence_archive(path) as evidence:
+                ctx = SimpleNamespace(evidence=evidence, dispatch_labels={"delivery": "C-busy-second"},
+                                      dispatch_calls=[], dispatch_results=[], dispatch_errors=[],
+                                      c_challenges=[], c_busy_nonces=set(), sessions={"C": {"binding": binding}})
+
+                async def dispatch(*args):
+                    ctx.c_challenges.append(copy.deepcopy(row))
+                    return {"status": "deferred", "reason": "client_unavailable_or_busy"}
+
+                ctx.original_dispatch = dispatch
+                with patch.object(FIXTURE, "launcher", launcher), patch.object(FIXTURE.time, "monotonic", return_value=10.1):
+                    asyncio.run(FIXTURE.observe_dispatch(None, ctx, "delivery"))
+                    self.assertEqual(ctx.c_busy_nonces, {1})
+                    self.assertEqual(len(ctx.dispatch_results), 1)
+                    with self.assertRaisesRegex(AssertionError, "authoritative Core-busy"):
+                        asyncio.run(FIXTURE.observe_dispatch(None, ctx, "delivery"))
+                    ctx.original_dispatch = AsyncMock(return_value={
+                        "status": "deferred", "reason": "client_unavailable_or_busy"})
+                    ctx.c_busy_nonces.clear()
+                    with self.assertRaisesRegex(AssertionError, "authoritative Core-busy"):
+                        asyncio.run(FIXTURE.observe_dispatch(None, ctx, "delivery"))
+                records = [json.loads(line) for line in path.read_text().splitlines()]
+                self.assertEqual(records[-1], {"kind": "c2CoreBusy", "value": [row]})
+                self.assertEqual(len(ctx.dispatch_results), 1)
+
+    def test_unavailable_dispatch_cannot_count_without_core_busy_evidence(self):
+        async def unavailable(gateway, delivery):
+            return {"status": "deferred", "reason": "client_unavailable_or_busy"}
+        ctx = SimpleNamespace(dispatch_labels={"delivery": "C-busy-second"}, dispatch_calls=[],
+                              dispatch_results=[], dispatch_errors=[], c_challenges=[], c_busy_nonces=set(),
+                              sessions={"C": {"binding": {}}}, original_dispatch=unavailable)
+        with self.assertRaisesRegex(AssertionError, "authoritative Core-busy"):
+            asyncio.run(FIXTURE.observe_dispatch(None, ctx, "delivery"))
+        self.assertEqual(ctx.dispatch_results, [])
+
     def test_fifth_start_refuses_before_forwarding_to_native(self):
         forward = Mock()
         ctx = SimpleNamespace(session_labels={"session": "C"}, start_calls={"A": [{}], "B": [{}], "C": [{}, {}]},
@@ -1918,7 +2121,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
     def observer_context(self, evidence, forward):
         return SimpleNamespace(evidence=evidence, original_session_request=forward,
                                session_labels={"session": "C"}, start_calls={"A": [], "B": [], "C": []},
-                               challenge_calls={"C": 0}, receipt_errors={"C": []}, receipt_calls={"C": []})
+                               c_challenges=[], c_busy_nonces=set(), challenge_calls={"C": 0}, receipt_errors={"C": []}, receipt_calls={"C": []})
 
     def test_same_size_replacement_and_hardlink_never_receive_records_or_seal(self):
         for replacement in ("same-size", "hardlink", "mode"):
@@ -2112,6 +2315,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
 
             with patch.object(FIXTURE, "args", SimpleNamespace(output=str(root / "proof.json"), outer_contained=False)), \
                     patch.object(FIXTURE, "private_temp_root", return_value=root), \
+                    patch.object(FIXTURE, "preflight_ports"), \
                     patch.object(FIXTURE, "start_broker", side_effect=RuntimeError("broker failed")), \
                     patch.object(FIXTURE, "evidence_archive", side_effect=archive), \
                     patch.object(FIXTURE.os, "close", side_effect=close), \
@@ -2258,6 +2462,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     order.append("durable")
 
                 with patch.object(FIXTURE, "private_temp_root", return_value=root), \
+                        patch.object(FIXTURE, "args", SimpleNamespace(model_ports=None), create=True), \
                         patch.object(FIXTURE, "make_model", side_effect=model), \
                         patch.object(FIXTURE, "host_qualifier", SimpleNamespace(
                             source_program=Mock(side_effect=RuntimeError("setup failure")))), \
