@@ -972,38 +972,9 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 self.assertFalse(state.exists())
                 self.assertEqual(list(parent.iterdir()), [])
 
-    def test_failed_executor_shutdown_is_not_retried_during_cleanup(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            state = root / "state"
-            state.mkdir()
-            with FIXTURE.evidence_archive(root / "evidence") as evidence:
-                ctx = SimpleNamespace(evidence=evidence, daemon_task=None, sessions={},
-                                      broker=None, broker_log=None, proof=None,
-                                      private_nonce_record=None, state_root=state)
-                first, second = TimeoutError("first shutdown"), RuntimeError("second shutdown")
-                shutdown = AsyncMock(side_effect=[first, second])
+    def test_executor_deadline_retains_all_resources_until_real_worker_joins(self):
+        self.run_retention_scenario("drain-timeout")
 
-                async def scenario():
-                    loop = asyncio.get_running_loop()
-                    with patch.object(loop, "shutdown_default_executor", shutdown):
-                        try:
-                            await FIXTURE.drain_native_observers(ctx)
-                        finally:
-                            await FIXTURE.cleanup_scenario(ctx)
-
-                with patch.object(FIXTURE, "restore_observers") as restore, \
-                        patch.object(FIXTURE, "stop_broker", return_value={}):
-                    with self.assertRaises(TimeoutError) as raised:
-                        asyncio.run(scenario())
-                self.assertIs(raised.exception, first)
-                shutdown.assert_awaited_once_with(timeout=30)
-                restore.assert_called_once_with(ctx)
-                self.assertFalse(state.exists())
-                self.assertFalse(evidence.drained)
-                self.assertFalse(evidence.sealed)
-                with self.assertRaisesRegex(AssertionError, "observers are not settled"):
-                    FIXTURE.seal_evidence(ctx)
 
     def test_cleanup_sync_failure_preserves_original_error_and_removes_state(self):
         for failure_at in ("fixture", "drain", "none"):
@@ -1514,6 +1485,14 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             state_roots = []
             descriptors = []
             resource_closed = []
+            inspections = []
+            if outcome == "drain-timeout":
+                real_wait = asyncio.wait
+
+                async def short_wait(tasks, **kwargs):
+                    return await real_wait(tasks, timeout=0.01)
+
+                patches.enter_context(patch.object(FIXTURE.asyncio, "wait", side_effect=short_wait))
             if outcome == "fsync-failure":
                 patches.enter_context(patch.object(FIXTURE.os, "fsync", side_effect=OSError("fsync failed")))
             for name in ("run_ab_routes", "run_busy_stage", "run_fixture_attach", "run_post_attach_c3"):
@@ -1522,6 +1501,8 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
 
             async def fail(ctx, resources):
                 self.prepare_retention_stage(ctx, resources, outcome, state_roots, descriptors, resource_closed)
+                if outcome == "drain-timeout":
+                    await self.hold_worker_through_drain_deadline(ctx, resource_closed, inspections)
 
             patches.enter_context(patch.object(FIXTURE, "initialize_runtime", side_effect=fail))
             proof = None
@@ -1534,10 +1515,13 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     "partial-success": (AssertionError, "checkpoint ledger is incomplete"),
                     "write-failure": (AssertionError, "bounded archive"),
                     "fsync-failure": (OSError, "fsync failed"),
+                    "drain-timeout": (TimeoutError, "drain exceeded 30 seconds"),
                 }[outcome]
                 with self.assertRaisesRegex(error, message):
                     asyncio.run(FIXTURE.run_scenario())
             self.assert_retention_archive(outcome, output, proof)
+            if outcome == "drain-timeout":
+                self.assertEqual(inspections, ["retained", "joined"])
             self.assertEqual(resource_closed, [True])
             self.assertFalse(output.exists(), "failed stages must not produce PASS proof")
             self.assertTrue(all(not path.exists() for path in state_roots))
@@ -1545,6 +1529,44 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             for descriptor in descriptors:
                 with self.assertRaises(OSError):
                     os.fstat(descriptor)
+
+    async def hold_worker_through_drain_deadline(self, ctx, resource_closed, inspections):
+        entered, release = threading.Event(), threading.Event()
+        scenario_task = asyncio.current_task()
+
+        def worker():
+            entered.set()
+            self.assertTrue(release.wait(5))
+            self.assertTrue(ctx.state.is_dir())
+            FIXTURE.record_evidence(ctx, "lateExecutorRecord", {})
+            inspections.append("joined")
+
+        task = asyncio.create_task(asyncio.to_thread(worker))
+        while not entered.is_set():
+            await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+        async def inspect_before_release():
+            try:
+                while ctx.evidence.drain_error is None:
+                    await asyncio.sleep(0)
+                scenario_task.cancel()
+                await asyncio.sleep(0)
+                self.assertTrue(ctx.state.is_dir())
+                self.assertEqual(resource_closed, [])
+                self.assertFalse(ctx.evidence.drained)
+                self.assertFalse(ctx.evidence.sealed)
+                self.assertEqual(ctx.evidence.active, 0)
+                os.fstat(ctx.evidence.fd)
+                os.fstat(ctx.evidence.directory_fd)
+                with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                    FIXTURE.seal_evidence(ctx)
+                inspections.append("retained")
+            finally:
+                release.set()
+
+        asyncio.create_task(inspect_before_release())
 
     def prepare_retention_stage(self, ctx, resources, outcome, state_roots, descriptors, resource_closed):
         state_roots.append(ctx.state_root)

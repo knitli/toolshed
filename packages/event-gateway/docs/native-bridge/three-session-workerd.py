@@ -26,7 +26,6 @@ import sys
 import tempfile
 import threading
 import time
-import warnings
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -391,7 +390,7 @@ def sync_evidence(ctx):
 def seal_evidence(ctx):
     evidence = ctx.evidence
     with evidence.lock:
-        require(evidence.drained and evidence.active == 0 and not evidence.failed,
+        require(evidence.drained and evidence.active == 0 and not evidence.failed and evidence.drain_error is None,
                 "private evidence observers are not settled")
         evidence.sealed = True  # Close writes even if durability or hashing fails.
         try:
@@ -412,20 +411,39 @@ async def drain_native_observers(ctx):
         ctx.evidence.closing = True
         if ctx.evidence.drained:
             return
+
+    def refuse(error):
+        with ctx.evidence.lock:
+            if ctx.evidence.drain_error is None:
+                ctx.evidence.drain_error = error
+                print("native observer drain refused; retaining resources until join or supervisor termination: "
+                      + type(error).__name__, file=sys.stderr)
+
+    loop = asyncio.get_running_loop()
+    shutdown = asyncio.create_task(loop.shutdown_default_executor())
+    try:
+        done, _ = await asyncio.wait({shutdown}, timeout=30)
+        if not done:
+            refuse(TimeoutError("native observer drain exceeded 30 seconds"))
+    except (Exception, asyncio.CancelledError) as error:
+        refuse(error)
+    while True:
+        try:
+            await asyncio.shield(shutdown)
+            require(ctx.evidence.active == 0, "native observers did not drain")
+            break
+        except asyncio.CancelledError as error:
+            refuse(error)
+            if shutdown.cancelled():
+                shutdown = loop.create_future()
+        except Exception as error:
+            refuse(error)
+            # A failed join cannot prove termination; only the qualified supervisor can end this run.
+            shutdown = loop.create_future()
+    with ctx.evidence.lock:
+        ctx.evidence.drained = True
         if ctx.evidence.drain_error is not None:
             raise ctx.evidence.drain_error
-    # Cancellation does not stop to_thread work, including callers outside the inner observer.
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", RuntimeWarning)
-            await asyncio.get_running_loop().shutdown_default_executor(timeout=30)
-        with ctx.evidence.lock:
-            require(ctx.evidence.active == 0, "native observers did not drain")
-            ctx.evidence.drained = True
-    except BaseException as error:
-        with ctx.evidence.lock:
-            ctx.evidence.drain_error = error
-        raise
 
 
 def snapshot_evidence(ctx, stage):

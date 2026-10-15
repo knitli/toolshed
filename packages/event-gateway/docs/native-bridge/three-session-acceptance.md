@@ -205,8 +205,15 @@ package root:
   > "$EVENT_RUN_STDOUT" 2> "$EVENT_RUN_STDERR"
 ```
 
-Use an external bounded supervisor that tracks and cleans up owned descendants;
-individual harness timeouts do not provide a global execution deadline. Retain
+An independently qualified external supervisor must enforce a hard deadline and
+terminate the whole owned process tree; this fixture has no standalone hard bound.
+The 30-second observer-drain deadline refuses qualification without cancelling the
+actual executor join. State, native scratch, and archive descriptors remain live
+until that join completes. A timed-out run still fails after workers finish; only
+then may cleanup remove scratch. If the join itself fails or workers never finish,
+the runner retains these resources for supervisor termination instead of unwinding
+cleanup or publishing PASS. Cancelling the waiter cannot authorize cleanup.
+Retain
 source/artifact hashes before and after execution. See the
 [coupled recovery preflight](coupled-workerd-recovery-preflight.md) for staging
 and supervision principles, not a directly interchangeable command/profile.
