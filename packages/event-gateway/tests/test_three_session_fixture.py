@@ -31,6 +31,31 @@ FIXTURE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(FIXTURE)
 
 
+class ThreeSessionDaemonBudgetTests(unittest.TestCase):
+    def test_sixth_daemon_start_refuses_before_serve_or_task_creation(self):
+        ctx = SimpleNamespace(state=Path("/fixture"), daemon_start_attempts=0)
+        failure = RuntimeError("task creation failed")
+        daemon = SimpleNamespace(serve=Mock(return_value=object()))
+
+        async def scenario():
+            with patch.object(FIXTURE, "daemon", daemon, create=True), \
+                    patch.object(FIXTURE.asyncio, "create_task", side_effect=failure) as create:
+                for _ in range(5):
+                    with self.assertRaises(RuntimeError) as caught:
+                        await FIXTURE.start_daemon(ctx)
+                    self.assertIs(caught.exception, failure)
+                self.assertEqual(ctx.daemon_start_attempts, 5)
+                daemon.serve.reset_mock()
+                create.reset_mock()
+                with self.assertRaisesRegex(AssertionError, "five daemon start attempt cap"):
+                    await FIXTURE.start_daemon(ctx)
+                daemon.serve.assert_not_called()
+                create.assert_not_called()
+                self.assertEqual(ctx.daemon_start_attempts, 5)
+
+        asyncio.run(scenario())
+
+
 class ThreeSessionFixedPortTests(unittest.TestCase):
     def parsed(self, **changes):
         fields = dict(entry_port=49732, loopback_port=49733, broker_port=49734,

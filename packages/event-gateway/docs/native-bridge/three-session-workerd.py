@@ -1576,6 +1576,8 @@ async def initialize_runtime(ctx, resources):
 
 
 async def start_daemon(ctx):
+    require(ctx.daemon_start_attempts < 5, "five daemon start attempt cap exhausted")
+    ctx.daemon_start_attempts += 1
     task = asyncio.create_task(daemon.serve(ctx.state, dispatch_config=ctx.state / "dispatch.json"))
     await wait_until(lambda: (ctx.state / "control.sock").exists() or task.done(),
                      "production daemon startup timed out")
@@ -2361,6 +2363,7 @@ async def run_scenario(directory_fd=None, publication_stack=None):
         wire_evidence = []
         sessions = {}
         daemon_task = None
+        daemon_start_attempts = 0
         start_calls = {label: [] for label in ("A", "B", "C")}
         challenge_calls = {label: 0 for label in ("A", "B", "C")}
         session_labels = {}
