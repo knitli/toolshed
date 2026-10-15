@@ -85,8 +85,40 @@ def b64(value):
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
 
 
+class ModelServer(ThreadingHTTPServer):
+    def __init__(self, *args, **kwargs):
+        self.connections = set()
+        self.connections_lock = threading.Lock()
+        super().__init__(*args, **kwargs)
+
+    def get_request(self):
+        connection, address = super().get_request()
+        with self.connections_lock:
+            self.connections.add(connection)
+        return connection, address
+
+    def shutdown_request(self, request):
+        try:
+            super().shutdown_request(request)
+        finally:
+            with self.connections_lock:
+                self.connections.discard(request)
+
+    def server_close(self):
+        # stop_model stops acceptance first, so this also covers handlers not yet scheduled.
+        with self.connections_lock:
+            for connection in self.connections:
+                try:
+                    connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+        super().server_close()
+
+
 class ModelProvider(BaseHTTPRequestHandler):
     """Local deterministic provider; it never forwards a request off this host."""
+
+    timeout = 5  # Bound socket reads/writes without shortening the intentional busy hold.
 
     def log_message(self, *_):
         pass
@@ -742,7 +774,7 @@ def make_model(stack, hold=False):
     # Each provider owns its verifier globals; C3 cannot change A/B's call identity.
     qualifier = load_module("three_session_model_qualifier", host_qualifier.__file__)
     qualifier.CALL_ID = "three-session-source-read-" + uuid4().hex
-    server = ThreadingHTTPServer(("127.0.0.1", 0), ModelProvider)
+    server = ModelServer(("127.0.0.1", 0), ModelProvider)
     # server_close must join handlers before the archive receives its final hash.
     server.daemon_threads = False
     server.qualifier = qualifier
@@ -1129,7 +1161,17 @@ async def wait_stable_session_binding(session, provider, *, minimum_turn_main_re
 
 
 def fixture(ctx, path, body=None):
-    status, _, raw = post(ctx.address["port"], ctx.fixture_secret, path, body)
+    record_evidence(ctx, "cloudFixtureAttempt", {"path": path})
+    try:
+        status, _, raw = post(ctx.address["port"], ctx.fixture_secret, path, body)
+    except Exception as error:
+        try:
+            record_evidence(ctx, "cloudFixtureError", {"path": path, "error": type(error).__name__})
+        except Exception:
+            with ctx.evidence.lock:
+                ctx.evidence.failed = True
+            raise error
+        raise
     record_evidence(ctx, "cloudFixture", {"path": path, "status": status,
                                           "response": raw.decode("utf-8", errors="replace")})
     require(status == 200, "workerd fixture rejected " + path)

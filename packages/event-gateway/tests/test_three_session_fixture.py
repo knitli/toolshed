@@ -11,6 +11,7 @@ from itertools import product
 import os
 from pathlib import Path
 import signal
+import socket
 import sqlite3
 import subprocess  # nosec B404 - Fixed Git executable and disposable test-owned repositories, no shell.
 import tempfile
@@ -154,6 +155,153 @@ class ThreeSessionModelTests(unittest.TestCase):
                 self.assertEqual(records[-1]["value"]["type"], "ValueError")
                 self.assertEqual(records[-1]["value"]["phase"], "initial")
 
+    def test_stalled_model_socket_io_times_out_and_joins_before_sealing(self):
+        for stall in ("upload", "download"):
+            with self.subTest(stall=stall), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "evidence"
+                with FIXTURE.evidence_archive(path) as evidence, ExitStack() as resources:
+                    ctx = SimpleNamespace(evidence=evidence)
+                    with patch.object(FIXTURE, "host_qualifier", self.provider().qualifier), \
+                            patch.object(FIXTURE.ModelProvider, "timeout", 0.15):
+                        server = FIXTURE.make_model(resources)
+                        server.handle_error = Mock()
+                        server.evidence = lambda kind, value: FIXTURE.record_evidence(ctx, kind, value)
+                        server.program = "x" * 3_000_000
+                        client = socket.socket()
+                        client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+                        client.settimeout(2)
+                        client.connect(("127.0.0.1", server.server_port))
+                        raw = json.dumps({"tools": [{"name": "exec"}]}).encode()
+                        size = len(raw) + 1 if stall == "upload" else len(raw)
+                        client.sendall(b"POST /v1/responses HTTP/1.0\r\nContent-Length: "
+                                       + str(size).encode() + b"\r\n\r\n" + raw)
+                        deadline = time.monotonic() + 2
+                        while not server.active_requests and time.monotonic() < deadline:
+                            time.sleep(0.01)
+                        while not server.errors and time.monotonic() < deadline:
+                            time.sleep(0.01)
+                        errors = []
+
+                        def close():
+                            try:
+                                resources.close()
+                            except Exception as error:
+                                errors.append(error)
+
+                        cleanup = threading.Thread(target=close, daemon=True)
+                        cleanup.start()
+                        cleanup.join(3)
+                        bounded = not cleanup.is_alive()
+                        client.close()
+                        cleanup.join(3)
+                        self.assertTrue(bounded, "provider shutdown waited for the stalled client")
+                        self.assertFalse(cleanup.is_alive())
+                        self.assertEqual(errors, [])
+                        self.assertEqual(server.active_requests, 0)
+                    records = [json.loads(line) for line in path.read_text().splitlines()]
+                    self.assertTrue(any(row["kind"] == "providerError" and row["value"]["type"] == "TimeoutError"
+                                        for row in records))
+                    evidence.drained = True
+                    sealed = FIXTURE.seal_evidence(ctx)
+                    self.assertEqual(sealed["sha256"], FIXTURE.digest(path.read_bytes()))
+
+    def test_model_shutdown_closes_header_body_and_response_stalls_before_join(self):
+        for stall in ("header", "body", "response", "busy-hold"):
+            with self.subTest(stall=stall), tempfile.TemporaryDirectory() as directory:
+                with FIXTURE.evidence_archive(Path(directory) / "evidence") as evidence, ExitStack() as resources:
+                    ctx = SimpleNamespace(evidence=evidence)
+                    with patch.object(FIXTURE, "host_qualifier", self.provider().qualifier), \
+                            patch.object(FIXTURE.ModelProvider, "timeout", 30):
+                        server = FIXTURE.make_model(resources, hold=stall == "busy-hold")
+                        server.handle_error = Mock()
+                        server.evidence = lambda kind, value: FIXTURE.record_evidence(ctx, kind, value)
+                        server.program = "x" * 3_000_000
+                        client = socket.socket()
+                        client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+                        client.settimeout(2)
+                        client.connect(("127.0.0.1", server.server_port))
+                        raw = json.dumps({"tools": [{"name": "exec"}]}).encode()
+                        request = (b"POST /v1/responses HTTP/1.0\r\nContent-Length: "
+                                   + str(3_999_999 if stall == "body" else len(raw)).encode() + b"\r\n\r\n" + raw)
+                        client.sendall(b"POST /v1/responses HTTP/1.0\r\nX-Stall: " if stall == "header" else request)
+                        deadline = time.monotonic() + 2
+                        while not server.connections and time.monotonic() < deadline:
+                            time.sleep(0.01)
+                        self.assertTrue(server.connections)
+                        if stall == "busy-hold":
+                            self.assertTrue(server.hold_started.wait(2))
+                            self.assertFalse(server.release_hold.is_set())
+                        trickle_stop = threading.Event()
+                        trickle = threading.Thread(target=self.trickle_model_request,
+                                                   args=(client, trickle_stop), daemon=True)
+                        if stall in ("header", "body"):
+                            trickle.start()
+                        try:
+                            self.assert_model_cleanup_bounded(resources, client, server)
+                        finally:
+                            trickle_stop.set()
+                            if trickle.ident is not None:
+                                trickle.join(2)
+                    self.assertEqual(server.connections, set())
+                    self.assertEqual(server.active_requests, 0)
+                    evidence.drained = True
+                    FIXTURE.seal_evidence(ctx)
+
+    def trickle_model_request(self, client, stop):
+        while not stop.wait(0.02):
+            try:
+                client.sendall(b" ")
+            except OSError:
+                return
+
+    def test_model_shutdown_closes_connection_before_handler_starts(self):
+        with ExitStack() as resources, patch.object(FIXTURE, "host_qualifier", self.provider().qualifier):
+            server = FIXTURE.make_model(resources)
+            server.handle_error = Mock()
+            accepted, release = threading.Event(), threading.Event()
+            original = server.finish_request
+
+            def delayed(request, address):
+                accepted.set()
+                release.wait(3)
+                original(request, address)
+
+            server.finish_request = delayed
+            client = socket.create_connection(("127.0.0.1", server.server_port), timeout=2)
+            cleanup = threading.Thread(target=resources.close, daemon=True)
+            try:
+                self.assertTrue(accepted.wait(2))
+                cleanup.start()
+                self.assertEqual(client.recv(1), b"")
+                self.assertTrue(cleanup.is_alive(), "cleanup must still join the delayed handler")
+            finally:
+                release.set()
+                client.close()
+                if cleanup.ident is not None:
+                    cleanup.join(3)
+            self.assertFalse(cleanup.is_alive())
+            self.assertEqual(server.connections, set())
+
+    def assert_model_cleanup_bounded(self, resources, client, server):
+        errors = []
+
+        def close():
+            try:
+                resources.close()
+            except Exception as error:
+                errors.append(error)
+
+        cleanup = threading.Thread(target=close, daemon=True)
+        cleanup.start()
+        cleanup.join(3)
+        bounded = not cleanup.is_alive()
+        client.close()
+        cleanup.join(3)
+        self.assertTrue(bounded, "provider shutdown waited for client I/O or busy hold")
+        self.assertFalse(cleanup.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(server.active_requests, 0)
+
     def test_title_cannot_consume_primary_hold(self):
         server = self.provider()
         self.respond(server, {'tools': [], 'text': {'format': {'schema': {
@@ -208,7 +356,7 @@ class ThreeSessionModelTests(unittest.TestCase):
     def test_providers_have_independent_verifier_call_ids(self):
         host = self.provider().qualifier
         with patch.object(FIXTURE, 'host_qualifier', host), \
-                patch.object(FIXTURE, 'ThreadingHTTPServer', side_effect=lambda *_: SimpleNamespace(serve_forever=Mock())), \
+                patch.object(FIXTURE, 'ModelServer', side_effect=lambda *_: SimpleNamespace(serve_forever=Mock())), \
                 patch.object(FIXTURE.threading, 'Thread'):
             first = FIXTURE.make_model(Mock())
             second = FIXTURE.make_model(Mock())
@@ -695,6 +843,37 @@ class ThreeSessionHistoricalReceiptTests(unittest.TestCase):
 
 
 class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
+    def test_direct_fixture_transport_failure_retains_sanitized_attempt_and_original_error(self):
+        for archive_fails in (False, True):
+            with self.subTest(archive_fails=archive_fails), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "evidence"
+                with FIXTURE.evidence_archive(path) as evidence:
+                    ctx = SimpleNamespace(evidence=evidence, address={"port": 12345}, fixture_secret=uuid4().hex)
+                    failure = TimeoutError("transport failed with PRIVATE contents")
+
+                    def post(*args):
+                        records = [json.loads(line) for line in path.read_text().splitlines()]
+                        self.assertEqual(records[-1], {"kind": "cloudFixtureAttempt", "value": {"path": "/fixture/setup"}})
+                        if archive_fails:
+                            evidence.size = 64 * 1024 * 1024
+                        raise failure
+
+                    with patch.object(FIXTURE, "post", side_effect=post):
+                        with self.assertRaises(TimeoutError) as raised:
+                            FIXTURE.fixture(ctx, "/fixture/setup", {"transportPrivateKey": "PRIVATE"})
+                    self.assertIs(raised.exception, failure)
+                    self.assertNotIn("PRIVATE", path.read_text())
+                    self.assertNotIn("transportPrivateKey", path.read_text())
+                    if archive_fails:
+                        self.assertTrue(evidence.failed)
+                        evidence.drained = True
+                        with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                            FIXTURE.seal_evidence(ctx)
+                    else:
+                        records = [json.loads(line) for line in path.read_text().splitlines()]
+                        self.assertEqual(records[-1], {"kind": "cloudFixtureError", "value": {
+                            "path": "/fixture/setup", "error": "TimeoutError"}})
+
     def test_fixture_archives_failure_responses_without_request_secrets(self):
         for status, raw, error in ((503, b"unavailable\xff", AssertionError),
                                    (200, b"not json", json.JSONDecodeError)):
