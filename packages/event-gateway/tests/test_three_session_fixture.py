@@ -1363,6 +1363,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     "SessionNativeBridge": Mock(), "client_runtime": Mock(), "CloudClient": Mock(),
                 }.items():
                     patches.enter_context(patch.object(FIXTURE, name, value))
+                patches.enter_context(patch.object(FIXTURE, "preflight_ports"))
                 patches.enter_context(patch.object(FIXTURE, "private_temp_root", return_value=root))
                 patches.enter_context(patch.object(FIXTURE, "start_broker", return_value=(None, None, {"secret": uuid4().hex, "port": 12345})))
                 stop = patches.enter_context(patch.object(FIXTURE, "stop_broker", return_value={}))
