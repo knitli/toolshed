@@ -2150,12 +2150,14 @@ def restore_observers(ctx):
     SessionNativeBridge.challenge = ctx.original_bridge_challenge
 
 
-async def run_scenario(directory_fd=None):
+async def run_scenario(directory_fd=None, publication_stack=None):
     temporary_root = private_temp_root()
     containment = (verify_outer_containment(temporary_root) if args.outer_contained
                    else {"mode": "per-native-profile"})
     evidence_path = Path(args.output).with_suffix(".private-evidence.jsonl")
-    with evidence_archive(evidence_path, directory_fd) as evidence:
+    with ExitStack() as local_stack:
+        evidence = (publication_stack if publication_stack is not None else local_stack).enter_context(
+            evidence_archive(evidence_path, directory_fd))
         broker, broker_log, address = start_broker()
         proof = None
         private_nonce_record = None
@@ -2259,7 +2261,7 @@ async def run_scenario(directory_fd=None):
                                 sync_evidence(ctx)
             ctx.proof, ctx.private_nonce_record = build_proof(ctx)
             ctx.proof["privateEvidence"] = seal_evidence(ctx)
-            return ctx.proof
+            return ctx.proof, evidence
         finally:
             await cleanup_scenario(ctx)
 
@@ -2285,6 +2287,7 @@ def main():
     target = output.parent.resolve(strict=True) / output.name
     require(not target.exists() and not target.is_symlink(), "proof output already exists")
     directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    proof_identity = None
     try:
         identity = os.fstat(directory)
 
@@ -2293,20 +2296,35 @@ def main():
             require(stat.S_ISDIR(current.st_mode) and (current.st_dev, current.st_ino)
                     == (identity.st_dev, identity.st_ino), "proof output directory changed")
 
-        proof = asyncio.run(run_scenario(directory))
-        encoded = (json.dumps(proof, indent=2) + "\n").encode()
-        require(len(encoded) <= 32_768, "proof exceeds fixed metadata bound")
-        verify_parent()
-        descriptor = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                             0o600, dir_fd=directory)
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(encoded)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.fsync(directory)
-        verify_parent()
-        print(json.dumps({"result": "PASS", "proof": str(target),
-                          "productionAdmissionProven": False, "nativeCliSessions": 3}))
+        with ExitStack() as publication_stack:
+            proof, evidence = asyncio.run(run_scenario(directory, publication_stack))
+            encoded = (json.dumps(proof, indent=2) + "\n").encode()
+            require(len(encoded) <= 32_768, "proof exceeds fixed metadata bound")
+            verify_parent()
+            verify_evidence(evidence)
+            descriptor = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                 0o600, dir_fd=directory)
+            with os.fdopen(descriptor, "wb") as stream:
+                proof_identity = os.fstat(stream.fileno())
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.fsync(directory)
+            verify_parent()
+            current_archive = seal_evidence(SimpleNamespace(evidence=evidence))
+            require(all(current_archive[key] == proof["privateEvidence"][key]
+                        for key in ("sha256", "bytes")), "private evidence changed before publication")
+            print(json.dumps({"result": "PASS", "proof": str(target),
+                              "productionAdmissionProven": False, "nativeCliSessions": 3}))
+    except BaseException:
+        if proof_identity is not None:
+            try:
+                current = os.stat(target.name, dir_fd=directory, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) == (proof_identity.st_dev, proof_identity.st_ino):
+                    os.unlink(target.name, dir_fd=directory)
+            except OSError:
+                pass
+        raise
     finally:
         os.close(directory)
 
