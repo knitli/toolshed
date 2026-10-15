@@ -360,14 +360,18 @@ def seal_evidence(ctx):
     with evidence.lock:
         require(evidence.drained and evidence.active == 0 and not evidence.failed,
                 "private evidence observers are not settled")
-        evidence.sealed = True
-        sync_evidence(ctx)
-        os.lseek(evidence.fd, 0, os.SEEK_SET)
-        hasher = hashlib.sha256()
-        while chunk := os.read(evidence.fd, 1024 * 1024):
-            hasher.update(chunk)
-        verify_evidence(evidence)
-        return {"sha256": hasher.hexdigest(), "bytes": evidence.size}
+        evidence.sealed = True  # Close writes even if durability or hashing fails.
+        try:
+            sync_evidence(ctx)
+            os.lseek(evidence.fd, 0, os.SEEK_SET)
+            hasher = hashlib.sha256()
+            while chunk := os.read(evidence.fd, 1024 * 1024):
+                hasher.update(chunk)
+            verify_evidence(evidence)
+            return {"sha256": hasher.hexdigest(), "bytes": evidence.size}
+        except BaseException:
+            evidence.failed = True
+            raise
 
 
 async def drain_native_observers(ctx):
@@ -1235,7 +1239,11 @@ def record_session_request(ctx, state_dir, session_id, message, *, native_reques
         raise
     row = {"session": label, "sessionId": session_id, "request": message, "nativeRequest": native_request,
            "response": result, "receivedAt": time.monotonic()}
-    record_evidence(ctx, "nativeExchange", row)
+    try:
+        record_evidence(ctx, "nativeExchange", row)
+    except Exception:
+        with ctx.evidence.lock:
+            ctx.evidence.failed = True
     if message.get("command") == "nativeReceipt" and label in ctx.receipt_calls:
         ctx.receipt_calls[label].append(result.get("outcome", {}).get("status"))
     return result
@@ -2097,6 +2105,7 @@ async def cleanup_scenario(ctx):
 
 
 def finish_scenario_cleanup(ctx):
+    original_error = sys.exc_info()[1]
     try:
         cleanup_error = None
         try:
@@ -2115,8 +2124,10 @@ def finish_scenario_cleanup(ctx):
                 verify_evidence(ctx.evidence)
                 private_json(private_path, ctx.private_nonce_record, directory_fd=ctx.evidence.directory_fd)
                 verify_evidence(ctx.evidence)
-            except OSError as error:
-                if cleanup_error is None:
+            except (OSError, AssertionError) as error:
+                if cleanup_error is None and original_error is None:
+                    if isinstance(error, AssertionError):
+                        raise
                     raise AssertionError("private nonce causal record unavailable: "
                                          + type(error).__name__) from None
                 print("private nonce causal record unavailable: " + type(error).__name__,

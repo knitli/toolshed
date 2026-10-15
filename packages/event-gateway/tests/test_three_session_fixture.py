@@ -733,6 +733,46 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, "observers are not settled"):
                     FIXTURE.seal_evidence(ctx)
 
+    def test_successful_native_receipt_survives_failed_archive_and_cannot_seal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with FIXTURE.evidence_archive(Path(directory) / "evidence") as evidence:
+                result = {"outcome": {"status": "inputRecorded"}}
+
+                def native(*args, **kwargs):
+                    evidence.size = 64 * 1024 * 1024
+                    return result
+
+                ctx = self.observer_context(evidence, native)
+                returned = FIXTURE.observe_session_request(ctx, None, "session", {"command": "nativeReceipt"})
+                self.assertIs(returned, result)
+                self.assertEqual(ctx.receipt_calls["C"], ["inputRecorded"])
+                self.assertEqual(evidence.active, 0)
+                self.assertTrue(evidence.failed)
+                evidence.drained = True
+                with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                    FIXTURE.seal_evidence(ctx)
+
+    def test_secondary_sidecar_assertion_preserves_active_error_and_owned_cleanup(self):
+        for broker_fails in (False, True):
+            with self.subTest(broker_fails=broker_fails), tempfile.TemporaryDirectory() as directory:
+                state = Path(directory) / "state"
+                state.mkdir()
+                original = RuntimeError("original scenario failure")
+                ctx = SimpleNamespace(broker=None, broker_log=None, proof=None, private_nonce_record={},
+                                      state_root=state, args=SimpleNamespace(output=str(Path(directory) / "proof")),
+                                      evidence=SimpleNamespace())
+                with patch.object(FIXTURE, "stop_broker", side_effect=AssertionError("broker cleanup failed") if broker_fails else None, return_value={}), \
+                        patch.object(FIXTURE, "verify_evidence", side_effect=AssertionError("directory changed")), \
+                        patch("builtins.print") as diagnostic:
+                    with self.assertRaises(RuntimeError) as raised:
+                        try:
+                            raise original
+                        finally:
+                            FIXTURE.finish_scenario_cleanup(ctx)
+                self.assertIs(raised.exception, original)
+                self.assertFalse(state.exists())
+                self.assertEqual(diagnostic.call_count, 2 if broker_fails else 1)
+
     def test_parent_replacement_cleanup_removes_owned_state_and_preserves_refusal(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1375,6 +1415,23 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             records = [json.loads(line) for line in evidence.path.read_text().splitlines()]
             self.assertEqual(records[-1]["kind"], "outerObserverFinished")
 
+    def test_hash_read_failure_closes_writes_and_latches_failed_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with FIXTURE.evidence_archive(Path(directory) / "evidence") as evidence:
+                ctx = SimpleNamespace(evidence=evidence)
+                evidence.drained = True
+                failure = OSError("hash read failed")
+                with patch.object(FIXTURE.os, "read", side_effect=failure):
+                    with self.assertRaises(OSError) as raised:
+                        FIXTURE.seal_evidence(ctx)
+                self.assertIs(raised.exception, failure)
+                self.assertTrue(evidence.failed)
+                self.assertTrue(evidence.sealed)
+                with self.assertRaisesRegex(AssertionError, "sealed"):
+                    FIXTURE.record_evidence(ctx, "late", {})
+                with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                    FIXTURE.seal_evidence(ctx)
+
     def test_fsync_file_then_parent_precedes_hash_and_failure_closes_descriptor(self):
         for failing_call in (None, 1, 2):
             with self.subTest(failing_call=failing_call), tempfile.TemporaryDirectory() as directory:
@@ -1400,6 +1457,12 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                             with self.assertRaisesRegex(OSError, "fsync failed"):
                                 FIXTURE.seal_evidence(ctx)
                             self.assertNotIn("hash-read", calls)
+                            self.assertTrue(evidence.sealed)
+                            self.assertTrue(evidence.failed)
+                            with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                                FIXTURE.seal_evidence(ctx)
+                            with self.assertRaisesRegex(AssertionError, "sealed"):
+                                FIXTURE.record_evidence(ctx, "late", {})
                         else:
                             proof = FIXTURE.seal_evidence(ctx)
                             self.assertEqual(calls[:3], ["file", "parent", "hash-read"])
