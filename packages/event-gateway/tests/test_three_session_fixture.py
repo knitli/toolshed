@@ -1155,7 +1155,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 real_fsync = os.fsync
 
                 def sync_before_cleanup(fd):
-                    self.assertTrue(list(root.glob(FIXTURE.GATEWAY_TEMP_PREFIX + "*")))
+                    self.assertEqual(bool(list(root.glob(FIXTURE.GATEWAY_TEMP_PREFIX + "*"))), not stop.called)
                     real_fsync(fd)
 
                 sync = patches.enter_context(patch.object(FIXTURE.os, "fsync", side_effect=sync_before_cleanup))
@@ -1163,7 +1163,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     asyncio.run(FIXTURE.run_scenario())
                 initialize.assert_not_called()
                 stop.assert_called_once()
-                self.assertEqual(sync.call_count, 2)
+                self.assertEqual(sync.call_count, 4)
                 for call in sync.call_args_list:
                     with self.assertRaises(OSError):
                         os.fstat(call.args[0])
@@ -1984,8 +1984,8 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
     def test_broker_setup_failure_closes_both_archive_descriptors(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            real_close, real_archive = os.close, FIXTURE.evidence_archive
-            archive_fds, closed = {}, []
+            real_close, real_archive, real_fsync = os.close, FIXTURE.evidence_archive, os.fsync
+            archive_fds, closed, synced = {}, [], []
 
             @contextmanager
             def archive(path, directory_fd=None):
@@ -1994,6 +1994,11 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                         info = os.fstat(fd)
                         archive_fds[fd] = (info.st_dev, info.st_ino)
                     yield evidence
+
+            def sync(fd):
+                self.assertNotIn(fd, closed)
+                synced.append(fd)
+                real_fsync(fd)
 
             def close(fd):
                 info = os.fstat(fd)
@@ -2005,7 +2010,8 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     patch.object(FIXTURE, "private_temp_root", return_value=root), \
                     patch.object(FIXTURE, "start_broker", side_effect=RuntimeError("broker failed")), \
                     patch.object(FIXTURE, "evidence_archive", side_effect=archive), \
-                    patch.object(FIXTURE.os, "close", side_effect=close):
+                    patch.object(FIXTURE.os, "close", side_effect=close), \
+                    patch.object(FIXTURE.os, "fsync", side_effect=sync):
                 with self.assertRaisesRegex(RuntimeError, "broker failed"):
                     asyncio.run(FIXTURE.run_scenario())
                 # Event-loop cleanup may close unrelated or reused descriptor numbers.
@@ -2016,6 +2022,36 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 os.close(unrelated)
             self.assertEqual(len(archive_fds), 2)
             self.assertCountEqual(closed, archive_fds)
+            self.assertCountEqual(synced, archive_fds)
+
+
+    def test_broker_failure_survives_early_persistence_failure_with_either_archive_owner(self):
+        for publication_owned, sink_error in product((False, True), (OSError, ValueError)):
+            with self.subTest(publication_owned=publication_owned, sink_error=sink_error), tempfile.TemporaryDirectory() as directory, \
+                    ExitStack() as publication:
+                root = Path(directory)
+                failure = RuntimeError("broker startup failed")
+                real_archive = FIXTURE.evidence_archive
+                retained = []
+
+                @contextmanager
+                def archive(path, directory_fd=None):
+                    with real_archive(path, directory_fd) as evidence:
+                        retained.append(evidence)
+                        yield evidence
+
+                with patch.object(FIXTURE, "args", SimpleNamespace(output=str(root / "proof.json"), outer_contained=False)), \
+                        patch.object(FIXTURE, "private_temp_root", return_value=root), \
+                        patch.object(FIXTURE, "start_broker", side_effect=failure), \
+                        patch.object(FIXTURE, "evidence_archive", side_effect=archive), \
+                        patch.object(FIXTURE.os, "fsync", side_effect=OSError("sync failed")) as sync, \
+                        patch.object(FIXTURE.sys, "stderr", Mock(write=Mock(side_effect=sink_error("sink failed")))):
+                    with self.assertRaises(Exception) as caught:
+                        asyncio.run(FIXTURE.run_scenario(publication_stack=publication if publication_owned else None))
+                self.assertIs(caught.exception, failure)
+                sync.assert_called_once_with(retained[0].fd)
+                self.assertTrue(retained[0].failed)
+                self.assertFalse((root / "proof.json").exists())
 
 
     def test_snapshot_stays_consistent_when_writer_commits_between_tables(self):

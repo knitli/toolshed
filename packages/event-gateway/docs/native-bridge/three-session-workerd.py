@@ -411,7 +411,8 @@ def persist_evidence(ctx, _error_type=None, error=None, _traceback=None):
             ctx.evidence.failed = True
         if error is None:
             raise
-        print("private evidence sync failed: " + type(sync_error).__name__, file=sys.stderr)
+        with suppress(OSError, ValueError):
+            print("private evidence sync failed: " + type(sync_error).__name__, file=sys.stderr)
 
 
 def seal_evidence(ctx):
@@ -2275,6 +2276,7 @@ async def run_scenario(directory_fd=None, publication_stack=None):
     with ExitStack() as local_stack:
         evidence = (publication_stack if publication_stack is not None else local_stack).enter_context(
             evidence_archive(evidence_path, directory_fd))
+        local_stack.push(partial(persist_evidence, SimpleNamespace(evidence=evidence)))
         broker, broker_log, address = start_broker()
         proof = None
         private_nonce_record = None
