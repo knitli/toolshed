@@ -34,6 +34,15 @@ JSON_HEADERS = {"content-type": "application/json"}
 
 class ExportPinTests(unittest.TestCase):
     def test_modified_source_refused_before_evaluation(self):
+        self._assert_modified_sources_refused()
+
+    def test_watch_runtime_sources_refused_before_schema_evaluation(self):
+        self._assert_modified_sources_refused((
+            "apps/os/packages/event-runtime/src/github/watch-store.ts",
+            "apps/os/packages/event-runtime/src/github/watch-control-internal.ts",
+        ))
+
+    def _assert_modified_sources_refused(self, selected_sources=None):
         git = shutil.which("git")
         node = shutil.which("node")
         self.assertIsNotNone(git, "git executable is required for the source pin test")
@@ -50,25 +59,30 @@ class ExportPinTests(unittest.TestCase):
             pin = json.loads((contract / "manifest.json").read_text())
             # Resolved executable, fixed arguments, no shell; read this checkout revision.
             pin["revision"] = subprocess.check_output([git, "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()  # nosec B603
+            marker = scratch / "must-not-execute"
             for name in pin["sources"]:
                 source_path = scratch / name.removeprefix("apps/os/")
                 source_path.parent.mkdir(parents=True, exist_ok=True)
-                source_path.write_text("export const harmless = true;\n")
+                source_path.write_text(
+                    "import {writeFileSync} from 'node:fs';\n"
+                    "writeFileSync(process.env.EVENT_EXPORT_TEST_MARKER, 'executed');\n"
+                    if name.endswith("/src/contracts.ts") else "export const harmless = true;\n"
+                )
                 pin["sources"][name] = hashlib.sha256(source_path.read_bytes()).hexdigest()
             dependency = scratch / "zod"
             dependency.mkdir()
             (dependency / "package.json").write_text(json.dumps({"version": pin["zodVersion"]}))
             (dependency / "index.js").write_text("export const z = {};\n")
             (scratch / "manifest.json").write_text(json.dumps(pin))
-            marker = scratch / "must-not-execute"
-            for name in pin["sources"]:
+            for name in selected_sources or pin["sources"]:
+                self.assertIn(name, pin["sources"], "required runtime source is not pinned")
                 source_path = scratch / name.removeprefix("apps/os/")
                 original = source_path.read_text()
                 with self.subTest(source=name):
                     try:
                         source_path.write_text(
                             "import {writeFileSync} from 'node:fs';\n"
-                            "writeFileSync(process.env.EVENT_EXPORT_TEST_MARKER, 'executed');\n"
+                            "writeFileSync(process.env.EVENT_EXPORT_TEST_MARKER, 'tampered');\n"
                         )
                         # Resolved executable, fixed arguments, no shell; isolated source-pin fixture.
                         result = subprocess.run(  # nosec B603
