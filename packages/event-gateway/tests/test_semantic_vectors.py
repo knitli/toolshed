@@ -41,13 +41,14 @@ class SemanticVectorScriptTests(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), 'PASS: 45 canonical semantic verdicts')
 
     def test_malformed_embedded_corpus_does_not_fall_back_to_outer_vectors(self):
-        for embedded in (None, {'schemaVersion': 2}):
+        for embedded in (None, [], 'invalid', True, {}, {'schemaVersion': 2}):
             with self.subTest(embedded=embedded):
                 document = {'schemaVersion': 1, 'rawCases': [], 'digestCases': [],
                             'bindingCases': [], 'semanticVectors': embedded}
                 result = run_synthetic_corpus(document)
                 self.assertNotEqual(result.returncode, 0, result.stdout)
                 self.assertNotIn('PASS:', result.stdout)
+                self.assertIn('ValueError: unsupported semantic corpus version', result.stderr)
 
 
 if __name__ == '__main__':
