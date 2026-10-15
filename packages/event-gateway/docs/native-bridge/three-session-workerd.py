@@ -2243,12 +2243,9 @@ async def finish_stage(ctx, stage, failure):
         else:
             print("stage snapshot failed: " + type(error).__name__, file=sys.stderr)
     try:
-        persist_evidence(ctx)
+        persist_evidence(ctx, error=failure)
     except Exception as error:
-        if failure is None:
-            failure = error
-        else:
-            print("stage archive sync failed: " + type(error).__name__, file=sys.stderr)
+        failure = error
     if failure is not None:
         raise failure
 
