@@ -359,11 +359,11 @@ def verify_evidence(evidence):
 
 
 def record_evidence(ctx, kind, value):
-    raw = (json.dumps({"kind": kind, "value": value}, separators=(",", ":")) + "\n").encode()
     evidence = ctx.evidence
     with evidence.lock:
-        require(not evidence.sealed, "private evidence is sealed")
         try:
+            require(not evidence.sealed, "private evidence is sealed")
+            raw = (json.dumps({"kind": kind, "value": value}, separators=(",", ":")) + "\n").encode()
             require(len(raw) <= 4_100_000 and evidence.size + len(raw) <= 64 * 1024 * 1024,
                     "private evidence exceeds bounded archive")
             verify_evidence(evidence)
@@ -385,6 +385,17 @@ def sync_evidence(ctx):
         os.fsync(evidence.fd)
         os.fsync(evidence.directory_fd)
         verify_evidence(evidence)
+
+
+def persist_evidence(ctx, _error_type=None, error=None, _traceback=None):
+    try:
+        sync_evidence(ctx)
+    except Exception as sync_error:
+        with ctx.evidence.lock:
+            ctx.evidence.failed = True
+        if error is None:
+            raise
+        print("private evidence sync failed: " + type(sync_error).__name__, file=sys.stderr)
 
 
 def seal_evidence(ctx):
@@ -880,7 +891,7 @@ def native_session(stack, label, ctx, *, hold=False):
     root.chmod(0o700)
     stack.callback(temporary.cleanup)
     # ExitStack joins the provider, persists its last records, then removes native scratch.
-    stack.callback(sync_evidence, ctx)
+    stack.push(partial(persist_evidence, ctx))
     provider = make_model(stack, hold=hold)
     provider.evidence = lambda kind, value: record_evidence(ctx, kind, {"session": label, **value})
     provider.nonce = "three-session-source-" + label.lower() + "-" + uuid4().hex
@@ -2152,14 +2163,7 @@ async def cleanup_scenario(ctx):
     finally:
         original_error = sys.exc_info()[1]
         try:
-            if not ctx.evidence.failed:
-                try:
-                    sync_evidence(ctx)
-                except Exception as error:
-                    ctx.evidence.failed = True
-                    if original_error is None:
-                        raise
-                    print("private evidence sync failed: " + type(error).__name__, file=sys.stderr)
+            persist_evidence(ctx, error=original_error)
         finally:
             restore_observers(ctx)
             finish_scenario_cleanup(ctx)
@@ -2209,6 +2213,44 @@ def restore_observers(ctx):
     daemon.NativeBridgeAdapter.check = ctx.original_adapter_check
     daemon.NativeBridgeAdapter.reconcile = ctx.original_adapter_reconcile
     SessionNativeBridge.challenge = ctx.original_bridge_challenge
+
+
+async def finish_stage(ctx, stage, failure):
+    try:
+        if ctx.daemon_task is not None:
+            await ctx.stop_daemon(ctx.daemon_task)
+            ctx.daemon_task = None
+    except (Exception, asyncio.CancelledError) as error:
+        if failure is None:
+            failure = error
+        else:
+            print("stage daemon stop failed: " + type(error).__name__, file=sys.stderr)
+    if "C" in ctx.sessions:
+        ctx.sessions["C"]["provider"].release_hold.set()
+    try:
+        await drain_native_observers(ctx)
+    except (Exception, asyncio.CancelledError) as error:
+        if failure is None:
+            failure = error
+        else:
+            print("stage observer drain failed: " + type(error).__name__, file=sys.stderr)
+    try:
+        missing = snapshot_evidence(ctx, "exit:" + stage)
+        require(failure is not None or not missing, "exit checkpoint ledger is incomplete")
+    except Exception as error:
+        if failure is None:
+            failure = error
+        else:
+            print("stage snapshot failed: " + type(error).__name__, file=sys.stderr)
+    try:
+        persist_evidence(ctx)
+    except Exception as error:
+        if failure is None:
+            failure = error
+        else:
+            print("stage archive sync failed: " + type(error).__name__, file=sys.stderr)
+    if failure is not None:
+        raise failure
 
 
 async def run_scenario(directory_fd=None, publication_stack=None):
@@ -2305,21 +2347,7 @@ async def run_scenario(directory_fd=None, publication_stack=None):
                         require(not snapshot_evidence(ctx, stage), "checkpoint ledger is incomplete")
                 finally:
                     # Persist while native scratch and the broker still exist, including failed stages.
-                    try:
-                        if ctx.daemon_task is not None:
-                            await ctx.stop_daemon(ctx.daemon_task)
-                            ctx.daemon_task = None
-                    finally:
-                        failed = sys.exc_info()[0] is not None
-                        if "C" in ctx.sessions:
-                            ctx.sessions["C"]["provider"].release_hold.set()
-                        await drain_native_observers(ctx)
-                        try:
-                            missing = snapshot_evidence(ctx, "exit:" + stage)
-                            require(failed or not missing, "exit checkpoint ledger is incomplete")
-                        finally:
-                            if not ctx.evidence.failed:
-                                sync_evidence(ctx)
+                    await finish_stage(ctx, stage, sys.exc_info()[1])
             ctx.proof, ctx.private_nonce_record = build_proof(ctx)
             ctx.proof["privateEvidence"] = seal_evidence(ctx)
             return ctx.proof, evidence
@@ -2392,6 +2420,7 @@ def main():
                 current = os.stat(target.name, dir_fd=directory, follow_symlinks=False)
                 if (current.st_dev, current.st_ino) == (proof_identity.st_dev, proof_identity.st_ino):
                     os.unlink(target.name, dir_fd=directory)
+                    os.fsync(directory)
             except OSError:
                 pass
         raise

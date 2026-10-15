@@ -893,25 +893,32 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     self.assertNotIn("transportPrivateKey", path.read_text())
 
     def test_native_error_survives_failed_archive_and_retains_receipt_bookkeeping(self):
-        with tempfile.TemporaryDirectory() as directory:
-            with FIXTURE.evidence_archive(Path(directory) / "evidence") as evidence:
-                failure = RuntimeError("original native failure")
+        for failure_kind in ("bound", "sealed", "serialization"):
+            with self.subTest(failure_kind=failure_kind), tempfile.TemporaryDirectory() as directory:
+                with FIXTURE.evidence_archive(Path(directory) / "evidence") as evidence:
+                    failure = RuntimeError("original native failure")
 
-                def native(*args, **kwargs):
-                    evidence.size = 64 * 1024 * 1024
-                    raise failure
+                    def native(*args, **kwargs):
+                        if failure_kind == "bound":
+                            evidence.size = 64 * 1024 * 1024
+                        if failure_kind == "sealed":
+                            evidence.sealed = True
+                        raise failure
 
-                ctx = SimpleNamespace(evidence=evidence, session_labels={"session": "A"},
-                                      receipt_errors={"A": []}, original_session_request=native)
-                with self.assertRaises(RuntimeError) as raised:
-                    FIXTURE.observe_session_request(ctx, None, "session", {"command": "nativeReceipt"})
-                self.assertIs(raised.exception, failure)
-                self.assertEqual(ctx.receipt_errors["A"], [str(failure)])
-                self.assertEqual(evidence.active, 0)
-                self.assertTrue(evidence.failed)
-                evidence.drained = True
-                with self.assertRaisesRegex(AssertionError, "observers are not settled"):
-                    FIXTURE.seal_evidence(ctx)
+                    ctx = SimpleNamespace(evidence=evidence, session_labels={"session": "A"},
+                                          receipt_errors={"A": []}, original_session_request=native)
+                    request = {"unencodable": object()} if failure_kind == "serialization" else None
+                    with self.assertRaises(RuntimeError) as raised:
+                        FIXTURE.observe_session_request(ctx, None, "session", {"command": "nativeReceipt"},
+                                                        native_request=request)
+                    self.assertIs(raised.exception, failure)
+                    self.assertEqual(ctx.receipt_errors["A"], [str(failure)])
+                    self.assertEqual(evidence.active, 0)
+                    self.assertTrue(evidence.failed)
+                    evidence.drained = True
+                    with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                        FIXTURE.seal_evidence(ctx)
+
 
     def test_successful_native_receipt_survives_failed_archive_and_cannot_seal(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1232,7 +1239,17 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 descriptors = []
                 real_fsync = os.fsync
                 mutated = False
+                removal_synced = []
                 original_archive = None
+                removed = False
+                real_unlink = os.unlink
+
+                def unlink(path, *args, **kwargs):
+                    nonlocal removed
+                    result = real_unlink(path, *args, **kwargs)
+                    if path == target.name and kwargs.get("dir_fd") == descriptors[0]:
+                        removed = True
+                    return result
 
                 async def scenario(directory_fd, publication_stack):
                     nonlocal original_archive
@@ -1255,6 +1272,8 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                             target.chmod(0o600)
                         if mutation == "overwrite":
                             target.write_bytes(raw.replace(b"sha256", b"SHA256"))
+                    if removed and fd == descriptors[0]:
+                        removal_synced.append(True)
                     real_fsync(fd)
 
                 real_fdopen = os.fdopen
@@ -1267,6 +1286,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                         patch.object(FIXTURE, "configure"), \
                         patch.object(FIXTURE, "run_scenario", side_effect=scenario), \
                         patch.object(FIXTURE.os, "fsync", side_effect=sync), \
+                        patch.object(FIXTURE.os, "unlink", side_effect=unlink), \
                         patch.object(FIXTURE.os, "fdopen", side_effect=fdopen), \
                         patch("builtins.print") as output:
                     if mutation:
@@ -1278,6 +1298,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                         FIXTURE.main()
                         self.assertEqual(json.loads(output.call_args.args[0])["result"], "PASS")
                 self.assertEqual(archive.read_bytes(), original_archive)
+                self.assertEqual(bool(removal_synced), mutation == "overwrite")
                 for fd in descriptors:
                     with self.assertRaises(OSError):
                         os.fstat(fd)
@@ -1445,6 +1466,19 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, "observers are not settled"):
                     FIXTURE.seal_evidence(ctx)
 
+    def test_stage_failure_survives_secondary_drain_snapshot_and_sync_failures(self):
+        for operation in ("drain", "snapshot", "sync"):
+            with self.subTest(operation=operation):
+                self.run_retention_scenario("stage-" + operation + "-failure")
+
+    def test_stage_failure_survives_secondary_daemon_stop_failure(self):
+        self.run_retention_scenario("stage-stop-failure")
+
+    def test_daemon_stop_failure_refuses_success_and_survives_later_sync_failure(self):
+        for outcome in ("stop-failure", "stop-sync-failure"):
+            with self.subTest(outcome=outcome):
+                self.run_retention_scenario(outcome)
+
     def test_failed_stage_retains_database_before_resource_and_state_cleanup(self):
         self.run_retention_scenario("stage-failure")
 
@@ -1486,6 +1520,10 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             descriptors = []
             resource_closed = []
             inspections = []
+            failures = {name: RuntimeError("original stage failure") for name in (
+                "stage-stop-failure", "stage-drain-failure", "stage-snapshot-failure", "stage-sync-failure")}
+            failures["stop-failure"] = AssertionError("daemon stop failed")
+            failures["stop-sync-failure"] = failures["stop-failure"]
             if outcome == "drain-timeout":
                 real_wait = asyncio.wait
 
@@ -1501,6 +1539,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
 
             async def fail(ctx, resources):
                 self.prepare_retention_stage(ctx, resources, outcome, state_roots, descriptors, resource_closed)
+                self.prepare_stage_cleanup_failure(ctx, outcome, patches, failures)
                 if outcome == "drain-timeout":
                     await self.hold_worker_through_drain_deadline(ctx, resource_closed, inspections)
 
@@ -1511,14 +1550,22 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             else:
                 error, message = {
                     "stage-failure": (RuntimeError, "injected stage failure"),
+                    "stage-stop-failure": (RuntimeError, "original stage failure"),
+                    "stage-drain-failure": (RuntimeError, "original stage failure"),
+                    "stage-snapshot-failure": (RuntimeError, "original stage failure"),
+                    "stage-sync-failure": (RuntimeError, "original stage failure"),
+                    "stop-failure": (AssertionError, "daemon stop failed"),
+                    "stop-sync-failure": (AssertionError, "daemon stop failed"),
                     "partial-failure": (ValueError, "original partial ledger failure"),
                     "partial-success": (AssertionError, "checkpoint ledger is incomplete"),
                     "write-failure": (AssertionError, "bounded archive"),
                     "fsync-failure": (OSError, "fsync failed"),
                     "drain-timeout": (TimeoutError, "drain exceeded 30 seconds"),
                 }[outcome]
-                with self.assertRaisesRegex(error, message):
+                with self.assertRaisesRegex(error, message) as raised:
                     asyncio.run(FIXTURE.run_scenario())
+                if outcome in failures:
+                    self.assertIs(raised.exception, failures[outcome])
             self.assert_retention_archive(outcome, output, proof)
             if outcome == "drain-timeout":
                 self.assertEqual(inspections, ["retained", "joined"])
@@ -1529,6 +1576,40 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             for descriptor in descriptors:
                 with self.assertRaises(OSError):
                     os.fstat(descriptor)
+
+    def prepare_stage_cleanup_failure(self, ctx, outcome, patches, failures):
+        if outcome in failures:
+            if "stop" in outcome:
+                ctx.daemon_task = asyncio.create_task(asyncio.sleep(60))
+                ctx.stop_daemon = AsyncMock(side_effect=failures["stop-failure"])
+            else:
+                self.inject_stage_cleanup_failure(outcome, patches)
+            if outcome == "stop-sync-failure":
+                self.inject_stage_cleanup_failure("stage-sync-failure", patches)
+            if outcome.startswith("stage-"):
+                raise failures[outcome]
+
+    def inject_stage_cleanup_failure(self, outcome, patches):
+        name = {"stage-drain-failure": "drain_native_observers", "stage-snapshot-failure": "snapshot_evidence",
+                "stage-sync-failure": "sync_evidence"}[outcome]
+        original = getattr(FIXTURE, name)
+        failed = False
+
+        def fail_once():
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise OSError("secondary " + name + " failure")
+
+        async def drain(ctx):
+            await original(ctx)
+            fail_once()
+
+        def diagnostic(*args):
+            fail_once()
+            return original(*args)
+
+        patches.enter_context(patch.object(FIXTURE, name, side_effect=drain if name == "drain_native_observers" else diagnostic))
 
     async def hold_worker_through_drain_deadline(self, ctx, resource_closed, inspections):
         entered, release = threading.Event(), threading.Event()
@@ -1585,7 +1666,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
 
         def verify_archive_before_cleanup():
             records = [json.loads(line) for line in ctx.evidence_path.read_text().splitlines()]
-            if outcome != "write-failure":
+            if outcome not in ("write-failure", "stage-snapshot-failure"):
                 self.assertTrue(any(row.get("kind") == "database" for row in records))
                 FIXTURE.record_evidence(ctx, "lateProviderResponse", {"joined": True})
             resource_closed.append(True)
@@ -1602,7 +1683,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
         archive = output.with_suffix(".private-evidence.jsonl")
         records = [json.loads(line) for line in archive.read_text().splitlines()]
         self.assertEqual(archive.stat().st_mode & 0o777, 0o600)
-        if outcome != "write-failure":
+        if outcome not in ("write-failure", "stage-snapshot-failure"):
             self.assertEqual({row["value"]["table"] for row in records if row["kind"] == "database"},
                              {"attachments"} if outcome.startswith("partial")
                              else {"attachments", "deliveries", "attempts"})
@@ -1636,7 +1717,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
         forward = Mock()
         ctx = SimpleNamespace(session_labels={"session": "C"}, start_calls={"A": [{}], "B": [{}], "C": [{}, {}]},
                               original_session_request=forward,
-                              evidence=SimpleNamespace(lock=threading.Condition(), closing=False, sealed=False))
+                              evidence=SimpleNamespace(lock=threading.Condition(), closing=False, sealed=False, active=0))
         with self.assertRaisesRegex(AssertionError, "four native Start attempt cap"):
             FIXTURE.observe_session_request(ctx, None, "session", {"command": "nativeStart"})
         forward.assert_not_called()
@@ -1894,11 +1975,45 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 self.assertFalse((root.parent / "ledger").exists())
 
 
+    def test_native_cleanup_persistent_sync_failure_preserves_setup_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with FIXTURE.evidence_archive(root / "evidence") as evidence:
+                ctx = SimpleNamespace(evidence=evidence, state=root)
+                original = RuntimeError("setup failure")
+                with patch.object(FIXTURE, "private_temp_root", return_value=root), \
+                        patch.object(FIXTURE, "make_model", return_value=SimpleNamespace()), \
+                        patch.object(FIXTURE, "host_qualifier", SimpleNamespace(source_program=Mock(side_effect=original))), \
+                        patch.object(FIXTURE.os, "fsync", side_effect=OSError("persistent fsync failure")) as sync:
+                    with self.assertRaises(RuntimeError) as raised, ExitStack() as resources:
+                        FIXTURE.native_session(resources, "C", ctx)
+                self.assertIs(raised.exception, original)
+                sync.assert_called_once_with(evidence.fd)
+                self.assertTrue(evidence.failed)
+                self.assertFalse(list(root.glob("three-native-*")))
+
+    def test_failed_record_prefix_is_synced_without_allowing_seal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence"
+            with FIXTURE.evidence_archive(path) as evidence:
+                ctx = SimpleNamespace(evidence=evidence)
+                prefix = path.read_bytes()
+                with self.assertRaisesRegex(AssertionError, "bounded archive"):
+                    FIXTURE.record_evidence(ctx, "oversized", "x" * 4_100_001)
+                with patch.object(FIXTURE.os, "fsync", wraps=os.fsync) as sync:
+                    FIXTURE.persist_evidence(ctx)
+                self.assertEqual([call.args[0] for call in sync.call_args_list], [evidence.fd, evidence.directory_fd])
+                self.assertEqual(path.read_bytes(), prefix)
+                self.assertTrue(evidence.failed)
+                evidence.drained = True
+                with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                    FIXTURE.seal_evidence(ctx)
+
     def test_provider_last_record_is_synced_before_native_scratch_removal(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with FIXTURE.evidence_archive(root / "evidence") as evidence:
-                ctx = SimpleNamespace(evidence=evidence)
+                ctx = SimpleNamespace(evidence=evidence, state=root)
                 order = []
                 real_sync = FIXTURE.sync_evidence
 
