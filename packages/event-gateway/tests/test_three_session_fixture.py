@@ -81,7 +81,7 @@ class ThreeSessionFixedPortTests(unittest.TestCase):
     def test_model_bind_uses_explicit_port_or_uncontained_ephemeral_default(self):
         host = SimpleNamespace(__file__=str(SCRIPT.with_name('native-host-launcher-qualification.py')))
         with patch.object(FIXTURE, 'host_qualifier', host, create=True), \
-                patch.object(FIXTURE, 'ThreadingHTTPServer', side_effect=lambda *_: SimpleNamespace(serve_forever=Mock())) as server, \
+                patch.object(FIXTURE, 'ModelServer', side_effect=lambda *_: SimpleNamespace(serve_forever=Mock())) as server, \
                 patch.object(FIXTURE.threading, 'Thread'):
             FIXTURE.make_model(Mock())
             self.assertEqual(server.call_args.args[0], ('127.0.0.1', 0))
