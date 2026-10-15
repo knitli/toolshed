@@ -22,7 +22,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
-from event_gateway import launcher
+from event_gateway import daemon, launcher
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "docs/native-bridge/three-session-workerd.py"
@@ -115,15 +115,18 @@ class ThreeSessionFixedPortTests(unittest.TestCase):
                     FIXTURE.fixture_ports(self.parsed(outer_contained=False, **{missing: None}))
 
     def test_bound_non_listening_port_blocks_preflight(self):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:
-            occupied.bind(("127.0.0.1", 0))
-            port = occupied.getsockname()[1]
-            with patch.object(FIXTURE, "fixture_ports", return_value=[port]), \
-                    patch.object(FIXTURE, "port_is_closed", return_value=True):
-                with self.assertRaisesRegex(AssertionError, "already bound or unavailable"):
+        for host, reuse in product(("127.0.0.1", "0.0.0.0"), (0, 1)):
+            with self.subTest(host=host, reuse=reuse):
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:
+                    occupied.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, reuse)
+                    occupied.bind((host, 0))
+                    port = occupied.getsockname()[1]
+                    with patch.object(FIXTURE, "fixture_ports", return_value=[port]), \
+                            patch.object(FIXTURE, "port_is_closed", return_value=True):
+                        with self.assertRaisesRegex(AssertionError, "already bound or unavailable"):
+                            FIXTURE.preflight_ports(self.parsed())
+                with patch.object(FIXTURE, "fixture_ports", return_value=[port]):
                     FIXTURE.preflight_ports(self.parsed())
-        with patch.object(FIXTURE, "fixture_ports", return_value=[port]):
-            FIXTURE.preflight_ports(self.parsed())
 
     def test_cleanup_requires_every_selected_fixed_port_closed(self):
         ports = list(range(49732, 49739))
@@ -2110,6 +2113,10 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
         with patch.object(FIXTURE, "launcher", launcher):
             self.assertTrue(launcher._valid_native_witness(row["response"]["witness"]))
             self.assertTrue(FIXTURE.core_busy_observation(row, binding, 10.1, set()))
+            for malformed in (None, [], "challenge", True):
+                with self.subTest(request=malformed):
+                    self.assertFalse(FIXTURE.core_busy_observation({**row, "request": malformed},
+                                                                  binding, 10.1, set()))
             for changed in ("unknown", "idle", None):
                 bad = copy.deepcopy(row)
                 bad["response"]["witness"]["nativeCoreTurnState"] = changed
@@ -2191,13 +2198,15 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     asyncio.run(FIXTURE.observe_dispatch(None, ctx, "delivery"))
                     self.assertEqual(ctx.c_busy_nonces, {1})
                     self.assertEqual(len(ctx.dispatch_results), 1)
+                    asyncio.run(FIXTURE.observe_dispatch(None, ctx, "delivery"))
                     with self.assertRaisesRegex(AssertionError, "authoritative Core-busy"):
-                        asyncio.run(FIXTURE.observe_dispatch(None, ctx, "delivery"))
+                        FIXTURE.c_second_busy_dispositions(ctx)
                     ctx.original_dispatch = AsyncMock(return_value={
                         "status": "deferred", "reason": "client_unavailable_or_busy"})
                     ctx.c_busy_nonces.clear()
+                    asyncio.run(FIXTURE.observe_dispatch(None, ctx, "delivery"))
                     with self.assertRaisesRegex(AssertionError, "authoritative Core-busy"):
-                        asyncio.run(FIXTURE.observe_dispatch(None, ctx, "delivery"))
+                        FIXTURE.c_second_busy_dispositions(ctx)
                 records = [json.loads(line) for line in path.read_text().splitlines()]
                 self.assertEqual(records[-1], {"kind": "c2CoreBusy", "value": [row]})
                 self.assertEqual(len(ctx.dispatch_results), 1)
@@ -2208,9 +2217,24 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
         ctx = SimpleNamespace(dispatch_labels={"delivery": "C-busy-second"}, dispatch_calls=[],
                               dispatch_results=[], dispatch_errors=[], c_challenges=[], c_busy_nonces=set(),
                               sessions={"C": {"binding": {}}}, original_dispatch=unavailable)
-        with self.assertRaisesRegex(AssertionError, "authoritative Core-busy"):
-            asyncio.run(FIXTURE.observe_dispatch(None, ctx, "delivery"))
-        self.assertEqual(ctx.dispatch_results, [])
+
+        async def scenario():
+            async def operation(delivery):
+                return await FIXTURE.observe_dispatch(None, ctx, delivery)
+            try:
+                await daemon._work_batch([{"deliveryId": "delivery"}], 0, operation)
+            except Exception as error:
+                self.fail("busy evidence refusal escaped the worker: " + type(error).__name__)
+            with self.assertRaisesRegex(AssertionError, "authoritative Core-busy"), \
+                    patch.object(FIXTURE.asyncio, "sleep", new_callable=AsyncMock) as sleep:
+                await FIXTURE.wait_until(lambda: bool(FIXTURE.c_second_busy_dispositions(ctx)),
+                                         "generic busy timeout", timeout=10)
+            sleep.assert_not_awaited()
+            self.assertEqual(ctx.dispatch_results, [])
+            ctx.dispatch_results.append({"delivery": "C-busy-second", "reason": "client_unavailable_or_busy"})
+            with self.assertRaisesRegex(AssertionError, "authoritative Core-busy"):
+                FIXTURE.c_second_busy_dispositions(ctx)
+        asyncio.run(scenario())
 
     def test_fifth_start_refuses_before_forwarding_to_native(self):
         forward = Mock()

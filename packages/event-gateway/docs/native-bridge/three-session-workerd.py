@@ -89,6 +89,7 @@ def fixture_ports(parsed):
 
 
 def preflight_ports(parsed):
+    # No SO_REUSEADDR: accepting a wildcard-bound occupant would defeat preflight.
     for port in fixture_ports(parsed):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             try:
@@ -546,7 +547,8 @@ def snapshot_evidence(ctx, stage):
 def core_busy_observation(row, binding, now, seen):
     request, response = row["request"], row["response"]
     # Raw exchanges are captured before session_challenge validates this envelope.
-    if (not launcher._valid_binding(binding) or not isinstance(response, dict)
+    if (not isinstance(request, dict) or not launcher._valid_binding(binding)
+            or not isinstance(response, dict)
             or set(response) != {"challengeId", "observedAt", "validUntilMonotonic", "witness"}
             or not launcher._valid_challenge_id(request.get("challengeId"))
             or response["challengeId"] != request["challengeId"]
@@ -558,8 +560,7 @@ def core_busy_observation(row, binding, now, seen):
     deadline = response["validUntilMonotonic"]
     return (request.get("command") == "challenge"
             and request.get("expectedBinding") == binding
-            and all(type(witness.get(key)) is type(value) and witness.get(key) == value
-                    for key, value in binding.items())
+            and launcher._binding(witness) == binding
             and witness["nativeCoreTurnState"] == "busy"
             and is_exact_int(nonce) and nonce not in seen
             and type(deadline) in (int, float) and math.isfinite(deadline)
@@ -1427,7 +1428,10 @@ async def observe_dispatch(gateway, ctx, delivery_id):
         observations = [row for row in ctx.c_challenges[challenge_offset:]
                         if core_busy_observation(row, ctx.sessions["C"]["binding"],
                                                  time.monotonic(), ctx.c_busy_nonces)]
-        require(bool(observations), "C2 busy disposition lacks fresh authoritative Core-busy evidence")
+        if not observations:
+            # Surface this in the main scenario poll, not the daemon's worker task.
+            ctx.c_busy_evidence_error = "C2 busy disposition lacks fresh authoritative Core-busy evidence"
+            return result
         ctx.c_busy_nonces.update(row["response"]["witness"]["nonce"] for row in observations)
         record_evidence(ctx, "c2CoreBusy", observations)
     ctx.dispatch_results.append({"delivery": label, "status": result.get("status"),
@@ -2242,6 +2246,8 @@ def build_proof(ctx):
 
 
 def c_second_busy_dispositions(ctx):
+    error = getattr(ctx, "c_busy_evidence_error", None)
+    require(not error, error)
     return [row for row in ctx.dispatch_results
             if row["delivery"] == "C-busy-second"
             and row["reason"] == "client_unavailable_or_busy"]
@@ -2400,6 +2406,7 @@ async def run_scenario(directory_fd=None, publication_stack=None):
         bridge_challenge_observations = []
         fixture_secret = address["secret"]
         c_challenges, c_busy_nonces = [], set()
+        c_busy_evidence_error = None
         ctx = SimpleNamespace(**locals())
         ctx.args = args
         ctx.installed_proof = installed_proof

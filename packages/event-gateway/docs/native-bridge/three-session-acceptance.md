@@ -194,9 +194,13 @@ together; the default per-native profile supports omitting both for dynamic port
 Port shape is validated before artifact inspection or Git subprocesses. After
 artifact and Git validation and the containment checks, every selected port must
 allow a temporary bind before the evidence archive is created or the broker/native
-sessions start, including refusal of bound sockets that are not listening. Git
-validation therefore still precedes occupancy probes. These probes
-are not reservations: a later bind can fail if another process takes a port.
+sessions start, including refusal of bound sockets that are not listening. The
+probe intentionally omits `SO_REUSEADDR` so wildcard-bound sockets also block it,
+even when those sockets enable address reuse. This conservative check can reject
+ports in `TIME_WAIT`: wait and retry, or select a fresh complete port set permitted
+by the audited outer profile. Do not weaken the outer policy or fall back to
+unapproved ports. Git validation therefore still precedes occupancy probes. These
+probes are not reservations: a later bind can fail if another process takes a port.
 Cleanup also requires every selected port to be closed after the native providers,
 daemon, and broker have stopped; a remaining listener refuses PASS.
 The old four-port recovery profile cannot be reused unchanged. Audit the outer
