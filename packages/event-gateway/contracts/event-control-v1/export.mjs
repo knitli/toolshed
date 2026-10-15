@@ -18,7 +18,7 @@ const names = [
   '../../gatekeeper-memory/src/principals.ts', '../../openapi-operator/src/access.ts',
   '../../gatekeeper-messaging/src/agent-token.ts',
   'github/source-control.ts', 'github/watches.ts',
-  'github/watch-store.ts', 'github/watch-control-internal.ts', 'manual-canary.ts',
+  'github/watch-store.ts', 'github/watch-control-internal.ts', 'github/watch-kernel.ts', 'github/watch-owner-proof.ts', 'manual-canary.ts',
   'manual-canary-scope.ts', 'native-admission-canary.ts', 'admin-api.ts', 'admin-types.ts',
   '../../gatekeeper-memory/src/auth.ts', '../../gatekeeper-memory/src/admin-security.ts',
 ];

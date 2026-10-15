@@ -14,7 +14,8 @@ from event_gateway.protocol import (
 
 
 def check(path):
-    vectors = json.loads(Path(path).read_text())
+    document = json.loads(Path(path).read_text())
+    vectors = document['semanticVectors'] if 'semanticVectors' in document else document
     if vectors['schemaVersion'] != 1:
         raise ValueError('unsupported semantic corpus version')
     parsers = {'envelope': parse_envelope, 'acknowledgment': parse_acknowledgment}

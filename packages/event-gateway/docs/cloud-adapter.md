@@ -112,21 +112,23 @@ as permission to create a new native attempt or attachment request.
 
 ## Separate control-plane source pin
 
-The `github-watch-control` snapshot was exported from the actual merged cloud
-revision and authorized by the trusted-main policy in Toolshed #105 before this
-consumer rotation. The added watch-store and internal watch-control pins record
-existing runtime imports; they do not expose a public watch API or adopt watches.
-Watch-kernel and owner-proof modules remain outside this selected source pin:
-at the pinned cloud revision they have no production caller.
+The `github-watch-owner-rpc` family pairs two actual merged cloud revisions:
+`event-v1` at `59940bde10db5584247c8648c985f246f546226f` embeds the canonical
+45 semantic verdicts, and `event-control-v1` at
+`b152b1b92fec860354cacd406b0d72274a97713c` pins 36 Event source paths plus the
+Zod version and fixture SHA-256. Both runtimes execute the same 30 raw-parser,
+six digest and nine ACK-binding cases. Authorization of the complete family on
+trusted main precedes the consumer rotation; all nine older families stay intact.
 
-`contracts/event-control-v1/manifest.json` pins 34 Event source paths from
-the immutable OS revision `ccdb861eb9126ccd8319d50da5cd6689f91435dd`, plus the Zod version and
-fixture SHA-256. The source chain includes delegated read authority, GitHub
-source-control and watches, manual/native canary boundaries, admin API/types,
-and memory authentication/admin security. These are offline provenance pins;
-production source activation, delivery, and native attachment remain disabled
-by default, and no live qualification is established by this rotation. It does
-not modify the earlier frozen `event-v1` transport pin.
+The selected control source now includes watch-kernel and owner-proof because
+coordinator/admin RPCs call them in production source. The create-only flag is
+unset in deployment configuration; this does not add a public route or activate
+watches, delivery or native attachment. The other selected sources cover delegated
+read authority, source-control, watches, manual/native canary boundaries, admin
+API/types, and memory authentication/admin security. All 36 source hashes match
+the later semantic-fixture revision, and generated control DTO bytes are unchanged.
+This is offline source/fixture provenance, not qualification of deployed RPC
+topology, live authority or native idle wake.
 In `--check` mode, the exporter verifies the committed revision, every source
 hash and installed Zod version before evaluating source. A mismatch stops before
 any data-module import. It then executes the pinned source's claim/settlement

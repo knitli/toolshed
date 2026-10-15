@@ -212,7 +212,11 @@ presence/authority seams are implemented.
 ## Contract and validation
 
 `contracts/event-v1/manifest.json` pins the canonical OS schema, semantic
-reference, and fixture bytes at `ed23882eac491e26e070e3ef26cf8c0e9e702b38`.
+reference, and fixture bytes at `59940bde10db5584247c8648c985f246f546226f`.
+The fixture embeds the canonical 45 semantic verdicts: 30 raw-parser, six
+delivery-digest and nine ACK-binding cases. Both runtimes execute these cases;
+normal Python tests require the embedded corpus, including optimized-mode
+wrong-verdict rejection.
 
 ```sh
 uv run --frozen python scripts/sync_contract.py --check --fetch
@@ -245,27 +249,27 @@ byte limits. Consumer tests exercise these through Python validation and the
 HTTP response boundary. Request identity, pagination binding, and duplicate
 record checks remain separately tested local invariants. These vectors do not
 qualify live authorization, source initialization, delivery, or native wake.
-The `github-watch-control` snapshot was exported from the actual merged cloud
-revision and authorized by the trusted-main policy in Toolshed #105 before this
-consumer rotation. The added watch-store and internal watch-control pins record
-existing runtime imports; they do not expose a public watch API or adopt watches.
-Watch-kernel and owner-proof modules remain outside this selected source pin:
-at the pinned cloud revision they have no production caller.
+The `github-watch-owner-rpc` family pairs the actual merged semantic-fixture
+revision with the actual merged internal owner-RPC revision. Its complete seven-file
+hash map must be authorized on trusted main before this consumer rotates. All nine
+historical families retain their existing hashes and archived snapshots.
 
-The control manifest pins 34 source paths at
-`ccdb861eb9126ccd8319d50da5cd6689f91435dd`, preserving the delegated read path:
-authority revalidation and deadlines, host admission and GitHub client, grants
-and principal allowlist, controller pagination/projection, subject validation,
-and shared identity helpers. It also includes source-control and watches, manual
-and native canary boundaries, admin API/types, and memory authentication/admin
-security. Production source activation, delivery, and native attachment remain
-disabled by default; this rotation does not enable them.
-These are offline source provenance, not an executable dependency bundle or proof
-of the external authority service, provider API, or Cloudflare runtime.
-Snapshot verification does not prove that every Python semantic
-edge matches TypeScript: the event-envelope corpus still lacks portable semantic
-boundary vectors. Expanding that corpus and running both validators is an open
-cross-repository qualification gate.
+The control manifest pins 36 source paths at
+`b152b1b92fec860354cacd406b0d72274a97713c`, including watch-store, internal
+watch-control, watch-kernel and owner-proof. The kernel now has an internal owner
+RPC caller; there is no public watch route or client activation. New create requires
+an exact-true flag that is unset in deployment configuration. Source activation,
+delivery and native attachment remain disabled by default.
+
+The source chain also covers delegated read authority and deadlines, host admission
+and GitHub client, grants and principal allowlist, controller pagination/projection,
+source-control and watches, manual/native canary boundaries, admin API/types, and
+memory authentication/admin security. All 36 source hashes match the semantic
+fixture's later cloud revision too. The generated control DTO fixture is unchanged.
+These are selected offline provenance pins, not an executable dependency bundle or
+proof of external authority, provider APIs, Cloudflare topology or native wake.
+The shared 45 cases establish their listed semantic verdicts, not every possible
+cross-language edge or live delivery readiness.
 
 `security.py` documents a **proposed local** Ed25519 transport seam (exact bytes,
 recipient audience, configured public-key ID). The dispatcher retains the exact
