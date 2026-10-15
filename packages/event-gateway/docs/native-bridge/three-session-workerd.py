@@ -384,6 +384,7 @@ def snapshot_evidence(ctx, stage):
     if database.exists():
         with closing(sqlite3.connect("file:" + str(database) + "?mode=ro", uri=True, timeout=3)) as db:
             db.row_factory = sqlite3.Row
+            db.execute("BEGIN")
             present = {row[0] for row in db.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 "AND name IN ('attachments', 'deliveries', 'attempts')",

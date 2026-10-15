@@ -2,7 +2,7 @@
 
 import copy
 import asyncio
-from contextlib import ExitStack, closing
+from contextlib import ExitStack, closing, contextmanager
 from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import io
@@ -946,17 +946,72 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
     def test_broker_setup_failure_closes_both_archive_descriptors(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            real_close = os.close
+            real_close, real_archive = os.close, FIXTURE.evidence_archive
+            archive_fds, closed = {}, []
+
+            @contextmanager
+            def archive(path):
+                with real_archive(path) as evidence:
+                    for fd in (evidence.fd, evidence.directory_fd):
+                        info = os.fstat(fd)
+                        archive_fds[fd] = (info.st_dev, info.st_ino)
+                    yield evidence
+
+            def close(fd):
+                info = os.fstat(fd)
+                if archive_fds.get(fd) == (info.st_dev, info.st_ino):
+                    closed.append(fd)
+                real_close(fd)
+
             with patch.object(FIXTURE, "args", SimpleNamespace(output=str(root / "proof.json"), outer_contained=False)), \
                     patch.object(FIXTURE, "private_temp_root", return_value=root), \
                     patch.object(FIXTURE, "start_broker", side_effect=RuntimeError("broker failed")), \
-                    patch.object(FIXTURE.os, "close", wraps=real_close) as close:
+                    patch.object(FIXTURE, "evidence_archive", side_effect=archive), \
+                    patch.object(FIXTURE.os, "close", side_effect=close):
                 with self.assertRaisesRegex(RuntimeError, "broker failed"):
                     asyncio.run(FIXTURE.run_scenario())
-            self.assertEqual(close.call_count, 2)
-            for call in close.call_args_list:
-                with self.assertRaises(OSError):
-                    os.fstat(call.args[0])
+                # Event-loop cleanup may close unrelated or reused descriptor numbers.
+                unrelated = os.open(root / "unrelated", os.O_CREAT | os.O_RDWR, 0o600)
+                reused = next(fd for fd in archive_fds if fd != unrelated)
+                os.dup2(unrelated, reused)
+                os.close(reused)
+                os.close(unrelated)
+            self.assertEqual(len(archive_fds), 2)
+            self.assertCountEqual(closed, archive_fds)
+
+
+    def test_snapshot_stays_consistent_when_writer_commits_between_tables(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "ledger.sqlite"
+            with closing(sqlite3.connect(database)) as writer:
+                writer.execute("PRAGMA journal_mode=WAL")
+                for query in (
+                    "CREATE TABLE attachments (version INTEGER)", "INSERT INTO attachments VALUES (0)",
+                    "CREATE TABLE deliveries (version INTEGER)", "INSERT INTO deliveries VALUES (0)",
+                    "CREATE TABLE attempts (version INTEGER)", "INSERT INTO attempts VALUES (0)",
+                ):
+                    writer.execute(query)
+                writer.commit()
+                records = []
+
+                def record(ctx, kind, value):
+                    if kind != "database":
+                        return
+                    records.append(value)
+                    if value["table"] == "attachments":
+                        for query in ("UPDATE attachments SET version = 1",
+                                      "UPDATE deliveries SET version = 1",
+                                      "UPDATE attempts SET version = 1"):
+                            writer.execute(query)
+                        writer.commit()
+
+                ctx = SimpleNamespace(state=root, fixture=Mock())
+                with patch.object(FIXTURE, "record_evidence", side_effect=record):
+                    self.assertEqual(FIXTURE.snapshot_evidence(ctx, "concurrent-write"), [])
+                self.assertEqual([row["rows"] for row in records], [[{"version": 0}]] * 3)
+                self.assertEqual(writer.execute("SELECT version FROM attempts").fetchone()[0], 1)
+                ctx.fixture.assert_called_once_with("/fixture/read")
 
 
     def test_provider_last_record_is_synced_before_native_scratch_removal(self):
