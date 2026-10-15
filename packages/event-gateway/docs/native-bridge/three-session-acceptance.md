@@ -188,13 +188,14 @@ The seven loopback ports are Workerd entry `49732`, internal loopback `49733`,
 broker `49734`, gateway listener `49735`, and model providers A/B/C
 `49736`/`49737`/`49738` in the example below. All supplied ports must be distinct
 integers between 1024 and 65535. `--outer-contained` requires `--listener-port`
-and exactly three `--model-ports`; the default per-native profile still supports
-an omitted listener/model selection using dynamic ports.
+and exactly three `--model-ports`. In either profile, these options must be supplied
+together; the default per-native profile supports omitting both for dynamic ports.
 
 Port shape is validated before artifact inspection or Git subprocesses. After
 artifact and Git validation and the containment checks, every selected port must
-be closed before the evidence archive is created or the broker/native sessions
-start. Git validation therefore still precedes occupancy probes. These probes
+allow a temporary bind before the evidence archive is created or the broker/native
+sessions start, including refusal of bound sockets that are not listening. Git
+validation therefore still precedes occupancy probes. These probes
 are not reservations: a later bind can fail if another process takes a port.
 Cleanup also requires every selected port to be closed after the native providers,
 daemon, and broker have stopped; a remaining listener refuses PASS.

@@ -82,26 +82,48 @@ class ThreeSessionFixedPortTests(unittest.TestCase):
         for value in (True, False, 0, 1023, 65536, "49735", 49735.0):
             faults.extend([dict(listener_port=value), dict(model_ports=[49736, value, 49738])])
         for fault in faults:
-            with self.subTest(fault=fault), patch.object(FIXTURE, "port_is_closed") as probe:
+            with self.subTest(fault=fault), patch.object(FIXTURE.socket, "socket") as probe:
                 with self.assertRaises(AssertionError):
                     FIXTURE.preflight_ports(self.parsed(**fault))
                 probe.assert_not_called()
-        with patch.object(FIXTURE, "port_is_closed", return_value=True) as probe:
+        with patch.object(FIXTURE.socket, "socket") as probe:
             FIXTURE.preflight_ports(self.parsed())
-            self.assertEqual([call.args[0] for call in probe.call_args_list], list(range(49732, 49739)))
+            self.assertEqual([call.args[0] for call in probe.return_value.__enter__.return_value.bind.call_args_list],
+                             [("127.0.0.1", port) for port in range(49732, 49739)])
 
     def test_occupied_port_blocks_scenario_before_any_process_or_archive(self):
         for occupied in range(49732, 49739):
             with self.subTest(occupied=occupied), patch.object(FIXTURE, "args", self.parsed(), create=True), \
                     patch.object(FIXTURE, "private_temp_root", return_value=Path('/fixture')), \
                     patch.object(FIXTURE, "verify_outer_containment"), \
-                    patch.object(FIXTURE, "port_is_closed", side_effect=lambda port: port != occupied), \
+                    patch.object(FIXTURE.socket, "socket") as probe, \
                     patch.object(FIXTURE, "start_broker") as broker, \
                     patch.object(FIXTURE, "evidence_archive") as archive:
-                with self.assertRaisesRegex(AssertionError, "already listening"):
+                def bind(address):
+                    if address[1] == occupied:
+                        raise OSError("address in use")
+                probe.return_value.__enter__.return_value.bind.side_effect = bind
+                with self.assertRaisesRegex(AssertionError, "already bound"):
                     asyncio.run(FIXTURE.run_scenario())
                 broker.assert_not_called()
                 archive.assert_not_called()
+
+    def test_uncontained_rejects_either_partial_fixed_port_selection(self):
+        for missing in ("listener_port", "model_ports"):
+            with self.subTest(missing=missing):
+                with self.assertRaisesRegex(AssertionError, "requires listener and three model ports"):
+                    FIXTURE.fixture_ports(self.parsed(outer_contained=False, **{missing: None}))
+
+    def test_bound_non_listening_port_blocks_preflight(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:
+            occupied.bind(("127.0.0.1", 0))
+            port = occupied.getsockname()[1]
+            with patch.object(FIXTURE, "fixture_ports", return_value=[port]), \
+                    patch.object(FIXTURE, "port_is_closed", return_value=True):
+                with self.assertRaisesRegex(AssertionError, "already bound or unavailable"):
+                    FIXTURE.preflight_ports(self.parsed())
+        with patch.object(FIXTURE, "fixture_ports", return_value=[port]):
+            FIXTURE.preflight_ports(self.parsed())
 
     def test_cleanup_requires_every_selected_fixed_port_closed(self):
         ports = list(range(49732, 49739))
@@ -974,7 +996,7 @@ class ThreeSessionSourceTests(unittest.TestCase):
             with patch.object(FIXTURE, 'load_module', return_value=helper) as module, \
                     patch.object(FIXTURE.subprocess, 'run') as readback, \
                     patch.object(FIXTURE.subprocess, 'Popen') as process:
-                with self.assertRaisesRegex(AssertionError, 'outer containment requires'):
+                with self.assertRaisesRegex(AssertionError, 'fixed port selection requires'):
                     FIXTURE.configure(parsed)
                 module.assert_not_called()
                 readback.assert_not_called()
@@ -2080,8 +2102,9 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
         binding = {"clientId": str(uuid4()), "backendPid": 42, "connectionId": str(uuid4()),
                    "threadId": str(uuid4()), "serverInstanceId": str(uuid4()), "serverGeneration": 2,
                    "generation": 3}
-        row = {"request": {"command": "challenge", "challengeId": "fresh", "expectedBinding": binding},
-               "receivedAt": 10.0, "response": {"challengeId": "fresh", "validUntilMonotonic": 10.5,
+        row = {"request": {"command": "challenge", "challengeId": "00000000-0000-4000-8000-000000000001", "expectedBinding": binding},
+               "receivedAt": 10.0, "response": {"challengeId": "00000000-0000-4000-8000-000000000001",
+               "observedAt": "2026-10-15T08:00:00.000Z", "validUntilMonotonic": 10.5,
                "witness": {**binding, "version": 2, "nonce": 1, "sequence": 1, "cause": "heartbeat",
                            "leaseMs": 750, "eligible": True, "nativeCoreTurnState": "busy"}}}
         with patch.object(FIXTURE, "launcher", launcher):
@@ -2108,17 +2131,48 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             bad = copy.deepcopy(row)
             bad["response"]["challengeId"] = "replayed"
             self.assertFalse(FIXTURE.core_busy_observation(bad, binding, 10.1, set()))
-            bad["response"]["challengeId"] = "fresh"
+            bad["response"]["challengeId"] = row["request"]["challengeId"]
             bad["response"]["validUntilMonotonic"] = float("nan")
             self.assertFalse(FIXTURE.core_busy_observation(bad, binding, 10.1, set()))
 
+
+    def test_busy_rejects_complete_challenge_contract_failures(self):
+        binding = {"clientId": str(uuid4()), "backendPid": 42, "connectionId": str(uuid4()),
+                   "threadId": str(uuid4()), "serverInstanceId": str(uuid4()), "serverGeneration": 2,
+                   "generation": 3}
+        challenge_id = str(uuid4())
+        response = {"challengeId": challenge_id, "observedAt": "2026-10-15T08:00:00.000Z",
+                    "validUntilMonotonic": 10.5,
+                    "witness": {**binding, "version": 2, "nonce": 1, "sequence": 1, "cause": "heartbeat",
+                                "leaseMs": 750, "eligible": True, "nativeCoreTurnState": "busy"}}
+        failures = [{**response, "observedAt": value} for value in (None, True, 1, "invalid")]
+        failures += [{key: value for key, value in response.items() if key != "observedAt"},
+                     {**response, "unexpected": True}]
+        with patch.object(FIXTURE, "launcher", launcher), \
+                patch.object(launcher, "_session_request", return_value=response), \
+                patch.object(launcher.time, "monotonic", return_value=10.1):
+            self.assertEqual(launcher.session_challenge("unused", str(uuid4()), challenge_id, binding),
+                             {key: response[key] for key in ("observedAt", "validUntilMonotonic", "witness")})
+            row = {"request": {"command": "challenge", "challengeId": challenge_id,
+                               "expectedBinding": binding}, "response": response, "receivedAt": 10.0}
+            self.assertTrue(FIXTURE.core_busy_observation(row, binding, 10.1, set()))
+        for bad in failures:
+            with self.subTest(response=bad), patch.object(FIXTURE, "launcher", launcher), \
+                    patch.object(launcher, "_session_request", return_value=bad), \
+                    patch.object(launcher.time, "monotonic", return_value=10.1):
+                with self.assertRaises(launcher.LaunchError):
+                    launcher.session_challenge("unused", str(uuid4()), challenge_id, binding)
+                row = {"request": {"command": "challenge", "challengeId": challenge_id,
+                                   "expectedBinding": binding}, "response": bad, "receivedAt": 10.0}
+                self.assertFalse(FIXTURE.core_busy_observation(row, binding, 10.1, set()))
 
     def test_busy_dispatch_requires_a_new_challenge_and_archives_accepted_witness(self):
         binding = {"clientId": str(uuid4()), "backendPid": 42, "connectionId": str(uuid4()),
                    "threadId": str(uuid4()), "serverInstanceId": str(uuid4()), "serverGeneration": 2,
                    "generation": 3}
-        row = {"request": {"command": "challenge", "challengeId": "fresh", "expectedBinding": binding},
-               "receivedAt": 10.0, "response": {"challengeId": "fresh", "validUntilMonotonic": 10.5,
+        row = {"request": {"command": "challenge", "challengeId": "00000000-0000-4000-8000-000000000001", "expectedBinding": binding},
+               "receivedAt": 10.0, "response": {"challengeId": "00000000-0000-4000-8000-000000000001",
+               "observedAt": "2026-10-15T08:00:00.000Z", "validUntilMonotonic": 10.5,
                "witness": {**binding, "version": 2, "nonce": 1, "sequence": 1, "cause": "heartbeat",
                            "leaseMs": 750, "eligible": True, "nativeCoreTurnState": "busy"}}}
         with tempfile.TemporaryDirectory() as directory:

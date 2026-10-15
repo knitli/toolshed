@@ -72,9 +72,9 @@ def require_fixture_port(port):
 def fixture_ports(parsed):
     listener_port = getattr(parsed, "listener_port", None)
     model_ports = getattr(parsed, "model_ports", None)
-    if getattr(parsed, "outer_contained", False):
+    if getattr(parsed, "outer_contained", False) or listener_port is not None or model_ports is not None:
         require(listener_port is not None and model_ports is not None,
-                "outer containment requires listener and three model ports")
+                "fixed port selection requires listener and three model ports")
     ports = [parsed.entry_port, parsed.loopback_port, parsed.broker_port]
     if listener_port is not None:
         ports.append(listener_port)
@@ -90,7 +90,11 @@ def fixture_ports(parsed):
 
 def preflight_ports(parsed):
     for port in fixture_ports(parsed):
-        require(port_is_closed(port), "fixture port already listening or unavailable")
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError as exc:
+                raise AssertionError("fixture port already bound or unavailable") from exc
 
 
 def load_module(name, path):
@@ -541,17 +545,22 @@ def snapshot_evidence(ctx, stage):
 
 def core_busy_observation(row, binding, now, seen):
     request, response = row["request"], row["response"]
-    witness = response.get("witness", {})
-    deadline = response.get("validUntilMonotonic")
-    nonce = witness.get("nonce")
+    # Raw exchanges are captured before session_challenge validates this envelope.
+    if (not launcher._valid_binding(binding) or not isinstance(response, dict)
+            or set(response) != {"challengeId", "observedAt", "validUntilMonotonic", "witness"}
+            or not launcher._valid_challenge_id(request.get("challengeId"))
+            or response["challengeId"] != request["challengeId"]
+            or not launcher._valid_observed_at(response["observedAt"])
+            or not launcher._valid_native_witness(response["witness"])):
+        return False
+    witness = response["witness"]
+    nonce = witness["nonce"]
+    deadline = response["validUntilMonotonic"]
     return (request.get("command") == "challenge"
-            and response.get("challengeId") == request.get("challengeId")
-            and isinstance(request.get("challengeId"), str) and bool(request["challengeId"])
             and request.get("expectedBinding") == binding
-            and launcher._valid_native_witness(witness)
             and all(type(witness.get(key)) is type(value) and witness.get(key) == value
                     for key, value in binding.items())
-            and witness.get("eligible") is True and witness.get("nativeCoreTurnState") == "busy"
+            and witness["nativeCoreTurnState"] == "busy"
             and is_exact_int(nonce) and nonce not in seen
             and type(deadline) in (int, float) and math.isfinite(deadline)
             and now < deadline <= row["receivedAt"] + min(witness["leaseMs"], 750) / 1000)
