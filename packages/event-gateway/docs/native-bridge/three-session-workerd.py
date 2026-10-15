@@ -314,11 +314,27 @@ def free_port():
 
 def private_json(path, value, *, directory_fd=None):
     raw = (json.dumps(value, separators=(",", ":")) + "\n").encode()
-    descriptor = os.open(path if directory_fd is None else path.name,
-                         os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+    named_path = path if directory_fd is None else path.name
+    descriptor = os.open(named_path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                          0o600, dir_fd=directory_fd)
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(raw)
+    try:
+        identity = os.fstat(descriptor)
+        with os.fdopen(descriptor, "wb", closefd=False) as stream:
+            stream.write(raw)
+        os.fsync(descriptor)
+        if directory_fd is not None:
+            os.fsync(directory_fd)
+        opened = os.fstat(descriptor)
+        named = os.stat(named_path, dir_fd=directory_fd, follow_symlinks=False)
+        require(all(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600
+                    and info.st_uid == os.getuid() and info.st_nlink == 1
+                    and (info.st_dev, info.st_ino) == (identity.st_dev, identity.st_ino)
+                    and info.st_size == len(raw) for info in (opened, named)),
+                "private JSON file changed")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        require(os.read(descriptor, len(raw) + 1) == raw, "private JSON content changed")
+    finally:
+        os.close(descriptor)
 
 
 @contextmanager
@@ -1198,8 +1214,6 @@ def fixture(ctx, path, body=None):
         try:
             record_evidence(ctx, "cloudFixtureError", {"path": path, "error": type(error).__name__})
         except Exception:
-            with ctx.evidence.lock:
-                ctx.evidence.failed = True
             raise error
         raise
     record_evidence(ctx, "cloudFixture", {"path": path, "status": status,
@@ -1314,8 +1328,7 @@ def record_session_request(ctx, state_dir, session_id, message, *, native_reques
     try:
         record_evidence(ctx, "nativeExchange", row)
     except Exception:
-        with ctx.evidence.lock:
-            ctx.evidence.failed = True
+        pass  # record_evidence already latched failure; preserve the native response.
     if message.get("command") == "nativeReceipt" and label in ctx.receipt_calls:
         ctx.receipt_calls[label].append(result.get("outcome", {}).get("status"))
     return result
@@ -1414,7 +1427,10 @@ async def initialize_runtime(ctx, resources):
         try:
             ctx.attached[label] = await admit_runtime(ctx.admission_cloud, session, ctx.runtime_ids[label])
         except Exception as error:
-            readback = ctx.fixture("/fixture/admission")
+            try:
+                readback = ctx.fixture("/fixture/admission")
+            except Exception:
+                raise error from None
             stored_clients = []
             for row in readback["native_runtime_bindings"]:
                 try:
@@ -2390,8 +2406,9 @@ def main():
             verify_evidence(evidence)
             descriptor = os.open(target.name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                  0o600, dir_fd=directory)
-            with os.fdopen(descriptor, "w+b") as stream:
-                proof_identity = os.fstat(stream.fileno())
+            publication_stack.callback(os.close, descriptor)
+            proof_identity = os.fstat(descriptor)
+            with os.fdopen(descriptor, "w+b", closefd=False) as stream:
                 stream.write(encoded)
                 stream.flush()
                 os.fsync(stream.fileno())

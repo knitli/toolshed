@@ -613,6 +613,88 @@ class ThreeSessionBrokerTests(unittest.TestCase):
                     self.assertTrue(broker_log.closed)
 
 
+class ThreeSessionArtifactFailureTests(unittest.TestCase):
+    def test_attach_diagnostic_failure_preserves_original_attach_error(self):
+        original = RuntimeError("attach failed")
+        sessions = [{"sessionId": str(uuid4()), "initiallySelectedIdle": True,
+                     "binding": {"clientId": str(uuid4()), "threadId": str(uuid4())}} for _ in range(3)]
+        with tempfile.TemporaryDirectory() as directory, \
+                FIXTURE.evidence_archive(Path(directory) / "evidence.jsonl") as evidence:
+            evidence.size = 64 * 1024 * 1024
+            ctx = SimpleNamespace(sessions={}, session_labels={}, admission_cloud=Mock(), evidence=evidence)
+            ctx.fixture = lambda path: FIXTURE.fixture(ctx, path)
+            with patch.object(FIXTURE, "native_session", side_effect=sessions), \
+                    patch.object(FIXTURE, "admit_runtime", AsyncMock(side_effect=original)), \
+                    patch.object(FIXTURE, "post") as post:
+                with self.assertRaises(Exception) as caught:
+                    asyncio.run(FIXTURE.initialize_runtime(ctx, Mock()))
+                self.assertIs(caught.exception, original)
+                self.assertTrue(evidence.failed)
+                post.assert_not_called()
+
+    def test_private_json_detects_postwrite_mutation(self):
+        for mutation in ("replace", "hardlink", "overwrite", "mode"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory, ExitStack() as resources:
+                path = Path(directory) / "causal.json"
+                directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+                resources.callback(os.close, directory_fd)
+                original_fdopen = os.fdopen
+
+                @contextmanager
+                def fdopen(fd, *args, **kwargs):
+                    with original_fdopen(fd, *args, **kwargs) as stream:
+                        yield stream
+                        stream.flush()
+                        if mutation == "replace":
+                            path.rename(path.with_suffix(".original"))
+                            path.write_bytes(b"replacement")
+                        elif mutation == "hardlink":
+                            os.link(path, path.with_suffix(".link"))
+                        elif mutation == "overwrite":
+                            path.write_bytes(b"X" * path.stat().st_size)
+                        else:
+                            path.chmod(0o644)
+
+                with patch.object(FIXTURE.os, "fdopen", side_effect=fdopen):
+                    with self.assertRaises((AssertionError, OSError)):
+                        FIXTURE.private_json(path, {"nonce": "private"}, directory_fd=directory_fd)
+
+    def test_proof_fdopen_failure_closes_descriptor_and_removes_owned_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "proof.json"
+            descriptors = []
+            failure = OSError("fdopen failed")
+
+            async def scenario(directory_fd, publication_stack):
+                evidence = publication_stack.enter_context(FIXTURE.evidence_archive(
+                    target.with_suffix(".private-evidence.jsonl"), directory_fd))
+                evidence.drained = True
+                return {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}, evidence
+
+            def fdopen(fd, *_args, **_kwargs):
+                descriptors.append(fd)
+                raise failure
+
+            with patch.object(FIXTURE, "cli", return_value=SimpleNamespace(output=str(target))), \
+                    patch.object(FIXTURE, "configure"), \
+                    patch.object(FIXTURE, "run_scenario", side_effect=scenario), \
+                    patch.object(FIXTURE.os, "fdopen", side_effect=fdopen), patch("builtins.print") as output:
+                with self.assertRaises(OSError) as caught:
+                    FIXTURE.main()
+                self.assertIs(caught.exception, failure)
+                output.assert_not_called()
+            self.assertFalse(target.exists())
+            for fd in descriptors:
+                try:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
+                finally:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+
+
 class ThreeSessionSourceTests(unittest.TestCase):
     def inputs(self, root):
         package = root / "package/src/event_gateway"
