@@ -201,8 +201,11 @@ ports in `TIME_WAIT`: wait and retry, or select a fresh complete port set permit
 by the audited outer profile. Do not weaken the outer policy or fall back to
 unapproved ports. Git validation therefore still precedes occupancy probes. These
 probes are not reservations: a later bind can fail if another process takes a port.
-Cleanup also requires every selected port to be closed after the native providers,
-daemon, and broker have stopped; a remaining listener refuses PASS.
+Cleanup also requires every selected port to allow the same strict temporary bind
+within the existing five-second wait after the native providers, daemon, and broker
+have stopped. A bound socket or `TIME_WAIT` can refuse PASS even without a listener
+if the port remains unavailable at that deadline. Cleanup does not enable
+`SO_REUSEADDR`, fall back to other ports, or extend the wait indefinitely.
 The old four-port recovery profile cannot be reused unchanged. Audit the outer
 profile for the seven selected ports before execution; do not supply operator
 credentials or real model configuration.

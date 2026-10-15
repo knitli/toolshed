@@ -121,8 +121,7 @@ class ThreeSessionFixedPortTests(unittest.TestCase):
                     occupied.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, reuse)
                     occupied.bind((host, 0))
                     port = occupied.getsockname()[1]
-                    with patch.object(FIXTURE, "fixture_ports", return_value=[port]), \
-                            patch.object(FIXTURE, "port_is_closed", return_value=True):
+                    with patch.object(FIXTURE, "fixture_ports", return_value=[port]):
                         with self.assertRaisesRegex(AssertionError, "already bound or unavailable"):
                             FIXTURE.preflight_ports(self.parsed())
                 with patch.object(FIXTURE, "fixture_ports", return_value=[port]):
@@ -138,7 +137,7 @@ class ThreeSessionFixedPortTests(unittest.TestCase):
                 with patch.object(FIXTURE, "args", self.parsed()), \
                         patch.object(FIXTURE, "process_group_members", return_value=[]), \
                         patch.object(FIXTURE.time, "monotonic", side_effect=(0, 6)), \
-                        patch.object(FIXTURE, "port_is_closed", side_effect=lambda port: port != occupied) as probe:
+                        patch.object(FIXTURE, "port_is_bindable", side_effect=lambda port: port != occupied) as probe:
                     if occupied is not None:
                         with self.assertRaisesRegex(AssertionError, "portsClosed=False"):
                             FIXTURE.stop_broker(process, broker_log)
@@ -148,6 +147,27 @@ class ThreeSessionFixedPortTests(unittest.TestCase):
                         self.assertTrue(proof["loopbackPortsClosed"])
                         self.assertEqual([call.args[0] for call in probe.call_args_list], ports)
                 self.assertTrue(broker_log.closed)
+
+    def test_cleanup_rejects_bound_non_listening_socket_at_each_selected_port(self):
+        with ExitStack() as stack:
+            sockets = [stack.enter_context(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) for _ in range(7)]
+            for occupied in sockets:
+                occupied.bind(("127.0.0.1", 0))
+            ports = [occupied.getsockname()[1] for occupied in sockets]
+            for occupied in sockets:
+                occupied.close()
+            parsed = self.parsed(entry_port=ports[0], loopback_port=ports[1], broker_port=ports[2],
+                                 listener_port=ports[3], model_ports=ports[4:])
+            for port in ports:
+                with self.subTest(port=port), socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:
+                    occupied.bind(("127.0.0.1", port))
+                    process = Mock(pid=410, returncode=0)
+                    process.poll.return_value = 0
+                    with patch.object(FIXTURE, "args", parsed), \
+                            patch.object(FIXTURE, "process_group_members", return_value=[]), \
+                            patch.object(FIXTURE.time, "monotonic", side_effect=(0, 6)):
+                        with self.assertRaisesRegex(AssertionError, "portsClosed=False"):
+                            FIXTURE.stop_broker(process, io.BytesIO())
 
     def test_model_bind_uses_explicit_port_or_uncontained_ephemeral_default(self):
         host = SimpleNamespace(__file__=str(SCRIPT.with_name('native-host-launcher-qualification.py')))
@@ -755,18 +775,18 @@ class ThreeSessionBrokerTests(unittest.TestCase):
         for port in (True, False, None, "49734", 49734.0, 0, -1, 65536):
             with self.subTest(port=port), patch.object(FIXTURE.socket, "socket") as socket:
                 with self.assertRaises((AssertionError, ValueError)):
-                    FIXTURE.port_is_closed(port)
+                    FIXTURE.port_is_bindable(port)
                 socket.assert_not_called()
 
-    def test_port_probe_only_connection_refusal_proves_closed(self):
-        for error, expected in ((None, False), (ConnectionRefusedError(), True), (TimeoutError(), False)):
-            probe = Mock()
-            probe.connect.side_effect = error
-            with self.subTest(error=type(error).__name__), \
-                    patch.object(FIXTURE.socket, "socket", return_value=probe):
-                self.assertEqual(FIXTURE.port_is_closed(49734), expected)
-                probe.connect.assert_called_once_with(("127.0.0.1", 49734))
-                probe.close.assert_called_once_with()
+    def test_port_probe_requires_successful_strict_bind_and_closes_socket(self):
+        for error, expected in ((None, True), (OSError(), False), (TimeoutError(), False)):
+            with self.subTest(error=type(error).__name__), patch.object(FIXTURE.socket, "socket") as socket:
+                probe = socket.return_value.__enter__.return_value
+                probe.bind.side_effect = error
+                self.assertEqual(FIXTURE.port_is_bindable(49734), expected)
+                probe.bind.assert_called_once_with(("127.0.0.1", 49734))
+                probe.setsockopt.assert_not_called()
+                socket.return_value.__exit__.assert_called_once()
 
     def test_invalid_broker_handshake_rejected_and_child_cleaned(self):
         vectors = ((True, "fixture-only"), (False, "fixture-only"),

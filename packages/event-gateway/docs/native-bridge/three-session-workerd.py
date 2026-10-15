@@ -88,14 +88,20 @@ def fixture_ports(parsed):
     return ports
 
 
-def preflight_ports(parsed):
+def port_is_bindable(port):
+    require_fixture_port(port)
     # No SO_REUSEADDR: accepting a wildcard-bound occupant would defeat preflight.
-    for port in fixture_ports(parsed):
+    try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            try:
-                probe.bind(("127.0.0.1", port))
-            except OSError as exc:
-                raise AssertionError("fixture port already bound or unavailable") from exc
+            probe.bind(("127.0.0.1", port))
+    except OSError:
+        return False
+    return True
+
+
+def preflight_ports(parsed):
+    for port in fixture_ports(parsed):
+        require(port_is_bindable(port), "fixture port already bound or unavailable")
 
 
 def load_module(name, path):
@@ -635,21 +641,6 @@ def start_broker():
         raise RuntimeError("workerd fixture startup failed: " + detail)
 
 
-def port_is_closed(port):
-    require_fixture_port(port)
-    probe = socket.socket()
-    probe.settimeout(0.25)
-    try:
-        probe.connect(("127.0.0.1", port))
-        return False
-    except ConnectionRefusedError:
-        return True
-    except OSError:
-        return False
-    finally:
-        probe.close()
-
-
 def process_group_members(group_id):
     require(is_exact_int(group_id) and group_id > 1, "process group ID outside range")
     if sys.platform == "darwin":
@@ -778,11 +769,11 @@ def stop_broker(process, broker_log):
     ports = fixture_ports(args)
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        if not process_group_members(process.pid) and all(port_is_closed(port) for port in ports):
+        if not process_group_members(process.pid) and all(port_is_bindable(port) for port in ports):
             break
         time.sleep(0.05)
     members = process_group_members(process.pid)
-    ports_closed = all(port_is_closed(port) for port in ports)
+    ports_closed = all(port_is_bindable(port) for port in ports)
     broker_log.flush()
     broker_log.seek(0)
     detail = broker_log.read().decode(errors="replace")[-2048:]
