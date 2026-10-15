@@ -1126,12 +1126,16 @@ async def send(ctx, **request):
     path = request["url"].removeprefix(ORIGIN)
     body = json.loads(request["body"])
     proof = json.loads(request["headers"]["x-event-node-proof"])
-    response = await asyncio.to_thread(
-        post, ctx.address["port"], ctx.fixture_secret, path, request["body"], request["headers"], limit=8192,
-    )
-    record_evidence(ctx, "cloudWire", {"path": path, "request": body,
-                                      "proof": proof, "status": response[0],
-                                      "response": response[2].decode(errors="replace")})
+    def exchange():
+        response = post(ctx.address["port"], ctx.fixture_secret, path,
+                        request["body"], request["headers"], limit=8192)
+        # A canceled await must not discard evidence from an HTTP request that still completes.
+        record_evidence(ctx, "cloudWire", {"path": path, "request": body,
+                                          "proof": proof, "status": response[0],
+                                          "response": response[2].decode(errors="replace")})
+        return response
+
+    response = await asyncio.to_thread(exchange)
     response_summary = None
     if path == "/v1/runtimes/status":
         try:

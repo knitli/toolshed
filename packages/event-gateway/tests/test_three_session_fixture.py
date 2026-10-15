@@ -465,6 +465,33 @@ class ThreeSessionSourceTests(unittest.TestCase):
         helper.verified_executable.return_value = str(node)
         return parsed, helper, cloud
 
+    def test_evidence_suffix_output_has_distinct_archive_checked_before_subprocess(self):
+        for name in ("proof.private-evidence.jsonl", ".private-evidence.jsonl"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                parsed, helper, _ = self.inputs(root)
+                output = root / name
+                parsed.output = str(output)
+                archive = output.with_suffix(".private-evidence.jsonl")
+                sidecar = output.with_name(output.stem + ".private-causal.json")
+                self.assertEqual(len({output, archive, sidecar}), 3)
+                self.assertEqual(archive.name, output.stem + ".private-evidence.jsonl")
+                with patch.object(FIXTURE, "load_module", side_effect=RuntimeError("past output validation")):
+                    with self.assertRaisesRegex(RuntimeError, "past output validation"):
+                        FIXTURE.configure(parsed)
+                self.assertFalse(any(path.exists() for path in (output, archive, sidecar)))
+                archive.write_bytes(b"prior evidence")
+                with patch.object(FIXTURE, "load_module") as load, \
+                        patch.object(FIXTURE.subprocess, "run") as run, \
+                        patch.object(FIXTURE.subprocess, "Popen") as popen:
+                    with self.assertRaisesRegex(AssertionError, "private evidence must be new"):
+                        FIXTURE.configure(parsed)
+                    load.assert_not_called()
+                    run.assert_not_called()
+                    popen.assert_not_called()
+                self.assertEqual(archive.read_bytes(), b"prior evidence")
+                self.assertFalse(output.exists())
+
     def test_occupied_or_symlink_sidecar_rejected_before_subprocess(self):
         for kind in ("file", "directory", "dangling-symlink"):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
@@ -670,6 +697,59 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     self.assertEqual(records[-1]["kind"], "cloudWire")
                     self.assertEqual(records[-1]["value"]["response"], '{"error":"bad \ufffd"}')
                     self.assertEqual(records[-1]["value"]["status"], status)
+
+    def test_cancelled_cloud_exchange_records_worker_completion_before_drain_and_seal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.jsonl"
+            with FIXTURE.evidence_archive(path) as evidence:
+                entered, release, completed = threading.Event(), threading.Event(), threading.Event()
+                ctx = SimpleNamespace(evidence=evidence, address={"port": 12345},
+                                      fixture_secret="fixture", wire_evidence=[])
+                response = (200, {}, b'{"status":"committed"}')
+
+                def post(*args, **kwargs):
+                    entered.set()
+                    self.assertTrue(release.wait(5))
+                    completed.set()
+                    return response
+
+                async def scenario():
+                    exchange = asyncio.create_task(FIXTURE.send(
+                        ctx, method="POST", url=FIXTURE.ORIGIN + "/v1/runtimes/attach",
+                        timeout=5, max_response_bytes=8192, follow_redirects=False,
+                        body=b'{"runtimeId":"runtime"}',
+                        headers={"x-event-node-proof": '{"nonce":"nonce"}'},
+                    ))
+                    while not entered.is_set():
+                        await asyncio.sleep(0)
+                    exchange.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await exchange
+                    self.assertFalse(completed.is_set())
+                    drain = asyncio.create_task(FIXTURE.drain_native_observers(ctx))
+                    await asyncio.sleep(0)
+                    self.assertFalse(drain.done())
+                    with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                        FIXTURE.seal_evidence(ctx)
+                    release.set()
+                    await drain
+                    self.assertTrue(completed.is_set())
+                    proof = FIXTURE.seal_evidence(ctx)
+                    self.assertEqual(proof["sha256"], FIXTURE.digest(path.read_bytes()))
+                    records = [json.loads(line) for line in path.read_text().splitlines()]
+                    self.assertEqual(records[-1], {"kind": "cloudWire", "value": {
+                        "path": "/v1/runtimes/attach", "request": {"runtimeId": "runtime"},
+                        "proof": {"nonce": "nonce"}, "status": 200,
+                        "response": response[2].decode(),
+                    }})
+                    with self.assertRaisesRegex(AssertionError, "sealed"):
+                        FIXTURE.record_evidence(ctx, "late", {})
+
+                with patch.object(FIXTURE, "post", side_effect=post):
+                    try:
+                        asyncio.run(scenario())
+                    finally:
+                        release.set()
 
     def test_failed_drain_restores_all_observers_without_sealing_or_masking_error(self):
         for error in (AssertionError("native observers did not drain"), TimeoutError("executor timeout")):
