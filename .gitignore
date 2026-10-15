@@ -14,3 +14,7 @@ packages/event-gateway/build/
 packages/event-gateway/*.egg-info/
 packages/event-gateway/.ruff_cache/
 .pnpm-store/
+
+# Private qualification traces contain raw native and provider data.
+*.private-causal.json
+*.private-evidence.jsonl

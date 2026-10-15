@@ -5,7 +5,7 @@ import argparse
 import asyncio
 import base64
 import ctypes
-from contextlib import ExitStack, closing, redirect_stderr, redirect_stdout
+from contextlib import ExitStack, closing, contextmanager, redirect_stderr, redirect_stdout, suppress
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
@@ -84,8 +84,41 @@ def b64(value):
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
 
 
+class ModelServer(ThreadingHTTPServer):
+    def __init__(self, *args, **kwargs):
+        """Track accepted sockets so shutdown can unblock every handler before joining."""
+        self.connections = set()
+        self.connections_lock = threading.Lock()
+        super().__init__(*args, **kwargs)
+
+    def get_request(self):
+        connection, address = super().get_request()
+        with self.connections_lock:
+            self.connections.add(connection)
+        return connection, address
+
+    def shutdown_request(self, request):
+        try:
+            super().shutdown_request(request)
+        finally:
+            with self.connections_lock:
+                self.connections.discard(request)
+
+    def server_close(self):
+        # stop_model stops acceptance first, so this also covers handlers not yet scheduled.
+        with self.connections_lock:
+            for connection in self.connections:
+                try:
+                    connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+        super().server_close()
+
+
 class ModelProvider(BaseHTTPRequestHandler):
     """Local deterministic provider; it never forwards a request off this host."""
+
+    timeout = 5  # Bound socket reads/writes without shortening the intentional busy hold.
 
     def log_message(self, *_):
         pass
@@ -106,6 +139,8 @@ class ModelProvider(BaseHTTPRequestHandler):
             size = int(self.headers["Content-Length"])
             require(0 < size < 4_000_000, "model request outside bound")
             request = json.loads(self.rfile.read(size))
+            if getattr(self.server, "evidence", None):
+                self.server.evidence("providerRequest", {"phase": self.server.phase, "request": request})
             qualifier = self.server.qualifier
             kind = qualifier.request_kind(request)
             with self.server.request_lock:
@@ -149,6 +184,8 @@ class ModelProvider(BaseHTTPRequestHandler):
                 events = [{"type": "response.output_item.done", "item": item},
                           qualifier.completed(identity)]
             payload = "".join("data: " + json.dumps(event) + "\n\n" for event in events).encode()
+            if getattr(self.server, "evidence", None):
+                self.server.evidence("providerResponse", {"phase": self.server.phase, "events": events})
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(payload)))
@@ -159,12 +196,16 @@ class ModelProvider(BaseHTTPRequestHandler):
                     self.server.turn_verified = True
         except Exception as error:
             with self.server.request_lock:
-                self.server.errors.append({"type": type(error).__name__, "message": str(error)[:160],
-                                           "phase": self.server.phase,
-                                           "kind": locals().get("kind"),
-                                           "mainCount": len(self.server.main_requests),
-                                           "turnMainCount": len(self.server.turn_main_requests)})
-            self.send_error(500)
+                diagnostic = {"type": type(error).__name__, "message": str(error)[:160],
+                              "phase": self.server.phase, "kind": locals().get("kind"),
+                              "mainCount": len(self.server.main_requests),
+                              "turnMainCount": len(self.server.turn_main_requests)}
+                self.server.errors.append(diagnostic)
+            try:
+                if getattr(self.server, "evidence", None):
+                    self.server.evidence("providerError", diagnostic)
+            finally:
+                self.send_error(500)
 
 
 def stop_model(server, thread):
@@ -271,11 +312,206 @@ def free_port():
         return reservation.getsockname()[1]
 
 
-def private_json(path, value):
+def require_private_output_directory(info):
+    require_all("proof output directory must be owned mode 0700",
+                stat.S_ISDIR(info.st_mode), info.st_uid == os.getuid(), stat.S_IMODE(info.st_mode) == 0o700)
+
+
+def verify_private_json(artifact):
+    opened = os.fstat(artifact.fd)
+    named = os.stat(artifact.path, dir_fd=artifact.directory_fd, follow_symlinks=False)
+    require(all(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600
+                and info.st_uid == os.getuid() and info.st_nlink == 1
+                and (info.st_dev, info.st_ino) == (artifact.identity.st_dev, artifact.identity.st_ino)
+                and info.st_size == len(artifact.raw) for info in (opened, named)),
+            "private JSON file changed")
+    os.lseek(artifact.fd, 0, os.SEEK_SET)
+    require(os.read(artifact.fd, len(artifact.raw) + 1) == artifact.raw, "private JSON content changed")
+
+
+def private_json(path, value, *, directory_fd=None, publication_stack=None):
     raw = (json.dumps(value, separators=(",", ":")) + "\n").encode()
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(raw)
+    named_path = path if directory_fd is None else path.name
+    with ExitStack() as local_stack:
+        descriptor = os.open(named_path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=directory_fd)
+        (publication_stack if publication_stack is not None else local_stack).callback(os.close, descriptor)
+        artifact = SimpleNamespace(fd=descriptor, identity=os.fstat(descriptor), raw=raw,
+                                   path=named_path, directory_fd=directory_fd)
+        with os.fdopen(descriptor, "wb", closefd=False) as stream:
+            stream.write(raw)
+        os.fsync(descriptor)
+        if directory_fd is not None:
+            os.fsync(directory_fd)
+        verify_private_json(artifact)
+        return artifact if publication_stack is not None else None
+
+
+@contextmanager
+def evidence_archive(path, directory_fd=None):
+    directory = (os.dup(directory_fd) if directory_fd is not None else
+                 os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
+    descriptor, evidence = None, None
+    try:
+        descriptor = os.open(path.name, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=directory)
+        evidence = SimpleNamespace(fd=descriptor, directory_fd=directory, path=path,
+                                   identity=os.fstat(descriptor), directory_identity=os.fstat(directory),
+                                   lock=threading.Condition(), size=0, sealed=False, failed=False,
+                                   closing=False, active=0, drained=False, drain_error=None, causal=None)
+        record_evidence(SimpleNamespace(evidence=evidence), "archive", {"version": 1})
+        yield evidence
+    finally:
+        if evidence is not None:
+            with evidence.lock:
+                evidence.sealed = True
+                os.close(descriptor)
+        elif descriptor is not None:
+            os.close(descriptor)
+        os.close(directory)
+
+
+def verify_evidence(evidence):
+    parent = evidence.path.parent.lstat()
+    require(stat.S_ISDIR(parent.st_mode) and (parent.st_dev, parent.st_ino)
+            == (evidence.directory_identity.st_dev, evidence.directory_identity.st_ino),
+            "private evidence directory changed")
+    opened, named = os.fstat(evidence.fd), evidence.path.lstat()
+    require(all(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600
+                and info.st_uid == os.getuid() and info.st_nlink == 1
+                and (info.st_dev, info.st_ino) == (evidence.identity.st_dev, evidence.identity.st_ino)
+                and info.st_size == evidence.size for info in (opened, named)),
+            "private evidence changed")
+
+
+def record_evidence(ctx, kind, value):
+    evidence = ctx.evidence
+    with evidence.lock:
+        try:
+            require(not evidence.sealed, "private evidence is sealed")
+            raw = (json.dumps({"kind": kind, "value": value}, separators=(",", ":")) + "\n").encode()
+            require(len(raw) <= 4_100_000 and evidence.size + len(raw) <= 64 * 1024 * 1024,
+                    "private evidence exceeds bounded archive")
+            verify_evidence(evidence)
+            remaining = memoryview(raw)
+            while remaining:
+                written = os.write(evidence.fd, remaining)
+                require(written > 0, "private evidence write made no progress")
+                evidence.size += written
+                remaining = remaining[written:]
+        except BaseException:
+            evidence.failed = True
+            raise
+
+
+def sync_evidence(ctx):
+    evidence = ctx.evidence
+    with evidence.lock:
+        verify_evidence(evidence)
+        os.fsync(evidence.fd)
+        os.fsync(evidence.directory_fd)
+        verify_evidence(evidence)
+
+
+def persist_evidence(ctx, _error_type=None, error=None, _traceback=None):
+    try:
+        sync_evidence(ctx)
+    except Exception as sync_error:
+        with ctx.evidence.lock:
+            ctx.evidence.failed = True
+        if error is None:
+            raise
+        with suppress(OSError, ValueError):
+            print("private evidence sync failed: " + type(sync_error).__name__, file=sys.stderr)
+
+
+def seal_evidence(ctx):
+    evidence = ctx.evidence
+    with evidence.lock:
+        require(evidence.drained and evidence.active == 0 and not evidence.failed and evidence.drain_error is None,
+                "private evidence observers are not settled")
+        evidence.sealed = True  # Close writes even if durability or hashing fails.
+        try:
+            sync_evidence(ctx)
+            os.lseek(evidence.fd, 0, os.SEEK_SET)
+            hasher = hashlib.sha256()
+            while chunk := os.read(evidence.fd, 1024 * 1024):
+                hasher.update(chunk)
+            verify_evidence(evidence)
+            return {"sha256": hasher.hexdigest(), "bytes": evidence.size}
+        except BaseException:
+            evidence.failed = True
+            raise
+
+
+async def drain_native_observers(ctx):
+    with ctx.evidence.lock:
+        ctx.evidence.closing = True
+        if ctx.evidence.drained:
+            return
+
+    def refuse(error):
+        with ctx.evidence.lock:
+            if ctx.evidence.drain_error is None:
+                ctx.evidence.drain_error = error
+                print("native observer drain refused; retaining resources until join or supervisor termination: "
+                      + type(error).__name__, file=sys.stderr)
+
+    loop = asyncio.get_running_loop()
+    shutdown = asyncio.create_task(loop.shutdown_default_executor())
+    try:
+        done, _ = await asyncio.wait({shutdown}, timeout=30)
+        if not done:
+            refuse(TimeoutError("native observer drain exceeded 30 seconds"))
+    except (Exception, asyncio.CancelledError) as error:
+        refuse(error)
+    while True:
+        try:
+            await asyncio.shield(shutdown)
+            require(ctx.evidence.active == 0, "native observers did not drain")
+            break
+        except asyncio.CancelledError as error:
+            refuse(error)
+            if shutdown.cancelled():
+                shutdown = loop.create_future()
+        except Exception as error:
+            refuse(error)
+            # A failed join cannot prove termination; only the qualified supervisor can end this run.
+            shutdown = loop.create_future()
+    with ctx.evidence.lock:
+        ctx.evidence.drained = True
+        if ctx.evidence.drain_error is not None:
+            raise ctx.evidence.drain_error
+
+
+def snapshot_evidence(ctx, stage):
+    record_evidence(ctx, "checkpoint", stage)
+    database = ctx.state / "ledger.sqlite"
+    missing = []
+    if database.exists():
+        with closing(sqlite3.connect(database.absolute().as_uri() + "?mode=ro", uri=True, timeout=3)) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("BEGIN")
+            present = {row[0] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('attachments', 'deliveries', 'attempts')",
+            )}
+            for table, query in (("attachments", "SELECT * FROM attachments"),
+                                 ("deliveries", "SELECT * FROM deliveries"),
+                                 ("attempts", "SELECT * FROM attempts")):
+                if table not in present:
+                    missing.append(table)
+                    record_evidence(ctx, "missingLedgerTable", {"stage": stage, "table": table})
+                    continue
+                rows = db.execute(query).fetchmany(4097)
+                require(len(rows) <= 4096, "private database snapshot exceeds row bound")
+                record_evidence(ctx, "database", {"stage": stage, "table": table,
+                                                "rows": [dict(row) for row in rows]})
+    else:
+        missing = ["attachments", "deliveries", "attempts"]
+        record_evidence(ctx, "missingLedgerDatabase", {"stage": stage, "tables": missing})
+    ctx.fixture("/fixture/read")
+    return missing
 
 
 def post(address, secret, path, body=None, headers=None, *, limit=65_536):
@@ -518,11 +754,12 @@ def configure(parsed):
     require(output_path.is_absolute() and output_path.name not in ("", ".", ".."),
             "proof output must be an absolute file path")
     output_parent = output_path.parent.resolve(strict=True)
-    require(output_parent.is_dir(), "proof output parent must be an existing directory")
+    require_private_output_directory(output_parent.lstat())
     output_path = output_parent / output_path.name
     sidecar_path = output_path.with_name(output_path.stem + ".private-causal.json")
     for candidate, description in ((output_path, "proof output"),
-                                   (sidecar_path, "private causal sidecar")):
+                                   (sidecar_path, "private causal sidecar"),
+                                   (output_path.with_suffix(".private-evidence.jsonl"), "private evidence")):
         try:
             candidate.lstat()
         except FileNotFoundError:
@@ -594,8 +831,11 @@ def make_model(stack, hold=False):
     # Each provider owns its verifier globals; C3 cannot change A/B's call identity.
     qualifier = load_module("three_session_model_qualifier", host_qualifier.__file__)
     qualifier.CALL_ID = "three-session-source-read-" + uuid4().hex
-    server = ThreadingHTTPServer(("127.0.0.1", 0), ModelProvider)
+    server = ModelServer(("127.0.0.1", 0), ModelProvider)
+    # server_close must join handlers before the archive receives its final hash.
+    server.daemon_threads = False
     server.qualifier = qualifier
+    server.evidence = None
     server.requests = []
     server.main_requests = []
     server.turn_main_requests = []
@@ -672,12 +912,15 @@ def start_pty_pump(stack, master, tail):
     return stats
 
 
-def native_session(stack, label, shared_state, *, hold=False):
+def native_session(stack, label, ctx, *, hold=False):
     temporary = tempfile.TemporaryDirectory(prefix="three-native-", dir=private_temp_root())
     root = Path(temporary.name)
     root.chmod(0o700)
     stack.callback(temporary.cleanup)
+    # ExitStack joins the provider, persists its last records, then removes native scratch.
+    stack.push(partial(persist_evidence, ctx))
     provider = make_model(stack, hold=hold)
+    provider.evidence = lambda kind, value: record_evidence(ctx, kind, {"session": label, **value})
     provider.nonce = "three-session-source-" + label.lower() + "-" + uuid4().hex
     provider.source_nonce_sha256 = digest(provider.nonce)
     source = root / "fixture-source.txt"
@@ -695,7 +938,7 @@ def native_session(stack, label, shared_state, *, hold=False):
     profile.write_text(host_qualifier.sandbox_profile(provider.server_port))
     cache = root / "child-cache"
     cache.mkdir(mode=0o700)
-    state = Path(shared_state)
+    state = Path(ctx.state)
     argv = native_launch_argv(profile, cache, state, root)
     known_sockets = {path.name for path in state.glob("c-*.sock")}
     observations = {}
@@ -767,7 +1010,7 @@ def listener_delivery(port, signed):
 
 def db_delivery(state, delivery_id):
     db_path = Path(state) / "ledger.sqlite"
-    uri = "file:" + str(db_path) + "?mode=ro"
+    uri = db_path.absolute().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
         db.execute("PRAGMA busy_timeout=3000")
         row = db.execute("SELECT state FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
@@ -777,7 +1020,7 @@ def db_delivery(state, delivery_id):
 
 def db_delivery_history(state, delivery_id):
     db_path = Path(state) / "ledger.sqlite"
-    uri = "file:" + str(db_path) + "?mode=ro"
+    uri = db_path.absolute().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
         db.execute("PRAGMA busy_timeout=3000")
         db.row_factory = sqlite3.Row
@@ -793,7 +1036,7 @@ def db_delivery_history(state, delivery_id):
 
 def db_delivery_envelope_sha256(state, delivery_id):
     db_path = Path(state) / "ledger.sqlite"
-    uri = "file:" + str(db_path) + "?mode=ro"
+    uri = db_path.absolute().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
         db.execute("PRAGMA busy_timeout=3000")
         row = db.execute("SELECT envelope FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
@@ -802,7 +1045,7 @@ def db_delivery_envelope_sha256(state, delivery_id):
 
 def db_delivery_reason(state, delivery_id):
     db_path = Path(state) / "ledger.sqlite"
-    uri = "file:" + str(db_path) + "?mode=ro"
+    uri = db_path.absolute().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
         db.execute("PRAGMA busy_timeout=3000")
         row = db.execute("SELECT state,reason FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
@@ -975,7 +1218,17 @@ async def wait_stable_session_binding(session, provider, *, minimum_turn_main_re
 
 
 def fixture(ctx, path, body=None):
-    status, _, raw = post(ctx.address["port"], ctx.fixture_secret, path, body)
+    record_evidence(ctx, "cloudFixtureAttempt", {"path": path})
+    try:
+        status, _, raw = post(ctx.address["port"], ctx.fixture_secret, path, body)
+    except Exception as error:
+        try:
+            record_evidence(ctx, "cloudFixtureError", {"path": path, "error": type(error).__name__})
+        except Exception:
+            raise error
+        raise
+    record_evidence(ctx, "cloudFixture", {"path": path, "status": status,
+                                          "response": raw.decode("utf-8", errors="replace")})
     require(status == 200, "workerd fixture rejected " + path)
     return json.loads(raw)
 
@@ -988,9 +1241,26 @@ async def send(ctx, **request):
     path = request["url"].removeprefix(ORIGIN)
     body = json.loads(request["body"])
     proof = json.loads(request["headers"]["x-event-node-proof"])
-    response = await asyncio.to_thread(
-        post, ctx.address["port"], ctx.fixture_secret, path, request["body"], request["headers"], limit=8192,
-    )
+
+    def exchange():
+        attempt = {"path": path, "request": body, "proof": proof}
+        record_evidence(ctx, "cloudAttempt", attempt)
+        try:
+            response = post(ctx.address["port"], ctx.fixture_secret, path,
+                            request["body"], request["headers"], limit=8192)
+        except Exception as error:
+            try:
+                record_evidence(ctx, "cloudError", {**attempt, "error": type(error).__name__})
+            except Exception:
+                raise error
+            raise
+        # A canceled await must not discard evidence from an HTTP request that still completes.
+        record_evidence(ctx, "cloudWire", {"path": path, "request": body,
+                                          "proof": proof, "status": response[0],
+                                          "response": response[2].decode(errors="replace")})
+        return response
+
+    response = await asyncio.to_thread(exchange)
     response_summary = None
     if path == "/v1/runtimes/status":
         try:
@@ -1030,23 +1300,47 @@ async def send(ctx, **request):
 
 
 def observe_session_request(ctx, state_dir, session_id, message, *, native_request=None):
+    with ctx.evidence.lock:
+        require(not ctx.evidence.closing and not ctx.evidence.sealed, "native observers are closed")
+        if message.get("command") == "nativeStart":
+            label = ctx.session_labels.get(session_id)
+            require(label in ctx.start_calls, "native Start came from an unknown session")
+            require(sum(map(len, ctx.start_calls.values())) < 4, "four native Start attempt cap exhausted")
+            request = native_request or {}
+            ctx.start_calls[label].append({
+                "eventId": request.get("event", {}).get("eventId"),
+                "attemptId": request.get("attemptId"), "threadId": request.get("threadId"),
+            })
+        ctx.evidence.active += 1
+    try:
+        return record_session_request(ctx, state_dir, session_id, message, native_request=native_request)
+    finally:
+        with ctx.evidence.lock:
+            ctx.evidence.active -= 1
+
+
+def record_session_request(ctx, state_dir, session_id, message, *, native_request=None):
     label = ctx.session_labels.get(session_id)
     if message.get("command") == "challenge" and label in ctx.challenge_calls:
         ctx.challenge_calls[label] += 1
-    if message.get("command") == "nativeStart":
-        require(label in ctx.start_calls, "native Start came from an unknown session")
-        request_value = native_request or {}
-        ctx.start_calls[label].append({
-            "eventId": request_value.get("event", {}).get("eventId"),
-            "attemptId": request_value.get("attemptId"),
-            "threadId": request_value.get("threadId"),
-        })
     try:
         result = ctx.original_session_request(state_dir, session_id, message, native_request=native_request)
     except Exception as error:
         if message.get("command") == "nativeReceipt" and label in ctx.receipt_errors:
             ctx.receipt_errors[label].append(getattr(error, "code", str(error)))
+        try:
+            record_evidence(ctx, "nativeError", {"session": label, "request": message,
+                                                "nativeRequest": native_request, "error": str(error)[:160]})
+        except Exception:
+            raise error
         raise
+    row = {"session": label, "sessionId": session_id, "request": message, "nativeRequest": native_request,
+           "response": result, "receivedAt": time.monotonic()}
+    try:
+        record_evidence(ctx, "nativeExchange", row)
+    except Exception as error:
+        with suppress(OSError, ValueError):
+            print("native exchange evidence unavailable: " + type(error).__name__, file=sys.stderr)
     if message.get("command") == "nativeReceipt" and label in ctx.receipt_calls:
         ctx.receipt_calls[label].append(result.get("outcome", {}).get("status"))
     return result
@@ -1125,7 +1419,7 @@ def observe_bridge_challenge(bridge, ctx):
 
 async def initialize_runtime(ctx, resources):
     for label in ("A", "B", "C"):
-        session = native_session(resources, label, ctx.state, hold=False)
+        session = native_session(resources, label, ctx, hold=False)
         ctx.sessions[label] = session
         ctx.session_labels[session["sessionId"]] = label
     require(len({session["sessionId"] for session in ctx.sessions.values()}) == 3,
@@ -1145,7 +1439,10 @@ async def initialize_runtime(ctx, resources):
         try:
             ctx.attached[label] = await admit_runtime(ctx.admission_cloud, session, ctx.runtime_ids[label])
         except Exception as error:
-            readback = ctx.fixture("/fixture/admission")
+            try:
+                readback = ctx.fixture("/fixture/admission")
+            except Exception:
+                raise error from None
             stored_clients = []
             for row in readback["native_runtime_bindings"]:
                 try:
@@ -1861,7 +2158,7 @@ def build_proof(ctx):
         },
         "cloudWireCount": len(ctx.wire_evidence),
         "realModelCalls": 0,
-        "evidenceNote": "IDs are represented only by SHA-256; credentials, native mappings, and raw wire bodies are omitted.",
+        "evidenceNote": "Public IDs are SHA-256 only; raw wire bodies and native mappings remain in the private mode-0600 evidence archive.",
     }
     encoded = json.dumps(ctx.proof, sort_keys=True)
     require_all("proof output contains a credential or native mapping",
@@ -1889,35 +2186,51 @@ async def cleanup_scenario(ctx):
         await asyncio.gather(ctx.daemon_task, return_exceptions=True)
     if "C" in ctx.sessions:
         ctx.sessions["C"]["provider"].release_hold.set()
-    restore_observers(ctx)
-    finish_scenario_cleanup(ctx)
+    try:
+        await drain_native_observers(ctx)
+    finally:
+        original_error = sys.exc_info()[1]
+        try:
+            persist_evidence(ctx, error=original_error)
+        finally:
+            restore_observers(ctx)
+            finish_scenario_cleanup(ctx)
 
 
 def finish_scenario_cleanup(ctx):
-    cleanup_error = None
+    original_error = sys.exc_info()[1]
     try:
-        broker_cleanup = stop_broker(ctx.broker, ctx.broker_log)
-        if ctx.proof is not None:
-            ctx.proof["brokerCleanup"] = broker_cleanup
-    except AssertionError as error:
-        cleanup_error = error
-    if cleanup_error is not None and sys.exc_info()[0] is None:
-        raise cleanup_error
-    if cleanup_error is not None:
-        print(str(cleanup_error), file=sys.stderr)
-    if ctx.private_nonce_record is not None:
-        private_path = Path(ctx.args.output).with_name(Path(ctx.args.output).stem + ".private-causal.json")
+        cleanup_error = None
         try:
-            private_json(private_path, ctx.private_nonce_record)
-        except OSError as error:
-            if cleanup_error is None:
-                raise AssertionError("private nonce causal record unavailable: "
-                                     + type(error).__name__) from None
-            print("private nonce causal record unavailable: " + type(error).__name__,
-                  file=sys.stderr)
-    if ctx.state_root.exists():
-        import shutil
-        shutil.rmtree(ctx.state_root)
+            broker_cleanup = stop_broker(ctx.broker, ctx.broker_log)
+            if ctx.proof is not None:
+                ctx.proof["brokerCleanup"] = broker_cleanup
+        except AssertionError as error:
+            cleanup_error = error
+        if cleanup_error is not None and sys.exc_info()[0] is None:
+            raise cleanup_error
+        if cleanup_error is not None:
+            print(str(cleanup_error), file=sys.stderr)
+        if ctx.private_nonce_record is not None:
+            private_path = Path(ctx.args.output).with_name(Path(ctx.args.output).stem + ".private-causal.json")
+            try:
+                verify_evidence(ctx.evidence)
+                owner = ctx.publication_stack if ctx.publication_stack is not None else ctx.local_stack
+                ctx.evidence.causal = private_json(private_path, ctx.private_nonce_record,
+                                                   directory_fd=ctx.evidence.directory_fd, publication_stack=owner)
+                verify_evidence(ctx.evidence)
+            except (OSError, AssertionError) as error:
+                if cleanup_error is None and original_error is None:
+                    if isinstance(error, AssertionError):
+                        raise
+                    raise AssertionError("private nonce causal record unavailable: "
+                                         + type(error).__name__) from None
+                print("private nonce causal record unavailable: " + type(error).__name__,
+                      file=sys.stderr)
+    finally:
+        if ctx.state_root.exists():
+            import shutil
+            shutil.rmtree(ctx.state_root)
 
 
 def restore_observers(ctx):
@@ -1932,96 +2245,142 @@ def restore_observers(ctx):
     SessionNativeBridge.challenge = ctx.original_bridge_challenge
 
 
-async def run_scenario():
+async def finish_stage(ctx, stage, failure):
+    try:
+        if ctx.daemon_task is not None:
+            await ctx.stop_daemon(ctx.daemon_task)
+            ctx.daemon_task = None
+    except (Exception, asyncio.CancelledError) as error:
+        if failure is None:
+            failure = error
+        else:
+            print("stage daemon stop failed: " + type(error).__name__, file=sys.stderr)
+    if "C" in ctx.sessions:
+        ctx.sessions["C"]["provider"].release_hold.set()
+    try:
+        await drain_native_observers(ctx)
+    except (Exception, asyncio.CancelledError) as error:
+        if failure is None:
+            failure = error
+        else:
+            print("stage observer drain failed: " + type(error).__name__, file=sys.stderr)
+    try:
+        missing = snapshot_evidence(ctx, "exit:" + stage)
+        require(failure is not None or not missing, "exit checkpoint ledger is incomplete")
+    except Exception as error:
+        if failure is None:
+            failure = error
+        else:
+            print("stage snapshot failed: " + type(error).__name__, file=sys.stderr)
+    try:
+        persist_evidence(ctx, error=failure)
+    except Exception as error:
+        failure = error
+    if failure is not None:
+        raise failure
+
+
+async def run_scenario(directory_fd=None, publication_stack=None):
     temporary_root = private_temp_root()
     containment = (verify_outer_containment(temporary_root) if args.outer_contained
                    else {"mode": "per-native-profile"})
-    broker, broker_log, address = start_broker()
-    proof = None
-    private_nonce_record = None
-    state_root = Path(tempfile.mkdtemp(prefix=GATEWAY_TEMP_PREFIX, dir=temporary_root))
-    state_root.chmod(0o700)
-    state = state_root / "state"
-    state.mkdir(mode=0o700)
-    node_key = private_key_type.generate()
-    transport_key = private_key_type.generate()
-    node_id = str(uuid4())
-    transport = {"firstLost": False, "pauseRetry": False, "retryWaiting": asyncio.Event(),
-                 "allowRetry": asyncio.Event(), "lostReply": asyncio.Event(), "targetDelivery": None}
-    wire_evidence = []
-    sessions = {}
-    daemon_task = None
-    start_calls = {label: [] for label in ("A", "B", "C")}
-    challenge_calls = {label: 0 for label in ("A", "B", "C")}
-    session_labels = {}
-    original_session_request = launcher._session_request
-    original_list_pending = Store.list_pending
-    original_list_reconcilable = Store.list_reconcilable
-    original_dispatch = daemon.Gateway.dispatch
-    original_reconcile = daemon.Gateway.reconcile
-    original_adapter_check = daemon.NativeBridgeAdapter.check
-    original_adapter_reconcile = daemon.NativeBridgeAdapter.reconcile
-    original_bridge_challenge = SessionNativeBridge.challenge
-    original_send_https = client_runtime._send_https
-    pending_scans = []
-    reconcilable_scans = []
-    receipt_calls = {label: [] for label in ("A", "B", "C")}
-    receipt_errors = {label: [] for label in ("A", "B", "C")}
-    adapter_receipts = []
-    reconcile_results = []
-    submission_returned = asyncio.Event()
-    dispatch_calls = []
-    dispatch_results = []
-    dispatch_labels = {}
-    dispatch_errors = []
-    adapter_checks = []
-    bridge_challenge_observations = []
-    fixture_secret = address["secret"]
-    ctx = SimpleNamespace(**locals())
-    ctx.args = args
-    ctx.installed_proof = installed_proof
-    ctx.cloud_source = cloud_source
-    ctx.fixture = partial(fixture, ctx)
-    ctx.send = partial(send, ctx)
-    ctx.start_daemon = partial(start_daemon, ctx)
-    ctx.stop_daemon = partial(stop_daemon, ctx)
-    ctx.deliver = partial(deliver, ctx)
-    ctx.wait_observed = partial(wait_observed, ctx)
-    ctx.c_second_busy_dispositions = partial(c_second_busy_dispositions, ctx)
-    client_runtime._send_https = ctx.send
-    launcher._session_request = partial(observe_session_request, ctx)
-    Store.list_pending = partialmethod(observe_list_pending, ctx)
-    Store.list_reconcilable = partialmethod(observe_list_reconcilable, ctx)
-    daemon.Gateway.dispatch = partialmethod(observe_dispatch, ctx)
-    daemon.Gateway.reconcile = partialmethod(observe_reconcile, ctx)
-    daemon.NativeBridgeAdapter.check = partialmethod(observe_adapter_check, ctx)
-    daemon.NativeBridgeAdapter.reconcile = partialmethod(observe_adapter_reconcile, ctx)
-    SessionNativeBridge.challenge = partialmethod(observe_bridge_challenge, ctx)
-    try:
-        challenge = ctx.fixture("/fixture/challenge", {
-            "nodeId": node_id,
-            "publicKey": {"kty": "OKP", "crv": "Ed25519",
-                          "x": b64(node_key.public_key().public_bytes_raw())},
-            "meshIp": "100.96.0.1", "meshPort": 8789, "agents": [AGENT],
-        })
-        ctx.fixture("/v1/nodes/complete", {
-            "challengeId": challenge["challengeId"],
-            "signature": b64(node_key.sign(challenge["signingPayload"].encode())),
-        })
-        ctx.admission_cloud = CloudClient(
-            origin=ORIGIN, principal=PRINCIPAL, agent=AGENT, node_id=node_id,
-            node_generation=1, private_key=node_key, credentials=credentials, send=ctx.send,
-        )
-        with ExitStack() as resources:
-            await initialize_runtime(ctx, resources)
-            await run_ab_routes(ctx)
-            await run_busy_stage(ctx)
-            await run_fixture_attach(ctx)
-            await run_post_attach_c3(ctx)
-        ctx.proof, ctx.private_nonce_record = build_proof(ctx)
-        return ctx.proof
-    finally:
-        await cleanup_scenario(ctx)
+    evidence_path = Path(args.output).with_suffix(".private-evidence.jsonl")
+    with ExitStack() as local_stack:
+        evidence = (publication_stack if publication_stack is not None else local_stack).enter_context(
+            evidence_archive(evidence_path, directory_fd))
+        local_stack.push(partial(persist_evidence, SimpleNamespace(evidence=evidence)))
+        broker, broker_log, address = start_broker()
+        proof = None
+        private_nonce_record = None
+        state_root = Path(tempfile.mkdtemp(prefix=GATEWAY_TEMP_PREFIX, dir=temporary_root))
+        state_root.chmod(0o700)
+        state = state_root / "state"
+        state.mkdir(mode=0o700)
+        node_key = private_key_type.generate()
+        transport_key = private_key_type.generate()
+        node_id = str(uuid4())
+        transport = {"firstLost": False, "pauseRetry": False, "retryWaiting": asyncio.Event(),
+                     "allowRetry": asyncio.Event(), "lostReply": asyncio.Event(), "targetDelivery": None}
+        wire_evidence = []
+        sessions = {}
+        daemon_task = None
+        start_calls = {label: [] for label in ("A", "B", "C")}
+        challenge_calls = {label: 0 for label in ("A", "B", "C")}
+        session_labels = {}
+        original_session_request = launcher._session_request
+        original_list_pending = Store.list_pending
+        original_list_reconcilable = Store.list_reconcilable
+        original_dispatch = daemon.Gateway.dispatch
+        original_reconcile = daemon.Gateway.reconcile
+        original_adapter_check = daemon.NativeBridgeAdapter.check
+        original_adapter_reconcile = daemon.NativeBridgeAdapter.reconcile
+        original_bridge_challenge = SessionNativeBridge.challenge
+        original_send_https = client_runtime._send_https
+        pending_scans = []
+        reconcilable_scans = []
+        receipt_calls = {label: [] for label in ("A", "B", "C")}
+        receipt_errors = {label: [] for label in ("A", "B", "C")}
+        adapter_receipts = []
+        reconcile_results = []
+        submission_returned = asyncio.Event()
+        dispatch_calls = []
+        dispatch_results = []
+        dispatch_labels = {}
+        dispatch_errors = []
+        adapter_checks = []
+        bridge_challenge_observations = []
+        fixture_secret = address["secret"]
+        ctx = SimpleNamespace(**locals())
+        ctx.args = args
+        ctx.installed_proof = installed_proof
+        ctx.cloud_source = cloud_source
+        ctx.fixture = partial(fixture, ctx)
+        ctx.send = partial(send, ctx)
+        ctx.start_daemon = partial(start_daemon, ctx)
+        ctx.stop_daemon = partial(stop_daemon, ctx)
+        ctx.deliver = partial(deliver, ctx)
+        ctx.wait_observed = partial(wait_observed, ctx)
+        ctx.c_second_busy_dispositions = partial(c_second_busy_dispositions, ctx)
+        client_runtime._send_https = ctx.send
+        launcher._session_request = partial(observe_session_request, ctx)
+        Store.list_pending = partialmethod(observe_list_pending, ctx)
+        Store.list_reconcilable = partialmethod(observe_list_reconcilable, ctx)
+        daemon.Gateway.dispatch = partialmethod(observe_dispatch, ctx)
+        daemon.Gateway.reconcile = partialmethod(observe_reconcile, ctx)
+        daemon.NativeBridgeAdapter.check = partialmethod(observe_adapter_check, ctx)
+        daemon.NativeBridgeAdapter.reconcile = partialmethod(observe_adapter_reconcile, ctx)
+        SessionNativeBridge.challenge = partialmethod(observe_bridge_challenge, ctx)
+        try:
+            challenge = ctx.fixture("/fixture/challenge", {
+                "nodeId": node_id,
+                "publicKey": {"kty": "OKP", "crv": "Ed25519",
+                              "x": b64(node_key.public_key().public_bytes_raw())},
+                "meshIp": "100.96.0.1", "meshPort": 8789, "agents": [AGENT],
+            })
+            ctx.fixture("/v1/nodes/complete", {
+                "challengeId": challenge["challengeId"],
+                "signature": b64(node_key.sign(challenge["signingPayload"].encode())),
+            })
+            ctx.admission_cloud = CloudClient(
+                origin=ORIGIN, principal=PRINCIPAL, agent=AGENT, node_id=node_id,
+                node_generation=1, private_key=node_key, credentials=credentials, send=ctx.send,
+            )
+            with ExitStack() as resources:
+                stage = "initialize"
+                try:
+                    await initialize_runtime(ctx, resources)
+                    for stage, action in (("ab", run_ab_routes), ("busy", run_busy_stage),
+                                          ("attach", run_fixture_attach), ("c3", run_post_attach_c3)):
+                        await action(ctx)
+                        require(not snapshot_evidence(ctx, stage), "checkpoint ledger is incomplete")
+                finally:
+                    # Persist while native scratch and the broker still exist, including failed stages.
+                    await finish_stage(ctx, stage, sys.exc_info()[1])
+            ctx.proof, ctx.private_nonce_record = build_proof(ctx)
+            ctx.proof["privateEvidence"] = seal_evidence(ctx)
+            return ctx.proof, evidence
+        finally:
+            await cleanup_scenario(ctx)
 
 
 def cli():
@@ -2044,15 +2403,62 @@ def main():
     output = Path(parsed.output)
     target = output.parent.resolve(strict=True) / output.name
     require(not target.exists() and not target.is_symlink(), "proof output already exists")
-    proof = asyncio.run(run_scenario())
-    encoded = (json.dumps(proof, indent=2) + "\n").encode()
-    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(encoded)
-        stream.flush()
-        os.fsync(stream.fileno())
-    print(json.dumps({"result": "PASS", "proof": str(target),
-                      "productionAdmissionProven": False, "nativeCliSessions": 3}))
+    directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    proof_identity = None
+    try:
+        identity = os.fstat(directory)
+        require_private_output_directory(identity)
+
+        def verify_parent():
+            require_private_output_directory(os.fstat(directory))
+            current = target.parent.lstat()
+            require(stat.S_ISDIR(current.st_mode) and (current.st_dev, current.st_ino)
+                    == (identity.st_dev, identity.st_ino), "proof output directory changed")
+
+        with ExitStack() as publication_stack:
+            proof, evidence = asyncio.run(run_scenario(directory, publication_stack))
+            encoded = (json.dumps(proof, indent=2) + "\n").encode()
+            require(len(encoded) <= 32_768, "proof exceeds fixed metadata bound")
+            verify_parent()
+            verify_evidence(evidence)
+            descriptor = os.open(target.name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                 0o600, dir_fd=directory)
+            publication_stack.callback(os.close, descriptor)
+            proof_identity = os.fstat(descriptor)
+            with os.fdopen(descriptor, "w+b", closefd=False) as stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+                os.fsync(directory)
+                verify_parent()
+                current_archive = seal_evidence(SimpleNamespace(evidence=evidence))
+                require(all(current_archive[key] == proof["privateEvidence"][key]
+                            for key in ("sha256", "bytes")), "private evidence changed before publication")
+                opened = os.fstat(stream.fileno())
+                named = os.stat(target.name, dir_fd=directory, follow_symlinks=False)
+                require(all(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600
+                            and info.st_uid == os.getuid() and info.st_nlink == 1
+                            and (info.st_dev, info.st_ino) == (proof_identity.st_dev, proof_identity.st_ino)
+                            and info.st_size == len(encoded) for info in (opened, named)),
+                        "proof output changed before publication")
+                stream.seek(0)
+                require(stream.read(32_769) == encoded, "proof output changed before publication")
+                require(evidence.causal is not None, "private causal sidecar missing before publication")
+                verify_private_json(evidence.causal)
+                print(json.dumps({"result": "PASS", "proof": str(target),
+                                  "productionAdmissionProven": False, "nativeCliSessions": 3}))
+    except BaseException:
+        if proof_identity is not None:
+            try:
+                current = os.stat(target.name, dir_fd=directory, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) == (proof_identity.st_dev, proof_identity.st_ino):
+                    os.unlink(target.name, dir_fd=directory)
+                    os.fsync(directory)
+            except OSError:
+                pass
+        raise
+    finally:
+        os.close(directory)
 
 
 if __name__ == "__main__":

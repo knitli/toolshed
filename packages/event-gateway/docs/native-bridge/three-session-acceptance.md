@@ -169,11 +169,20 @@ Use explicitly selected, verified artifacts; the runner installs nothing:
   `apps/os/packages/event-runtime/src`, with bundle dependencies available.
   Supply its exact HEAD as `--cloud-commit`; the runner checks equality.
   HEAD alone does not certify a clean tree: retain input hashes and checkout state.
-- A new absolute proof filename whose parent already exists. Both it and its
-  sibling `<proof-stem>.private-causal.json` must be absent, including dangling
-  symlinks; the runner checks both before starting any subprocess. Choose separate
+- A new absolute proof filename in an existing directory owned by the invoking
+  user with mode `0700`. The runner checks this before starting any subprocess
+  and rechecks the held directory during publication. Both it and its
+  siblings `<proof-stem>.private-causal.json` and `<proof-stem>.private-evidence.jsonl` must be absent, including dangling
+  symlinks; the runner checks all three paths before starting any subprocess. Choose separate
   stdout/stderr paths and retain failed
   run diagnostics without relabeling them as proof.
+  Keep the output directory and its ancestors under exclusive trusted control.
+  No untrusted concurrent writer, including an unsandboxed process with the same
+  UID, may modify the artifacts from creation through consumer verification.
+  This is an operator/environment precondition: the native sandbox profile does
+  not establish output-directory write isolation. Mode `0700` restricts POSIX-mode
+  access; ACLs and privileged access must also preserve exclusive trusted control.
+  It does not isolate processes sharing the owner's UID.
 
 The three workerd ports must be distinct and between 1024 and 65535. Defaults
 are entry `49732`, internal loopback `49733`, and broker `49734`. Native model
@@ -205,8 +214,15 @@ package root:
   > "$EVENT_RUN_STDOUT" 2> "$EVENT_RUN_STDERR"
 ```
 
-Use an external bounded supervisor that tracks and cleans up owned descendants;
-individual harness timeouts do not provide a global execution deadline. Retain
+An independently qualified external supervisor must enforce a hard deadline and
+terminate the whole owned process tree; this fixture has no standalone hard bound.
+The 30-second observer-drain deadline refuses qualification without cancelling the
+actual executor join. State, native scratch, and archive descriptors remain live
+until that join completes. A timed-out run still fails after workers finish; only
+then may cleanup remove scratch. If the join itself fails or workers never finish,
+the runner retains these resources for supervisor termination instead of unwinding
+cleanup or publishing PASS. Cancelling the waiter cannot authorize cleanup.
+Retain
 source/artifact hashes before and after execution. See the
 [coupled recovery preflight](coupled-workerd-recovery-preflight.md) for staging
 and supervision principles, not a directly interchangeable command/profile.
@@ -253,6 +269,16 @@ session labels and an exact mapping from summary fields to raw proof keys. Retai
 the mode-0600 raw proof, private causal sidecar, and execution logs with the input
 manifest; do not publish private paths, session IDs, or nonce hashes. No proof
 file or a nonzero exit means that run has not passed.
+
+The retained descriptors and sequential identity, metadata, and byte checks
+validate each artifact at its check points; they are not an atomic snapshot of
+all files at PASS. Keep the trusted-writer precondition in force while reading
+and retaining the result. Independently reread the archive and compare its
+SHA-256 and byte count with the proof before accepting it. A mismatch or any
+untrusted concurrent modification invalidates the attempt; another final check
+cannot provide isolation from a hostile writer.
+
+New runs also retain `<proof-stem>.private-evidence.jsonl`, a mode-0600 raw causal archive containing provider exchanges, native receipts/observations, cloud wire/readbacks, and local database checkpoints before scratch cleanup. Keep it private with the input manifest and logs, including failed-run evidence. Records are capped at 4,100,000 bytes and the archive at 64 MiB; exceeding either bound fails qualification. Appends and hashing use the original file descriptor, with file and parent identity checks. Native executor work drains and provider handlers join before sealing; the archive and its parent directory are flushed before cleanup and final hashing. After resource cleanup finishes, the PASS proof records the final archive SHA-256 and byte count. Verify both against the retained file before accepting the run. This retention does not change the historical runs described above or establish the pending Core-idle busy gate.
 
 This PASS is controlled integration evidence only. Access identity,
 Messaging identity/budget, owner manual publication, queues/metrics, and model
