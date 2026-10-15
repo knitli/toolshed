@@ -45,10 +45,31 @@ uv run --frozen knitli-event-gateway status
 uv run --frozen knitli-event-gateway run
 ```
 
-Build with `uv build --wheel`, then install that wheel in an isolated environment
-or with `uv tool install path/to/knitli_event_gateway-0.1.0-py3-none-any.whl`.
-The installed wheel embeds the verified contract; no contract fetch happens at
-runtime. There is no PyPI publication workflow in this PR.
+Build with `uv build --wheel`. For a supported owner installation on Apple Silicon
+macOS, use the repository's paired installer from current protected main with
+CPython 3.13+ and an authenticated `GITHUB_TOKEN`:
+
+```sh
+python3 -I scripts/install_paired_client.py \
+  --wheel /absolute/path/to/knitli_event_gateway-0.1.0-py3-none-any.whl \
+  --native-artifact /absolute/path/to/native-client-artifact.zip \
+  --destination /absolute/path/to/new-client-environment
+```
+
+The destination must not exist. Before creating it, the command checks the wheel
+against authenticated main source and verifies the promoted native/companion pair,
+CI receipt and current build recipe. A pending consumer/native transition fails
+closed, even when launcher pins have not changed. Keep the previous working client
+until the paired release is promoted; a successful consumer PR alone does not
+permit installation. Raw `uv tool install` bypasses this paired release gate.
+
+The installer uses PyPI only for runtime dependencies pinned by main's `uv.lock`,
+requires approved wheel hashes and refuses source builds. It verifies the fresh
+installed package and copied executables before printing handoff paths. It does
+not switch the active client, register a default tool, create gateway state, start
+a service, or execute the native binary. Failures clean up its owned destination;
+existing installations remain untouched. Same-user code is trusted, as for launch.
+The wheel embeds the verified contract; no contract fetch happens at runtime.
 
 The wheel includes `event_gateway.native_reader.NativeBridge`, the same private
 socket reader used by the qualification harness. A qualified host supplies an
