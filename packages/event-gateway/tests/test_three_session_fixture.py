@@ -683,7 +683,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
                 path = Path(directory) / "evidence"
                 with FIXTURE.evidence_archive(path) as evidence:
-                    ctx = SimpleNamespace(evidence=evidence, address={"port": 12345}, fixture_secret="secret")
+                    ctx = SimpleNamespace(evidence=evidence, address={"port": 12345}, fixture_secret=uuid4().hex)
                     with patch.object(FIXTURE, "post", return_value=(status, {}, raw)):
                         with self.assertRaises(error):
                             FIXTURE.fixture(ctx, "/fixture/setup", {"transportPrivateKey": "PRIVATE"})
