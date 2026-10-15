@@ -2376,6 +2376,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
 
                 with patch.object(FIXTURE, "args", SimpleNamespace(output=str(root / "proof.json"), outer_contained=False)), \
                         patch.object(FIXTURE, "private_temp_root", return_value=root), \
+                        patch.object(FIXTURE, "preflight_ports"), \
                         patch.object(FIXTURE, "start_broker", side_effect=failure), \
                         patch.object(FIXTURE, "evidence_archive", side_effect=archive), \
                         patch.object(FIXTURE.os, "fsync", side_effect=OSError("sync failed")) as sync, \
