@@ -71,7 +71,125 @@ class ThreeSessionLateModelBindTests(unittest.TestCase):
         stack.callback.assert_not_called()
 
 
+class ThreeSessionReleasedPortTests(unittest.TestCase):
+    @unittest.skipUnless(FIXTURE.sys.platform == "darwin", "Darwin cleanup semantics")
+    def test_darwin_rejects_active_bindings_even_with_reuse(self):
+        for host, reuse, reuse_port, listening in product(("127.0.0.1", "0.0.0.0"), (0, 1), (0, 1), (False, True)):
+            with self.subTest(host=host, reuse=reuse, reuse_port=reuse_port, listening=listening):
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:
+                    occupied.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, reuse)
+                    occupied.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, reuse_port)
+                    occupied.bind((host, 0))
+                    if listening:
+                        occupied.listen()
+                    port = occupied.getsockname()[1]
+                    self.assertFalse(FIXTURE.port_is_released(port))
+                self.assertTrue(FIXTURE.port_is_released(port))
+
+    @unittest.skipUnless(FIXTURE.sys.platform == "darwin", "Darwin cleanup semantics")
+    def test_darwin_allows_time_wait_after_http_server_and_handlers_close(self):
+        class Handler(FIXTURE.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"ok")
+
+            def log_message(self, *_):
+                pass
+
+        server = FIXTURE.ModelServer(("127.0.0.1", 0), Handler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=2) as client:
+                client.sendall(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")
+                response = bytearray()
+                while data := client.recv(4096):
+                    response.extend(data)
+                self.assertTrue(response.endswith(b"ok"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+        self.assertFalse(thread.is_alive())
+        self.assertFalse(FIXTURE.port_is_bindable(port))
+        self.assertTrue(FIXTURE.port_is_released(port))
+
+    def test_other_platforms_keep_strict_probe(self):
+        for result in (False, True):
+            with self.subTest(result=result), patch.object(FIXTURE.sys, "platform", "linux"), \
+                    patch.object(FIXTURE, "port_is_bindable", return_value=result) as strict, \
+                    patch.object(FIXTURE.socket, "socket") as socket_factory:
+                self.assertEqual(FIXTURE.port_is_released(19432), result)
+                strict.assert_called_once_with(19432)
+                socket_factory.assert_not_called()
+
+
+class ThreeSessionEphemeralRangeTests(unittest.TestCase):
+    def test_linux_range_is_bounded_and_validated(self):
+        for raw, valid in ((b"32768 60999\n", True), (b"0 65535", False),
+                           (b"65535 1024", False), (b"1 2 3", False),
+                           (b"x y", False), (b"1 2" + b" " * 64, False)):
+            with self.subTest(raw=raw), patch.object(FIXTURE.sys, "platform", "linux"), \
+                    patch.object(Path, "open", return_value=io.BytesIO(raw)):
+                if valid:
+                    self.assertEqual(FIXTURE.ephemeral_port_ranges(), [(32768, 60999)])
+                else:
+                    with self.assertRaises(AssertionError):
+                        FIXTURE.ephemeral_port_ranges()
+
+    def test_unavailable_or_unknown_range_fails_closed(self):
+        for platform in ("linux", "unknown"):
+            with self.subTest(platform=platform), patch.object(FIXTURE.sys, "platform", platform), \
+                    patch.object(Path, "open", side_effect=OSError("denied")):
+                with self.assertRaises(AssertionError):
+                    FIXTURE.ephemeral_port_ranges()
+
+    def test_darwin_reads_both_ranges_and_rejects_bad_sysctl(self):
+        for failure in (None, "result", "size", "range"):
+            values = iter((49152, 65535, 45000, 40000) if failure == "range"
+                          else (49152, 65535, 40000, 45000))
+
+            def sysctl(name, value, size, new, length):
+                value._obj.value = next(values)
+                if failure == "size":
+                    size._obj.value = 0
+                return -1 if failure == "result" else 0
+            library = SimpleNamespace(sysctlbyname=Mock(side_effect=sysctl))
+            with self.subTest(failure=failure), patch.object(FIXTURE.sys, "platform", "darwin"), \
+                    patch.object(FIXTURE.ctypes, "CDLL", return_value=library):
+                if failure:
+                    with self.assertRaises(AssertionError):
+                        FIXTURE.ephemeral_port_ranges()
+                else:
+                    self.assertEqual(FIXTURE.ephemeral_port_ranges(), [(49152, 65535), (40000, 45000)])
+                    self.assertEqual(library.sysctlbyname.call_count, 4)
+
+    def test_every_fixed_port_and_both_range_boundaries_refuse_before_probe(self):
+        fields = dict(entry_port=19432, loopback_port=19433, broker_port=19434,
+                      listener_port=19435, model_ports=[19436, 19437, 19438], outer_contained=False)
+        for port in range(19432, 19439):
+            for ranges in ([(port, 65535)], [(1024, port)], [(50000, 60000), (port, port)]):
+                with self.subTest(port=port, ranges=ranges), \
+                        patch.object(FIXTURE, "ephemeral_port_ranges", return_value=ranges), \
+                        patch.object(FIXTURE, "port_is_bindable") as probe:
+                    with self.assertRaisesRegex(AssertionError, "ephemeral"):
+                        FIXTURE.preflight_ports(SimpleNamespace(**fields))
+                    probe.assert_not_called()
+        with patch.object(FIXTURE, "ephemeral_port_ranges") as ranges, \
+                patch.object(FIXTURE, "port_is_bindable", return_value=True):
+            FIXTURE.preflight_ports(SimpleNamespace(**(fields | dict(listener_port=None, model_ports=None))))
+            ranges.assert_not_called()
+
+
 class ThreeSessionFixedPortTests(unittest.TestCase):
+    def setUp(self):
+        ranges = patch.object(FIXTURE, "ephemeral_port_ranges", return_value=[(1, 1023)])
+        ranges.start()
+        self.addCleanup(ranges.stop)
+
     def parsed(self, **changes):
         fields = dict(entry_port=49732, loopback_port=49733, broker_port=49734,
                       listener_port=49735, model_ports=[49736, 49737, 49738], outer_contained=True)
@@ -152,7 +270,7 @@ class ThreeSessionFixedPortTests(unittest.TestCase):
                 with patch.object(FIXTURE, "args", self.parsed()), \
                         patch.object(FIXTURE, "process_group_members", return_value=[]), \
                         patch.object(FIXTURE.time, "monotonic", side_effect=(0, 6)), \
-                        patch.object(FIXTURE, "port_is_bindable", side_effect=lambda port: port != occupied) as probe:
+                        patch.object(FIXTURE, "port_is_released", side_effect=lambda port: port != occupied) as probe:
                     if occupied is not None:
                         with self.assertRaisesRegex(AssertionError, "portsClosed=False"):
                             FIXTURE.stop_broker(process, broker_log)

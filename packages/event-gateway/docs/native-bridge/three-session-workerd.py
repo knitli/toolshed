@@ -99,8 +99,64 @@ def port_is_bindable(port):
     return True
 
 
+def port_is_released(port):
+    if sys.platform != "darwin":
+        return port_is_bindable(port)
+    require_fixture_port(port)
+    # Darwin reuse permits TIME_WAIT; both addresses exclude live loopback/wildcard binds.
+    try:
+        with ExitStack() as probes:
+            for host in ("127.0.0.1", "0.0.0.0"):
+                probe = probes.enter_context(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                probe.bind((host, port))
+    except OSError:
+        return False
+    return True
+
+
+def ephemeral_port_ranges():
+    try:
+        if sys.platform == "darwin":
+            sysctl = ctypes.CDLL(None, use_errno=True).sysctlbyname
+            sysctl.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t),
+                               ctypes.c_void_p, ctypes.c_size_t]
+            sysctl.restype = ctypes.c_int
+            values = []
+            for suffix in ("first", "last", "hifirst", "hilast"):
+                value = ctypes.c_int()
+                size = ctypes.c_size_t(ctypes.sizeof(value))
+                result = sysctl(("net.inet.ip.portrange." + suffix).encode(),
+                                ctypes.byref(value), ctypes.byref(size), None, 0)
+                require(result == 0 and size.value == ctypes.sizeof(value),
+                        "cannot read host ephemeral port range")
+                values.append(value.value)
+            ranges = [(values[0], values[1]), (values[2], values[3])]
+        elif sys.platform == "linux":
+            with Path("/proc/sys/net/ipv4/ip_local_port_range").open("rb") as source:
+                raw = source.read(65)
+            require(len(raw) <= 64, "invalid host ephemeral port range")
+            values = raw.split()
+            require(len(values) == 2 and all(value.isdigit() for value in values),
+                    "invalid host ephemeral port range")
+            ranges = [tuple(int(value) for value in values)]
+        else:
+            raise AssertionError("unsupported host ephemeral port range")
+    except (OSError, AttributeError, ValueError) as error:
+        raise AssertionError("cannot read host ephemeral port range") from error
+    require(all(1 <= first <= last <= 65535 for first, last in ranges),
+            "invalid host ephemeral port range")
+    return ranges
+
+
 def preflight_ports(parsed):
-    for port in fixture_ports(parsed):
+    ports = fixture_ports(parsed)
+    if getattr(parsed, "listener_port", None) is not None:
+        ranges = ephemeral_port_ranges()
+        for port in ports:
+            require(not any(first <= port <= last for first, last in ranges),
+                    f"fixed fixture port {port} overlaps host ephemeral port range")
+    for port in ports:
         require(port_is_bindable(port), "fixture port already bound or unavailable")
 
 
@@ -769,11 +825,11 @@ def stop_broker(process, broker_log):
     ports = fixture_ports(args)
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        if not process_group_members(process.pid) and all(port_is_bindable(port) for port in ports):
+        if not process_group_members(process.pid) and all(port_is_released(port) for port in ports):
             break
         time.sleep(0.05)
     members = process_group_members(process.pid)
-    ports_closed = all(port_is_bindable(port) for port in ports)
+    ports_closed = all(port_is_released(port) for port in ports)
     broker_log.flush()
     broker_log.seek(0)
     detail = broker_log.read().decode(errors="replace")[-2048:]

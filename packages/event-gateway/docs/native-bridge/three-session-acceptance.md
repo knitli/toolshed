@@ -184,10 +184,20 @@ Use explicitly selected, verified artifacts; the runner installs nothing:
   access; ACLs and privileged access must also preserve exclusive trusted control.
   It does not isolate processes sharing the owner's UID.
 
-The seven loopback ports are Workerd entry `49732`, internal loopback `49733`,
-broker `49734`, gateway listener `49735`, and model providers A/B/C
-`49736`/`49737`/`49738` in the example below. All supplied ports must be distinct
-integers between 1024 and 65535. `--outer-contained` requires `--listener-port`
+The seven loopback ports are Workerd entry `19432`, internal loopback `19433`,
+broker `19434`, gateway listener `19435`, and model providers A/B/C
+`19436`/`19437`/`19438` in the example below. All supplied ports must be distinct
+integers between 1024 and 65535. A complete fixed set must also fall outside the
+host automatic ephemeral ranges (Darwin default and high ranges, or Linux
+`ip_local_port_range`). Preflight reads these settings without a subprocess and
+refuses overlap, unreadable settings, or unsupported hosts before archive creation
+or process startup. The example uses `19432`–`19438`; verify the actual host ranges
+and authorize the same complete set in the audited outer profile and command.
+These example ports do not update any profile or binary pin; audit the matching
+candidate profile and manifest before execution. Use a fresh controlled host and
+keep its ephemeral-range settings unchanged throughout qualification. The range
+check is a point-in-time observation, not protection against later administrator
+changes. `--outer-contained` requires `--listener-port`
 and exactly three `--model-ports`. In either profile, these options must be supplied
 together; the default per-native profile supports omitting both for dynamic ports.
 
@@ -200,12 +210,20 @@ even when those sockets enable address reuse. This conservative check can reject
 ports in `TIME_WAIT`: wait and retry, or select a fresh complete port set permitted
 by the audited outer profile. Do not weaken the outer policy or fall back to
 unapproved ports. Git validation therefore still precedes occupancy probes. These
-probes are not reservations: a later bind can fail if another process takes a port.
-Cleanup also requires every selected port to allow the same strict temporary bind
-within the existing five-second wait after the native providers, daemon, and broker
-have stopped. A bound socket or `TIME_WAIT` can refuse PASS even without a listener
-if the port remains unavailable at that deadline. Cleanup does not enable
-`SO_REUSEADDR`, fall back to other ports, or extend the wait indefinitely.
+probes are not reservations: a later bind can fail if another process explicitly
+takes a port. Excluding automatic ephemeral ranges prevents the fixture’s own
+outgoing clients from automatically consuming a selected fixed port.
+Cleanup checks every selected IPv4 loopback port within the existing five-second
+wait after the native providers, daemon, and broker have stopped. On Darwin it
+holds simultaneous `SO_REUSEADDR` probes for `127.0.0.1` and `0.0.0.0`: both must
+bind, allowing completed connections in `TIME_WAIT` while rejecting live loopback
+or wildcard bindings, including non-listening sockets. The probes never enable
+`SO_REUSEPORT`. Other platforms retain the conservative strict-bind check, which
+can refuse `TIME_WAIT`; the Darwin cleanup behavior is not a portable guarantee.
+These checks prove availability only at observation time and do not reserve ports
+or establish absence of sockets on unrelated addresses or families. A late bind
+collision fails the attempt. Cleanup does not fall back to other ports or extend
+the wait indefinitely.
 The old four-port recovery profile cannot be reused unchanged. Audit the outer
 profile for the seven selected ports before execution; do not supply operator
 credentials or real model configuration.
@@ -227,8 +245,8 @@ package root:
   --cloud-commit "$EVENT_CLOUD_COMMIT" \
   --esbuild "$EVENT_ESBUILD_PACKAGE" \
   --miniflare "$EVENT_MINIFLARE_PACKAGE" \
-  --entry-port 49732 --loopback-port 49733 --broker-port 49734 \
-  --listener-port 49735 --model-ports 49736 49737 49738 \
+  --entry-port 19432 --loopback-port 19433 --broker-port 19434 \
+  --listener-port 19435 --model-ports 19436 19437 19438 \
   --output "$EVENT_PROOF_OUTPUT" \
   > "$EVENT_RUN_STDOUT" 2> "$EVENT_RUN_STDERR"
 ```
