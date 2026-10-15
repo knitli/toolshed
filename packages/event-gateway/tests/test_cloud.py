@@ -40,6 +40,8 @@ class ExportPinTests(unittest.TestCase):
         self._assert_modified_sources_refused((
             "apps/os/packages/event-runtime/src/github/watch-store.ts",
             "apps/os/packages/event-runtime/src/github/watch-control-internal.ts",
+            "apps/os/packages/event-runtime/src/github/watch-kernel.ts",
+            "apps/os/packages/event-runtime/src/github/watch-owner-proof.ts",
         ))
 
     def _assert_modified_sources_refused(self, selected_sources=None):

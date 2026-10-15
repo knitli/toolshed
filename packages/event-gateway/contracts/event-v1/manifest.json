@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/knitli/knitli-site.git",
-  "commit": "ed23882eac491e26e070e3ef26cf8c0e9e702b38",
+  "commit": "59940bde10db5584247c8648c985f246f546226f",
   "protocolVersion": 1,
   "files": [
     {
@@ -21,7 +21,7 @@
     {
       "file": "protocol-v1.json",
       "originalPath": "apps/os/packages/event-runtime/__tests__/fixtures/protocol-v1.json",
-      "sha256": "bab3fe23001ece200b8954dbc0e628bc558e6969ccf49969700315379eb456e3"
+      "sha256": "2f1fba8d3945c820a1d0ef429738c9d55f671b00cc7efcdf8f32f4ad8f2d8566"
     }
   ]
 }
