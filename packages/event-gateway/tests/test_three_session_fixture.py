@@ -659,6 +659,84 @@ class ThreeSessionArtifactFailureTests(unittest.TestCase):
                     with self.assertRaises((AssertionError, OSError)):
                         FIXTURE.private_json(path, {"nonce": "private"}, directory_fd=directory_fd)
 
+    def test_retained_private_json_wrapper_failure_closes_owned_descriptor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "causal.json"
+            failure = OSError("wrapper unavailable")
+            descriptors = []
+
+            def fdopen(fd, *_args, **_kwargs):
+                descriptors.append(fd)
+                raise failure
+
+            with patch.object(FIXTURE.os, "fdopen", side_effect=fdopen):
+                with self.assertRaises(OSError) as caught, ExitStack() as publication:
+                    FIXTURE.private_json(path, {}, publication_stack=publication)
+            self.assertIs(caught.exception, failure)
+            for fd in descriptors:
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+
+    def test_causal_sidecar_stays_pinned_until_pass(self):
+        for mutation in ("rename", "replace", "disappear", "bytes", "mode", "hardlink", None):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                target, sidecar = root / "proof.json", root / "proof.private-causal.json"
+                descriptors = []
+                original_open = os.open
+
+                async def scenario(directory_fd, publication_stack):
+                    evidence = publication_stack.enter_context(FIXTURE.evidence_archive(
+                        target.with_suffix(".private-evidence.jsonl"), directory_fd))
+                    evidence.drained = True
+                    proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
+                    # Exercise the real scenario cleanup path that publishes the sidecar.
+                    state = root / "state"
+                    state.mkdir()
+                    ctx = SimpleNamespace(evidence=evidence, broker=None, broker_log=None, proof=proof,
+                                          private_nonce_record={"nonReuse": True}, state_root=state,
+                                          args=SimpleNamespace(output=str(target)), publication_stack=publication_stack)
+                    with patch.object(FIXTURE, "stop_broker", return_value={}):
+                        FIXTURE.finish_scenario_cleanup(ctx)
+                    return proof, evidence
+
+                def opened(path, *args, **kwargs):
+                    if path == target.name:
+                        if mutation in ("rename", "replace"):
+                            sidecar.rename(root / "owned-sidecar")
+                        if mutation == "replace":
+                            sidecar.write_bytes(b'{"nonReuse":true}\n')
+                            sidecar.chmod(0o600)
+                        elif mutation == "disappear":
+                            sidecar.unlink()
+                        elif mutation == "bytes":
+                            sidecar.write_bytes(b"x" * sidecar.stat().st_size)
+                        elif mutation == "mode":
+                            sidecar.chmod(0o644)
+                        elif mutation == "hardlink":
+                            os.link(sidecar, root / "sidecar-link")
+                    fd = original_open(path, *args, **kwargs)
+                    descriptors.append(fd)
+                    return fd
+
+                with patch.object(FIXTURE, "cli", return_value=SimpleNamespace(output=str(target))), \
+                        patch.object(FIXTURE, "configure"), \
+                        patch.object(FIXTURE, "run_scenario", side_effect=scenario), \
+                        patch.object(FIXTURE.os, "open", side_effect=opened), patch("builtins.print") as output:
+                    if mutation is not None:
+                        with self.assertRaises((AssertionError, OSError)):
+                            FIXTURE.main()
+                        output.assert_not_called()
+                        self.assertFalse(target.exists())
+                    else:
+                        FIXTURE.main()
+                        self.assertEqual(json.loads(output.call_args.args[0])["result"], "PASS")
+                if mutation == "replace":
+                    self.assertEqual(sidecar.read_bytes(), b'{"nonReuse":true}\n')
+                for fd in descriptors:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
+
     def test_proof_fdopen_failure_closes_descriptor_and_removes_owned_file(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "proof.json"
@@ -1269,6 +1347,9 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     descriptors.extend((directory_fd, evidence.fd, evidence.directory_fd))
                     evidence.drained = True
                     proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
+                    evidence.causal = FIXTURE.private_json(target.with_name("proof.private-causal.json"), {},
+                                                            directory_fd=directory_fd,
+                                                            publication_stack=publication_stack)
                     if mutation == "scenario-error":
                         raise RuntimeError("scenario failed")
                     return proof, evidence
@@ -1345,6 +1426,9 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     descriptors.extend((directory_fd, evidence.fd, evidence.directory_fd))
                     evidence.drained = True
                     proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
+                    evidence.causal = FIXTURE.private_json(target.with_name("proof.private-causal.json"), {},
+                                                            directory_fd=directory_fd,
+                                                            publication_stack=publication_stack)
                     original_archive = archive.read_bytes()
                     return proof, evidence
 
@@ -1412,8 +1496,9 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                         target.with_suffix(".private-evidence.jsonl"), directory_fd))
                     evidence.drained = True
                     proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
-                    FIXTURE.private_json(parent / "proof.private-causal.json", {},
-                                         directory_fd=evidence.directory_fd)
+                    evidence.causal = FIXTURE.private_json(parent / "proof.private-causal.json", {},
+                                                            directory_fd=evidence.directory_fd,
+                                                            publication_stack=publication_stack)
                     FIXTURE.verify_evidence(evidence)
                     if replace_at == "scenario":
                         replace()

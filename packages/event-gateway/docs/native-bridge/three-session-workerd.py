@@ -312,29 +312,34 @@ def free_port():
         return reservation.getsockname()[1]
 
 
-def private_json(path, value, *, directory_fd=None):
+def verify_private_json(artifact):
+    opened = os.fstat(artifact.fd)
+    named = os.stat(artifact.path, dir_fd=artifact.directory_fd, follow_symlinks=False)
+    require(all(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600
+                and info.st_uid == os.getuid() and info.st_nlink == 1
+                and (info.st_dev, info.st_ino) == (artifact.identity.st_dev, artifact.identity.st_ino)
+                and info.st_size == len(artifact.raw) for info in (opened, named)),
+            "private JSON file changed")
+    os.lseek(artifact.fd, 0, os.SEEK_SET)
+    require(os.read(artifact.fd, len(artifact.raw) + 1) == artifact.raw, "private JSON content changed")
+
+
+def private_json(path, value, *, directory_fd=None, publication_stack=None):
     raw = (json.dumps(value, separators=(",", ":")) + "\n").encode()
     named_path = path if directory_fd is None else path.name
-    descriptor = os.open(named_path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                         0o600, dir_fd=directory_fd)
-    try:
-        identity = os.fstat(descriptor)
+    with ExitStack() as local_stack:
+        descriptor = os.open(named_path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=directory_fd)
+        (publication_stack if publication_stack is not None else local_stack).callback(os.close, descriptor)
+        artifact = SimpleNamespace(fd=descriptor, identity=os.fstat(descriptor), raw=raw,
+                                   path=named_path, directory_fd=directory_fd)
         with os.fdopen(descriptor, "wb", closefd=False) as stream:
             stream.write(raw)
         os.fsync(descriptor)
         if directory_fd is not None:
             os.fsync(directory_fd)
-        opened = os.fstat(descriptor)
-        named = os.stat(named_path, dir_fd=directory_fd, follow_symlinks=False)
-        require(all(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600
-                    and info.st_uid == os.getuid() and info.st_nlink == 1
-                    and (info.st_dev, info.st_ino) == (identity.st_dev, identity.st_ino)
-                    and info.st_size == len(raw) for info in (opened, named)),
-                "private JSON file changed")
-        os.lseek(descriptor, 0, os.SEEK_SET)
-        require(os.read(descriptor, len(raw) + 1) == raw, "private JSON content changed")
-    finally:
-        os.close(descriptor)
+        verify_private_json(artifact)
+        return artifact if publication_stack is not None else None
 
 
 @contextmanager
@@ -348,7 +353,7 @@ def evidence_archive(path, directory_fd=None):
         evidence = SimpleNamespace(fd=descriptor, directory_fd=directory, path=path,
                                    identity=os.fstat(descriptor), directory_identity=os.fstat(directory),
                                    lock=threading.Condition(), size=0, sealed=False, failed=False,
-                                   closing=False, active=0, drained=False, drain_error=None)
+                                   closing=False, active=0, drained=False, drain_error=None, causal=None)
         record_evidence(SimpleNamespace(evidence=evidence), "archive", {"version": 1})
         yield evidence
     finally:
@@ -2205,7 +2210,9 @@ def finish_scenario_cleanup(ctx):
             private_path = Path(ctx.args.output).with_name(Path(ctx.args.output).stem + ".private-causal.json")
             try:
                 verify_evidence(ctx.evidence)
-                private_json(private_path, ctx.private_nonce_record, directory_fd=ctx.evidence.directory_fd)
+                owner = ctx.publication_stack if ctx.publication_stack is not None else ctx.local_stack
+                ctx.evidence.causal = private_json(private_path, ctx.private_nonce_record,
+                                                   directory_fd=ctx.evidence.directory_fd, publication_stack=owner)
                 verify_evidence(ctx.evidence)
             except (OSError, AssertionError) as error:
                 if cleanup_error is None and original_error is None:
@@ -2429,6 +2436,8 @@ def main():
                         "proof output changed before publication")
                 stream.seek(0)
                 require(stream.read(32_769) == encoded, "proof output changed before publication")
+                require(evidence.causal is not None, "private causal sidecar missing before publication")
+                verify_private_json(evidence.causal)
                 print(json.dumps({"result": "PASS", "proof": str(target),
                                   "productionAdmissionProven": False, "nativeCliSessions": 3}))
     except BaseException:
