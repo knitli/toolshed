@@ -650,6 +650,61 @@ class ThreeSessionHistoricalReceiptTests(unittest.TestCase):
 
 
 class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
+    def test_invalid_utf8_cloud_response_is_recorded_without_changing_exchange(self):
+        for status in (200, 502):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "evidence.jsonl"
+                with FIXTURE.evidence_archive(path) as evidence:
+                    ctx = SimpleNamespace(evidence=evidence, address={"port": 12345},
+                                          fixture_secret="fixture", wire_evidence=[])
+                    response = (status, {"content-type": "application/json"}, b'{"error":"bad \xff"}')
+                    with patch.object(FIXTURE, "post", return_value=response):
+                        actual = asyncio.run(FIXTURE.send(
+                            ctx, method="POST", url=FIXTURE.ORIGIN + "/v1/runtimes/status",
+                            timeout=5, max_response_bytes=8192, follow_redirects=False,
+                            body=b"{}", headers={"x-event-node-proof": '{"nonce":"nonce"}'},
+                        ))
+                    self.assertIs(actual, response)
+                    self.assertEqual(ctx.wire_evidence[-1]["responseSummary"], {"parse": "failed"})
+                    records = [json.loads(line) for line in path.read_text().splitlines()]
+                    self.assertEqual(records[-1]["kind"], "cloudWire")
+                    self.assertEqual(records[-1]["value"]["response"], '{"error":"bad \ufffd"}')
+                    self.assertEqual(records[-1]["value"]["status"], status)
+
+    def test_failed_drain_restores_all_observers_without_sealing_or_masking_error(self):
+        for error in (AssertionError("native observers did not drain"), TimeoutError("executor timeout")):
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as directory, ExitStack() as patches:
+                evidence = patches.enter_context(FIXTURE.evidence_archive(Path(directory) / "evidence"))
+                ctx = SimpleNamespace(evidence=evidence, daemon_task=None, sessions={})
+                for name in ("client_runtime", "launcher", "Store", "daemon", "SessionNativeBridge"):
+                    patches.enter_context(patch.object(FIXTURE, name, Mock()))
+                targets = (
+                    (FIXTURE.client_runtime, "_send_https", "original_send_https"),
+                    (FIXTURE.launcher, "_session_request", "original_session_request"),
+                    (FIXTURE.Store, "list_pending", "original_list_pending"),
+                    (FIXTURE.Store, "list_reconcilable", "original_list_reconcilable"),
+                    (FIXTURE.daemon.Gateway, "dispatch", "original_dispatch"),
+                    (FIXTURE.daemon.Gateway, "reconcile", "original_reconcile"),
+                    (FIXTURE.daemon.NativeBridgeAdapter, "check", "original_adapter_check"),
+                    (FIXTURE.daemon.NativeBridgeAdapter, "reconcile", "original_adapter_reconcile"),
+                    (FIXTURE.SessionNativeBridge, "challenge", "original_bridge_challenge"),
+                )
+                for module, attribute, original in targets:
+                    setattr(ctx, original, object())
+                    setattr(module, attribute, Mock())
+                patches.enter_context(patch.object(FIXTURE, "drain_native_observers", AsyncMock(side_effect=error)))
+                finish = patches.enter_context(patch.object(FIXTURE, "finish_scenario_cleanup"))
+                with self.assertRaises(type(error)) as raised:
+                    asyncio.run(FIXTURE.cleanup_scenario(ctx))
+                self.assertIs(raised.exception, error)
+                finish.assert_called_once_with(ctx)
+                for module, attribute, original in targets:
+                    self.assertIs(getattr(module, attribute), getattr(ctx, original))
+                self.assertFalse(evidence.drained)
+                self.assertFalse(evidence.sealed)
+                with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                    FIXTURE.seal_evidence(ctx)
+
     def test_failed_stage_retains_database_before_resource_and_state_cleanup(self):
         self.run_retention_scenario("stage-failure")
 

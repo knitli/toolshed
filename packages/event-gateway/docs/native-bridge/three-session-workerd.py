@@ -1131,7 +1131,7 @@ async def send(ctx, **request):
     )
     record_evidence(ctx, "cloudWire", {"path": path, "request": body,
                                       "proof": proof, "status": response[0],
-                                      "response": response[2].decode()})
+                                      "response": response[2].decode(errors="replace")})
     response_summary = None
     if path == "/v1/runtimes/status":
         try:
@@ -2050,8 +2050,7 @@ async def cleanup_scenario(ctx):
     try:
         await drain_native_observers(ctx)
     finally:
-        if ctx.evidence.drained:
-            restore_observers(ctx)
+        restore_observers(ctx)
         finish_scenario_cleanup(ctx)
 
 
