@@ -112,6 +112,14 @@ class FakeAPI:
 
 
 class NativeCIProvenanceTests(unittest.TestCase):
+    def test_push_trigger_covers_every_trusted_policy_input(self):
+        workflow = (SCRIPT.parents[3] / V.VERIFIER_WORKFLOW).read_text()
+        push = workflow.split("\n  push:\n", 1)[1]
+        paths = push.split("\n    paths:\n", 1)[1].split("\n\n", 1)[0]
+        triggered = {line.removeprefix("      - ") for line in paths.splitlines()}
+        required = {V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, *V.INPUTS.values()}
+        self.assertFalse(required - triggered, required - triggered)
+
     def test_pins_parse_literals_without_executing_candidate(self):
         with tempfile.TemporaryDirectory() as directory:
             marker = Path(directory) / "executed"
@@ -230,6 +238,19 @@ class NativeCIProvenanceTests(unittest.TestCase):
             api.blobs[V.LAUNCHER, HEAD] = source
             with self.subTest(source=source), self.assertRaises(ValueError):
                 V.verify_candidate(api, HEAD, MAIN)
+
+    def test_build_foundation_allows_unchanged_release_but_requires_reviewed_recipe_for_promotion(self):
+        api = FakeAPI()
+        api.blobs[V.LAUNCHER, HEAD] = launcher()
+        for path in V.INPUTS.values():
+            api.blobs[path, HEAD] += b" new Core-idle recipe"
+        self.assertIn("unchanged", V.verify_candidate(api, HEAD, MAIN))
+        self.assertNotIn(("download", 456), api.calls)
+        api.blobs[V.LAUNCHER, HEAD] = launcher(api.selected["binarySha256"],
+                                               api.selected["codeModeHostSha256"])
+        with self.assertRaises(ValueError):
+            V.verify_candidate(api, HEAD, MAIN)
+        self.assertNotIn(("download", 456), api.calls)
 
     def test_changed_pins_require_producer_selection(self):
         api = FakeAPI()
@@ -376,7 +397,7 @@ class GitHubTransportTests(unittest.TestCase):
         return metadata, blob
 
     def test_large_patch_uses_pinned_git_blob_and_preserves_bytes(self):
-        raw = (SCRIPT.parents[1] / "docs/native-bridge/native-metadata-v1-implementation.patch").read_bytes()
+        raw = (SCRIPT.parents[3] / V.INPUTS["patchSha256"]).read_bytes()
         self.assertGreater(len(raw), 1024 * 1024)
         metadata, blob = self.blob_fixture(raw)
         api, opener = self.api([self.response(metadata), self.response(blob)])

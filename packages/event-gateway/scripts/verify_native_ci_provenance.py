@@ -35,8 +35,8 @@ INPUTS = {
     "builderSha256": "packages/event-gateway/scripts/package_native_client.py",
     "producerSha256": "packages/event-gateway/scripts/produce_native_ci_artifact.py",
     "workflowSha256": WORKFLOW,
-    "sourceManifestSha256": "packages/event-gateway/docs/native-bridge/native-metadata-v1-source-manifest.json",
-    "patchSha256": "packages/event-gateway/docs/native-bridge/native-metadata-v1-implementation.patch",
+    "sourceManifestSha256": "packages/event-gateway/docs/native-bridge/native-core-idle-v1-source-manifest.json",
+    "patchSha256": "packages/event-gateway/docs/native-bridge/native-core-idle-v1-implementation.patch",
 }
 CONTEXT = "Event Gateway / native provenance"
 LIMIT = 2 * 1024 * 1024
