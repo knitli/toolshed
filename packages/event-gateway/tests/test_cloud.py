@@ -13,6 +13,10 @@ import tempfile
 import time
 import unittest
 import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from event_gateway import cli
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -138,6 +142,7 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
 
     def native_sample(self, binding, *, observed_at=None, lease_ms=5000):
         witness = {
+            "nativeCoreTurnState": "idle",
             "version": 2,
             "nonce": 8,
             **{key: binding[key] for key in (
@@ -783,7 +788,8 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(commit["body"]), {
             "challengeId": challenge["challengeId"], "runtimeId": intent["runtimeId"],
             "expectedRuntimeGeneration": None, "expectedAttachmentGeneration": None,
-            "nativeEvidence": {"observedAt": evidence["observedAt"], "witness": evidence["witness"]},
+            "nativeEvidence": {"observedAt": evidence["observedAt"], "witness": {k: v for k, v in evidence["witness"].items()
+                           if k != "nativeCoreTurnState"}},
         })
         commit_proof = json.loads(commit["headers"]["x-event-node-proof"])
         self.assertNotEqual(commit_proof["nonce"], proof["nonce"])
@@ -829,6 +835,7 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
                 self.result = native["successResponses"][operation]
                 local_evidence = {
                     **native["evidence"],
+                    "witness": {**native["witness"], "nativeCoreTurnState": "idle"},
                     "validUntilMonotonic": time.monotonic() + min(native["witness"]["leaseMs"], 750) / 1000,
                 }
                 self.assertEqual(
@@ -838,6 +845,61 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
                     native["successResponses"][operation],
                 )
                 assert_node_proof(vector, self.requests[-1])
+
+    async def test_cli_fresh_core_witness_persists_wire_evidence_and_replays_exact_body(self):
+        native = FIXTURE["nativeAdmission"]
+        for operation in ("attach", "renew", "transfer"):
+            for state in ("busy", "idle", "unknown"):
+                with self.subTest(operation=operation, state=state), tempfile.TemporaryDirectory() as directory:
+                    intent = native["challengeRequests"][operation]
+                    challenge = native["challengeResponses"][operation]
+                    binding = intent["expectedNativeBinding"]
+                    self.now = _timestamp(native["nodeProofs"][operation]["proof"]["issuedAt"]) / 1000
+                    self.result = native["successResponses"][operation]
+                    evidence = {**native["evidence"],
+                                "witness": {**native["witness"], "nativeCoreTurnState": state},
+                                "validUntilMonotonic": time.monotonic() + 0.5}
+                    args = SimpleNamespace(session_id=str(uuid.uuid4()))
+                    state_dir = Path(directory).resolve() / "state"
+                    persisted = {}
+                    with patch.object(cli, "session_challenge", return_value=evidence), patch.object(
+                            self.client, "native_challenge", new=AsyncMock(return_value=challenge)):
+                        result = await asyncio.to_thread(
+                            cli._commit_native_call, args, state_dir, operation, intent, None,
+                            self.client, binding, persisted,
+                        )
+                    self.assertEqual(result, self.result)
+                    original_body = self.requests[-1]["body"]
+                    artifact = cli.load_pending_commit(state_dir, operation, args.session_id)
+                    self.assertEqual(artifact["evidence"], json.loads(original_body)["nativeEvidence"])
+                    self.assertNotIn("nativeCoreTurnState", artifact["evidence"]["witness"])
+                    self.assertEqual(evidence["witness"]["nativeCoreTurnState"], state)
+                    self.assertEqual(base64.b64decode(artifact["bodyB64"]), original_body)
+                    with patch.object(cli, "session_challenge", side_effect=AssertionError("must not resample")):
+                        replay = await asyncio.to_thread(
+                            cli._commit_native_call, args, state_dir, operation, intent, artifact,
+                            self.client, binding, {},
+                        )
+                    self.assertEqual(replay, result)
+                    self.assertEqual(self.requests[-1]["body"], original_body)
+
+    async def test_fresh_core_witness_rejects_missing_malformed_and_extra_fields(self):
+        binding = self.native_binding()
+        for operation in ("attach", "renew", "transfer"):
+            for malformed in (None, True, 1, [], {}, "running", "missing", "extra"):
+                with self.subTest(operation=operation, malformed=malformed):
+                    evidence = self.native_sample(binding)
+                    if malformed == "missing":
+                        del evidence["witness"]["nativeCoreTurnState"]
+                    elif malformed == "extra":
+                        evidence["witness"]["unexpected"] = True
+                    else:
+                        evidence["witness"]["nativeCoreTurnState"] = malformed
+                    with self.assertRaisesRegex(CloudError, "^invalid_request$"):
+                        await getattr(self.client, operation)(
+                            self.native_intent(operation, binding), self.native_challenge_response(), evidence,
+                        )
+        self.assertEqual(self.requests, [])
 
     async def test_native_admission_external_rejection_vectors_match_python(self):
         native = FIXTURE["nativeAdmission"]
@@ -862,6 +924,7 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
                     operation = commit_rejections[name]
                     local_evidence = {
                         **value["nativeEvidence"],
+                        "witness": {**value["nativeEvidence"]["witness"], "nativeCoreTurnState": "idle"},
                         "validUntilMonotonic": time.monotonic() + 0.5,
                     }
                     challenge = native["challengeResponses"][operation]
@@ -959,7 +1022,8 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         challenge = self.native_challenge_response()
         local_evidence = self.native_sample(binding)
         evidence = {"observedAt": local_evidence["observedAt"],
-                    "witness": local_evidence["witness"]}
+                    "witness": {k: v for k, v in local_evidence["witness"].items()
+                                if k != "nativeCoreTurnState"}}
         body = json.dumps({
             "challengeId": challenge["challengeId"], "runtimeId": intent["runtimeId"],
             "expectedRuntimeGeneration": None, "expectedAttachmentGeneration": None,

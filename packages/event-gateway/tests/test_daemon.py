@@ -187,7 +187,9 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
 
                 async def _commit(self, *_args, on_first_send=None, **_kwargs):
                     if on_first_send is not None:
-                        on_first_send(b'{"commit":"exact"}')
+                        on_first_send(json.dumps({"nativeEvidence": {
+                            "observedAt": _args[2]["observedAt"], "witness": _args[2]["witness"],
+                        }}).encode())
                     return response
 
                 async def attach(self, *args, **kwargs):

@@ -351,6 +351,51 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(witnessed[0]['state'], 'submitting')
         self.assertEqual(witnessed[0]['native_request'], self.submissions[0])
 
+    async def test_core_busy_or_unknown_snapshot_stops_before_claim(self):
+        ident = self.accept()['deliveryId']
+        owner = self
+
+        class CoreStateBridge:
+            receipt_version = 3
+
+            def __init__(self):
+                self.state = 'busy'
+
+            def challenge(self):
+                witness = {
+                    'eligible': True,
+                    'clientId': str(uuid.uuid4()),
+                    'serverInstanceId': str(uuid.uuid4()),
+                    'serverGeneration': 1,
+                    'threadId': owner.mapping['nativeThreadId'],
+                    'generation': 2,
+                }
+                if self.state != 'missing':
+                    witness['nativeCoreTurnState'] = self.state
+                return witness
+
+            def start(self, request):
+                return {'status': 'terminalNotStarted', 'reason': 'busy',
+                        'receiptId': str(uuid.uuid4()), 'replayed': False}
+
+            def restore_attempt(self, request):
+                pass
+
+            def receipt(self, request):
+                return {'status': 'unknown'}
+
+        bridge = CoreStateBridge()
+        self.gateway.adapter_factory = lambda mapping: NativeBridgeAdapter(mapping, bridge)
+        for state in ('busy', 'unknown', 'malformed', None, 'missing'):
+            bridge.state = state
+            row = await self.gateway.dispatch(ident)
+            self.assertEqual(row['status'], 'queued')
+            self.assertEqual(row['reason'], 'client_unavailable_or_busy')
+            self.assertEqual(self.claims, [], 'Core busy or unknown must stop before cloud claim')
+        bridge.state = 'idle'
+        await self.gateway.dispatch(ident)
+        self.assertEqual(len(self.claims), 1, 'an idle snapshot may enter admission')
+
     async def _v3_ambiguous_bridge(self, *, lost_response=False):
         ident = self.accept()['deliveryId']
         witnessed = []
@@ -362,7 +407,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             def challenge(self):
                 return {'eligible': True, 'clientId': str(uuid.uuid4()),
                         'serverInstanceId': str(uuid.uuid4()), 'serverGeneration': 1,
-                        'threadId': owner.mapping['nativeThreadId'], 'generation': 2}
+                        'threadId': owner.mapping['nativeThreadId'], 'generation': 2,
+                        'nativeCoreTurnState': 'idle'}
 
             def start(self, request):
                 owner.submissions.append(copy.deepcopy(request))

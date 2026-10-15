@@ -401,8 +401,14 @@ def _native_local_evidence(value, expected_binding):
     if (type(deadline) not in (int, float) or not math.isfinite(deadline)  # pylint: disable=unidiomatic-typecheck
             or time.monotonic() >= deadline):
         raise CloudError("native_evidence_expired")
+    witness = value["witness"]
+    _closed(witness, _NATIVE_WITNESS_FIELDS | {"nativeCoreTurnState"}, code="invalid_request")
+    if witness["nativeCoreTurnState"] not in ("busy", "idle", "unknown"):
+        raise CloudError("invalid_request")
+    # Core state is a local admission check, not part of the cloud wire contract.
+    wire_witness = {key: item for key, item in witness.items() if key != "nativeCoreTurnState"}
     evidence = _native_evidence(
-        {"observedAt": value["observedAt"], "witness": value["witness"]}, expected_binding,
+        {"observedAt": value["observedAt"], "witness": wire_witness}, expected_binding,
     )
     remaining = deadline - time.monotonic()
     if not 0 < remaining <= min(value["witness"]["leaseMs"], 750) / 1000:

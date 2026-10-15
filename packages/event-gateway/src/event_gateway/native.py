@@ -172,12 +172,15 @@ class NativeBridgeAdapter:
         except Exception:
             raise NativeError("native_unavailable") from None
         if (not isinstance(witness, dict) or witness.get("eligible") is not True
+                or witness.get("nativeCoreTurnState") not in ("busy", "idle", "unknown")
                 or witness.get("threadId") != self.thread_id
                 or (self.binding is not None and any(
                     type(witness.get(key)) is not type(value) or witness.get(key) != value
                     for key, value in self.binding.items()))
                 or any(not _native_uuid(witness.get(key)) for key in ("clientId", "serverInstanceId", "threadId"))
                 or any(not _uint(witness.get(key)) for key in ("generation", "serverGeneration"))):
+            return "unavailable"
+        if witness["nativeCoreTurnState"] != "idle":
             return "unavailable"
         self.witness = dict(witness)
         return "available"

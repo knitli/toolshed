@@ -43,7 +43,8 @@ class DaemonDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.bridge = InjectedBridge(self.state, thread)
         self.bridge.receipt_version = 3
         self.bridge.outcome = 'started'
-        binding = {key: value for key, value in self.bridge.witness.items() if key != 'eligible'}
+        binding = {key: value for key, value in self.bridge.witness.items()
+                   if key not in {'eligible', 'nativeCoreTurnState'}}
         binding.update(connectionId=str(uuid.uuid4()), backendPid=123)
         self.bridge.witness.update(binding)
         self.mapping.update(leaseExpiresAt=now + 600, nativeThreadId=thread,

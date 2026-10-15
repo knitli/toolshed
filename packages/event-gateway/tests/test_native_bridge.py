@@ -19,30 +19,12 @@ from unittest.mock import Mock, call, patch
 from uuid import uuid4
 
 from event_gateway import native_reader
+from native_witness import witness
 
 path = Path(__file__).parents[1] / "scripts" / "qualify_native_bridge.py"
 spec = importlib.util.spec_from_file_location("qualify_native_bridge", path)
 native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
-
-
-def witness(nonce=1, **changes):
-    return {
-        "version": 2,
-        "nonce": nonce,
-        "clientId": str(uuid4()),
-        "backendPid": 123,
-        "connectionId": str(uuid4()),
-        "threadId": str(uuid4()),
-        "generation": 2,
-        "eligible": True,
-        "sequence": 1,
-        "cause": "heartbeat",
-        "serverInstanceId": str(uuid4()),
-        "serverGeneration": 1,
-        "leaseMs": 750,
-        **changes,
-    }
 
 
 def send(channel, row):
@@ -923,6 +905,9 @@ class NativeBridgeTests(unittest.TestCase):
             {"serverGeneration": True},
             {"serverInstanceId": None},
             {"sequence": 0},
+            {"nativeCoreTurnState": "running"},
+            {"nativeCoreTurnState": None},
+            {"nativeCoreTurnState": []},
             {"prompt": "forbidden"},
         ):
             with self.subTest(changes=changes):
@@ -940,6 +925,17 @@ class NativeBridgeTests(unittest.TestCase):
                     else:
                         with self.assertRaises(native.BridgeError):
                             client.challenge()
+
+        def missing_core_state_peer(channel):
+            receive(channel)
+            row = witness()
+            del row["nativeCoreTurnState"]
+            send(channel, row)
+            self.assertIsNone(receive(channel))
+
+        with peer(missing_core_state_peer) as client:
+            with self.assertRaises(native.BridgeError):
+                client.challenge()
 
         def expired_witness_peer(channel):
             receive(channel)
@@ -1014,6 +1010,23 @@ class NativeBridgeTests(unittest.TestCase):
         with peer(handler) as client:
             self.assertEqual(client.challenge(), row)
             self.assertLessEqual(client.valid_until, before + 0.8)
+
+    def test_remaining_sample_lease_is_not_restarted_after_socket_delay(self):
+        row = witness(leaseMs=120)
+
+        def handler(channel):
+            receive(channel)
+            time.sleep(0.025)
+            send(channel, row)
+            self.assertIsNone(receive(channel))
+
+        before = time.monotonic()
+        with peer(handler) as client:
+            self.assertEqual(client.challenge(), row)
+            self.assertLessEqual(
+                client.valid_until, before + 0.121,
+                "a remaining lease is not restarted when the challenge response arrives",
+            )
 
     def test_loopback_mock_returns_synthetic_sse(self):
         import http.client

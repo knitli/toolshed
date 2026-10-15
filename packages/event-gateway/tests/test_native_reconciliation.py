@@ -92,7 +92,9 @@ class NativeReconciliationTests(unittest.TestCase):
                 self.before_send()
                 self.commits.append((copy.deepcopy(intent), prepared_body, recovery))
                 if on_first_send:
-                    on_first_send(b'{"fixture":"prepared-attach"}')
+                    on_first_send(json.dumps({"nativeEvidence": {
+                        "observedAt": evidence["observedAt"], "witness": evidence["witness"],
+                    }}).encode())
                 if self.commit_error:
                     raise self.commit_error
                 return owner.response

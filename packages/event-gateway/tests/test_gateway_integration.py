@@ -27,7 +27,8 @@ class InjectedBridge:
         """Bind the fake bridge to the durable ledger and selected thread."""
         self.path = path
         self.witness = {"eligible": True, "clientId": str(uuid.uuid4()), "generation": 2,
-                        "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 1, "threadId": thread_id}
+                        "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 1,
+                        "threadId": thread_id, "nativeCoreTurnState": "idle"}
         self.calls, self.at_start = [], []
         self.outcome = "terminalNotStarted"
         self.retained = {}
