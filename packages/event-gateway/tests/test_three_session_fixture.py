@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import io
 import json
+from itertools import product
 import os
 from pathlib import Path
 import signal
@@ -993,82 +994,85 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, "observers are not settled"):
                     FIXTURE.seal_evidence(ctx)
 
+    def mutate_publication_archive(self, mutation, root, target, archive):
+        raw = archive.read_bytes()
+        if mutation in ("rename", "replace"):
+            archive.rename(root / "original")
+        if mutation == "recreate":
+            archive.unlink()
+        if mutation in ("replace", "recreate"):
+            archive.write_bytes(raw)
+            archive.chmod(0o600)
+        if mutation in ("overwrite", "proof-replaced"):
+            archive.write_bytes(raw.replace(b"archive", b"ARCHIVE"))
+        if mutation == "proof-replaced" and target.exists():
+            target.rename(root / "owned-proof")
+            target.write_text("replacement proof")
+
     def test_archive_remains_bound_through_proof_publication_and_descriptors_close(self):
-        for mutation in ("rename", "replace", "recreate", "overwrite", "proof-replaced", "scenario-error", None):
-            for phase in ("proof-open", "proof-fsync"):
-                with self.subTest(mutation=mutation, phase=phase), tempfile.TemporaryDirectory() as directory:
-                    root = Path(directory)
-                    target, archive = root / "proof.json", root / "proof.private-evidence.jsonl"
-                    descriptors = []
-                    real_open, real_fsync = os.open, os.fsync
-                    changed = False
+        mutations = ("rename", "replace", "recreate", "overwrite", "proof-replaced", "scenario-error", None)
+        for mutation, phase in product(mutations, ("proof-open", "proof-fsync")):
+            with self.subTest(mutation=mutation, phase=phase), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                target, archive = root / "proof.json", root / "proof.private-evidence.jsonl"
+                descriptors = []
+                real_open, real_fsync = os.open, os.fsync
+                changed = False
 
-                    async def scenario(directory_fd, publication_stack):
-                        evidence = publication_stack.enter_context(FIXTURE.evidence_archive(archive, directory_fd))
-                        descriptors.extend((directory_fd, evidence.fd, evidence.directory_fd))
-                        evidence.drained = True
-                        proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
-                        if mutation == "scenario-error":
-                            raise RuntimeError("scenario failed")
-                        return proof, evidence
+                async def scenario(directory_fd, publication_stack):
+                    evidence = publication_stack.enter_context(FIXTURE.evidence_archive(archive, directory_fd))
+                    descriptors.extend((directory_fd, evidence.fd, evidence.directory_fd))
+                    evidence.drained = True
+                    proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
+                    if mutation == "scenario-error":
+                        raise RuntimeError("scenario failed")
+                    return proof, evidence
 
-                    def mutate():
-                        nonlocal changed
-                        if changed or mutation is None:
-                            return
-                        changed = True
-                        raw = archive.read_bytes()
-                        if mutation in ("rename", "replace"):
-                            archive.rename(root / "original")
-                        if mutation == "recreate":
-                            archive.unlink()
-                        if mutation in ("replace", "recreate"):
-                            archive.write_bytes(raw)
-                            archive.chmod(0o600)
-                        if mutation in ("overwrite", "proof-replaced"):
-                            archive.write_bytes(raw.replace(b"archive", b"ARCHIVE"))
-                        if mutation == "proof-replaced" and target.exists():
-                            target.rename(root / "owned-proof")
-                            target.write_text("replacement proof")
+                def mutate():
+                    nonlocal changed
+                    if changed or mutation is None:
+                        return
+                    changed = True
+                    self.mutate_publication_archive(mutation, root, target, archive)
 
-                    proof_fd = None
+                proof_fd = None
 
-                    def open_proof(path, *args, **kwargs):
-                        nonlocal proof_fd
-                        if path == target.name and kwargs.get("dir_fd") is not None:
-                            for fd in descriptors:
-                                os.fstat(fd)
-                            if phase == "proof-open":
-                                mutate()
-                            proof_fd = real_open(path, *args, **kwargs)
-                            return proof_fd
-                        return real_open(path, *args, **kwargs)
-
-                    def sync(fd):
-                        if fd == proof_fd and phase == "proof-fsync":
-                            mutate()
-                        real_fsync(fd)
-
-                    with patch.object(FIXTURE, "cli", return_value=SimpleNamespace(output=str(target))), \
-                            patch.object(FIXTURE, "configure"), \
-                            patch.object(FIXTURE, "run_scenario", side_effect=scenario), \
-                            patch.object(FIXTURE.os, "open", side_effect=open_proof), \
-                            patch.object(FIXTURE.os, "fsync", side_effect=sync), \
-                            patch("builtins.print") as output:
-                        if mutation:
-                            with self.assertRaises((AssertionError, OSError, RuntimeError)):
-                                FIXTURE.main()
-                            output.assert_not_called()
-                            if mutation == "proof-replaced" and phase == "proof-fsync":
-                                self.assertEqual(target.read_text(), "replacement proof")
-                            else:
-                                self.assertFalse(target.exists())
-                        else:
-                            FIXTURE.main()
-                            self.assertEqual(json.loads(output.call_args.args[0])["result"], "PASS")
-                    for fd in descriptors:
-                        with self.assertRaises(OSError):
+                def open_proof(path, *args, **kwargs):
+                    nonlocal proof_fd
+                    if path == target.name and kwargs.get("dir_fd") is not None:
+                        for fd in descriptors:
                             os.fstat(fd)
+                        if phase == "proof-open":
+                            mutate()
+                        proof_fd = real_open(path, *args, **kwargs)
+                        return proof_fd
+                    return real_open(path, *args, **kwargs)
+
+                def sync(fd):
+                    if fd == proof_fd and phase == "proof-fsync":
+                        mutate()
+                    real_fsync(fd)
+
+                with patch.object(FIXTURE, "cli", return_value=SimpleNamespace(output=str(target))), \
+                        patch.object(FIXTURE, "configure"), \
+                        patch.object(FIXTURE, "run_scenario", side_effect=scenario), \
+                        patch.object(FIXTURE.os, "open", side_effect=open_proof), \
+                        patch.object(FIXTURE.os, "fsync", side_effect=sync), \
+                        patch("builtins.print") as output:
+                    if mutation:
+                        with self.assertRaises((AssertionError, OSError, RuntimeError)):
+                            FIXTURE.main()
+                        output.assert_not_called()
+                        if mutation == "proof-replaced" and phase == "proof-fsync":
+                            self.assertEqual(target.read_text(), "replacement proof")
+                        else:
+                            self.assertFalse(target.exists())
+                    else:
+                        FIXTURE.main()
+                        self.assertEqual(json.loads(output.call_args.args[0])["result"], "PASS")
+                for fd in descriptors:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
 
     def test_proof_only_mutation_refuses_pass_and_preserves_unknown_replacement(self):
         for mutation in ("rename", "replace", "overwrite", None):
