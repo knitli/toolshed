@@ -2,6 +2,7 @@
 
 import base64
 import csv
+from contextlib import ExitStack
 import importlib.util
 import io
 import json
@@ -11,6 +12,7 @@ from pathlib import Path
 import tempfile
 import tomllib
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from test_native_ci_provenance import FakeAPI, MAIN, archive_bytes, launcher
@@ -149,11 +151,13 @@ class PairedInstallTests(unittest.TestCase):
     def test_success_orders_mock_install_copy_and_verification_before_handoff(self):
         plan = self.preflight()
         events = []
+
         def installer(destination, wheel, requirements, wheel_sha256):
             self.assertFalse((destination / 'native').exists())
             self.assertEqual(wheel.read_bytes(), plan['wheel'])
             self.assertIn('--hash=sha256:', requirements.read_text())
             events.append('install')
+
         def verify(destination, source, helper, selected):
             self.assertEqual(INSTALL.V.digest((destination / 'native/codex').read_bytes()), selected['binarySha256'])
             self.assertEqual((source / 'src/event_gateway/launcher.py').read_bytes(), self.api.payload['event_gateway/launcher.py'])
@@ -185,6 +189,7 @@ class PairedInstallTests(unittest.TestCase):
 
     def test_cleanup_preserves_replaced_destination(self):
         plan = self.preflight()
+
         def replace(destination, wheel, requirements, wheel_sha256):
             destination.rename(self.root / 'original-owned')
             destination.mkdir()
@@ -219,6 +224,7 @@ class PairedInstallTests(unittest.TestCase):
     def test_main_movement_during_preflight_refuses_without_creation(self):
         request = self.api.request
         reads = []
+
         def moving(endpoint, payload=None):
             result = request(endpoint, payload)
             if endpoint == 'branches/main':
@@ -233,6 +239,7 @@ class PairedInstallTests(unittest.TestCase):
 
     def test_artifact_swap_during_install_never_hands_off(self):
         plan = self.preflight()
+
         def swap(*args):
             self.artifact.write_bytes(archive_bytes([('codex', b'changed'), ('codex-code-mode-host', b'changed')]))
         with patch.object(INSTALL, 'install_wheel', side_effect=swap), patch.object(INSTALL, 'verify_destination') as verify:
@@ -310,3 +317,92 @@ class PairedInstallTests(unittest.TestCase):
                 with self.assertRaises(subprocess.CalledProcessError):
                     INSTALL.verify_destination(destination, source, helper, {'binarySha256': 'fixture-native-digest'})
                 self.assertFalse(marker.exists(), 'unverified launcher must never be imported')
+
+    def test_parent_swap_cannot_redirect_creation_or_cleanup(self):
+        safe = self.root / 'safe'
+        safe.mkdir()
+        outside = self.root / 'outside'
+        outside.mkdir()
+        self.destination = safe / 'fresh'
+        plan = self.preflight()
+        original_mkdir = INSTALL.os.mkdir
+
+        def swap(path, mode=0o777, *, dir_fd=None):
+            if path == 'fresh' and dir_fd is not None:
+                safe.rename(self.root / 'moved-safe')
+                safe.symlink_to(outside, target_is_directory=True)
+            return original_mkdir(path, mode, dir_fd=dir_fd)
+
+        with patch.object(INSTALL.os, 'mkdir', side_effect=swap), patch.object(INSTALL, 'install_wheel') as installer:
+            with self.assertRaises((FileNotFoundError, ValueError)):
+                INSTALL.install(plan)
+        installer.assert_not_called()
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertEqual(list((self.root / 'moved-safe').iterdir()), [])
+        self.assertEqual(self.existing.read_bytes(), b'keep working installation')
+
+    def test_cli_prerequisites_refuse_before_preflight_or_install(self):
+        defaults = {'platform': 'darwin', 'version_info': (3, 13),
+                    'flags': SimpleNamespace(isolated=1), 'implementation': SimpleNamespace(name='cpython')}
+        faults = ({'platform': 'linux'}, {'version_info': (3, 12)}, {'flags': SimpleNamespace(isolated=0)},
+                  {'implementation': SimpleNamespace(name='pypy')}, {'machine': 'x86_64'}, {'token': ''})
+        for fault in faults:
+            with self.subTest(fault=fault), ExitStack() as stack:
+                runtime = {**defaults, **{key: value for key, value in fault.items() if key in defaults}}
+                for name, value in runtime.items():
+                    stack.enter_context(patch.object(INSTALL.sys, name, value))
+                stack.enter_context(patch.object(INSTALL.sys, 'argv', [
+                    'install_paired_client.py', '--wheel', str(self.wheel), '--native-artifact', str(self.artifact),
+                    '--destination', str(self.destination),
+                ]))
+                stack.enter_context(patch.object(INSTALL.platform, 'machine', return_value=fault.get('machine', 'arm64')))
+                stack.enter_context(patch.dict(INSTALL.os.environ, {'GITHUB_TOKEN': fault.get('token', 'fixture-token')}))
+                preflight = stack.enter_context(patch.object(INSTALL, 'preflight'))
+                install = stack.enter_context(patch.object(INSTALL, 'install'))
+                with self.assertRaises(ValueError):
+                    INSTALL.main()
+                preflight.assert_not_called()
+                install.assert_not_called()
+                self.unchanged()
+
+    def test_offline_synthetic_install_runs_real_pip_postcheck_and_handoff(self):
+        self.api.project['dependencies'] = []
+        self.api.payload['event_gateway/__init__.py'] = b''
+        marker = self.root / 'synthetic-launcher-imported'
+        code = (f'QUALIFIED_SHA256 = {self.api.selected["binarySha256"]!r}\n'
+                f'QUALIFIED_CODE_MODE_HOST_SHA256 = {self.api.selected["codeModeHostSha256"]!r}\n'
+                f'from pathlib import Path\nPath({str(marker)!r}).write_text("verified")\n'
+                'def qualified_binary(binary, digest):\n    assert digest == QUALIFIED_SHA256\n')
+        self.api.payload['event_gateway/launcher.py'] = code.encode()
+        for name in ('__init__.py', 'launcher.py'):
+            self.api.blobs[INSTALL.PREFIX + 'src/event_gateway/' + name, MAIN] = self.api.payload['event_gateway/' + name]
+        project = (INSTALL.ROOT / 'pyproject.toml').read_text()
+        start = project.index('dependencies = [')
+        end = project.index(']', start) + 1
+        self.api.blobs[INSTALL.PREFIX + 'pyproject.toml', MAIN] = (project[:start] + 'dependencies = []' + project[end:]).encode()
+        self.api.blobs[INSTALL.PREFIX + 'uv.lock', MAIN] = (
+            'version = 1\n[[package]]\nname = "knitli-event-gateway"\nversion = "0.1.0"\ndependencies = []\n'
+        ).encode()
+        self.wheel.write_bytes(wheel_bytes(self.api.payload, self.api.project))
+        plan = self.preflight()
+        self.assertEqual(plan['requirements'].strip(), '')
+        real_run = subprocess.run
+        pip_calls = []
+        deny_network = ('import runpy, socket, sys\n'
+                        'def deny(*args, **kwargs): raise RuntimeError("network forbidden in offline fixture")\n'
+                        'socket.create_connection = deny\nsocket.socket.connect = deny\n'
+                        'sys.argv = ["pip", *sys.argv[1:]]\nrunpy.run_module("pip", run_name="__main__")\n')
+
+        def offline_run(command, *args, **kwargs):
+            if isinstance(command, list) and command[1:4] == ['-I', '-m', 'pip']:
+                pip_calls.append(command)
+                command = [command[0], '-I', '-c', deny_network, *command[4:]]
+            return real_run(command, *args, **kwargs)
+
+        with patch.object(INSTALL.subprocess, 'run', side_effect=offline_run):
+            result = INSTALL.install(plan)
+        self.assertEqual(len(pip_calls), 3)
+        self.assertEqual(marker.read_text(), 'verified')
+        self.assertEqual(result['environment'], str(self.destination))
+        self.assertEqual(INSTALL.V.digest((self.destination / 'native/codex').read_bytes()), result['binarySha256'])
+        self.assertEqual(self.existing.read_bytes(), b'keep working installation')

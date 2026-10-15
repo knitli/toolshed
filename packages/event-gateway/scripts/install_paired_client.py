@@ -60,6 +60,25 @@ def destination_path(value):
     return path
 
 
+def create_destination(path):
+    """Create exclusively beneath validated handles, never through a swapped symlink."""
+    parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for component in path.parts[1:-1]:
+            child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            os.close(parent)
+            parent = child
+            info = os.fstat(parent)
+            sticky = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
+            require(info.st_uid in (0, os.getuid()) and (not info.st_mode & 0o022 or sticky),
+                    "unsafe_destination_parent")
+        os.mkdir(path.name, mode=0o700, dir_fd=parent)
+        return parent, os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+    except BaseException:
+        os.close(parent)
+        raise
+
+
 def wheel_payload(data, expected, project):
     """Check every installable member before pip can process the wheel."""
     distribution = project['name'].replace('-', '_') + '-' + project['version'] + '.dist-info/'
@@ -233,9 +252,11 @@ def install(plan):
     """Populate only a fresh private destination; hand off only after verification."""
     destination = destination_path(plan['destination'])
     V.verify_archive(plan['artifact'], plan['selected'], plan['inputs'], plan['manifest'])
-    destination.mkdir(mode=0o700)
-    identity = destination.lstat()
+    parent, identity = create_destination(destination)
     try:
+        current = destination.lstat()
+        require((current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino),
+                "destination_parent_changed")
         source = destination / '.paired-source'
         for name, data in plan['expected'].items():
             relative = name.removeprefix('event_gateway/')
@@ -270,13 +291,18 @@ def install(plan):
                 'codeModeHostSha256': plan['selected']['codeModeHostSha256'],
                 'environment': str(destination), 'binary': str(native / 'codex')}
     except BaseException as error:
-        current = destination.lstat() if os.path.lexists(destination) else None
+        try:
+            current = os.stat(destination.name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            current = None
         if current and (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
             try:
-                shutil.rmtree(destination)
+                shutil.rmtree(destination.name, dir_fd=parent)
             except OSError:
                 error.add_note('Owned destination cleanup failed; active installation was not touched')
         raise
+    finally:
+        os.close(parent)
 
 
 def main():
