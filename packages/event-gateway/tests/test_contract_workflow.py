@@ -87,6 +87,7 @@ class ContractWorkflowTests(unittest.TestCase):
         self.assertEqual(set(metadata["snapshots"]), {
             "legacy", "no-start", "native-start", "native-input-recorded",
             "native-admission", "native-runtime-status", "github-source-readback", "github-source-control",
+            "github-watch-control",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         for expected in metadata["families"]:
@@ -165,8 +166,46 @@ class ContractWorkflowTests(unittest.TestCase):
         self.assertEqual(len(control["sources"]), 32)
         self.assertEqual(control["zodVersion"], "4.6.5")
 
+    def test_github_watch_control_accepted_with_all_authorized_hashes(self):
+        self.blobs = self.approved_snapshot("github-watch-control")
+        self.assertEqual(self.verify(), "github-watch-control")
+
+    def test_github_watch_control_requires_its_complete_authorization(self):
+        self.blobs = self.approved_snapshot("github-watch-control")
+        legacy = tuple(entry for entry in POLICY["FAMILIES"] if entry["name"] != "github-watch-control")
+        with self.assertRaisesRegex(ValueError, "contract family not authorized"):
+            self.verify(legacy)
+
+    def test_github_watch_control_mutation_or_omission_rejected(self):
+        self.assert_mutation_or_omission_rejected("github-watch-control")
+
+    def test_github_watch_control_manifest_source_provenance(self):
+        self.assert_manifest_source_provenance(
+            "github-watch-control", "ccdb861eb9126ccd8319d50da5cd6689f91435dd",
+            ("native-runtime-store", "native-admission-gate", "github/readback-contract",
+             "read-authority", "request-deadline", "github/host", "github/controller",
+             "github/client", "github/grants", "github/state", "github/ingress",
+             "github/source-control", "github/watches", "github/watch-store", "github/watch-control-internal",
+             "manual-canary", "manual-canary-scope",
+             "native-admission-canary", "admin-api", "admin-types"),
+            ("apps/os/packages/gatekeeper-memory/src/principals.ts",
+             "apps/os/packages/openapi-operator/src/access.ts",
+             "apps/os/packages/gatekeeper-messaging/src/agent-token.ts",
+             "apps/os/packages/gatekeeper-memory/src/auth.ts",
+             "apps/os/packages/gatekeeper-memory/src/admin-security.ts"))
+        control = json.loads(self.approved_snapshot("github-watch-control")[
+            SNAPSHOT + "event-control-v1/manifest.json"])
+        self.assertEqual(len(control["sources"]), 34)
+        self.assertEqual(control["zodVersion"], "4.6.5")
+
     def test_github_source_control_rejects_changed_or_omitted_source_hashes(self):
-        original = self.approved_snapshot("github-source-control")
+        self.assert_source_hash_mutation_or_omission_rejected("github-source-control")
+
+    def test_github_watch_control_rejects_changed_or_omitted_source_hashes(self):
+        self.assert_source_hash_mutation_or_omission_rejected("github-watch-control")
+
+    def assert_source_hash_mutation_or_omission_rejected(self, name):
+        original = self.approved_snapshot(name)
         path = SNAPSHOT + "event-control-v1/manifest.json"
         for source in json.loads(original[path])["sources"]:
             for missing in (False, True):
