@@ -875,7 +875,10 @@ def make_model(stack, hold=False, *, port=0):
     require(is_exact_int(port), "model port must be an integer")
     if port != 0:
         require_fixture_port(port)
-    server = ModelServer(("127.0.0.1", port), ModelProvider)
+    try:
+        server = ModelServer(("127.0.0.1", port), ModelProvider)
+    except OSError as error:
+        raise AssertionError(f"model provider could not bind 127.0.0.1:{port}") from error
     # server_close must join handlers before the archive receives its final hash.
     server.daemon_threads = False
     server.qualifier = qualifier
@@ -1416,14 +1419,15 @@ async def observe_dispatch(gateway, ctx, delivery_id):
         ctx.dispatch_errors.append(type(error).__name__)
         raise
     if label == "C-busy-second" and result.get("reason") == "client_unavailable_or_busy":
-        observations = [row for row in ctx.c_challenges[challenge_offset:]
-                        if core_busy_observation(row, ctx.sessions["C"]["binding"],
-                                                 time.monotonic(), ctx.c_busy_nonces)]
+        observations = []
+        for row in ctx.c_challenges[challenge_offset:]:
+            if core_busy_observation(row, ctx.sessions["C"]["binding"], time.monotonic(), ctx.c_busy_nonces):
+                observations.append(row)
+                ctx.c_busy_nonces.add(row["response"]["witness"]["nonce"])
         if not observations:
             # Surface this in the main scenario poll, not the daemon's worker task.
             ctx.c_busy_evidence_error = "C2 busy disposition lacks fresh authoritative Core-busy evidence"
             return result
-        ctx.c_busy_nonces.update(row["response"]["witness"]["nonce"] for row in observations)
         record_evidence(ctx, "c2CoreBusy", observations)
     ctx.dispatch_results.append({"delivery": label, "status": result.get("status"),
                              "reason": result.get("reason")})

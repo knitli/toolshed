@@ -56,6 +56,21 @@ class ThreeSessionDaemonBudgetTests(unittest.TestCase):
         asyncio.run(scenario())
 
 
+class ThreeSessionLateModelBindTests(unittest.TestCase):
+    def test_late_model_collision_identifies_port_and_preserves_cause(self):
+        failure = OSError("Address already in use")
+        stack = Mock()
+        host = SimpleNamespace(__file__=str(SCRIPT.with_name("native-host-launcher-qualification.py")))
+        with patch.object(FIXTURE, "host_qualifier", host, create=True), \
+                patch.object(FIXTURE, "ModelServer", side_effect=failure), \
+                patch.object(FIXTURE.threading, "Thread") as thread:
+            with self.assertRaisesRegex(AssertionError, "model provider could not bind 127.0.0.1:49736") as caught:
+                FIXTURE.make_model(stack, port=49736)
+        self.assertIs(caught.exception.__cause__, failure)
+        thread.assert_not_called()
+        stack.callback.assert_not_called()
+
+
 class ThreeSessionFixedPortTests(unittest.TestCase):
     def parsed(self, **changes):
         fields = dict(entry_port=49732, loopback_port=49733, broker_port=49734,
@@ -2210,7 +2225,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                                       c_challenges=[], c_busy_nonces=set(), sessions={"C": {"binding": binding}})
 
                 async def dispatch(*args):
-                    ctx.c_challenges.append(copy.deepcopy(row))
+                    ctx.c_challenges.extend([copy.deepcopy(row), copy.deepcopy(row)])
                     return {"status": "deferred", "reason": "client_unavailable_or_busy"}
 
                 ctx.original_dispatch = dispatch
