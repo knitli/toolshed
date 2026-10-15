@@ -12,6 +12,7 @@ import tempfile
 import tomllib
 import unittest
 from types import SimpleNamespace
+from uuid import uuid4
 from unittest.mock import patch
 
 from test_native_ci_provenance import FakeAPI, MAIN, archive_bytes, launcher
@@ -349,7 +350,7 @@ class PairedInstallTests(unittest.TestCase):
         faults = ({'platform': 'linux'}, {'version_info': (3, 12)},
                   {'flags': SimpleNamespace(**{**flags, 'isolated': 0})},
                   {'implementation': SimpleNamespace(**{**implementation, 'name': 'pypy'})},
-                  {'machine': 'x86_64'}, {'missing_token': True})
+                  {'machine': 'x86_64'}, {'unauthenticated': True})
         for fault in faults:
             with self.subTest(fault=fault), ExitStack() as stack:
                 runtime = {**defaults, **{key: value for key, value in fault.items() if key in defaults}}
@@ -360,8 +361,8 @@ class PairedInstallTests(unittest.TestCase):
                     '--destination', str(self.destination),
                 ]))
                 stack.enter_context(patch.object(INSTALL.platform, 'machine', return_value=fault.get('machine', 'arm64')))
-                stack.enter_context(patch.dict(INSTALL.os.environ, {'GITHUB_TOKEN': 'fixture-token'}))
-                if fault.get('missing_token'):
+                stack.enter_context(patch.dict(INSTALL.os.environ, {'GITHUB_TOKEN': uuid4().hex}))
+                if fault.get('unauthenticated'):
                     INSTALL.os.environ.pop('GITHUB_TOKEN', None)
                 preflight = stack.enter_context(patch.object(INSTALL, 'preflight'))
                 install = stack.enter_context(patch.object(INSTALL, 'install'))
