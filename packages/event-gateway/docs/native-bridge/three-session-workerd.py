@@ -106,7 +106,7 @@ def port_is_released(port):
     # Darwin reuse permits TIME_WAIT; both addresses exclude live loopback/wildcard binds.
     try:
         with ExitStack() as probes:
-            for host in ("127.0.0.1", "0.0.0.0"):
+            for host in ("127.0.0.1", "0.0.0.0"):  # nosec B104 - Bind-only cleanup probe; never listens; detects wildcard occupants.
                 probe = probes.enter_context(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
                 probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 probe.bind((host, port))
