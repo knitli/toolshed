@@ -136,6 +136,23 @@ class ThreeSessionModelTests(unittest.TestCase):
             FIXTURE.ModelProvider._respond(handler)
         return handler
 
+    def test_provider_failure_is_archived_before_scratch_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence"
+            with FIXTURE.evidence_archive(path) as evidence:
+                server = self.provider()
+                ctx = SimpleNamespace(evidence=evidence)
+                server.evidence = lambda kind, value: FIXTURE.record_evidence(ctx, kind, {"session": "C", **value})
+                server.qualifier.request_kind = Mock(side_effect=ValueError("bad request " + "x" * 500))
+                handler = self.respond(server, {})
+                handler.send_error.assert_called_once_with(500)
+                records = [json.loads(line) for line in path.read_text().splitlines()]
+                self.assertEqual(records[-1]["kind"], "providerError")
+                self.assertEqual(records[-1]["value"], {"session": "C", **server.errors[0]})
+                self.assertEqual(len(records[-1]["value"]["message"]), 160)
+                self.assertEqual(records[-1]["value"]["type"], "ValueError")
+                self.assertEqual(records[-1]["value"]["phase"], "initial")
+
     def test_title_cannot_consume_primary_hold(self):
         server = self.provider()
         self.respond(server, {'tools': [], 'text': {'format': {'schema': {
@@ -767,6 +784,106 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                 self.assertFalse(evidence.sealed)
                 with self.assertRaisesRegex(AssertionError, "observers are not settled"):
                     FIXTURE.seal_evidence(ctx)
+
+    def test_cleanup_sync_failure_preserves_original_error_and_removes_state(self):
+        for failure_at in ("fixture", "drain", "none"):
+            with self.subTest(failure_at=failure_at), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                state = root / "state"
+                state.mkdir()
+                with FIXTURE.evidence_archive(root / "evidence") as evidence:
+                    ctx = SimpleNamespace(evidence=evidence, daemon_task=None, sessions={},
+                                          broker=None, broker_log=None, proof=None,
+                                          private_nonce_record=None, state_root=state)
+                    original = RuntimeError("original " + failure_at)
+                    fsync_failure = OSError("fsync failed")
+                    drain = AsyncMock(side_effect=original if failure_at == "drain" else None)
+
+                    def fail_sync(fd):
+                        drain.assert_awaited_once_with(ctx)
+                        self.assertTrue(state.is_dir())
+                        raise fsync_failure
+
+                    async def scenario():
+                        try:
+                            if failure_at == "fixture":
+                                raise original
+                        finally:
+                            await FIXTURE.cleanup_scenario(ctx)
+
+                    with patch.object(FIXTURE, "drain_native_observers", drain), \
+                            patch.object(FIXTURE, "restore_observers") as restore, \
+                            patch.object(FIXTURE, "stop_broker", return_value={}) as stop, \
+                            patch.object(FIXTURE.os, "fsync", side_effect=fail_sync), \
+                            patch("builtins.print"):
+                        with self.assertRaises((RuntimeError, OSError)) as raised:
+                            asyncio.run(scenario())
+                    self.assertIs(raised.exception, fsync_failure if failure_at == "none" else original)
+                    restore.assert_called_once_with(ctx)
+                    stop.assert_called_once()
+                    self.assertFalse(state.exists())
+                    self.assertTrue(evidence.failed)
+                    evidence.drained = True
+                    with self.assertRaisesRegex(AssertionError, "observers are not settled"):
+                        FIXTURE.seal_evidence(ctx)
+
+    def test_final_published_proof_size_is_checked_before_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "proof.json"
+            proof = {"metadata": "x" * 32650}
+            self.assertLess(len(json.dumps(proof).encode()), 32768)
+            proof.update(privateEvidence={"sha256": "a" * 64, "bytes": 100},
+                         brokerCleanup={"closed": True, "ports": [49732, 49733, 49734]})
+            with patch.object(FIXTURE, "cli", return_value=SimpleNamespace(output=str(target))), \
+                    patch.object(FIXTURE, "configure"), \
+                    patch.object(FIXTURE, "run_scenario", AsyncMock(return_value=proof)), \
+                    patch("builtins.print") as output:
+                with self.assertRaisesRegex(AssertionError, "proof exceeds fixed metadata bound"):
+                    FIXTURE.main()
+                self.assertFalse(target.exists())
+                output.assert_not_called()
+
+    def test_early_fixture_failure_flushes_archive_and_parent_before_close(self):
+        for failed_path in ("/fixture/challenge", "/v1/nodes/complete"):
+            with self.subTest(path=failed_path), tempfile.TemporaryDirectory() as directory, ExitStack() as patches:
+                root = Path(directory)
+                key = Mock()
+                key.public_key.return_value.public_bytes_raw.return_value = b"key"
+                key.sign.return_value = b"signature"
+                for name, value in {
+                    "args": SimpleNamespace(output=str(root / "proof.json"), outer_contained=False),
+                    "private_key_type": SimpleNamespace(generate=lambda: key),
+                    "launcher": Mock(), "Store": Mock(), "daemon": Mock(),
+                    "SessionNativeBridge": Mock(), "client_runtime": Mock(), "CloudClient": Mock(),
+                }.items():
+                    patches.enter_context(patch.object(FIXTURE, name, value))
+                patches.enter_context(patch.object(FIXTURE, "private_temp_root", return_value=root))
+                patches.enter_context(patch.object(FIXTURE, "start_broker", return_value=(None, None, {"secret": "secret", "port": 12345})))
+                stop = patches.enter_context(patch.object(FIXTURE, "stop_broker", return_value={}))
+
+                def post(port, secret, path, body):
+                    return (503 if path == failed_path else 200), {}, b'{"challengeId":"id","signingPayload":"payload"}'
+
+                patches.enter_context(patch.object(FIXTURE, "post", side_effect=post))
+                initialize = patches.enter_context(patch.object(FIXTURE, "initialize_runtime", AsyncMock()))
+                real_fsync = os.fsync
+
+                def sync_before_cleanup(fd):
+                    self.assertTrue(list(root.glob(FIXTURE.GATEWAY_TEMP_PREFIX + "*")))
+                    real_fsync(fd)
+
+                sync = patches.enter_context(patch.object(FIXTURE.os, "fsync", side_effect=sync_before_cleanup))
+                with self.assertRaisesRegex(AssertionError, "fixture rejected " + failed_path):
+                    asyncio.run(FIXTURE.run_scenario())
+                initialize.assert_not_called()
+                stop.assert_called_once()
+                self.assertEqual(sync.call_count, 2)
+                for call in sync.call_args_list:
+                    with self.assertRaises(OSError):
+                        os.fstat(call.args[0])
+                self.assertEqual([p.name for p in root.iterdir()], ["proof.private-evidence.jsonl"])
+                records = [json.loads(line) for line in (root / "proof.private-evidence.jsonl").read_text().splitlines()]
+                self.assertEqual(records[-1]["value"]["status"], 503)
 
     def test_transport_failure_is_archived_before_real_cloud_retry(self):
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey

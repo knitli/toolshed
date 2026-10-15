@@ -164,12 +164,16 @@ class ModelProvider(BaseHTTPRequestHandler):
                     self.server.turn_verified = True
         except Exception as error:
             with self.server.request_lock:
-                self.server.errors.append({"type": type(error).__name__, "message": str(error)[:160],
-                                           "phase": self.server.phase,
-                                           "kind": locals().get("kind"),
-                                           "mainCount": len(self.server.main_requests),
-                                           "turnMainCount": len(self.server.turn_main_requests)})
-            self.send_error(500)
+                diagnostic = {"type": type(error).__name__, "message": str(error)[:160],
+                              "phase": self.server.phase, "kind": locals().get("kind"),
+                              "mainCount": len(self.server.main_requests),
+                              "turnMainCount": len(self.server.turn_main_requests)}
+                self.server.errors.append(diagnostic)
+            try:
+                if getattr(self.server, "evidence", None):
+                    self.server.evidence("providerError", diagnostic)
+            finally:
+                self.send_error(500)
 
 
 def stop_model(server, thread):
@@ -2077,8 +2081,19 @@ async def cleanup_scenario(ctx):
     try:
         await drain_native_observers(ctx)
     finally:
-        restore_observers(ctx)
-        finish_scenario_cleanup(ctx)
+        original_error = sys.exc_info()[1]
+        try:
+            if not ctx.evidence.failed:
+                try:
+                    sync_evidence(ctx)
+                except Exception as error:
+                    ctx.evidence.failed = True
+                    if original_error is None:
+                        raise
+                    print("private evidence sync failed: " + type(error).__name__, file=sys.stderr)
+        finally:
+            restore_observers(ctx)
+            finish_scenario_cleanup(ctx)
 
 
 def finish_scenario_cleanup(ctx):
@@ -2269,6 +2284,7 @@ def main():
 
         proof = asyncio.run(run_scenario(directory))
         encoded = (json.dumps(proof, indent=2) + "\n").encode()
+        require(len(encoded) <= 32_768, "proof exceeds fixed metadata bound")
         verify_parent()
         descriptor = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                              0o600, dir_fd=directory)
