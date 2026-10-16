@@ -44,6 +44,14 @@ class ExportPinTests(unittest.TestCase):
             "apps/os/packages/event-runtime/src/github/watch-owner-proof.ts",
         ))
 
+    def test_pinned_history_sources_refused_before_schema_evaluation(self):
+        self._assert_modified_sources_refused((
+            "apps/os/packages/event-runtime/src/github/pinned-read-contract.ts",
+            "apps/os/packages/event-runtime/src/github/host.ts",
+            "apps/os/packages/event-runtime/src/github/controller.ts",
+            "apps/os/packages/event-runtime/src/github/grants.ts",
+        ))
+
     def _assert_modified_sources_refused(self, selected_sources=None):
         git = shutil.which("git")
         node = shutil.which("node")

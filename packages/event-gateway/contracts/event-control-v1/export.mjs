@@ -14,7 +14,7 @@ const names = [
   'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts',
   'native-runtime-store.ts', 'native-admission-gate.ts', 'github/readback-contract.ts',
   'read-authority.ts', 'request-deadline.ts', 'github/host.ts', 'github/controller.ts',
-  'github/client.ts', 'github/grants.ts', 'github/state.ts', 'github/ingress.ts',
+  'github/client.ts', 'github/pinned-read-contract.ts', 'github/grants.ts', 'github/state.ts', 'github/ingress.ts',
   '../../gatekeeper-memory/src/principals.ts', '../../openapi-operator/src/access.ts',
   '../../gatekeeper-messaging/src/agent-token.ts',
   'github/source-control.ts', 'github/watches.ts',
