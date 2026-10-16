@@ -87,7 +87,7 @@ class ContractWorkflowTests(unittest.TestCase):
         self.assertEqual(set(metadata["snapshots"]), {
             "legacy", "no-start", "native-start", "native-input-recorded",
             "native-admission", "native-runtime-status", "github-source-readback", "github-source-control",
-            "github-watch-control", "github-watch-owner-rpc",
+            "github-watch-control", "github-watch-owner-rpc", "github-pinned-history-read",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         for expected in metadata["families"]:
@@ -234,6 +234,51 @@ class ContractWorkflowTests(unittest.TestCase):
 
     def test_github_watch_owner_rpc_rejects_changed_or_omitted_source_hashes(self):
         self.assert_source_hash_mutation_or_omission_rejected("github-watch-owner-rpc")
+
+    def test_github_pinned_history_read_accepted_with_all_authorized_hashes(self):
+        self.blobs = self.approved_snapshot("github-pinned-history-read")
+        self.assertEqual(self.verify(), "github-pinned-history-read")
+
+    def test_github_pinned_history_read_requires_its_complete_authorization(self):
+        self.blobs = self.approved_snapshot("github-pinned-history-read")
+        legacy = tuple(entry for entry in POLICY["FAMILIES"] if entry["name"] != "github-pinned-history-read")
+        with self.assertRaisesRegex(ValueError, "contract family not authorized"):
+            self.verify(legacy)
+
+    def test_github_pinned_history_read_mutation_or_omission_rejected(self):
+        self.assert_mutation_or_omission_rejected("github-pinned-history-read")
+
+    def test_github_pinned_history_read_manifest_source_provenance(self):
+        self.assert_manifest_source_provenance(
+            "github-pinned-history-read", "49122dd4ac2a358d87e8cd727fd8e817ae183dac",
+            ("native-runtime-store", "native-admission-gate", "github/readback-contract",
+             "read-authority", "request-deadline", "github/host", "github/controller",
+             "github/client", "github/pinned-read-contract", "github/grants", "github/state", "github/ingress",
+             "github/source-control", "github/watches", "github/watch-store", "github/watch-control-internal",
+             "github/watch-kernel", "github/watch-owner-proof",
+             "manual-canary", "manual-canary-scope",
+             "native-admission-canary", "admin-api", "admin-types"),
+            ("apps/os/packages/gatekeeper-memory/src/principals.ts",
+             "apps/os/packages/openapi-operator/src/access.ts",
+             "apps/os/packages/gatekeeper-messaging/src/agent-token.ts",
+             "apps/os/packages/gatekeeper-memory/src/auth.ts",
+             "apps/os/packages/gatekeeper-memory/src/admin-security.ts"),
+            event_revision="59940bde10db5584247c8648c985f246f546226f")
+        control = json.loads(self.approved_snapshot("github-pinned-history-read")[
+            SNAPSHOT + "event-control-v1/manifest.json"])
+        self.assertEqual(len(control["sources"]), 37)
+        self.assertEqual(control["zodVersion"], "4.6.5")
+
+    def test_github_pinned_history_read_rejects_changed_or_omitted_source_hashes(self):
+        self.assert_source_hash_mutation_or_omission_rejected("github-pinned-history-read")
+
+    def test_github_pinned_history_read_preserves_event_and_control_dto_bytes(self):
+        previous = self.approved_snapshot("github-watch-owner-rpc")
+        current = self.approved_snapshot("github-pinned-history-read")
+        for path in PATHS:
+            if path != "event-control-v1/manifest.json":
+                with self.subTest(path=path):
+                    self.assertEqual(current[SNAPSHOT + path], previous[SNAPSHOT + path])
 
     def test_github_watch_owner_rpc_semantic_corpus(self):
         blobs = self.approved_snapshot("github-watch-owner-rpc")
