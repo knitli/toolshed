@@ -44,7 +44,20 @@ class ExportPinTests(unittest.TestCase):
             "apps/os/packages/event-runtime/src/github/watch-owner-proof.ts",
         ))
 
-    def _assert_modified_sources_refused(self, selected_sources=None):
+    def test_pinned_history_sources_refused_before_schema_evaluation(self):
+        self._assert_modified_sources_refused((
+            "apps/os/packages/event-runtime/src/github/pinned-read-contract.ts",
+            "apps/os/packages/event-runtime/src/github/host.ts",
+            "apps/os/packages/event-runtime/src/github/controller.ts",
+            "apps/os/packages/event-runtime/src/github/grants.ts",
+        ))
+
+    def test_pin_metadata_mismatches_refused_before_schema_evaluation(self):
+        for mismatch in ("revision", "zod_version", "missing_source", "extra_source"):
+            with self.subTest(mismatch=mismatch):
+                self._assert_modified_sources_refused(pin_mismatch=mismatch)
+
+    def _assert_modified_sources_refused(self, selected_sources=None, *, pin_mismatch=None):
         git = shutil.which("git")
         node = shutil.which("node")
         self.assertIsNotNone(git, "git executable is required for the source pin test")
@@ -75,7 +88,30 @@ class ExportPinTests(unittest.TestCase):
             dependency.mkdir()
             (dependency / "package.json").write_text(json.dumps({"version": pin["zodVersion"]}))
             (dependency / "index.js").write_text("export const z = {};\n")
+            if pin_mismatch == "revision":
+                pin["revision"] = "0" * 40
+            elif pin_mismatch == "zod_version":
+                (dependency / "package.json").write_text(json.dumps({"version": "0.0.0"}))
+            elif pin_mismatch == "missing_source":
+                del pin["sources"]["apps/os/packages/event-runtime/src/github/pinned-read-contract.ts"]
+            elif pin_mismatch == "extra_source":
+                pin["sources"]["apps/os/packages/event-runtime/src/extra.ts"] = "0" * 64
             (scratch / "manifest.json").write_text(json.dumps(pin))
+
+            def assert_refused():
+                # Resolved executable, fixed arguments, no shell; isolated source-pin fixture.
+                result = subprocess.run(  # nosec B603
+                    [node, str(exporter), str(scratch), str(dependency / "index.js"), "--check"],
+                    capture_output=True, text=True, timeout=10,
+                    env={**os.environ, "EVENT_EXPORT_TEST_MARKER": str(marker)},
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(marker.exists(), "source executed before its pin was checked")
+                self.assertIn("source pin mismatch before evaluation", result.stderr)
+
+            if pin_mismatch is not None:
+                assert_refused()
+                return
             for name in selected_sources or pin["sources"]:
                 self.assertIn(name, pin["sources"], "required runtime source is not pinned")
                 source_path = scratch / name.removeprefix("apps/os/")
@@ -86,15 +122,7 @@ class ExportPinTests(unittest.TestCase):
                             "import {writeFileSync} from 'node:fs';\n"
                             "writeFileSync(process.env.EVENT_EXPORT_TEST_MARKER, 'tampered');\n"
                         )
-                        # Resolved executable, fixed arguments, no shell; isolated source-pin fixture.
-                        result = subprocess.run(  # nosec B603
-                            [node, str(exporter), str(scratch), str(dependency / "index.js"), "--check"],
-                            capture_output=True, text=True, timeout=10,
-                            env={**os.environ, "EVENT_EXPORT_TEST_MARKER": str(marker)},
-                        )
-                        self.assertNotEqual(result.returncode, 0)
-                        self.assertFalse(marker.exists(), "modified source executed before its pin was checked")
-                        self.assertIn("source pin mismatch before evaluation", result.stderr)
+                        assert_refused()
                     finally:
                         source_path.write_text(original)
 

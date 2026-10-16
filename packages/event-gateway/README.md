@@ -249,23 +249,28 @@ byte limits. Consumer tests exercise these through Python validation and the
 HTTP response boundary. Request identity, pagination binding, and duplicate
 record checks remain separately tested local invariants. These vectors do not
 qualify live authorization, source initialization, delivery, or native wake.
-The `github-watch-owner-rpc` family pairs the actual merged semantic-fixture
-revision with the actual merged internal owner-RPC revision. Its complete seven-file
-hash map must be authorized on trusted main before this consumer rotates. All nine
-historical families retain their existing hashes and archived snapshots.
+The `github-pinned-history-read` family pairs the unchanged semantic-fixture
+revision with merged cloud fixes for pinned metadata reads and invalid-counter
+refusal. Its complete seven-file hash map must be authorized on trusted main
+before this consumer rotates. All ten historical families retain their existing
+hashes and archived snapshots.
 
-The control manifest pins 36 source paths at
-`b152b1b92fec860354cacd406b0d72274a97713c`, including watch-store, internal
-watch-control, watch-kernel and owner-proof. The kernel now has an internal owner
-RPC caller; there is no public watch route or client activation. New create requires
-an exact-true flag that is unset in deployment configuration. Source activation,
-delivery and native attachment remain disabled by default.
+The control manifest pins 37 source paths at
+`49122dd4ac2a358d87e8cd727fd8e817ae183dac`, including the new internal
+`github/pinned-read-contract.ts` helper and its existing host, controller and
+grants boundaries. The helper imports Zod, grants and readback types. The grants
+and readback sources are already hash-pinned; Zod is pinned separately by version
+4.6.5. The exporter does not evaluate the internal reader or Worker runtime
+modules.
 
-The source chain also covers delegated read authority and deadlines, host admission
-and GitHub client, grants and principal allowlist, controller pagination/projection,
-source-control and watches, manual/native canary boundaries, admin API/types, and
-memory authentication/admin security. All 36 source hashes match the semantic
-fixture's later cloud revision too. The generated control DTO fixture is unchanged.
+The source chain also covers watch-store, internal watch-control, watch-kernel,
+owner-proof, delegated read authority and deadlines, GitHub client and principal
+allowlist, source-control and watches, manual/native canary boundaries, admin
+API/types, and memory authentication/admin security. The generated control DTO
+fixture and all five event-v1 files remain byte-identical, preserving the same
+45 semantic cases. There is no public watch route or client activation. New
+create requires an exact-true flag that is unset in deployment configuration;
+source activation, delivery and native attachment remain disabled by default.
 These are selected offline provenance pins, not an executable dependency bundle or
 proof of external authority, provider APIs, Cloudflare topology or native wake.
 The shared 45 cases establish their listed semantic verdicts, not every possible
