@@ -160,7 +160,17 @@ jobs:
                       'event-v1/protocol-v1.json': '2f1fba8d3945c820a1d0ef429738c9d55f671b00cc7efcdf8f32f4ad8f2d8566',
                       'event-v1/manifest.json': '87b2212fd827ed21144c0248ac133a5a9f97c6ac1f219dc87b85408bbf80169a',
                       'event-control-v1/fixtures.json': 'a337d1d2dbdf44a72bc41607e04bc5744886c130bafc6a9282438b81570e68bb',
-                      'event-control-v1/manifest.json': 'f753e19c52cc8da39ac6d64ed43d0b436d71fe93138ae9c20278ccbedb3a16c0'}})
+                      'event-control-v1/manifest.json': 'f753e19c52cc8da39ac6d64ed43d0b436d71fe93138ae9c20278ccbedb3a16c0'}},
+           {'name': 'github-pinned-history-read',
+            'eventRevision': '59940bde10db5584247c8648c985f246f546226f',
+            'controlRevision': '49122dd4ac2a358d87e8cd727fd8e817ae183dac',
+            'hashes': {'event-v1/protocol.schema.json': '583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38',
+                       'event-v1/protocol.ts': 'c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34',
+                       'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+                       'event-v1/protocol-v1.json': '2f1fba8d3945c820a1d0ef429738c9d55f671b00cc7efcdf8f32f4ad8f2d8566',
+                       'event-v1/manifest.json': '87b2212fd827ed21144c0248ac133a5a9f97c6ac1f219dc87b85408bbf80169a',
+                       'event-control-v1/fixtures.json': 'a337d1d2dbdf44a72bc41607e04bc5744886c130bafc6a9282438b81570e68bb',
+                       'event-control-v1/manifest.json': '9220c227c766fae2fbd9f216534b461db471ec4ae7083e9fb205b9cf7abd5884'}})
 
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
