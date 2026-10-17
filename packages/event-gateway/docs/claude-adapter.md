@@ -341,6 +341,26 @@ malformed envelopes, wrong sessions, and a missing init still fail closed.
 Validated UI invalidation hints remain passive. This bounded ordering allowance
 has only offline evidence; it does not establish native busy qualification.
 
+Hosted run `39074877564`, attempt 1, accepted the buffered running notice,
+then failed promptly with `busy_native_missing_init` on another same-session
+pre-init event. Cleanup completed and no proof was emitted. The previous
+diagnostic classified that event's top-level type as `unknown`, so its identity
+cannot be recovered from that artifact and must not be inferred from ordering.
+
+Diagnostics now name only the 19 fixed top-level types in the exact pinned
+2.1.302 `StdoutMessage` union (binary byte offset 214655727), including its
+`SDKMessage` union (214409742): `active_goal`, `assistant`, `auth_status`,
+`autocompact_state`, `command_lifecycle`, `control_cancel_request`,
+`control_request`, `control_response`, `conversation_reset`, `keep_alive`,
+`prompt_suggestion`, `rate_limit_event`, `result`, `stream_event`, `system`,
+`tool_progress`, `tool_use_summary`, `transcript_mirror`, and `user`.
+These source anchors refer to the exact executable digest below, not a separate
+SDK version. Other or non-string types remain `unknown`; arbitrary tags and
+nested values are never copied. This changes failure diagnostics only: the
+same pre-init event still fails, and initialization, readiness, stream limits,
+cleanup and the 90-second budget are unchanged. Busy qualification remains
+unproven.
+
 The [official 2.1.302 manifest](https://downloads.claude.ai/claude-code-releases/2.1.302/manifest.json)
 records `darwin-arm64` SHA256
 `5262ce9de86243fed0d21edc39b271555d56780d0112e2b194439fe1c6662d37`

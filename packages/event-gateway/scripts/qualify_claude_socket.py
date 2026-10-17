@@ -378,7 +378,16 @@ async def observe_busy_stdout(reader, probe):
                 envelope = value if isinstance(value, dict) else {}
                 kind, subtype = envelope.get('type'), envelope.get('subtype')
                 diagnostic.append({'order': order, 'observedNs': time.monotonic_ns() - probe.started_ns,
-                    'eventType': kind if kind in ('system', 'user', 'assistant', 'result') else 'unknown',
+                    # Diagnostic labels only: pinned 2.1.302 StdoutMessage at
+                    # binary offset 214655727, including SDKMessage at 214409742.
+                    # This list does not admit messages into the busy witness.
+                    'eventType': kind if kind in (
+                        'active_goal', 'assistant', 'auth_status', 'autocompact_state',
+                        'command_lifecycle', 'control_cancel_request', 'control_request',
+                        'control_response', 'conversation_reset', 'keep_alive',
+                        'prompt_suggestion', 'rate_limit_event', 'result', 'stream_event',
+                        'system', 'tool_progress', 'tool_use_summary', 'transcript_mirror', 'user'
+                    ) else 'unknown',
                     'eventSubtype': subtype if subtype in ('init', 'session_state_changed', 'success',
                         'error_during_execution', 'error_max_turns', 'error_max_budget_usd',
                         'error_during_result_validation') else 'unknown',
