@@ -166,11 +166,7 @@ def _decode(raw, url, maximum):
 
 
 def bind(node_path):
-    """Unavailable until independently trusted native runtime authority exists.
-
-    No runtime path, configuration, environment or callback can enable this
-    prototype. Retain the binding signature while refusing before path access.
-    """
+    """Refuse binding until independently trusted runtime authority exists."""
     del node_path
     raise Refused('https_runtime_authority_unavailable')
 

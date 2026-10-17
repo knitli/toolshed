@@ -5,7 +5,6 @@ from pathlib import Path
 import struct
 import subprocess  # nosec B404 - offline child fixtures only
 import sys
-import tempfile
 import time
 import unittest
 from unittest.mock import patch
@@ -23,6 +22,7 @@ class AdapterTests(unittest.TestCase):
         metadata = json.dumps({'status': 200, 'headers': {}}).encode()
         frame = struct.pack('!I', len(metadata)) + metadata + b'{}'
         # Explicit fixture seam, not a successful public adapter binding.
+
         def fixture_request(url, headers, maximum, deadline):
             self.assertEqual(headers['Authorization'], 'Bearer offline-token')
             self.assertGreater(deadline, time.monotonic())
@@ -182,8 +182,12 @@ sys.stdout.buffer.write(struct.pack('!I',len(m))+m+b'ok')
                 operation.assert_not_called()
 
     def test_environment_cannot_enable_public_requests(self):
-        with patch.dict(os.environ, {'NODE_OPTIONS': '--eval=BAD', 'GH_TOKEN': 'SECRET',
-                                    'REVIEWER_HTTPS_ENABLED': '1', 'REVIEWER_NATIVE_HELPER': '/tmp/helper'}):
+        with patch.dict(os.environ, {
+            'NODE_OPTIONS': '--eval=BAD',
+            'GH_TOKEN': 'SECRET',  # nosec B105 - inert refusal-test sentinel
+            'REVIEWER_HTTPS_ENABLED': '1',
+            'REVIEWER_NATIVE_HELPER': '/tmp/helper',  # nosec B108 - unused path; no file access
+        }):
             with self.assertRaisesRegex(adapter.Refused, '^https_runtime_authority_unavailable$'):
                 adapter.bind('/physical/node')
             with self.assertRaisesRegex(adapter.Refused, '^https_runtime_authority_unavailable$'):
@@ -191,7 +195,8 @@ sys.stdout.buffer.write(struct.pack('!I',len(m))+m+b'ok')
 
     def test_public_binding_has_no_fixture_callback_override(self):
         with self.assertRaises(TypeError):
-            adapter.bind('/physical/node', fixture=lambda: None)
+            # Deliberately unsupported keyword proves callers cannot inject a fixture.
+            adapter.bind('/physical/node', fixture=lambda: None)  # pylint: disable=unexpected-keyword-arg
 
 
 if __name__ == '__main__':
