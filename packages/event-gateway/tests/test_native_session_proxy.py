@@ -19,17 +19,17 @@ from test_native_bridge import native, peer, receive, send, witness
 
 
 @contextmanager
-def session_fixture(row):
+def session_fixture(row, *, persisted=None, input_item_id=None, terminal_receipt_id=None):
     calls = []
     current = dict(row)
-    recorded = {}
-    item_ids = {}
+    recorded = {} if persisted is None else {persisted["attemptId"]: deepcopy(persisted)}
+    item_ids = {} if persisted is None else {persisted["attemptId"]: input_item_id}
 
     def handle(channel):
         sequence = 0
         while (message := receive(channel)) is not None:
             sequence += 1
-            operation = next((key for key in ("start", "receipt") if key in message), "challenge")
+            operation = next((key for key in ("start", "receipt", "terminalEvidence") if key in message), "challenge")
             calls.append(operation)
             if operation == "challenge":
                 send(channel, {**current, "nonce": message["nonce"], "sequence": sequence})
@@ -42,6 +42,9 @@ def session_fixture(row):
             elif recorded.get(request["attemptId"]) == request:
                 outcome = {"status": "inputRecorded", "turnId": request["clientUserMessageId"],
                            "itemId": item_ids[request["attemptId"]], "replayed": True}
+                if operation == "terminalEvidence":
+                    outcome.update(status="terminal", receiptId=terminal_receipt_id,
+                                   terminalStatus="completed")
             else:
                 outcome = {"status": "unknown"}
             send(channel, {"version": 3, "nonce": message["nonce"], "receipt": {
@@ -77,6 +80,53 @@ def session_fixture(row):
 
 
 class NativeSessionProxyTests(unittest.TestCase):
+    def test_historical_terminal_query_survives_fresh_reader_and_proxy_without_start(self):
+        from event_gateway.native_terminal_evidence import NativeTerminalEvidenceAdapter
+
+        row = witness()
+        wire = native.synthetic_request(row)
+        request = {**wire, "receiptVersion": 3}
+        item_id, receipt_id = str(uuid4()), str(uuid4())
+        anchor = {**{key: wire[key] for key in (*native.IDENTITY, "generation")},
+                  "outcome": {"status": "inputRecorded", "turnId": wire["clientUserMessageId"],
+                              "itemId": item_id, "replayed": True}}
+        recovered = []
+        for _ in range(2):
+            with session_fixture(row, persisted=wire, input_item_id=item_id,
+                                 terminal_receipt_id=receipt_id) as (state, mapping, client, current, calls):
+                current.update(eligible=False, threadId=str(uuid4()), generation=row["generation"] + 1)
+                adapter = NativeTerminalEvidenceAdapter(mapping, SessionNativeBridge(state, mapping))
+                recovered.append(asyncio.run(adapter.terminal_evidence(request, anchor)))
+                self.assertEqual(calls, ["terminalEvidence"])
+                self.assertIsNone(client.bridge.witness)
+                self.assertEqual(client.bridge.valid_until, 0)
+                self.assertEqual(client.bridge.terminal_attempts, set())
+                client.bridge.witness, client.bridge.valid_until = row, time.monotonic() + 1
+                with self.assertRaises(ValueError):
+                    client.bridge.start(wire)
+                self.assertEqual(calls, ["terminalEvidence"])
+        self.assertEqual(recovered[0], recovered[1])
+        self.assertEqual(recovered[0]["outcome"], {
+            "status": "terminal", "turnId": wire["clientUserMessageId"], "itemId": item_id,
+            "receiptId": receipt_id, "terminalStatus": "completed", "replayed": True,
+        })
+
+    def test_terminal_proxy_rejects_mismatched_identity_without_start(self):
+        row = witness()
+        mapping = {"sessionId": str(uuid4()), "nativeThreadId": row["threadId"],
+                   "nativeBinding": launcher._binding(row)}
+        proxy = SessionNativeBridge("unused", mapping)
+        request = native.synthetic_request(row)
+        reply = {**{key: request[key] for key in (*native.IDENTITY, "generation")},
+                 "outcome": {"status": "unknown"}}
+        for key in (*native.IDENTITY, "generation"):
+            with self.subTest(key=key), patch.object(launcher, "session_native_operation", return_value={**reply, key: None}):
+                with self.assertRaises(NativeError):
+                    proxy.terminal_evidence(request)
+        with patch.object(launcher, "session_native_operation") as operation, self.assertRaises(NativeError):
+            proxy.terminal_evidence({**request, "generation": request["generation"] + 1})
+        operation.assert_not_called()
+
     def test_intervening_readonly_status_rechecks_start_and_recovery_survives_daemon_restart(self):
         row = witness()
         with session_fixture(row) as (state, mapping, _client, current, calls):

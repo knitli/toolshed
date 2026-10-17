@@ -207,7 +207,7 @@ class NativeBridge:
             require(
                 isinstance(row, dict)
                 and type(row.get("version")) is int  # pylint: disable=unidiomatic-typecheck
-                and row["version"] == (self.receipt_version if "start" in body or "receipt" in body else 2)
+                and row["version"] == (self.receipt_version if any(key in body for key in ("start", "receipt", "terminalEvidence")) else 2)
                 and type(row.get("nonce")) is int  # pylint: disable=unidiomatic-typecheck
                 and row["nonce"] == self.nonce
             )
@@ -377,6 +377,21 @@ class NativeBridge:
         validate_start(request)
         require(not self.closed and request == self.attempts.get(request["attemptId"]))
         return self._receipt_exchange("receipt", request)
+
+    def terminal_evidence(self, request):
+        """Read exact durable terminal evidence without selection or Start eligibility."""
+        from .native_terminal_evidence import validate_terminal_receipt
+
+        validate_start(request)
+        require(self.receipt_version == 3 and not self.closed
+                and request == self.attempts.get(request["attemptId"]))
+        try:
+            row = self.exchange({"terminalEvidence": request}, START_SECONDS)
+            require(set(row) == {"version", "nonce", "receipt"})
+            return validate_terminal_receipt({**request, "receiptVersion": 3}, row["receipt"])
+        except (ValueError, TypeError, KeyError):
+            self.close()
+            return {"status": "unknown"}
 
     def _receipt_exchange(self, operation, request):
         try:
