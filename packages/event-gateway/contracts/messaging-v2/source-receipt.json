@@ -1,0 +1,52 @@
+{
+  "purpose": "dormant_source_conformance_only",
+  "protocolVersion": 2,
+  "trustedPolicyAdoption": false,
+  "sourceRepository": "https://github.com/knitli/knitli-site.git",
+  "sourceCommit": "075c69e1fb2ad4a41dc5c6079a8e42752daf703a",
+  "sourceFiles": [
+    {
+      "path": "apps/os/packages/event-runtime/src/messaging/protocol-v2.ts",
+      "sha256": "9e3682501268e83803f4e1faa725e48e22575569ae686f7c5ef60eabd04d3793"
+    },
+    {
+      "path": "apps/os/packages/event-runtime/src/policy.ts",
+      "sha256": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3"
+    },
+    {
+      "path": "apps/os/packages/event-runtime/src/protocol.ts",
+      "sha256": "c94b996a472345c54cafac41ee067d48c77a9d037448151e3f05707a83b11d34"
+    },
+    {
+      "path": "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json",
+      "sha256": "74c37fe03b019c153a4ac81c11253618a1444eea63d794d70e9899699e2f786d"
+    },
+    {
+      "path": "apps/os/pnpm-lock.yaml",
+      "sha256": "73f5f367585a055a1a723ba521cd496c66509357d9462f1e17059ea106bec4f5"
+    }
+  ],
+  "fixture": {
+    "file": "messaging-protocol-semantics-v2.json",
+    "sha256": "74c37fe03b019c153a4ac81c11253618a1444eea63d794d70e9899699e2f786d"
+  },
+  "schemaDependency": {
+    "package": "zod",
+    "version": "4.6.5",
+    "namespaceLength": "Unicode code points; valid UTF-16 surrogate pairs count once, unpaired surrogates once",
+    "files": [
+      {
+        "path": "package.json",
+        "sha256": "a046ed85fa09571dba539fee9ef236152d12dabd1f229b014ec3bd2ebaad9000"
+      },
+      {
+        "path": "v4/core/checks.js",
+        "sha256": "bc42543274218aa7ef72192b3218d2a4a399e53df8de240a04d9ff275096f563"
+      },
+      {
+        "path": "v4/core/util.js",
+        "sha256": "728f52b496620336775eafcdb91c0a574380086e53f215b55c58eedc1422c49c"
+      }
+    ]
+  }
+}
