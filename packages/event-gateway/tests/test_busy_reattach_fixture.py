@@ -9,7 +9,8 @@ from types import SimpleNamespace
 import unittest
 import threading
 from uuid import uuid4
-from event_gateway import launcher
+from event_gateway import cli as gateway_cli, launcher
+from event_gateway.store import Store
 from unittest.mock import AsyncMock, Mock, patch
 
 
@@ -39,6 +40,59 @@ def busy_response(binding, challenge_id, nonce, deadline, *, eligible=True, turn
 
 
 class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
+    async def test_settlement_reads_run_off_event_loop(self):
+        loop_thread = threading.get_ident()
+        ctx = SimpleNamespace(sessions={"C": {"provider": SimpleNamespace(
+            hold_deadline=asyncio.get_running_loop().time() + 1)}}, c_busy_nonces=set())
+
+        def read(context):
+            self.assertNotEqual(threading.get_ident(), loop_thread,
+                                "settlement I/O blocked the daemon event loop")
+            return history()
+
+        with patch.object(F, "require_model_held"), \
+                patch.object(F, "c1_busy_history", side_effect=read), \
+                patch.object(F, "wait_busy_session_binding", side_effect=RuntimeError("settled")):
+            with self.assertRaisesRegex(RuntimeError, "settled"):
+                await F.attach_busy_session(ctx)
+
+    async def test_unsettled_c1_has_its_own_bounded_failure(self):
+        ctx = SimpleNamespace(sessions={"C": {"provider": SimpleNamespace(
+            hold_deadline=asyncio.get_running_loop().time() + 0.02)}})
+        unsettled = history()
+        unsettled["localDelivery"]["state"] = "queued"
+        with patch.object(F, "require_model_held"), \
+                patch.object(F, "c1_busy_history", return_value=unsettled):
+            with self.assertRaises((AssertionError, TimeoutError)) as raised:
+                await asyncio.wait_for(F.attach_busy_session(ctx), timeout=0.2)
+        self.assertIsInstance(raised.exception, AssertionError, "only the external test timeout stopped settlement")
+        self.assertIn("C1 settlement did not complete before busy attach deadline", str(raised.exception))
+
+    async def test_timeout_and_cancellation_keep_structured_diagnostics_when_archive_fails(self):
+        for failure in (TimeoutError("held stage expired"), asyncio.CancelledError("shutdown")):
+            with self.subTest(failure=type(failure).__name__):
+                hold = SimpleNamespace(hold_lock=threading.Lock(), hold_started=threading.Event(),
+                                       release_hold=threading.Event(), hold_deadline=asyncio.get_running_loop().time() + 1,
+                                       requests=[], errors=[])
+                ctx = SimpleNamespace(runtime_ids={"C": "runtime-c"}, node_id="node", transport_key=Mock(),
+                                      sessions={"C": {"provider": hold}}, dispatch_labels={}, listen_port=1,
+                                      fixture=Mock(return_value={"envelope": {"deliveryId": "c1"}, "signedDelivery": "c1"}))
+                ctx.transport_key.private_bytes.return_value = b"test-key"
+                with patch.object(F, "serialization", Mock()), patch.object(F, "require_model_held"), \
+                        patch.object(F, "listener_delivery", return_value=(202, None)), \
+                        patch.object(F, "wait_until", new=AsyncMock()), \
+                        patch.object(F, "run_held_busy_stage", side_effect=failure), \
+                        patch.object(F, "record_evidence", side_effect=OSError("archive unavailable")):
+                    with self.assertRaises(type(failure)) as raised:
+                        await F.run_busy_stage(ctx)
+                self.assertIs(raised.exception, failure)
+                notes = getattr(failure, "__notes__", [])
+                self.assertTrue(notes, "deadline/cancellation lost structured Busy diagnostics")
+                diagnostic = json.loads(notes[-1].split("bounded diagnostic=", 1)[1])
+                self.assertEqual(diagnostic["failureType"], type(failure).__name__)
+                self.assertFalse(diagnostic["cSecondCreated"])
+                self.assertFalse(hold.release_hold.is_set())
+
     async def test_real_dispatch_observer_archive_passes_hosted_verifier(self):
         from test_hosted_native_qualification import HOSTED, attach_archive, busy_attach_evidence, c2_proof
         result, attach, identities = busy_attach_evidence()
@@ -74,7 +128,7 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
                 await F.observe_dispatch(None, ctx, delivery_id)
             records.append({'kind': 'c2BusyRestart', 'value': {'deliveryId': delivery_id, 'binding': binding,
                             'checkedAt': 6.5, 'evidenceError': None}})
-            ctx.c_busy_phase = 'post-restart'
+            ctx.busy_result_count = len(ctx.dispatch_results)
             nonce = 7
             with patch.object(F.time, 'monotonic', return_value=7.1):
                 await F.observe_dispatch(None, ctx, delivery_id)
@@ -180,17 +234,21 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
                    threadId=str(uuid4()), serverInstanceId=str(uuid4()),
                    generation=1, serverGeneration=1)
         binding = dict(old, generation=native_generations[0], serverGeneration=native_generations[1])
+        session_id = str(uuid4())
         before = dict(status="present", storedQualified=True, nativeBinding=old, runtimeGeneration=3, attachmentGeneration=4)
         after = dict(before, nativeBinding=binding, runtimeGeneration=4, attachmentGeneration=5)
-        mapping = dict(nativeBinding=binding, sessionId="C", runtimeGeneration=4, attachmentGeneration=5)
+        mapping = dict(nativeBinding=binding, nativeThreadId=binding["threadId"], sessionId=session_id,
+                       runtimeId="runtime-c", principal="fixture-principal", agent="fixture-agent",
+                       nodeGeneration=2, runtimeGeneration=4, attachmentGeneration=5, leaseExpiresAt=2_000_000_000)
+        Store._validate_attachment(None, mapping, None)
         if wrong_mapping:
             mapping["attachmentGeneration"] = 4
         provider = SimpleNamespace(hold_deadline=asyncio.get_running_loop().time() + 10)
         ctx = SimpleNamespace(state=Path("/fixture"),
-                              sessions={"C": {"state": Path("/native"), "sessionId": "C", "provider": provider, "binding": old}},
+                              sessions={"C": {"state": Path("/native"), "sessionId": session_id, "provider": provider, "binding": old}},
                               runtime_ids={"C": "runtime-c"}, c_busy_nonces=set(),
                               admission_cloud=SimpleNamespace(runtime_status=AsyncMock(side_effect=[before, after])))
-        ctx.session_labels = {"C": "C", "B": "B"}
+        ctx.session_labels = {session_id: "C", "B": "B"}
         ctx.challenge_calls, ctx.receipt_errors, ctx.receipt_calls = {"C": 0}, {"C": []}, {"C": []}
         ctx.c_challenges = []
 
@@ -203,18 +261,35 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
         ctx.original_session_request = cli_challenge
 
         def cli_call(argv):
+            if cli_witness == "production":
+                challenge_id = str(uuid4())
+
+                async def commit(intent, challenge, evidence, **kwargs):
+                    self.assertEqual(ctx.busy_attach_capture["threadId"], threading.get_ident())
+                    self.assertEqual(len(ctx.busy_attach_capture["rows"]), 1)
+                    self.assertEqual(ctx.busy_attach_capture["rows"][0]["request"]["challengeId"], challenge_id)
+                    self.assertEqual(evidence["witness"]["nonce"], 11)
+                    return {"remoteStatus": "attached", "localStatus": "current"}
+
+                cloud = SimpleNamespace(native_challenge=AsyncMock(return_value={"challengeId": challenge_id}),
+                                        attach=commit)
+                with patch.object(launcher, "_session_request", side_effect=lambda *a, **kw: F.record_session_request(ctx, *a, **kw)):
+                    result = gateway_cli._commit_native_call(
+                        SimpleNamespace(session_id=session_id), ctx.state, "attach", {}, None, cloud, binding, {},
+                    )
+                return 0, result
             if cli_witness != "missing":
                 expected = dict(binding, generation=binding["generation"] + 1) if cli_witness == "wrong-binding" else binding
                 message = {
                     "command": "challenge", "challengeId": str(uuid4()), "expectedBinding": expected,
                 }
-                session_id = "B" if cli_witness == "wrong-session" else "C"
+                request_session = "B" if cli_witness == "wrong-session" else session_id
                 if cli_witness == "wrong-thread":
-                    observer = threading.Thread(target=F.record_session_request, args=(ctx, ctx.state, session_id, message))
+                    observer = threading.Thread(target=F.record_session_request, args=(ctx, ctx.state, request_session, message))
                     observer.start()
                     observer.join()
                 else:
-                    F.record_session_request(ctx, ctx.state, session_id, message)
+                    F.record_session_request(ctx, ctx.state, request_session, message)
             return 0, {"remoteStatus": "attached", "localStatus": "current"}
         first, last = history(), history()
         if changed_history == "ack":
@@ -292,6 +367,12 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
                           "wrong-session", "wrong-thread", "missing"):
             with self.subTest(violation=violation), self.assertRaises(AssertionError):
                 await self.attach(cli_witness=violation)
+
+    async def test_production_cli_commit_challenge_is_captured_before_attach_send(self):
+        ctx, _, _, _ = await self.attach(cli_witness="production")
+        self.assertEqual(ctx.challenge_calls["C"], 1)
+        self.assertIn(11, ctx.c_busy_nonces)
+        self.assertIsNone(ctx.busy_attach_capture)
 
     async def test_native_generation_rollback_cannot_qualify_busy_reattach(self):
         for counters in ((0, 2), (2, 0), (0, 0), (1, 1)):
@@ -468,8 +549,9 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(F, "attach_busy_session", side_effect=attach), \
                 patch.object(F, "listener_delivery", side_effect=listener), \
                 patch.object(F, "wait_until", side_effect=wait):
-            with self.assertRaises(TimeoutError):
+            with self.assertRaises(TimeoutError) as raised:
                 await asyncio.wait_for(F.run_busy_stage(ctx), timeout=0.5)
+        self.assertIn('"failureType": "TimeoutError"', raised.exception.__notes__[-1])
         self.assertTrue(attach_cancelled.is_set())
         self.assertEqual(setup_subjects, ["three-session-c-busy-first"])
         self.assertTrue(hold.hold_started.is_set())
