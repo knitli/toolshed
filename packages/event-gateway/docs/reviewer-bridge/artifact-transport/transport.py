@@ -486,12 +486,10 @@ class _Transport:
 
 
 def _private_parent(parent):
-    """Physical owner-private leaf beneath non-replaceable trusted ancestors.
-
-    Matches the gateway launcher's owner/write boundary, with sticky exceptions
-    narrowed to the two fixed system temporary roots. Same-UID adversaries are
-    outside this host-owned preparation boundary.
-    """
+    """Require a physical private leaf beneath trusted, non-replaceable ancestors."""
+    # Match the launcher owner/write boundary; sticky exceptions are restricted
+    # to the two fixed system temporary roots. Same-UID adversaries are outside
+    # this host-owned preparation boundary.
     need(isinstance(parent, Path) and parent.is_absolute(), "scratch_parent")
     try:
         need(parent.resolve(strict=True) == parent, "scratch_parent_alias")

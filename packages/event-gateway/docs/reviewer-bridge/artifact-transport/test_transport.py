@@ -8,6 +8,7 @@ from pathlib import Path
 import stat
 import struct
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import warnings
@@ -198,6 +199,8 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(len(fake.calls), 14)
         for url, headers, maximum, deadline in fake.calls:
             self.assertGreater(maximum, 0)
+            self.assertGreater(deadline, time.monotonic())
+            self.assertLessEqual(deadline, time.monotonic() + 60)
             if url.startswith(subject._API):
                 self.assertEqual(headers["Authorization"], "Bearer " + TOKEN)
             else:
