@@ -1,0 +1,404 @@
+{
+  "description": "Typed projection of genuine Core canonical records and process-asserted recovery. Not a replayable canonical rollout or database export.",
+  "originalFixtureManifestSha256": "056dc9acb20b1428d686040ef60b32e7f9e8283de46edda212d3c2ef2a5b9872",
+  "originalReceiptOutputSha256": "52bdda860748c3c0ee411034cd3a2cbde13c99508aa9677803c71f2794e53702",
+  "fixtures": [
+    {
+      "fault": "none",
+      "outcome": "completed",
+      "threadId": "01a14941-a55c-7ac0-aebf-d8b0a0736762",
+      "turnId": "24685514-148f-4af8-aef6-886089fa552f",
+      "deliveredUserItemId": "01a14941-a5cd-7132-9d37-7ab0e24cac3c",
+      "canonicalRolloutSha256": "f8b3d34d546ff1f02e1e45c92398903139fd14ecc4b08af99c018c99adad07a5",
+      "canonicalRecordCount": 4,
+      "sessionMeta": {
+        "id": "01a14941-a55c-7ac0-aebf-d8b0a0736762",
+        "session_id": "01a14941-a560-7971-aa35-3768f80238ff",
+        "source": "exec",
+        "history_mode": "paginated"
+      },
+      "canonicalUserItemEvents": [
+        {
+          "timestamp": "2026-10-17T09:46:41.487Z",
+          "ordinal": 2,
+          "type": "event_msg",
+          "payload": {
+            "type": "item_completed",
+            "thread_id": "01a14941-a55c-7ac0-aebf-d8b0a0736762",
+            "turn_id": "24685514-148f-4af8-aef6-886089fa552f",
+            "item": {
+              "type": "UserMessage",
+              "id": "01a14941-a5cd-7132-9d37-7ab0e24cac3c",
+              "client_id": "24685514-148f-4af8-aef6-886089fa552f",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "exact native history fixture input",
+                  "text_elements": []
+                }
+              ]
+            },
+            "started_at_ms": 1792230401487,
+            "completed_at_ms": 1792230401487
+          }
+        }
+      ],
+      "canonicalTerminalEvents": [
+        {
+          "timestamp": "2026-10-17T09:46:41.491Z",
+          "ordinal": 3,
+          "type": "event_msg",
+          "payload": {
+            "type": "task_complete",
+            "turn_id": "24685514-148f-4af8-aef6-886089fa552f",
+            "last_agent_message": null,
+            "started_at": 1792230401,
+            "completed_at": 1792230401,
+            "duration_ms": 6
+          }
+        }
+      ],
+      "processVerifiedRecovery": {
+        "stage": "input_recorded",
+        "terminalProof": {
+          "outcome": "completed",
+          "receipt": "39945222-1ef2-483c-802e-be97ff4ff09e",
+          "turn": "24685514-148f-4af8-aef6-886089fa552f"
+        }
+      }
+    },
+    {
+      "fault": "none",
+      "outcome": "failed",
+      "threadId": "01a14941-a5d8-7992-a028-572dfd56e96c",
+      "turnId": "ba6ad737-9025-4e23-8c9d-26fc333a8209",
+      "deliveredUserItemId": "01a14941-a633-7191-9520-dab70ba40807",
+      "canonicalRolloutSha256": "74d7518e3b416a0574aaef1eb62596fc607f7dbcab8b8a6f6d1058e3d99072dd",
+      "canonicalRecordCount": 4,
+      "sessionMeta": {
+        "id": "01a14941-a5d8-7992-a028-572dfd56e96c",
+        "session_id": "01a14941-a5da-7b10-b0c0-339ec4592cd6",
+        "source": "exec",
+        "history_mode": "paginated"
+      },
+      "canonicalUserItemEvents": [
+        {
+          "timestamp": "2026-10-17T09:46:41.588Z",
+          "ordinal": 2,
+          "type": "event_msg",
+          "payload": {
+            "type": "item_completed",
+            "thread_id": "01a14941-a5d8-7992-a028-572dfd56e96c",
+            "turn_id": "ba6ad737-9025-4e23-8c9d-26fc333a8209",
+            "item": {
+              "type": "UserMessage",
+              "id": "01a14941-a633-7191-9520-dab70ba40807",
+              "client_id": "ba6ad737-9025-4e23-8c9d-26fc333a8209",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "exact native history fixture input",
+                  "text_elements": []
+                }
+              ]
+            },
+            "started_at_ms": 1792230401588,
+            "completed_at_ms": 1792230401588
+          }
+        }
+      ],
+      "canonicalTerminalEvents": [
+        {
+          "timestamp": "2026-10-17T09:46:41.590Z",
+          "ordinal": 3,
+          "type": "event_msg",
+          "payload": {
+            "type": "task_complete",
+            "turn_id": "ba6ad737-9025-4e23-8c9d-26fc333a8209",
+            "last_agent_message": null,
+            "error": {
+              "message": "Fatal error: history fixture failure",
+              "codex_error_info": "other"
+            },
+            "started_at": 1792230401,
+            "completed_at": 1792230401,
+            "duration_ms": 2
+          }
+        }
+      ],
+      "processVerifiedRecovery": {
+        "stage": "input_recorded",
+        "terminalProof": {
+          "outcome": "failed",
+          "receipt": "b6f06c46-5084-4819-8903-dfa1496a1fe1",
+          "turn": "ba6ad737-9025-4e23-8c9d-26fc333a8209"
+        }
+      }
+    },
+    {
+      "fault": "none",
+      "outcome": "canceled",
+      "threadId": "01a14941-a63b-7682-bfce-42606c5a28ef",
+      "turnId": "c84dad4d-16ad-42ea-94d5-06192635abcb",
+      "deliveredUserItemId": "01a14941-a698-7f52-bd5c-0206193908a7",
+      "canonicalRolloutSha256": "520586b1e670dc32d8a87a931c4e6f53ee30a6f91ece604af1df9fda5e2d10e0",
+      "canonicalRecordCount": 5,
+      "sessionMeta": {
+        "id": "01a14941-a63b-7682-bfce-42606c5a28ef",
+        "session_id": "01a14941-a63d-7d92-9be9-0fea247d39b0",
+        "source": "exec",
+        "history_mode": "paginated"
+      },
+      "canonicalUserItemEvents": [
+        {
+          "timestamp": "2026-10-17T09:46:41.688Z",
+          "ordinal": 2,
+          "type": "event_msg",
+          "payload": {
+            "type": "item_completed",
+            "thread_id": "01a14941-a63b-7682-bfce-42606c5a28ef",
+            "turn_id": "c84dad4d-16ad-42ea-94d5-06192635abcb",
+            "item": {
+              "type": "UserMessage",
+              "id": "01a14941-a698-7f52-bd5c-0206193908a7",
+              "client_id": "c84dad4d-16ad-42ea-94d5-06192635abcb",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "exact native history fixture input",
+                  "text_elements": []
+                }
+              ]
+            },
+            "started_at_ms": 1792230401688,
+            "completed_at_ms": 1792230401688
+          }
+        }
+      ],
+      "canonicalTerminalEvents": [
+        {
+          "timestamp": "2026-10-17T09:46:41.692Z",
+          "ordinal": 4,
+          "type": "event_msg",
+          "payload": {
+            "type": "turn_aborted",
+            "turn_id": "c84dad4d-16ad-42ea-94d5-06192635abcb",
+            "reason": "interrupted",
+            "started_at": 1792230401,
+            "completed_at": 1792230401,
+            "duration_ms": 4
+          }
+        }
+      ],
+      "processVerifiedRecovery": {
+        "stage": "input_recorded",
+        "terminalProof": {
+          "outcome": "canceled",
+          "receipt": "7d9082de-85eb-4141-bc94-7ad397efa6ed",
+          "turn": "c84dad4d-16ad-42ea-94d5-06192635abcb"
+        }
+      }
+    },
+    {
+      "fault": "before_input",
+      "outcome": "completed",
+      "threadId": "01a14941-a6a1-7030-a025-a6622d13944d",
+      "turnId": "e36a417b-91c5-4d2e-95a3-906fc5c49aed",
+      "deliveredUserItemId": "01a14941-a6fb-72d0-bb33-2f45c49943e8",
+      "canonicalRolloutSha256": "213d3a3dbce18c582681e5eaab04de963805e0ef75d886a6647dd1ce313f1c98",
+      "canonicalRecordCount": 1,
+      "sessionMeta": {
+        "id": "01a14941-a6a1-7030-a025-a6622d13944d",
+        "session_id": "01a14941-a6a3-7503-892f-859426ef58ca",
+        "source": "exec",
+        "history_mode": "paginated"
+      },
+      "canonicalUserItemEvents": [],
+      "canonicalTerminalEvents": [],
+      "processVerifiedRecovery": {
+        "stage": "pending",
+        "terminalProof": null
+      }
+    },
+    {
+      "fault": "before_input",
+      "outcome": "failed",
+      "threadId": "01a14941-a6fe-72f0-b8f6-34b267fa4905",
+      "turnId": "b739f1f5-9d76-4d1d-9023-22376b97ede6",
+      "deliveredUserItemId": "01a14941-a752-7a03-8234-47f3a4d1076a",
+      "canonicalRolloutSha256": "63cbcb171ae5056d1ed110a8a0b3cea294144e8dadfd432ff794d252892eb09b",
+      "canonicalRecordCount": 1,
+      "sessionMeta": {
+        "id": "01a14941-a6fe-72f0-b8f6-34b267fa4905",
+        "session_id": "01a14941-a700-7ed0-8af7-15fe668b07e3",
+        "source": "exec",
+        "history_mode": "paginated"
+      },
+      "canonicalUserItemEvents": [],
+      "canonicalTerminalEvents": [],
+      "processVerifiedRecovery": {
+        "stage": "pending",
+        "terminalProof": null
+      }
+    },
+    {
+      "fault": "before_input",
+      "outcome": "canceled",
+      "threadId": "01a14941-a754-7fb3-b945-c081b37af801",
+      "turnId": "08fc5cff-9e81-4a11-95a4-882342873fa3",
+      "deliveredUserItemId": "01a14941-a7a8-78f1-a6cd-eaad527c5756",
+      "canonicalRolloutSha256": "4c20ad317b7dbf0d6fd6ca8efcec1990d4e3ac3db5256dc55f22da0912372783",
+      "canonicalRecordCount": 1,
+      "sessionMeta": {
+        "id": "01a14941-a754-7fb3-b945-c081b37af801",
+        "session_id": "01a14941-a756-79a3-866d-7adf7803ec80",
+        "source": "exec",
+        "history_mode": "paginated"
+      },
+      "canonicalUserItemEvents": [],
+      "canonicalTerminalEvents": [],
+      "processVerifiedRecovery": {
+        "stage": "pending",
+        "terminalProof": null
+      }
+    },
+    {
+      "fault": "before_terminal",
+      "outcome": "completed",
+      "threadId": "01a14941-a7aa-7412-9925-96a5db2be15d",
+      "turnId": "68f459af-61a1-46a0-abde-c874d0f9661b",
+      "deliveredUserItemId": "01a14941-a801-74b3-9f12-7319c4cbb769",
+      "canonicalRolloutSha256": "7d987afefcf585cc1bfa8cf4393358e4c203d5276da7f27704488c9b5c3c6a57",
+      "canonicalRecordCount": 3,
+      "sessionMeta": {
+        "id": "01a14941-a7aa-7412-9925-96a5db2be15d",
+        "session_id": "01a14941-a7ac-7600-b09e-eb83342e5f37",
+        "source": "exec",
+        "history_mode": "paginated"
+      },
+      "canonicalUserItemEvents": [
+        {
+          "timestamp": "2026-10-17T09:46:42.050Z",
+          "ordinal": 2,
+          "type": "event_msg",
+          "payload": {
+            "type": "item_completed",
+            "thread_id": "01a14941-a7aa-7412-9925-96a5db2be15d",
+            "turn_id": "68f459af-61a1-46a0-abde-c874d0f9661b",
+            "item": {
+              "type": "UserMessage",
+              "id": "01a14941-a801-74b3-9f12-7319c4cbb769",
+              "client_id": "68f459af-61a1-46a0-abde-c874d0f9661b",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "exact native history fixture input",
+                  "text_elements": []
+                }
+              ]
+            },
+            "started_at_ms": 1792230402050,
+            "completed_at_ms": 1792230402050
+          }
+        }
+      ],
+      "canonicalTerminalEvents": [],
+      "processVerifiedRecovery": {
+        "stage": "pending",
+        "terminalProof": null
+      }
+    },
+    {
+      "fault": "before_terminal",
+      "outcome": "failed",
+      "threadId": "01a14941-a806-7453-8620-06cd34083210",
+      "turnId": "7834a302-7a1e-4e6d-8256-05f570b2fac2",
+      "deliveredUserItemId": "01a14941-a859-7631-9004-b61d67ed07dc",
+      "canonicalRolloutSha256": "bc77e8eeccbf9eabce71473a7920572ed69807587803785bfa149faae9a6c9a8",
+      "canonicalRecordCount": 3,
+      "sessionMeta": {
+        "id": "01a14941-a806-7453-8620-06cd34083210",
+        "session_id": "01a14941-a808-7c02-8343-39b2f97ea193",
+        "source": "exec",
+        "history_mode": "paginated"
+      },
+      "canonicalUserItemEvents": [
+        {
+          "timestamp": "2026-10-17T09:46:42.138Z",
+          "ordinal": 2,
+          "type": "event_msg",
+          "payload": {
+            "type": "item_completed",
+            "thread_id": "01a14941-a806-7453-8620-06cd34083210",
+            "turn_id": "7834a302-7a1e-4e6d-8256-05f570b2fac2",
+            "item": {
+              "type": "UserMessage",
+              "id": "01a14941-a859-7631-9004-b61d67ed07dc",
+              "client_id": "7834a302-7a1e-4e6d-8256-05f570b2fac2",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "exact native history fixture input",
+                  "text_elements": []
+                }
+              ]
+            },
+            "started_at_ms": 1792230402138,
+            "completed_at_ms": 1792230402138
+          }
+        }
+      ],
+      "canonicalTerminalEvents": [],
+      "processVerifiedRecovery": {
+        "stage": "pending",
+        "terminalProof": null
+      }
+    },
+    {
+      "fault": "before_terminal",
+      "outcome": "canceled",
+      "threadId": "01a14941-a85e-70b2-bbce-725a72b6d10f",
+      "turnId": "84ac82a4-c3e5-4b40-be70-b4f0b3ddbe5f",
+      "deliveredUserItemId": "01a14941-a8b1-7ee3-8e74-6c9aa4480f75",
+      "canonicalRolloutSha256": "6227f6327cfb9039a154361bdcd3fb41265eb806e8f617f675650c06056bf0fd",
+      "canonicalRecordCount": 3,
+      "sessionMeta": {
+        "id": "01a14941-a85e-70b2-bbce-725a72b6d10f",
+        "session_id": "01a14941-a860-7831-9040-21aaf98ab85a",
+        "source": "exec",
+        "history_mode": "paginated"
+      },
+      "canonicalUserItemEvents": [
+        {
+          "timestamp": "2026-10-17T09:46:42.226Z",
+          "ordinal": 2,
+          "type": "event_msg",
+          "payload": {
+            "type": "item_completed",
+            "thread_id": "01a14941-a85e-70b2-bbce-725a72b6d10f",
+            "turn_id": "84ac82a4-c3e5-4b40-be70-b4f0b3ddbe5f",
+            "item": {
+              "type": "UserMessage",
+              "id": "01a14941-a8b1-7ee3-8e74-6c9aa4480f75",
+              "client_id": "84ac82a4-c3e5-4b40-be70-b4f0b3ddbe5f",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "exact native history fixture input",
+                  "text_elements": []
+                }
+              ]
+            },
+            "started_at_ms": 1792230402226,
+            "completed_at_ms": 1792230402226
+          }
+        }
+      ],
+      "canonicalTerminalEvents": [],
+      "processVerifiedRecovery": {
+        "stage": "pending",
+        "terminalProof": null
+      }
+    }
+  ]
+}

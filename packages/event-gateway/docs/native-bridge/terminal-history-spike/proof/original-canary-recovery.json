@@ -1,0 +1,65 @@
+{
+  "scope": "Offline recovery using private copies of the original historical canary receipt and canonical rollout; no new turn submitted.",
+  "result": "PASS: original historical recovery, two fresh processes",
+  "receipt": {
+    "receipt_id": "a0aa3228-8a93-4505-b44f-96d76a452361",
+    "status": "Completed",
+    "turn_id": "fb6b5823-bfef-4079-96c9-bd24ae407481"
+  },
+  "recordCount": 38,
+  "rolloutBytes": 118894,
+  "freshRecoveryProcesses": [
+    {
+      "phase": "recover1",
+      "exitCode": 0,
+      "logSha256": "dffd5212f31f214250cadf9e537cda7da25e1e40baa1560872a5ad67b03701d2"
+    },
+    {
+      "phase": "recover2",
+      "exitCode": 0,
+      "logSha256": "3dd62f216d7db58378a5989d710812a73bb6f1916d39b152cdd2048e16f12f1c"
+    }
+  ],
+  "normalMigrationsOnly": true,
+  "allowedDatabaseChanges": {
+    "normalMigrations": [
+      60,
+      62
+    ],
+    "addedReceiptColumns": [
+      "terminal_status",
+      "terminal_receipt_id",
+      "terminal_candidate_status"
+    ],
+    "existingReceiptColumnsChanged": [],
+    "copiedRolloutPathRelocated": true
+  },
+  "unchanged": {
+    "originalSource": true,
+    "originalSnapshots": true,
+    "copiedRollout": true,
+    "originalReceiptAllColumns": true,
+    "originalInput": true
+  },
+  "qualificationTest": {
+    "onlySourceChange": true,
+    "testedSha256": "21e5bcf9f848530ccce83653fb998ba404a1f0b4d23c5502ebdac9ae6b939ef8",
+    "finalSha256": "468bc720ffbc966dd34cfb42c21f0fd97923530b628db72501f914083e8cea35",
+    "finalEqualsRepositoryRustfmtOfTestedBytes": true,
+    "noTestsAfterFixFmt": true
+  },
+  "unbundledEvidenceSha256": {
+    "manifest.json": "5461305ccb95d0d9611fc17a577bb395164e32563ed6203e9abcf80c2cf39dbd",
+    "audit.json": "f48461ff1ec5fb28022d085e4b88b6c123743fca959b3359d918d1f60e3031e1",
+    "results.json": "6943b2109b8218d3e9eb9e8ee9c033ef1359178efe5636e464560ef9587cd35f",
+    "test-addition.patch": "b26f72fe1cc51069b9ccdf34520ef834c6493e0a07f8c9b1b655b3e2d30268e7"
+  },
+  "limits": [
+    "Original database, input text, rollout, logs and qualification test patch remain private and are not bundled.",
+    "These evidence hashes identify locally audited artifacts; the bundle checker cannot reverify unbundled files or rerun recovery.",
+    "The qualification test is specific to the private copied profile, not a portable public reproducer.",
+    "This adds no native public API, client/gateway/cloud integration, binary promotion, deployment or activation.",
+    "One historical terminal execution does not establish complete history, live recovery, quarantine clearance or production acceptance.",
+    "Scoped just fix passed; full just fmt lacked uv/dotslash while Rust formatting passed. No tests reran after fix/fmt, and the full workspace suite remains unrun."
+  ]
+}

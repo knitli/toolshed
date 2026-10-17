@@ -1,0 +1,21 @@
+{
+  "codex-rs/app-server/src/thread_state.rs": "4e2d653d7d4d45d43ea06a97a7c49875754b6ea1a015c4184385ce9753d1654c",
+  "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs": "76a93e1bda8aa04a810142da144a505449e8a4cc809c7cf92803421a3a2b82ae",
+  "codex-rs/app-server/src/request_processors/native_selection_processor.rs": "83abc347288fcba241d5fd536f74c6802fba17c6a93f351e692480cd279bafb6",
+  "codex-rs/app-server/src/request_processors/thread_lifecycle.rs": "1085651378a824ede984a052e859548b0e4ce73af16f2cbaf5d9758be02d3e33",
+  "codex-rs/state/src/runtime.rs": "3ae1f29ebcfedc29b55c933ade4bd0b97cbace1c833e69aecd87625d6d98293b",
+  "codex-rs/state/src/lib.rs": "e74a5b0e6a86a40da276b2834d06e383b16b676cb9371c3faa5c1df941435ed3",
+  "codex-rs/state/src/runtime/native_receipts.rs": "ce3c59e2d2ae34b2f1381f390b7381ad8fbe77a4eff2465a77fc1541af5664d0",
+  "codex-rs/state/src/runtime/native_receipts_tests.rs": "ed673cbfc9713f15276d921e4eb24350f5e7a520e36d46d5a72ba09d3189513e",
+  "codex-rs/core/src/tasks/mod_tests.rs": "ff4c7022fcd59b864ddc2a7986cc63596b10009932a6b4cd73081be31ee49071",
+  "codex-rs/core/src/session/tests.rs": "8dc356e09f92ff38671f0a733c3916416502087be9cbd65dfd95b3949ee449ef",
+  "codex-rs/state/migrations/0061_native_turn_terminal_receipts.sql": "47e080e2d57919e48beb0ae6d1ff61d059e05b13cb9d65db8b57ae168349fe5e",
+  "codex-rs/state/migrations/0062_native_turn_terminal_candidates.sql": "f57542109636d701f92b6e52bfc0e3fb04c50d2b3980a6cea7603345370d2e30",
+  "codex-rs/app-server/src/request_processors/native_terminal_ordering_tests.rs": "5672211b97451d2a9fd5f75d07a9edf18e53840775639b5f7f8a70ffe4d0737d",
+  "codex-rs/core/src/tasks/mod.rs": "59dacde51f526d3511a2ed0930a7032e39f066a75123c5786b93f7b3ffc5556d",
+  "codex-rs/core/src/tasks/native_terminal_history_tests.rs": "9cf1b5f5a7850bb1397148db5216379d735f34a04b60660a896485490e426236",
+  "codex-rs/thread-store/src/local/mod.rs": "7bba25926dd79fdcdf1226fc29f4dddcdacd899db440d87e53300ca542865840",
+  "codex-rs/thread-store/src/local/rollout_migration.rs": "71f6f423957e03ec18caefff710ab3886588fa782d9a57fa70442e01a0c5d37e",
+  "codex-rs/thread-store/src/local/native_terminal_history.rs": "cdca65bcb0a972e535700bb5e6ba6f5771a56ca3e3e6bedaaf7493812b037f18",
+  "codex-rs/thread-store/src/local/native_terminal_history_tests.rs": "6bf7b30142a31941ed297e1a2a78b1c28e9aae3bfd4fc3d96ae3bd43bd693d4e"
+}

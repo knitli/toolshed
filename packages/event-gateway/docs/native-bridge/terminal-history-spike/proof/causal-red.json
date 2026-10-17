@@ -1,0 +1,164 @@
+[
+  {
+    "name": "atomicity",
+    "mutation": "Commit input before terminal transaction, breaking rollback atomicity",
+    "rawLog": "native-history-red-state-atomicity.log",
+    "rawLogSha256": "a2a0935c0b1ebdc40d33a749ccb568a5f9076ee5adeca7b6767d2b4df6938d32",
+    "assertionExcerpt": "    thread 'runtime::native_receipts::tests::native_history_recovery_is_atomic_idempotent_and_durable' (115632156) panicked at state/src/runtime/native_receipts_tests.rs:980:9:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n     Some(\n    <    InputRecorded {",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "candidate",
+    "mutation": "Accept conflicting terminal candidate status",
+    "rawLog": "native-history-red-state-candidate.log",
+    "rawLogSha256": "04f7603efd5d758f6677cdccba1aaada07cf6fe5aeb3a320d50878161f8d32a6",
+    "assertionExcerpt": "    thread 'runtime::native_receipts::tests::native_history_recovery_rejects_candidate_conflicts_without_promoting' (115634272) panicked at state/src/runtime/native_receipts_tests.rs:1060:9:\n    assertion failed: db.recover_native_turn_terminal(&request, turn,\n                \"00000000-0000-7000-8000-000000000099\",\n                NativeTurnTerminalStatus::Completed).await.is_err()\n    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "identity",
+    "mutation": "Disable exact full original v3 identity comparison",
+    "rawLog": "native-history-red-state-identity.log",
+    "rawLogSha256": "c6dbdddce0fe7df5d30823649040640c5d718b5dac743d87ccdc819872661b97",
+    "assertionExcerpt": "    thread 'runtime::native_receipts::tests::native_history_recovery_rejects_identity_and_invalid_anchors' (115633184) panicked at state/src/runtime/native_receipts_tests.rs:1025:9:\n    assertion failed: db.recover_native_turn_terminal(&wrong, &wrong.client_user_message_id, item,\n                status).await.is_err()\n    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n        PASS [   0.113s] (2/3) codex-state runtime::native_receipts::tests::native_history_recovery_rejects_candidate_conflicts_without_promoting",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "invalid_anchor",
+    "mutation": "Skip genuine Core item ID validation",
+    "rawLog": "native-history-red-state-invalid_anchor.log",
+    "rawLogSha256": "725dd908326070ef074f1286a86a158034ec1047cd329b2abbe5fe035143e651",
+    "assertionExcerpt": "    thread 'runtime::native_receipts::tests::native_history_recovery_rejects_identity_and_invalid_anchors' (115635016) panicked at state/src/runtime/native_receipts_tests.rs:1034:9:\n    assertion failed: db.recover_native_turn_terminal(&request, bad_turn, bad_item,\n                status).await.is_err()\n    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n        PASS [   0.134s] (2/3) codex-state runtime::native_receipts::tests::native_history_recovery_rejects_candidate_conflicts_without_promoting",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "stored_anchor",
+    "mutation": "Accept a different item ID for an already stored input anchor",
+    "rawLog": "native-history-red-state-stored_anchor.log",
+    "rawLogSha256": "cd3af47816a2b84ff9717853d724f43ac12fbb24361174ce2502453917efdd4f",
+    "assertionExcerpt": "    thread 'runtime::native_receipts::tests::native_history_recovery_rejects_identity_and_invalid_anchors' (115635943) panicked at state/src/runtime/native_receipts_tests.rs:1039:5:\n    assertion failed: db.recover_native_turn_terminal(&request, turn,\n                \"00000000-0000-7000-8000-000000000098\", status).await.is_err()\n    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n        FAIL [   0.093s] (2/3) codex-state runtime::native_receipts::tests::native_history_recovery_is_atomic_idempotent_and_durable",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "duplicate-json",
+    "mutation": "Allow duplicate JSON object keys",
+    "rawLog": "native-history-reader-red-duplicate-json.log",
+    "rawLogSha256": "8c2a26f7e42b69be6db40e8f9730296ac8f5e1af1eb43441dd45a75d476bcac1",
+    "assertionExcerpt": "    thread 'local::native_terminal_history::tests::rejects_incomplete_malformed_duplicate_and_oversized_snapshots' (115740192) panicked at thread-store/src/local/native_terminal_history_tests.rs:75:5:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n    <Some(\n    <    (",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "exact-input",
+    "mutation": "Ignore original input text mismatch",
+    "rawLog": "native-history-reader-red-exact-input.log",
+    "rawLogSha256": "090414dcee11065d332cd52246f684477b9172cd112554c412127c50bf91e6d4",
+    "assertionExcerpt": "    thread 'local::native_terminal_history::tests::rejects_wrong_identity_content_core_item_and_conflicting_anchors' (115737265) panicked at thread-store/src/local/native_terminal_history_tests.rs:105:9:\n    assertion failed: `(left == right)`: /payload/item/content/0/text\n\n    Diff < left / right > :\n    <Some(\n    <    (",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "lineage",
+    "mutation": "Allow parent thread lineage",
+    "rawLog": "native-history-reader-red-lineage.log",
+    "rawLogSha256": "0f20bb4e2cb917a91d49c3b43dc4f0c2e7b387024cf5f5e3a1e9b963eb0f5a1b",
+    "assertionExcerpt": "    thread 'local::native_terminal_history::tests::rejects_lineage_and_legacy_history' (115741379) panicked at thread-store/src/local/native_terminal_history_tests.rs:147:9:\n    assertion failed: `(left == right)`: parent_thread_id\n\n    Diff < left / right > :\n    <Some(\n    <    (",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "malformed-tail",
+    "mutation": "Skip malformed trailing records",
+    "rawLog": "native-history-reader-red-malformed-tail.log",
+    "rawLogSha256": "bcc2a27c8a11d47785b8c72e419fae7dd459ddb88d59aefe2496a55aa61810fc",
+    "assertionExcerpt": "    thread 'local::native_terminal_history::tests::rejects_incomplete_malformed_duplicate_and_oversized_snapshots' (115742412) panicked at thread-store/src/local/native_terminal_history_tests.rs:72:9:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n    <Some(\n    <    (",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "record-cap",
+    "mutation": "Remove 256-record bound",
+    "rawLog": "native-history-reader-red-record-cap.log",
+    "rawLogSha256": "54babe2ae97d05b7e0c7c772ab319aa2df4f9a2a103957f4b332f20ed2940c9e",
+    "assertionExcerpt": "    thread 'local::native_terminal_history::tests::rejects_incomplete_malformed_duplicate_and_oversized_snapshots' (115738838) panicked at thread-store/src/local/native_terminal_history_tests.rs:85:5:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n    <Some(\n    <    (",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "reused-item-id",
+    "mutation": "Allow completed user item ID reuse across turns",
+    "rawLog": "native-history-reader-red-reused-item-id.log",
+    "rawLogSha256": "34f800bb2de9c3d116d8dd5632c67d4e9581f938808b6454ff4846869eff6266",
+    "assertionExcerpt": "    thread 'local::native_terminal_history::tests::rejects_user_item_id_reused_by_other_turn' (115814190) panicked at thread-store/src/local/native_terminal_history_tests.rs:280:9:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n    <Some(\n    <    (",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "snapshot-equality",
+    "mutation": "Accept changed snapshot bytes or file identity",
+    "rawLog": "native-history-reader-red-snapshot-equality.log",
+    "rawLogSha256": "39499d2f4fa172643f778a97b34be3a2ac29307f386a5973de4840328773fbaf",
+    "assertionExcerpt": "    thread 'local::native_terminal_history::tests::bounded_snapshot_detects_replacement_mutation_and_truncation' (115733851) panicked at thread-store/src/local/native_terminal_history_tests.rs:163:5:\n    assertion failed: !first.matches(&snapshot(&path).await.unwrap())\n    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n  TRY 2 FAIL [   0.010s] (1/1) codex-thread-store local::native_terminal_history::tests::bounded_snapshot_detects_replacement_mutation_and_truncation\n  stdout \u2500\u2500\u2500",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "snapshot-race",
+    "mutation": "Skip production commit snapshot comparison",
+    "rawLog": "native-history-reader-red-snapshot-race.log",
+    "rawLogSha256": "c085935de0f474aceaf80f7576e09d6834956ce273a88423751bcf7562dd1505",
+    "assertionExcerpt": "    thread 'local::native_terminal_history::tests::snapshot_race_cannot_commit_state_evidence' (115735374) panicked at thread-store/src/local/native_terminal_history_tests.rs:243:9:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n    <Some(\n    <    NativeTurnTerminalProof {",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "status-mapping",
+    "mutation": "Map failed terminal event to completed",
+    "rawLog": "native-history-reader-red-status-mapping.log",
+    "rawLogSha256": "ce3e14e7a8f4bb4da21a7ffacb5f9a686489800ada5ce97530e079fe3ac64d91",
+    "assertionExcerpt": "    thread 'local::native_terminal_history::tests::strict_complete_snapshot_accepts_three_terminal_statuses' (115732699) panicked at thread-store/src/local/native_terminal_history_tests.rs:57:5:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n     Some(\n         (",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "target-restart",
+    "mutation": "Allow duplicate or late target turn start",
+    "rawLog": "native-history-reader-red-target-restart.log",
+    "rawLogSha256": "49a8ec6f3af66f0a593ebf361413c8818e04e12d47097c991d82eb122c8656d3",
+    "assertionExcerpt": "    thread 'local::native_terminal_history::tests::rejects_restarted_target_turn_and_duplicate_starts' (115813172) panicked at thread-store/src/local/native_terminal_history_tests.rs:261:9:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n    <Some(\n    <    (",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "terminal-duplicate",
+    "mutation": "Allow duplicate terminal records",
+    "rawLog": "native-history-reader-red-terminal-duplicate.log",
+    "rawLogSha256": "2b550e9a99cec9b4abade51daef7fb0b5aa59eb51a7a90472f03cfaaf125ccc4",
+    "assertionExcerpt": "    thread 'local::native_terminal_history::tests::rejects_wrong_identity_content_core_item_and_conflicting_anchors' (115743297) panicked at thread-store/src/local/native_terminal_history_tests.rs:110:9:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n    <Some(\n    <    (",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "writer-lock",
+    "mutation": "Bypass existing cross-process writer lock",
+    "rawLog": "native-history-reader-red-writer-lock.log",
+    "rawLogSha256": "c99e5fa2088a1e03bb1e25c01003637af3114f3e8ac7a70d07c7bbfc44937c17",
+    "assertionExcerpt": "    thread 'local::native_terminal_history::tests::invalid_history_never_commits_and_offline_history_recovers' (115744649) panicked at thread-store/src/local/native_terminal_history_tests.rs:194:5:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n    <Some(\n    <    NativeTurnTerminalProof {",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  },
+  {
+    "name": "core-persistence",
+    "mutation": "Drop genuine user ItemCompleted at rollout persistence policy while Core still delivers events",
+    "rawLog": "native-history-causal-core-recover.log",
+    "rawLogSha256": "82997913df3d1c2fde38505083b434cd96e1766322c1841371beab91205c5e29",
+    "assertionExcerpt": "    thread 'tasks::native_terminal_history_tests::native_terminal_canonical_history_process_proof' (115768241) panicked at core/src/tasks/native_terminal_history_tests.rs:177:35:\n    genuine canonical history recovers after process restart\n    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n     Summary [   0.071s] 1 test run: 0 passed, 1 failed, 2680 skipped",
+    "result": "expected assertion failure",
+    "productionSourceRestored": true
+  }
+]

@@ -1,0 +1,101 @@
+{
+  "scope": "Artifact checker helper extraction and reviewed tested-provenance/inventory corrections only; no native execution or changes to frozen native evidence.",
+  "supersedesCheckerValidationOnly": "proof/package-validation.json",
+  "historicalCheckerSha256": "9226286907934f13f9d6361b4a868edffe7cbc1cfced417b5d55149c0aacbe6b",
+  "checkerSha256": "0ec987c742e3141b27d6e73497a84c299563e9fd085fe426f1b10031a0f23f9b",
+  "pythonVersion": "3.13.14",
+  "checks": [
+    {
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "packages/event-gateway/tests",
+        "-p",
+        "test_terminal*artifacts.py"
+      ],
+      "passed": 35
+    },
+    {
+      "command": [
+        "ruff",
+        "check",
+        "packages/event-gateway/docs/native-bridge/terminal-history-spike/verify.py",
+        "packages/event-gateway/tests/test_terminal_history_artifacts.py"
+      ],
+      "result": "PASS"
+    }
+  ],
+  "causalCheck": {
+    "mutation": "Temporarily disable bundled provenance hash comparison",
+    "test": "test_each_provenance_pin_precedes_json_parsing",
+    "assertionFailures": 5,
+    "errors": 0,
+    "restoredCheckerSha256": "10746e0b54e7463d1816a1925ca2a0ebe03d53b612c0810216f8307194e8b76b",
+    "rawLogSha256": "5a2908bf2fac0610323a83f0f4803a904e39a9aa3a9a098feae0a38dd0084778",
+    "rawLogStatus": "Unbundled local output; hash identifies evidence, not reverified by artifact checker.",
+    "scope": "Historical helper-extraction proof, before subsequent P2 fixes."
+  },
+  "optionalSourceAndOriginalManifest": "PASS: all66 frozen source hashes and supplied original native-history manifest hash",
+  "nativeTestsRun": false,
+  "testSha256": "a937bbb63d0605db2df18a0af56010e0662f74d6d2a791c755885fc8ddfabe07",
+  "reviewFixCausalChecks": [
+    {
+      "logSha256": "97e8549723d277a75007fb45fe845d75e520baafb2227bbcfde7f836c7ca30ba",
+      "assertionFailures": 17,
+      "errors": 0
+    },
+    {
+      "logSha256": "0bce576432cb713eef3e5a37d870cecfcdee18a825b87c9575d24fba7ba6eebe",
+      "assertionFailures": 5,
+      "errors": 0
+    },
+    {
+      "scope": "Normal unittest invocation originally created verifier bytecode; loader-only suppression preserves strict inventory.",
+      "redMetadataSha256": "f8dc06747d34a75cc3a72c882fb9a57d9851e356ba13307616023d8915497e62",
+      "greenMetadataSha256": "594aa984e4bb51cdab5bff87e564a068043e3ad633f709bbe39c7d6addbc5090",
+      "normalInvocationPassed": 22
+    }
+  ],
+  "unbundledReviewLogs": "Hashes identify private logs not reverified by artifact checker.",
+  "complexityRefactor": {
+    "scope": "Behavior-preserving helper extraction in the Python artifact checker; not a formatting-only native-source change.",
+    "parentCheckerSha256": "0c8b389cca067a26791e938ac73c311402580fbf4de89af2f558a82e034c8b6a",
+    "helpers": [
+      "_inventory_directories",
+      "_formatting_hunk_lines"
+    ],
+    "mccabeComplexity": {
+      "_validate_inventory": 10,
+      "_validate_formatting": 12,
+      "_inventory_directories": 7,
+      "_formatting_hunk_lines": 7
+    },
+    "complexityLimit": 15,
+    "causalChecks": [
+      {
+        "mutation": "Disable extracted inventory path-depth guard",
+        "test": "test_standalone_inventory_rejects_deep_paths_before_expansion",
+        "assertionFailures": 1,
+        "errors": 0,
+        "restoredCheckerSha256": "0ec987c742e3141b27d6e73497a84c299563e9fd085fe426f1b10031a0f23f9b",
+        "logSha256": "d4f1cdb50bb580ea1864a6ff10f8d1caf88265b172275c657f627817a83c4372"
+      },
+      {
+        "mutation": "Disable extracted hunk complete-line guard",
+        "test": "test_repinned_formatting_diff_rejects_incomplete_lines_and_counts",
+        "assertionFailures": 1,
+        "errors": 0,
+        "restoredCheckerSha256": "0ec987c742e3141b27d6e73497a84c299563e9fd085fe426f1b10031a0f23f9b",
+        "logSha256": "7189860dfe6f536fb811a1a177081565c5eb9b7e7cf471e28515e52aeea9ba4a"
+      }
+    ],
+    "artifactSuitePassed": 35,
+    "greenLogSha256": "4f38ad6b28c57b2027e5f9875bd15aa1e1c21a729414a762f0d85e6c9e31b80a",
+    "optionalSourceAndOriginalManifest": "PASS: all 66 selected source hashes, reverse reconstruction of 19 tested sources, original manifest hash",
+    "nativeEvidenceChanged": false,
+    "nativeTestsRun": false
+  }
+}
