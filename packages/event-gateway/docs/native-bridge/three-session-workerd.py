@@ -667,6 +667,7 @@ def core_busy_observation(row, binding, now, seen):
 
 def load_revocation_parser():
     """Execute only the pinned parser source, never neighboring bytecode."""
+    # Keep bounded NOFOLLOW reads local; the shared loader belongs to the pinned host qualification.
     path = HERE / "native-metadata-launcher-smoke.py"
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor, "rb") as source:
@@ -685,7 +686,8 @@ def load_revocation_parser():
 
 def collect_native_revocations(session, started_unix, ended_unix):
     """Best-effort diagnostics from C's owned scratch; absence proves nothing."""
-    # Live DB/WAL copies can be inconsistent; SQLite opens only the private snapshot.
+    # Double reads detect observable mutation, not same-uid tampering or atomic DB/WAL consistency.
+    # Dynamic snapshots are best-effort diagnostics, never integrity or authority evidence.
     result = {"status": "unavailable", "records": [], "diagnosticOnly": True,
               "exactRejectedWitnessAvailable": False}
     try:
@@ -728,6 +730,7 @@ def collect_native_revocations(session, started_unix, ended_unix):
                         require(stat.S_ISREG(before.st_mode) and before.st_uid == os.getuid()
                                 and before.st_nlink == 1 and before.st_size <= NATIVE_DIAGNOSTIC_FILE_BYTES,
                                 "unsafe native diagnostic file")
+                        copied = hashlib.sha256()
                         remaining = before.st_size
                         with (snapshot / name).open("xb") as output:
                             while remaining:
@@ -735,7 +738,18 @@ def collect_native_revocations(session, started_unix, ended_unix):
                                 chunk = source.read(min(65_536, remaining))
                                 require(bool(chunk), "native diagnostic file changed")
                                 output.write(chunk)
+                                copied.update(chunk)
                                 remaining -= len(chunk)
+                        source.seek(0)
+                        reread = hashlib.sha256()
+                        remaining = before.st_size
+                        while remaining:
+                            require(time.monotonic() < deadline, "native diagnostic copy deadline")
+                            chunk = source.read(min(65_536, remaining))
+                            require(bool(chunk), "native diagnostic file changed")
+                            reread.update(chunk)
+                            remaining -= len(chunk)
+                        require(copied.digest() == reread.digest(), "native diagnostic file changed")
                         after = os.fstat(source.fileno())
                         require((before.st_size, before.st_mtime_ns) == (after.st_size, after.st_mtime_ns),
                                 "native diagnostic file changed")
@@ -748,10 +762,10 @@ def collect_native_revocations(session, started_unix, ended_unix):
                     rows = database.execute(
                         "SELECT ts + ts_nanos / 1000000000.0, "
                         "CASE WHEN length(feedback_log_body) <= 4096 THEN feedback_log_body END, target "
-                        "FROM logs WHERE target IN (?, ?) AND ts BETWEEN ? AND ? "
+                        "FROM logs WHERE target IN (?, ?) AND ts + ts_nanos / 1000000000.0 BETWEEN ? AND ? "
                         "ORDER BY ts, ts_nanos LIMIT ?",
-                        ("codex_selection_witness", "codex_native_selection", int(started_unix) - 2,
-                         int(ended_unix) + 1, NATIVE_DIAGNOSTIC_ROWS + 1),
+                        ("codex_selection_witness", "codex_native_selection", started_unix - 2,
+                         ended_unix, NATIVE_DIAGNOSTIC_ROWS + 1),
                     ).fetchall()
                 truncated = len(rows) > NATIVE_DIAGNOSTIC_ROWS
                 rejected = 0
@@ -805,6 +819,9 @@ def diagnostic_native_response(command, response, *, expected_binding=None, chal
             or isinstance(response.get("validUntilMonotonic"), bool)
             or not math.isfinite(response["validUntilMonotonic"])):
         return {"status": "malformed"}
+    now = time.monotonic()
+    if not now < response["validUntilMonotonic"] <= now + min(witness["leaseMs"], 750) / 1000:
+        return {"status": "stale"}
     return {"status": "observed", "observedAt": response["observedAt"],
             "validUntilMonotonic": response["validUntilMonotonic"],
             "witness": {key: witness[key] for key in (*launcher.BINDING_FIELDS, "version", "nonce",
@@ -813,31 +830,39 @@ def diagnostic_native_response(command, response, *, expected_binding=None, chal
 
 def capture_busy_failure(ctx, started_unix):
     """Post-failure probes are diagnostics, never busy/claim authority evidence."""
-    session = ctx.sessions["C"]
-    value = {"session": "C", "diagnosticOnly": True, "exactRejectedWitnessAvailable": False,
-             "startedUnix": time.time(), "subsequentObservations": []}
-    binding = None
-    for command in ("status", "binding", "challenge"):
-        if command == "challenge" and binding is None:
-            break
-        request = {"command": command}
-        if command == "challenge":
-            request.update(challengeId=str(uuid4()), expectedBinding=binding)
-        observation = {"command": command, "startedUnix": time.time(), "startedMonotonic": time.monotonic()}
-        try:
-            # Bypass the normal observer: these cannot enter c_challenges or satisfy C2.
-            response = ctx.original_session_request(session["state"], session["sessionId"], request)
-            observation["result"] = diagnostic_native_response(command, response,
-                expected_binding=request.get("expectedBinding"), challenge_id=request.get("challengeId"))
-            if command == "binding" and observation["result"].get("status") == "observed":
-                binding = observation["result"]["binding"]
-        except Exception as error:
-            observation["result"] = {"status": "unavailable", "failureType": type(error).__name__[:64]}
-        observation.update(endedUnix=time.time(), endedMonotonic=time.monotonic())
-        value["subsequentObservations"].append(observation)
-    value["endedUnix"] = time.time()
-    value["nativeRevocations"] = collect_native_revocations(session, started_unix, value["endedUnix"])
-    record_evidence(ctx, "busyFailureDiagnostics", value)
+    # Count the whole capture through its final write, without authority-observer side effects.
+    with ctx.evidence.lock:
+        require(not ctx.evidence.closing and not ctx.evidence.sealed, "native observers are closed")
+        ctx.evidence.active += 1
+    try:
+        session = ctx.sessions["C"]
+        value = {"session": "C", "diagnosticOnly": True, "exactRejectedWitnessAvailable": False,
+                 "startedUnix": time.time(), "subsequentObservations": []}
+        binding = None
+        for command in ("status", "binding", "challenge"):
+            if command == "challenge" and binding is None:
+                break
+            request = {"command": command}
+            if command == "challenge":
+                request.update(challengeId=str(uuid4()), expectedBinding=binding)
+            observation = {"command": command, "startedUnix": time.time(), "startedMonotonic": time.monotonic()}
+            try:
+                # Bypass the normal observer: these cannot enter c_challenges or satisfy C2.
+                response = ctx.original_session_request(session["state"], session["sessionId"], request)
+                observation["result"] = diagnostic_native_response(command, response,
+                    expected_binding=request.get("expectedBinding"), challenge_id=request.get("challengeId"))
+                if command == "binding" and observation["result"].get("status") == "observed":
+                    binding = observation["result"]["binding"]
+            except Exception as error:
+                observation["result"] = {"status": "unavailable", "failureType": type(error).__name__[:64]}
+            observation.update(endedUnix=time.time(), endedMonotonic=time.monotonic())
+            value["subsequentObservations"].append(observation)
+        value["endedUnix"] = time.time()
+        value["nativeRevocations"] = collect_native_revocations(session, started_unix, value["endedUnix"])
+        record_evidence(ctx, "busyFailureDiagnostics", value)
+    finally:
+        with ctx.evidence.lock:
+            ctx.evidence.active -= 1
 
 
 def post(address, secret, path, body=None, headers=None, *, limit=65_536):
@@ -2053,6 +2078,7 @@ async def run_busy_stage(ctx):
     except AssertionError as error:
         try:
             await asyncio.to_thread(capture_busy_failure, ctx, busy_started_unix)
+        # Cancellation intentionally propagates; diagnostics cannot override task shutdown.
         except Exception as diagnostic_error:
             # Keep the original failed gate; diagnostics cannot turn it into success.
             print("busy failure diagnostics unavailable: " + type(diagnostic_error).__name__, file=sys.stderr)

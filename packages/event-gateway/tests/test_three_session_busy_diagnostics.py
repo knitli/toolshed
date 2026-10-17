@@ -154,6 +154,51 @@ class NativeRevocationDiagnosticsTests(unittest.TestCase):
                 stream.truncate(FIXTURE.NATIVE_DIAGNOSTIC_FILE_BYTES + 1)
             self.assertEqual(FIXTURE.collect_native_revocations(session, 99, 101)["status"], "unavailable")
 
+    def test_exact_window_fringe_does_not_consume_cap_or_mark_truncated(self):
+        with native_home() as (session, home):
+            database(home, [row(stamp=98), *([row()] * 256), row(stamp=102)]).close()
+            result = FIXTURE.collect_native_revocations(session, 100.5, 101.5)
+            self.assertEqual((result["status"], result["truncated"], len(result["records"])),
+                             ("available", False, 256))
+
+    def test_same_size_rewrite_restoring_mtime_is_detected(self):
+        with native_home() as (session, home):
+            database(home, [row()]).close()
+            path = home / "logs_2.sqlite"
+            original = os.fstat
+            calls = 0
+
+            def mutate_after_initial_stat(fd):
+                nonlocal calls
+                info = original(fd)
+                if info.st_ino == path.stat().st_ino:
+                    calls += 1
+                return info
+
+            original_sha = FIXTURE.hashlib.sha256
+
+            def mutate_before_reread(*args, **kwargs):
+                if calls == 1:
+                    info = path.stat()
+                    data = path.read_bytes().replace(b"thread-event", b"client-event")
+                    path.write_bytes(data)
+                    os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+                return original_sha(*args, **kwargs)
+
+            # The second hasher is created after copying and rewinding the source.
+            count = 0
+
+            def hasher(*args, **kwargs):
+                nonlocal count
+                count += 1
+                return mutate_before_reread(*args, **kwargs) if count == 3 else original_sha(*args, **kwargs)
+
+            with patch.object(FIXTURE.os, "fstat", side_effect=mutate_after_initial_stat), \
+                    patch.object(FIXTURE.hashlib, "sha256", side_effect=hasher):
+                result = FIXTURE.collect_native_revocations(session, 99, 101)
+            self.assertEqual(result["status"], "unavailable")
+            self.assertEqual(result["records"], [])
+
     def test_identity_and_symlinks_refuse_before_sqlite_reads(self):
         for mutation in ("root_identity", "home_identity", "home_link", "db_link", "wal_link", "db_fifo"):
             with self.subTest(mutation=mutation), native_home() as (session, home):
@@ -203,7 +248,7 @@ class SubsequentObservationTests(unittest.TestCase):
         if request["command"] == "binding":
             return self.binding
         return {"challengeId": request["challengeId"], "observedAt": "2026-10-17T00:00:00.000Z",
-            "validUntilMonotonic": 200, "witness": {**self.binding, "version": 2, "nonce": 10,
+            "validUntilMonotonic": FIXTURE.time.monotonic() + 0.4, "witness": {**self.binding, "version": 2, "nonce": 10,
                 "eligible": True, "sequence": 10, "cause": "never copy me", "leaseMs": 500,
                 "nativeCoreTurnState": "busy"}}
 
@@ -221,14 +266,21 @@ class SubsequentObservationTests(unittest.TestCase):
                 self.assertIs(result["eligible"], eligible)
 
     def test_followup_busy_witness_never_satisfies_failed_busy_gate(self):
-        request = Mock(side_effect=lambda state, session, message: self.response(message))
+        def probe(state, session, message):
+            self.assertEqual(ctx.evidence.active, 1)
+            return self.response(message)
+
+        request = Mock(side_effect=probe)
         ctx = SimpleNamespace(sessions={"C": {"state": "/fixed-fixture-state", "sessionId": "fixed-session"}},
+            evidence=SimpleNamespace(lock=threading.Condition(), active=0, closing=False, sealed=False),
             original_session_request=request, c_challenges=[], c_busy_nonces=set(), dispatch_results=[],
             c_busy_evidence_error="C2 busy disposition lacks fresh authoritative Core-busy evidence")
         with patch.object(FIXTURE, "collect_native_revocations", return_value={"status": "unavailable"}), \
-                patch.object(FIXTURE, "record_evidence") as record, \
+                patch.object(FIXTURE, "record_evidence",
+                             side_effect=lambda *_: self.assertEqual(ctx.evidence.active, 1)) as record, \
                 patch.object(launcher, "_session_request", side_effect=AssertionError("normal observer used")):
             FIXTURE.capture_busy_failure(ctx, 100)
+        self.assertEqual(ctx.evidence.active, 0)
         self.assertEqual(request.call_count, 3)
         self.assertTrue(all(call.args[:2] == ("/fixed-fixture-state", "fixed-session") for call in request.call_args_list))
         evidence = record.call_args.args[2]
@@ -243,6 +295,7 @@ class SubsequentObservationTests(unittest.TestCase):
 
     def test_failed_probe_remains_unavailable_and_does_not_attempt_challenge(self):
         ctx = SimpleNamespace(sessions={"C": {"state": "state", "sessionId": "session"}},
+            evidence=SimpleNamespace(lock=threading.Condition(), active=0, closing=False, sealed=False),
             original_session_request=Mock(side_effect=TimeoutError("do not print")))
         with patch.object(FIXTURE, "collect_native_revocations", return_value={"status": "unavailable"}), \
                 patch.object(FIXTURE, "record_evidence") as record:
@@ -270,7 +323,36 @@ class SubsequentObservationTests(unittest.TestCase):
         self.assertEqual(FIXTURE.diagnostic_native_response("binding", {"reason": "private error details"}),
                          {"status": "refused", "reason": "other"})
 
+    def test_expired_and_inconsistent_challenge_leases_are_stale(self):
+        request = {"command": "challenge", "challengeId": str(uuid4())}
+        for deadline in (99, 100, 100.501):
+            response = self.response(request)
+            response["validUntilMonotonic"] = deadline
+            with patch.object(FIXTURE.time, "monotonic", return_value=100):
+                self.assertEqual(FIXTURE.diagnostic_native_response("challenge", response,
+                    expected_binding=self.binding, challenge_id=request["challengeId"]), {"status": "stale"})
+
+    def test_capture_refuses_after_observer_close(self):
+        for field in ("closing", "sealed"):
+            evidence = SimpleNamespace(lock=threading.Condition(), active=0, closing=False, sealed=False)
+            setattr(evidence, field, True)
+            ctx = SimpleNamespace(evidence=evidence, original_session_request=Mock(return_value={}),
+                sessions={"C": {"state": "state", "sessionId": "session"}})
+            with patch.object(FIXTURE, "collect_native_revocations", return_value={"status": "unavailable"}), \
+                    patch.object(FIXTURE, "record_evidence"), \
+                    self.assertRaisesRegex(AssertionError, "observers are closed"):
+                FIXTURE.capture_busy_failure(ctx, 100)
+            ctx.original_session_request.assert_not_called()
+            self.assertEqual(evidence.active, 0)
+
+    def test_diagnostic_cancellation_propagates(self):
+        self.check_diagnostic_failure(asyncio.CancelledError(), asyncio.CancelledError, "")
+
     def test_diagnostic_failure_preserves_original_busy_failure(self):
+        self.check_diagnostic_failure(RuntimeError("private diagnostic failure"), AssertionError,
+                                      "^original busy failure; bounded diagnostic=")
+
+    def check_diagnostic_failure(self, failure, expected, pattern):
         provider = SimpleNamespace(hold_lock=threading.Lock(), hold_started=threading.Event(),
             release_hold=threading.Event(), requests=[], errors=[])
         envelope = {"deliveryId": "delivery", "attemptId": "attempt"}
@@ -294,8 +376,8 @@ class SubsequentObservationTests(unittest.TestCase):
                 patch.object(FIXTURE, "has_attempt_state", return_value=True), \
                 patch.object(FIXTURE, "db_delivery", return_value={"state": "queued", "attemptState": None}), \
                 patch.object(FIXTURE, "db_delivery_envelope_sha256", return_value="digest"), \
-                patch.object(FIXTURE, "capture_busy_failure", side_effect=RuntimeError("private diagnostic failure")) as capture, \
-                self.assertRaisesRegex(AssertionError, "^original busy failure; bounded diagnostic="):
+                patch.object(FIXTURE, "capture_busy_failure", side_effect=failure) as capture, \
+                self.assertRaisesRegex(expected, pattern):
             asyncio.run(FIXTURE.run_busy_stage(ctx))
         capture.assert_called_once()
         self.assertFalse(provider.release_hold.is_set())
