@@ -81,7 +81,8 @@ def sandbox_profile(binary, root, port):
         '(literal "/dev/random") (literal "/private/etc/localtime"))',
         f'(allow file-read* (literal {quote(binary)}) (subpath {quote(root)}))',
         f'(allow file-write* (subpath {quote(root)}) (literal "/dev/null"))',
-        f'(allow network-outbound (remote ip "localhost:{port}"))',
+        '(allow system-socket (socket-domain AF_UNIX))',
+        f'(allow network-outbound (remote tcp "localhost:{port}"))',
         f'(allow network-bind (local unix-socket (literal {quote(root / "inbox.sock")})))',
         f'(allow network-inbound (local unix-socket (literal {quote(root / "inbox.sock")})))',
     ]) + '\n'
