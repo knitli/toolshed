@@ -264,7 +264,10 @@ class ModelProvider(BaseHTTPRequestHandler):
                 hold = kind == "main" and self.server.hold_next
                 self.server.hold_next = False if hold else self.server.hold_next
                 if hold:
-                    self.server.hold_deadline = time.monotonic() + 60
+                    started_at = time.monotonic()
+                    self.server.hold_deadline = started_at + 60
+                    self.server.evidence("providerHoldStarted", {"phase": self.server.phase,
+                        "startedAt": started_at, "holdDeadline": self.server.hold_deadline})
                     self.server.hold_state = "held"
                     self.server.hold_started.set()
             if hold:
@@ -1564,6 +1567,14 @@ class BusyObservationRefused(AssertionError):
     """A transient witness refusal; this never represents an expired model hold."""
 
 
+def accept_busy_observation(row, binding, seen):
+    row["checkedAt"] = time.monotonic()
+    if not core_busy_observation(row, binding, row["checkedAt"], seen):
+        raise BusyObservationRefused("busy attachment lacks fresh eligible Core-busy evidence")
+    seen.add(row["response"]["witness"]["nonce"])
+    return row
+
+
 async def read_busy_binding(session, binding, seen):
     """Obtain fresh Core evidence; a selected binding alone never proves Busy."""
     challenge_id = str(uuid4())
@@ -1572,17 +1583,15 @@ async def read_busy_binding(session, binding, seen):
     )
     row = {"request": {"command": "challenge", "challengeId": challenge_id,
                        "expectedBinding": binding}, "response": response, "receivedAt": time.monotonic()}
-    if not core_busy_observation(row, binding, time.monotonic(), seen):
-        raise BusyObservationRefused("busy attachment lacks fresh eligible Core-busy evidence")
-    seen.add(response["witness"]["nonce"])
+    accept_busy_observation(row, binding, seen)
     require_model_held(session["provider"])
     return row
 
 
-async def wait_busy_session_binding(session, timeout=10):
+async def wait_busy_session_binding(session, seen, timeout=10):
     """Wait for notification churn to settle without releasing the held Core turn."""
     deadline = min(time.monotonic() + timeout, session["provider"].hold_deadline)
-    previous, stable, seen = None, 0, set()
+    previous, stable = None, 0
     async with asyncio.timeout_at(deadline):
         while True:
             require_model_held(session["provider"])
@@ -1637,8 +1646,11 @@ async def attach_busy_session(ctx):
             await asyncio.sleep(0.05)
         else:
             break
-    binding, evidence = await wait_busy_session_binding(session)
-    require(binding != session["binding"] and all(binding[key] == session["binding"][key]
+    binding, evidence = await wait_busy_session_binding(session, ctx.c_busy_nonces)
+    counters = ("generation", "serverGeneration")
+    require(all(binding[key] >= session["binding"][key] for key in counters)
+            and any(binding[key] > session["binding"][key] for key in counters)
+            and all(binding[key] == session["binding"][key]
                 for key in ("clientId", "connectionId", "backendPid", "threadId", "serverInstanceId")),
             "busy reattach must retain C1's native session and select its current changed binding")
     before = c1_busy_history(ctx)
@@ -1647,12 +1659,14 @@ async def attach_busy_session(ctx):
     require(status_before["status"] == "present" and status_before["storedQualified"] is True
             and status_before["nativeBinding"] == session["binding"],
             "busy reattach requires the original qualified C attachment")
-    exit_code, result = await asyncio.to_thread(run_cli_capture, [
+    attach_argv = [
         "--state-dir", str(ctx.state), "attach", "--runtime-id", ctx.runtime_ids["C"],
         "--session-id", session["sessionId"], "--cloud-config", str(ctx.state / "cloud.json"),
         "--expected-runtime-generation", str(status_before["runtimeGeneration"]),
         "--expected-attachment-generation", str(status_before["attachmentGeneration"]),
-    ])
+    ]
+    pre_attach_nonces = sorted(ctx.c_busy_nonces)
+    exit_code, result, attach_evidence = await asyncio.to_thread(run_busy_attach_cli, ctx, attach_argv, binding)
     require(exit_code == 0 and result.get("remoteStatus") == "attached"
             and result.get("localStatus") == "current", "production busy attach did not commit and persist")
     status_after = await ctx.admission_cloud.runtime_status(ctx.runtime_ids["C"])
@@ -1661,7 +1675,7 @@ async def attach_busy_session(ctx):
     require(attachment_matches_current(mapping, status_after, status_before, binding, session["sessionId"])
             and status_after["storedQualified"] is True and status_after["nativeBinding"] == binding,
             "busy attach cloud and Store generations or binding differ")
-    current = await read_busy_binding(session, binding, {evidence["response"]["witness"]["nonce"]})
+    current = await read_busy_binding(session, binding, ctx.c_busy_nonces)
     after = c1_busy_history(ctx)
     assert_c1_busy_settled(after)
     assert_c1_history_unchanged(before, after)
@@ -1673,10 +1687,31 @@ async def attach_busy_session(ctx):
         "runtimeGenerationAfter": status_after["runtimeGeneration"],
         "attachmentGenerationBefore": status_before["attachmentGeneration"],
         "attachmentGenerationAfter": status_after["attachmentGeneration"],
-        "coreBusyBeforeAndAfter": True, "c1HistoryAndChargesUnchanged": True}
+        "coreBusyBeforeAndAfter": True, "coreBusyDuringAttach": True, "c1HistoryAndChargesUnchanged": True}
     record_evidence(ctx, "busyFixtureAttach", {"before": before, "after": after,
                     "bindingBefore": session["binding"], "mapping": mapping,
-                    "busyEvidence": [evidence, current], "result": ctx.c_busy_attach_proof})
+                    "busyEvidence": [evidence, attach_evidence, current],
+                    "preAttachNonces": pre_attach_nonces, "holdDeadline": session["provider"].hold_deadline,
+                    "attachArgv": attach_argv,
+                    "attachRequest": {"operation": "attach", "runtimeId": ctx.runtime_ids["C"],
+                        "sessionId": session["sessionId"], "expectedNativeBinding": binding,
+                        "expectedRuntimeGeneration": status_before["runtimeGeneration"],
+                        "expectedAttachmentGeneration": status_before["attachmentGeneration"],
+                        "challengeId": attach_evidence["request"]["challengeId"]},
+                    "result": ctx.c_busy_attach_proof})
+
+
+def run_busy_attach_cli(ctx, argv, binding):
+    """Attribute the production CLI's own challenge to this exact calling thread."""
+    require(getattr(ctx, "busy_attach_capture", None) is None, "busy attach capture already active")
+    capture = {"threadId": threading.get_ident(), "binding": binding, "rows": []}
+    ctx.busy_attach_capture = capture
+    try:
+        code, result = run_cli_capture(argv)
+        require(len(capture["rows"]) == 1, "production busy attach must emit exactly one native challenge")
+        return code, result, capture["rows"][0]
+    finally:
+        ctx.busy_attach_capture = None
 
 
 def fixture(ctx, path, body=None):
@@ -1805,6 +1840,14 @@ def record_session_request(ctx, state_dir, session_id, message, *, native_reques
             print("native exchange evidence unavailable: " + type(error).__name__, file=sys.stderr)
     if message.get("command") == "challenge" and label == "C":
         ctx.c_challenges.append(row)
+    capture = getattr(ctx, "busy_attach_capture", None)
+    if capture is not None and capture["threadId"] == threading.get_ident() and message.get("command") == "challenge":
+        require(label == "C" and session_id == ctx.sessions["C"]["sessionId"]
+                and message.get("expectedBinding") == capture["binding"],
+                "production busy attach challenged a different native session or binding")
+        accept_busy_observation(row, capture["binding"], ctx.c_busy_nonces)
+        require_model_held(ctx.sessions["C"]["provider"])
+        capture["rows"].append(row)
     if message.get("command") == "nativeReceipt" and label in ctx.receipt_calls:
         ctx.receipt_calls[label].append(result.get("outcome", {}).get("status"))
     return result

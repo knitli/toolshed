@@ -1,4 +1,6 @@
 """No native processes or sandbox probes are launched by these tests."""
+import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -20,6 +22,56 @@ ENV = {'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_NAME': 'workflow_dispatch',
        'RUNNER_ENVIRONMENT': 'github-hosted', 'RUNNER_OS': 'macOS', 'RUNNER_ARCH': 'ARM64',
        'GITHUB_REPOSITORY_ID': '123', 'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '42',
        'ImageOS': 'macos15', 'ImageVersion': 'test', 'GH_TOKEN': str(uuid4())}
+
+
+def busy_attach_evidence():
+    old = {key: str(uuid4()) for key in ('clientId', 'connectionId', 'threadId', 'serverInstanceId')}
+    old.update(backendPid=42, generation=1, serverGeneration=1)
+    binding = {**old, 'generation': 2}
+    mapping = {'runtimeId': str(uuid4()), 'sessionId': str(uuid4()), 'nativeBinding': binding,
+               'runtimeGeneration': 4, 'attachmentGeneration': 5}
+    result = {'productionCliPath': True, 'remoteStatus': 'attached', 'localStatus': 'current',
+              'runtimeGenerationBefore': 3, 'runtimeGenerationAfter': 4,
+              'attachmentGenerationBefore': 4, 'attachmentGenerationAfter': 5,
+              'coreBusyBeforeAndAfter': True, 'coreBusyDuringAttach': True, 'c1HistoryAndChargesUnchanged': True}
+    history = {'localDelivery': {'state': 'observed', 'ack_state': 'observed'},
+               'localAttempts': [{'state': 'observed', 'native_observed_ack': 'ack', 'reserved_bytes': 0}],
+               'workerdAttempts': [{'state': 'observed'}], 'workerdClaims': [{'attempt_id': 'c1'}],
+               'receiptStatuses': ['inputRecorded'], 'nativeStarts': [{'attemptId': 'c1'}],
+               'cloudHistory': {key: [] for key in ('attempts', 'deliveries', 'native_claims',
+                    'native_correlations', 'manual_sources', 'slot_intents', 'no_start_settlements')},
+               'slots': [], 'budget': {'used': 0, 'remaining': 10, 'limit': 10, 'windowMs': 3600000}}
+    observations = []
+    for nonce in (3, 4, 5):
+        challenge = str(uuid4())
+        observations.append({'request': {'command': 'challenge', 'challengeId': challenge,
+                                         'expectedBinding': binding},
+                             'response': {'challengeId': challenge, 'observedAt': '2026-10-17T08:00:00.000Z',
+                                          'validUntilMonotonic': float(nonce) + 0.5,
+                                          'witness': {**binding, 'version': 2, 'nonce': nonce, 'sequence': nonce,
+                                                      'cause': 'heartbeat', 'leaseMs': 750, 'eligible': True,
+                                                      'nativeCoreTurnState': 'busy'}},
+                             'receivedAt': float(nonce), 'checkedAt': float(nonce) + 0.1})
+    observations[1].update(session='C', sessionId=mapping['sessionId'])
+    row = {'before': history, 'after': copy.deepcopy(history), 'bindingBefore': old, 'mapping': mapping,
+           'busyEvidence': observations, 'preAttachNonces': [1, 2, 3], 'holdDeadline': 60.0, 'result': copy.deepcopy(result),
+           'attachRequest': {'operation': 'attach', 'runtimeId': mapping['runtimeId'],
+                             'sessionId': mapping['sessionId'], 'expectedRuntimeGeneration': 3,
+                             'expectedAttachmentGeneration': 4, 'expectedNativeBinding': binding,
+                             'challengeId': observations[1]['request']['challengeId']}}
+    row['attachArgv'] = ['--state-dir', '/fixture', 'attach', '--runtime-id', mapping['runtimeId'],
+                         '--session-id', mapping['sessionId'], '--cloud-config', '/fixture/cloud.json',
+                         '--expected-runtime-generation', '3', '--expected-attachment-generation', '4']
+    identities = {field: hashlib.sha256(value.encode()).hexdigest() for field, value in (
+        ('runtimeSha256', mapping['runtimeId']), ('sessionSha256', mapping['sessionId']),
+        ('threadSha256', binding['threadId']))}
+    return result, row, identities
+
+
+def busy_archive(row):
+    hold = {'kind': 'providerHoldStarted', 'value': {'session': 'C', 'phase': 'initial',
+            'startedAt': 0.0, 'holdDeadline': 60.0}}
+    return ('\n'.join(json.dumps(item) for item in (hold, {'kind': 'busyFixtureAttach', 'value': row})) + '\n').encode()
 
 
 class HostedNativeTests(unittest.TestCase):
@@ -343,6 +395,109 @@ class HostedNativeTests(unittest.TestCase):
                     else:
                         self.assertTrue(HOSTED.verify_proof(args, 'native-recovery', root)['semanticChecksPassed'])
 
+    def test_busy_attach_rejects_primitive_argv_and_original_hold_forgery(self):
+        result, row, identities = busy_attach_evidence()
+        proof = {'busyFixtureAttach': result, 'nativeCliSessions': {'C': identities}}
+        HOSTED.verify_busy_attach(proof, busy_archive(row))
+        changes = {
+            'witness_bool': lambda r: r['busyEvidence'][1]['response']['witness'].update(serverGeneration=True),
+            'request_bool': lambda r: r['busyEvidence'][1]['request'].update(
+                expectedBinding={**r['mapping']['nativeBinding'], 'serverGeneration': True}),
+            'attach_binding_bool': lambda r: r['attachRequest'].update(
+                expectedNativeBinding={**r['mapping']['nativeBinding'], 'serverGeneration': True}),
+            'truncated_argv': lambda r: r.update(attachArgv=['attach', '--expected-runtime-generation', '999']),
+            'wrong_argv_cas': lambda r: r['attachArgv'].__setitem__(10, '999'),
+            'wrong_argv_runtime': lambda r: r['attachArgv'].__setitem__(4, 'other'),
+            'wrong_argv_session': lambda r: r['attachArgv'].__setitem__(6, 'other'),
+            'inflated_deadline': lambda r: r.update(holdDeadline=1e9),
+        }
+        for name, mutate in changes.items():
+            with self.subTest(mutation=name):
+                private = copy.deepcopy(row)
+                mutate(private)
+                with self.assertRaisesRegex(ValueError, 'Busy attach evidence mismatch'):
+                    HOSTED.verify_busy_attach(proof, busy_archive(private))
+        for fault in ('missing', 'duplicate', 'reordered', 'extended', 'late_start', 'wrong_phase'):
+            with self.subTest(hold=fault):
+                records = [json.loads(line) for line in busy_archive(row).splitlines()]
+                if fault == 'missing':
+                    records.pop(0)
+                elif fault == 'duplicate':
+                    records.insert(0, copy.deepcopy(records[0]))
+                elif fault == 'reordered':
+                    records.reverse()
+                elif fault == 'extended':
+                    records[0]['value']['holdDeadline'] = records[1]['value']['holdDeadline'] = 1e9
+                elif fault == 'late_start':
+                    records[0]['value']['startedAt'] = 3.05
+                else:
+                    records[0]['value']['phase'] = 'C3'
+                evidence = '\n'.join(json.dumps(record) for record in records).encode()
+                with self.assertRaisesRegex(ValueError, 'Busy attach evidence mismatch'):
+                    HOSTED.verify_busy_attach(proof, evidence)
+
+    def test_busy_attach_verifier_rejects_falsified_private_evidence(self):
+        result, row, identities = busy_attach_evidence()
+        proof = {'busyFixtureAttach': result, 'nativeCliSessions': {'C': identities}}
+        HOSTED.verify_busy_attach(proof, busy_archive(row))
+        mutations = {
+            'missing_public_section': lambda p, r: p.pop('busyFixtureAttach'),
+            'not_cli': lambda p, r: p['busyFixtureAttach'].update(productionCliPath=False),
+            'cli_not_busy': lambda p, r: p['busyFixtureAttach'].update(coreBusyDuringAttach=False),
+            'false_unchanged': lambda p, r: p['busyFixtureAttach'].update(c1HistoryAndChargesUnchanged=False),
+            'bad_runtime_cas': lambda p, r: p['busyFixtureAttach'].update(runtimeGenerationAfter=3),
+            'bool_generation': lambda p, r: p['busyFixtureAttach'].update(attachmentGenerationBefore=True),
+            'local_not_committed': lambda p, r: p['busyFixtureAttach'].update(localStatus='stale'),
+            'private_result_disagrees': lambda p, r: r['result'].update(remoteStatus='denied'),
+            'changed_ack': lambda p, r: r['after']['localAttempts'][0].update(native_observed_ack='other'),
+            'changed_budget': lambda p, r: r['after']['budget'].update(used=1),
+            'changed_slots': lambda p, r: r['after']['slots'].append({'state': 'reserved'}),
+            'changed_correlations': lambda p, r: r['after']['cloudHistory']['native_correlations'].append({}),
+            'missing_cloud_history': lambda p, r: (r['before'].pop('cloudHistory'), r['after'].pop('cloudHistory')),
+            'missing_slot_intents': lambda p, r: (r['before']['cloudHistory'].pop('slot_intents'),
+                                                  r['after']['cloudHistory'].pop('slot_intents')),
+            'reservation_not_released': lambda p, r: [h['localAttempts'][0].update(reserved_bytes=1)
+                                                      for h in (r['before'], r['after'])],
+            'ack_not_observed': lambda p, r: [h['localDelivery'].update(ack_state='pending')
+                                              for h in (r['before'], r['after'])],
+            'duplicate_start': lambda p, r: [h['nativeStarts'].append({'attemptId': 'c1'})
+                                            for h in (r['before'], r['after'])],
+            'mapping_cas_mismatch': lambda p, r: r['mapping'].update(runtimeGeneration=3),
+            'wrong_session_identity': lambda p, r: p['nativeCliSessions']['C'].update(sessionSha256='f' * 64),
+            'native_generation_rollback': lambda p, r: r['bindingBefore'].update(generation=3),
+            'changed_native_identity': lambda p, r: r['bindingBefore'].update(backendPid=43),
+            'missing_cli_observation': lambda p, r: r['busyEvidence'].pop(1),
+            'cli_idle': lambda p, r: r['busyEvidence'][1]['response']['witness'].update(nativeCoreTurnState='idle'),
+            'cli_ineligible': lambda p, r: r['busyEvidence'][1]['response']['witness'].update(eligible=False),
+            'hold_expired': lambda p, r: r.update(holdDeadline=5.0),
+            'expired_on_check': lambda p, r: r['busyEvidence'][1].update(checkedAt=4.6),
+            'nonfinite_check': lambda p, r: r['busyEvidence'][1].update(checkedAt=float('nan')),
+            'expired_post': lambda p, r: r['busyEvidence'][2]['response'].update(validUntilMonotonic=5.0),
+            'post_reuses_first_nonce': lambda p, r: r['busyEvidence'][2]['response']['witness'].update(nonce=1),
+            'cli_reuses_second_nonce': lambda p, r: r['busyEvidence'][1]['response']['witness'].update(nonce=2),
+            'duplicate_witness_nonce': lambda p, r: r['busyEvidence'][2]['response']['witness'].update(nonce=4),
+            'missing_prior_nonces': lambda p, r: r.update(preAttachNonces=[3]),
+            'challenge_mismatch': lambda p, r: r['busyEvidence'][1]['response'].update(challengeId=str(uuid4())),
+            'wrong_witness_binding': lambda p, r: r['busyEvidence'][1]['response']['witness'].update(generation=99),
+            'wrong_cli_session': lambda p, r: r['busyEvidence'][1].update(sessionId=str(uuid4())),
+            'wrong_attach_operation': lambda p, r: r['attachRequest'].update(operation='status'),
+            'wrong_attach_cas': lambda p, r: r['attachRequest'].update(expectedAttachmentGeneration=99),
+            'wrong_attach_runtime': lambda p, r: r['attachRequest'].update(runtimeId=str(uuid4())),
+            'wrong_attach_challenge': lambda p, r: r['attachRequest'].update(challengeId=str(uuid4())),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(mutation=name):
+                candidate, private = copy.deepcopy(proof), copy.deepcopy(row)
+                mutate(candidate, private)
+                if name in ('not_cli', 'cli_not_busy', 'false_unchanged', 'bad_runtime_cas',
+                            'bool_generation', 'local_not_committed'):
+                    private['result'] = copy.deepcopy(candidate['busyFixtureAttach'])
+                with self.assertRaisesRegex(ValueError, 'Busy attach evidence mismatch'):
+                    HOSTED.verify_busy_attach(candidate, busy_archive(private))
+        for evidence in (b'{"kind":"archive","value":{}}\n', busy_archive(row) * 2):
+            with self.subTest(archive=evidence[:20]), self.assertRaises(ValueError):
+                HOSTED.verify_busy_attach(proof, evidence)
+
     def test_three_session_proof_requires_private_evidence_and_expected_outcomes(self):
         import copy
         package = SCRIPT.parents[1].resolve()
@@ -392,9 +547,17 @@ class HostedNativeTests(unittest.TestCase):
                 'privateCausal': {'bytes': (root / 'proof.private-causal.json').stat().st_size,
                                   'sha256': HOSTED.sha(root / 'proof.private-causal.json')},
                 'workerdInputsSha256': {str(source.relative_to(cloud.parents[2])): HOSTED.sha(source)}}
-            for field in (None, 'proofNonceChanged', 'ackBodyBytesIdentical'):
+            busy_result, busy_row, identities = busy_attach_evidence()
+            proof['busyFixtureAttach'] = busy_result
+            proof['nativeCliSessions']['C'].update(identities)
+            evidence = busy_archive(busy_row)
+            (root / 'proof.private-evidence.jsonl').write_bytes(evidence)
+            proof['privateEvidence'] = {'bytes': len(evidence), 'sha256': hashlib.sha256(evidence).hexdigest()}
+            for field in (None, 'proofNonceChanged', 'ackBodyBytesIdentical', 'busyFixtureAttach'):
                 candidate = copy.deepcopy(proof)
-                if field:
+                if field == 'busyFixtureAttach':
+                    del candidate[field]
+                elif field:
                     candidate['observedAckRestart'][field] = False
                 (root / 'proof.json').write_text(json.dumps(candidate))
                 if field:
