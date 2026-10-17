@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 2,
+  "nowMs": 1792238430000,
+  "envelope": {
+    "schemaVersion": 2,
+    "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+    "source": "messaging",
+    "canonicalSubject": {
+      "kind": "message",
+      "namespace": "team/inbox",
+      "messageId": "018e2c70-7c6a-7a01-8000-000000000002",
+      "agentIncarnation": 0
+    },
+    "eventKind": "message",
+    "reasonCode": "inbox_message",
+    "sourceStateVersion": "msg:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "policyRevision": 1,
+    "observedAt": "2026-10-17T11:59:45.000Z",
+    "principal": "adam@knitli.com",
+    "agent": "pilot-agent",
+    "eventReference": "ref_018e2c70-7c6a-7a01-8000-000000000003",
+    "nodeId": "018e2c70-7c6a-7a01-8000-000000000004",
+    "runtimeId": "018e2c70-7c6a-7a01-8000-000000000005",
+    "nodeGeneration": 1,
+    "runtimeGeneration": 2,
+    "attachmentGeneration": 3,
+    "consumerGeneration": 3,
+    "routingGeneration": 4,
+    "attemptId": "018e2c70-7c6a-7a01-8000-000000000006",
+    "issuedAt": "2026-10-17T12:00:00.000Z",
+    "expiresAt": "2026-10-17T12:01:00.000Z",
+    "deliveryId": "dly_e9a5d8a2eff4001935940f60c13a891d75236119f80f8c7898f5718247771fe5"
+  },
+  "acknowledgment": {
+    "schemaVersion": 2,
+    "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+    "deliveryId": "dly_e9a5d8a2eff4001935940f60c13a891d75236119f80f8c7898f5718247771fe5",
+    "attemptId": "018e2c70-7c6a-7a01-8000-000000000006",
+    "principal": "adam@knitli.com",
+    "agent": "pilot-agent",
+    "nodeId": "018e2c70-7c6a-7a01-8000-000000000004",
+    "runtimeId": "018e2c70-7c6a-7a01-8000-000000000005",
+    "nodeGeneration": 1,
+    "runtimeGeneration": 2,
+    "attachmentGeneration": 3,
+    "consumerGeneration": 3,
+    "routingGeneration": 4,
+    "deliveredSourceStateVersion": "msg:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "acknowledgedAt": "2026-10-17T12:00:30.000Z",
+    "status": "observed",
+    "nativeCorrelation": {
+      "kind": "native_input_recorded",
+      "permitId": "018e2c70-7c6a-7a01-8000-000000000007",
+      "turnId": "018e2c70-7c6a-7a01-8000-000000000008",
+      "itemId": "018e2c70-7c6a-7a01-8000-000000000009"
+    }
+  },
+  "canonicalDeliveryIdentity": "[2,\"018e2c70-7c6a-7a01-8000-000000000001\",\"018e2c70-7c6a-7a01-8000-000000000004\",\"018e2c70-7c6a-7a01-8000-000000000005\",1,2,3,3,4]",
+  "expectedDigest": "dly_e9a5d8a2eff4001935940f60c13a891d75236119f80f8c7898f5718247771fe5",
+  "v1SemanticFixtureSha256": "9d34521788fcba40663bf0d1076747dc2c48b290126f25c0df510bbd670b50c5"
+}
