@@ -136,6 +136,35 @@ class Gateway:
             # Claim intent survives every uncertain response/storage failure.
             return None
 
+    async def _claim_messaging_history(self, delivery_id):
+        """Private one-shot path through the injected trusted cloud authority."""
+        envelope = self._require_envelope(delivery_id)
+        if envelope.get("schemaVersion") != 2:
+            return self._row(delivery_id, "messaging_v2_disabled")
+        async with self._runtime_guard(envelope["runtimeId"]):
+            attempt = self.store.current_attempt(delivery_id)
+            if attempt is not None:
+                if attempt["admission"] is not None:
+                    return attempt["admission"]
+                if attempt["evidence"] is not None and not attempt["claim_uncertain"]:
+                    return attempt["evidence"]
+                return self._row(delivery_id, "claim_outcome_unknown")
+            attempt = self.store._begin_messaging_claim_history(delivery_id)
+            if attempt is None:
+                return self._row(delivery_id, "claim_outcome_unknown")
+            try:
+                result = await asyncio.wait_for(
+                    self.authority.claim_messaging_history(attempt["envelope"]), 8,
+                )
+                # Record immediately; a failed write leaves the pre-RPC intent unknown.
+                if isinstance(result, dict) and result.get("status") == "over_budget":
+                    return self.store._record_messaging_claim_refusal(delivery_id, result)
+                return self.store._record_messaging_admission_history(
+                    delivery_id, result, node_id=attempt["envelope"]["nodeId"],
+                )
+            except Exception:
+                return self._row(delivery_id, "claim_outcome_unknown")
+
     async def _settle(self, delivery_id):
         attempt = self.store.current_attempt(delivery_id)
         if not attempt or attempt["state"] != "settlement_pending":

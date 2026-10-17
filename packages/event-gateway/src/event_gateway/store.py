@@ -491,8 +491,8 @@ class Store:
         self.db.execute(
             """UPDATE attempts SET fenced=1,
                state=CASE WHEN state IN ('submitting','submitted') THEN 'ambiguous' ELSE state END,
-               reason='attachment_detached', updated=?
-               WHERE delivery_id IN (SELECT id FROM deliveries WHERE runtime=?)
+               reason=CASE WHEN state='held' AND reason='over_budget' THEN reason ELSE 'attachment_detached' END,
+               updated=? WHERE delivery_id IN (SELECT id FROM deliveries WHERE runtime=?)
                AND state NOT IN ('settled','observed')""",
             (self.clock(), runtime_id),
         )
@@ -581,9 +581,7 @@ class Store:
             result["duplicate"] = True
             return result
         self.cleanup()
-        count = self.db.execute("""SELECT COUNT(*) FROM deliveries
-                 WHERE state IN ('held','queued','claiming','admitted','settlement_pending','submitting','submitted','ambiguous')
-                    OR (state='observed' AND ack_state IS NOT state)""").fetchone()[0]
+        count = self._pending_delivery_count()
         if count >= self.max_rows:
             self.blocked_reason = "pending_capacity"
             raise StoreError("capacity", self.blocked_reason)
@@ -723,6 +721,107 @@ class Store:
                 "UPDATE deliveries SET state='stale', reason='claim_refused', updated=? WHERE id=?",
                 (self.clock(), delivery_id))
         return self.delivery(delivery_id)
+
+    def _begin_messaging_claim_history(self, delivery_id):
+        """Commit one exact v2 claim intent and its history storage before any RPC."""
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+            if delivery is None or delivery["state"] != "held":
+                raise StoreError("invalid_transition")
+            envelope = json.loads(delivery["envelope"])
+            if envelope.get("schemaVersion") != 2:
+                raise StoreError("invalid_transition")
+            if self._attempt(delivery_id) is not None:
+                return None
+            self._matches(envelope)
+            # Reserve only the bounded claim response, not native execution capacity.
+            reserve = 65536 + 6 * (8192 + len(delivery["envelope"].encode()))
+            self._capacity(reserve)
+            self.db.execute(
+                "INSERT INTO attempts (delivery_id,attempt_id,state,envelope,reserved_bytes,updated,claim_uncertain) "
+                "VALUES (?,?,'held',?,?,?,1)",
+                (delivery_id, envelope["attemptId"], delivery["envelope"], reserve, self.clock()),
+            )
+        return self.current_attempt(delivery_id)
+
+    def _record_messaging_claim_refusal(self, delivery_id, refusal):
+        """Keep a definitive over-budget response immutable without replacing its attempt."""
+        from .cloud import CloudError, validate_over_budget
+
+        try:
+            encoded = _json(validate_over_budget(refusal))
+        except CloudError as error:
+            raise StoreError("invalid_refusal") from error
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id)
+            if (row is None or row["state"] != "held"
+                    or json.loads(row["envelope"]).get("schemaVersion") != 2
+                    or row["envelope"] != _json(self.delivery_envelope(delivery_id))
+                    or row["admission"] is not None):
+                raise StoreError("invalid_transition")
+            if row["evidence"] is not None:
+                if row["evidence"] != encoded or row["claim_uncertain"]:
+                    raise StoreError("admission_conflict")
+                return json.loads(encoded)
+            if not row["claim_uncertain"]:
+                raise StoreError("invalid_transition")
+            # Even after detach, a definitive response resolves this existing intent only.
+            self._capacity(65536 + 6 * len(encoded.encode()), credit=row["reserved_bytes"])
+            self.db.execute(
+                "UPDATE attempts SET evidence=?,reason='over_budget',claim_uncertain=0,reserved_bytes=0,updated=? "
+                "WHERE delivery_id=? AND attempt_id=?",
+                (encoded, self.clock(), delivery_id, row["attempt_id"]),
+            )
+        return json.loads(encoded)
+
+    def _record_messaging_admission_history(self, delivery_id, admission, *, node_id):
+        """Trusted internal history only; callers must authenticate cloud responses.
+
+        Metadata validation is not response authentication. The private Gateway
+        path records its trusted cloud client's reply; the permit never allows start.
+        """
+        from .messaging_admission_v2 import validate_admission
+        from .messaging_protocol_v2 import MessagingProtocolError
+
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+            if delivery is None or delivery["state"] != "held":
+                raise StoreError("invalid_transition")
+            envelope = json.loads(delivery["envelope"])
+            if envelope.get("schemaVersion") != 2:
+                raise StoreError("invalid_transition")
+            try:
+                admitted = validate_admission(admission, envelope, now_ms=self.clock() * 1000,
+                                              node_id=node_id)
+            except MessagingProtocolError as exc:
+                raise StoreError("invalid_admission") from exc
+            # This dormant writer binds the exact persisted envelope, including time bounds.
+            if _json(admitted["envelope"]) != delivery["envelope"]:
+                raise StoreError("invalid_admission")
+            self._matches(envelope)
+            encoded = _json(admitted)
+            row = self._attempt(delivery_id, envelope["attemptId"])
+            if row is None:
+                raise StoreError("invalid_transition")
+            if (row["state"] != "held" or row["fenced"] or row["evidence"] is not None
+                    or row["envelope"] != delivery["envelope"]
+                    or row["admission"] not in (None, encoded)):
+                raise StoreError("admission_conflict")
+            if row["admission"] is not None:
+                return json.loads(row["admission"])
+            if not row["claim_uncertain"]:
+                raise StoreError("invalid_transition")
+            self._capacity(65536 + 6 * (len(encoded.encode()) + len(delivery["envelope"].encode())),
+                           credit=row["reserved_bytes"])
+            self.db.execute(
+                "UPDATE attempts SET admission=?,claim_uncertain=0,reserved_bytes=0,updated=? "
+                "WHERE delivery_id=? AND attempt_id=?",
+                (encoded, self.clock(), delivery_id, envelope["attemptId"]),
+            )
+        return json.loads(encoded)
 
     def record_admission(self, delivery_id, admission):
         from .cloud import CloudError, validate_admission
@@ -1219,18 +1318,42 @@ class Store:
             if json.loads(row["envelope"]).get("schemaVersion") == 1
         ]
 
+    def _messaging_obligations(self):
+        # V2 has no settlement yet; detach must not erase a possibly charged attempt.
+        return {
+            row["id"] for row in self.db.execute(
+                "SELECT id,envelope FROM deliveries WHERE EXISTS "
+                "(SELECT 1 FROM attempts WHERE delivery_id=deliveries.id)"
+            ) if json.loads(row["envelope"]).get("schemaVersion") == 2
+        }
+
+    def _pending_delivery_count(self):
+        pending = {row[0] for row in self.db.execute(
+            "SELECT id FROM deliveries WHERE state IN "
+            "('held','queued','claiming','admitted','settlement_pending','submitting','submitted','ambiguous') "
+            "OR (state='observed' AND ack_state IS NOT state)"
+        )}
+        return len(pending | self._messaging_obligations())
+
     def cleanup(self):
         with self.db:
-            self.db.execute(
-                "DELETE FROM attempts WHERE state='settled' AND updated<?",
+            protected = self._messaging_obligations()
+            settled = self.db.execute(
+                "SELECT delivery_id,attempt_id FROM attempts WHERE state='settled' AND updated<?",
                 (self.clock() - RETENTION,),
+            ).fetchall()
+            self.db.executemany(
+                "DELETE FROM attempts WHERE delivery_id=? AND attempt_id=?",
+                ((row[0], row[1]) for row in settled if row[0] not in protected),
             )
-            removed = self.db.execute(
-                "DELETE FROM deliveries WHERE (state='stale' OR (state='observed' AND ack_state=state)) AND retain_until<? AND updated<?",
-                (self.clock(), self.clock() - RETENTION),
-            ).rowcount
+            expired = self.db.execute(
+                "SELECT id FROM deliveries WHERE (state='stale' OR (state='observed' AND ack_state=state)) "
+                "AND retain_until<? AND updated<?", (self.clock(), self.clock() - RETENTION),
+            ).fetchall()
+            removable = [(row[0],) for row in expired if row[0] not in protected]
+            self.db.executemany("DELETE FROM deliveries WHERE id=?", removable)
             self.db.execute("DELETE FROM attempts WHERE delivery_id NOT IN (SELECT id FROM deliveries)")
-            return removed
+            return len(removable)
 
     def status(self):
         size = self._size()
@@ -1240,9 +1363,7 @@ class Store:
                 "SELECT state,COUNT(*) FROM deliveries GROUP BY state"
             )
         }
-        pending = self.db.execute("""SELECT COUNT(*) FROM deliveries
-                 WHERE state IN ('held','queued','claiming','admitted','settlement_pending','submitting','submitted','ambiguous')
-                    OR (state='observed' AND ack_state IS NOT state)""").fetchone()[0]
+        pending = self._pending_delivery_count()
         try:
             self._capacity(32768)
         except StoreError as exc:
