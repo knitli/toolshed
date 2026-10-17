@@ -1,0 +1,20 @@
+{
+  "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json": "489ecbfb0e5bb5cf331bb006c0c83bd8687170d8627588a2e7718bfe045f3cb5",
+  "codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json": "8516393655a23659b8116e3bc90d971dc5346663ccc978f60345036c0c2b681f",
+  "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst": "57d3bf0a75f8c485310e4d86babe3525f8f773adcc48ae09bcea7c9b41c6cabb",
+  "codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst": "b163199b2146ee1031a5edc489eb0ac8699c4b92a90e386f3fd1bd3751a8eff1",
+  "codex-rs/app-server-protocol/schema/typescript/v2/NativeTurnTerminalStatus.ts": "d14aba430ef9e8e968d8452dc9b209a07a5baef126e1d67796c36fc55bda37cc",
+  "codex-rs/app-server-protocol/schema/typescript/v2/index.ts": "2ef7f090777782e51b23bd3acfce4be79ddeea71c76cff777722b1e2e3d75463",
+  "codex-rs/app-server-protocol/src/protocol/common.rs": "d1de39b3d2e7d5fdbab8e09d4a7f36b5c492d672d095148d3e1b3d9fe8c9b47a",
+  "codex-rs/app-server-protocol/src/protocol/v2/thread.rs": "bc560df85ee4b4c6d026d0ae61b55b33138b68a2be99549bccaf548dc0c6a713",
+  "codex-rs/app-server/src/message_processor.rs": "780ba94f9180e6645a8fbcc02225d2ceef3baa2cda86f5db2cb40f95b111ed22",
+  "codex-rs/app-server/src/request_processors/native_selection_processor.rs": "cd60094f873660a08b92915c87a2a424e91d76beecd468362e567b73e738cb67",
+  "codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query.rs": "020f92b8eb6b4371bbc47e20ff4e3e5b6bc7252a33cdd2d112a40aa390b3d362",
+  "codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query_tests.rs": "1597fee1e4588ba1730ae9fe517e787b9709203426897a3e0ee973d729e2d12d",
+  "codex-rs/app-server/tests/suite/v2/mod.rs": "b0071dd8b41ce95311ded5b72e22e3b136fe6c5d5c8566235822ff6a542c866c",
+  "codex-rs/app-server/tests/suite/v2/native_terminal_query.rs": "489fdc84f40fde500422ef5c8b0eddb39470e6e22917866e4755160fcd2bd928",
+  "codex-rs/tui/src/app/selection_bridge.rs": "fe0a228d83d4ff6bf52b8579788e6d88208747ca87d17b33337acc9ebc83602f",
+  "codex-rs/tui/src/app/selection_bridge_tests.rs": "6f5759ee42f232054d388db32a88e5c234b3740c4d063ce26ab29a380bebf047",
+  "codex-rs/tui/src/app/selection_witness.rs": "a3c1c2bb508b264fd2d5d81712ed07576dd8b42eadab28875c495e3f72983c4a",
+  "codex-rs/tui/src/app/selection_witness_tests.rs": "3d1bba9af36f71e9190d846b5f3a73869a02be249b2eb9c7912ae5203c675822"
+}

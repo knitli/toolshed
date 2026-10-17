@@ -1,0 +1,11 @@
+--- a/codex-rs/tui/src/app/selection_bridge_tests.rs
++++ b/codex-rs/tui/src/app/selection_bridge_tests.rs
+@@ -547,7 +547,7 @@
+     for status in [NativeTurnTerminalStatus::Completed, NativeTurnTerminalStatus::Failed, NativeTurnTerminalStatus::Canceled] {
+         let response = ThreadTerminalEvidenceResponse::Terminal {
+             item_id: item_id.clone(), replayed: true,
+-            turn_id: event.client_user_message_id.clone(), receipt_id: receipt_id.clone(), terminal_status: status.clone(),
++            turn_id: event.client_user_message_id.clone(), receipt_id: receipt_id.clone(), terminal_status: status,
+         };
+         let bytes = event.receipt(42, native_terminal_outcome(response, &event.client_user_message_id), ReceiptVersion::V3);
+         let wire: serde_json::Value = serde_json::from_slice(&bytes).unwrap();

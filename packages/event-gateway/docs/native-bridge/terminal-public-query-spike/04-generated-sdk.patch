@@ -1,0 +1,21 @@
+--- a/sdk/python/src/openai_codex/generated/v2_all.py
++++ b/sdk/python/src/openai_codex/generated/v2_all.py
+@@ -2906,6 +2906,18 @@
+     disabled = "disabled"
+     v1 = "v1"
+     v2 = "v2"
++
++
++class NativeCoreTurnState(Enum):
++    busy = "busy"
++    idle = "idle"
++    unknown = "unknown"
++
++
++class NativeTurnTerminalStatus(Enum):
++    completed = "completed"
++    failed = "failed"
++    canceled = "canceled"
+ 
+ 
+ class NetworkAccess(Enum):
