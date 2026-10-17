@@ -141,7 +141,9 @@ class TransportTests(unittest.TestCase):
         self.hosts.start()
         self.addCleanup(self.hosts.stop)
 
-    def refused(self, fake, policy=POLICY):
+    def refused(self, fake, policy=None):
+        if policy is None:
+            policy = POLICY
         with self.assertRaises(subject.Refused) as caught:
             with subject.transport(policy, TOKEN, fake, self.parent):
                 self.fail("unexpected transport publication")
