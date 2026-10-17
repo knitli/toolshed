@@ -14,7 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 from uuid import uuid4
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -62,6 +62,9 @@ def _process_group_exists(process_group):
         os.killpg(process_group, 0)
     except ProcessLookupError:
         return False
+    except PermissionError:
+        # A denied probe cannot prove absence; keep the existing bounded shutdown poll.
+        return True
     return True
 
 
@@ -90,7 +93,7 @@ def _stop_process_group(process, *, term_timeout=10, kill_timeout=5):
     except ProcessLookupError:
         pass
     if not _wait_for_process_group_exit(process, kill_timeout):
-        raise TimeoutError('workerd process group did not exit after SIGKILL')
+        raise TimeoutError(f'workerd process group {process.pid} did not exit or remained inaccessible after SIGKILL')
 
 
 def _cleanup_fixture_process(process, primary_error=None):
@@ -246,6 +249,33 @@ class FixtureSafetyTests(unittest.TestCase):
 
         self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
         self.assertEqual(waits, [0])
+
+    def test_denied_liveness_probe_waits_until_group_disappears(self):
+        process = Mock(pid=4242)
+        process.poll.return_value = 0
+        with (patch.object(os, 'killpg', side_effect=[None, PermissionError('probe denied'), ProcessLookupError()]) as killpg,
+              patch.object(time, 'monotonic', side_effect=[0, 0]),
+              patch.object(time, 'sleep') as sleep):
+            _stop_process_group(process, term_timeout=1, kill_timeout=1)
+        self.assertEqual(killpg.call_args_list, [call(4242, signal.SIGTERM), call(4242, 0), call(4242, 0)])
+        sleep.assert_called_once()
+        process.wait.assert_called_once_with(timeout=0)
+
+    def test_persistent_denied_liveness_probe_never_counts_as_exit(self):
+        process = Mock(pid=4242)
+        process.poll.return_value = 0
+
+        def deny_probe(process_group, sig):
+            if sig == 0:
+                raise PermissionError('probe denied')
+
+        with (patch.object(os, 'killpg', side_effect=deny_probe) as killpg,
+              patch.object(time, 'monotonic', side_effect=[0, 1, 2, 3]),
+              self.assertRaisesRegex(TimeoutError, 'process group 4242 .* after SIGKILL')):
+            _stop_process_group(process, term_timeout=1, kill_timeout=1)
+        self.assertEqual(killpg.call_args_list,
+                         [call(4242, signal.SIGTERM), call(4242, 0), call(4242, signal.SIGKILL), call(4242, 0)])
+        process.wait.assert_not_called()
 
     def test_cleanup_failure_is_reported_without_replacing_startup_failure(self):
         closed = []
