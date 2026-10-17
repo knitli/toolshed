@@ -207,6 +207,14 @@ in an actual contained run. Unit tests do not execute Claude.
 
 ### Offline busy probe (experimental)
 
+Busy observation failures retain at most eight classified stdout envelopes in the
+existing bounded `fixture.log`: event type/subtype from fixed allowlists, exact
+expected session UUID (or null), parent monotonic timestamp, and sequence number.
+Session-state events additionally retain only `running`, `idle`, or `unknown`.
+Unknown labels, malformed JSON, and oversized reads retain no raw frame text.
+This diagnostic is failure evidence only; init, native running, held-response,
+identity and completion requirements remain unchanged. It does not prove admission.
+
 `--busy-probe` requires `--local-provider` and uses the existing contained,
 disposable launch. It explicitly enables experimental
 `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` only in the child environment and adds
@@ -261,8 +269,13 @@ might still use it. Audited private hosted run
 [`39037031558`](https://github.com/knitli/knitli-site/actions/runs/39037031558),
 attempt 1 on 2026-10-17, demonstrated a controlled synthetic second turn through
 the authenticated socket in the same fresh headless session. It did not independently
-witness native idle or busy admission. The experimental busy probe above remains
-unexecuted; production qualification, restart recovery, and receipt-v3 remain false.
+witness native idle or busy admission. Subsequent busy-probe run
+[`39042238469`](https://github.com/knitli/knitli-site/actions/runs/39042238469),
+attempt 1, failed with `busy_native_missing_init` before emitting proof. A
+same-session event preceded init, but its type was not retained. The bounded
+failure diagnostics above support investigating that ordering without relaxing
+the gate. Busy qualification, production admission, restart recovery, and
+receipt-v3 remain false.
 
 The [official 2.1.302 manifest](https://downloads.claude.ai/claude-code-releases/2.1.302/manifest.json)
 records `darwin-arm64` SHA256

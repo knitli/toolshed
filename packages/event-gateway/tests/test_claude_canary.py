@@ -2,6 +2,7 @@
 import asyncio
 from functools import partial
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -625,6 +626,155 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(CANARY, 'MAX_STREAM_BYTES', 2), self.assertRaises(CANARY.CanaryError):
             await CANARY.observe_busy_stdout(stream({'type': 'system'}), self.new_probe())
 
+    async def test_preinit_failure_diagnostic_is_sanitized_before_validation(self):
+        secret = 'private-content-' + secrets.token_hex(16)
+        events = [self.state('running'), self.initial, self.assistant(secret),
+                  self.result(secret), {'type': secret, 'subtype': secret,
+                                        'session_id': secret, 'content': secret}]
+        for event in events:
+            with self.subTest(event_type=event['type']):
+                probe = self.new_probe()
+                with patch.object(CANARY.time, 'monotonic_ns', return_value=probe.started_ns + 17), \
+                        self.assertRaises(CANARY.CanaryError) as raised:
+                    await CANARY.observe_busy_stdout(stream(event), probe)
+                self.assertFalse(probe.ready_to_send.is_set())
+                self.assertFalse(probe.complete.is_set())
+                self.assertEqual(raised.exception.diagnostic, [{
+                    'order': 1, 'observedNs': 17,
+                    'eventType': event['type'] if event['type'] != secret else 'unknown',
+                    'eventSubtype': event.get('subtype', 'unknown') if event.get('subtype') != secret else 'unknown',
+                    'sessionId': self.session if event['session_id'] == self.session else None,
+                    **({'state': 'running'} if event.get('subtype') == 'session_state_changed' else {})}])
+                self.assertNotIn(secret, json.dumps(raised.exception.diagnostic))
+
+    async def test_failure_diagnostic_state_is_allowlisted_and_only_for_state_events(self):
+        secret = 'private-state-' + secrets.token_hex(16)
+        for state in ('running', 'idle', secret, None, {'content': secret}):
+            probe = self.new_probe()
+            with self.subTest(state=state), self.assertRaises(CANARY.CanaryError) as raised:
+                await CANARY.observe_busy_stdout(stream(self.state(state)), probe)
+            self.assertEqual(raised.exception.diagnostic[0]['state'],
+                             state if state in ('running', 'idle') else 'unknown')
+            self.assertNotIn(secret, json.dumps(raised.exception.diagnostic))
+            self.assertFalse(probe.ready_to_send.is_set())
+        for event in (self.initial | {'state': secret},
+                      self.state('running') | {'type': 'result'},
+                      self.state('running') | {'subtype': secret}):
+            with self.subTest(event=event), self.assertRaises(CANARY.CanaryError) as raised:
+                await CANARY.observe_busy_stdout(stream(event), self.new_probe())
+            self.assertNotIn('state', raised.exception.diagnostic[0])
+            self.assertNotIn(secret, json.dumps(raised.exception.diagnostic))
+
+    async def test_failure_diagnostic_allowlists_subtypes_and_exact_session(self):
+        subtypes = ('init', 'session_state_changed', 'success', 'error_during_execution',
+                    'error_max_turns', 'error_max_budget_usd', 'error_during_result_validation')
+        for subtype in subtypes:
+            with self.subTest(subtype=subtype), self.assertRaises(CANARY.CanaryError) as raised:
+                await CANARY.observe_busy_stdout(stream({'type': 'result', 'subtype': subtype,
+                    'session_id': str(uuid4()), 'result': self.key}), self.new_probe())
+            self.assertEqual(raised.exception.diagnostic[0]['eventSubtype'], subtype)
+            self.assertIsNone(raised.exception.diagnostic[0]['sessionId'])
+            self.assertNotIn(self.key, json.dumps(raised.exception.diagnostic))
+
+    async def test_malformed_and_oversized_diagnostics_never_contain_raw_output(self):
+        secret = ('private-output-' + secrets.token_hex(16)).encode()
+        for payload in (secret + b'\n', secret * 2048 + b'\n', b'null\n', b'[]\n'):
+            reader = asyncio.StreamReader(limit=len(payload) + 1)
+            reader.feed_data(payload)
+            reader.feed_eof()
+            probe = self.new_probe()
+            with self.subTest(size=len(payload)), self.assertRaises(CANARY.CanaryError) as raised:
+                await CANARY.observe_busy_stdout(reader, probe)
+            diagnostic = raised.exception.diagnostic
+            self.assertEqual(len(diagnostic), 1)
+            self.assertEqual(diagnostic[0], {'order': 1, 'observedNs': diagnostic[0]['observedNs'],
+                'eventType': 'unknown', 'eventSubtype': 'unknown', 'sessionId': None})
+            self.assertGreaterEqual(diagnostic[0]['observedNs'], 0)
+            self.assertNotIn(secret.decode(), str(raised.exception) + json.dumps(diagnostic))
+            self.assertFalse(probe.ready_to_send.is_set())
+        with patch.object(CANARY, 'MAX_STREAM_BYTES', 2), self.assertRaises(CANARY.CanaryError) as raised:
+            await CANARY.observe_busy_stdout(stream(self.initial), self.new_probe())
+        self.assertEqual(raised.exception.diagnostic[0]['eventType'], 'unknown')
+        self.assertIsNone(raised.exception.diagnostic[0]['sessionId'])
+
+    async def test_eof_and_read_failure_preserve_only_actual_output_events(self):
+        init = {'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []}
+        secret = 'private-read-error-' + secrets.token_hex(16)
+        for count in (0, 10):
+            for ending in (b'', OSError(secret)):
+                reader = Mock()
+                reader.readline = AsyncMock(side_effect=[
+                    *[(json.dumps(init) + '\n').encode()] * count, ending])
+                probe = self.new_probe()
+                reason = 'busy_native_stream_closed' if ending == b'' else 'busy_native_stream_failure'
+                with self.subTest(count=count, ending=type(ending).__name__), \
+                        self.assertRaisesRegex(CANARY.CanaryError, '^' + reason + '$') as raised:
+                    await CANARY.observe_busy_stdout(reader, probe)
+                diagnostic = raised.exception.diagnostic
+                self.assertEqual([entry['order'] for entry in diagnostic],
+                                 list(range(3, 11)) if count else [])
+                self.assertTrue(all(entry['eventType'] == 'system' and entry['eventSubtype'] == 'init'
+                                    and entry['sessionId'] == self.session for entry in diagnostic))
+                self.assertNotIn(secret, str(raised.exception) + json.dumps(diagnostic))
+                self.assertFalse(probe.ready_to_send.is_set())
+                self.assertFalse(probe.complete.is_set())
+
+    async def test_streamreader_limit_failure_has_no_output_diagnostic(self):
+        secret = ('private-overlong-' + secrets.token_hex(16)).encode()
+        reader = asyncio.StreamReader()
+        reader.feed_data(secret * 2048 + b'\n')
+        reader.feed_eof()
+        probe = self.new_probe()
+        with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_stream_failure$') as raised:
+            await CANARY.observe_busy_stdout(reader, probe)
+        self.assertEqual(raised.exception.diagnostic, [])
+        self.assertNotIn(secret.decode(), str(raised.exception))
+        self.assertFalse(probe.ready_to_send.is_set())
+
+    async def test_failure_diagnostic_retains_only_last_eight_events(self):
+        probe = self.new_probe()
+        init = {'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []}
+        with self.assertRaises(CANARY.CanaryError) as raised:
+            await CANARY.observe_busy_stdout(stream(*([init] * 10), self.result(self.key)), probe)
+        diagnostic = raised.exception.diagnostic
+        self.assertEqual(len(diagnostic), 8)
+        self.assertEqual([entry['order'] for entry in diagnostic], list(range(4, 12)))
+        self.assertTrue(all(entry['eventSubtype'] == 'init' for entry in diagnostic[:-1]))
+        self.assertEqual(diagnostic[-1]['eventType'], 'result')
+        self.assertEqual([entry['observedNs'] for entry in diagnostic],
+                         sorted(entry['observedNs'] for entry in diagnostic))
+        self.assertNotIn(self.key, json.dumps(diagnostic))
+        self.assertFalse(probe.ready_to_send.is_set())
+
+    def test_main_prints_diagnostic_only_when_failure_carries_one(self):
+        diagnostic = [{'order': 1, 'observedNs': 17, 'eventType': 'user',
+                       'eventSubtype': 'unknown', 'sessionId': self.session}]
+        for included in (False, True):
+            error = CANARY.CanaryError('busy_native_missing_init')
+            if included:
+                error.diagnostic = diagnostic
+            stderr = io.StringIO()
+            with tempfile.TemporaryDirectory() as temporary:
+                binary = Path(temporary) / 'client'
+                binary.write_bytes(b'synthetic-client')
+
+                async def fail(*args, **kwargs):
+                    raise error
+                with patch.object(CANARY, 'CLIENT_SHA256', CANARY.hashlib.sha256(binary.read_bytes()).hexdigest()), \
+                        patch.object(CANARY, 'canary', side_effect=fail), \
+                        patch.object(CANARY, 'ensure_private_directory'), \
+                        patch.object(CANARY.tempfile, 'mkdtemp', return_value=temporary), \
+                        patch.object(CANARY.sys, 'stderr', stderr):
+                    self.assertEqual(CANARY.main(['--binary', str(binary), '--model', 'fixture',
+                        '--local-provider', '--busy-probe', '--private-output',
+                        str(Path(temporary) / 'proof.json')]), 2)
+            output = json.loads(stderr.getvalue())
+            self.assertEqual(output['reason'], 'busy_native_missing_init')
+            self.assertFalse(output['productionQualified'])
+            self.assertEqual('busyFailureDiagnostic' in output, included)
+            if included:
+                self.assertEqual(output['busyFailureDiagnostic'], diagnostic)
+
     async def test_waiter_prioritizes_provider_failure_over_ready_barrier(self):
         probe = self.started()
         probe.failed.set()
@@ -651,6 +801,12 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_busy_canary_late_failure_cleans_child_server_and_scratch(self):
         await self.run_busy_canary('late_failure')
+
+    async def test_busy_canary_late_native_failure_retains_diagnostic_and_cleans_up(self):
+        await self.run_busy_canary('late_native_failure')
+
+    async def test_busy_canary_late_malformed_frame_retains_diagnostic_and_cleans_up(self):
+        await self.run_busy_canary('late_malformed_frame')
 
     async def test_busy_canary_returns_ordered_observations_only_after_shutdown(self):
         await self.run_busy_canary('success')
@@ -703,6 +859,12 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         async def stop(_child):
             nonlocal stopped
             stopped = True
+            if scenario in ('late_native_failure', 'late_malformed_frame'):
+                self.assertTrue(provider.probe.complete.is_set())
+                if scenario == 'late_native_failure':
+                    feed(self.result(self.key))
+                else:
+                    reader.feed_data(self.key.encode() + b'\n')
             reader.feed_eof()
 
         async def late_failure():
@@ -758,7 +920,23 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         if scenario == 'success':
             return await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
                                        busy_probe=True)
-        if scenario in ('timeout', 'held_timeout'):
+        if scenario in ('late_native_failure', 'late_malformed_frame'):
+            code = ('busy_native_result_mismatch' if scenario == 'late_native_failure'
+                    else 'invalid_client_output')
+            with self.assertRaisesRegex(CANARY.CanaryError, '^' + code + '$') as raised:
+                await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
+                                    busy_probe=True)
+            diagnostic = raised.exception.diagnostic
+            self.assertEqual(len(diagnostic), 8)
+            last = diagnostic[-1]
+            self.assertEqual(last['eventType'],
+                             'result' if scenario == 'late_native_failure' else 'unknown')
+            self.assertEqual(last['eventSubtype'],
+                             'success' if scenario == 'late_native_failure' else 'unknown')
+            self.assertEqual(last['sessionId'],
+                             self.session if scenario == 'late_native_failure' else None)
+            self.assertNotIn(self.key, str(raised.exception) + json.dumps(diagnostic))
+        elif scenario in ('timeout', 'held_timeout'):
             with self.assertRaises(TimeoutError):
                 await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
                                     busy_probe=True)
