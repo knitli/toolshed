@@ -312,6 +312,20 @@ failure diagnostics above support investigating that ordering without relaxing
 the gate. Busy qualification, production admission, restart recovery, and
 receipt-v3 remain false.
 
+Hosted run `39067519862` timed out at the four-minute fixture step with no
+status or proof and an empty fixture log. Its exact startup phase is unknown.
+A bounded Python 3.13 loopback reproduction confirmed that waiting for the
+server to close before cancelling a held provider connection blocks cleanup.
+Cleanup now closes the listener, settles provider connections, then awaits
+server shutdown within four seconds. Failure aborts accepted clients and cancels
+owned tasks with a further one-second bound. Cleanup failure retains scratch,
+records a fixed failure label, and preserves the original run error. This fixes a demonstrated cleanup ordering defect; it does not
+establish why the native witness failed to complete within the 90-second run
+budget. Fixed lifecycle labels and bounded probe flags/counters are flushed to
+the private log at startup, witness waits, timeout and cleanup, without payloads,
+credentials, paths or session identifiers. No hosted rerun has qualified this
+change; busy qualification remains unproven.
+
 The [official 2.1.302 manifest](https://downloads.claude.ai/claude-code-releases/2.1.302/manifest.json)
 records `darwin-arm64` SHA256
 `5262ce9de86243fed0d21edc39b271555d56780d0112e2b194439fe1c6662d37`
