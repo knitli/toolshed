@@ -198,7 +198,7 @@ class SubsequentObservationTests(unittest.TestCase):
     def test_challenge_crossbinding_and_unknown_error_text_are_redacted(self):
         request = {"command": "challenge", "challengeId": str(uuid4())}
         response = self.response(request)
-        for mutation in ("challenge", "binding", "lease", "extra"):
+        for mutation in ("challenge", "binding", "lease", "lease_true", "lease_false", "extra"):
             value = json.loads(json.dumps(response))
             if mutation == "challenge":
                 value["challengeId"] = str(uuid4())
@@ -206,8 +206,10 @@ class SubsequentObservationTests(unittest.TestCase):
                 value["witness"]["generation"] += 1
             elif mutation == "lease":
                 value["validUntilMonotonic"] = float("nan")
+            elif mutation in ("lease_true", "lease_false"):
+                value["validUntilMonotonic"] = mutation == "lease_true"
             else:
-                value["secret"] = "not copied"
+                value["unexpectedDiagnosticField"] = "omitted diagnostic marker"
             self.assertEqual(FIXTURE.diagnostic_native_response("challenge", value,
                 expected_binding=self.binding, challenge_id=request["challengeId"]), {"status": "malformed"})
         self.assertEqual(FIXTURE.diagnostic_native_response("binding", {"reason": "private error details"}),

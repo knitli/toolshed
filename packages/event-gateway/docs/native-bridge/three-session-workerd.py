@@ -682,7 +682,8 @@ def load_revocation_parser():
 
 
 def collect_native_revocations(session, started_unix, ended_unix):
-    """Best-effort diagnostics from C's owned scratch; absence proves nothing.
+    """
+    Best-effort diagnostics from C's owned scratch; absence proves nothing.
 
     Snapshot bounded DB/WAL files through no-follow descriptors before querying.
     Live copies can be inconsistent: that is unavailable evidence, never an
@@ -799,7 +800,8 @@ def diagnostic_native_response(command, response, *, expected_binding=None, chal
             or not launcher._valid_native_witness(witness)
             or launcher._binding(witness) != expected_binding
             or not launcher._valid_observed_at(response.get("observedAt"))
-            or type(response.get("validUntilMonotonic")) not in (int, float)
+            or not isinstance(response.get("validUntilMonotonic"), (int, float))
+            or isinstance(response.get("validUntilMonotonic"), bool)
             or not math.isfinite(response["validUntilMonotonic"])):
         return {"status": "malformed"}
     return {"status": "observed", "observedAt": response["observedAt"],
