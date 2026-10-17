@@ -76,7 +76,7 @@ def attach_archive(row):
 
 def c2_archive(row):
     records = [json.loads(line) for line in attach_archive(row).splitlines()]
-    delivery = '00000000-0000-4000-8000-000000000002'
+    delivery = 'dly_' + 'a' * 64
     binding = row['mapping']['nativeBinding']
     for phase, nonce in (('initial', 6), ('post-restart', 7)):
         observation = copy.deepcopy(row['busyEvidence'][-1])
@@ -103,7 +103,7 @@ def busy_archive(row):
 def c2_proof(result, identities):
     return {'busyFixtureAttach': result, 'nativeCliSessions': {'C': identities},
             'busyC': {'busyDispatchCount': 2, 'deliverySha256': hashlib.sha256(
-                b'00000000-0000-4000-8000-000000000002').hexdigest()},
+                ('dly_' + 'a' * 64).encode()).hexdigest()},
             'busyDeliveryRestart': {'busyDispatchCountAfterRestart': 1},
             'privateEvidence': {'coreBusyNonces': 7}}
 
@@ -448,7 +448,7 @@ class HostedNativeTests(unittest.TestCase):
             'wrong_session': lambda p, r: r[4]['value']['observations'][0].update(session='B'),
             'wrong_session_id': lambda p, r: r[4]['value']['observations'][0].update(sessionId=str(uuid4())),
             'wrong_phase': lambda p, r: r[4]['value'].update(phase='initial'),
-            'wrong_delivery': lambda p, r: r[4]['value'].update(deliveryId=str(uuid4())),
+            'wrong_delivery': lambda p, r: r[4]['value'].update(deliveryId='dly_' + 'b' * 64),
             'wrong_binding': lambda p, r: r[4]['value']['binding'].update(generation=99),
             'missing_witness': lambda p, r: r[4]['value'].update(observations=[]),
             'idle': lambda p, r: r[4]['value']['observations'][0]['response']['witness'].update(nativeCoreTurnState='idle'),
@@ -476,6 +476,21 @@ class HostedNativeTests(unittest.TestCase):
                 evidence = '\n'.join(json.dumps(record) for record in archive).encode()
                 with self.assertRaisesRegex(ValueError, 'Busy attach evidence mismatch'):
                     HOSTED.verify_busy_attach(candidate, evidence)
+
+    def test_busy_restart_requires_canonical_delivery_id_even_with_matching_hash(self):
+        result, row, identities = busy_attach_evidence()
+        for delivery in (str(uuid4()), 'bad_' + 'a' * 64, 'dly_' + 'a' * 63,
+                         'dly_' + 'A' * 64, 'dly_' + 'a' * 65, 'dly_' + 'a' * 64 + '\n'):
+            with self.subTest(delivery=delivery):
+                proof, records = c2_proof(result, identities), c2_archive(row)
+                # Keep every ID and its public hash consistent, isolating the schema check.
+                for record in records:
+                    if record['kind'] in ('c2CoreBusy', 'c2BusyRestart'):
+                        record['value']['deliveryId'] = delivery
+                proof['busyC']['deliverySha256'] = hashlib.sha256(delivery.encode()).hexdigest()
+                evidence = '\n'.join(json.dumps(record) for record in records).encode()
+                with self.assertRaisesRegex(ValueError, 'Busy attach evidence mismatch'):
+                    HOSTED.verify_busy_attach(proof, evidence)
 
     def test_busy_attach_rejects_primitive_argv_and_original_hold_forgery(self):
         result, row, identities = busy_attach_evidence()
