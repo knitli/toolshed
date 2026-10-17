@@ -307,20 +307,42 @@ class BusyProbe:
 
 
 async def observe_busy_stdout(reader, probe):
-    """One bounded reader owns stdout until the retained child closes it."""
-    size = 0
-    while True:
-        raw = await reader.readline()
-        if not raw:
-            require(probe.complete.is_set(), 'busy_native_stream_closed')
-            return
-        size += len(raw)
-        require(size <= MAX_STREAM_BYTES, 'client_output_limit')
-        try:
-            value = json.loads(raw)
-        except (ValueError, UnicodeError):
-            raise CanaryError('invalid_client_output') from None
-        probe.observe(value)
+    """One bounded reader owns stdout; failures retain only classified envelopes."""
+    size = order = 0
+    diagnostic = []
+    try:
+        while True:
+            value = None
+            try:
+                raw = await reader.readline()
+                if not raw:
+                    require(probe.complete.is_set(), 'busy_native_stream_closed')
+                    return
+                size += len(raw)
+                require(size <= MAX_STREAM_BYTES, 'client_output_limit')
+                try:
+                    value = json.loads(raw)
+                except (ValueError, UnicodeError):
+                    raise CanaryError('invalid_client_output') from None
+            finally:
+                order += 1
+                envelope = value if isinstance(value, dict) else {}
+                kind, subtype = envelope.get('type'), envelope.get('subtype')
+                diagnostic.append({'order': order, 'observedNs': time.monotonic_ns() - probe.started_ns,
+                    'eventType': kind if kind in ('system', 'user', 'assistant', 'result') else 'unknown',
+                    'eventSubtype': subtype if subtype in ('init', 'session_state_changed', 'success',
+                        'error_during_execution', 'error_max_turns', 'error_max_budget_usd',
+                        'error_during_result_validation') else 'unknown',
+                    'sessionId': probe.session_id if envelope.get('session_id') == probe.session_id else None})
+                if kind == 'system' and subtype == 'session_state_changed':
+                    state = envelope.get('state')
+                    diagnostic[-1]['state'] = state if state in ('running', 'idle') else 'unknown'
+                del diagnostic[:-8]
+            probe.observe(value)
+    except Exception as error:
+        failure = error if isinstance(error, CanaryError) else CanaryError('busy_native_stream_failure')
+        failure.diagnostic = diagnostic
+        raise failure from None
 
 
 async def wait_busy_witness(event, observer, probe):
@@ -665,8 +687,10 @@ def main(argv=None):
     except (Exception, KeyboardInterrupt) as error:
         reason = str(error) if isinstance(error, CanaryError) else (
             'canary_timeout' if isinstance(error, TimeoutError) else 'canary_local_or_client_failure')
-        print(json.dumps({'canary': 'incomplete', 'reason': reason,
-                          'productionQualified': False}), file=sys.stderr)
+        failure = {'canary': 'incomplete', 'reason': reason, 'productionQualified': False}
+        if isinstance(error, CanaryError) and hasattr(error, 'diagnostic'):
+            failure['busyFailureDiagnostic'] = error.diagnostic
+        print(json.dumps(failure), file=sys.stderr)
         return 2
 
 

@@ -207,6 +207,14 @@ in an actual contained run. Unit tests do not execute Claude.
 
 ### Offline busy probe (experimental)
 
+Busy observation failures retain at most eight classified stdout envelopes in the
+existing bounded `fixture.log`: event type/subtype from fixed allowlists, exact
+expected session UUID (or null), parent monotonic timestamp, and sequence number.
+Session-state events additionally retain only `running`, `idle`, or `unknown`.
+Unknown labels, malformed JSON, and oversized reads retain no raw frame text.
+This diagnostic is failure evidence only; init, native running, held-response,
+identity and completion requirements remain unchanged. It does not prove admission.
+
 `--busy-probe` requires `--local-provider` and uses the existing contained,
 disposable launch. It explicitly enables experimental
 `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` only in the child environment and adds
