@@ -1,10 +1,6 @@
-"""
-Dormant Messaging v2 decoded-DTO conformance; no admission or wire parsing.
+"""Dormant Messaging v2 decoded-DTO conformance; no admission or wire parsing."""
 
-This module is deliberately separate from the active v1 contract and gateway.
-A valid shape, matching digest or ACK does not authenticate a publisher/runtime,
-prove current routing consent, or grant native execution authority.
-"""
+# Separate from the active v1 contract: valid DTOs do not grant execution authority.
 
 # Exact built-in types reject bool-as-int and subclasses outside decoded JSON DTOs.
 # pylint: disable=unidiomatic-typecheck
