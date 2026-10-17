@@ -1,0 +1,777 @@
+diff --git a/codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs b/codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs
+--- a/codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs
++++ b/codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs
+@@ -955,26 +955,25 @@
+         let identity = identity_from_params(&params);
+         if mode.starts_with("recover") {
+             let proof = db.get_native_turn_terminal_proof(&identity).await?;
+-            if mode == "recover_before" {
++            if mode == "recover_before" || mode == "recover_candidate" {
+                 assert_eq!(proof, None);
++                if mode == "recover_candidate" {
++                    db.record_native_turn_started(&identity, &fixture.turn_id)
++                        .await?;
++                    let promoted = db
++                        .get_native_turn_terminal_proof(&identity)
++                        .await?
++                        .expect("durable candidate promotes after genuine start anchor");
++                    assert_eq!(promoted.status, status);
++                    assert_eq!(promoted.turn_id, fixture.turn_id);
++                }
+             } else {
+                 assert_eq!(proof.expect("committed proof").status, status);
+             }
+             continue;
+         }
+         db.begin_native_turn_start(&identity, &[]).await?;
+-        db.record_native_turn_started(&identity, &fixture.turn_id)
+-            .await?;
+         let thread = ThreadId::from_string(&fixture.thread_id)?;
+-        manager
+-            .observe_core_item_completed(thread, &fixture.event)
+-            .await;
+-        assert_eq!(
+-            db.get_native_turn_terminal_proof(&identity).await?,
+-            None,
+-            "missing registered turn cannot create terminal authority"
+-        );
+-        insert_committed_receipt(&receipts, &params, receipt_for(&params));
+         manager
+             .observe_core_item_completed(ThreadId::new(), &fixture.event)
+             .await;
+@@ -985,6 +984,7 @@
+         if mode == "write_failure" {
+             db.close().await;
+         }
++        // Volatile receipts deliberately remain empty: durable identity correlates the event.
+         manager
+             .observe_core_item_completed(thread, &fixture.event)
+             .await;
+@@ -998,6 +998,19 @@
+             install_native_receipt_observer(&manager, &receipts, Some(db.clone()));
+             continue;
+         }
++        assert_eq!(
++            db.get_native_turn_terminal_proof(&identity).await?,
++            None,
++            "a terminal candidate alone is not a start or input anchor"
++        );
++        manager
++            .observe_core_item_completed(thread, &fixture.event)
++            .await;
++        if mode == "candidate" {
++            continue;
++        }
++        db.record_native_turn_started(&identity, &fixture.turn_id)
++            .await?;
+         let proof = db
+             .get_native_turn_terminal_proof(&identity)
+             .await?
+@@ -1015,6 +1028,9 @@
+     if mode == "before" {
+         std::process::exit(71);
+     }
++    if mode == "candidate" {
++        std::process::exit(73);
++    }
+     if mode == "after" {
+         std::process::exit(72);
+     }
+diff --git a/codex-rs/app-server/src/request_processors/native_selection_processor.rs b/codex-rs/app-server/src/request_processors/native_selection_processor.rs
+--- a/codex-rs/app-server/src/request_processors/native_selection_processor.rs
++++ b/codex-rs/app-server/src/request_processors/native_selection_processor.rs
+@@ -776,14 +776,13 @@
+         let receipts = Arc::clone(&receipts);
+         let state_db = state_db.clone();
+         Box::pin(async move {
+-            persist_core_terminal(&receipts, state_db.as_ref(), thread_id, &event).await;
++            persist_core_terminal(state_db.as_ref(), thread_id, &event).await;
+             persist_core_item_completed(receipts, state_db, event).await;
+         })
+     }));
+ }
+ 
+ async fn persist_core_terminal(
+-    receipts: &Arc<Mutex<ReceiptStore>>,
+     state_db: Option<&StateDbHandle>,
+     thread_id: ThreadId,
+     event: &EventMsg,
+@@ -806,23 +805,12 @@
+         }
+         _ => return,
+     };
+-    let identity = {
+-        let receipts = lock(receipts);
+-        let Some(delivery) = receipts.by_client_user_message_id.get(turn_id) else {
+-            return;
+-        };
+-        let Some(receipt) = receipts.by_delivery.get(delivery) else {
+-            return;
+-        };
+-        if receipt.thread_id != thread_id.to_string() || receipt.turn_id != *turn_id {
+-            return;
+-        }
+-        identity_from_receipt(receipt)
+-    };
+     if let Some(state_db) = state_db {
+-        // Only the committed database row is terminal authority; notification loss stays unknown.
++        // The trusted listener supplies the thread and Core's explicit turn ID. The
++        // durable reservation binds both to the original immutable v3 identity;
++        // Pending candidates cannot become terminal proof before a start anchor.
+         let _ = state_db
+-            .record_native_turn_terminal(&identity, turn_id, status)
++            .observe_native_turn_terminal(&thread_id.to_string(), turn_id, status)
+             .await;
+     }
+ }
+@@ -1225,3 +1213,7 @@
+ #[cfg(test)]
+ #[path = "native_selection_processor_tests.rs"]
+ mod tests;
++
++#[cfg(test)]
++#[path = "native_terminal_ordering_tests.rs"]
++mod terminal_ordering_tests;
+diff --git a/codex-rs/state/src/runtime/native_receipts.rs b/codex-rs/state/src/runtime/native_receipts.rs
+--- a/codex-rs/state/src/runtime/native_receipts.rs
++++ b/codex-rs/state/src/runtime/native_receipts.rs
+@@ -74,29 +74,51 @@
+         if matches!(proof_from_row(&row)?, NativeTurnStartProof::Pending) {
+             bail!("native terminal proof requires committed start evidence");
+         }
+-        let proof = if let Some(proof) = terminal_proof_from_row(&row)? {
+-            if proof.status != status {
+-                bail!("native terminal status conflicts with committed proof");
+-            }
+-            proof
++        if row
++            .try_get::<Option<String>, _>("terminal_candidate_status")?
++            .is_some_and(|candidate| candidate != terminal_status_name(status))
++        {
++            bail!("native terminal status conflicts with observed candidate");
++        }
++        let proof = commit_terminal_proof(&mut transaction, &row, status).await?;
++        transaction.commit().await?;
++        Ok(proof)
++    }
++
++    /// Observes a trusted Core terminal event; pending candidates are not proof.
++    pub async fn observe_native_turn_terminal(
++        &self,
++        thread_id: &str,
++        turn_id: &str,
++        status: NativeTurnTerminalStatus,
++    ) -> anyhow::Result<Option<NativeTurnTerminalProof>> {
++        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
++        let row = sqlx::query("SELECT * FROM native_turn_start_receipts WHERE thread_id = ? AND client_user_message_id = ?")
++            .bind(thread_id).bind(turn_id).fetch_optional(&mut *transaction).await?;
++        let Some(row) = row else {
++            return Ok(None);
++        };
++        let identity = identity_from_row(&row)?;
++        validate_terminal_identity(&identity)?;
++        validate_started_turn(&identity, turn_id)?;
++        if terminal_proof_from_row(&row)?.is_some() {
++            let proof = commit_terminal_proof(&mut transaction, &row, status).await?;
++            transaction.commit().await?;
++            return Ok(Some(proof));
++        }
++        let candidate = row.try_get::<Option<String>, _>("terminal_candidate_status")?;
++        // A conflict is durable and never promoted, including after restart.
++        let candidate = if candidate
++            .as_deref()
++            .is_some_and(|candidate| candidate != terminal_status_name(status))
++        {
++            "conflict"
+         } else {
+-            let proof = NativeTurnTerminalProof {
+-                turn_id: turn_id.to_string(),
+-                receipt_id: Uuid::new_v4().to_string(),
+-                status,
+-            };
+-            sqlx::query("UPDATE native_turn_start_receipts SET terminal_status = ?, terminal_receipt_id = ? WHERE attempt_id = ?")
+-                .bind(match status {
+-                    NativeTurnTerminalStatus::Completed => "completed",
+-                    NativeTurnTerminalStatus::Failed => "failed",
+-                    NativeTurnTerminalStatus::Canceled => "canceled",
+-                })
+-                .bind(&proof.receipt_id)
+-                .bind(&identity.attempt_id)
+-                .execute(&mut *transaction)
+-                .await?;
+-            proof
++            terminal_status_name(status)
+         };
++        sqlx::query("UPDATE native_turn_start_receipts SET terminal_candidate_status = ? WHERE attempt_id = ?")
++            .bind(candidate).bind(&identity.attempt_id).execute(&mut *transaction).await?;
++        let proof = promote_terminal_candidate(&mut transaction, &identity).await?;
+         transaction.commit().await?;
+         Ok(proof)
+     }
+@@ -215,6 +237,7 @@
+             },
+             _ => bail!("native receipt start proof conflicts with committed identity"),
+         };
++        promote_terminal_candidate(&mut transaction, identity).await?;
+         transaction.commit().await?;
+         Ok(updated)
+     }
+@@ -271,6 +294,7 @@
+             }
+             _ => bail!("native input evidence conflicts with committed identity"),
+         };
++        promote_terminal_candidate(&mut transaction, identity).await?;
+         transaction.commit().await?;
+         Ok(updated)
+     }
+@@ -293,6 +317,60 @@
+         }
+         Ok(Some(proof_from_row(&row)?))
+     }
++}
++
++fn terminal_status_name(status: NativeTurnTerminalStatus) -> &'static str {
++    match status {
++        NativeTurnTerminalStatus::Completed => "completed",
++        NativeTurnTerminalStatus::Failed => "failed",
++        NativeTurnTerminalStatus::Canceled => "canceled",
++    }
++}
++
++async fn commit_terminal_proof(
++    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
++    row: &sqlx::sqlite::SqliteRow,
++    status: NativeTurnTerminalStatus,
++) -> anyhow::Result<NativeTurnTerminalProof> {
++    if let Some(proof) = terminal_proof_from_row(row)? {
++        if proof.status != status {
++            bail!("native terminal status conflicts with committed proof");
++        }
++        return Ok(proof);
++    }
++    let proof = NativeTurnTerminalProof {
++        turn_id: row.try_get("turn_id")?,
++        receipt_id: Uuid::new_v4().to_string(),
++        status,
++    };
++    sqlx::query("UPDATE native_turn_start_receipts SET terminal_status = ?, terminal_receipt_id = ? WHERE attempt_id = ?")
++        .bind(terminal_status_name(status)).bind(&proof.receipt_id)
++        .bind(row.try_get::<String, _>("attempt_id")?).execute(&mut **transaction).await?;
++    Ok(proof)
++}
++
++async fn promote_terminal_candidate(
++    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
++    identity: &NativeTurnStartIdentity,
++) -> anyhow::Result<Option<NativeTurnTerminalProof>> {
++    let row = exact_native_receipt_row(transaction, identity).await?;
++    let status = match row
++        .try_get::<Option<String>, _>("terminal_candidate_status")?
++        .as_deref()
++    {
++        None | Some("conflict") => return Ok(None),
++        Some("completed") => NativeTurnTerminalStatus::Completed,
++        Some("failed") => NativeTurnTerminalStatus::Failed,
++        Some("canceled") => NativeTurnTerminalStatus::Canceled,
++        Some(_) => bail!("invalid native terminal candidate"),
++    };
++    validate_terminal_identity(identity)?;
++    if matches!(proof_from_row(&row)?, NativeTurnStartProof::Pending) {
++        return Ok(None);
++    }
++    Ok(Some(
++        commit_terminal_proof(transaction, &row, status).await?,
++    ))
+ }
+ 
+ fn validate_terminal_identity(identity: &NativeTurnStartIdentity) -> anyhow::Result<()> {
+diff --git a/codex-rs/state/src/runtime/native_receipts_tests.rs b/codex-rs/state/src/runtime/native_receipts_tests.rs
+--- a/codex-rs/state/src/runtime/native_receipts_tests.rs
++++ b/codex-rs/state/src/runtime/native_receipts_tests.rs
+@@ -142,7 +142,7 @@
+         sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations")
+             .fetch_one(migrated.pool.as_ref())
+             .await?,
+-        61
++        62
+     );
+     assert_eq!(
+         sqlx::query_scalar::<_, Option<String>>(
+@@ -727,3 +727,230 @@
+     );
+     Ok(())
+ }
++
++#[tokio::test]
++async fn native_terminal_candidate_orders_with_start_and_input_across_restart() -> anyhow::Result<()>
++{
++    for input_first in [false, true] {
++        for terminal_first in [false, true] {
++            let home = unique_temp_dir();
++            let db = runtime(&home).await?;
++            let mut request = identity(50);
++            request.bridge_client_id = Some("bridge".into());
++            request.bridge_client_generation = Some(1);
++            let turn = &request.client_user_message_id;
++            let status = NativeTurnTerminalStatus::Completed;
++            assert_eq!(
++                db.observe_native_turn_terminal(&request.thread_id, turn, status)
++                    .await?,
++                None
++            );
++            db.begin_native_turn_start(&request, &[]).await?;
++            assert_eq!(
++                db.observe_native_turn_terminal("wrong-thread", turn, status)
++                    .await?,
++                None
++            );
++            if terminal_first {
++                for _ in 0..2 {
++                    assert_eq!(
++                        db.observe_native_turn_terminal(&request.thread_id, turn, status)
++                            .await?,
++                        None
++                    );
++                }
++            }
++            db.close().await;
++            let db = runtime(&home).await?;
++            assert_eq!(db.get_native_turn_terminal_proof(&request).await?, None);
++            if input_first {
++                db.record_native_turn_input(&request, turn, "00000000-0000-7000-8000-000000000099")
++                    .await?;
++            } else {
++                db.record_native_turn_started(&request, turn).await?;
++            }
++            assert_eq!(
++                db.get_native_turn_terminal_proof(&request).await?.is_some(),
++                terminal_first
++            );
++            let proof = db
++                .observe_native_turn_terminal(&request.thread_id, turn, status)
++                .await?
++                .expect("anchored terminal");
++            assert_eq!(
++                db.get_native_turn_terminal_proof(&request).await?,
++                Some(proof.clone())
++            );
++            assert!(
++                db.observe_native_turn_terminal(
++                    &request.thread_id,
++                    turn,
++                    NativeTurnTerminalStatus::Failed
++                )
++                .await
++                .is_err()
++            );
++            assert_eq!(
++                db.observe_native_turn_terminal(&request.thread_id, turn, status)
++                    .await?,
++                Some(proof.clone())
++            );
++            db.close().await;
++            let db = runtime(&home).await?;
++            assert_eq!(
++                db.get_native_turn_terminal_proof(&request).await?,
++                Some(proof)
++            );
++        }
++    }
++    Ok(())
++}
++
++#[tokio::test]
++async fn native_terminal_candidate_conflict_survives_restart_and_cannot_be_promoted()
++-> anyhow::Result<()> {
++    let home = unique_temp_dir();
++    let db = runtime(&home).await?;
++    let mut request = identity(51);
++    request.bridge_client_id = Some("bridge".into());
++    request.bridge_client_generation = Some(1);
++    let turn = &request.client_user_message_id;
++    db.begin_native_turn_start(&request, &[]).await?;
++    for status in [
++        NativeTurnTerminalStatus::Completed,
++        NativeTurnTerminalStatus::Failed,
++        NativeTurnTerminalStatus::Completed,
++    ] {
++        assert_eq!(
++            db.observe_native_turn_terminal(&request.thread_id, turn, status)
++                .await?,
++            None
++        );
++    }
++    db.close().await;
++    let db = runtime(&home).await?;
++    db.record_native_turn_started(&request, turn).await?;
++    db.record_native_turn_input(&request, turn, "00000000-0000-7000-8000-000000000099")
++        .await?;
++    assert_eq!(db.get_native_turn_terminal_proof(&request).await?, None);
++    assert_eq!(
++        db.observe_native_turn_terminal(
++            &request.thread_id,
++            turn,
++            NativeTurnTerminalStatus::Completed
++        )
++        .await?,
++        None
++    );
++    assert!(
++        db.record_native_turn_terminal(&request, turn, NativeTurnTerminalStatus::Completed)
++            .await
++            .is_err()
++    );
++    Ok(())
++}
++
++#[tokio::test]
++async fn native_terminal_candidate_requires_full_original_identity() -> anyhow::Result<()> {
++    let db = runtime(&unique_temp_dir()).await?;
++    let mut request = identity(52);
++    db.begin_native_turn_start(&request, &[]).await?;
++    assert!(
++        db.observe_native_turn_terminal(
++            &request.thread_id,
++            &request.client_user_message_id,
++            NativeTurnTerminalStatus::Completed
++        )
++        .await
++        .is_err()
++    );
++    request = identity(53);
++    request.bridge_client_id = Some("bridge".into());
++    request.bridge_client_generation = Some(1);
++    db.begin_native_turn_start(&request, &[]).await?;
++    db.observe_native_turn_terminal(
++        &request.thread_id,
++        &request.client_user_message_id,
++        NativeTurnTerminalStatus::Completed,
++    )
++    .await?;
++    for field in 0..12 {
++        let mut wrong = request.clone();
++        match field {
++            0 => wrong.server_instance_id.push('x'),
++            1 => wrong.selection_generation += 1,
++            2 => wrong.bridge_client_id = Some("other".into()),
++            3 => wrong.bridge_client_generation = Some(2),
++            4 => wrong.attempt_id.push('x'),
++            5 => wrong.delivery_id.push('x'),
++            6 => wrong.thread_id.push('x'),
++            7 => wrong.client_user_message_id = identity(54).client_user_message_id,
++            8 => wrong.permit_id.push('x'),
++            9 => wrong.permit_issued_at += 1,
++            10 => wrong.permit_expires_at += 1,
++            11 => wrong.input.push('x'),
++            _ => unreachable!(),
++        }
++        assert!(
++            db.record_native_turn_started(&wrong, &wrong.client_user_message_id)
++                .await
++                .is_err()
++        );
++        assert!(
++            db.record_native_turn_input(
++                &wrong,
++                &wrong.client_user_message_id,
++                "00000000-0000-7000-8000-000000000099"
++            )
++            .await
++            .is_err()
++        );
++        assert_eq!(db.get_native_turn_terminal_proof(&wrong).await?, None);
++        assert_eq!(db.get_native_turn_terminal_proof(&request).await?, None);
++    }
++    db.record_native_turn_started(&request, &request.client_user_message_id)
++        .await?;
++    assert!(db.get_native_turn_terminal_proof(&request).await?.is_some());
++    Ok(())
++}
++
++#[tokio::test]
++async fn native_terminal_candidate_promotion_failure_rolls_back_start_and_input()
++-> anyhow::Result<()> {
++    for input_first in [false, true] {
++        let home = unique_temp_dir();
++        let db = runtime(&home).await?;
++        let mut request = identity(55);
++        request.bridge_client_id = Some("bridge".into());
++        request.bridge_client_generation = Some(1);
++        let turn = &request.client_user_message_id;
++        db.begin_native_turn_start(&request, &[]).await?;
++        db.observe_native_turn_terminal(
++            &request.thread_id,
++            turn,
++            NativeTurnTerminalStatus::Completed,
++        )
++        .await?;
++        sqlx::query("CREATE TRIGGER fail_candidate_promotion BEFORE UPDATE OF terminal_status ON native_turn_start_receipts BEGIN SELECT RAISE(ABORT, 'promotion failed'); END").execute(db.pool.as_ref()).await?;
++        let result = if input_first {
++            db.record_native_turn_input(&request, turn, "00000000-0000-7000-8000-000000000099")
++                .await
++        } else {
++            db.record_native_turn_started(&request, turn).await
++        };
++        assert!(result.is_err());
++        db.close().await;
++        let db = runtime(&home).await?;
++        assert_eq!(
++            db.get_native_turn_start_proof(&request).await?,
++            Some(NativeTurnStartProof::Pending)
++        );
++        assert_eq!(db.get_native_turn_terminal_proof(&request).await?, None);
++        sqlx::query("DROP TRIGGER fail_candidate_promotion")
++            .execute(db.pool.as_ref())
++            .await?;
++        db.record_native_turn_started(&request, turn).await?;
++        assert!(db.get_native_turn_terminal_proof(&request).await?.is_some());
++    }
++    Ok(())
++}
+diff --git a/codex-rs/state/migrations/0062_native_turn_terminal_candidates.sql b/codex-rs/state/migrations/0062_native_turn_terminal_candidates.sql
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/state/migrations/0062_native_turn_terminal_candidates.sql
+@@ -0,0 +1,3 @@
++-- Candidates are not terminal proof; conflict permanently suppresses promotion.
++ALTER TABLE native_turn_start_receipts ADD COLUMN terminal_candidate_status TEXT
++    CHECK (terminal_candidate_status IN ('completed', 'failed', 'canceled', 'conflict'));
+diff --git a/codex-rs/app-server/src/request_processors/native_terminal_ordering_tests.rs b/codex-rs/app-server/src/request_processors/native_terminal_ordering_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/app-server/src/request_processors/native_terminal_ordering_tests.rs
+@@ -0,0 +1,234 @@
++use super::*;
++use crate::outgoing_message::OutgoingMessageSender;
++use crate::request_processors::thread_lifecycle::ListenerTaskContext;
++use crate::request_processors::thread_lifecycle::ensure_listener_task_running;
++use crate::skills_watcher::SkillsWatcher;
++use crate::thread_state::ThreadStateManager;
++use crate::thread_status::ThreadWatchManager;
++use codex_analytics::AnalyticsEventsClient;
++use codex_core::StartThreadOptions;
++use codex_core::config::ConfigBuilder;
++use codex_core::test_support::EmptyUserInstructionsProvider;
++use codex_exec_server::EnvironmentManager;
++use codex_extension_api::ExtensionData;
++use codex_extension_api::ExtensionFuture;
++use codex_extension_api::ExtensionRegistryBuilder;
++use codex_extension_api::TurnLifecycleContributor;
++use codex_extension_api::TurnStartInput;
++use codex_extension_api::TurnStartPhase;
++use codex_login::AuthManager;
++use codex_protocol::protocol::Op;
++use codex_protocol::protocol::SessionSource;
++use codex_state::NativeTurnTerminalStatus;
++use codex_state::SqliteConfig;
++use codex_state::StateRuntime;
++use codex_utils_absolute_path::test_support::PathExt;
++use tokio::sync::Notify;
++
++struct HoldGuardedPreparation(Notify);
++
++impl TurnLifecycleContributor for HoldGuardedPreparation {
++    fn turn_start_phase(&self, _thread_store: &ExtensionData) -> TurnStartPhase {
++        TurnStartPhase::RegularTaskStart
++    }
++
++    fn on_turn_start<'a>(&'a self, _input: TurnStartInput<'a>) -> ExtensionFuture<'a, ()> {
++        Box::pin(async move {
++            self.0.notify_one();
++            std::future::pending::<()>().await;
++        })
++    }
++}
++
++#[tokio::test]
++async fn actual_guarded_cancel_listener_preserves_terminal_before_started_anchor()
++-> anyhow::Result<()> {
++    tokio::time::timeout(Duration::from_secs(30), async {
++        let home = tempfile::tempdir()?;
++        let endpoint = wiremock::MockServer::start().await;
++        let base_url = endpoint.uri();
++        std::fs::write(home.path().join("config.toml"), format!(r#"
++model = "gpt-5.1"
++model_provider = "unreachable-test-provider"
++approval_policy = "never"
++sandbox_mode = "read-only"
++[model_providers.unreachable-test-provider]
++name = "No sampling allowed"
++base_url = "{base_url}/v1"
++wire_api = "responses"
++request_max_retries = 0
++stream_max_retries = 0
++"#))?;
++        let hook_marker = home.path().join("prompt-hook-invoked");
++        let quoted_marker = format!("'{}'", hook_marker.display().to_string().replace('\'', "'\"'\"'"));
++        let hook_command = format!("printf invoked > {quoted_marker}; exec /bin/sleep 1");
++        // A slow real prompt hook keeps cancellation's input-preservation path before ItemCompleted.
++        std::fs::write(home.path().join("hooks.json"), serde_json::json!({
++            "hooks": { "UserPromptSubmit": [{ "hooks": [{
++                "type": "command", "command": hook_command
++            }] }] }
++        }).to_string())?;
++        let mut config = ConfigBuilder::default().codex_home(home.path().to_path_buf()).build().await?;
++        let hooks = codex_hooks::list_hooks(codex_hooks::HooksConfig {
++            feature_enabled: true,
++            config_layer_stack: Some(config.config_layer_stack.clone()),
++            ..Default::default()
++        });
++        assert_eq!(hooks.hooks.len(), 1, "one real prompt hook discovered");
++        let mut user_config = config.config_layer_stack.get_active_user_layer()
++            .expect("test user config").config.clone();
++        let mut trusted_states = toml::map::Map::new();
++        for hook in hooks.hooks {
++            let mut state = toml::map::Map::new();
++            state.insert("trusted_hash".into(), codex_config::TomlValue::String(hook.current_hash));
++            trusted_states.insert(hook.key, codex_config::TomlValue::Table(state));
++        }
++        let mut hook_config = toml::map::Map::new();
++        hook_config.insert("state".into(), codex_config::TomlValue::Table(trusted_states));
++        user_config.as_table_mut().expect("test config table")
++            .insert("hooks".into(), codex_config::TomlValue::Table(hook_config));
++        config.config_layer_stack = config.config_layer_stack.with_user_config(
++            &config.codex_home.join("config.toml"), user_config,
++        )?;
++        let sqlite = SqliteConfig::new_for_testing(home.path().abs());
++        let db = StateRuntime::init(sqlite.clone(), "unreachable-test-provider".into()).await?;
++        let read_db = sqlite.open_read_only_pool(&sqlite.state_db_path(), None).await?;
++        let auth = AuthManager::shared_from_config(&config, false).await?;
++        let barrier = Arc::new(HoldGuardedPreparation(Notify::new()));
++        let mut registry = ExtensionRegistryBuilder::new();
++        registry.turn_lifecycle_contributor(barrier.clone());
++        let manager = Arc::new(ThreadManager::new(
++            &config,
++            auth.clone(),
++            codex_core::build_models_manager(&config, auth),
++            codex_core::CodexAppsToolsCache::default(),
++            SessionSource::VSCode,
++            Arc::new(EnvironmentManager::default_for_tests()),
++            Arc::new(registry.build()),
++            Arc::new(EmptyUserInstructionsProvider),
++            None,
++            codex_core::passthrough_image_store(),
++            codex_core::thread_store_from_config(&config, Some(db.clone())),
++            None,
++            Uuid::new_v4().to_string(),
++            None,
++            None,
++        ));
++        let home_path = config.codex_home.clone();
++        eprintln!("ordering test: starting Core thread");
++        let created = manager.start_thread(StartThreadOptions::new(config)).await?;
++        let thread = created.thread;
++        let thread_id = created.thread_id;
++        let states = ThreadStateManager::default();
++        let thread_state = states.thread_state(thread_id).await;
++        let watches = ThreadWatchManager::new();
++        watches.upsert_thread_silently(&thread_id.to_string()).await;
++        let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::channel(64);
++        let outgoing = Arc::new(OutgoingMessageSender::new(outgoing_tx, AnalyticsEventsClient::disabled()));
++        let outgoing_drain = tokio::spawn(async move { while outgoing_rx.recv().await.is_some() {} });
++        let skills = SkillsWatcher::new(manager.skills_service(), &home_path, outgoing.clone());
++        let receipts = Arc::new(Mutex::new(ReceiptStore::default()));
++        install_native_receipt_observer(&states, &receipts, Some(db.clone()));
++        ensure_listener_task_running(ListenerTaskContext {
++            thread_manager: manager.clone(),
++            thread_state_manager: states.clone(),
++            outgoing,
++            pending_thread_unloads: Arc::new(tokio::sync::Mutex::new(Default::default())),
++            thread_watch_manager: watches,
++            codex_home: home_path.to_path_buf(),
++            thread_unload_delay: Duration::from_secs(60),
++            skills_watcher: skills.clone(),
++            turn_cost_worker: None,
++        }, thread_id, thread.clone(), thread_state).await.map_err(|error| anyhow::anyhow!("listener: {error:?}"))?;
++        eprintln!("ordering test: actual listener attached");
++        let message_id = Uuid::new_v4().to_string();
++        let params = ThreadStartIfIdleParams {
++            server_instance_id: "ordering-server".into(),
++            expected_generation: 4,
++            thread_id: thread_id.to_string(),
++            attempt_id: "ordering-attempt".into(),
++            delivery_id: "ordering-delivery".into(),
++            client_user_message_id: message_id.clone(),
++            permit_id: "ordering-permit".into(),
++            permit_issued_at: 1,
++            permit_expires_at: 2,
++            input: "This input must never reach sampling".into(),
++            bridge_client_id: Some(Uuid::new_v4().to_string()),
++            bridge_client_generation: Some(9),
++        };
++        let identity = identity_from_params(&params);
++        assert_eq!(db.begin_native_turn_start(&identity, &[]).await?, NativeTurnStartBegin::Created);
++        let guard = Arc::new(NativeTurnStartGuard {
++            selection: Arc::new(Mutex::new(SelectionState {
++                generation: params.expected_generation,
++                thread_id: Some(params.thread_id.clone()),
++                ready: true,
++                expires_at: Some(Instant::now() + Duration::from_secs(10)),
++                closed: false,
++            })),
++            receipts: receipts.clone(),
++            expected_generation: params.expected_generation,
++            thread_id: params.thread_id.clone(),
++            permit_deadline: Instant::now() + Duration::from_secs(10),
++            receipt: NativeReceipt {
++                server_instance_id: identity.server_instance_id.clone(),
++                selection_generation: identity.selection_generation,
++                attempt_id: identity.attempt_id.clone(),
++                delivery_id: identity.delivery_id.clone(),
++                thread_id: identity.thread_id.clone(),
++                client_user_message_id: identity.client_user_message_id.clone(),
++                permit_id: identity.permit_id.clone(),
++                permit_issued_at: identity.permit_issued_at,
++                permit_expires_at: identity.permit_expires_at,
++                input: identity.input.clone(),
++                bridge_client_id: identity.bridge_client_id.clone(),
++                bridge_client_generation: identity.bridge_client_generation,
++                turn_id: message_id.clone(),
++                input_recorded_item_id: None,
++            },
++            rejection: GuardRejection(Mutex::new(None)),
++        });
++        let request = TurnInputRequest::new(TurnInput::UserInput {
++            content: vec![UserInput::Text { text: params.input, text_elements: Vec::new() }],
++            client_id: Some(message_id.clone()),
++        }).on_start(TurnStartOptions { turn_trigger: Some("event_gateway".into()), ..Default::default() })
++            .with_start_guard(guard).with_submission_id(message_id.clone());
++        let starting_thread = thread.clone();
++        let start = tokio::spawn(async move { starting_thread.start_turn_if_idle(request).await });
++        tokio::time::timeout(Duration::from_secs(10), barrier.0.notified())
++            .await.expect("regular task entered its pre-input lifecycle barrier");
++        assert!(matches!(start.await??, StartIfIdleSubmission::Started { turn_id } if turn_id == message_id));
++        assert_eq!(lock(&receipts).by_delivery.len(), 1, "actual guard registered the receipt");
++        assert_eq!(db.get_native_turn_start_proof(&identity).await?, Some(NativeTurnStartProof::Pending));
++        eprintln!("ordering test: Core Started returned; durable anchor withheld; interrupting");
++        thread.submit(Op::Interrupt).await?;
++        // The caller deliberately delays its durable Started write until the real listener consumes cancellation.
++        loop {
++            let row: (String, Option<String>, Option<String>) = sqlx::query_as(
++                "SELECT stage, input_item_id, terminal_candidate_status FROM native_turn_start_receipts WHERE attempt_id = ?"
++            ).bind(&identity.attempt_id).fetch_one(&read_db).await?;
++            assert_eq!(row.0, "pending");
++            assert_eq!(row.1, None, "no ItemCompleted may create an early input anchor");
++            if row.2.as_deref() == Some("canceled") { break; }
++            tokio::task::yield_now().await;
++        }
++        assert_eq!(std::fs::read_to_string(&hook_marker)?, "invoked", "real prompt hook entered before forced abort");
++        assert_eq!(db.get_native_turn_terminal_proof(&identity).await?, None);
++        eprintln!("ordering test: canceled candidate durable; committing Started anchor");
++        db.record_native_turn_started(&identity, &message_id).await?;
++        let proof = db.get_native_turn_terminal_proof(&identity).await?.expect("pending terminal promoted after Started");
++        assert_eq!(proof.status, NativeTurnTerminalStatus::Canceled);
++        assert_eq!(proof.turn_id, message_id);
++        db.record_native_turn_started(&identity, &message_id).await?;
++        assert_eq!(db.get_native_turn_terminal_proof(&identity).await?, Some(proof));
++        manager.shutdown_all_threads_bounded(Duration::from_secs(5)).await;
++        states.clear_all_listeners().await;
++        skills.shutdown();
++        outgoing_drain.abort();
++        assert!(endpoint.received_requests().await.expect("request journal").is_empty(), "guarded cancellation must never contact the provider");
++        read_db.close().await;
++        db.close().await;
++        Ok::<(), anyhow::Error>(())
++    }).await??;
++    Ok(())
++}

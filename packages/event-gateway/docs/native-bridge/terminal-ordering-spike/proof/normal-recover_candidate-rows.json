@@ -1,0 +1,54 @@
+{
+  "before": [
+    [
+      "terminal-attempt-0",
+      null,
+      null,
+      null,
+      "pending",
+      "completed"
+    ],
+    [
+      "terminal-attempt-1",
+      null,
+      null,
+      null,
+      "pending",
+      "failed"
+    ],
+    [
+      "terminal-attempt-2",
+      null,
+      null,
+      null,
+      "pending",
+      "canceled"
+    ]
+  ],
+  "after": [
+    [
+      "terminal-attempt-0",
+      "62ceba16-e5fa-4f4b-ad01-be35809aba8c",
+      "completed",
+      "40afced3-0e8d-47ab-9cea-433f52cf0cf4",
+      "started",
+      "completed"
+    ],
+    [
+      "terminal-attempt-1",
+      "cd3e37eb-8a10-47b7-bb7f-b0f24a4b2efd",
+      "failed",
+      "12842d21-8879-4a53-8898-05f69b58c27f",
+      "started",
+      "failed"
+    ],
+    [
+      "terminal-attempt-2",
+      "f69950c7-489c-413e-9aa2-e8b4218bf8e1",
+      "canceled",
+      "fd472abc-87a2-4f8b-8de4-be586697f061",
+      "started",
+      "canceled"
+    ]
+  ]
+}

@@ -1,0 +1,400 @@
+--- tested/codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs
++++ formatted/codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs
+@@ -958,8 +958,11 @@
+             if mode == "recover_before" || mode == "recover_candidate" {
+                 assert_eq!(proof, None);
+                 if mode == "recover_candidate" {
+-                    db.record_native_turn_started(&identity, &fixture.turn_id).await?;
+-                    let promoted = db.get_native_turn_terminal_proof(&identity).await?
++                    db.record_native_turn_started(&identity, &fixture.turn_id)
++                        .await?;
++                    let promoted = db
++                        .get_native_turn_terminal_proof(&identity)
++                        .await?
+                         .expect("durable candidate promotes after genuine start anchor");
+                     assert_eq!(promoted.status, status);
+                     assert_eq!(promoted.turn_id, fixture.turn_id);
+@@ -971,7 +974,9 @@
+         }
+         db.begin_native_turn_start(&identity, &[]).await?;
+         let thread = ThreadId::from_string(&fixture.thread_id)?;
+-        manager.observe_core_item_completed(ThreadId::new(), &fixture.event).await;
++        manager
++            .observe_core_item_completed(ThreadId::new(), &fixture.event)
++            .await;
+         assert_eq!(db.get_native_turn_terminal_proof(&identity).await?, None);
+         if mode == "before" {
+             continue;
+@@ -980,21 +985,32 @@
+             db.close().await;
+         }
+         // Volatile receipts deliberately remain empty: durable identity correlates the event.
+-        manager.observe_core_item_completed(thread, &fixture.event).await;
++        manager
++            .observe_core_item_completed(thread, &fixture.event)
++            .await;
+         if mode == "write_failure" {
+             let reopened = StateRuntime::init(sqlite.clone(), "test-provider".into()).await?;
+-            assert_eq!(reopened.get_native_turn_terminal_proof(&identity).await?, None);
++            assert_eq!(
++                reopened.get_native_turn_terminal_proof(&identity).await?,
++                None
++            );
+             db = reopened;
+             install_native_receipt_observer(&manager, &receipts, Some(db.clone()));
+             continue;
+         }
+-        assert_eq!(db.get_native_turn_terminal_proof(&identity).await?, None,
+-            "a terminal candidate alone is not a start or input anchor");
+-        manager.observe_core_item_completed(thread, &fixture.event).await;
++        assert_eq!(
++            db.get_native_turn_terminal_proof(&identity).await?,
++            None,
++            "a terminal candidate alone is not a start or input anchor"
++        );
++        manager
++            .observe_core_item_completed(thread, &fixture.event)
++            .await;
+         if mode == "candidate" {
+             continue;
+         }
+-        db.record_native_turn_started(&identity, &fixture.turn_id).await?;
++        db.record_native_turn_started(&identity, &fixture.turn_id)
++            .await?;
+         let proof = db
+             .get_native_turn_terminal_proof(&identity)
+             .await?
+--- tested/codex-rs/state/src/runtime/native_receipts.rs
++++ formatted/codex-rs/state/src/runtime/native_receipts.rs
+@@ -74,7 +74,10 @@
+         if matches!(proof_from_row(&row)?, NativeTurnStartProof::Pending) {
+             bail!("native terminal proof requires committed start evidence");
+         }
+-        if row.try_get::<Option<String>, _>("terminal_candidate_status")?.is_some_and(|candidate| candidate != terminal_status_name(status)) {
++        if row
++            .try_get::<Option<String>, _>("terminal_candidate_status")?
++            .is_some_and(|candidate| candidate != terminal_status_name(status))
++        {
+             bail!("native terminal status conflicts with observed candidate");
+         }
+         let proof = commit_terminal_proof(&mut transaction, &row, status).await?;
+@@ -92,7 +95,9 @@
+         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+         let row = sqlx::query("SELECT * FROM native_turn_start_receipts WHERE thread_id = ? AND client_user_message_id = ?")
+             .bind(thread_id).bind(turn_id).fetch_optional(&mut *transaction).await?;
+-        let Some(row) = row else { return Ok(None); };
++        let Some(row) = row else {
++            return Ok(None);
++        };
+         let identity = identity_from_row(&row)?;
+         validate_terminal_identity(&identity)?;
+         validate_started_turn(&identity, turn_id)?;
+@@ -103,9 +108,14 @@
+         }
+         let candidate = row.try_get::<Option<String>, _>("terminal_candidate_status")?;
+         // A conflict is durable and never promoted, including after restart.
+-        let candidate = if candidate.as_deref().is_some_and(|candidate| candidate != terminal_status_name(status)) {
++        let candidate = if candidate
++            .as_deref()
++            .is_some_and(|candidate| candidate != terminal_status_name(status))
++        {
+             "conflict"
+-        } else { terminal_status_name(status) };
++        } else {
++            terminal_status_name(status)
++        };
+         sqlx::query("UPDATE native_turn_start_receipts SET terminal_candidate_status = ? WHERE attempt_id = ?")
+             .bind(candidate).bind(&identity.attempt_id).execute(&mut *transaction).await?;
+         let proof = promote_terminal_candidate(&mut transaction, &identity).await?;
+@@ -323,7 +333,9 @@
+     status: NativeTurnTerminalStatus,
+ ) -> anyhow::Result<NativeTurnTerminalProof> {
+     if let Some(proof) = terminal_proof_from_row(row)? {
+-        if proof.status != status { bail!("native terminal status conflicts with committed proof"); }
++        if proof.status != status {
++            bail!("native terminal status conflicts with committed proof");
++        }
+         return Ok(proof);
+     }
+     let proof = NativeTurnTerminalProof {
+@@ -342,7 +354,10 @@
+     identity: &NativeTurnStartIdentity,
+ ) -> anyhow::Result<Option<NativeTurnTerminalProof>> {
+     let row = exact_native_receipt_row(transaction, identity).await?;
+-    let status = match row.try_get::<Option<String>, _>("terminal_candidate_status")?.as_deref() {
++    let status = match row
++        .try_get::<Option<String>, _>("terminal_candidate_status")?
++        .as_deref()
++    {
+         None | Some("conflict") => return Ok(None),
+         Some("completed") => NativeTurnTerminalStatus::Completed,
+         Some("failed") => NativeTurnTerminalStatus::Failed,
+@@ -350,8 +365,12 @@
+         Some(_) => bail!("invalid native terminal candidate"),
+     };
+     validate_terminal_identity(identity)?;
+-    if matches!(proof_from_row(&row)?, NativeTurnStartProof::Pending) { return Ok(None); }
+-    Ok(Some(commit_terminal_proof(transaction, &row, status).await?))
++    if matches!(proof_from_row(&row)?, NativeTurnStartProof::Pending) {
++        return Ok(None);
++    }
++    Ok(Some(
++        commit_terminal_proof(transaction, &row, status).await?,
++    ))
+ }
+ 
+ fn validate_terminal_identity(identity: &NativeTurnStartIdentity) -> anyhow::Result<()> {
+--- tested/codex-rs/state/src/runtime/native_receipts_tests.rs
++++ formatted/codex-rs/state/src/runtime/native_receipts_tests.rs
+@@ -729,7 +729,8 @@
+ }
+ 
+ #[tokio::test]
+-async fn native_terminal_candidate_orders_with_start_and_input_across_restart() -> anyhow::Result<()> {
++async fn native_terminal_candidate_orders_with_start_and_input_across_restart() -> anyhow::Result<()>
++{
+     for input_first in [false, true] {
+         for terminal_first in [false, true] {
+             let home = unique_temp_dir();
+@@ -739,37 +740,75 @@
+             request.bridge_client_generation = Some(1);
+             let turn = &request.client_user_message_id;
+             let status = NativeTurnTerminalStatus::Completed;
+-            assert_eq!(db.observe_native_turn_terminal(&request.thread_id, turn, status).await?, None);
++            assert_eq!(
++                db.observe_native_turn_terminal(&request.thread_id, turn, status)
++                    .await?,
++                None
++            );
+             db.begin_native_turn_start(&request, &[]).await?;
+-            assert_eq!(db.observe_native_turn_terminal("wrong-thread", turn, status).await?, None);
++            assert_eq!(
++                db.observe_native_turn_terminal("wrong-thread", turn, status)
++                    .await?,
++                None
++            );
+             if terminal_first {
+                 for _ in 0..2 {
+-                    assert_eq!(db.observe_native_turn_terminal(&request.thread_id, turn, status).await?, None);
++                    assert_eq!(
++                        db.observe_native_turn_terminal(&request.thread_id, turn, status)
++                            .await?,
++                        None
++                    );
+                 }
+             }
+             db.close().await;
+             let db = runtime(&home).await?;
+             assert_eq!(db.get_native_turn_terminal_proof(&request).await?, None);
+             if input_first {
+-                db.record_native_turn_input(&request, turn, "00000000-0000-7000-8000-000000000099").await?;
++                db.record_native_turn_input(&request, turn, "00000000-0000-7000-8000-000000000099")
++                    .await?;
+             } else {
+                 db.record_native_turn_started(&request, turn).await?;
+             }
+-            assert_eq!(db.get_native_turn_terminal_proof(&request).await?.is_some(), terminal_first);
+-            let proof = db.observe_native_turn_terminal(&request.thread_id, turn, status).await?.expect("anchored terminal");
+-            assert_eq!(db.get_native_turn_terminal_proof(&request).await?, Some(proof.clone()));
+-            assert!(db.observe_native_turn_terminal(&request.thread_id, turn, NativeTurnTerminalStatus::Failed).await.is_err());
+-            assert_eq!(db.observe_native_turn_terminal(&request.thread_id, turn, status).await?, Some(proof.clone()));
++            assert_eq!(
++                db.get_native_turn_terminal_proof(&request).await?.is_some(),
++                terminal_first
++            );
++            let proof = db
++                .observe_native_turn_terminal(&request.thread_id, turn, status)
++                .await?
++                .expect("anchored terminal");
++            assert_eq!(
++                db.get_native_turn_terminal_proof(&request).await?,
++                Some(proof.clone())
++            );
++            assert!(
++                db.observe_native_turn_terminal(
++                    &request.thread_id,
++                    turn,
++                    NativeTurnTerminalStatus::Failed
++                )
++                .await
++                .is_err()
++            );
++            assert_eq!(
++                db.observe_native_turn_terminal(&request.thread_id, turn, status)
++                    .await?,
++                Some(proof.clone())
++            );
+             db.close().await;
+             let db = runtime(&home).await?;
+-            assert_eq!(db.get_native_turn_terminal_proof(&request).await?, Some(proof));
++            assert_eq!(
++                db.get_native_turn_terminal_proof(&request).await?,
++                Some(proof)
++            );
+         }
+     }
+     Ok(())
+ }
+ 
+ #[tokio::test]
+-async fn native_terminal_candidate_conflict_survives_restart_and_cannot_be_promoted() -> anyhow::Result<()> {
++async fn native_terminal_candidate_conflict_survives_restart_and_cannot_be_promoted()
++-> anyhow::Result<()> {
+     let home = unique_temp_dir();
+     let db = runtime(&home).await?;
+     let mut request = identity(51);
+@@ -777,16 +816,37 @@
+     request.bridge_client_generation = Some(1);
+     let turn = &request.client_user_message_id;
+     db.begin_native_turn_start(&request, &[]).await?;
+-    for status in [NativeTurnTerminalStatus::Completed, NativeTurnTerminalStatus::Failed, NativeTurnTerminalStatus::Completed] {
+-        assert_eq!(db.observe_native_turn_terminal(&request.thread_id, turn, status).await?, None);
++    for status in [
++        NativeTurnTerminalStatus::Completed,
++        NativeTurnTerminalStatus::Failed,
++        NativeTurnTerminalStatus::Completed,
++    ] {
++        assert_eq!(
++            db.observe_native_turn_terminal(&request.thread_id, turn, status)
++                .await?,
++            None
++        );
+     }
+     db.close().await;
+     let db = runtime(&home).await?;
+     db.record_native_turn_started(&request, turn).await?;
+-    db.record_native_turn_input(&request, turn, "00000000-0000-7000-8000-000000000099").await?;
++    db.record_native_turn_input(&request, turn, "00000000-0000-7000-8000-000000000099")
++        .await?;
+     assert_eq!(db.get_native_turn_terminal_proof(&request).await?, None);
+-    assert_eq!(db.observe_native_turn_terminal(&request.thread_id, turn, NativeTurnTerminalStatus::Completed).await?, None);
+-    assert!(db.record_native_turn_terminal(&request, turn, NativeTurnTerminalStatus::Completed).await.is_err());
++    assert_eq!(
++        db.observe_native_turn_terminal(
++            &request.thread_id,
++            turn,
++            NativeTurnTerminalStatus::Completed
++        )
++        .await?,
++        None
++    );
++    assert!(
++        db.record_native_turn_terminal(&request, turn, NativeTurnTerminalStatus::Completed)
++            .await
++            .is_err()
++    );
+     Ok(())
+ }
+ 
+@@ -795,12 +855,25 @@
+     let db = runtime(&unique_temp_dir()).await?;
+     let mut request = identity(52);
+     db.begin_native_turn_start(&request, &[]).await?;
+-    assert!(db.observe_native_turn_terminal(&request.thread_id, &request.client_user_message_id, NativeTurnTerminalStatus::Completed).await.is_err());
++    assert!(
++        db.observe_native_turn_terminal(
++            &request.thread_id,
++            &request.client_user_message_id,
++            NativeTurnTerminalStatus::Completed
++        )
++        .await
++        .is_err()
++    );
+     request = identity(53);
+     request.bridge_client_id = Some("bridge".into());
+     request.bridge_client_generation = Some(1);
+     db.begin_native_turn_start(&request, &[]).await?;
+-    db.observe_native_turn_terminal(&request.thread_id, &request.client_user_message_id, NativeTurnTerminalStatus::Completed).await?;
++    db.observe_native_turn_terminal(
++        &request.thread_id,
++        &request.client_user_message_id,
++        NativeTurnTerminalStatus::Completed,
++    )
++    .await?;
+     for field in 0..12 {
+         let mut wrong = request.clone();
+         match field {
+@@ -818,18 +891,32 @@
+             11 => wrong.input.push('x'),
+             _ => unreachable!(),
+         }
+-        assert!(db.record_native_turn_started(&wrong, &wrong.client_user_message_id).await.is_err());
+-        assert!(db.record_native_turn_input(&wrong, &wrong.client_user_message_id, "00000000-0000-7000-8000-000000000099").await.is_err());
++        assert!(
++            db.record_native_turn_started(&wrong, &wrong.client_user_message_id)
++                .await
++                .is_err()
++        );
++        assert!(
++            db.record_native_turn_input(
++                &wrong,
++                &wrong.client_user_message_id,
++                "00000000-0000-7000-8000-000000000099"
++            )
++            .await
++            .is_err()
++        );
+         assert_eq!(db.get_native_turn_terminal_proof(&wrong).await?, None);
+         assert_eq!(db.get_native_turn_terminal_proof(&request).await?, None);
+     }
+-    db.record_native_turn_started(&request, &request.client_user_message_id).await?;
++    db.record_native_turn_started(&request, &request.client_user_message_id)
++        .await?;
+     assert!(db.get_native_turn_terminal_proof(&request).await?.is_some());
+     Ok(())
+ }
+ 
+ #[tokio::test]
+-async fn native_terminal_candidate_promotion_failure_rolls_back_start_and_input() -> anyhow::Result<()> {
++async fn native_terminal_candidate_promotion_failure_rolls_back_start_and_input()
++-> anyhow::Result<()> {
+     for input_first in [false, true] {
+         let home = unique_temp_dir();
+         let db = runtime(&home).await?;
+@@ -838,19 +925,30 @@
+         request.bridge_client_generation = Some(1);
+         let turn = &request.client_user_message_id;
+         db.begin_native_turn_start(&request, &[]).await?;
+-        db.observe_native_turn_terminal(&request.thread_id, turn, NativeTurnTerminalStatus::Completed).await?;
++        db.observe_native_turn_terminal(
++            &request.thread_id,
++            turn,
++            NativeTurnTerminalStatus::Completed,
++        )
++        .await?;
+         sqlx::query("CREATE TRIGGER fail_candidate_promotion BEFORE UPDATE OF terminal_status ON native_turn_start_receipts BEGIN SELECT RAISE(ABORT, 'promotion failed'); END").execute(db.pool.as_ref()).await?;
+         let result = if input_first {
+-            db.record_native_turn_input(&request, turn, "00000000-0000-7000-8000-000000000099").await
++            db.record_native_turn_input(&request, turn, "00000000-0000-7000-8000-000000000099")
++                .await
+         } else {
+             db.record_native_turn_started(&request, turn).await
+         };
+         assert!(result.is_err());
+         db.close().await;
+         let db = runtime(&home).await?;
+-        assert_eq!(db.get_native_turn_start_proof(&request).await?, Some(NativeTurnStartProof::Pending));
++        assert_eq!(
++            db.get_native_turn_start_proof(&request).await?,
++            Some(NativeTurnStartProof::Pending)
++        );
+         assert_eq!(db.get_native_turn_terminal_proof(&request).await?, None);
+-        sqlx::query("DROP TRIGGER fail_candidate_promotion").execute(db.pool.as_ref()).await?;
++        sqlx::query("DROP TRIGGER fail_candidate_promotion")
++            .execute(db.pool.as_ref())
++            .await?;
+         db.record_native_turn_started(&request, turn).await?;
+         assert!(db.get_native_turn_terminal_proof(&request).await?.is_some());
+     }
+--- tested/codex-rs/app-server/src/request_processors/native_terminal_ordering_tests.rs
++++ formatted/codex-rs/app-server/src/request_processors/native_terminal_ordering_tests.rs
+@@ -41,7 +41,8 @@
+ }
+ 
+ #[tokio::test]
+-async fn actual_guarded_cancel_listener_preserves_terminal_before_started_anchor() -> anyhow::Result<()> {
++async fn actual_guarded_cancel_listener_preserves_terminal_before_started_anchor()
++-> anyhow::Result<()> {
+     tokio::time::timeout(Duration::from_secs(30), async {
+         let home = tempfile::tempdir()?;
+         let endpoint = wiremock::MockServer::start().await;

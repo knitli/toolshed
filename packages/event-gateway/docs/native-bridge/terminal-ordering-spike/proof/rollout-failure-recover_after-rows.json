@@ -1,0 +1,54 @@
+{
+  "before": [
+    [
+      "terminal-attempt-0",
+      "68bb9b6b-1576-4115-8f2a-e8e1db1fdb44",
+      "completed",
+      "c495335e-e818-4cfc-8d64-7ef1e158217a",
+      "started",
+      "completed"
+    ],
+    [
+      "terminal-attempt-1",
+      "1dce01c0-49d6-4b54-b84d-c1d8505d8558",
+      "failed",
+      "d9e73fe8-60f3-4c0c-ba5e-64e09db092d0",
+      "started",
+      "failed"
+    ],
+    [
+      "terminal-attempt-2",
+      "e53dfb5b-a28e-4113-bdc7-7bf98b705189",
+      "canceled",
+      "305d0db5-069b-41b4-8d7f-4baefc3663bd",
+      "started",
+      "canceled"
+    ]
+  ],
+  "after": [
+    [
+      "terminal-attempt-0",
+      "68bb9b6b-1576-4115-8f2a-e8e1db1fdb44",
+      "completed",
+      "c495335e-e818-4cfc-8d64-7ef1e158217a",
+      "started",
+      "completed"
+    ],
+    [
+      "terminal-attempt-1",
+      "1dce01c0-49d6-4b54-b84d-c1d8505d8558",
+      "failed",
+      "d9e73fe8-60f3-4c0c-ba5e-64e09db092d0",
+      "started",
+      "failed"
+    ],
+    [
+      "terminal-attempt-2",
+      "e53dfb5b-a28e-4113-bdc7-7bf98b705189",
+      "canceled",
+      "305d0db5-069b-41b4-8d7f-4baefc3663bd",
+      "started",
+      "canceled"
+    ]
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "command": [
+    "python3",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "packages/event-gateway/tests",
+    "-p",
+    "test_terminal_ordering_artifacts.py",
+    "-v"
+  ],
+  "testsPassed": 6,
+  "actualFrozenSelectedSourceCheck": "61 file hashes matched",
+  "causalAssertionRed": [
+    {
+      "mutation": "skip-historical-hashes",
+      "exitCode": 1,
+      "assertion": "ValueError not raised",
+      "logSha256": "4eb55278d7fbff00daa1895730f987207f4cfc55c18bf6a2f2f4dbe443ea14f1",
+      "restored": true
+    },
+    {
+      "mutation": "skip-final-hashes",
+      "exitCode": 1,
+      "assertion": "ValueError not raised",
+      "logSha256": "ced2a5f26deca1189b1e7c60b5e1849af7c95dfaedaa45f79dad5542f906d9f2",
+      "restored": true
+    },
+    {
+      "mutation": "leak-command-path",
+      "exitCode": 1,
+      "assertion": "!= 'just'",
+      "logSha256": "7e9c09f05043818dde4717a38425f6ea851aaabcb959f6dc69b4f796fb54da4d",
+      "restored": true
+    }
+  ],
+  "nativeCommandsExecuted": false
+}
