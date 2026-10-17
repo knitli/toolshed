@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from types import MappingProxyType
 import stat
-import subprocess
+import subprocess  # nosec B404 - Fixed isolated Python child tests sibling import provenance.
 import sys
 import struct
 import tempfile
@@ -552,7 +552,8 @@ class NativeCIProvenanceTests(unittest.TestCase):
             code = ("import runpy; namespace=runpy.run_path(" + repr(str(SCRIPT)) + "); "
                     "assert namespace['R'].__file__ == " + repr(str(SCRIPT.with_name('native_recipe_registry.py'))) + "; "
                     "assert namespace['R'].recipe().family == 'core-idle-v1'")
-            completed = subprocess.run([sys.executable, "-I", "-B", "-c", code], cwd=root,
+            completed = subprocess.run(  # nosec B603 - Fixed interpreter/code; private fixture paths, no shell.
+                                       [sys.executable, "-I", "-B", "-c", code], cwd=root,
                                        capture_output=True, text=True, timeout=20,
                                        env={**V.os.environ, "PYTHONPATH": str(root), "PYTHONDONTWRITEBYTECODE": "1"})
             self.assertEqual(completed.returncode, 0, completed.stderr)
@@ -561,7 +562,8 @@ class NativeCIProvenanceTests(unittest.TestCase):
             missing.mkdir()
             isolated = missing / SCRIPT.name
             isolated.write_bytes(SCRIPT.read_bytes())
-            failed = subprocess.run([sys.executable, "-I", "-B", "-c",
+            failed = subprocess.run(  # nosec B603 - Fixed interpreter/code; private fixture paths, no shell.
+                                    [sys.executable, "-I", "-B", "-c",
                                      "import runpy; runpy.run_path(" + repr(str(isolated)) + ")"],
                                     cwd=root, capture_output=True, text=True, timeout=20)
             self.assertNotEqual(failed.returncode, 0)
