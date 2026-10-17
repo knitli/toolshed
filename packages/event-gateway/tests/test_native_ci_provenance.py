@@ -590,7 +590,7 @@ for family in ("core-idle-v1", "terminal-query-v1"):
     assert evidence.recipe == verifier["R"].recipe(family)
     assert type(evidence.recipe) is plain.Recipe
 """
-                result = subprocess.run([sys.executable, "-I", "-B", "-c", code],
+                result = subprocess.run([sys.executable, "-I", "-B", "-c", code],  # nosec B603 - Fixed interpreter and closed, trusted import-test template; no shell.
                                         capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -613,7 +613,7 @@ except ImportError as error:
 else:
     raise AssertionError("foreign cached registry was accepted")
 """
-                    result = subprocess.run([sys.executable, "-I", "-B", "-c", code],
+                    result = subprocess.run([sys.executable, "-I", "-B", "-c", code],  # nosec B603 - Fixed interpreter and closed, trusted rejection-test template; no shell.
                                             capture_output=True, text=True, timeout=20)
                     self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -632,7 +632,7 @@ else:
     raise AssertionError("broken registry loaded")
 assert "native_recipe_registry" not in sys.modules
 """
-            result = subprocess.run([sys.executable, "-I", "-B", "-c", code],
+            result = subprocess.run([sys.executable, "-I", "-B", "-c", code],  # nosec B603 - Fixed interpreter and owned, trusted failure-test template; no shell.
                                     capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, 0, result.stderr)
 
