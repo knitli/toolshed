@@ -1,16 +1,34 @@
 # Disposable Muse monitor wake canary
 
-Status: offline fixture only. No Muse monitor, native client, model/provider call,
-owner configuration, credentials, gateway, or source access was exercised. This
-fixture emits one nonsecret random marker; it cannot establish delivery authority,
-a durable acknowledgment, source permission, or a production binding.
+Status: owner-observed controlled idle wake on 2026-10-17, alongside offline
+fixture checks. The owner confirmed that the native notification reached the
+idle session and that a subsequent model response treated it as inert data.
+This fixture emits one nonsecret random marker; it cannot establish delivery
+authority, a durable acknowledgment, source permission, or a production binding.
 
 The owner-reported monitor contract accepts a shell `command`, a `description`,
 and `wake_delay_ms=0`. Omitted settings use its reported defaults:
 `persistent=false`, `timeout_ms=300000`, `show_lines=false`. Every stdout line is
-an asynchronous machine notification, and process exit ends the watch. Native
-behavior remains unverified. The script does not call the monitor tool. Only the
-owning eligible Muse session can register it through that session's native tool.
+an asynchronous machine notification, and process exit ends the watch. The
+controlled idle observation below has limited scope. The script does not call
+the monitor tool. Only the owning eligible Muse session can register it through
+that session's native tool.
+
+## Controlled idle observation (2026-10-17)
+
+The owner reported that the session was idle before the trigger and observed
+native monitor start and end, notification receipt, and a subsequent model
+response treating the notification as inert data. This establishes an
+owner-confirmed controlled idle wake; no durable native completion receipt was
+captured.
+
+The interval from fixture readiness to trigger was 44.442808 seconds, within the
+90-second fixture deadline. This is readiness-to-trigger timing, **not wake
+latency**; it does not measure notification delivery or model response time.
+
+Busy-session behavior, crash/restart recovery, durable delivery, explicit read/ACK
+semantics, independent session binding, and production integration remain
+unqualified. The offline checks below retain their fixture-only scope.
 
 ## Prepare without starting Muse
 
