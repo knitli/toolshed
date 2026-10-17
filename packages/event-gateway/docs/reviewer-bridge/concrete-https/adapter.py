@@ -7,13 +7,17 @@ from pathlib import Path
 import selectors
 import signal
 import struct
-import subprocess
+import subprocess  # nosec B404 - fixed pinned child, private bounded pipes
 import tempfile
 import time
 
 from transport import Response
 
+# Nominal protocol types reject bool-as-int and subclasses at this boundary.
+# pylint: disable=unidiomatic-typecheck
+
 NODE_SHA256 = 'e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b'
+CHILD_SHA256 = 'b6f1dbb8ee71202034f9d137c3e334644ead22381120012866b74657e1178c0f'
 CHILD = Path(__file__).with_name('child.mjs')
 HEADER_LIMIT = 32768
 BODY_LIMIT = 3 * 1024 * 1024
@@ -52,6 +56,41 @@ def _stop(process, deadline):
         raise Refused('https_cleanup') from None
 
 
+def _pump(selector, process, payload, maximum, work_until):
+    output = bytearray()
+    error_bytes = 0
+    position = 0
+    while selector.get_map():
+        remaining = work_until - time.monotonic()
+        _need(remaining > 0, 'https_deadline')
+        for key, _ in selector.select(min(remaining, 0.05)):
+            pipe = key.fileobj
+            if pipe is process.stdin:
+                try:
+                    position += os.write(pipe.fileno(), payload[position:position + 4096])
+                except BrokenPipeError:
+                    raise Refused('https_child') from None
+                if position == len(payload):
+                    selector.unregister(pipe)
+                    pipe.close()
+            else:
+                chunk = os.read(pipe.fileno(), 4096)
+                if not chunk:
+                    selector.unregister(pipe)
+                    pipe.close()
+                elif pipe is process.stderr:
+                    error_bytes += len(chunk)
+                    _need(error_bytes <= 4096, 'https_stderr_limit')
+                else:
+                    _need(len(output) + len(chunk) <= 4 + HEADER_LIMIT + maximum, 'https_output_limit')
+                    output.extend(chunk)
+                    if len(output) >= 4:
+                        length = struct.unpack('!I', output[:4])[0]
+                        _need(0 < length <= HEADER_LIMIT, 'https_metadata_limit')
+                        _need(len(output) <= 4 + length + maximum, 'https_body_limit')
+    return output, error_bytes
+
+
 def _run(command, payload, maximum, deadline):
     """Private offline-test seam. Production request supplies only pinned argv."""
     work_until = deadline - CLEANUP_RESERVE
@@ -59,7 +98,6 @@ def _run(command, payload, maximum, deadline):
     _need(len(payload) <= 16384, 'https_input')
     output = bytearray()
     error_bytes = 0
-    position = 0
     process = None
     status = None
     failure = None
@@ -67,7 +105,7 @@ def _run(command, payload, maximum, deadline):
         directory = str(Path(directory).resolve(strict=True))
         try:
             with selectors.DefaultSelector() as selector:
-                process = subprocess.Popen(
+                process = subprocess.Popen(  # nosec B603 - public caller supplies only verified runtime/child argv
                     command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, cwd=directory,
                     env={'HOME': directory, 'LANG': 'C', 'LC_ALL': 'C'},
@@ -78,34 +116,7 @@ def _run(command, payload, maximum, deadline):
                                      (process.stderr, selectors.EVENT_READ)):
                     os.set_blocking(pipe.fileno(), False)
                     selector.register(pipe, events)
-                while selector.get_map():
-                    remaining = work_until - time.monotonic()
-                    _need(remaining > 0, 'https_deadline')
-                    for key, _ in selector.select(min(remaining, 0.05)):
-                        pipe = key.fileobj
-                        if pipe is process.stdin:
-                            try:
-                                position += os.write(pipe.fileno(), payload[position:position + 4096])
-                            except BrokenPipeError:
-                                raise Refused('https_child') from None
-                            if position == len(payload):
-                                selector.unregister(pipe)
-                                pipe.close()
-                        else:
-                            chunk = os.read(pipe.fileno(), 4096)
-                            if not chunk:
-                                selector.unregister(pipe)
-                                pipe.close()
-                            elif pipe is process.stderr:
-                                error_bytes += len(chunk)
-                                _need(error_bytes <= 4096, 'https_stderr_limit')
-                            else:
-                                _need(len(output) + len(chunk) <= 4 + HEADER_LIMIT + maximum, 'https_output_limit')
-                                output.extend(chunk)
-                                if len(output) >= 4:
-                                    length = struct.unpack('!I', output[:4])[0]
-                                    _need(0 < length <= HEADER_LIMIT, 'https_metadata_limit')
-                                    _need(len(output) <= 4 + length + maximum, 'https_body_limit')
+                output, error_bytes = _pump(selector, process, payload, maximum, work_until)
                 # Pipe EOF is not process exit. Observe without reaping and keep
                 # the leader reserved until cleanup has signalled its group.
                 while True:
@@ -188,7 +199,8 @@ def _request(node, url, headers, maximum, deadline):
         _need(type(url) is str and url.startswith('https://api.github.com/'), 'https_origin')
         _pinned(node, NODE_SHA256)
         manifest = json.loads(CHILD.with_name('pins.json').read_text())
-        _pinned(CHILD, manifest['childSha256'])
+        _need(manifest['childSha256'] == CHILD_SHA256, 'https_pin')
+        _pinned(CHILD, CHILD_SHA256)
         remaining = (deadline - CLEANUP_RESERVE - time.monotonic()) * 1000
         _need(0 < remaining <= 60000, 'https_deadline')
         payload = json.dumps({'url': url, 'headers': headers, 'maximum': maximum,

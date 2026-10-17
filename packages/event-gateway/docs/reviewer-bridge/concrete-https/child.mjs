@@ -54,7 +54,7 @@ export function responseHeaders(raw) {
   let bytes = 0;
   for (let i = 0; i < raw.length; i += 2) {
     const name = raw[i], value = raw[i + 1];
-    if (typeof name !== 'string' || typeof value !== 'string' || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}$/.test(name) || value.length > 8192 || /[\x00-\x08\x0a-\x1f\x7f]/.test(value)) fail();
+    if (typeof name !== 'string' || typeof value !== 'string' || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}$/.test(name) || value.length > 8192 || [...value].some(char => (char.charCodeAt(0) < 32 && char !== '\t') || char.charCodeAt(0) === 127)) fail();
     bytes += Buffer.byteLength(name) + Buffer.byteLength(value) + 4;
     const lower = name.toLowerCase();
     if (Object.hasOwn(headers, lower) || bytes > HEADER_LIMIT) fail();

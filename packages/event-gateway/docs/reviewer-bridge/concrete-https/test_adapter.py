@@ -4,7 +4,7 @@ import json
 import hashlib
 from pathlib import Path
 import struct
-import subprocess
+import subprocess  # nosec B404 - offline child fixtures only
 import sys
 import tempfile
 import time
@@ -43,14 +43,14 @@ class AdapterTests(unittest.TestCase):
 
     def test_success_closed_environment_private_cwd_and_frame(self):
         source = """import os,sys,json,struct
-assert not any(k in os.environ for k in ('NODE_OPTIONS','NODE_EXTRA_CA_CERTS','HTTPS_PROXY','GH_TOKEN','SECRET'))
+assert not any(k in os.environ for k in ('NODE_OPTIONS','NODE_EXTRA_CA_CERTS','HTTPS_PROXY','GH_TOKEN','ISOLATION_SENTINEL'))
 assert os.environ['HOME']==os.getcwd()
 assert os.stat(os.getcwd()).st_mode & 0o777 == 0o700
 assert sys.stdin.buffer.read()==b'{}'
 m=json.dumps({'status':302,'headers':{'location':'https://storage.invalid/?secret=SIGNED'}}).encode()
 sys.stdout.buffer.write(struct.pack('!I',len(m))+m+b'ok')
 """
-        with patch.dict(os.environ, {'SECRET': 'SECRET', 'GH_TOKEN': 'SECRET', 'HTTPS_PROXY': 'http://localhost:1', 'NODE_OPTIONS': '--bad'}):
+        with patch.dict(os.environ, {'ISOLATION_SENTINEL': 'offline-fixture', 'GH_TOKEN': 'offline-fixture', 'HTTPS_PROXY': 'http://localhost:1', 'NODE_OPTIONS': '--bad'}):
             result = adapter._decode(self.run_child(source), 'https://api.github.com/', 8)
         self.assertEqual((result.status, result.body), (302, b'ok'))
 
@@ -60,9 +60,29 @@ sys.stdout.buffer.write(struct.pack('!I',len(m))+m+b'ok')
                 adapter._run([], b'{}', 8, time.monotonic())
             spawn.assert_not_called()
 
+    def test_partial_input_writes_preserve_frame(self):
+        real_write = os.write
+        with patch.object(adapter.os, 'write', side_effect=lambda fd, data: real_write(fd, data[:1])) as write:
+            result = self.run_child('import sys,struct; assert sys.stdin.buffer.read()==b"{}"; sys.stdout.buffer.write(struct.pack("!I",2)+b"{}")')
+        self.assertEqual(result, struct.pack('!I', 2) + b'{}')
+        self.assertEqual(write.call_count, 2)
+
+    def test_changed_child_and_manifest_cannot_repin_adapter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            child = Path(directory).resolve() / 'child.mjs'
+            child.write_bytes(b'changed-child')
+            child.with_name('pins.json').write_text(json.dumps({'childSha256': hashlib.sha256(child.read_bytes()).hexdigest()}))
+            node = child.with_name('node')
+            node.write_bytes(b'inert-runtime')
+            with patch.object(adapter, 'CHILD', child), patch.object(adapter, 'NODE_SHA256', hashlib.sha256(node.read_bytes()).hexdigest()), patch.object(adapter, '_run') as run:
+                with self.assertRaisesRegex(adapter.Refused, '^https_pin$'):
+                    adapter.bind(node)('https://api.github.com/', {}, 8, time.monotonic() + 10)
+                run.assert_not_called()
+
     def test_hung_child_killed_reaped_pipes_and_scratch_closed(self):
         real = adapter.subprocess.Popen
         children = []
+
         def spawn(*args, **kwargs):
             child = real(*args, **kwargs)
             children.append((child, kwargs['cwd']))
@@ -114,8 +134,10 @@ sys.stdout.buffer.write(struct.pack('!I',len(m))+m+b'ok')
 
     def test_cleanup_signal_precedes_reap(self):
         calls = []
+
         class Child:
             pid = 123456
+
             def wait(self, timeout):
                 calls.append('wait')
                 return 0
@@ -124,8 +146,10 @@ sys.stdout.buffer.write(struct.pack('!I',len(m))+m+b'ok')
         self.assertEqual(calls, ['kill', 'wait'])
 
     def test_cleanup_failure_cannot_report_success(self):
+
         class Child:
             pid = 123456
+
             def wait(self, timeout):
                 raise subprocess.TimeoutExpired('private-child', timeout)
         with patch.object(adapter.os, 'killpg'):
@@ -134,6 +158,7 @@ sys.stdout.buffer.write(struct.pack('!I',len(m))+m+b'ok')
 
     def test_primary_deadline_retained_when_cleanup_reports_failure(self):
         real_stop = adapter._stop
+
         def failed_stop(child, deadline):
             real_stop(child, deadline)
             raise adapter.Refused('https_cleanup')

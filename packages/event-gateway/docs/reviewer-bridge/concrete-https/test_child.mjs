@@ -67,6 +67,12 @@ test('reject ambiguous origin and unexpected/auth-smuggling headers', () => {
 test('headers: duplicates, framing ambiguity, compression and limits rejected', () => {
   for (const raw of [['X', 'a', 'x', 'b'], ['Content-Length', '1', 'Transfer-Encoding', 'chunked'], ['Content-Length', '-1'], ['Content-Encoding', 'gzip'], ['Transfer-Encoding', 'gzip'], ['X', 'a'.repeat(8193)], Array.from({ length: 65 }, (_, i) => [`X-${i}`, 'a']).flat(), Array.from({ length: 5 }, (_, i) => [`X-${i}`, 'a'.repeat(8192)]).flat()]) assert.throws(() => responseHeaders(raw));
 });
+test('header values reject C0 and DEL, retaining valid tab', () => {
+  for (const code of [...Array(32).keys(), 127].filter(code => code !== 9)) {
+    assert.throws(() => responseHeaders(['X', `a${String.fromCharCode(code)}b`]));
+  }
+  assert.equal(responseHeaders(['X', 'a\tb']).x, 'a\tb');
+});
 test('response body, truncation, peer mismatch, unauthenticated TLS refused', async () => {
   for (const config of [{ chunks: [Buffer.alloc(9)] }, { headers: ['Content-Length', '9'] }, { headers: ['Content-Length', '3'] }, { complete: false }, { address: '127.0.0.1' }, { authorized: false }, { headers: ['X', '1', 'x', '2'] }]) await assert.rejects(exchange(input(), lookup, fake(config).request));
 });
