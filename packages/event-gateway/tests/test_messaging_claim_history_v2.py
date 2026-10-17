@@ -27,7 +27,7 @@ class ClaimHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.now = FIXTURE['nowMs'] / 1000
         self.path = Path(self.tmp.name).resolve() / 'private'
         self.store = Store(self.path, clock=lambda: self.now)
-        self.addCleanup(lambda: self.store.close())
+        self.addCleanup(self.close_store)
         self.event = copy.deepcopy(FIXTURE['envelope'])
         mapping = {key: self.event[key] for key in admission.ATTACHMENT_FIELDS}
         mapping.update(namespace='team/inbox', agentIncarnation=0, leaseExpiresAt=self.now + 60)
@@ -45,6 +45,9 @@ class ClaimHistoryTests(unittest.IsolatedAsyncioTestCase):
                                   credentials=self.credentials, send=self.send, clock=lambda: self.now)
         self.adapter = Mock()
         self.gateway = self.make_gateway()
+
+    def close_store(self):
+        self.store.close()
 
     def make_gateway(self):
         return Gateway(self.store, self.client, self.adapter, audience='local', keys={}, clock=lambda: self.now)
@@ -206,6 +209,7 @@ class ClaimHistoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancellation_survives_restart_detach_and_retention_without_resend(self):
         entered = asyncio.Event()
+
         async def blocked(**_):
             entered.set()
             await asyncio.Future()
@@ -220,6 +224,7 @@ class ClaimHistoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_concurrent_calls_send_once(self):
         entered, release = asyncio.Event(), asyncio.Event()
+
         async def blocked(**_):
             entered.set()
             await release.wait()
@@ -316,6 +321,7 @@ class ClaimHistoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_detach_during_refusal_preserves_closed_outcome_without_resend(self):
         outcome = {'status': 'over_budget', 'budget': {'used': 10, 'remaining': 0, 'limit': 10, 'windowMs': 3600000}}
+
         async def detach_then_refuse(**_):
             self.store.detach(self.event['runtimeId'])
             return self.response(outcome)

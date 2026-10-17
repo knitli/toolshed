@@ -89,6 +89,7 @@ class AdmissionHistoryTests(unittest.IsolatedAsyncioTestCase):
     def test_attachment_fence_is_inside_transaction_and_failure_rolls_back(self):
         before = self.snapshot()
         original = self.store._matches
+
         def expire_inside_transaction(envelope):
             self.assertTrue(self.store.db.in_transaction)
             mapping = self.store.get_attachment(envelope['runtimeId'])
@@ -104,7 +105,10 @@ class AdmissionHistoryTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(StoreError, 'capacity'):
                 self.record()
         self.assertEqual(self.snapshot(), before)
-        self.store.db.execute("CREATE TRIGGER fail_history AFTER UPDATE OF admission ON attempts BEGIN SELECT RAISE(ABORT, 'injected history write failure'); END")
+        self.store.db.execute(
+            "CREATE TRIGGER fail_history AFTER UPDATE OF admission ON attempts "
+            "BEGIN SELECT RAISE(ABORT, 'injected history write failure'); END"
+        )
         before = self.snapshot()
         with self.assertRaisesRegex(sqlite3.IntegrityError, 'injected history write failure'):
             self.record()

@@ -777,7 +777,8 @@ class Store:
         return json.loads(encoded)
 
     def _record_messaging_admission_history(self, delivery_id, admission, *, node_id):
-        """Trusted internal history only; callers must authenticate cloud responses.
+        """
+        Trusted internal history only; callers must authenticate cloud responses.
 
         Metadata validation is not response authentication. The private Gateway
         path records its trusted cloud client's reply; the permit never allows start.
