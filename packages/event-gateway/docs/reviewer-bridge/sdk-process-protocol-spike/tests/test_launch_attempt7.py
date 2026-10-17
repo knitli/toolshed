@@ -35,9 +35,11 @@ class FakeSelector:
         self.keys = {}
 
     def __enter__(self):
+        """Return the selector context manager."""
         return self
 
     def __exit__(self, *_args):
+        """Leave selector state unchanged on context exit."""
         return False
 
     def register(self, fileobj, _events, data):
@@ -50,8 +52,10 @@ class FakeSelector:
         del self.keys[fileobj]
 
     def select(self, timeout):
-        assert timeout > 0
-        assert self.events
+        if timeout <= 0:
+            raise AssertionError("selector wait must be positive")
+        if not self.events:
+            raise AssertionError("selector requires a configured readiness event")
         delta, event_names = self.events.pop(0)
         self.clock.value += delta
         return [(self.keys[name], LAUNCH.selectors.EVENT_READ) for name in event_names]
