@@ -50,7 +50,12 @@ assert sys.stdin.buffer.read()==b'{}'
 m=json.dumps({'status':302,'headers':{'location':'https://storage.invalid/?secret=SIGNED'}}).encode()
 sys.stdout.buffer.write(struct.pack('!I',len(m))+m+b'ok')
 """
-        with patch.dict(os.environ, {'ISOLATION_SENTINEL': 'offline-fixture', 'GH_TOKEN': 'offline-fixture', 'HTTPS_PROXY': 'http://localhost:1', 'NODE_OPTIONS': '--bad'}):
+        inherited = {
+            'ISOLATION_SENTINEL': 'offline-fixture',
+            'GH_TOKEN': 'offline-fixture',  # nosec B105 - dummy credential isolation sentinel
+            'HTTPS_PROXY': 'http://localhost:1', 'NODE_OPTIONS': '--bad',
+        }
+        with patch.dict(os.environ, inherited):
             result = adapter._decode(self.run_child(source), 'https://api.github.com/', 8)
         self.assertEqual((result.status, result.body), (302, b'ok'))
 
@@ -74,7 +79,11 @@ sys.stdout.buffer.write(struct.pack('!I',len(m))+m+b'ok')
             child.with_name('pins.json').write_text(json.dumps({'childSha256': hashlib.sha256(child.read_bytes()).hexdigest()}))
             node = child.with_name('node')
             node.write_bytes(b'inert-runtime')
-            with patch.object(adapter, 'CHILD', child), patch.object(adapter, 'NODE_SHA256', hashlib.sha256(node.read_bytes()).hexdigest()), patch.object(adapter, '_run') as run:
+            with (
+                patch.object(adapter, 'CHILD', child),
+                patch.object(adapter, 'NODE_SHA256', hashlib.sha256(node.read_bytes()).hexdigest()),
+                patch.object(adapter, '_run') as run,
+            ):
                 with self.assertRaisesRegex(adapter.Refused, '^https_pin$'):
                     adapter.bind(node)('https://api.github.com/', {}, 8, time.monotonic() + 10)
                 run.assert_not_called()
