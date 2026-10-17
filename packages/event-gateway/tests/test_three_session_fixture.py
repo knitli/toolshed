@@ -84,6 +84,9 @@ class ThreeSessionReleasedPortTests(unittest.TestCase):
                         occupied.listen()
                     port = occupied.getsockname()[1]
                     self.assertFalse(FIXTURE.port_is_released(port))
+                    with patch.object(FIXTURE, "ephemeral_port_ranges", return_value=[]):
+                        with self.assertRaisesRegex(AssertionError, "already bound or unavailable"):
+                            FIXTURE.preflight_ports(SimpleNamespace(), ports=[port])
                 # Match stop_broker's bounded cleanup wait: Darwin may not release
                 # the just-closed binding before the first immediate probe.
                 deadline = time.monotonic() + 5
@@ -121,6 +124,11 @@ class ThreeSessionReleasedPortTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertFalse(FIXTURE.port_is_bindable(port))
         self.assertTrue(FIXTURE.port_is_released(port))
+        # OS-assigned test port may be ephemeral; exercise only occupancy here.
+        with patch.object(FIXTURE, "ephemeral_port_ranges", return_value=[]):
+            FIXTURE.preflight_ports(SimpleNamespace(), ports=[port])
+        with FIXTURE.ModelServer(("127.0.0.1", port), Handler):
+            pass
 
     def test_other_platforms_keep_strict_probe(self):
         for result in (False, True):
@@ -179,12 +187,12 @@ class ThreeSessionEphemeralRangeTests(unittest.TestCase):
             for ranges in ([(port, 65535)], [(1024, port)], [(50000, 60000), (port, port)]):
                 with self.subTest(port=port, ranges=ranges), \
                         patch.object(FIXTURE, "ephemeral_port_ranges", return_value=ranges), \
-                        patch.object(FIXTURE, "port_is_bindable") as probe:
+                        patch.object(FIXTURE, "port_is_released") as probe:
                     with self.assertRaisesRegex(AssertionError, "ephemeral"):
                         FIXTURE.preflight_ports(SimpleNamespace(**fields))
                     probe.assert_not_called()
         with patch.object(FIXTURE, "ephemeral_port_ranges") as ranges, \
-                patch.object(FIXTURE, "port_is_bindable", return_value=True):
+                patch.object(FIXTURE, "port_is_released", return_value=True):
             FIXTURE.preflight_ports(SimpleNamespace(**(fields | dict(listener_port=None, model_ports=None))))
             ranges.assert_not_called()
 
@@ -232,7 +240,9 @@ class ThreeSessionFixedPortTests(unittest.TestCase):
         with patch.object(FIXTURE.socket, "socket") as probe:
             FIXTURE.preflight_ports(self.parsed())
             self.assertEqual([call.args[0] for call in probe.return_value.__enter__.return_value.bind.call_args_list],
-                             [("127.0.0.1", port) for port in range(49732, 49739)])
+                             [(host, port) for port in range(49732, 49739)
+                              for host in (("127.0.0.1", "0.0.0.0") if FIXTURE.sys.platform == "darwin"
+                                           else ("127.0.0.1",))])
 
     def test_occupied_port_blocks_scenario_before_any_process_or_archive(self):
         for occupied in range(49732, 49739):

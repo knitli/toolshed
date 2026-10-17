@@ -172,7 +172,7 @@ def preflight_ports(parsed, *, ports=None):
             require(not any(first <= port <= last for first, last in ranges),
                     f"fixed fixture port {port} overlaps host ephemeral port range")
     for port in ports:
-        require(port_is_bindable(port), "fixture port already bound or unavailable")
+        require(port_is_released(port), "fixture port already bound or unavailable")
 
 
 def load_module(name, path):
