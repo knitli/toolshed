@@ -320,7 +320,9 @@ def verify_busy_attach(proof, evidence):
                 and not any(record.get('kind') == 'c2CoreBusyError' for record in records), message)
         restart_index, restart = restarts[0]
         require(restart['binding'] == binding and binding_valid(restart['binding'])
-                and uuid_string(restart['deliveryId']) and restart['evidenceError'] is None
+                and isinstance(restart['deliveryId'], str)
+                and re.fullmatch(r'dly_[0-9a-f]{64}', restart['deliveryId']) is not None
+                and restart['evidenceError'] is None
                 and hashlib.sha256(restart['deliveryId'].encode()).hexdigest() == proof['busyC']['deliverySha256']
                 and finite(restart['checkedAt'])
                 and checked[-1] < restart['checkedAt'] < hold['holdDeadline'], message)
