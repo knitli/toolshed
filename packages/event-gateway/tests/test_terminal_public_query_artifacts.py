@@ -293,6 +293,110 @@ class TerminalPublicQueryArtifactTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verifier.patch_paths(original.replace(b"a/codex-rs/", b"a/../codex-rs/", 1))
 
+    def test_repair_preserves_original_proof_and_separates_sdk_qualification(self):
+        original = read_json(self.bundle / "proof/source-qualification.json")
+        repair = read_json(self.bundle / "proof/repair-qualification.json")
+        self.assertEqual(original["scopedRegression"]["passed"], 375)
+        self.assertEqual(repair["regression"]["passed"], 27)
+        for field in ("fileSha256", "testedSha256", "selectedSourceClosureSha256"):
+            self.assertEqual(self.manifest[field], original[field])
+        self.assertFalse(repair["finalization"]["testsAfterFixOrFmt"])
+        self.assertEqual(repair["testedFileSha256"], repair["preFormatFileSha256"])
+        self.assertEqual(
+            repair["nativeTestedSelectedSourceClosureSha256"],
+            original["selectedSourceClosureSha256"] | repair["testedFileSha256"],
+        )
+        self.assertEqual(
+            self.manifest["repairedSelectedSourceClosureSha256"],
+            self.manifest["finalSelectedSourceClosureSha256"]
+            | repair["finalFileSha256"],
+        )
+        self.assertNotEqual(
+            repair["nativeTestedSelectedSourceClosureSha256"][verifier.SDK],
+            self.manifest["repairedSelectedSourceClosureSha256"][verifier.SDK],
+        )
+
+    def test_repair_source_maps_require_exact_values_and_inventory(self):
+        for field in (
+            "repairFileSha256",
+            "repairTestedSha256",
+            "repairedSelectedSourceClosureSha256",
+        ):
+            original = self.manifest[field].copy()
+            name = next(iter(original))
+            for value in (
+                {key: checksum for key, checksum in original.items() if key != name},
+                {**original, name: "0" * 64},
+            ):
+                with self.subTest(field=field):
+                    self.manifest[field] = value
+                    self.save()
+                    self.rejected()
+            self.manifest[field] = original
+            self.save()
+
+    def test_repair_order_and_frozen_manifest_are_bound(self):
+        original = self.manifest["repairPatchOrder"]
+        for value in ([], original * 2, self.manifest["followupPatchOrder"]):
+            self.manifest["repairPatchOrder"] = value
+            self.save()
+            self.rejected()
+        self.manifest["repairPatchOrder"] = original
+        self.manifest["frozenRepairManifestSha256"] = "0" * 64
+        self.save()
+        self.rejected()
+
+    def test_repair_replay_rejects_repinned_base_stage_and_order_mutations(self):
+        name = "proof/repair-replay.json"
+        original = (self.bundle / name).read_text()
+        for field, value in (
+            ("baseReplaySha256", "0" * 64),
+            ("baseSelectedSourceClosureSha256", {}),
+            ("allPatchOrder", PATCH_ORDER),
+            ("patchOrder", []),
+            ("stages", []),
+            ("changedFiles", 2),
+            (
+                "selectedSourceClosureSha256",
+                self.manifest["finalSelectedSourceClosureSha256"],
+            ),
+            ("nativeExecution", True),
+        ):
+            with self.subTest(field=field):
+                replay = json.loads(original)
+                replay[field] = value
+                self.repin(name, json.dumps(replay))
+                self.rejected()
+        for field in ("fileSha256", "baseFileSha256"):
+            with self.subTest(stage_field=field):
+                replay = json.loads(original)
+                replay["stages"][0][field] = {}
+                self.repin(name, json.dumps(replay))
+                self.rejected()
+
+    def test_repair_native_tested_proof_cannot_be_repinned_as_sdk_tested(self):
+        name = "proof/repair-qualification.json"
+        proof = read_json(self.bundle / name)
+        proof["nativeTestedSelectedSourceClosureSha256"][verifier.SDK] = self.manifest[
+            "finalSelectedSourceClosureSha256"
+        ][verifier.SDK]
+        proof["sdkQualificationBoundary"]["sdkRegeneratedOrTestedHere"] = True
+        self.repin(name, json.dumps(proof))
+        self.rejected()
+
+    def test_repair_text_patch_and_format_delta_have_exact_scope(self):
+        name = self.manifest["repairPatchOrder"][0]
+        data = (self.bundle / name).read_bytes()
+        self.assertEqual(
+            set(verifier.git_text_patch_hunks(data)),
+            set(self.manifest["repairFileSha256"]),
+        )
+        malformed = data.replace(b"--- a/codex-rs/", b"--- a/../codex-rs/", 1)
+        with self.assertRaises(ValueError):
+            verifier.git_text_patch_hunks(malformed)
+        self.repin("repair-tested-to-final.diff", "")
+        self.rejected()
+
     def test_optional_source_missing(self):
         source = self.root / "source"
         source.mkdir()

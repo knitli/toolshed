@@ -18,13 +18,20 @@ PATCH_ORDER = [
     "03-generated-protocol.patch",
 ]
 FOLLOWUP = ["04-generated-sdk.patch"]
+REPAIR = ["05-terminal-query-recovery.patch"]
+REPAIR_MANIFEST_SHA256 = (
+    "e1d427c04b3e1588b4de542e0d57e16a40eb22d4f344ef1670d19aacc7fdd8e7"
+)
 SDK = "sdk/python/src/openai_codex/generated/v2_all.py"
 SUPPLEMENT = "codex-rs/app-server/tests/suite/v2/mod.rs"
 QUALIFICATION_SHA256 = (
     "696492d809a8744e4ef7b0e86fcdc902a0ac4949e13c574be78734aebafd6abc"
 )
 BASE_CLOSURE_SHA256 = "5aa9be3e75a95064c4c6deeab2f897623fa1892d63542a994a4ff2f332273be2"
-PAYLOADS = set(PATCH_ORDER + FOLLOWUP) | {
+PAYLOADS = set(PATCH_ORDER + FOLLOWUP + REPAIR) | {
+    "repair-tested-to-final.diff",
+    "proof/repair-qualification.json",
+    "proof/repair-replay.json",
     "tested-to-final.diff",
     "clippy-source-delta.diff",
     "proof/source-qualification.json",
@@ -284,6 +291,7 @@ def authenticated_payloads(bundle):
     if sha(payloads["proof/base-history-closure.json"]) != BASE_CLOSURE_SHA256:
         raise ValueError("immutable base history closure hash mismatch")
     immutable = {
+        "proof/repair-qualification.json": "a9046df0561ff67f8f8286b1dafb1f2a06854a251667e68415d21356784f268e",
         "proof/pre-format-source-hashes.json": "9d82bbe60ae36cac72670bed5db419416a9f44cde15fe0aec4b3db7163932be2",
         "proof/sdk-generation.json": "81f4003fefdd0c6590af60e89a91da0244b1f0138d719674ebd88e24c4e7f0e0",
     }
@@ -348,7 +356,7 @@ def followup_chain(manifest, qualified, selected):
         raise ValueError("final selected source closure mismatch")
     if manifest["baseFrozenManifestSha256"] != qualified["baseFrozenManifestSha256"]:
         raise ValueError("base frozen manifest chain mismatch")
-    if set(manifest["patches"]) != set(PATCH_ORDER + FOLLOWUP):
+    if set(manifest["patches"]) != set(PATCH_ORDER + FOLLOWUP + REPAIR):
         raise ValueError("patch metadata inventory mismatch")
     return followup, final_selected
 
@@ -470,6 +478,164 @@ def replay_metadata(
         raise ValueError("base supplement provenance mismatch")
 
 
+def repair_source_chain(manifest, proof, selected, stage04):
+    if (
+        proof["frozenPublicQueryManifestSha256"] != QUALIFICATION_SHA256
+        or proof["frozenRepairManifestSha256"] != REPAIR_MANIFEST_SHA256
+        or manifest["frozenRepairManifestSha256"] != REPAIR_MANIFEST_SHA256
+    ):
+        raise ValueError("repair qualification provenance mismatch")
+    base = hashes(proof["baseFileSha256"], 3)
+    final = hashes(proof["finalFileSha256"], 3)
+    tested = hashes(proof["testedFileSha256"], 3)
+    if base.keys() != final.keys() or final.keys() != tested.keys():
+        raise ValueError("repair source inventory mismatch")
+    if base != {name: stage04[name] for name in base}:
+        raise ValueError("repair base source mismatch")
+    for field, wanted in (("repairFileSha256", final), ("repairTestedSha256", tested)):
+        if hashes(manifest[field], 3) != wanted:
+            raise ValueError("repair changed source hash mismatch")
+    expected = {
+        "nativeTestedSelectedSourceClosureSha256": selected | tested,
+        "nativeFinalSelectedSourceClosureSha256": selected | final,
+        "stage04BaseSelectedSourceClosureSha256": stage04,
+        "stage05FinalSelectedSourceClosureSha256": stage04 | final,
+    }
+    for field, wanted in expected.items():
+        if hashes(proof[field], 71) != wanted:
+            raise ValueError("repair selected source closure mismatch")
+    if hashes(manifest["repairedSelectedSourceClosureSha256"], 71) != stage04 | final:
+        raise ValueError("repaired final source closure mismatch")
+    if hashes(proof["preFormatFileSha256"], 3) != tested:
+        raise ValueError("repair pre-format source mismatch")
+
+
+def repair_qualification_boundary(proof, selected, stage04):
+    if proof["sdkQualificationBoundary"] != {
+        "path": SDK,
+        "nativeRegressionUsed": selected[SDK],
+        "carriedForwardFromStage04OnlyForReplay": stage04[SDK],
+        "sdkRegeneratedOrTestedHere": False,
+    }:
+        raise ValueError("repair SDK qualification boundary mismatch")
+    regression = proof["regression"]
+    if (
+        regression["passed"] != 27
+        or regression["appServerUnit"] != 25
+        or regression["publicStdioRpc"] != 2
+        or regression["retries"] != 0
+    ):
+        raise ValueError("repair regression scope mismatch")
+    if (
+        proof["finalization"]["testsAfterFixOrFmt"] is not False
+        or proof["finalization"]["clippySourceDelta"]["sourceBytesChanged"] is not False
+        or proof["originalFrozen18Unchanged"] is not True
+        or proof["replay"]["nativeExecution"] is not False
+    ):
+        raise ValueError("repair qualification scope mismatch")
+
+
+def git_text_patch_hunks(data):
+    # Validate complete Git headers, modes, paths and hunks before stripping headers.
+    _, _, binaries = patch_paths(data)
+    if binaries:
+        raise ValueError("repair must use text patches")
+    result = {}
+    for section in data.split(b"diff --git ")[1:]:
+        start = section.find(b"--- a/")
+        if start < 0:
+            raise ValueError("repair requires an existing source file")
+        result.update(parse_diff(section[start:]))
+    return result
+
+
+def repair_patch_proof(manifest, proof, pins, payloads):
+    if manifest["repairPatchOrder"] != REPAIR:
+        raise ValueError("repair patch order must be exact")
+    name = REPAIR[0]
+    entry = manifest["patches"][name]
+    if proof["patch"] != {"name": name, "sha256": pins[name], "files": 3}:
+        raise ValueError("repair patch qualification mismatch")
+    paths, changed, binaries = patch_paths(payloads[name])
+    if (
+        entry != {"sha256": pins[name], "files": 3, "textChangedLines": changed}
+        or len(paths) != 3
+        or set(paths) != set(proof["finalFileSha256"])
+        or binaries
+    ):
+        raise ValueError("repair patch scope mismatch")
+    delta_name = "repair-tested-to-final.diff"
+    if pins[delta_name] != proof["supportArtifactSha256"]["tested-to-final.diff"]:
+        raise ValueError("repair tested delta hash mismatch")
+    delta = parse_diff(payloads[delta_name])
+    if set(delta) != {
+        name
+        for name in proof["finalFileSha256"]
+        if proof["finalFileSha256"][name] != proof["testedFileSha256"][name]
+    }:
+        raise ValueError("repair tested delta scope mismatch")
+    return git_text_patch_hunks(payloads[name]), delta
+
+
+def repair_replay_metadata(proofs, proof, pins):
+    name = REPAIR[0]
+    expected = {
+        "baseReplaySha256": pins["proof/replay.json"],
+        "baseSelectedSourceClosureSha256": proof[
+            "stage04BaseSelectedSourceClosureSha256"
+        ],
+        "patchOrder": REPAIR,
+        "allPatchOrder": PATCH_ORDER + FOLLOWUP + REPAIR,
+        "stages": [
+            {
+                "patch": name,
+                "sha256": pins[name],
+                "baseFileSha256": proof["baseFileSha256"],
+                "fileSha256": proof["finalFileSha256"],
+                "applyCheck": "PASS",
+            }
+        ],
+        "changedFiles": 3,
+        "selectedSourceFiles": 71,
+        "selectedSourceClosureSha256": proof["stage05FinalSelectedSourceClosureSha256"],
+        "nativeExecution": False,
+    }
+    replay = proofs["proof/repair-replay.json"]
+    if replay != expected or replay["nativeExecution"] is not False:
+        raise ValueError("repair replay metadata mismatch")
+
+
+def repair_evidence(manifest, proofs, pins, payloads, selected, stage04):
+    proof = proofs["proof/repair-qualification.json"]
+    repair_source_chain(manifest, proof, selected, stage04)
+    repair_qualification_boundary(proof, selected, stage04)
+    patch_hunks, delta = repair_patch_proof(manifest, proof, pins, payloads)
+    repair_replay_metadata(proofs, proof, pins)
+    return {
+        "qualification": proof,
+        "patchHunks": patch_hunks,
+        "testedDelta": delta,
+        "sdkHunks": parse_diff(payloads[FOLLOWUP[0]]),
+    }
+
+
+def repaired_source_bytes(source_root, repair):
+    """Stream composed stage05 bytes back through both independent source chains."""
+    proof = repair["qualification"]
+    for name, checksum in proof["stage05FinalSelectedSourceClosureSha256"].items():
+        data = read_bounded(relative_file(Path(source_root), name), SOURCE_LIMIT)
+        if sha(data) != checksum:
+            raise ValueError(f"repaired selected source hash mismatch: {name}")
+        # Native regression used pre-SDK bytes; SDK04 is only composed for replay.
+        native_final = reverse_diff(data, repair["sdkHunks"].get(name, []))
+        if sha(native_final) != proof["nativeFinalSelectedSourceClosureSha256"][name]:
+            raise ValueError("repair native final source hash mismatch")
+        native_tested = reverse_diff(native_final, repair["testedDelta"].get(name, []))
+        if sha(native_tested) != proof["nativeTestedSelectedSourceClosureSha256"][name]:
+            raise ValueError("repair native tested source hash mismatch")
+        yield name, reverse_diff(data, repair["patchHunks"].get(name, []))
+
+
 def optional_source_proof(
     frozen_base_manifest,
     qualified,
@@ -479,6 +645,7 @@ def optional_source_proof(
     delta,
     clippy,
     pre_format,
+    repair,
 ):
     if (
         frozen_base_manifest is not None
@@ -487,9 +654,8 @@ def optional_source_proof(
     ):
         raise ValueError("frozen base manifest hash mismatch")
     if source_root is not None:
-        for name, checksum in final_selected.items():
-            data = read_bounded(relative_file(Path(source_root), name), SOURCE_LIMIT)
-            if sha(data) != checksum:
+        for name, data in repaired_source_bytes(source_root, repair):
+            if sha(data) != final_selected[name]:
                 raise ValueError(f"selected source hash mismatch: {name}")
             if name in tested:
                 tested_bytes = reverse_diff(data, delta.get(name, []))
@@ -520,6 +686,7 @@ def _verify(bundle, source_root, frozen_base_manifest):
     replay_metadata(
         proofs, qualified, final, followup, final_selected, supplement, pins, scopes
     )
+    repair = repair_evidence(manifest, proofs, pins, payloads, selected, final_selected)
     optional_source_proof(
         frozen_base_manifest,
         qualified,
@@ -529,10 +696,12 @@ def _verify(bundle, source_root, frozen_base_manifest):
         delta,
         clippy,
         pre_format,
+        repair,
     )
     return {
         "bundle": "PASS",
         "selectedSourceFiles": 71,
+        "sourceStage": REPAIR[0],
         "sourceHashes": "PASS" if source_root is not None else "not checked",
         "frozenBaseManifestHash": "PASS"
         if frozen_base_manifest is not None

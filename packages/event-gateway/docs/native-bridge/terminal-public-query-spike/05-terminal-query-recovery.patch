@@ -1,0 +1,231 @@
+diff --git a/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query.rs b/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query.rs
+index 246bc24..f3831f6 100644
+--- a/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query.rs
++++ b/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query.rs
+@@ -5,6 +5,7 @@ use codex_app_server_protocol::NativeTurnTerminalStatus;
+ use codex_app_server_protocol::ThreadStartIfIdleParams;
+ use codex_app_server_protocol::ThreadTerminalEvidenceResponse;
+ use codex_rollout::StateDbHandle;
++use codex_state::NativeTurnStartProof;
+ use codex_thread_store::LocalThreadStore;
+ use codex_thread_store::ThreadStore;
+ 
+@@ -31,9 +32,15 @@ async fn terminal_evidence(
+         return ThreadTerminalEvidenceResponse::Unknown;
+     };
+     let identity = identity_from_params(params);
++    // Reject unknown identities before recovery can take lifecycle/writer locks or read history.
++    let Ok(Some(start)) = state.get_native_turn_start_proof(&identity).await else {
++        return ThreadTerminalEvidenceResponse::Unknown;
++    };
+     let proof = match state.get_native_turn_terminal_proof(&identity).await {
+-        Ok(Some(proof)) => Some(proof),
+-        Ok(None) => {
++        Ok(Some(proof)) if matches!(start, NativeTurnStartProof::InputRecorded { .. }) => {
++            Some(proof)
++        }
++        Ok(_) => {
+             let Some(local) = store.as_any().downcast_ref::<LocalThreadStore>() else {
+                 return ThreadTerminalEvidenceResponse::Unknown;
+             };
+@@ -50,7 +57,7 @@ async fn terminal_evidence(
+     };
+     // A terminal row alone may be anchored only to Started. Expose it only with the
+     // exact durable input item; these immutable proofs cannot be evicted or rebound.
+-    let Ok(Some(codex_state::NativeTurnStartProof::InputRecorded { turn_id, item_id })) =
++    let Ok(Some(NativeTurnStartProof::InputRecorded { turn_id, item_id })) =
+         state.get_native_turn_start_proof(&identity).await
+     else {
+         return ThreadTerminalEvidenceResponse::Unknown;
+diff --git a/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query_tests.rs b/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query_tests.rs
+index f57f496..b642b08 100644
+--- a/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query_tests.rs
++++ b/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query_tests.rs
+@@ -264,3 +264,138 @@ async fn terminal_query_requires_durable_input_anchor_even_with_terminal_record(
+         })
+     );
+ }
++
++#[tokio::test]
++async fn terminal_query_missing_start_bypasses_lifecycle_and_rollout_reads() {
++    let (_home, state, store, params, path) = fixture().await;
++    let bytes = history(
++        &params,
++        json!({"type":"task_complete","turn_id":params.client_user_message_id,"last_agent_message":null}),
++    );
++    tokio::fs::write(&path, &bytes).await.unwrap();
++    let entered = std::sync::Arc::new(tokio::sync::Notify::new());
++    let release = std::sync::Arc::new(tokio::sync::Notify::new());
++    let store = store.with_thread_data_cleanup({
++        let entered = entered.clone();
++        let release = release.clone();
++        move |_| {
++            let entered = entered.clone();
++            let release = release.clone();
++            Box::pin(async move {
++                // This callback holds the store's exclusive lifecycle and writer locks.
++                entered.notify_one();
++                release.notified().await;
++                Err(codex_thread_store::ThreadStoreError::Internal {
++                    message: "test stops before deleting any history".into(),
++                })
++            })
++        }
++    });
++    let deletion = tokio::spawn({
++        let store = store.clone();
++        let thread_id = ThreadId::from_string(&params.thread_id).unwrap();
++        async move {
++            store
++                .delete_thread(codex_thread_store::DeleteThreadParams { thread_id })
++                .await
++        }
++    });
++    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
++        .await
++        .expect("deletion must hold the lifecycle lock");
++    let exact = tokio::time::timeout(
++        std::time::Duration::from_millis(100),
++        terminal_evidence(Some(&state), &store, &params),
++    )
++    .await;
++    let mut missing = params.clone();
++    missing.attempt_id = "missing-attempt".into();
++    let result = tokio::time::timeout(
++        std::time::Duration::from_secs(2),
++        terminal_evidence(Some(&state), &store, &missing),
++    )
++    .await;
++    release.notify_one();
++    assert!(deletion.await.unwrap().is_err());
++    assert!(
++        exact.is_err(),
++        "the matching attempt must reach the held recovery lock"
++    );
++    assert_eq!(
++        result.expect("missing Start must not enter recovery"),
++        ThreadTerminalEvidenceResponse::Unknown
++    );
++    // Recovery reads history only after the held lock, so the prompt response proves no rollout I/O.
++    assert_eq!(tokio::fs::read(&path).await.unwrap(), bytes);
++    assert_eq!(
++        state
++            .get_native_turn_start_proof(&identity_from_params(&missing))
++            .await
++            .unwrap(),
++        None
++    );
++    assert_eq!(
++        state
++            .get_native_turn_start_proof(&identity_from_params(&params))
++            .await
++            .unwrap(),
++        Some(NativeTurnStartProof::Pending)
++    );
++}
++
++#[tokio::test]
++async fn terminal_query_recovers_input_anchor_with_existing_terminal_receipt() {
++    let (_home, state, store, params, path) = fixture().await;
++    let identity = identity_from_params(&params);
++    state
++        .record_native_turn_started(&identity, &params.client_user_message_id)
++        .await
++        .unwrap();
++    let original = state
++        .record_native_turn_terminal(
++            &identity,
++            &params.client_user_message_id,
++            codex_state::NativeTurnTerminalStatus::Completed,
++        )
++        .await
++        .unwrap();
++    let bytes = history(
++        &params,
++        json!({"type":"task_complete","turn_id":params.client_user_message_id,"last_agent_message":null}),
++    );
++    let input: serde_json::Value =
++        serde_json::from_slice(bytes.split(|byte| *byte == b'\n').nth(1).unwrap()).unwrap();
++    let item_id = input["payload"]["item"]["id"].as_str().unwrap().to_owned();
++    tokio::fs::write(&path, &bytes).await.unwrap();
++    let expected = ThreadTerminalEvidenceResponse::Terminal {
++        turn_id: params.client_user_message_id.clone(),
++        item_id: item_id.clone(),
++        receipt_id: original.receipt_id.clone(),
++        terminal_status: NativeTurnTerminalStatus::Completed,
++        replayed: true,
++    };
++    assert_eq!(
++        terminal_evidence(Some(&state), &store, &params).await,
++        expected
++    );
++    assert_eq!(
++        state.get_native_turn_start_proof(&identity).await.unwrap(),
++        Some(NativeTurnStartProof::InputRecorded {
++            turn_id: params.client_user_message_id.clone(),
++            item_id,
++        })
++    );
++    assert_eq!(
++        state
++            .get_native_turn_terminal_proof(&identity)
++            .await
++            .unwrap(),
++        Some(original)
++    );
++    assert_eq!(tokio::fs::read(&path).await.unwrap(), bytes);
++    tokio::fs::remove_file(&path).await.unwrap();
++    assert_eq!(
++        terminal_evidence(Some(&state), &store, &params).await,
++        expected
++    );
++}
+diff --git a/codex-rs/app-server/tests/suite/v2/native_terminal_query.rs b/codex-rs/app-server/tests/suite/v2/native_terminal_query.rs
+index ccc64ff..d894e47 100644
+--- a/codex-rs/app-server/tests/suite/v2/native_terminal_query.rs
++++ b/codex-rs/app-server/tests/suite/v2/native_terminal_query.rs
+@@ -21,6 +21,21 @@ use uuid::Uuid;
+ #[tokio::test]
+ async fn native_terminal_query_public_rpc_recovers_without_start_and_survives_restart()
+ -> anyhow::Result<()> {
++    query_replay(PriorReceipt::Pending).await
++}
++
++#[tokio::test]
++async fn native_terminal_query_public_rpc_recovers_anchor_with_terminal_and_survives_restart()
++-> anyhow::Result<()> {
++    query_replay(PriorReceipt::StartedAndTerminal).await
++}
++
++enum PriorReceipt {
++    Pending,
++    StartedAndTerminal,
++}
++
++async fn query_replay(prior_receipt: PriorReceipt) -> anyhow::Result<()> {
+     tokio::time::timeout(std::time::Duration::from_secs(30), async {
+     let home = TempDir::new()?;
+     std::fs::write(home.path().join("config.toml"), "cli_auth_credentials_store = \"file\"\nmodel_provider = \"query-test\"\nmodel = \"unused\"\n[model_providers.query-test]\nname = \"query test\"\nbase_url = \"http://127.0.0.1:9/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n")?;
+@@ -35,6 +50,14 @@ async fn native_terminal_query_public_rpc_recovers_without_start_and_survives_re
+         input: "original historical input".into(),
+     };
+     db.begin_native_turn_start(&identity, &[]).await?;
++    let prior_terminal = match prior_receipt {
++        PriorReceipt::Pending => None,
++        PriorReceipt::StartedAndTerminal => {
++            db.record_native_turn_started(&identity, &identity.client_user_message_id).await?;
++            Some(db.record_native_turn_terminal(&identity, &identity.client_user_message_id,
++                codex_state::NativeTurnTerminalStatus::Completed).await?)
++        }
++    };
+     let item_id = Uuid::now_v7().to_string();
+     let rollout = home.path().join("rollout.jsonl");
+     let mut metadata = codex_state::ThreadMetadataBuilder::new(thread_id, rollout.clone(), chrono::Utc::now(), SessionSource::Cli).build("query-test");
+@@ -69,6 +92,7 @@ async fn native_terminal_query_public_rpc_recovers_without_start_and_survives_re
+         let id = app.send_request("thread/terminalEvidence", Some(params.clone())).await?;
+         let evidence: ThreadTerminalEvidenceResponse = app.read_response(id).await?;
+         let proof = db.get_native_turn_terminal_proof(&identity).await?.expect("native proof");
++        if let Some(ref prior) = prior_terminal { assert_eq!(&proof, prior); }
+         assert_eq!(evidence, ThreadTerminalEvidenceResponse::Terminal {
+             turn_id: identity.client_user_message_id.clone(), item_id: item_id.clone(), receipt_id: proof.receipt_id,
+             terminal_status: NativeTurnTerminalStatus::Completed, replayed: true,

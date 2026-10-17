@@ -1,0 +1,145 @@
+--- a/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query.rs
++++ b/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query.rs
+@@ -37,7 +37,9 @@
+         return ThreadTerminalEvidenceResponse::Unknown;
+     };
+     let proof = match state.get_native_turn_terminal_proof(&identity).await {
+-        Ok(Some(proof)) if matches!(start, NativeTurnStartProof::InputRecorded { .. }) => Some(proof),
++        Ok(Some(proof)) if matches!(start, NativeTurnStartProof::InputRecorded { .. }) => {
++            Some(proof)
++        }
+         Ok(_) => {
+             let Some(local) = store.as_any().downcast_ref::<LocalThreadStore>() else {
+                 return ThreadTerminalEvidenceResponse::Unknown;
+--- a/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query_tests.rs
++++ b/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query_tests.rs
+@@ -294,7 +294,11 @@
+     let deletion = tokio::spawn({
+         let store = store.clone();
+         let thread_id = ThreadId::from_string(&params.thread_id).unwrap();
+-        async move { store.delete_thread(codex_thread_store::DeleteThreadParams { thread_id }).await }
++        async move {
++            store
++                .delete_thread(codex_thread_store::DeleteThreadParams { thread_id })
++                .await
++        }
+     });
+     tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+         .await
+@@ -302,48 +306,96 @@
+     let exact = tokio::time::timeout(
+         std::time::Duration::from_millis(100),
+         terminal_evidence(Some(&state), &store, &params),
+-    ).await;
++    )
++    .await;
+     let mut missing = params.clone();
+     missing.attempt_id = "missing-attempt".into();
+     let result = tokio::time::timeout(
+         std::time::Duration::from_secs(2),
+         terminal_evidence(Some(&state), &store, &missing),
+-    ).await;
++    )
++    .await;
+     release.notify_one();
+     assert!(deletion.await.unwrap().is_err());
+-    assert!(exact.is_err(), "the matching attempt must reach the held recovery lock");
+-    assert_eq!(result.expect("missing Start must not enter recovery"), ThreadTerminalEvidenceResponse::Unknown);
++    assert!(
++        exact.is_err(),
++        "the matching attempt must reach the held recovery lock"
++    );
++    assert_eq!(
++        result.expect("missing Start must not enter recovery"),
++        ThreadTerminalEvidenceResponse::Unknown
++    );
+     // Recovery reads history only after the held lock, so the prompt response proves no rollout I/O.
+     assert_eq!(tokio::fs::read(&path).await.unwrap(), bytes);
+-    assert_eq!(state.get_native_turn_start_proof(&identity_from_params(&missing)).await.unwrap(), None);
+-    assert_eq!(state.get_native_turn_start_proof(&identity_from_params(&params)).await.unwrap(), Some(NativeTurnStartProof::Pending));
++    assert_eq!(
++        state
++            .get_native_turn_start_proof(&identity_from_params(&missing))
++            .await
++            .unwrap(),
++        None
++    );
++    assert_eq!(
++        state
++            .get_native_turn_start_proof(&identity_from_params(&params))
++            .await
++            .unwrap(),
++        Some(NativeTurnStartProof::Pending)
++    );
+ }
+ 
+ #[tokio::test]
+ async fn terminal_query_recovers_input_anchor_with_existing_terminal_receipt() {
+     let (_home, state, store, params, path) = fixture().await;
+     let identity = identity_from_params(&params);
+-    state.record_native_turn_started(&identity, &params.client_user_message_id).await.unwrap();
+-    let original = state.record_native_turn_terminal(
+-        &identity, &params.client_user_message_id, codex_state::NativeTurnTerminalStatus::Completed,
+-    ).await.unwrap();
++    state
++        .record_native_turn_started(&identity, &params.client_user_message_id)
++        .await
++        .unwrap();
++    let original = state
++        .record_native_turn_terminal(
++            &identity,
++            &params.client_user_message_id,
++            codex_state::NativeTurnTerminalStatus::Completed,
++        )
++        .await
++        .unwrap();
+     let bytes = history(
+         &params,
+         json!({"type":"task_complete","turn_id":params.client_user_message_id,"last_agent_message":null}),
+     );
+-    let input: serde_json::Value = serde_json::from_slice(bytes.split(|byte| *byte == b'\n').nth(1).unwrap()).unwrap();
++    let input: serde_json::Value =
++        serde_json::from_slice(bytes.split(|byte| *byte == b'\n').nth(1).unwrap()).unwrap();
+     let item_id = input["payload"]["item"]["id"].as_str().unwrap().to_owned();
+     tokio::fs::write(&path, &bytes).await.unwrap();
+     let expected = ThreadTerminalEvidenceResponse::Terminal {
+-        turn_id: params.client_user_message_id.clone(), item_id: item_id.clone(),
+-        receipt_id: original.receipt_id.clone(), terminal_status: NativeTurnTerminalStatus::Completed, replayed: true,
++        turn_id: params.client_user_message_id.clone(),
++        item_id: item_id.clone(),
++        receipt_id: original.receipt_id.clone(),
++        terminal_status: NativeTurnTerminalStatus::Completed,
++        replayed: true,
+     };
+-    assert_eq!(terminal_evidence(Some(&state), &store, &params).await, expected);
+-    assert_eq!(state.get_native_turn_start_proof(&identity).await.unwrap(), Some(NativeTurnStartProof::InputRecorded {
+-        turn_id: params.client_user_message_id.clone(), item_id,
+-    }));
+-    assert_eq!(state.get_native_turn_terminal_proof(&identity).await.unwrap(), Some(original));
++    assert_eq!(
++        terminal_evidence(Some(&state), &store, &params).await,
++        expected
++    );
++    assert_eq!(
++        state.get_native_turn_start_proof(&identity).await.unwrap(),
++        Some(NativeTurnStartProof::InputRecorded {
++            turn_id: params.client_user_message_id.clone(),
++            item_id,
++        })
++    );
++    assert_eq!(
++        state
++            .get_native_turn_terminal_proof(&identity)
++            .await
++            .unwrap(),
++        Some(original)
++    );
+     assert_eq!(tokio::fs::read(&path).await.unwrap(), bytes);
+     tokio::fs::remove_file(&path).await.unwrap();
+-    assert_eq!(terminal_evidence(Some(&state), &store, &params).await, expected);
+-}
++    assert_eq!(
++        terminal_evidence(Some(&state), &store, &params).await,
++        expected
++    );
++}
