@@ -2,11 +2,13 @@ import asyncio
 import contextlib
 import io
 import json
+import os
+import secrets
 from pathlib import Path
 import tempfile
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock, Mock
 from uuid import uuid4
 
 from event_gateway.claude import ClaudeError, ClaudeSocketTransport, METADATA_FIELDS, event_frame, main
@@ -23,7 +25,7 @@ class ClaudeTests(unittest.IsolatedAsyncioTestCase):
         self.path.chmod(0o600)
         info = self.path.stat()
         self.options = dict(socket_path=str(self.path), socket_identity=(info.st_dev, info.st_ino),
-                            session_id=str(uuid4()), token='disposable-fixture-token',
+                            peer_pid=os.getpid(), session_id=str(uuid4()), token=secrets.token_urlsafe(32),
                             version='2.1.302', journal_dir=Path(self.temp.name) / 'journal')
         fixtures = Path(__file__).parents[1] / 'contracts/event-v1/protocol-v1.json'
         self.envelopes = json.loads(fixtures.read_text())['validEnvelopes']
@@ -115,8 +117,8 @@ class ClaudeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await adapter.send(self.event))['reason'], 'claude_attempt_already_reserved')
 
     async def test_validation(self):
-        for override in ({'version': '2.1.303'}, {'session_id': 'wrong'}, {'token': '\nsecret'},
-                         {'socket_identity': (True, 1)}):
+        for override in ({'version': '2.1.303'}, {'session_id': 'wrong'}, {'token': chr(10)},
+                         {'socket_identity': (True, 1)}, {'peer_pid': True}, {'peer_pid': 0}):
             with self.subTest(override=override), self.assertRaises(ClaudeError):
                 ClaudeSocketTransport(**(self.options | override))
         for metadata in (self.event | {'content': 'run this'}, self.event | {'source': 4},
@@ -141,6 +143,7 @@ class ClaudeTests(unittest.IsolatedAsyncioTestCase):
             'version': 1, 'clientVersion': '2.1.302', 'socketPath': str(self.path),
             'socketDevice': self.options['socket_identity'][0],
             'socketInode': self.options['socket_identity'][1],
+            'peerPid': self.options['peer_pid'],
             'sessionId': self.options['session_id'], 'token': self.options['token'],
             'journalDirectory': str(self.options['journal_dir']),
         }))
@@ -187,3 +190,85 @@ class ClaudeTests(unittest.IsolatedAsyncioTestCase):
                 await adapter.send(metadata)
         self.assertEqual(list(self.options['journal_dir'].iterdir()), [])
         self.assertEqual(self.frames, [])
+
+    async def test_close_flushes_pending_bytes_without_aborting(self):
+        adapter = ClaudeSocketTransport(**self.options)
+        writer = Mock()
+        writer.drain = AsyncMock()
+        writer.wait_closed = AsyncMock()
+        with patch('event_gateway.claude.asyncio.open_unix_connection',
+                   new=AsyncMock(return_value=(None, writer))), \
+                patch('event_gateway.claude._peer_identity', return_value=(os.getpid(), os.getuid())):
+            result = await adapter.send(self.event)
+        self.assertEqual(result['reason'], 'claude_write_unacknowledged')
+        writer.close.assert_called_once()
+        writer.wait_closed.assert_awaited_once()
+        writer.transport.abort.assert_not_called()
+
+    async def test_close_timeout_aborts_and_keeps_no_replay(self):
+        adapter = ClaudeSocketTransport(**self.options)
+        writer = Mock()
+        writer.drain = AsyncMock()
+        writer.wait_closed = AsyncMock(side_effect=TimeoutError)
+        with patch('event_gateway.claude.asyncio.open_unix_connection',
+                   new=AsyncMock(return_value=(None, writer))), \
+                patch('event_gateway.claude._peer_identity', return_value=(os.getpid(), os.getuid())):
+            result = await adapter.send(self.event)
+        self.assertEqual(result['reason'], 'claude_transport_unconfirmed')
+        writer.transport.abort.assert_called_once()
+        self.assertEqual((await adapter.send(self.event))['reason'], 'claude_attempt_already_reserved')
+
+    async def test_connected_wrong_peer_receives_no_bytes_even_with_restored_path(self):
+        # The connection points elsewhere while both pathname checks still see the pinned inode.
+        adapter = ClaudeSocketTransport(**self.options)
+        writer = Mock()
+        with patch('event_gateway.claude.asyncio.open_unix_connection',
+                   new=AsyncMock(return_value=(None, writer))), \
+                patch('event_gateway.claude._peer_identity', return_value=(os.getpid() + 1, os.getuid())):
+            result = await adapter.send(self.event)
+        self.assertEqual(result['reason'], 'claude_transport_unconfirmed')
+        writer.write.assert_not_called()
+        writer.transport.abort.assert_called_once()
+
+    async def test_actual_path_swap_restore_cannot_release_auth_to_other_process(self):
+        adapter = ClaudeSocketTransport(**self.options)
+        saved = self.path.with_name('original.sock')
+        original_connect = asyncio.open_unix_connection
+        process = None
+
+        async def swapped_connect(path):
+            nonlocal process
+            self.path.rename(saved)
+            program = (
+                'import socket,sys,os\n'
+                'listener=socket.socket(socket.AF_UNIX)\n'
+                'listener.bind(sys.argv[1]);os.chmod(sys.argv[1],0o600)\n'
+                'listener.listen(1);print("ready",flush=True)\n'
+                'connection,_=listener.accept()\n'
+                'data=connection.recv(65536);print(len(data),flush=True)\n'
+                'connection.close();listener.close()\n'
+            )
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, '-I', '-c', program, str(self.path),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            self.assertEqual(await asyncio.wait_for(process.stdout.readline(), 2), b'ready\n')
+            connection = await original_connect(path)
+            self.path.unlink()
+            saved.rename(self.path)
+            return connection
+
+        try:
+            with patch('event_gateway.claude.asyncio.open_unix_connection', side_effect=swapped_connect):
+                result = await adapter.send(self.event)
+            self.assertEqual(result['reason'], 'claude_transport_unconfirmed')
+            stdout, stderr = await asyncio.wait_for(process.communicate(), 2)
+            self.assertEqual(process.returncode, 0)
+            self.assertEqual(stdout, b'0\n')
+            self.assertEqual(stderr, b'')
+        finally:
+            if process is not None and process.returncode is None:
+                process.kill()
+                await process.wait()
+            if saved.exists():
+                self.path.unlink(missing_ok=True)
+                saved.rename(self.path)

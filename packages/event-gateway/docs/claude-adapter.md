@@ -41,7 +41,11 @@ installed version and must be revalidated before another version is accepted.
 Prepare two owner-only mode-0600 JSON files in a mode-0700 directory from a deliberately
 created disposable session. Do not select an existing owner session by scanning its
 registry or reading its credentials. A launcher must independently verify the client
-version and provide the socket identity; these config assertions are not attestation.
+version and provide the socket identity and process PID. It must keep that trusted
+process alive for the entire binding lifetime and discard the binding on exit; these
+config assertions are not attestation. Never reuse a config after process exit: PIDs
+can be reused. This manual qualification surface does not defend against code already
+executing inside the trusted peer or a compromised launcher.
 
 Binding file fields (all required, no extras):
 
@@ -52,6 +56,7 @@ Binding file fields (all required, no extras):
   "socketPath": "/private/disposable/claude.sock",
   "socketDevice": 1,
   "socketInode": 2,
+  "peerPid": 12345,
   "sessionId": "11111111-1111-4111-8111-111111111111",
   "token": "DISPOSABLE_SESSION_TOKEN_ONLY",
   "journalDirectory": "/private/disposable/attempts"
@@ -79,6 +84,13 @@ Before connecting, the adapter reserves an owner-only journal marker with exclus
 creation and fsync of file and directory. The same session/delivery cannot send again,
 including across process restarts or after uncertain failures. Socket ownership,
 permissions, symlinks and the pinned device/inode are checked before and after connect.
+Those pathname checks alone do not prevent a swap-and-restore race. Before writing
+auth or event bytes, the adapter verifies the connected kernel peer PID and UID
+(Darwin `LOCAL_PEERPID`/`getpeereid`, Linux `SO_PEERCRED`) against the live launcher
+binding and current user. Unsupported platforms fail closed. The socket parent must
+remain owner-only; other code running as that owner and the trusted peer are outside
+this manual qualification isolation boundary. Healthy writes close gracefully and
+await buffer flushing within the send deadline; failure or timeout aborts.
 Retain the journal: deleting it removes the no-replay boundary. Markers have no payload
 or secret. This manual qualification journal is intentionally not auto-pruned.
 
@@ -86,7 +98,8 @@ or secret. This manual qualification journal is intentionally not auto-pruned.
 
 Protocol fixtures exercise real disposable Unix sockets: auth/wire shape, stable
 session targeting, concurrent reservation, restart/no-replay, pre/post-connect socket
-rotation, unsafe permissions, validation and safe CLI errors. They prove our adapter's
+rotation, an actual other-process path-swap-and-restore race with a zero-byte witness,
+graceful close/timeout, unsafe permissions, validation and safe CLI errors. They prove our adapter's
 behavior, not Claude's processing or idle wake.
 
 No live Claude/model run was attempted: an isolated authenticated disposable client,

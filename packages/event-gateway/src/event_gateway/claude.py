@@ -1,11 +1,15 @@
 """Version-pinned Claude UDS qualification transport, not a production receipt bridge."""
 
 import asyncio
+import ctypes
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import socket
+import struct
+import sys
 from uuid import UUID, uuid5, NAMESPACE_URL
 
 from .codex import CodexError, _socket_identity
@@ -29,6 +33,7 @@ class ClaudeError(RuntimeError):
     """Safe reason only: never include the credential or event contents."""
 
     def __init__(self, code):
+        """Expose only a safe machine-readable reason."""
         self.code = code
         super().__init__(code)
 
@@ -63,27 +68,46 @@ def event_frame(session_id, metadata):
             "message": {"role": "user", "content": content}}
 
 
+def _peer_identity(connection):
+    """Read connected kernel peer identity before releasing any credential bytes."""
+    if sys.platform == "linux":
+        pid, uid, _ = struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        return pid, uid
+    if sys.platform == "darwin":
+        # Darwin sys/un.h: SOL_LOCAL=0, LOCAL_PEERPID=2; getpeereid supplies UID.
+        pid = connection.getsockopt(0, 2)
+        libc = ctypes.CDLL(None, use_errno=True)
+        getpeereid = libc.getpeereid
+        getpeereid.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+        getpeereid.restype = ctypes.c_int
+        uid, gid = ctypes.c_uint(), ctypes.c_uint()
+        if getpeereid(connection.fileno(), ctypes.byref(uid), ctypes.byref(gid)) != 0:
+            raise ClaudeError("claude_peer_unverified")
+        return pid, uid.value
+    raise ClaudeError("claude_peer_unverified")
+
+
 class ClaudeSocketTransport:
-    """Explicit caller-owned binding; never discovers sessions or reads owner credentials.
+    """Explicit disposable binding; no session discovery or receipt-v3 acknowledgment."""
 
-    Callers must authenticate and admit events before invoking send. The pinned inode
-    must come from their disposable launcher, not an untrusted event or session scan.
-    No result from this transport is a receipt-v3 acknowledgment.
-    """
+    # Callers admit events and pin the live peer through their trusted launcher.
 
-    def __init__(self, *, socket_path, socket_identity, session_id, token, version, journal_dir):
+    def __init__(self, *, socket_path, socket_identity, peer_pid, session_id, token, version, journal_dir):
+        """Pin a trusted launcher-owned live process and its private inbox."""
         if version != SUPPORTED_VERSION:
             raise ClaudeError("unsupported_claude_version")
         self.session_id = _uuid(session_id)
         if (not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_+/=-]{16,512}", token)
                 or not isinstance(socket_identity, tuple) or len(socket_identity) != 2
-                or any(type(value) is not int or value < 0 for value in socket_identity)):
+                or any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in socket_identity)
+                or not isinstance(peer_pid, int) or isinstance(peer_pid, bool) or peer_pid <= 0):
             raise ClaudeError("invalid_claude_binding")
         if (not isinstance(socket_path, str) or not Path(socket_path).is_absolute()
                 or "\0" in socket_path):
             raise ClaudeError("invalid_claude_binding")
         self.socket_path = socket_path
         self.socket_identity = socket_identity
+        self.peer_pid = peer_pid
         self._token = token
         self.journal_dir = ensure_private_directory(journal_dir)
         self._check_socket()
@@ -132,8 +156,13 @@ class ClaudeSocketTransport:
             async with asyncio.timeout(SEND_SECONDS):
                 _, writer = await asyncio.open_unix_connection(self.socket_path)
                 self._check_socket()
+                if _peer_identity(writer.get_extra_info("socket")) != (self.peer_pid, os.getuid()):
+                    raise ClaudeError("claude_peer_unverified")
                 writer.write(wire)
                 await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                writer = None
                 return {"status": "unknown", "reason": "claude_write_unacknowledged"}
         except (OSError, TimeoutError, ClaudeError):
             return {"status": "unknown", "reason": "claude_transport_unconfirmed"}
@@ -165,9 +194,10 @@ def main(argv=None):
     try:
         config, _ = _private_json(args.config, 4096, "invalid_claude_config")
         fields = {"version", "clientVersion", "socketPath", "socketDevice", "socketInode",
-                  "sessionId", "token", "journalDirectory"}
+                  "peerPid", "sessionId", "token", "journalDirectory"}
         if (not isinstance(config, dict) or set(config) != fields
-                or type(config["version"]) is not int or config["version"] != 1
+                or not isinstance(config["version"], int) or isinstance(config["version"], bool)
+                or config["version"] != 1
                 or not isinstance(config["socketPath"], str)
                 or not isinstance(config["journalDirectory"], str)
                 or not Path(config["journalDirectory"]).is_absolute()):
@@ -176,7 +206,7 @@ def main(argv=None):
         transport = ClaudeSocketTransport(
             socket_path=config["socketPath"],
             socket_identity=(config["socketDevice"], config["socketInode"]),
-            session_id=config["sessionId"], token=config["token"],
+            peer_pid=config["peerPid"], session_id=config["sessionId"], token=config["token"],
             version=config["clientVersion"], journal_dir=config["journalDirectory"])
         result = asyncio.run(transport.send(metadata))
     except (ClaudeError, SecurityError) as error:
