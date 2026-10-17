@@ -208,9 +208,12 @@ def _github_material_request(value):
     code = "invalid_request"
     if not isinstance(value, dict):
         raise CloudError(code)
-    _closed(value, {"subject", "sourceId", "fingerprint"} | ({"cursor"} if "cursor" in value else set()), code=code)
+    _closed(value, {"subject", "sourceId", "fingerprint", "fromVersion", "toVersion"}
+            | ({"cursor"} if "cursor" in value else set()), code=code)
     _closed(value["subject"], ("installationId", "repositoryId", "prNumber"), code=code)
     if (any(not _generation(number) for number in value["subject"].values())
+            or any(not _generation(value[key]) for key in ("fromVersion", "toVersion"))
+            or value["fromVersion"] > value["toVersion"]
             or not _github_text(value["sourceId"], 4096)
             or re.fullmatch(r"(?:review:[1-9][0-9]*|comment:[1-9][0-9]*|thread-comment:.+)", value["sourceId"], re.DOTALL) is None
             or not isinstance(value["fingerprint"], str)
@@ -228,11 +231,13 @@ def _github_material_response(value, request):
     if isinstance(value, dict) and value.get("status") in ("unavailable", "deleted", "conflict"):
         _closed(value, ("status",))
         return value
-    _closed(value, ("status", "subject", "sourceId", "fingerprint", "firstVersion", "bodyDigest",
+    _closed(value, ("status", "subject", "sourceId", "fingerprint", "requestedRange", "firstVersion", "bodyDigest",
                     "offset", "totalLength", "body", "nextCursor", "complete"))
     if (value["status"] != "ok"
             or any(not _same_json_value(value[key], request[key]) for key in ("subject", "sourceId", "fingerprint"))
+            or not _same_json_value(value["requestedRange"], {key: request[key] for key in ("fromVersion", "toVersion")})
             or not _generation(value["firstVersion"])
+            or not request["fromVersion"] <= value["firstVersion"] <= request["toVersion"]
             or not isinstance(value["bodyDigest"], str)
             or re.fullmatch(r"[a-f0-9]{64}", value["bodyDigest"]) is None
             or any(not _safe_uint(value[key]) or value[key] > 1048576 for key in ("offset", "totalLength"))

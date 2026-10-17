@@ -81,7 +81,7 @@ def main(argv=None):
     source_read.add_argument("--cursor", help="Exact nextCursor JSON from the preceding page")
     material = commands.add_parser("github-source-material", help="Verify all finding text pages into a new private file")
     material.add_argument("--cloud-config", type=Path, required=True)
-    for flag in ("installation-id", "repository-id", "pr-number"):
+    for flag in ("installation-id", "repository-id", "pr-number", "from-version", "to-version"):
         material.add_argument("--" + flag, type=int, required=True)
     material.add_argument("--source-id", required=True)
     material.add_argument("--fingerprint", required=True)
@@ -210,6 +210,7 @@ def _execute_github_source_material(args, state_dir):
                 "subject": {"installationId": args.installation_id, "repositoryId": args.repository_id,
                             "prNumber": args.pr_number},
                 "sourceId": args.source_id, "fingerprint": args.fingerprint,
+                "fromVersion": args.from_version, "toVersion": args.to_version,
             }))
         except CloudError as error:
             print(json.dumps({"materialRead": None, "reason": error.code}))

@@ -20,7 +20,8 @@ from event_gateway import cli
 from event_gateway.cloud import CloudClient, CloudError, Credentials, canonical_node_proof
 
 SUBJECT = {"installationId": 1, "repositoryId": 2, "prNumber": 3}
-REQUEST = {"subject": SUBJECT, "sourceId": "comment:7", "fingerprint": "f" * 64}
+REQUEST = {"subject": SUBJECT, "sourceId": "comment:7", "fingerprint": "f" * 64,
+           "fromVersion": 3, "toVersion": 5}
 BODY = "private 😀 first\nsecond é page"
 
 
@@ -32,7 +33,8 @@ def pages(chunks=None):
     result, offset = [], 0
     for index, chunk in enumerate(chunks):
         last = index == len(chunks) - 1
-        result.append({"status": "ok", **copy.deepcopy(REQUEST), "firstVersion": 4,
+        result.append({"status": "ok", **{key: copy.deepcopy(REQUEST[key]) for key in ("subject", "sourceId", "fingerprint")},
+                       "requestedRange": {"fromVersion": 3, "toVersion": 5}, "firstVersion": 4,
                        "bodyDigest": digest, "offset": offset, "totalLength": total,
                        "body": chunk, "nextCursor": None if last else f"cursor_{index}",
                        "complete": last})
@@ -57,12 +59,26 @@ class MaterialReadTests(unittest.IsolatedAsyncioTestCase):
             agent="codex", node_id="12345678-1234-4123-8123-123456789012", node_generation=1,
             private_key=self.key, credentials=self.credentials, send=send)
 
+    async def test_exact_producer_range_fixture(self):
+        # Copied producer DTO fixture; this does not rotate the trusted contract.
+        fixture = json.loads((Path(__file__).parent / "fixtures/github-material-read-v1.json").read_text())
+        self.results = [fixture["response"]]
+        result = await self.client.github_source_material_all(fixture["request"])
+        self.assertEqual(result, fixture["response"])
+        self.assertEqual(json.loads(self.requests[-1]["body"]), fixture["request"])
+        for status in ("unavailable", "deleted", "conflict"):
+            self.results = [fixture[status]]
+            self.assertEqual(await self.client.github_source_material_all(fixture["request"]), fixture[status])
+
     async def test_unicode_all_pages_and_exact_signed_path(self):
         result = await self.client.github_source_material_all(REQUEST)
         self.assertEqual(result["body"], BODY)
         self.assertTrue(result["complete"])
         self.assertEqual(result["offset"], 0)
         self.assertEqual(self.credentials.await_count, 2)
+        for wire in self.requests:
+            self.assertEqual(json.loads(wire["body"])["fromVersion"], 3)
+            self.assertEqual(json.loads(wire["body"])["toVersion"], 5)
         self.assertEqual(json.loads(self.requests[1]["body"])["cursor"], "cursor_0")
         for request in self.requests:
             self.assertEqual(request["url"], "https://events.example.com/v1/github/source/material")
@@ -88,6 +104,39 @@ class MaterialReadTests(unittest.IsolatedAsyncioTestCase):
             await self.client.github_source_material_all({**REQUEST, "cursor": "start"})
         self.credentials.assert_not_called()
         self.assertEqual(self.requests, [])
+
+    async def test_range_required_ordered_and_safe_before_credentials(self):
+        invalid = [{key: value for key, value in REQUEST.items() if key != removed}
+                   for removed in ("fromVersion", "toVersion")]
+        invalid += [{**REQUEST, **change} for change in (
+            {"fromVersion": True}, {"toVersion": 2**53}, {"fromVersion": 0},
+            {"fromVersion": 6}, {"toVersion": 2})]
+        for request in invalid:
+            with self.assertRaisesRegex(CloudError, "^invalid_request$"):
+                await self.client.github_source_material_all(request)
+        self.credentials.assert_not_called()
+        self.assertEqual(self.requests, [])
+
+    async def test_every_page_echoes_exact_range_and_first_version_is_covered(self):
+        changes = [{"requestedRange": {"fromVersion": 2, "toVersion": 5}},
+                   {"requestedRange": {"fromVersion": 3, "toVersion": True}},
+                   {"requestedRange": {"fromVersion": 3, "toVersion": 5, "extra": 1}},
+                   {"requestedRange": None}, {"firstVersion": 2}, {"firstVersion": 6}]
+        for index in (0, 1):
+            for change in changes:
+                self.results = pages()
+                self.results[index].update(change)
+                with self.subTest(page=index, change=change), self.assertRaisesRegex(CloudError, "^invalid_response$"):
+                    await self.client.github_source_material_all(REQUEST)
+        self.results = pages()
+        del self.results[0]["requestedRange"]
+        with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+            await self.client.github_source_material_all(REQUEST)
+
+    async def test_cursor_cannot_rebind_page_to_another_requested_range(self):
+        self.results = [pages()[1]]
+        with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+            await self.client.github_source_material({**REQUEST, "fromVersion": 4, "cursor": "cursor_0"})
 
     async def test_closed_response_types_and_echoes(self):
         mutations = [lambda p: p.update(extra="raw"), lambda p: p.update(firstVersion=True),
@@ -173,6 +222,7 @@ class MaterialCliTests(unittest.TestCase):
         self.output = self.root / "finding.txt"
         self.args = ["--state-dir", str(self.root), "github-source-material", "--cloud-config", "/unused",
                      "--installation-id", "1", "--repository-id", "2", "--pr-number", "3",
+                     "--from-version", "3", "--to-version", "5",
                      "--source-id", "comment:7", "--fingerprint", "f" * 64,
                      "--private-output", str(self.output)]
         self.client = AsyncMock()
@@ -193,9 +243,21 @@ class MaterialCliTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(json.loads(stdout), {"materialRead": "written", "complete": True})
         self.assertEqual(self.output.read_text(), BODY)
+        self.client.github_source_material_all.assert_awaited_once_with(REQUEST)
         self.assertEqual(stat.S_IMODE(self.output.stat().st_mode), 0o600)
         self.assertEqual(self.invoke()[0], 2)  # Existing output is never overwritten.
         self.assertEqual(self.output.read_text(), BODY)
+
+    def test_cli_requires_both_range_bounds_before_loading_credentials(self):
+        for flag in ("--from-version", "--to-version"):
+            index = self.args.index(flag)
+            arguments = self.args[:index] + self.args[index + 2:]
+            with patch.object(cli, "load_cloud_client") as load, redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    cli.main(arguments)
+                self.assertEqual(error.exception.code, 2)
+                load.assert_not_called()
+        self.assertFalse(self.output.exists())
 
     def test_midpage_failure_leaves_no_output(self):
         for result in (CloudError("invalid_response"), {"status": "conflict"}, {"status": "deleted"}):

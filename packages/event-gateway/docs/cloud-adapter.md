@@ -201,10 +201,13 @@ establish a live Access session, production enrollment, or native delivery.
 ## Current GitHub finding material
 
 `github-source-material` retrieves the text identified by a retained source
-projection's subject, `sourceId` and `fingerprint`. It signs each
+projection's subject, `sourceId`, `fingerprint`, and required `fromVersion` /
+`toVersion` coverage range. It signs each
 `POST /v1/github/source/material` using the existing enrolled node identity and
 fresh credentials. Cloud checks the current source grant and permission on every
-page; an old source projection does not grant historical access.
+page and requires the exact locator in retained journal coverage for the requested
+range. The material first version must lie inside that range. An old source
+projection does not grant historical access.
 
 ```sh
 mkdir -m 700 ./private-findings
@@ -212,6 +215,7 @@ knitli-event-gateway --state-dir "$STATE_DIR" github-source-material \
   --cloud-config "$CLOUD_CONFIG" \
   --installation-id 123 --repository-id 456 --pr-number 7 \
   --source-id comment:890 --fingerprint "$FINGERPRINT" \
+  --from-version "$FROM_VERSION" --to-version "$TO_VERSION" \
   --private-output ./private-findings/finding.txt
 ```
 
@@ -224,7 +228,8 @@ The terminal reports only `materialRead: written` and `complete: true`, or a saf
 failure code.
 
 The client validates closed request/response shapes, subject/source/fingerprint
-binding, contiguous UTF-16 offsets, stable first version/body digest/total length,
+binding, exact `requestedRange` echoes on every page, covered first version,
+contiguous UTF-16 offsets, stable first version/body digest/total length,
 opaque cursor cycles, and the SHA-256 digest of the assembled UTF-8 text. It
 bounds requests to 4096 bytes, responses to 8192 bytes, material to 1 Mi UTF-16
 units, and a traversal to 4096 pages. Unavailable, deleted, conflict, malformed,
