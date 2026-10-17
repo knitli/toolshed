@@ -110,23 +110,23 @@ class CoupledHostedTests(unittest.TestCase):
         parsed = FIXTURE.inputs(self.arguments())
         ports = [43125, 43121, 43122, 43123]
         with patch.object(helper, 'ephemeral_port_ranges', return_value=[(49152, 65535)]), \
-                patch.object(helper, 'port_is_bindable', return_value=True) as probe:
+                patch.object(helper, 'port_is_released', return_value=True) as probe:
             helper.preflight_ports(parsed, ports=ports)
             self.assertEqual([call.args[0] for call in probe.call_args_list], ports)
         for port in ports:
             with self.subTest(port=port), \
                     patch.object(helper, 'ephemeral_port_ranges', return_value=[(port, port)]), \
-                    patch.object(helper, 'port_is_bindable') as probe:
+                    patch.object(helper, 'port_is_released') as probe:
                 with self.assertRaisesRegex(AssertionError, 'ephemeral'):
                     helper.preflight_ports(parsed, ports=ports)
                 probe.assert_not_called()
             with self.subTest(unavailable=port), \
                     patch.object(helper, 'ephemeral_port_ranges', return_value=[(49152, 65535)]), \
-                    patch.object(helper, 'port_is_bindable', side_effect=lambda value: value != port):
+                    patch.object(helper, 'port_is_released', side_effect=lambda value: value != port):
                 with self.assertRaisesRegex(AssertionError, 'unavailable'):
                     helper.preflight_ports(parsed, ports=ports)
         for invalid in ([43125] * 4, [True], [1023], [65536], ['43125'], [43125.0]):
-            with self.subTest(invalid=invalid), patch.object(helper, 'port_is_bindable') as probe:
+            with self.subTest(invalid=invalid), patch.object(helper, 'port_is_released') as probe:
                 with self.assertRaises(AssertionError):
                     helper.preflight_ports(parsed, ports=invalid)
                 probe.assert_not_called()
