@@ -407,7 +407,7 @@ function hasDuplicateObjectKeys(json: string): boolean {
   return scanValue(0);
 }
 
-function decodeProtocolJson(json: string): unknown {
+export function decodeProtocolJson(json: string): unknown {
   if (
     json.length > MAX_PROTOCOL_MESSAGE_BYTES ||
     new TextEncoder().encode(json).byteLength > MAX_PROTOCOL_MESSAGE_BYTES
