@@ -89,7 +89,7 @@ Run from an interactive terminal, naming the exact [qualified CI artifact](docs/
 ```sh
 knitli-event-gateway launch \
   --codex-binary /absolute/path/to/qualified/codex \
-  --binary-sha256 763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b \
+  --binary-sha256 5e0afe79db147dd5e2267d56d8f2bfd9ec466ad9ab78b03c0a2f5c5a5f6c22ef \
   --cwd /absolute/path/to/project
 ```
 
