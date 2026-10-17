@@ -34,7 +34,8 @@ def read_crash_marker(path, expected):
         value = json.loads(raw)
         if (not isinstance(value, dict) or set(value) != {'phase', 'brokerPid', 'oldPid'}
                 or any(value[key] != expected[key] for key in ('phase', 'brokerPid'))
-                or type(value['oldPid']) is not int or value['oldPid'] <= 0):
+                or not isinstance(value['oldPid'], int) or isinstance(value['oldPid'], bool)
+                or value['oldPid'] <= 0):
             return None
         return value
     except (OSError, ValueError):

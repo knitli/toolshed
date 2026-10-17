@@ -15,8 +15,9 @@ const storageIdentity = path => {
 
 export class OwnedWorkerdCrash {
   constructor({ binary, binarySha256, persistencePath, timeoutMs = 4000,
-    processApi = childProcess, canonical = realpathSync, digest = hash, storage = storageIdentity,
-    afterKill = () => {} }) {
+    dependencies = {}, afterKill = () => {} }) {
+    const { processApi = childProcess, canonical = realpathSync, digest = hash,
+      storage = storageIdentity } = dependencies;
     this.binary = canonical(binary);
     this.binarySha256 = binarySha256;
     this.persistencePath = persistencePath;

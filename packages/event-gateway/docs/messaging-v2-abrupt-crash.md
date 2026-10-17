@@ -1,7 +1,7 @@
 # Messaging in-flight workerd crash matrix
 
 Status: the approved local three-case matrix passed on 2026-10-17. One unittest
-executed all three subtests in 6.412 seconds with exit code 0 and no skips. The
+executed all three subtests in 5.260 seconds with exit code 0 and no skips. The
 preparation base is reviewed PR #153, commit `1a66233e2ae957e3015c84e188be6725a63a8cf9`.
 PR #153 has since merged as `4182c8e593a70c8f752b812a45494dcbf693484c`.
 This work is rebased onto fresh main `291fbead344e33be99851e1238dfbcf3bafcbaf2`
@@ -9,8 +9,10 @@ with the executed fixture bytes preserved. Root content review approved publicat
 
 The [derived result receipt](messaging-v2-abrupt-crash-result.json) records the
 successful root execution against preparation freeze SHA-256
-`c415cd9cc2c1b58488543648123a80616e9bd520f5c29b37785ca2956520a292`;
-all eleven frozen file hashes matched before the run. The evidence is the frozen
+`1beb36e89e86e88ac7c335838eaf3c6899cda4d45c0628abeaec004296c1070e`;
+all twelve revised frozen file hashes matched before the latest run. The original
+6.412-second pass is preserved in the result history. The repeated pass covers the
+constructor dependency grouping and equivalent JSON integer PID validation. The evidence is the frozen
 assertions and successful execution result. Temporary fixture directories were
 cleaned; raw per-case PID and storage-identity values were asserted during the
 run but were not retained as separate artifacts. No provider or native client ran.

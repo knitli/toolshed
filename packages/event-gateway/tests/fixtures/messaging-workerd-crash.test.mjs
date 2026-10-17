@@ -20,8 +20,8 @@ function fixture(t, { timeoutMs = 1000, afterKill = () => {} } = {}) {
   } };
   const original = api.spawn;
   const controller = new OwnedWorkerdCrash({ binary: '/synthetic/workerd', binarySha256: 'pin',
-    persistencePath: '/synthetic/storage', timeoutMs, processApi: api,
-    canonical: path => path, digest: () => 'pin', storage: () => ({ ...identity }), afterKill });
+    persistencePath: '/synthetic/storage', timeoutMs, afterKill, dependencies: { processApi: api,
+      canonical: path => path, digest: () => 'pin', storage: () => ({ ...identity }) } });
   controller.install();
   t.after(() => { controller.stop(); controller.restore(); assert.equal(api.spawn, original); });
   const spawn = (binary = '/synthetic/workerd', argv = args, config = options) => api.spawn(binary, argv, config);
