@@ -324,8 +324,22 @@ records a fixed failure label, and preserves the original run error. This fixes 
 establish why the native witness failed to complete within the 90-second run
 budget. Fixed lifecycle labels and bounded probe flags/counters are flushed to
 the private log at startup, witness waits, timeout and cleanup, without payloads,
-credentials, paths or session identifiers. No hosted rerun has qualified this
-change; busy qualification remains unproven.
+credentials, paths or session identifiers. Hosted run `39071583512`, attempt 1,
+then failed promptly with `busy_native_missing_init` and completed cleanup.
+Its bounded diagnostics showed a same-session canonical running notice before
+init. Busy qualification remains unproven.
+
+The pinned 2.1.302 startup queue can forward one canonical
+`session_state_changed/running` before the separate init builder completes.
+The probe buffers at most one such notice for its fresh owned session, validates
+its exact envelope and canonical UUID, and reserves the UUID immediately. It
+records the original observation time with `awaitingInit: true`; it does not
+mark the session initialized or running, or permit sending, until a genuine
+same-session init with empty tools arrives. A second lifecycle notice before
+init, including idle or requires_action, fails the probe. Duplicate identities,
+malformed envelopes, wrong sessions, and a missing init still fail closed.
+Validated UI invalidation hints remain passive. This bounded ordering allowance
+has only offline evidence; it does not establish native busy qualification.
 
 The [official 2.1.302 manifest](https://downloads.claude.ai/claude-code-releases/2.1.302/manifest.json)
 records `darwin-arm64` SHA256

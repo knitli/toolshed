@@ -510,7 +510,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                 self.new_probe().observe(hint | change)
 
     def test_passive_ui_hint_does_not_replace_real_init_or_tools_validation(self):
-        for event in (self.state('running'), self.assistant(self.ready), self.result(self.ready)):
+        for event in (self.assistant(self.ready), self.result(self.ready)):
             probe = self.new_probe()
             probe.observe(self.ui_hint())
             with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_missing_init$'):
@@ -521,6 +521,113 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_init$'):
                 probe.observe({'type': 'system', 'subtype': 'init',
                                'session_id': self.session, 'tools': tools})
+
+    def test_preinit_running_preserves_observation_and_requires_init_and_hold(self):
+        for hold_first in (False, True):
+            with self.subTest(hold_first=hold_first):
+                probe = self.new_probe()
+                probe.observe(self.ui_hint())
+                if hold_first:
+                    probe.provider_request(self.ready)
+                    probe.hold_response()
+                event = self.state('running')
+                with patch.object(CANARY.time, 'monotonic_ns', return_value=probe.started_ns + 17):
+                    probe.observe(event)
+                self.assertFalse(probe.initialized)
+                self.assertFalse(probe.running)
+                self.assertEqual(probe.running_turn, 0)
+                self.assertFalse(probe.ready_to_send.is_set())
+                self.assertIn(event['uuid'], probe.native_ids)
+                observed = dict(probe.observations[-1])
+                self.assertEqual(observed, {'kind': 'native_state', 'observedNs': 17,
+                    'state': 'running', 'nativeUuid': event['uuid'], 'awaitingInit': True})
+                with self.assertRaises(CANARY.CanaryError):
+                    probe.prepare(self.frame)
+                probe.observe({'type': 'system', 'subtype': 'init',
+                               'session_id': self.session, 'tools': []})
+                self.assertTrue(probe.initialized)
+                self.assertTrue(probe.running)
+                self.assertEqual(probe.running_turn, 1)
+                self.assertEqual(probe.ready_to_send.is_set(), hold_first)
+                if not hold_first:
+                    probe.provider_request(self.ready)
+                    probe.hold_response()
+                self.assertTrue(probe.ready_to_send.is_set())
+                probe.prepare(self.frame)
+                probe.observe(self.frame | {'isReplay': True})
+                probe.sent()
+                probe.release_response()
+                self.finish(probe)
+                states = [item for item in probe.proof()['observations']
+                          if item['kind'] == 'native_state' and item['state'] == 'running']
+                self.assertEqual(states, [observed])
+                probe.observe({'type': 'system', 'subtype': 'init',
+                               'session_id': self.session, 'tools': []})
+                self.assertFalse(probe.running)
+
+    async def test_preinit_running_without_init_never_becomes_ready(self):
+        probe = self.new_probe()
+        probe.provider_request(self.ready)
+        probe.hold_response()
+        with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_stream_closed$'):
+            await CANARY.observe_busy_stdout(stream(self.ui_hint(), self.state('running')), probe)
+        self.assertFalse(probe.initialized)
+        self.assertFalse(probe.running)
+        self.assertFalse(probe.ready_to_send.is_set())
+        self.assertFalse(probe.complete.is_set())
+        with self.assertRaises(CANARY.CanaryError):
+            probe.proof()
+
+    def test_preinit_running_rejects_second_state_and_duplicate_ids(self):
+        for state in ('idle', 'requires_action', 'running'):
+            probe = self.new_probe()
+            probe.observe(self.state('running'))
+            with self.subTest(state=state), self.assertRaisesRegex(
+                    CANARY.CanaryError, '^busy_native_preinit_order$'):
+                probe.observe(self.state(state))
+            self.assertFalse(probe.running)
+            self.assertFalse(probe.ready_to_send.is_set())
+        for initialized in (False, True):
+            probe = self.new_probe()
+            event = self.state('running')
+            probe.observe(event)
+            if initialized:
+                probe.observe({'type': 'system', 'subtype': 'init',
+                               'session_id': self.session, 'tools': []})
+            with self.subTest(initialized=initialized), self.assertRaisesRegex(
+                    CANARY.CanaryError, '^busy_native_duplicate$'):
+                probe.observe(event)
+        probe = self.new_probe()
+        event = self.state('running')
+        probe.observe(event)
+        self.released(probe=probe)
+        probe.observe(self.assistant(self.ready))
+        with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_duplicate$'):
+            probe.observe(self.result(self.ready) | {'uuid': event['uuid']})
+
+    def test_preinit_running_rejects_malformed_schema_session_and_init(self):
+        event = self.state('running')
+        malformed = [event | change for change in (
+            {'extra': True}, {'tools': []}, {'state': 'idle'}, {'state': None})]
+        malformed += [{key: value for key, value in event.items() if key != missing}
+                      for missing in ('uuid', 'state')]
+        for value in malformed:
+            with self.subTest(value=value), self.assertRaises(CANARY.CanaryError):
+                self.new_probe().observe(value)
+        for identity in (None, 1, 'malformed', event['uuid'].upper(), '{' + event['uuid'] + '}'):
+            with self.subTest(identity=identity), self.assertRaises(CANARY.CanaryError):
+                self.new_probe().observe(event | {'uuid': identity})
+        with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_session_mismatch$'):
+            self.new_probe().observe(event | {'session_id': str(uuid4())})
+        for change in ({'tools': ['Bash']}, {'tools': None}, {'session_id': str(uuid4())}):
+            probe = self.new_probe()
+            probe.observe(event)
+            with self.subTest(change=change), self.assertRaises(CANARY.CanaryError):
+                probe.observe({'type': 'system', 'subtype': 'init',
+                               'session_id': self.session, 'tools': []} | change)
+            self.assertFalse(probe.initialized)
+            self.assertFalse(probe.running)
+            self.assertFalse(probe.ready_to_send.is_set())
 
     async def test_repeated_passive_ui_hints_remain_bounded_and_never_ready(self):
         hint = self.ui_hint()
