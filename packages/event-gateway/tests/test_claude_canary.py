@@ -887,7 +887,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(probe.complete.is_set())
 
     async def test_unknown_stdout_types_never_export_arbitrary_values(self):
-        secret = 'private_untrusted_discriminator'
+        secret = 'private_untrusted_discriminator_' + secrets.token_hex(16)
         values = (secret, secret * 100, 'control_request' + secret,
                   'CONTROL_REQUEST', 'control_request\n', None, {secret: secret},
                   [secret], True, 17, 1.5, 'bash_command', 'session_notice',
