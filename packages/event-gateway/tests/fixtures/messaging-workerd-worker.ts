@@ -95,6 +95,10 @@ export class FixtureCoordinator extends AgentCoordinator {
     return attachment;
   }
 
+  fixtureRotateConsumer() {
+    this.ctx.storage.sql.exec('UPDATE runtimes SET attachment_generation=attachment_generation+1');
+  }
+
   async fixturePublish(publication: unknown) {
     await this.publishMessage(publication);
     this.ctx.storage.sql.exec('UPDATE message_publications SET next_at=0');
@@ -155,7 +159,12 @@ export default { async fetch(request: Request, env: FixtureEnv) {
       keyId: signed.headers.get('x-event-key-id') });
   }
   if (path === '/fixture/read') return Response.json({ ...await mailbox.fixtureRead(), ...await coordinator.fixtureRead() });
-  if (path === '/fixture/change') { await mailbox.fixtureChange((await request.json() as { kind: string }).kind); return Response.json({ changed: true }); }
+  if (path === '/fixture/change') {
+    const { kind } = await request.json() as { kind: string };
+    if (kind === 'consumer') await coordinator.fixtureRotateConsumer();
+    else await mailbox.fixtureChange(kind);
+    return Response.json({ changed: true });
+  }
   const headers = new Headers(request.headers);
   const assertion = headers.get('cf-access-token');
   if (assertion) headers.set('cf-access-jwt-assertion', assertion);

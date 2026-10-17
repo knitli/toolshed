@@ -87,7 +87,8 @@ const agentToken = await jwt({ alg: 'Ed25519', kid: thumbprint, typ: 'JWT' },
 const receiptPublic = { ...receipt.publicJwk, kid: 'fixture-receipt' };
 const secret = randomUUID();
 let outboundCalls = 0;
-const mf = new Miniflare(convertV4MiniflareOptions({
+const options = convertV4MiniflareOptions({
+  resourcePersistencePath: join(process.env.HOME, 'durable-objects'),
   name: 'messaging-wire-fixture', modules: true, script: bundle.outputFiles[0].text,
   outboundService: async () => { outboundCalls++; return new Response(null, { status: 503 }); },
   compatibilityDate: '2026-10-05', compatibilityFlags: ['nodejs_compat'], host: '127.0.0.1', port: 0,
@@ -110,8 +111,10 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     OWNER_REGISTRY: { className: 'FixtureRegistry', useSQLite: true },
     AGENT_COORDINATOR: { className: 'FixtureCoordinator', useSQLite: true },
   },
-}));
-const paths = new Set(['/fixture/seed', '/fixture/read', '/fixture/change', '/v1/dispatch/claim']);
+});
+let mf = new Miniflare(options);
+let restarting = null;
+const paths = new Set(['/fixture/seed', '/fixture/read', '/fixture/change', '/fixture/restart', '/v1/dispatch/claim']);
 const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, maxHeaderSize: 16384 }, async (req, res) => {
   try {
     if (req.method !== 'POST' || !paths.has(req.url) || req.headers['x-fixture-secret'] !== secret) {
@@ -119,6 +122,18 @@ const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, maxHea
     }
     const chunks = []; let length = 0;
     for await (const chunk of req) { length += chunk.length; if (length > 8192) { res.writeHead(413).end(); req.resume(); return; } chunks.push(chunk); }
+    if (restarting || stopping) { res.writeHead(409).end(); return; }
+    if (req.url === '/fixture/restart') {
+      restarting = (async () => {
+        await mf.dispose();
+        if (stopping) throw new Error('fixture stopping');
+        mf = new Miniflare(options);
+        await mf.ready;
+      })();
+      try { await restarting; } finally { restarting = null; }
+      res.writeHead(200, { 'content-type': 'application/json' }).end('{"restarted":true}');
+      return;
+    }
     const headers = new Headers();
     for (const [key, value] of Object.entries(req.headers)) if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(', ') : value);
     const response = await mf.dispatchFetch(`https://events.test${req.url}`, { method: 'POST', headers, body: Buffer.concat(chunks) });
@@ -134,14 +149,15 @@ const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, maxHea
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;
-  server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await mf.dispose();
+  server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+  try { await restarting; } finally { await mf.dispose(); }
 }
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => void stop().then(() => process.exit(0)));
 process.on('disconnect', () => void stop().then(() => process.exit(0)));
 try {
   await mf.ready;
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-  process.stdout.write(`${JSON.stringify({ port: server.address().port, secret, accessToken, agentToken,
+  process.stdout.write(`${JSON.stringify({ pid: process.pid, port: server.address().port, secret, accessToken, agentToken,
     agentPrivateJwk: agent.privateJwk, transportPublicKey: transport.publicJwk.x,
     bundle: { sha256: sha256(bundle.outputFiles[0].contents), inputs } })}\n`);
 } catch (error) { console.error(error); await stop(); process.exitCode = 1; }

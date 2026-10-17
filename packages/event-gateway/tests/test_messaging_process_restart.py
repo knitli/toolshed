@@ -1,10 +1,12 @@
 """Opt-in SIGKILL/restart qualification across real Python, SQLite, HTTP and workerd."""
+import asyncio
 from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import signal
 import selectors
+import shutil
 import subprocess  # nosec B404 - Owned local Python child, fixed checked-in fixture, no shell.
 import sys
 import tempfile
@@ -19,6 +21,8 @@ from test_messaging_workerd import (
     _read_startup_handshake,
     fixture,
 )
+
+import test_messaging_workerd as workerd_fixture
 
 
 CHILD = Path(__file__).parent / 'fixtures/messaging_process_child.py'
@@ -132,7 +136,25 @@ class MessagingProcessRestartTests(unittest.TestCase):
         for field in ('native_request', 'started_receipt', 'input_recorded_receipt'):
             self.assertIsNone(attempt[field])
 
-    def crash_and_restart(self, phase):
+    def restart_cloud(self, address, transport):
+        def workerd_pids():
+            result = subprocess.run(  # nosec B603 - Fixed process inspection command; no shell.
+                ['/usr/bin/pgrep', '-P', str(address['pid']), '-x', 'workerd'],
+                capture_output=True, text=True, timeout=5, check=True)
+            self.assertLess(len(result.stdout), 1024)
+            pids = {int(value) for value in result.stdout.split()}
+            self.assertTrue(pids)
+            return pids
+
+        before = workerd_pids()
+        self.assertEqual(transport.fixture('/fixture/restart'), {'restarted': True})
+        after = workerd_pids()
+        self.assertTrue(before.isdisjoint(after), (before, after))
+        for pid in before:
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+
+    def crash_and_restart(self, phase, *, restart_cloud=False):
         with fixture() as (ledger, address, transport, seed):
             directory = ledger.parent
             native_log, http_log = directory / 'native-calls', directory / 'http-calls'
@@ -173,6 +195,9 @@ class MessagingProcessRestartTests(unittest.TestCase):
                     self.assertEqual(cloud['native_claims'][0]['permit_id'], attempt['admission']['permitId'])
             else:
                 self.assertTrue(all(row['permit_id'] is None for row in cloud['native_claims']))
+            if restart_cloud:
+                self.restart_cloud(address, transport)
+                self.assertEqual(transport.fixture('/fixture/read'), cloud)
             with gateway_child(config, 'restart') as (restarted, recovered):
                 self.assertEqual(recovered['phase'], 'restart')
                 self.assertEqual(recovered['pid'], restarted.pid)
@@ -203,3 +228,58 @@ class MessagingProcessRestartTests(unittest.TestCase):
 
     def test_kill_after_local_admission_commit(self):
         self.crash_and_restart('admission')
+
+    def test_cloud_restart_preserves_uncertain_intent_without_resend(self):
+        self.crash_and_restart('response', restart_cloud=True)
+
+    def test_cloud_restart_preserves_committed_admission_and_shared_budget(self):
+        self.crash_and_restart('admission', restart_cloud=True)
+
+    def test_cloud_restart_preserves_consumer_and_routing_fences(self):
+        for kind in (None, 'consumer', 'route'):
+            with self.subTest(kind=kind), fixture() as (path, address, transport, seed):
+                case = workerd_fixture.MessagingWorkerdTests()
+                case.addCleanup = self.addCleanup
+                gateway = case.gateway(path, address, transport, seed)
+                if kind is not None:
+                    transport.fixture('/fixture/change', {'kind': kind})
+                cloud = transport.fixture('/fixture/read')
+                self.restart_cloud(address, transport)
+                self.assertEqual(transport.fixture('/fixture/read'), cloud)
+                result = asyncio.run(gateway._claim_messaging_history(seed['envelope']['deliveryId']))
+                cloud = transport.fixture('/fixture/read')
+                if kind is None:
+                    self.assertEqual(result['status'], 'admitted', transport.last_response)
+                    self.assertEqual(len(cloud['budget']['wakes']), 1)
+                    self.assertEqual(cloud['native_claims'][0]['permit_id'], result['permitId'])
+                else:
+                    self.assertEqual(result.get('reason'), 'claim_outcome_unknown')
+                    self.assertIn(transport.last_response[0], (403, 409))
+                    self.assertIn(json.loads(transport.last_response[1])['error'], ('denied', 'conflict'))
+                    self.assertEqual((cloud['budget'] or {}).get('wakes', []), [])
+                    self.assertTrue(all(row['permit_id'] is None for row in cloud['native_claims']))
+                self.assertEqual(cloud['outboundCalls'], 0)
+                self.assertEqual(transport.claims, 1)
+                case.assert_inert(gateway, seed)
+
+    def test_restart_proof_rejects_missing_restart_and_missing_persistence(self):
+        for mutation in ('restart', 'persistence'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                broker = Path(directory) / workerd_fixture.BROKER.name
+                source = workerd_fixture.BROKER.read_text()
+                if mutation == 'restart':
+                    original = "await mf.dispose();\n        if (stopping) throw new Error('fixture stopping');\n        mf = new Miniflare(options);"
+                    self.assertIn(original, source)
+                    source = source.replace(original, '')
+                    expected = 'False is not true'
+                else:
+                    original = "resourcePersistencePath: join(process.env.HOME, 'durable-objects'),"
+                    self.assertIn(original, source)
+                    source = source.replace(original, '')
+                    expected = '/fixture/read returned 500:.*no such table'
+                broker.write_text(source)
+                for name in ('messaging-workerd-worker.ts', 'messaging-workerd-inputs.json'):
+                    shutil.copy(workerd_fixture.BROKER.with_name(name), broker.with_name(name))
+                with (patch.object(workerd_fixture, 'BROKER', broker),
+                      self.assertRaisesRegex(AssertionError, expected)):
+                    self.crash_and_restart('admission', restart_cloud=True)
