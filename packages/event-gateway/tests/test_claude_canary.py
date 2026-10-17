@@ -1117,6 +1117,17 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                         self.frame['message']['content']):
             self.assertNotIn(private, diagnostic.getvalue())
 
+    async def test_busy_canary_held_timeout_waits_for_send_after_slow_startup(self):
+        initialize = self.initialize_busy_provider
+
+        async def slow_startup(*args):
+            await initialize(*args)
+            await asyncio.sleep(0.02)
+
+        async with asyncio.timeout(5):
+            with patch.object(self, 'initialize_busy_provider', side_effect=slow_startup):
+                await self.run_busy_canary('held_timeout')
+
     async def run_busy_canary(self, scenario):
         parent = '/private/tmp' if Path('/private/tmp').is_dir() else '/tmp'  # nosec B108
         root = Path(tempfile.mkdtemp(dir=parent)).resolve()
@@ -1128,6 +1139,8 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         pending = []
         generated = 0
         stopped = False
+        real_timeout = asyncio.timeout
+        held_timeout = real_timeout(None)
 
         def generate_uuid():
             nonlocal generated
@@ -1150,6 +1163,8 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
 
         async def send(metadata):
             if scenario == 'held_timeout':
+                # Expire the real run timeout only after reaching the held send.
+                held_timeout.reschedule(asyncio.get_running_loop().time())
                 await asyncio.Event().wait()
             self.assertTrue(provider.probe.running)
             self.assertFalse(provider.probe.release.is_set())
@@ -1176,7 +1191,8 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         transport = Mock(send=AsyncMock(side_effect=send))
         try:
             with patch.object(CANARY, 'uuid4', side_effect=generate_uuid), \
-                    patch.object(CANARY, 'RUN_SECONDS', 0.01 if scenario in ('timeout', 'held_timeout') else 1), \
+                    patch.object(CANARY, 'RUN_SECONDS', None if scenario == 'held_timeout' else 0.01 if scenario == 'timeout' else 1), \
+                    patch.object(CANARY.asyncio, 'timeout', side_effect=lambda delay: held_timeout if delay is None else real_timeout(delay)), \
                     patch.object(CANARY, 'sandbox_profile', return_value='(deny default)'), \
                     patch.object(CANARY, 'LocalProvider', side_effect=make_provider), \
                     patch.object(CANARY.asyncio, 'start_server', new=AsyncMock(return_value=server)), \
@@ -1185,7 +1201,8 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(CANARY, 'child_peer_token', return_value=secrets.token_urlsafe(32)), \
                     patch.object(CANARY, 'ClaudeSocketTransport', return_value=transport), \
                     patch.object(CANARY, 'stop_child', new=AsyncMock(side_effect=stop)) as shutdown:
-                proof = await self.busy_scenario_outcome(scenario, root)
+                async with real_timeout(5):
+                    proof = await self.busy_scenario_outcome(scenario, root)
                 if scenario == 'success':
                     self.assertTrue(stopped)
                     provider.close.assert_awaited_once()
