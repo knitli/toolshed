@@ -1,0 +1,57 @@
+{
+  "source": "Structured transcription of the owner-reported native tool schema; not an independently exported native schema; no monitor started",
+  "required": [
+    "description"
+  ],
+  "exactlyOneOf": [
+    "command",
+    "ws"
+  ],
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "command": {
+      "type": "string",
+      "semantics": "Shell source; each stdout line event; exit ends watch"
+    },
+    "ws": {
+      "type": "string",
+      "schemes": [
+        "ws",
+        "wss"
+      ],
+      "semantics": "Each UTF-8 text frame event; close ends watch"
+    },
+    "ws_subprotocols": {
+      "type": "array",
+      "items": "RFC6455 token",
+      "uniqueItems": true,
+      "wsOnly": true
+    },
+    "persistent": {
+      "type": "boolean",
+      "default": false
+    },
+    "timeout_ms": {
+      "type": "integer",
+      "default": 300000,
+      "minimum": 1000,
+      "maximum": 1800000,
+      "persistentForbidden": true
+    },
+    "wake_delay_ms": {
+      "type": "integer",
+      "default": 120000,
+      "allowedZero": true,
+      "nonzeroMinimum": 1000,
+      "maximum": 1800000
+    },
+    "show_lines": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "output": "No synchronous return schema. Asynchronous machine notifications, not user replies, per line/frame. show_lines true gives FEED transcript cells. Timed ceiling30min. Stop via muse.work_stop/source ends/session ends. Persistent has no deadline until these stops.",
+  "liveWakeProven": false
+}
