@@ -211,13 +211,21 @@ Busy observation failures retain at most eight classified stdout envelopes in th
 existing bounded `fixture.log`: event type/subtype from fixed allowlists, exact
 expected session UUID (or null), parent monotonic timestamp, and sequence number.
 Session-state events additionally retain only `running`, `idle`, or `unknown`.
-Unexpected system events additionally classify the fixed `hook_started`,
-`hook_progress`, `hook_response`, `status`, `session_metadata`, and `init_milestone`
-subtypes. Their diagnostic includes only JSON type/absence labels for ten fixed
+System diagnostics recognize all 64 fixed system-schema subtype constants from
+pinned Claude 2.1.302, plus the previously reviewed `init_milestone` constructor.
+The [source manifest](claude-system-subtypes-2.1.302.json) records the binary and
+schema-module hashes and absolute byte offsets for each fixed label. `init` and
+`session_state_changed` retain their existing handling; the other 63 labels change
+diagnostics only. Their diagnostic includes only JSON type/absence labels for ten fixed
 fields: subtype, metadata, status, hook_id, hook_event, message, stdout, stderr,
 output, and exit_code. Field values and arbitrary field names are never retained.
 These labels come from the pinned 2.1.302 executable's static source; they do not
-identify the earlier failed run's redacted event or establish valid startup order.
+identify the failed run `39055515172`'s redacted event or establish valid startup order.
+That run still reported an unknown system subtype before init. Absent sampled
+fields do not imply an otherwise empty envelope: fields such as content, tasks,
+commands and title were not sampled. Static classification does not qualify
+acceptance, and unlisted subtype strings remain `unknown`. Constructor-only labels
+outside this reviewed schema (except retained `init_milestone`) are not included.
 Unknown labels, malformed JSON, and oversized reads retain no raw frame text.
 This diagnostic is failure evidence only; init, native running, held-response,
 identity and completion requirements remain unchanged. It does not prove admission.

@@ -336,8 +336,24 @@ async def observe_busy_stdout(reader, probe):
                     'sessionId': probe.session_id if envelope.get('session_id') == probe.session_id else None})
                 if kind == 'system' and subtype not in ('init', 'session_state_changed'):
                     # Fixed labels and JSON shapes identify startup failures without retaining payloads.
-                    if subtype in ('hook_started', 'hook_progress', 'hook_response', 'status',
-                                   'session_metadata', 'init_milestone'):
+                    if subtype in (
+                            'agents_killed', 'api_error', 'api_retry', 'away_summary', 'background_tasks_changed',
+                            'cloud_session_delta', 'code_change_published', 'commands_changed', 'compact_boundary',
+                            'control_request_progress', 'dev_intent', 'elicitation_complete',
+                            'feedback_draft_queued', 'file_attachments_missing', 'file_snapshot', 'files_persisted',
+                            'hook_progress', 'hook_response', 'hook_started', 'informational', 'init_milestone',
+                            'instruction_size_warning', 'local_command_output', 'memory_recall', 'memory_saved',
+                            'mirror_error', 'model_consent_fallback', 'model_fallback', 'model_refusal_fallback',
+                            'model_refusal_no_fallback', 'notification', 'peer_message_hold',
+                            'per_turn_effort_changed', 'permission_check_status', 'permission_denied',
+                            'permission_retry', 'plugin_install', 'post_turn_summary', 'scheduled_task_fire',
+                            'session_metadata', 'session_title_changed', 'status', 'stop_hook_summary',
+                            'task_notification', 'task_progress', 'task_started', 'task_summary', 'task_updated',
+                            'thinking', 'thinking_tokens', 'turn_duration', 'turn_handoff_available',
+                            'turn_preempted', 'ui_focus', 'ui_invalidate', 'ui_log', 'ui_panes', 'ui_scroll',
+                            'ui_status', 'ui_toast', 'upgrade_relay_marker', 'vcs_state_changed',
+                            'worker_shutting_down'
+                    ):
                         diagnostic[-1]['eventSubtype'] = subtype
                     shapes = {str: 'string', dict: 'object', list: 'array', type(None): 'null',
                               bool: 'boolean', int: 'number', float: 'number'}
