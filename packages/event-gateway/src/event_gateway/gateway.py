@@ -80,6 +80,19 @@ class Gateway:
             raise Refused("attachment_fenced")
         return self.store.accept(envelope)
 
+    def accept_messaging_v2(self, body, *, signature, audience, key_id, node_id, runtime_id):
+        """Callable-only authenticated journal entry; the active listener remains v1."""
+        from .messaging_admission_v2 import validate_authenticated_envelope
+
+        if audience != self.audience or key_id not in self.keys:
+            raise Refused("invalid_transport_authority")
+        envelope = validate_authenticated_envelope(
+            body, signature=signature, audience=audience, public_key=self.keys[key_id],
+            expected_audience=self.audience, node_id=node_id,
+            attachment=self.store.get_attachment(runtime_id), now_ms=self.clock() * 1000,
+        )
+        return self.store.accept(envelope)
+
     def _row(self, delivery_id, reason=None):
         row = self.store.delivery(delivery_id)
         return {**row, "reason": reason} if reason else row
@@ -307,6 +320,8 @@ class Gateway:
     async def _dispatch_locked(self, delivery_id):
         """Run the admitted-submission pipeline under the runtime lock."""
         envelope = self._require_envelope(delivery_id)
+        if envelope.get("schemaVersion") != 1:
+            return self._row(delivery_id, "messaging_v2_disabled")
         row = self._row(delivery_id)
         if row["status"] != "queued":
             return row
@@ -358,6 +373,8 @@ class Gateway:
         envelope = self.store.delivery_envelope(delivery_id)
         if envelope is None:
             return None
+        if envelope.get("schemaVersion") != 1:
+            return self._row(delivery_id, "messaging_v2_disabled")
         async with self._runtime_guard(envelope["runtimeId"]):
             attempt = self.store.current_attempt(delivery_id)
             if not attempt:

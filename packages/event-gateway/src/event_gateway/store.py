@@ -31,6 +31,7 @@ IDENTITY = (
 RETENTION = 7 * 86400
 CLAIM_RESERVE = 262144
 RETRYABLE_CLAIM_REFUSALS = ("conflict", "capacity", "coordinator_capacity", "native_binding_unqualified")
+MESSAGING_METADATA = ("routingGeneration", "namespace", "agentIncarnation")
 
 
 def _json(value):
@@ -131,7 +132,7 @@ class Store:
     def _initialize_schema(self):
         """Create tables, migrate columns, and mark interrupted submits ambiguous."""
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, 1, 2, 3, 4):
+        if version not in (0, 1, 2, 3, 4, 5):
             raise StoreError("unsupported_schema")
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
@@ -157,7 +158,8 @@ class Store:
             self._ensure_attempt_columns()
             if version < 3:
                 self._migrate_native_turn_aliases()
-            self.db.execute("PRAGMA user_version=4")
+            if version < 4:
+                self.db.execute("PRAGMA user_version=4")
             self.db.execute(
                 "UPDATE attempts SET state='ambiguous', reason='restart_during_submit', updated=? WHERE state='submitting'",
                 (self.clock(),),
@@ -315,8 +317,39 @@ class Store:
             raise StoreError("invalid_attachment")
 
     def put_attachment(self, mapping, *, transfer=None):
+        if isinstance(mapping, dict) and any(key in mapping for key in MESSAGING_METADATA):
+            raise StoreError("invalid_attachment")
         try:
             return self._put_attachment(mapping, transfer=transfer)
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
+
+    def put_messaging_attachment(self, mapping):
+        """Persist trusted v2 metadata only; no activation, transfer, or counter reset."""
+        from .messaging_admission_v2 import ATTACHMENT_FIELDS, _finite
+        from . import messaging_protocol_v2 as protocol
+
+        if (type(mapping) is not dict
+                or set(mapping) != set(ATTACHMENT_FIELDS) | {"namespace", "agentIncarnation", "leaseExpiresAt"}):
+            raise StoreError("invalid_attachment")
+        try:
+            mapping = json.loads(protocol._json_bytes(mapping))
+        except (TypeError, ValueError, RecursionError, OverflowError):
+            raise StoreError("invalid_attachment") from None
+        namespace = mapping["namespace"]
+        if (not all(protocol._matches(protocol._UUID, mapping[key]) for key in ("nodeId", "runtimeId"))
+                or not protocol._matches(protocol._PRINCIPAL, mapping["principal"])
+                or len(mapping["principal"]) > 254
+                or not protocol._matches(re.compile(r"[a-z0-9-]{1,32}"), mapping["agent"])
+                or not protocol._integer(mapping["routingGeneration"])
+                or not protocol._integer(mapping["agentIncarnation"], 0)
+                or not _finite(mapping["leaseExpiresAt"])
+                or mapping["consumerGeneration"] != mapping["attachmentGeneration"]
+                or type(namespace) is not str or not 1 <= protocol._code_points(namespace) <= 256
+                or re.search(r"[\x00-\x1f\x7f]", namespace)):
+            raise StoreError("invalid_attachment")
+        try:
+            return self._put_attachment(mapping)
         except sqlite3.Error:
             raise StoreError("storage_unavailable") from None
 
@@ -324,11 +357,14 @@ class Store:
         self._validate_attachment(mapping, transfer)
         if mapping["leaseExpiresAt"] <= self.clock():
             raise StoreError("invalid_attachment")
-        generations = (*IDENTITY[3:], "consumerGeneration")
+        messaging = "routingGeneration" in mapping
+        generations = (*IDENTITY[3:], "consumerGeneration", *(("routingGeneration", "agentIncarnation") if messaging else ()))
         row = self.db.execute(
             "SELECT data FROM attachments WHERE runtime=?", (mapping["runtimeId"],)
         ).fetchone()
         old = json.loads(row[0]) if row else None
+        if old and ("routingGeneration" in old) != messaging:
+            raise StoreError("invalid_attachment")
         target_error = None
         try:
             if (
@@ -370,11 +406,15 @@ class Store:
         target_reserve = 32768 + len(data.encode()) * 3
         self._capacity(target_reserve)
         with self.db:
+            if messaging:
+                self.db.execute("BEGIN IMMEDIATE")
+                self.db.execute("PRAGMA user_version=5")
             if transfer is not None:
                 self._revoke_transfer_source(mapping, transfer, target_reserve=target_reserve)
             if target_error is None:
                 if old and any(
-                    old.get(k) != mapping.get(k) for k in (*IDENTITY, "consumerGeneration")
+                    old.get(k) != mapping.get(k)
+                    for k in (*IDENTITY, "consumerGeneration", "nodeId", *MESSAGING_METADATA)
                 ):
                     self._fence(mapping["runtimeId"])
                 self.db.execute(
@@ -386,7 +426,7 @@ class Store:
         return mapping.copy()
 
     def revoke_transfer_source(self, mapping, *, transfer):
-        if transfer is None:
+        if transfer is None or (isinstance(mapping, dict) and any(key in mapping for key in MESSAGING_METADATA)):
             raise StoreError("invalid_attachment")
         self._validate_attachment(mapping, transfer)
         try:
@@ -412,6 +452,8 @@ class Store:
         }
         if source.get("runtimeId") != source_id:
             raise StoreError("corrupt_state")
+        if "routingGeneration" in source:
+            raise StoreError("invalid_attachment")
         if source_row:
             if (source.get("principal") != mapping["principal"]
                     or source.get("agent") != mapping["agent"]):
@@ -459,9 +501,9 @@ class Store:
         )
         self.db.execute(
             """UPDATE deliveries
-               SET state=CASE WHEN state='queued' THEN 'stale' ELSE 'ambiguous' END,
+               SET state=CASE WHEN state IN ('queued','held') THEN 'stale' ELSE 'ambiguous' END,
                    reason='attachment_detached', updated=?
-               WHERE runtime=? AND state IN ('queued','submitting','submitted')""",
+               WHERE runtime=? AND state IN ('queued','held','submitting','submitted')""",
             (self.clock(), runtime_id),
         )
 
@@ -484,8 +526,19 @@ class Store:
 
     def _matches(self, envelope):
         mapping = self.get_attachment(envelope.get("runtimeId"))
+        if envelope.get("schemaVersion") == 2:
+            from .messaging_admission_v2 import ATTACHMENT_FIELDS
+            from .messaging_protocol_v2 import _json_bytes
+
+            expected = {key: envelope[key] for key in ATTACHMENT_FIELDS}
+            expected.update((key, envelope["canonicalSubject"][key]) for key in ("namespace", "agentIncarnation"))
+            if (not mapping or mapping["leaseExpiresAt"] <= self.clock()
+                    or any(_json_bytes(mapping.get(key)) != _json_bytes(value) for key, value in expected.items())):
+                raise StoreError("stale", "attachment_fenced")
+            return mapping
         if (
             not mapping
+            or "routingGeneration" in mapping
             or mapping["leaseExpiresAt"] <= self.clock()
             or any(
                 envelope.get(k) != mapping.get(k)
@@ -499,9 +552,14 @@ class Store:
         if not isinstance(envelope, dict):
             raise StoreError("invalid_envelope")
         # Protocol validation is repeated at the store trust boundary when available.
-        from .protocol import parse_envelope, matches_delivery_id
+        if envelope.get("schemaVersion") == 2:
+            from .messaging_protocol_v2 import parse_envelope, matches_delivery_id, _json_bytes
 
-        envelope = parse_envelope(_json(envelope), now_ms=self.clock() * 1000)
+            envelope = parse_envelope(_json_bytes(envelope), now_ms=self.clock() * 1000)
+        else:
+            from .protocol import parse_envelope, matches_delivery_id
+
+            envelope = parse_envelope(_json(envelope), now_ms=self.clock() * 1000)
         if not matches_delivery_id(envelope):
             raise StoreError("invalid_delivery_identity")
         self._matches(envelope)
@@ -526,7 +584,7 @@ class Store:
             return result
         self.cleanup()
         count = self.db.execute("""SELECT COUNT(*) FROM deliveries
-                 WHERE state IN ('queued','claiming','admitted','settlement_pending','submitting','submitted','ambiguous')
+                 WHERE state IN ('held','queued','claiming','admitted','settlement_pending','submitting','submitted','ambiguous')
                     OR (state='observed' AND ack_state IS NOT state)""").fetchone()[0]
         if count >= self.max_rows:
             self.blocked_reason = "pending_capacity"
@@ -537,6 +595,9 @@ class Store:
         now = self.clock()
         horizon = max(now, self._expires(envelope)) + RETENTION
         with self.db:
+            if envelope["schemaVersion"] == 2:
+                self.db.execute("BEGIN IMMEDIATE")
+                self.db.execute("PRAGMA user_version=5")
             self.db.execute(
                 "INSERT INTO deliveries VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
@@ -546,7 +607,7 @@ class Store:
                     encoded,
                     envelope["runtimeId"],
                     envelope["agent"],
-                    "queued",
+                    "held" if envelope["schemaVersion"] == 2 else "queued",
                     now,
                     now,
                     horizon,
@@ -597,6 +658,8 @@ class Store:
             if row is None or row["state"] != "queued":
                 return False
             envelope = json.loads(row["envelope"])
+            if envelope.get("schemaVersion") != 1:
+                return False
             try:
                 self._matches(envelope)
             except StoreError:
@@ -698,6 +761,8 @@ class Store:
             self.db.execute("BEGIN IMMEDIATE")
             row = self._attempt(delivery_id, attempt_id)
             if row is None or row["state"] != "admitted" or row["fenced"]:
+                return False
+            if json.loads(row["envelope"]).get("schemaVersion") != 1:
                 return False
             admission = json.loads(row["admission"])
             if not _timestamp(admission["permitIssuedAt"]) <= self.clock() * 1000 < _timestamp(admission["permitExpiresAt"]):
@@ -931,6 +996,8 @@ class Store:
             row = self._attempt(delivery_id, attempt_id)
             if row is None or row["state"] != "settlement_pending":
                 return False
+            if json.loads(row["envelope"]).get("schemaVersion") != 1:
+                return False
             admission, evidence = json.loads(row["admission"]), json.loads(row["evidence"])
             expected = {key: admission["envelope"][key] for key in ("deliveryId", "attemptId", "nodeGeneration")}
             expected.update(status="not_started", permitId=admission["permitId"], nodeId=admission["nodeId"], evidence=evidence)
@@ -966,8 +1033,10 @@ class Store:
         ).fetchone()
         if not row or row["state"] != "queued":
             return False
-        self._capacity(32768)
         envelope = json.loads(row["envelope"])
+        if envelope.get("schemaVersion") != 1:
+            return False
+        self._capacity(32768)
         try:
             self._matches(envelope)
         except StoreError:
@@ -1000,6 +1069,7 @@ class Store:
         ):
             raise StoreError("invalid_native_id")
         transitions = {
+            "held": {"stale"},
             "queued": {"stale"},
             "claiming": {"ambiguous"},
             "admitted": set(),
@@ -1015,6 +1085,9 @@ class Store:
         ).fetchone()
         if not row:
             raise StoreError("not_found")
+        if json.loads(row["envelope"]).get("schemaVersion") == 2 and (
+                status not in ("held", "stale") or submission_id is not None or turn_id is not None):
+            raise StoreError("invalid_transition")
         if attempt_id is not None and json.loads(row["envelope"])["attemptId"] != attempt_id:
             raise StoreError("attempt_conflict")
         if row["state"] == "settlement_pending" and (submission_id is not None or turn_id is not None):
@@ -1130,7 +1203,7 @@ class Store:
         return [
             self._public(row)
             for row in self.db.execute(
-                "SELECT * FROM deliveries WHERE state='queued' ORDER BY created,id"
+                "SELECT * FROM deliveries WHERE state='queued' AND json_extract(envelope,'$.schemaVersion')=1 ORDER BY created,id"
             )
         ]
 
@@ -1138,9 +1211,10 @@ class Store:
         return [
             self._public(row)
             for row in self.db.execute(
-                "SELECT * FROM deliveries WHERE state IN "
+                "SELECT * FROM deliveries WHERE (state IN "
                 "('claiming','admitted','settlement_pending','submitted','ambiguous') "
-                "OR (state='observed' AND ack_state IS NOT state) ORDER BY created,id"
+                "OR (state='observed' AND ack_state IS NOT state)) "
+                "AND json_extract(envelope,'$.schemaVersion')=1 ORDER BY created,id"
             )
         ]
 
@@ -1166,7 +1240,7 @@ class Store:
             )
         }
         pending = self.db.execute("""SELECT COUNT(*) FROM deliveries
-                 WHERE state IN ('queued','claiming','admitted','settlement_pending','submitting','submitted','ambiguous')
+                 WHERE state IN ('held','queued','claiming','admitted','settlement_pending','submitting','submitted','ambiguous')
                     OR (state='observed' AND ack_state IS NOT state)""").fetchone()[0]
         try:
             self._capacity(32768)
