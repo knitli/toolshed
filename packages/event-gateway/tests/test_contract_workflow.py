@@ -88,7 +88,7 @@ class ContractWorkflowTests(unittest.TestCase):
             "legacy", "no-start", "native-start", "native-input-recorded",
             "native-admission", "native-runtime-status", "github-source-readback", "github-source-control",
             "github-watch-control", "github-watch-owner-rpc", "github-pinned-history-read",
-            "cloud-guard-baseline-messaging-v2-dispatch",
+            "cloud-guard-baseline-messaging-v2-dispatch", "github-initial-custody",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         for expected in metadata["families"]:
@@ -99,6 +99,117 @@ class ContractWorkflowTests(unittest.TestCase):
                 self.assertEqual(self.verify(), expected["name"])
                 self.assertCountEqual(self.reads, [SNAPSHOT + path for path in PATHS])
                 self.assertEqual(self.api_reads, [f"git/trees/{HEAD}?recursive=1"])
+
+    def test_initial_custody_requires_complete_authorization(self):
+        name = "github-initial-custody"
+        self.blobs = self.approved_snapshot(name)
+        self.assertEqual(self.verify(), name)
+        previous = tuple(entry for entry in POLICY["FAMILIES"] if entry["name"] != name)
+        with self.assertRaisesRegex(ValueError, "contract family not authorized"):
+            self.verify(previous)
+
+    def test_initial_custody_snapshot_mutation_or_omission_rejected(self):
+        self.assert_mutation_or_omission_rejected("github-initial-custody")
+
+    def test_initial_custody_source_hash_mutation_or_omission_rejected(self):
+        self.assert_source_hash_mutation_or_omission_rejected("github-initial-custody")
+
+    def test_initial_custody_exact_source_provenance_and_retained_event_bytes(self):
+        name = "github-initial-custody"
+        revision = "3ad64222999bc2aaa60f50623120e302edc5f8bd"
+        event_revision = "7b63bee97395a70e05ffb08ee214e8351f6dda06"
+        blobs = self.approved_snapshot(name)
+        previous = self.approved_snapshot("cloud-guard-baseline-messaging-v2-dispatch")
+        control = json.loads(blobs[SNAPSHOT + "event-control-v1/manifest.json"])
+        event = json.loads(blobs[SNAPSHOT + "event-v1/manifest.json"])
+        baseline = json.loads(previous[SNAPSHOT + "event-control-v1/manifest.json"])
+        additional = {
+            'github/conversion-manifest-store.ts',
+            'github/conversion-planning.ts',
+            'github/initial-conversion.ts',
+            'github/initial-watch-host-store.ts',
+            'github/initial-watch-preparation.ts',
+            'github/material-cache.ts',
+            'github/material-delete.ts',
+            'github/material-read-contract.ts',
+            'github/material-read.ts',
+            'github/reconciliation-internal.ts',
+            'github/reconciliation-store.ts',
+            'github/source-reference-contract.ts',
+            'github/source-reference-store.ts',
+            'quarantine-inventory.ts',
+            'quarantine-inventory-contract.ts',
+            'quarantine-inventory-validation.ts',
+        }
+        expected_paths = set(baseline["sources"]) | {
+            "apps/os/packages/event-runtime/src/" + path for path in additional}
+        self.assertEqual(len(baseline["sources"]), 39)
+        self.assertEqual(len(expected_paths), 55)
+        self.assertEqual(set(control["sources"]), expected_paths)
+        self.assertEqual(control["revision"], revision)
+        self.assertEqual(control["zodVersion"], "4.6.5")
+        self.assertEqual(event["commit"], event_revision)
+        for path in PATHS:
+            if path != "event-control-v1/manifest.json":
+                self.assertEqual(blobs[SNAPSHOT + path], previous[SNAPSHOT + path])
+        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+            self.assertEqual(metadata["snapshots"][name], "prepared-export:" + revision)
+            self.assertEqual(metadata["sources"][revision], control["sources"])
+            for path, digest in control["sources"].items():
+                self.assertEqual(hashlib.sha256(archive.read(f"sources/{revision}/{path}")).hexdigest(), digest)
+            # This historical revision is a 41-source union; retain it and verify
+            # the four event entries as a subset, not as a replacement source map.
+            self.assertEqual(len(metadata["sources"][event_revision]), 41)
+            self.assertEqual(len(event["files"]), 4)
+            for entry in event["files"]:
+                path = entry["originalPath"]
+                self.assertEqual(metadata["sources"][event_revision][path], entry["sha256"])
+                source = archive.read(f"sources/{event_revision}/{path}")
+                self.assertEqual(hashlib.sha256(source).hexdigest(), entry["sha256"])
+                self.assertEqual(blobs[SNAPSHOT + "event-v1/" + entry["file"]], source)
+        self.assertEqual(hashlib.sha256(blobs[SNAPSHOT + "event-control-v1/fixtures.json"]).hexdigest(),
+                         control["fixturesSha256"])
+
+    def test_initial_custody_preserves_all_historical_archive_payloads_and_metadata(self):
+        name = "github-initial-custody"
+        revision = "3ad64222999bc2aaa60f50623120e302edc5f8bd"
+        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
+            names = archive.namelist()
+            self.assertEqual(len(names), 378)
+            self.assertEqual(len(set(names)), len(names))
+            previous = {path: hashlib.sha256(archive.read(path)).hexdigest() for path in names
+                        if path != "metadata.json" and not path.startswith(f"snapshots/{name}/")
+                        and not path.startswith(f"sources/{revision}/")}
+            self.assertEqual(len(previous), 315)
+            digest = hashlib.sha256(json.dumps(previous, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            self.assertEqual(digest, "519d70205b0741bf8e8db2b97bba0f2f1b88f3acc0b491a596208e6f7b0dd1e4")
+            metadata = json.loads(archive.read("metadata.json"))
+        self.assertEqual(metadata["families"][-1]["name"], name)
+        metadata["families"] = metadata["families"][:-1]
+        del metadata["snapshots"][name]
+        del metadata["sources"][revision]
+        self.assertEqual(len(metadata["families"]), 12)
+        digest = hashlib.sha256(json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.assertEqual(digest, "678cd6587803547f685115676d9bcd9c1b58b3f7d50f3d8b6e34842960427980")
+
+    def test_initial_custody_semantic_corpus_and_self_rehashed_mutation(self):
+        name = "github-initial-custody"
+        blobs = self.approved_snapshot(name)
+        path = SNAPSHOT + "event-v1/protocol-v1.json"
+        fixture = json.loads(blobs[path])
+        self.assert_semantic_corpus(blobs)
+        fixture["semanticVectors"]["rawCases"][0]["expectedError"] = "invalid_schema"
+        self.blobs = blobs.copy()
+        self.blobs[path] = (json.dumps(fixture, indent=2) + "\n").encode()
+        manifest_path = SNAPSHOT + "event-v1/manifest.json"
+        manifest = json.loads(blobs[manifest_path])
+        for entry in manifest["files"]:
+            if entry["file"] == "protocol-v1.json":
+                entry["sha256"] = hashlib.sha256(self.blobs[path]).hexdigest()
+        self.blobs[manifest_path] = (json.dumps(manifest, indent=2) + "\n").encode()
+        with self.assertRaisesRegex(ValueError, "contract family not authorized"):
+            self.verify()
 
     def test_guard_baseline_requires_complete_authorization(self):
         name = "cloud-guard-baseline-messaging-v2-dispatch"
@@ -325,7 +436,9 @@ class ContractWorkflowTests(unittest.TestCase):
                     self.assertEqual(current[SNAPSHOT + path], previous[SNAPSHOT + path])
 
     def test_github_watch_owner_rpc_semantic_corpus(self):
-        blobs = self.approved_snapshot("github-watch-owner-rpc")
+        self.assert_semantic_corpus(self.approved_snapshot("github-watch-owner-rpc"))
+
+    def assert_semantic_corpus(self, blobs):
         vectors = json.loads(blobs[SNAPSHOT + "event-v1/protocol-v1.json"])["semanticVectors"]
         self.assertEqual(sum(len(vectors[key]) for key in
                              ("rawCases", "digestCases", "bindingCases")), 45)
