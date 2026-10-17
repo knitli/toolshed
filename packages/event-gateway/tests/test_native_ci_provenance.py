@@ -1,4 +1,5 @@
 import copy
+import gzip
 import importlib.util
 import io
 import json
@@ -259,8 +260,58 @@ class NativeCIProvenanceTests(unittest.TestCase):
             V.verify_candidate(api, HEAD, MAIN)
         self.assertNotIn(("download", 456), api.calls)
 
+    def frozen_launcher(self, name, expected):
+        with gzip.open(Path(__file__).parent / "fixtures" / name, "rb") as stream:
+            source = stream.read(V.LIMIT + 1)
+        self.assertLessEqual(len(source), V.LIMIT)
+        self.assertEqual(V.digest(source), expected)
+        return source
+
+    def terminal_query_transition(self):
+        api = FakeAPI()
+        api.blobs[V.LAUNCHER, MAIN] = self.frozen_launcher(
+            "reviewed-launcher-before-terminal-query.py.gz",
+            "4ca29e5aec4aa7bbe753d2910839b1d77002b6ccbf7941d3358d3518aee8cfed")
+        api.blobs[V.LAUNCHER, HEAD] = self.frozen_launcher(
+            "reviewed-launcher-terminal-query.py.gz",
+            "b35f40b9968d66471ba420cf8b6ea46f482e7f49c43bd0e6ddca99aefa6275b5")
+        return api
+
+    def test_exact_terminal_query_source_transition_keeps_both_binary_pins(self):
+        api = self.terminal_query_transition()
+        self.assertEqual(V.verify_candidate(api, HEAD, MAIN),
+                         "Current main-authorized native pins unchanged")
+        self.assertEqual(api.calls, [f"git/trees/{HEAD}?recursive=1",
+                                     (V.LAUNCHER, HEAD), (V.LAUNCHER, MAIN)])
+
+    def test_terminal_query_transition_rejects_changed_source_or_digest_pair(self):
+        for revision in (MAIN, HEAD):
+            api = self.terminal_query_transition()
+            api.blobs[V.LAUNCHER, revision] += b"# not the reviewed source bytes\n"
+            with self.subTest(revision=revision), self.assertRaises(ValueError):
+                V.verify_candidate(api, HEAD, MAIN)
+            self.assertNotIn(("download", 456), api.calls)
+        for name in ("QUALIFIED_SHA256", "QUALIFIED_CODE_MODE_HOST_SHA256"):
+            api = self.terminal_query_transition()
+            source = api.blobs[V.LAUNCHER, HEAD]
+            api.blobs[V.LAUNCHER, HEAD] = source.replace(V.pins(source)[name].encode(), b"0" * 64)
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                V.verify_candidate(api, HEAD, MAIN)
+            self.assertNotIn(("download", 456), api.calls)
+
+    def test_terminal_query_source_cannot_also_promote_attested_binary(self):
+        api = self.terminal_query_transition()
+        source = api.blobs[V.LAUNCHER, HEAD]
+        api.blobs[V.LAUNCHER, HEAD] = source.replace(
+            V.pins(source)["QUALIFIED_SHA256"].encode(), api.selected["binarySha256"].encode())
+        with self.assertRaises(ValueError):
+            V.verify_candidate(api, HEAD, MAIN)
+        self.assertNotIn(("download", 456), api.calls)
+
     def core_idle_transition(self):
-        source = (SCRIPT.parents[3] / V.LAUNCHER).read_bytes()
+        source = self.frozen_launcher(
+            "reviewed-launcher-before-terminal-query.py.gz",
+            "4ca29e5aec4aa7bbe753d2910839b1d77002b6ccbf7941d3358d3518aee8cfed")
         # Replay the reviewed two-line witness change; retain this fixture after pin promotion.
         for name, value in zip(("QUALIFIED_SHA256", "QUALIFIED_CODE_MODE_HOST_SHA256"),
                                V.REVIEWED_LAUNCHER_TRANSITION[2:]):

@@ -31,6 +31,14 @@ REVIEWED_LAUNCHER_TRANSITION = (
     "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b",
     "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
 )
+# Separate historical-evidence query; exact reviewed source and unchanged pins.
+# This protected-policy change must merge before the consumer source transition.
+REVIEWED_TERMINAL_QUERY_TRANSITION = (
+    "4ca29e5aec4aa7bbe753d2910839b1d77002b6ccbf7941d3358d3518aee8cfed",
+    "b35f40b9968d66471ba420cf8b6ea46f482e7f49c43bd0e6ddca99aefa6275b5",
+    "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b",
+    "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
+)
 INPUTS = {
     "builderSha256": "packages/event-gateway/scripts/package_native_client.py",
     "producerSha256": "packages/event-gateway/scripts/produce_native_ci_artifact.py",
@@ -284,7 +292,7 @@ def verify_candidate(api, head, main):
             or (candidate == approved and (
                 digest(approved_source), digest(candidate_source),
                 candidate["QUALIFIED_SHA256"], candidate["QUALIFIED_CODE_MODE_HOST_SHA256"],
-            ) == REVIEWED_LAUNCHER_TRANSITION))
+            ) in (REVIEWED_LAUNCHER_TRANSITION, REVIEWED_TERMINAL_QUERY_TRANSITION)))
     if candidate == approved:
         return "Current main-authorized native pins unchanged"
     require(entries.get(PROVENANCE, {}).get("type") == "blob"
