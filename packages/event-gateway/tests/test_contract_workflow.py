@@ -88,6 +88,7 @@ class ContractWorkflowTests(unittest.TestCase):
             "legacy", "no-start", "native-start", "native-input-recorded",
             "native-admission", "native-runtime-status", "github-source-readback", "github-source-control",
             "github-watch-control", "github-watch-owner-rpc", "github-pinned-history-read",
+            "cloud-guard-baseline-messaging-v2-dispatch",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         for expected in metadata["families"]:
@@ -98,6 +99,49 @@ class ContractWorkflowTests(unittest.TestCase):
                 self.assertEqual(self.verify(), expected["name"])
                 self.assertCountEqual(self.reads, [SNAPSHOT + path for path in PATHS])
                 self.assertEqual(self.api_reads, [f"git/trees/{HEAD}?recursive=1"])
+
+    def test_guard_baseline_requires_complete_authorization(self):
+        name = "cloud-guard-baseline-messaging-v2-dispatch"
+        self.blobs = self.approved_snapshot(name)
+        self.assertEqual(self.verify(), name)
+        historical = tuple(family for family in POLICY["FAMILIES"] if family["name"] != name)
+        with self.assertRaisesRegex(ValueError, "contract family not authorized"):
+            self.verify(historical)
+
+    def test_guard_baseline_mutation_or_omission_rejected(self):
+        self.assert_mutation_or_omission_rejected("cloud-guard-baseline-messaging-v2-dispatch")
+
+    def test_guard_baseline_source_hash_mutation_or_omission_rejected(self):
+        self.assert_source_hash_mutation_or_omission_rejected("cloud-guard-baseline-messaging-v2-dispatch")
+
+    def test_guard_baseline_immutable_source_provenance(self):
+        name = "cloud-guard-baseline-messaging-v2-dispatch"
+        revision = "7b63bee97395a70e05ffb08ee214e8351f6dda06"
+        blobs = self.approved_snapshot(name)
+        control = json.loads(blobs[SNAPSHOT + "event-control-v1/manifest.json"])
+        event = json.loads(blobs[SNAPSHOT + "event-v1/manifest.json"])
+        self.assertEqual(control["revision"], revision)
+        self.assertEqual(event["commit"], revision)
+        self.assertEqual(len(control["sources"]), 39)
+        for path in ("github/host-storage-version.ts", "messaging/protocol-v2.ts"):
+            self.assertIn("apps/os/packages/event-runtime/src/" + path, control["sources"])
+        expected = dict(control["sources"])
+        for entry in event["files"]:
+            path = entry["originalPath"]
+            if path in expected:
+                self.assertEqual(expected[path], entry["sha256"])
+            expected[path] = entry["sha256"]
+        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+            self.assertEqual(metadata["sources"][revision], expected)
+            for path, digest in expected.items():
+                source = archive.read(f"sources/{revision}/{path}")
+                self.assertEqual(hashlib.sha256(source).hexdigest(), digest)
+            for entry in event["files"]:
+                self.assertEqual(blobs[SNAPSHOT + "event-v1/" + entry["file"]],
+                                 archive.read(f"sources/{revision}/{entry['originalPath']}"))
+        self.assertEqual(hashlib.sha256(blobs[SNAPSHOT + "event-control-v1/fixtures.json"]).hexdigest(),
+                         control["fixturesSha256"])
 
     def test_native_admission_mutation_or_omission_rejected_for_all_required_blobs(self):
         self.assert_mutation_or_omission_rejected("native-admission")
