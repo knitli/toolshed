@@ -2399,7 +2399,8 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
             with FIXTURE.evidence_archive(path) as evidence:
                 ctx = SimpleNamespace(evidence=evidence, dispatch_labels={"delivery": "C-busy-second"},
                                       dispatch_calls=[], dispatch_results=[], dispatch_errors=[],
-                                      c_challenges=[], c_busy_nonces=set(), sessions={"C": {"binding": binding}})
+                                      c_challenges=[], c_busy_nonces=set(), c_busy_binding=binding,
+                                      sessions={"C": {"binding": binding}})
 
                 async def dispatch(*args):
                     ctx.c_challenges.extend([copy.deepcopy(row), copy.deepcopy(row)])

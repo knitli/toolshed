@@ -1560,6 +1560,125 @@ async def wait_stable_session_binding(session, provider, *, minimum_turn_main_re
     raise AssertionError("native binding/model activity did not stabilize after completed turn")
 
 
+class BusyObservationRefused(AssertionError):
+    """A transient witness refusal; this never represents an expired model hold."""
+
+
+async def read_busy_binding(session, binding, seen):
+    """Obtain fresh Core evidence; a selected binding alone never proves Busy."""
+    challenge_id = str(uuid4())
+    response = await asyncio.to_thread(
+        launcher.session_challenge, session["state"], session["sessionId"], challenge_id, binding,
+    )
+    row = {"request": {"command": "challenge", "challengeId": challenge_id,
+                       "expectedBinding": binding}, "response": response, "receivedAt": time.monotonic()}
+    if not core_busy_observation(row, binding, time.monotonic(), seen):
+        raise BusyObservationRefused("busy attachment lacks fresh eligible Core-busy evidence")
+    seen.add(response["witness"]["nonce"])
+    require_model_held(session["provider"])
+    return row
+
+
+async def wait_busy_session_binding(session, timeout=10):
+    """Wait for notification churn to settle without releasing the held Core turn."""
+    deadline = min(time.monotonic() + timeout, session["provider"].hold_deadline)
+    previous, stable, seen = None, 0, set()
+    async with asyncio.timeout_at(deadline):
+        while True:
+            require_model_held(session["provider"])
+            try:
+                binding = await asyncio.to_thread(
+                    launcher.session_binding, session["state"], session["sessionId"],
+                )
+                evidence = await read_busy_binding(session, binding, seen)
+            except (OSError, ValueError, TimeoutError, launcher.LaunchError, BusyObservationRefused):
+                # Previously accepted nonces remain spent across notification churn.
+                previous, stable = None, 0
+            else:
+                stable = stable + 1 if previous == binding else 1
+                previous = binding
+                if stable >= 3:
+                    return binding, evidence
+            await asyncio.sleep(0.25)
+
+
+def c1_busy_history(ctx):
+    """Retain full ACK/history and all cloud charges across the fixture-only reattach."""
+    local = db_delivery_history(ctx.state, ctx.c_first_envelope["deliveryId"])
+    remote = ctx.fixture("/fixture/read")
+    attempt_id = ctx.c_first_envelope["attemptId"]
+    return {"localDelivery": local["delivery"], "localAttempts": local["attempts"],
+            "workerdAttempts": attempts_for(remote, attempt_id),
+            "workerdClaims": native_claims_for(remote, attempt_id),
+            "receiptStatuses": list(ctx.receipt_calls["C"]),
+            "nativeStarts": json.loads(json.dumps(ctx.start_calls["C"])),
+            "cloudHistory": remote["cloud"], "slots": remote["slots"], "budget": remote["budget"]}
+
+
+def assert_c1_busy_settled(history):
+    assert_c1_settled(history["localDelivery"], history["localAttempts"],
+                      history["workerdAttempts"], history["workerdClaims"], history["receiptStatuses"])
+    require(history["localDelivery"].get("ack_state") == "observed"
+            and history["localAttempts"][0].get("native_observed_ack") is not None
+            and history["localAttempts"][0].get("reserved_bytes") == 0
+            and len(history["nativeStarts"]) == 1,
+            "C1 observed ACK, released local reservation and sole native Start required before busy attach")
+
+
+async def attach_busy_session(ctx):
+    """Qualify current Busy selection through the production CLI and Store before C2 exists."""
+    session = ctx.sessions["C"]
+    while True:
+        require_model_held(session["provider"])
+        history = c1_busy_history(ctx)
+        try:
+            assert_c1_busy_settled(history)
+        except AssertionError:
+            await asyncio.sleep(0.05)
+        else:
+            break
+    binding, evidence = await wait_busy_session_binding(session)
+    require(binding != session["binding"] and all(binding[key] == session["binding"][key]
+                for key in ("clientId", "connectionId", "backendPid", "threadId", "serverInstanceId")),
+            "busy reattach must retain C1's native session and select its current changed binding")
+    before = c1_busy_history(ctx)
+    assert_c1_busy_settled(before)
+    status_before = await ctx.admission_cloud.runtime_status(ctx.runtime_ids["C"])
+    require(status_before["status"] == "present" and status_before["storedQualified"] is True
+            and status_before["nativeBinding"] == session["binding"],
+            "busy reattach requires the original qualified C attachment")
+    exit_code, result = await asyncio.to_thread(run_cli_capture, [
+        "--state-dir", str(ctx.state), "attach", "--runtime-id", ctx.runtime_ids["C"],
+        "--session-id", session["sessionId"], "--cloud-config", str(ctx.state / "cloud.json"),
+        "--expected-runtime-generation", str(status_before["runtimeGeneration"]),
+        "--expected-attachment-generation", str(status_before["attachmentGeneration"]),
+    ])
+    require(exit_code == 0 and result.get("remoteStatus") == "attached"
+            and result.get("localStatus") == "current", "production busy attach did not commit and persist")
+    status_after = await ctx.admission_cloud.runtime_status(ctx.runtime_ids["C"])
+    with Store(ctx.state) as store:
+        mapping = store.get_attachment(ctx.runtime_ids["C"])
+    require(attachment_matches_current(mapping, status_after, status_before, binding, session["sessionId"])
+            and status_after["storedQualified"] is True and status_after["nativeBinding"] == binding,
+            "busy attach cloud and Store generations or binding differ")
+    current = await read_busy_binding(session, binding, {evidence["response"]["witness"]["nonce"]})
+    after = c1_busy_history(ctx)
+    assert_c1_busy_settled(after)
+    assert_c1_history_unchanged(before, after)
+    require_model_held(session["provider"])
+    ctx.c_busy_binding = binding
+    ctx.c_busy_mapping = mapping
+    ctx.c_busy_attach_proof = {"productionCliPath": True, "remoteStatus": result["remoteStatus"],
+        "localStatus": result["localStatus"], "runtimeGenerationBefore": status_before["runtimeGeneration"],
+        "runtimeGenerationAfter": status_after["runtimeGeneration"],
+        "attachmentGenerationBefore": status_before["attachmentGeneration"],
+        "attachmentGenerationAfter": status_after["attachmentGeneration"],
+        "coreBusyBeforeAndAfter": True, "c1HistoryAndChargesUnchanged": True}
+    record_evidence(ctx, "busyFixtureAttach", {"before": before, "after": after,
+                    "bindingBefore": session["binding"], "mapping": mapping,
+                    "busyEvidence": [evidence, current], "result": ctx.c_busy_attach_proof})
+
+
 def fixture(ctx, path, body=None):
     record_evidence(ctx, "cloudFixtureAttempt", {"path": path})
     try:
@@ -1715,7 +1834,7 @@ async def observe_dispatch(gateway, ctx, delivery_id):
     if label == "C-busy-second" and result.get("reason") == "client_unavailable_or_busy":
         observations = []
         for row in ctx.c_challenges[challenge_offset:]:
-            if core_busy_observation(row, ctx.sessions["C"]["binding"], time.monotonic(), ctx.c_busy_nonces):
+            if core_busy_observation(row, ctx.c_busy_binding, time.monotonic(), ctx.c_busy_nonces):
                 observations.append(row)
                 ctx.c_busy_nonces.add(row["response"]["witness"]["nonce"])
         if not observations:
@@ -2027,6 +2146,35 @@ async def run_busy_stage(ctx):
     ctx.c_first_envelope = c_first["envelope"]
     ctx.dispatch_labels[ctx.c_first_envelope["deliveryId"]] = "C-busy-first"
     c_first_signed = c_first["signedDelivery"]
+    with ctx.sessions["C"]["provider"].hold_lock:
+        ctx.sessions["C"]["provider"].hold_next = True
+        ctx.sessions["C"]["provider"].hold_started.clear()
+        ctx.sessions["C"]["provider"].release_hold.clear()
+    c_first_status, _ = await asyncio.to_thread(listener_delivery, ctx.listen_port, c_first_signed)
+    require(c_first_status == 202, "production listener refused C busy-first delivery")
+    await wait_until(ctx.sessions["C"]["provider"].hold_started.is_set,
+                     "C native CLI did not enter the controlled busy state")
+    require_model_held(ctx.sessions["C"]["provider"])
+    async with asyncio.timeout_at(ctx.sessions["C"]["provider"].hold_deadline):
+        await run_held_busy_stage(ctx, busy_started_unix)
+    ctx.sessions["C"]["provider"].release_hold.set()
+    ctx.current_binding = await wait_stable_session_binding(
+        ctx.sessions["C"], ctx.sessions["C"]["provider"],
+        minimum_turn_main_requests=2, timeout=75,
+    )
+    ctx.same_binding_after_turn = ctx.current_binding == ctx.c_busy_binding
+    queued_while_stopped = db_delivery(ctx.state, ctx.c_second_envelope["deliveryId"])
+    require(queued_while_stopped["state"] == "queued",
+            "C busy delivery did not remain queued while the daemon was stopped")
+    require(not ctx.same_binding_after_turn,
+            "controlled C turn did not rotate its native binding for explicit reattachment")
+
+
+async def run_held_busy_stage(ctx, busy_started_unix):
+    """All qualification work here runs under the original model hold deadline."""
+    await attach_busy_session(ctx)
+    ctx.starts_before_busy_delivery = len(ctx.start_calls["C"])
+    require(ctx.starts_before_busy_delivery == 1, "C busy-first event did not issue exactly one native Start")
     c_second = ctx.fixture("/fixture/setup", {
         "runtimeId": ctx.runtime_ids["C"], "nodeId": ctx.node_id,
         "transportPrivateKey": b64(ctx.transport_key.private_bytes(
@@ -2044,24 +2192,9 @@ async def run_busy_stage(ctx):
         "state": "created", "reservation_state": "none", "transport_status": "sending",
         "permit_id": None, "submission_id": None, "turn_id": None,
     }, "fixture did not create the expected unreserved C2 transport-attempt baseline")
-    with ctx.sessions["C"]["provider"].hold_lock:
-        ctx.sessions["C"]["provider"].hold_next = True
-        ctx.sessions["C"]["provider"].hold_started.clear()
-        ctx.sessions["C"]["provider"].release_hold.clear()
-    c_first_status, _ = await asyncio.to_thread(listener_delivery, ctx.listen_port, c_first_signed)
-    require(c_first_status == 202, "production listener refused C busy-first delivery")
-    await wait_until(ctx.sessions["C"]["provider"].hold_started.is_set,
-                     "C native CLI did not enter the controlled busy state")
-    require_model_held(ctx.sessions["C"]["provider"])
-    c_first_id = ctx.c_first_envelope["deliveryId"]
-    await wait_until(lambda: db_delivery(ctx.state, c_first_id)["attemptState"] in
-                     ("submitted", "observed"), "C busy-first event did not reach native Start")
-    c_first_cloud = ctx.fixture("/fixture/read")
-    c_first_attempts = attempts_for(c_first_cloud, ctx.c_first_envelope["attemptId"])
-    require(has_attempt_state(c_first_attempts, ("submitted", "observed")),
-            "C busy-first event did not persist in Workerd")
-    ctx.starts_before_busy_delivery = len(ctx.start_calls["C"])
-    require(ctx.starts_before_busy_delivery == 1, "C busy-first event did not issue exactly one native Start")
+    require(all(ctx.c_second_envelope[key] == ctx.c_busy_mapping[key] for key in (
+        "runtimeId", "nodeGeneration", "runtimeGeneration", "attachmentGeneration",
+    )), "C2 was not created from the committed busy attachment")
     status, _ = await asyncio.to_thread(listener_delivery, ctx.listen_port, c_second_signed)
     require(status == 202, "production listener refused C busy delivery")
     await wait_until(lambda: db_delivery(ctx.state, ctx.c_second_envelope["deliveryId"])["state"] == "queued",
@@ -2166,17 +2299,6 @@ async def run_busy_stage(ctx):
     await ctx.stop_daemon(ctx.daemon_task)
     ctx.daemon_task = None
     require_model_held(ctx.sessions["C"]["provider"])
-    ctx.sessions["C"]["provider"].release_hold.set()
-    ctx.current_binding = await wait_stable_session_binding(
-        ctx.sessions["C"], ctx.sessions["C"]["provider"],
-        minimum_turn_main_requests=2, timeout=75,
-    )
-    ctx.same_binding_after_turn = ctx.current_binding == ctx.sessions["C"]["binding"]
-    queued_while_stopped = db_delivery(ctx.state, ctx.c_second_envelope["deliveryId"])
-    require(queued_while_stopped["state"] == "queued",
-            "C busy delivery did not remain queued while the daemon was stopped")
-    require(not ctx.same_binding_after_turn,
-            "controlled C turn did not rotate its native binding for explicit reattachment")
 
 
 async def run_fixture_attach(ctx):
@@ -2211,8 +2333,8 @@ async def run_fixture_attach(ctx):
         c_mapping_before_attach = store.get_attachment(ctx.runtime_ids["C"])
     require(c_mapping_before_attach is not None,
             "C local attachment was missing before fixture attach")
-    require(c_mapping_before_attach["nativeBinding"] == ctx.sessions["C"]["binding"],
-            "C local attachment did not retain its original binding before fixture attach")
+    require(c_mapping_before_attach["nativeBinding"] == ctx.c_busy_binding,
+            "C local attachment did not retain its busy binding before fixture attach")
     ctx.changed_binding_fields = sorted(
         key for key, value in ctx.current_binding.items()
         if c_mapping_before_attach["nativeBinding"].get(key) != value
@@ -2445,6 +2567,7 @@ def build_proof(ctx):
                   "busyDispatchCount": len(ctx.c_second_busy_dispositions())},
         "sourceNonceTransition": {"firstDelivery": "C1", "freshDelivery": "C3",
                                   "nonReuse": True},
+        "busyFixtureAttach": ctx.c_busy_attach_proof,
         "busyDeliveryRestart": {"queuedWhileDaemonStopped": True,
                                  "restartedWhileNativeTurnBusy": True,
                                  "queuedAfterBusyRestart": True,

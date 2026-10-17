@@ -1,0 +1,339 @@
+"""Provider-free regression coverage for the disposable Busy reattachment gate."""
+import asyncio
+import copy
+from contextlib import ExitStack, asynccontextmanager
+import importlib.util
+from pathlib import Path
+from types import SimpleNamespace
+import unittest
+import threading
+from uuid import uuid4
+from event_gateway import launcher
+from unittest.mock import AsyncMock, Mock, patch
+
+
+SCRIPT = Path(__file__).resolve().parents[1] / "docs/native-bridge/three-session-workerd.py"
+SPEC = importlib.util.spec_from_file_location("busy_reattach_fixture", SCRIPT)
+F = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(F)
+F.launcher = launcher
+
+
+def history():
+    return {"localDelivery": {"state": "observed", "ack_state": "observed"},
+            "localAttempts": [{"state": "observed", "native_observed_ack": "ack", "reserved_bytes": 0}],
+            "workerdAttempts": [{"state": "observed"}], "workerdClaims": [{}],
+            "receiptStatuses": ["inputRecorded"], "nativeStarts": [{"attemptId": "c1"}],
+            "cloudHistory": {"native_correlations": [{"attemptId": "c1", "state": "observed"}],
+                             "slot_intents": [{"attemptId": "c1", "state": "released"}]},
+            "slots": [{"used": 0}], "budget": {"used": 0}}
+
+
+class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
+    async def test_read_requires_valid_busy_evidence_and_unreleased_hold(self):
+        session = {"state": Path("/fixture"), "sessionId": "C", "provider": object()}
+        response = {"witness": {"nonce": 7}}
+        with patch.object(F.launcher, "session_challenge", return_value=response), \
+                patch.object(F, "core_busy_observation", return_value=False), \
+                patch.object(F, "require_model_held"):
+            with self.assertRaisesRegex(AssertionError, "fresh eligible Core-busy"):
+                await F.read_busy_binding(session, {}, set())
+        seen = set()
+        with patch.object(F.launcher, "session_challenge", return_value=response), \
+                patch.object(F, "core_busy_observation", return_value=True) as check, \
+                patch.object(F, "require_model_held", side_effect=AssertionError("hold released")):
+            with self.assertRaisesRegex(AssertionError, "hold released"):
+                await F.read_busy_binding(session, {}, seen)
+            self.assertEqual(seen, {7})
+            self.assertEqual(check.call_args.args[0]["response"], response)
+
+    async def test_binding_needs_three_consecutive_observations_after_churn(self):
+        session = {"state": Path("/fixture"), "sessionId": "C",
+                   "provider": SimpleNamespace(hold_deadline=asyncio.get_running_loop().time() + 10)}
+        bindings = [{"generation": n} for n in [1, 1, 2, 2, 2]]
+        with patch.object(F.launcher, "session_binding", side_effect=bindings) as select, \
+                patch.object(F, "require_model_held"), \
+                patch.object(F, "read_busy_binding", new=AsyncMock(return_value={"fresh": True})) as read, \
+                patch.object(F.asyncio, "sleep", new=AsyncMock()):
+            binding, evidence = await F.wait_busy_session_binding(session)
+        self.assertEqual(binding, {"generation": 2})
+        self.assertEqual(evidence, {"fresh": True})
+        self.assertEqual(select.call_count, 5)
+        self.assertEqual(read.await_count, 5)
+
+    def test_c1_requires_observed_ack_released_reservation_and_sole_start(self):
+        F.assert_c1_busy_settled(history())
+        for field, value in [("ack_state", "pending"), ("native_observed_ack", None),
+                             ("reserved_bytes", 1), ("nativeStarts", [{}, {}])]:
+            with self.subTest(field=field):
+                bad = history()
+                if field == "ack_state":
+                    bad["localDelivery"][field] = value
+                elif field == "nativeStarts":
+                    bad[field] = value
+                else:
+                    bad["localAttempts"][0][field] = value
+                with self.assertRaises(AssertionError):
+                    F.assert_c1_busy_settled(bad)
+
+    def test_snapshot_retains_cloud_charges_and_copies_native_starts(self):
+        h = history()
+        remote = {"cloud": h["cloudHistory"], "slots": h["slots"], "budget": h["budget"]}
+        ctx = SimpleNamespace(state=Path("/fixture"), c_first_envelope={"deliveryId": "d", "attemptId": "a"},
+                              fixture=Mock(return_value=remote), receipt_calls={"C": h["receiptStatuses"]},
+                              start_calls={"C": h["nativeStarts"]})
+        with patch.object(F, "db_delivery_history", return_value={"delivery": h["localDelivery"], "attempts": h["localAttempts"]}), \
+                patch.object(F, "attempts_for", return_value=h["workerdAttempts"]), \
+                patch.object(F, "native_claims_for", return_value=h["workerdClaims"]):
+            actual = F.c1_busy_history(ctx)
+        self.assertEqual(actual, h)
+        ctx.start_calls["C"][0]["attemptId"] = "changed"
+        self.assertEqual(actual["nativeStarts"][0]["attemptId"], "c1")
+
+    async def attach(self, *, changed_history=False, wrong_mapping=False):
+        old = dict(clientId=str(uuid4()), connectionId=str(uuid4()), backendPid=1, threadId=str(uuid4()), serverInstanceId=str(uuid4()), generation=1, serverGeneration=1)
+        binding = dict(old, generation=2)
+        before = dict(status="present", storedQualified=True, nativeBinding=old, runtimeGeneration=3, attachmentGeneration=4)
+        after = dict(before, nativeBinding=binding, runtimeGeneration=4, attachmentGeneration=5)
+        mapping = dict(nativeBinding=binding, sessionId="C", runtimeGeneration=4, attachmentGeneration=5)
+        if wrong_mapping:
+            mapping["attachmentGeneration"] = 4
+        ctx = SimpleNamespace(state=Path("/fixture"), sessions={"C": {"state": Path("/native"), "sessionId": "C", "provider": object(), "binding": old}},
+                              runtime_ids={"C": "runtime-c"}, admission_cloud=SimpleNamespace(runtime_status=AsyncMock(side_effect=[before, after])))
+        first, last = history(), history()
+        if changed_history == "ack":
+            last["localAttempts"][0]["native_observed_ack"] = "different-ack"
+        elif changed_history == "slots":
+            last["slots"][0]["used"] = 1
+        elif changed_history in ("native_correlations", "slot_intents"):
+            last["cloudHistory"][changed_history][0]["state"] = "changed"
+        elif changed_history:
+            last["budget"]["used"] = 1
+        store = Mock()
+        store.__enter__ = Mock(return_value=store)
+        store.__exit__ = Mock(return_value=False)
+        store.get_attachment.return_value = mapping
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(F, "require_model_held"))
+            stack.enter_context(patch.object(F, "c1_busy_history", side_effect=[first, copy.deepcopy(first), last]))
+            stack.enter_context(patch.object(F, "wait_busy_session_binding", new=AsyncMock(return_value=(binding, {"response": {"witness": {"nonce": 9}}}))))
+            cli = stack.enter_context(patch.object(F, "run_cli_capture", return_value=(0, {"remoteStatus": "attached", "localStatus": "current"})))
+            stack.enter_context(patch.object(F, "Store", return_value=store))
+            fresh = stack.enter_context(patch.object(F, "read_busy_binding", new=AsyncMock(return_value={"response": {"witness": {"nonce": 10}}})))
+            stack.enter_context(patch.object(F, "record_evidence"))
+            await F.attach_busy_session(ctx)
+        return ctx, cli, fresh, binding
+
+    async def test_attach_uses_production_cli_cas_and_fresh_post_commit_busy_proof(self):
+        ctx, cli, fresh, binding = await self.attach()
+        args = cli.call_args.args[0]
+        self.assertIn("attach", args)
+        self.assertEqual(args[args.index("--expected-runtime-generation") + 1], "3")
+        self.assertEqual(args[args.index("--expected-attachment-generation") + 1], "4")
+        fresh.assert_awaited_once_with(ctx.sessions["C"], binding, {9})
+        self.assertEqual(ctx.c_busy_binding, binding)
+        self.assertTrue(ctx.c_busy_attach_proof["c1HistoryAndChargesUnchanged"])
+
+    async def test_attach_rejects_cloud_charge_mutation(self):
+        for mutation in ("charge", "ack", "slots", "native_correlations", "slot_intents"):
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(AssertionError, "C1 history changed"):
+                await self.attach(changed_history=mutation)
+
+    async def test_attach_rejects_store_cloud_generation_mismatch(self):
+        with self.assertRaisesRegex(AssertionError, "cloud and Store generations"):
+            await self.attach(wrong_mapping=True)
+
+    async def test_read_rejects_idle_expired_ineligible_and_replayed_native_witness(self):
+        binding = dict(clientId=str(uuid4()), connectionId=str(uuid4()), backendPid=42,
+                       threadId=str(uuid4()), serverInstanceId=str(uuid4()), generation=2, serverGeneration=1)
+        session = {"state": Path("/fixture"), "sessionId": "C", "provider": object()}
+        for mutation in ("valid", "idle", "expired", "ineligible", "replayed"):
+            def challenge(state, session_id, challenge_id, expected):
+                return {"challengeId": challenge_id, "observedAt": "2026-10-15T08:00:00.000Z",
+                        "validUntilMonotonic": 9.0 if mutation == "expired" else 10.5,
+                        "witness": {**binding, "version": 2, "nonce": 7, "sequence": 1,
+                                    "cause": "heartbeat", "leaseMs": 750,
+                                    "eligible": mutation != "ineligible",
+                                    "nativeCoreTurnState": "idle" if mutation == "idle" else "busy"}}
+            with self.subTest(mutation=mutation), \
+                    patch.object(F.launcher, "session_challenge", side_effect=challenge), \
+                    patch.object(F.time, "monotonic", return_value=10.0), \
+                    patch.object(F, "require_model_held"):
+                seen = {7} if mutation == "replayed" else set()
+                if mutation == "valid":
+                    await F.read_busy_binding(session, binding, seen)
+                    self.assertEqual(seen, {7})
+                else:
+                    with self.assertRaisesRegex(AssertionError, "fresh eligible Core-busy"):
+                        await F.read_busy_binding(session, binding, seen)
+
+    async def test_dispatch_uses_busy_binding_and_requires_fresh_nonce_each_time(self):
+        old = {"generation": 1}
+        current = {"generation": 2}
+        ctx = SimpleNamespace(dispatch_labels={"c2": "C-busy-second"}, dispatch_calls=[],
+                              dispatch_errors=[], dispatch_results=[], c_challenges=[], c_busy_nonces=set(),
+                              c_busy_binding=current, sessions={"C": {"binding": old}})
+        nonces = iter([7, 7, 8])
+        async def dispatch(*args):
+            ctx.c_challenges.append({"response": {"witness": {"nonce": next(nonces)}}})
+            return {"status": "queued", "reason": "client_unavailable_or_busy"}
+        ctx.original_dispatch = dispatch
+        def valid(row, binding, now, seen):
+            return binding == current and row["response"]["witness"]["nonce"] not in seen
+        with patch.object(F, "core_busy_observation", side_effect=valid), patch.object(F, "record_evidence"):
+            await F.observe_dispatch(None, ctx, "c2")
+            self.assertEqual(len(ctx.dispatch_results), 1)
+            await F.observe_dispatch(None, ctx, "c2")
+            self.assertEqual(len(ctx.dispatch_results), 1)
+            self.assertIn("fresh authoritative", ctx.c_busy_evidence_error)
+            await F.observe_dispatch(None, ctx, "c2")
+            self.assertEqual(len(ctx.dispatch_results), 2)
+            self.assertEqual(ctx.c_busy_nonces, {7, 8})
+
+    async def test_stage_attaches_under_hold_deadline_before_creating_c2_with_new_generations(self):
+        class StopAfterC2(Exception):
+            pass
+        events = []
+        stale_c2 = False
+        hold = SimpleNamespace(hold_lock=threading.Lock(), hold_started=threading.Event(),
+                               release_hold=threading.Event(), hold_deadline=asyncio.get_running_loop().time() + 60)
+        mapping = dict(runtimeId="runtime-c", nodeGeneration=2, runtimeGeneration=4, attachmentGeneration=5)
+        ctx = SimpleNamespace(runtime_ids={"C": "runtime-c"}, node_id="node", transport_key=Mock(),
+                              sessions={"C": {"provider": hold}}, dispatch_labels={}, start_calls={"C": []}, listen_port=1)
+        ctx.transport_key.private_bytes.return_value = b"test-key"
+        def fixture(path, body=None):
+            if path == "/fixture/read":
+                return {}
+            label = "c1" if body["subjectId"].endswith("first") else "c2"
+            if label == "c2":
+                self.assertEqual(events, ["c1", "hold-deadline", "attached"])
+                self.assertEqual(ctx.c_busy_mapping, mapping)
+            events.append(label)
+            envelope = {**mapping, "deliveryId": label, "attemptId": label}
+            if label == "c2" and stale_c2:
+                envelope["attachmentGeneration"] -= 1
+            return {"envelope": envelope, "signedDelivery": label}
+        ctx.fixture = fixture
+        async def attach(context):
+            self.assertEqual(events, ["c1", "hold-deadline"])
+            context.c_busy_mapping = mapping
+            context.start_calls["C"].append({"attemptId": "c1"})
+            events.append("attached")
+        def listener(port, signed):
+            if signed == "c2":
+                self.assertFalse(stale_c2, "stale C2 reached the production listener")
+                raise StopAfterC2()
+            hold.hold_started.set()
+            return 202, None
+        @asynccontextmanager
+        async def deadline(value):
+            self.assertEqual(value, hold.hold_deadline)
+            events.append("hold-deadline")
+            yield
+        async def wait(predicate, *args, **kwargs):
+            self.assertTrue(predicate())
+        baseline = dict(state="created", reservation_state="none", transport_status="sending",
+                        permit_id=None, submission_id=None, turn_id=None)
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(F, "serialization", Mock()))
+            stack.enter_context(patch.object(F, "require_model_held"))
+            stack.enter_context(patch.object(F, "attach_busy_session", side_effect=attach))
+            stack.enter_context(patch.object(F, "listener_delivery", side_effect=listener))
+            stack.enter_context(patch.object(F, "wait_until", side_effect=wait))
+            stack.enter_context(patch.object(F.asyncio, "timeout_at", side_effect=deadline))
+            stack.enter_context(patch.object(F, "attempts_for", return_value=[]))
+            stack.enter_context(patch.object(F, "transport_attempt_snapshot", return_value=baseline))
+            with self.assertRaises(StopAfterC2):
+                await F.run_busy_stage(ctx)
+            self.assertEqual(events, ["c1", "hold-deadline", "attached", "c2"])
+            stale_c2 = True
+            events.clear()
+            ctx.start_calls["C"].clear()
+            with self.assertRaisesRegex(AssertionError, "C2 was not created from the committed busy attachment"):
+                await F.run_busy_stage(ctx)
+        self.assertEqual(events, ["c1", "hold-deadline", "attached", "c2"])
+
+    async def test_hold_deadline_cancels_attach_before_c2_without_releasing_turn(self):
+        hold = SimpleNamespace(hold_lock=threading.Lock(), hold_started=threading.Event(),
+                               release_hold=threading.Event(), hold_deadline=asyncio.get_running_loop().time() + 0.02)
+        ctx = SimpleNamespace(runtime_ids={"C": "runtime-c"}, node_id="node", transport_key=Mock(),
+                              sessions={"C": {"provider": hold}}, dispatch_labels={}, listen_port=1)
+        ctx.transport_key.private_bytes.return_value = b"test-key"
+        setup_subjects = []
+        attach_cancelled = asyncio.Event()
+        def fixture(path, body=None):
+            setup_subjects.append(body["subjectId"])
+            return {"envelope": {"deliveryId": "c1", "attemptId": "c1"}, "signedDelivery": "c1"}
+        ctx.fixture = fixture
+        def listener(*args):
+            hold.hold_started.set()
+            return 202, None
+        async def attach(context):
+            try:
+                await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                attach_cancelled.set()
+                raise
+            self.fail("attach exceeded the original hold deadline without cancellation")
+        async def wait(predicate, *args, **kwargs):
+            self.assertTrue(predicate())
+        with patch.object(F, "serialization", Mock()), \
+                patch.object(F, "require_model_held"), \
+                patch.object(F, "attach_busy_session", side_effect=attach), \
+                patch.object(F, "listener_delivery", side_effect=listener), \
+                patch.object(F, "wait_until", side_effect=wait):
+            with self.assertRaises(TimeoutError):
+                await asyncio.wait_for(F.run_busy_stage(ctx), timeout=0.5)
+        self.assertTrue(attach_cancelled.is_set())
+        self.assertEqual(setup_subjects, ["three-session-c-busy-first"])
+        self.assertTrue(hold.hold_started.is_set())
+        self.assertFalse(hold.release_hold.is_set())
+
+    async def test_refused_busy_witness_resets_stability_without_recycling_nonces(self):
+        binding = dict(clientId=str(uuid4()), connectionId=str(uuid4()), backendPid=42,
+                       threadId=str(uuid4()), serverInstanceId=str(uuid4()), generation=2, serverGeneration=1)
+        session = {"state": Path("/fixture"), "sessionId": "C",
+                   "provider": SimpleNamespace(hold_deadline=asyncio.get_running_loop().time() + 5)}
+        samples = iter([(1, False), (2, False), (3, True), (1, False), (4, False), (5, False), (6, False)])
+        observed_nonces = []
+        def challenge(state, session_id, challenge_id, expected):
+            try:
+                nonce, expired = next(samples)
+            except StopIteration:
+                self.fail("Busy selection exhausted all fresh samples without settling")
+            observed_nonces.append(nonce)
+            now = F.time.monotonic()
+            return {"challengeId": challenge_id, "observedAt": "2026-10-15T08:00:00.000Z",
+                    "validUntilMonotonic": now - 1 if expired else now + 0.5,
+                    "witness": {**binding, "version": 2, "nonce": nonce, "sequence": 1,
+                                "cause": "heartbeat", "leaseMs": 750, "eligible": True,
+                                "nativeCoreTurnState": "busy"}}
+        with patch.object(F.launcher, "session_binding", return_value=binding), \
+                patch.object(F.launcher, "session_challenge", side_effect=challenge), \
+                patch.object(F, "require_model_held"), \
+                patch.object(F.asyncio, "sleep", new=AsyncMock()):
+            result, evidence = await F.wait_busy_session_binding(session)
+        self.assertEqual(result, binding)
+        self.assertEqual(evidence["response"]["witness"]["nonce"], 6)
+        self.assertEqual(observed_nonces, [1, 2, 3, 1, 4, 5, 6])
+
+    async def test_persistent_busy_refusals_expire_at_original_hold_deadline(self):
+        binding = dict(clientId=str(uuid4()), connectionId=str(uuid4()), backendPid=42,
+                       threadId=str(uuid4()), serverInstanceId=str(uuid4()), generation=2, serverGeneration=1)
+        started = asyncio.get_running_loop().time()
+        session = {"state": Path("/fixture"), "sessionId": "C",
+                   "provider": SimpleNamespace(hold_deadline=started + 0.03)}
+        def challenge(state, session_id, challenge_id, expected):
+            return {"challengeId": challenge_id, "observedAt": "2026-10-15T08:00:00.000Z",
+                    "validUntilMonotonic": F.time.monotonic() - 1,
+                    "witness": {**binding, "version": 2, "nonce": 1, "sequence": 1,
+                                "cause": "heartbeat", "leaseMs": 750, "eligible": True,
+                                "nativeCoreTurnState": "busy"}}
+        with patch.object(F.launcher, "session_binding", return_value=binding), \
+                patch.object(F.launcher, "session_challenge", side_effect=challenge) as challenged, \
+                patch.object(F, "require_model_held"):
+            with self.assertRaises(TimeoutError):
+                await asyncio.wait_for(F.wait_busy_session_binding(session), timeout=0.5)
+        self.assertGreaterEqual(challenged.call_count, 1)
+        self.assertLess(asyncio.get_running_loop().time() - started, 0.25,
+                        "witness refusals extended the original model hold deadline")
