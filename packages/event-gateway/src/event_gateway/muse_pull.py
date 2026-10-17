@@ -88,9 +88,11 @@ class MusePullJournal:
         self.store.close()
 
     def __enter__(self):
+        """Return this journal for a managed lifecycle."""
         return self
 
     def __exit__(self, *_):
+        """Close the journal when leaving its managed lifecycle."""
         self.close()
 
     def _initialize_schema(self):

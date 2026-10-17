@@ -23,7 +23,7 @@ class MusePullJournalTests(unittest.TestCase):
         self.store = Store(self.path, clock=lambda: self.now, max_rows=8)
         self.addCleanup(lambda: self.store.close())
         self.j = MusePullJournal(self.store, max_rows=8)
-        self.addCleanup(lambda: self.j.close())
+        self.addCleanup(self._close_journal)
         self.b = dict(
             slotId="owner-muse",
             bindingGeneration=1,
@@ -40,6 +40,9 @@ class MusePullJournalTests(unittest.TestCase):
         self.a = dict(notificationId="one", eventReference="ref_one")
         self.z = dict(notificationId="two", eventReference="ref_two")
         self.j.put_binding(self.b)
+
+    def _close_journal(self):
+        self.j.close()
 
     def reopen(self):
         self.j.close()
