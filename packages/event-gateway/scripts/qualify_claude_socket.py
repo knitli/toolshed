@@ -15,9 +15,10 @@ import shutil
 import stat
 import sys
 import tempfile
-from uuid import uuid4
+import time
+from uuid import UUID, uuid4
 
-from event_gateway.claude import ClaudeSocketTransport, SUPPORTED_VERSION
+from event_gateway.claude import ClaudeSocketTransport, SUPPORTED_VERSION, event_frame
 from event_gateway.client_runtime import _private_json
 from event_gateway.security import ensure_private_directory
 
@@ -36,10 +37,11 @@ def require(condition, code):
         raise CanaryError(code)
 
 
-def child_command(binary, root, session_id, model, marker):
+def child_command(binary, root, session_id, model, marker, *, busy_probe=False):
     """Fixed no-tools session, explicit configuration sources and spend guard."""
     return [str(binary), '--bare', '--print', '--verbose', '--input-format', 'stream-json',
             '--output-format', 'stream-json', '--tools', '', '--disable-slash-commands',
+            *(['--replay-user-messages'] if busy_probe else []),
             '--setting-sources', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
             '--no-session-persistence', '--session-id', session_id,
             '--messaging-socket-path', str(root / 'inbox.sock'), '--model', model,
@@ -49,8 +51,9 @@ def child_command(binary, root, session_id, model, marker):
             'Do not access any source or take any other action.']
 
 
-def child_environment(root, key, local_port=None):
+def child_environment(root, key, local_port=None, *, busy_probe=False):
     """Only a deliberately supplied API key enters the fresh client environment."""
+    require(not busy_probe or local_port is not None, 'busy_probe_requires_local_provider')
     result = {'PATH': '/usr/bin:/bin', 'HOME': str(root / 'home'),
             'CLAUDE_CONFIG_DIR': str(root / 'config'), 'TMPDIR': str(root / 'tmp'),
             'CLAUDE_CODE_TMPDIR': str(root / 'tmp'),
@@ -58,6 +61,9 @@ def child_environment(root, key, local_port=None):
     if local_port is not None:
         result.update(ANTHROPIC_BASE_URL=f'http://127.0.0.1:{local_port}',
                       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1', DISABLE_AUTOUPDATER='1')
+    if busy_probe:
+        # Experimental observation in this dummy-key disposable child only.
+        result['CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS'] = '1'
     return result
 
 
@@ -147,13 +153,198 @@ def synthetic_stream(text, model):
     return ''.join(f"event: {value['type']}\ndata: {json.dumps(value)}\n\n" for value in events).encode()
 
 
+class BusyProbe:
+    """Observe one held-response experiment; never issue an admission receipt."""
+
+    def __init__(self, session_id, initial, ready_marker):
+        self.session_id, self.initial, self.ready_marker = session_id, initial, ready_marker
+        self.ready_to_send, self.release, self.complete, self.failed = (asyncio.Event() for _ in range(4))
+        self.initialized = self.running = self.held = self.sent_once = False
+        self.expected = None
+        self.requests = self.assistants = self.results = 0
+        self.running_turn = 0
+        self.replayed, self.native_ids, self.observations = set(), set(), []
+        self.started_ns = time.monotonic_ns()
+
+    def record(self, kind, **fields):
+        require(len(self.observations) < 64, 'busy_evidence_limit')
+        self.observations.append({'kind': kind, 'observedNs': time.monotonic_ns() - self.started_ns, **fields})
+
+    def _ready(self):
+        if self.initialized and self.running and self.held and not self.release.is_set():
+            self.ready_to_send.set()
+
+    def provider_request(self, marker):
+        """Called only after bounded, authenticated request parsing, never to choose a response."""
+        if self.requests == 0:
+            require(marker == self.ready_marker, 'busy_initial_request_mismatch')
+        else:
+            require(self.requests == 1 and self.release.is_set() and self.expected is not None
+                    and marker == self.expected['marker'], 'busy_followup_request_mismatch')
+        self.requests += 1
+        self.record('provider_request', turn=self.requests)
+
+    def hold_response(self):
+        require(self.requests == 1 and not self.held and not self.release.is_set(), 'busy_hold_order')
+        self.held = True
+        self.record('initial_response_held')
+        self._ready()
+
+    def prepare(self, frame):
+        require(self.ready_to_send.is_set() and self.running and self.held
+                and not self.release.is_set() and self.expected is None and self.results == 0,
+                'busy_native_running_required')
+        content = frame['message']['content']
+        markers = re.findall(r'BUSY_[a-f0-9]{32}', content)
+        require(frame['session_id'] == self.session_id and len(set(markers)) == 1,
+                'busy_input_mismatch')
+        self.expected = {'uuid': frame['uuid'], 'content': content, 'marker': markers[0]}
+        self.record('busy_input_prepared', inputUuid=frame['uuid'],
+                    contentSha256=hashlib.sha256(content.encode()).hexdigest())
+
+    def sent(self):
+        require(self.expected is not None and self.running and self.held and not self.sent_once
+                and not self.release.is_set() and self.results == 0, 'busy_send_order')
+        self.sent_once = True
+        self.record('socket_write_closed', delivery='unknown')
+
+    def release_response(self):
+        require(self.sent_once and not self.release.is_set(), 'busy_release_order')
+        self.record('initial_response_released')
+        self.release.set()
+
+    def observe(self, value):
+        """Consume exact-session native stdout continuously, including during the hold."""
+        require(isinstance(value, dict) and value.get('session_id') == self.session_id,
+                'busy_native_session_mismatch')
+        kind = value.get('type')
+        if kind == 'system' and value.get('subtype') == 'init':
+            require(not self.initialized and value.get('tools') == [], 'busy_native_init')
+            self.initialized = True
+            self.record('native_init')
+            return
+        require(self.initialized, 'busy_native_missing_init')
+        if kind == 'system' and value.get('subtype') == 'session_state_changed':
+            identity = value.get('uuid')
+            try:
+                require(isinstance(identity, str) and str(UUID(identity)) == identity, 'busy_native_identity')
+            except ValueError:
+                raise CanaryError('busy_native_identity') from None
+            require(identity not in self.native_ids, 'busy_native_duplicate')
+            self.native_ids.add(identity)
+            state = value.get('state')
+            require(state in ('running', 'idle'), 'busy_native_state')
+            if state == 'running':
+                require(self.results < 2, 'busy_native_extra_turn')
+                if not self.running:
+                    self.running_turn = self.results + 1
+                self.running = True
+            else:
+                require(not self.running or self.release.is_set() and self.results >= self.running_turn,
+                        'busy_native_premature_idle')
+                self.running = False
+            self.record('native_state', state=state, nativeUuid=identity)
+            self._ready()
+            if state == 'idle' and self.results == 2:
+                require(self.expected is not None and self.expected['uuid'] in self.replayed
+                        and self.requests == 2, 'busy_witness_incomplete')
+                self.complete.set()
+            return
+        if kind == 'user':
+            identity = value.get('uuid')
+            expected = self.initial if identity == self.initial.get('uuid') else None
+            if self.expected is not None and identity == self.expected['uuid']:
+                expected = {'message': {'role': 'user', 'content': self.expected['content']}}
+            require(expected is not None and value.get('isReplay') is True
+                    and value.get('parent_tool_use_id') is None
+                    and value.get('message') == expected['message'] and identity not in self.replayed,
+                    'busy_native_replay_mismatch')
+            self.replayed.add(identity)
+            self.record('native_user_replay', inputUuid=identity,
+                        contentSha256=hashlib.sha256(expected['message']['content'].encode()).hexdigest(),
+                        whileResponseHeld=not self.release.is_set(), admission='unknown')
+            return
+        require(self.release.is_set() and self.expected is not None, 'busy_native_premature_result')
+        expected_text = self.ready_marker if self.results == 0 else self.expected['marker']
+        if kind == 'assistant':
+            message = value.get('message')
+            parts = message.get('content') if isinstance(message, dict) else None
+            require(self.results < 2 and self.assistants == self.results and isinstance(parts, list)
+                    and all(isinstance(part, dict) and part.get('type') in ('text', 'thinking')
+                            and isinstance(part.get('text', ''), str) for part in parts)
+                    and ''.join(part.get('text', '') for part in parts if part['type'] == 'text').strip() == expected_text,
+                    'busy_native_assistant_mismatch')
+            if self.results == 1:
+                require(self.expected['uuid'] in self.replayed and self.requests == 2, 'busy_witness_incomplete')
+            self.assistants += 1
+            self.record('native_assistant', turn=self.assistants)
+        elif kind == 'result':
+            require(self.results < 2 and self.assistants == self.results + 1 and value.get('subtype') == 'success'
+                    and value.get('is_error') is False and isinstance(value.get('result'), str)
+                    and value['result'].strip() == expected_text,
+                    'busy_native_result_mismatch')
+            identity = value.get('uuid')
+            try:
+                require(isinstance(identity, str) and str(UUID(identity)) == identity, 'busy_native_identity')
+            except ValueError:
+                raise CanaryError('busy_native_identity') from None
+            require(identity not in self.native_ids, 'busy_native_duplicate')
+            self.native_ids.add(identity)
+            self.results += 1
+            self.record('native_result', turn=self.results, nativeUuid=identity)
+        else:
+            raise CanaryError('busy_native_unexpected_message')
+
+    def proof(self):
+        require(self.complete.is_set() and not self.failed.is_set(), 'busy_witness_incomplete')
+        return {'sessionId': self.session_id, 'inputUuid': self.expected['uuid'],
+                'inputContentSha256': hashlib.sha256(self.expected['content'].encode()).hexdigest(),
+                'admission': 'unknown', 'delivery': 'unknown', 'restartQualified': False,
+                'timestamps': 'parent-monotonic-observation-nanoseconds',
+                'observations': [dict(item) for item in self.observations]}
+
+
+async def observe_busy_stdout(reader, probe):
+    """One bounded reader owns stdout until the retained child closes it."""
+    size = 0
+    while True:
+        raw = await reader.readline()
+        if not raw:
+            require(probe.complete.is_set(), 'busy_native_stream_closed')
+            return
+        size += len(raw)
+        require(size <= MAX_STREAM_BYTES, 'client_output_limit')
+        try:
+            value = json.loads(raw)
+        except (ValueError, UnicodeError):
+            raise CanaryError('invalid_client_output') from None
+        probe.observe(value)
+
+
+async def wait_busy_witness(event, observer, probe):
+    """No controller step may advance after native or provider observation fails."""
+    reached = asyncio.create_task(event.wait())
+    failed = asyncio.create_task(probe.failed.wait())
+    try:
+        done, _ = await asyncio.wait((reached, failed, observer), return_when=asyncio.FIRST_COMPLETED)
+        require(failed not in done, 'local_provider_incomplete')
+        if observer in done:
+            await observer
+            require(event.is_set(), 'busy_native_stream_closed')
+    finally:
+        reached.cancel()
+        failed.cancel()
+        await asyncio.gather(reached, failed, return_exceptions=True)
+
+
 class LocalProvider:
     """Bounded local protocol fixture with no upstream connection or retained prompts."""
-    def __init__(self, key, model):
+    def __init__(self, key, model, probe=None):
         self.key, self.model = key, model
         self.turns = 0
         self.failure = False
         self.tasks = set()
+        self.probe = probe
 
     def respond(self, value):
         require(isinstance(value, dict) and value.get('stream') is True
@@ -166,14 +357,17 @@ class LocalProvider:
         if self.turns == 0:
             text = json.dumps(value.get('system', []))
             candidates = re.findall(r'READY_[a-f0-9]{32}', text)
-            require(len(set(candidates)) == 1 and 'WAKE_' not in json.dumps(value),
+            require(len(set(candidates)) == 1 and 'WAKE_' not in json.dumps(value)
+                    and 'BUSY_' not in json.dumps(value),
                     'local_provider_initial_marker_missing')
         else:
             # The nonce is never passed to this server by the canary controller.
             # It must arrive through the real client's subsequent model request.
             text = json.dumps(messages[-1].get('content'))
-            candidates = re.findall(r'WAKE_[a-f0-9]{32}', text)
+            candidates = re.findall(r'BUSY_[a-f0-9]{32}' if self.probe else r'WAKE_[a-f0-9]{32}', text)
             require(len(set(candidates)) == 1, 'local_provider_wake_missing')
+        if self.probe:
+            self.probe.provider_request(candidates[0])
         self.turns += 1
         return synthetic_stream(candidates[0], self.model)
 
@@ -202,12 +396,17 @@ class LocalProvider:
                 require(0 < length <= 1024 * 1024, 'local_provider_body_limit')
                 value = json.loads(await reader.readexactly(length))
                 body = self.respond(value)
+                if self.probe and self.turns == 1:
+                    self.probe.hold_response()
+                    await self.probe.release.wait()
                 writer.write(b'HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n'
                              b'Cache-Control: no-cache\r\nConnection: close\r\nContent-Length: '
                              + str(len(body)).encode() + b'\r\n\r\n' + body)
                 await writer.drain()
         except (Exception, asyncio.CancelledError):
             self.failure = True
+            if self.probe:
+                self.probe.failed.set()
         finally:
             writer.close()
             try:
@@ -278,42 +477,54 @@ async def stop_child(child):
             await asyncio.wait_for(child.wait(), 5)
 
 
-async def canary(binary, root, key, model, local_port=None, hosted_repository_id=None):
+async def canary(binary, root, key, model, local_port=None, hosted_repository_id=None, *, busy_probe=False):
     """Run exactly two synthetic turns; every success criterion is observed."""
+    require(not busy_probe or local_port is not None, 'busy_probe_requires_local_provider')
     if hosted_repository_id is not None:
         require(local_port is not None, 'hosted_vm_requires_local_provider')
         admit_hosted_vm(os.environ, hosted_repository_id)
     session_id, marker = str(uuid4()), uuid4().hex
     child = None
     server = provider = None
+    observer = None
+    observer_failed = False
+    initial = {'type': 'user', 'session_id': session_id,
+               'message': {'role': 'user', 'content': 'Begin the synthetic transport test.'}}
+    probe = None
+    if busy_probe:
+        initial['uuid'] = str(uuid4())
+        probe = BusyProbe(session_id, initial, 'READY_' + marker)
     for name in ('home', 'config', 'tmp', 'work'):
         (root / name).mkdir(mode=0o700)
     try:
         async with asyncio.timeout(RUN_SECONDS):
-            command = child_command(binary, root, session_id, model, marker)
+            command = child_command(binary, root, session_id, model, marker, busy_probe=busy_probe)
             if local_port is not None:
                 profile = root / 'child.sb'
                 profile.write_text(hosted_network_profile(root, local_port, hosted_repository_id)
                                    if hosted_repository_id is not None
                                    else sandbox_profile(binary, root, local_port))
-                provider = LocalProvider(key, model)
+                provider = LocalProvider(key, model, probe=probe)
                 server = await asyncio.start_server(provider.handle, '127.0.0.1', local_port,
                                                     limit=16384, reuse_address=False)
                 command = ['/usr/bin/sandbox-exec', '-f', str(profile), *command]
             child = await asyncio.create_subprocess_exec(
                 *command,
-                env=child_environment(root, key, local_port), cwd=root / 'work',
+                env=child_environment(root, key, local_port, busy_probe=busy_probe), cwd=root / 'work',
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL, close_fds=True, limit=65536)
             state = {'bytes': 0, 'initialized': False}
-            initial = {'type': 'user', 'session_id': session_id,
-                       'message': {'role': 'user', 'content': 'Begin the synthetic transport test.'}}
+            if probe:
+                observer = asyncio.create_task(observe_busy_stdout(child.stdout, probe))
             child.stdin.write((json.dumps(initial) + '\n').encode())
             await child.stdin.drain()
-            await completed_turn(child.stdout, session_id, 'READY_' + marker, state)
-            await asyncio.sleep(1)
+            if probe:
+                await wait_busy_witness(probe.ready_to_send, observer, probe)
+            else:
+                await completed_turn(child.stdout, session_id, 'READY_' + marker, state)
+                await asyncio.sleep(1)
             require(child.returncode is None, 'client_exited_before_wake')
-            wake_marker = 'WAKE_' + uuid4().hex
+            wake_marker = ('BUSY_' if probe else 'WAKE_') + uuid4().hex
             socket_path = root / 'inbox.sock'
             info = socket_path.lstat()
             require(stat.S_ISSOCK(info.st_mode), 'child_inbox_unavailable')
@@ -325,9 +536,17 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
                         'source': 'manual', 'sourceStateVersion': 'canary-1',
                         'canonicalSubject': {'kind': 'manual', 'subjectId': wake_marker},
                         'eventReference': 'ref_' + str(uuid4())}
+            if probe:
+                probe.prepare(event_frame(session_id, metadata))
             outcome = await transport.send(metadata)
             require(outcome['reason'] == 'claude_write_unacknowledged', 'socket_write_unconfirmed')
-            await completed_turn(child.stdout, session_id, wake_marker, state)
+            if probe:
+                await wait_busy_witness(probe.ready_to_send, observer, probe)
+                probe.sent()
+                probe.release_response()
+                await wait_busy_witness(probe.complete, observer, probe)
+            else:
+                await completed_turn(child.stdout, session_id, wake_marker, state)
             require(provider is None or provider.turns == 2 and not provider.failure,
                     'local_provider_incomplete')
             proof = {'schemaVersion': 1,
@@ -345,11 +564,21 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
                     'socketWriteClosedGracefully': True, 'matchingWakeTurnObserved': True,
                     'stdinWakeWritten': False, 'productionQualified': False,
                     'nativeReceiptV3Proven': False}
+            if probe:
+                proof.update(scope='disposable-headless-native-witness-busy-probe', idleIntervalObserved=False,
+                             matchingWakeTurnObserved=False, matchingBusyTurnObserved=True)
+                proof['busyProbe'] = probe.proof()
+                proof['busyProbe']['retainedChildPid'] = child.pid
     finally:
         try:
             if child is not None:
                 await stop_child(child)
         finally:
+            if observer is not None:
+                try:
+                    await asyncio.wait_for(observer, 1)
+                except (Exception, asyncio.CancelledError):
+                    observer_failed = True
             if server is not None:
                 server.close()
                 await server.wait_closed()
@@ -361,6 +590,10 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
     # Only settled provider state may authorize returning the selected proof.
     require(provider is None or provider.turns == 2 and not provider.failure,
             'local_provider_incomplete')
+    require(not observer_failed, 'busy_native_observation_failed')
+    if probe:
+        # Include any final observations drained while the retained child stopped.
+        proof['busyProbe'] = probe.proof() | {'retainedChildPid': child.pid}
     return proof
 
 
@@ -390,6 +623,8 @@ def main(argv=None):
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--model', required=True)
     parser.add_argument('--local-provider', action='store_true', help='Synthetic local SSE; no credential or spend')
+    parser.add_argument('--busy-probe', action='store_true',
+                        help='Experimental native state/replay observations; local synthetic provider only')
     parser.add_argument('--local-port', type=int, default=43231)
     parser.add_argument('--trusted-hosted-vm', action='store_true',
                         help='Reviewed client on a fresh private GitHub-hosted macOS VM only')
@@ -397,6 +632,7 @@ def main(argv=None):
     parser.add_argument('--private-output', type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        require(not args.busy_probe or args.local_provider, 'busy_probe_requires_local_provider')
         require(args.trusted_hosted_vm == (args.hosted_repository_id is not None),
                 'hosted_vm_repository_id_required')
         if args.trusted_hosted_vm:
@@ -416,7 +652,8 @@ def main(argv=None):
         root = Path(tempfile.mkdtemp(prefix='cq-', dir=temp_root)).resolve()
         proof = asyncio.run(canary(binary, root, key, args.model,
                                   args.local_port if args.local_provider else None,
-                                  args.hosted_repository_id if args.trusted_hosted_vm else None))
+                                  args.hosted_repository_id if args.trusted_hosted_vm else None,
+                                  busy_probe=args.busy_probe))
         publish_proof(output, proof)
         print(json.dumps({'canary': 'observed', 'productionQualified': False}))
         return 0

@@ -205,6 +205,34 @@ real-model behavior or production qualification. Native startup, sandbox
 compatibility, the installed messaging gate, and idle wake must still be observed
 in an actual contained run. Unit tests do not execute Claude.
 
+### Offline busy probe (experimental)
+
+`--busy-probe` requires `--local-provider` and uses the existing contained,
+disposable launch. It explicitly enables experimental
+`CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` only in the child environment and adds
+`--replay-user-messages`. It needs no owner credentials or configuration and makes
+no workflow changes. Add `--busy-probe` to the local-provider command above; this
+section describes the probe contract, not an executed qualification result.
+
+The probe continuously observes native stdout for the exact disposable session
+and requires native `running` before creating the fresh BUSY nonce. The synthetic
+provider holds its initial response until the socket write completes. Evidence
+then requires ordered native READY and BUSY assistant messages and successful
+results, plus a native user replay correlated by exact UUID and content. Ordering
+uses host-observed monotonic timestamps, not inferred native admission times.
+
+Delivery and native admission remain **unknown**. A replay can describe merged or
+duplicate input and is not a durable receipt. Holding the response through the
+write and observing an eventual second turn do not prove the native queue admitted
+the input while busy. Restart recovery remains unqualified, and current selected
+TUI identity remains unproven.
+
+Audited [run `39037031558`](https://github.com/knitli/knitli-site/actions/runs/39037031558)
+established a controlled synthetic two-turn,
+same-session socket wake. Its completed first turn plus a one-second wait did not
+independently establish native idle state. Earlier idle-wake wording describes the
+canary's intent; it must not be read as independently observed native idle evidence.
+
 ### Reviewed hosted-VM qualification
 
 `--trusted-hosted-vm --hosted-repository-id <immutable-id>` is a separate,
@@ -229,9 +257,12 @@ Hosted evidence marks `containment: trusted-hosted-vm-network-only`, with
 `hostileSameUidIsolationProven`, `completeDescendantTerminationProven`, and
 `vmDisposalObserved` all false. Scratch remains for provider-managed VM disposal,
 including failed runs, to avoid deleting state while an unobserved descendant
-might still use it. A successful result proves only the controlled synthetic
-headless idle-wake case; production qualification and receipt-v3 remain false.
-No hosted execution has yet been demonstrated by this change.
+might still use it. Audited private hosted run
+[`39037031558`](https://github.com/knitli/knitli-site/actions/runs/39037031558),
+attempt 1 on 2026-10-17, demonstrated a controlled synthetic second turn through
+the authenticated socket in the same fresh headless session. It did not independently
+witness native idle or busy admission. The experimental busy probe above remains
+unexecuted; production qualification, restart recovery, and receipt-v3 remain false.
 
 The [official 2.1.302 manifest](https://downloads.claude.ai/claude-code-releases/2.1.302/manifest.json)
 records `darwin-arm64` SHA256
@@ -240,6 +271,7 @@ and size 267956720 bytes. The
 [official installer](https://claude.ai/install.sh) establishes the version/platform
 URL pattern; the pinned artifact is
 `https://downloads.claude.ai/claude-code-releases/2.1.302/darwin-arm64/claude`.
-Only installer/manifest text was fetched for this change. A future workflow must
-verify the downloaded bytes against the pinned hash before execution; it must not
+Initial preparation fetched only installer/manifest text; the audited hosted run
+subsequently verified and executed the pinned client. Every qualification run must
+verify downloaded bytes against the pinned hash before execution; it must not
 execute an installer or select `latest`.

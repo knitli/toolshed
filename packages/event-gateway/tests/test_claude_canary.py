@@ -371,3 +371,424 @@ class HostedVmTests(unittest.TestCase):
                     patch.object(CANARY.sys, 'stderr'):
                 self.assertEqual(CANARY.main(base + flags), 2)
                 run.assert_not_called()
+
+
+class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
+    """Synthetic protocol checks are not evidence of native client qualification."""
+
+    def setUp(self):
+        self.session = str(uuid4())
+        self.key = 'local-fixture-' + secrets.token_hex(24)
+        self.ready = 'READY_' + uuid4().hex
+        self.busy = 'BUSY_' + uuid4().hex
+        self.initial = {'type': 'user', 'session_id': self.session, 'uuid': str(uuid4()),
+                        'message': {'role': 'user', 'content': 'Begin synthetic test.'}}
+        from event_gateway.claude import event_frame
+        self.frame = event_frame(self.session, {
+            'eventId': str(uuid4()), 'deliveryId': 'dly_' + secrets.token_hex(32),
+            'source': 'manual', 'sourceStateVersion': 'canary-1',
+            'canonicalSubject': {'kind': 'manual', 'subjectId': self.busy},
+            'eventReference': 'ref_' + str(uuid4())})
+
+    def new_probe(self):
+        return CANARY.BusyProbe(self.session, self.initial, self.ready)
+
+    def state(self, state):
+        return {'type': 'system', 'subtype': 'session_state_changed',
+                'session_id': self.session, 'uuid': str(uuid4()), 'state': state}
+
+    def assistant(self, marker):
+        return {'type': 'assistant', 'session_id': self.session, 'uuid': str(uuid4()),
+                'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': marker}]}}
+
+    def result(self, marker):
+        return {'type': 'result', 'session_id': self.session, 'uuid': str(uuid4()),
+                'subtype': 'success', 'is_error': False, 'result': marker}
+
+    def started(self):
+        probe = self.new_probe()
+        probe.observe({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []})
+        probe.observe(self.state('running'))
+        probe.provider_request(self.ready)
+        probe.hold_response()
+        return probe
+
+    def released(self, replay=True):
+        probe = self.started()
+        probe.prepare(self.frame)
+        if replay:
+            probe.observe(self.frame | {'isReplay': True})
+        probe.sent()
+        probe.release_response()
+        return probe
+
+    def finish(self, probe):
+        probe.observe(self.assistant(self.ready))
+        probe.observe(self.result(self.ready))
+        probe.provider_request(self.busy)
+        probe.observe(self.assistant(self.busy))
+        probe.observe(self.result(self.busy))
+        probe.observe(self.state('idle'))
+
+    def test_complete_synthetic_sequence_requires_final_idle(self):
+        probe = self.released()
+        probe.observe(self.assistant(self.ready))
+        probe.observe(self.result(self.ready))
+        probe.provider_request(self.busy)
+        probe.observe(self.assistant(self.busy))
+        probe.observe(self.result(self.busy))
+        self.assertFalse(probe.complete.is_set())
+        with self.assertRaises(CANARY.CanaryError):
+            probe.proof()
+        probe.observe(self.state('idle'))
+        self.assertTrue(probe.complete.is_set())
+        self.assertIsInstance(probe.proof(), dict)
+
+    def test_provider_hold_alone_cannot_open_native_running_barrier(self):
+        probe = self.new_probe()
+        probe.observe({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []})
+        probe.provider_request(self.ready)
+        probe.hold_response()
+        self.assertFalse(probe.ready_to_send.is_set())
+        with self.assertRaises(CANARY.CanaryError):
+            probe.prepare(self.frame)
+
+    def test_running_alone_cannot_open_provider_hold_barrier(self):
+        probe = self.new_probe()
+        probe.observe({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []})
+        probe.observe(self.state('running'))
+        self.assertFalse(probe.ready_to_send.is_set())
+        with self.assertRaises(CANARY.CanaryError):
+            probe.prepare(self.frame)
+
+    def test_replay_requires_exact_uuid_content_session_and_boolean(self):
+        changes = [{'uuid': str(uuid4())}, {'session_id': str(uuid4())},
+                   {'message': {'role': 'user', 'content': self.busy}},
+                   {'isReplay': False}, {'isReplay': 'true'}, {'uuid': None}]
+        for change in changes:
+            with self.subTest(change=change):
+                probe = self.started()
+                probe.prepare(self.frame)
+                with self.assertRaises(CANARY.CanaryError):
+                    probe.observe(self.frame | {'isReplay': True} | change)
+
+    def test_replay_before_send_preparation_and_duplicate_replay_rejected(self):
+        probe = self.started()
+        with self.assertRaises(CANARY.CanaryError):
+            probe.observe(self.frame | {'isReplay': True})
+        probe = self.released()
+        with self.assertRaises(CANARY.CanaryError):
+            probe.observe(self.frame | {'isReplay': True})
+
+    def test_missing_replay_cannot_produce_proof(self):
+        probe = self.released(replay=False)
+        try:
+            self.finish(probe)
+        except CANARY.CanaryError:
+            pass
+        with self.assertRaises(CANARY.CanaryError):
+            probe.proof()
+
+    def test_premature_output_or_idle_rejected_before_release(self):
+        for message in (self.assistant(self.ready), self.result(self.ready), self.state('idle')):
+            with self.subTest(message=message):
+                probe = self.started()
+                probe.prepare(self.frame)
+                with self.assertRaises(CANARY.CanaryError):
+                    probe.observe(message)
+
+    def test_result_requires_assistant_order_success_and_valid_uuid(self):
+        for message in (self.result(self.ready), self.assistant(self.busy), self.state('idle')):
+            with self.subTest(message=message):
+                probe = self.released()
+                with self.assertRaises(CANARY.CanaryError):
+                    probe.observe(message)
+        for change in ({'uuid': None}, {'uuid': 'invalid'}, {'session_id': str(uuid4())},
+                       {'subtype': 'error_during_execution'}, {'is_error': True}, {'result': self.busy}):
+            with self.subTest(change=change):
+                probe = self.released()
+                probe.observe(self.assistant(self.ready))
+                with self.assertRaises(CANARY.CanaryError):
+                    probe.observe(self.result(self.ready) | change)
+
+    def test_duplicate_result_and_early_second_provider_request_rejected(self):
+        probe = self.released()
+        probe.observe(self.assistant(self.ready))
+        result = self.result(self.ready)
+        probe.observe(result)
+        with self.assertRaises(CANARY.CanaryError):
+            probe.observe(result)
+        probe = self.started()
+        with self.assertRaises(CANARY.CanaryError):
+            probe.provider_request(self.busy)
+
+    def test_malformed_native_messages_never_produce_proof(self):
+        for message in (None, [], {}, {'type': 'system', 'subtype': 'init',
+                                     'session_id': self.session, 'tools': ['Bash']}):
+            with self.subTest(message=message):
+                probe = self.new_probe()
+                with self.assertRaises(CANARY.CanaryError):
+                    probe.observe(message)
+                with self.assertRaises(CANARY.CanaryError):
+                    probe.proof()
+
+    def test_busy_cli_requires_local_provider_before_setup(self):
+        with patch.object(CANARY.asyncio, 'run') as run, patch.object(CANARY.sys, 'stderr'), \
+                patch.object(CANARY.Path, 'resolve') as resolve, \
+                patch.object(CANARY.getpass, 'getpass') as prompt:
+            self.assertEqual(CANARY.main(['--busy-probe', '--binary', '/missing', '--model', 'fixture',
+                                         '--private-output', '/missing/proof.json']), 2)
+        run.assert_not_called()
+        resolve.assert_not_called()
+        prompt.assert_not_called()
+
+    def test_busy_instrumentation_is_opt_in_and_local_only(self):
+        root = Path('/private/tmp/disposable')
+        for enabled in (False, True):
+            command = CANARY.child_command('/binary', root, self.session, 'fixture', 'nonce',
+                                           busy_probe=enabled)
+            environment = CANARY.child_environment(root, self.key, 43231, busy_probe=enabled)
+            self.assertEqual('--replay-user-messages' in command, enabled)
+            self.assertEqual('CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS' in environment, enabled)
+        with self.assertRaises(CANARY.CanaryError):
+            CANARY.child_environment(root, 'dummy', busy_probe=True)
+
+    def test_release_requires_confirmed_send_and_native_barrier(self):
+        for stage in ('new', 'held', 'prepared'):
+            with self.subTest(stage=stage):
+                probe = self.new_probe() if stage == 'new' else self.started()
+                if stage == 'prepared':
+                    probe.prepare(self.frame)
+                with self.assertRaises(CANARY.CanaryError):
+                    probe.release_response()
+                self.assertFalse(probe.release.is_set())
+        with self.assertRaises(CANARY.CanaryError):
+            self.started().sent()
+
+    def test_state_requires_exact_session_and_canonical_uuid(self):
+        for change in ({'uuid': None}, {'uuid': 'malformed'}, {'session_id': str(uuid4())},
+                       {'state': 'unexpected'}):
+            with self.subTest(change=change):
+                probe = self.new_probe()
+                probe.observe({'type': 'system', 'subtype': 'init',
+                               'session_id': self.session, 'tools': []})
+                with self.assertRaises(CANARY.CanaryError):
+                    probe.observe(self.state('running') | change)
+                self.assertFalse(probe.ready_to_send.is_set())
+
+    async def test_stdout_eof_malformed_and_limit_refuse_completion(self):
+        for payload in (b'', b'not-json\n', b'null\n', b'[]\n', b'{}\n'):
+            reader = asyncio.StreamReader()
+            reader.feed_data(payload)
+            reader.feed_eof()
+            probe = self.new_probe()
+            with self.subTest(payload=payload), self.assertRaises(CANARY.CanaryError):
+                await CANARY.observe_busy_stdout(reader, probe)
+            self.assertFalse(probe.complete.is_set())
+        with patch.object(CANARY, 'MAX_STREAM_BYTES', 2), self.assertRaises(CANARY.CanaryError):
+            await CANARY.observe_busy_stdout(stream({'type': 'system'}), self.new_probe())
+
+    async def test_waiter_prioritizes_provider_failure_over_ready_barrier(self):
+        probe = self.started()
+        probe.failed.set()
+        observer = asyncio.create_task(asyncio.Event().wait())
+        try:
+            with self.assertRaisesRegex(CANARY.CanaryError, 'local_provider_incomplete'):
+                await CANARY.wait_busy_witness(probe.ready_to_send, observer, probe)
+        finally:
+            observer.cancel()
+            await asyncio.gather(observer, return_exceptions=True)
+
+    def test_late_provider_failure_invalidates_completed_observations(self):
+        probe = self.released()
+        self.finish(probe)
+        proof = probe.proof()
+        self.assertEqual(proof['admission'], 'unknown')
+        self.assertEqual(proof['delivery'], 'unknown')
+        self.assertFalse(proof['restartQualified'])
+        self.assertEqual(proof['sessionId'], self.session)
+        self.assertEqual(proof['inputUuid'], self.frame['uuid'])
+        probe.failed.set()
+        with self.assertRaises(CANARY.CanaryError):
+            probe.proof()
+
+    async def test_busy_canary_late_failure_cleans_child_server_and_scratch(self):
+        await self.run_busy_canary('late_failure')
+
+    async def test_busy_canary_returns_ordered_observations_only_after_shutdown(self):
+        await self.run_busy_canary('success')
+
+    async def test_busy_canary_timeout_cleans_stalled_native_session(self):
+        await self.run_busy_canary('timeout')
+
+    async def run_busy_canary(self, scenario):
+        parent = '/private/tmp' if Path('/private/tmp').is_dir() else '/tmp'  # nosec B108
+        root = Path(tempfile.mkdtemp(dir=parent)).resolve()
+        reader = asyncio.StreamReader()
+        child = Mock(returncode=None, pid=123, stdout=reader)
+        server = Mock()
+        server.wait_closed = AsyncMock()
+        provider = Mock(turns=0, failure=False)
+        pending = []
+        generated = 0
+        stopped = False
+
+        def generate_uuid():
+            nonlocal generated
+            if generated >= 3:
+                self.assertTrue(provider.probe.ready_to_send.is_set())
+                self.assertTrue(provider.probe.running)
+                self.assertTrue(provider.probe.held)
+                self.assertFalse(provider.probe.release.is_set())
+            generated += 1
+            return uuid4()
+
+        def make_provider(_key, _model, *, probe):
+            provider.probe = probe
+            self.session = probe.session_id
+            self.ready = probe.ready_marker
+            return provider
+
+        def feed(*messages):
+            reader.feed_data(b''.join((json.dumps(message) + '\n').encode() for message in messages))
+
+        async def initial_drain():
+            if scenario == 'timeout':
+                return
+            feed({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []},
+                 self.state('running'))
+            provider.probe.provider_request(self.ready)
+            provider.probe.hold_response()
+            provider.turns = 1
+
+        async def finish_native(frame):
+            await provider.probe.release.wait()
+            feed(frame | {'isReplay': True}, self.assistant(self.ready), self.result(self.ready))
+            self.busy = provider.probe.expected['marker']
+            provider.probe.provider_request(self.busy)
+            provider.turns = 2
+            feed(self.assistant(self.busy), self.result(self.busy), self.state('idle'))
+
+        async def send(metadata):
+            self.assertTrue(provider.probe.running)
+            self.assertFalse(provider.probe.release.is_set())
+            pending.append(asyncio.create_task(finish_native(CANARY.event_frame(self.session, metadata))))
+            return {'reason': 'claude_write_unacknowledged'}
+
+        async def stop(_child):
+            nonlocal stopped
+            stopped = True
+            reader.feed_eof()
+
+        async def late_failure():
+            provider.failure = True
+            provider.probe.failed.set()
+
+        child.stdin.drain = AsyncMock(side_effect=initial_drain)
+        provider.close = AsyncMock(side_effect=late_failure if scenario == 'late_failure' else None)
+        transport = Mock(send=AsyncMock(side_effect=send))
+        try:
+            with patch.object(CANARY, 'uuid4', side_effect=generate_uuid), \
+                    patch.object(CANARY, 'RUN_SECONDS', 0.01 if scenario == 'timeout' else 1), \
+                    patch.object(CANARY, 'sandbox_profile', return_value='(deny default)'), \
+                    patch.object(CANARY, 'LocalProvider', side_effect=make_provider), \
+                    patch.object(CANARY.asyncio, 'start_server', new=AsyncMock(return_value=server)), \
+                    patch.object(CANARY.asyncio, 'create_subprocess_exec', new=AsyncMock(return_value=child)), \
+                    patch.object(CANARY.Path, 'lstat', return_value=SimpleNamespace(st_mode=stat.S_IFSOCK, st_dev=1, st_ino=2)), \
+                    patch.object(CANARY, 'child_peer_token', return_value=secrets.token_urlsafe(32)), \
+                    patch.object(CANARY, 'ClaudeSocketTransport', return_value=transport), \
+                    patch.object(CANARY, 'stop_child', new=AsyncMock(side_effect=stop)) as shutdown:
+                if scenario == 'success':
+                    proof = await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
+                                               busy_probe=True)
+                    self.assertTrue(stopped)
+                    provider.close.assert_awaited_once()
+                    witness = proof['busyProbe']
+                    self.assertEqual(witness['admission'], 'unknown')
+                    self.assertEqual(witness['delivery'], 'unknown')
+                    self.assertFalse(witness['restartQualified'])
+                    self.assertFalse(proof['productionQualified'])
+                    self.assertFalse(proof['nativeReceiptV3Proven'])
+                    self.assertEqual(witness['retainedChildPid'], child.pid)
+                    observations = witness['observations']
+                    timestamps = [item['observedNs'] for item in observations]
+                    self.assertEqual(timestamps, sorted(timestamps))
+                    self.assertGreaterEqual(timestamps[0], 0)
+                    kinds = [item['kind'] for item in observations]
+                    sequence = ['busy_input_prepared', 'socket_write_closed',
+                                'initial_response_released', 'native_user_replay', 'native_assistant']
+                    positions = [kinds.index(kind) for kind in sequence]
+                    self.assertEqual(positions, sorted(positions))
+                    self.assertEqual(observations[-1]['kind'], 'native_state')
+                    self.assertEqual(observations[-1]['state'], 'idle')
+                elif scenario == 'timeout':
+                    with self.assertRaises(TimeoutError):
+                        await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
+                                            busy_probe=True)
+                else:
+                    with self.assertRaisesRegex(CANARY.CanaryError, '^local_provider_incomplete$'):
+                        await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
+                                            busy_probe=True)
+            shutdown.assert_awaited_once_with(child)
+            server.close.assert_called_once()
+            server.wait_closed.assert_awaited_once()
+            provider.close.assert_awaited_once()
+            if scenario == 'timeout':
+                transport.send.assert_not_awaited()
+                self.assertEqual(generated, 3)
+            else:
+                transport.send.assert_awaited_once()
+                self.assertEqual(generated, 6)
+            self.assertFalse(root.exists())
+        finally:
+            await asyncio.gather(*pending)
+
+    def test_optional_initial_replay_and_late_busy_replay_preserve_identity(self):
+        probe = self.started()
+        probe.observe(self.initial | {'isReplay': True})
+        probe.prepare(self.frame)
+        probe.sent()
+        probe.release_response()
+        probe.observe(self.assistant(self.ready))
+        probe.observe(self.result(self.ready))
+        probe.observe(self.frame | {'isReplay': True})
+        probe.provider_request(self.busy)
+        probe.observe(self.assistant(self.busy))
+        probe.observe(self.result(self.busy))
+        probe.observe(self.state('idle'))
+        observations = probe.proof()['observations']
+        replay = [item for item in observations if item['kind'] == 'native_user_replay']
+        self.assertEqual([item['inputUuid'] for item in replay], [self.initial['uuid'], self.frame['uuid']])
+        self.assertEqual([item['whileResponseHeld'] for item in replay], [True, False])
+
+    async def test_provider_http_waits_for_release_before_writing_response(self):
+        probe = self.new_probe()
+        probe.observe({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []})
+        probe.observe(self.state('running'))
+        provider = CANARY.LocalProvider('dummy-fixture', 'fixture', probe=probe)
+        body = json.dumps({'model': 'fixture', 'stream': True, 'tools': [],
+                           'system': [{'type': 'text', 'text': self.ready}],
+                           'messages': [{'role': 'user', 'content': 'Begin synthetic test.'}]}).encode()
+        reader = asyncio.StreamReader()
+        reader.feed_data(('POST /v1/messages HTTP/1.1\r\nHost: 127.0.0.1:43231\r\n'
+                          'Content-Type: application/json\r\nX-Api-Key: dummy-fixture\r\n'
+                          f'Content-Length: {len(body)}\r\n\r\n').encode() + body)
+        reader.feed_eof()
+        writer = Mock(drain=AsyncMock(), wait_closed=AsyncMock())
+        task = asyncio.create_task(provider.handle(reader, writer))
+        try:
+            await asyncio.wait_for(probe.ready_to_send.wait(), 1)
+            writer.write.assert_not_called()
+            self.assertFalse(task.done())
+            probe.prepare(self.frame)
+            probe.sent()
+            probe.release_response()
+            await asyncio.wait_for(task, 1)
+            self.assertIn(self.ready.encode(), writer.write.call_args.args[0])
+            self.assertNotIn(self.busy.encode(), writer.write.call_args.args[0])
+            self.assertEqual(probe.requests, 1)
+            self.assertFalse(provider.failure)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await provider.close()
