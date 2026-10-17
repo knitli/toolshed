@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "nodeSha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+  "childSha256": "85c2b38768ad444098366086ce754266d42f840de2e390032c7a367607463c09",
+  "caSerialization": "UTF-8 JSON.stringify(tls.rootCertificates)",
+  "caCount": 121,
+  "caSha256": "1decfbbd96de12a0ff0677ea34b95586e646a7fb4c32f6352d95af26a7408624",
+  "productionTransportQualified": false
+}
