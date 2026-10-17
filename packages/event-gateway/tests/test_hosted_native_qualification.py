@@ -4,10 +4,11 @@ import json
 import os
 import re
 from pathlib import Path
-import subprocess
+import subprocess  # nosec B404 - every process invocation in these tests is mocked.
 import tempfile
 from types import SimpleNamespace
 import unittest
+from uuid import uuid4
 from unittest.mock import patch
 
 SCRIPT = Path(__file__).parents[1] / 'scripts/run_hosted_native_qualification.py'
@@ -18,7 +19,7 @@ ENV = {'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_NAME': 'workflow_dispatch',
        'GITHUB_REF': 'refs/heads/main', 'GITHUB_RUN_ATTEMPT': '1',
        'RUNNER_ENVIRONMENT': 'github-hosted', 'RUNNER_OS': 'macOS', 'RUNNER_ARCH': 'ARM64',
        'GITHUB_REPOSITORY_ID': '123', 'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '42',
-       'ImageOS': 'macos15', 'ImageVersion': 'test', 'GH_TOKEN': 'never-inherit'}
+       'ImageOS': 'macos15', 'ImageVersion': 'test', 'GH_TOKEN': str(uuid4())}
 
 
 class HostedNativeTests(unittest.TestCase):
