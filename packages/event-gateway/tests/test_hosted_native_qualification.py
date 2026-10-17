@@ -4,7 +4,7 @@ import json
 import os
 import re
 from pathlib import Path
-import subprocess  # nosec B404 - every process invocation in these tests is mocked.
+import subprocess  # nosec B404 - mocked providers and fixed Git commands in disposable test repositories.
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -176,8 +176,10 @@ class HostedNativeTests(unittest.TestCase):
             entry = source / 'index.ts'
             entry.write_text('export {};\n')
             (root / '.gitignore').write_text('ignored.ts\nnode_modules/\n')
+
             def git(*arguments):
-                return subprocess.run(['/usr/bin/git', '-C', str(root), *arguments], check=True,
+                # Fixed executable and test-owned arguments; no shell or external input.
+                return subprocess.run(['/usr/bin/git', '-C', str(root), *arguments], check=True,  # nosec B603
                                       capture_output=True, text=True).stdout.strip()
             git('init', '-q')
             git('add', '.')

@@ -17,7 +17,7 @@ export const coordinatorName=()=>{throw new Error('unexpected coordinator lookup
 
 test('hashes only resolved sources inside qualified roots, before reading contents', t => {
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- Owned disposable test tree only; no user paths.
-  const temporary = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'native-source-hashes-')));
+  const temporary = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'native-source-hashes-'))); // nosemgrep: javascript_pathtraversal_rule-non-literal-fs-filename
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- Owned disposable test tree only; no user paths.
   t.after(() => fs.rmSync(temporary, {recursive: true, force: true}));
   const root = join(temporary, 'qualified');
@@ -39,7 +39,7 @@ test('hashes only resolved sources inside qualified roots, before reading conten
   });
   const scratch = join(temporary, 'scratch');
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- Owned producer-cwd fixture.
-  fs.mkdirSync(scratch);
+  fs.mkdirSync(scratch); // nosemgrep: javascript_pathtraversal_rule-non-literal-fs-filename
   const priorCwd = process.cwd();
   try {
     process.chdir(scratch);
