@@ -137,17 +137,51 @@ configuration change, pull endpoint, cursor, or acknowledgment is added here.
 
 Push ingress remains a separate, unqualified path; see [Push ingress qualification](#push-ingress-qualification).
 
-Design the session-owned pull service against an independently trusted Muse
-session/generation binding. Existing `control.sock` authenticates the filesystem
-owner, not a Muse session. The HTTP listener accepts signed delivery intake only.
-`Store.list_pending` is scheduler state, not a durable consumer cursor, and Codex
-attachments do not establish Muse ownership. A real service needs bounded reads,
-a durable pending notification, explicit idempotent ACK, lost-read/ACK recovery,
-and generation fencing. It must also isolate Muse work from the existing native
-push dispatcher. Native receipt-v3 ACK/settlement methods cannot acknowledge a
-monitor line. Only after those boundaries exist can an owner-started disposable
-monitor establish idle/busy/restart behavior. Monitor output never authorizes
-source access or tools.
+A dormant local journal now exists in `event_gateway.muse_pull.MusePullJournal`.
+It uses an already-open `Store` connection, private directory, exclusive writer
+lock, SQLite transactions, WAL/FULL durability and byte-capacity checks. Its two
+versioned tables are created only when this journal is explicitly constructed;
+ordinary Store opening and the native delivery schema remain unchanged.
+
+The interface is `put_binding(trusted_binding)`, `enqueue(trusted_binding,
+notification)`, `read(trusted_binding)`, and `ack(trusted_binding, notification_id)`.
+Binding metadata has exactly `slotId`, `bindingGeneration`, `principal`, `nodeId`,
+`runtimeId`, `sessionId`, `nodeGeneration`, `runtimeGeneration`,
+`attachmentGeneration`, `consumerGeneration`, and `leaseExpiresAt` (Unix seconds).
+The host supplies a stable slot ID from trusted configuration. A changed identity
+or session tuple requires a strictly greater binding generation for that same
+slot; old operations are fenced and old pending rows are retained, never moved.
+The same live generation permits only an unchanged tuple and nondecreasing lease;
+a lease extension fences the old metadata snapshot. Expiry requires a higher
+binding generation to resume. Different slot IDs are independent domains: this
+journal neither discovers session ownership nor promises cross-slot fencing.
+Native generation fields are checked as metadata, not authenticated native state.
+
+Each notification contains only bounded opaque `notificationId` and
+`eventReference` identifiers. Read returns one pending notification or `None` and
+never advances state. Lost reads replay the same item. Only the queue head can be
+ACKed; repeated ACK of an acknowledged ID succeeds even after restart. Exact
+re-enqueue is idempotent before and after ACK, while conflicting references fail.
+ACK is local consumption only, not native receipt-v3 evidence or Cloud settlement.
+
+All binding rows, pending rows and ACK tombstones across generations count toward
+the journal's `Store.max_rows` bound; byte allocation uses Store's shared database
+budget. ACK updates an equal-width state field without adding rows or payload.
+Duplicates and ACKs do not require spare enqueue capacity. No unacknowledged row
+or tombstone is automatically evicted. This dormant slice deliberately has no
+compaction: sustained use eventually refuses new work at capacity; a separately
+reviewed retirement policy is required before production use.
+
+Trusted metadata is not authentication. Existing `control.sock` authenticates the
+filesystem owner, not a Muse session, and Codex attachments do not establish Muse
+ownership. A future transport must independently authenticate the exact owner and
+current generation before accessing this journal; a caller-selected slot, UUID,
+or monitor command is insufficient. The journal is not wired to intake, daemon,
+CLI, HTTP, Cloud ACK, monitor startup or native dispatcher. Notification references
+do not authorize tools or source access. Only after the owner-binding and transport
+boundaries exist can an owner-started disposable monitor establish idle/busy/restart
+behavior. `test_muse_pull_journal.py` proves local abrupt-exit replay, ACK recovery,
+rotation fencing, capacity and rollback semantics offline, not native delivery.
 
 `test_muse_monitor.py` covers the reported contract and shell quoting offline;
 these are contract-derived checks, not Muse wake or delivery qualification.
