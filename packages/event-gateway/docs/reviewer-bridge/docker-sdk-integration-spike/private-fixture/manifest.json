@@ -10,9 +10,9 @@
   },
   "files": {
     "fixture.mjs": "c767125bbe5b90ef5cc1071f45810cff3d4ce09f86f9fa5f197fff6f7da399d4",
-    "launch.py": "34cacf25d58ae0850d08fbb90133681a07d698835dc8b6093198c089d6aa1401",
+    "launch.py": "884a486a6be7267547a67ab5965f4242f6c7c07a7e878e2c5dda46ca3b1f5609",
     "profile.sb": "dc6c4ddbf8c1fd356580842eb5c6df29d1941104b47fbfeb5c3dddc701919f87",
-    "README.md": "3b2359379c305ba8bfff98500228859e9d423ddafe0e414063cbe0814dc0875d"
+    "README.md": "b4a8d246e97874f85f2e7de714024096a837f1f514a7af3d7cf47bc9347f3874"
   },
   "dependencies": {
     "/private/tmp/reviewer-sdk-process-protocol-20261017/frozen/sdk.mjs": "7b3577a1078660a3ec43471e6738c730ca1b172070ddcf3f9a9384bcb68bd3ca",
@@ -29,7 +29,7 @@
   ],
   "validation": {
     "javascriptSyntax": "node --check PASS; fixture not executed",
-    "pythonSyntax": "AST and eight offline manifest/cleanup tests PASS; bounded synthetic host/descendant cleanup PASS; candidate SDK/Docker execution not performed",
+    "pythonSyntax": "AST and thirteen offline manifest/cleanup tests PASS; bounded synthetic plain-host and host/descendant cleanup PASS; candidate SDK/Docker execution not performed",
     "sandboxSyntax": "Profile accepted in historical attempt 1; real forbidden Unix socket denial unproven",
     "sdkDockerIntegration": "Qualification is established by a matching execution receipt, not this creation-time manifest; historical attempt4 qualifies its archived hashes only",
     "pythonLint": "Configured Ruff plus explicit preview E306 and C901 maximum15 PASS",
@@ -41,7 +41,8 @@
     "streams": "separate stdout.bin and stderr.bin; bounded prefix on overflow",
     "scratch": "retained on every outcome",
     "independentProcessAndDockerCleanup": "root required even on failure; no claimed absence from CLI termination",
-    "pythonRequirement": "waitid/WNOWAIT required before spawn; qualified Python 3.13 supports non-reaping observation"
+    "pythonRequirement": "waitid/WNOWAIT required before spawn; qualified Python 3.13 supports non-reaping observation",
+    "groupObservation": "fixed root-owned /bin/ps, closed environment, exact reserved PGID/UID, 1s/64KiB per query and bounded 2s loop; unknown or live members fail; not exhaustive or race-free proof"
   },
   "runtimeReadClosure": {
     "exactSources": true,

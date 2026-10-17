@@ -15,7 +15,7 @@ SPEC.loader.exec_module(launch)
 
 
 class CaptureCleanupTests(unittest.TestCase):
-    def exercise(self, *, timeout=False, pid=42123, pgid=42123, own_group=99, kill_error=None):
+    def exercise(self, *, timeout=False, pid=42123, pgid=42123, own_group=99, kill_error=None, inventory_error=None):
         process = MagicMock(pid=pid, returncode=None)
         process.stdout, process.stderr = io.BytesIO(), io.BytesIO()
         signalled = []
@@ -38,6 +38,7 @@ class CaptureCleanupTests(unittest.TestCase):
         with patch.object(launch, 'await_unreaped_exit', side_effect=subprocess.TimeoutExpired('fixture', 1) if timeout else None), \
                 patch.object(launch.subprocess, 'Popen', return_value=process), \
                 patch.object(launch.selectors, 'DefaultSelector', return_value=selector), \
+                patch.object(launch, 'await_group_exit', side_effect=inventory_error), \
                 patch.object(launch.os, 'waitid', return_value=None), \
                 patch.object(launch.os, 'getpgrp', return_value=own_group), \
                 patch.object(launch.os, 'getpgid', return_value=pgid), \
@@ -51,6 +52,36 @@ class CaptureCleanupTests(unittest.TestCase):
         self.assertTrue(process.stdout.closed)
         self.assertTrue(process.stderr.closed)
         return error, state, kill, process
+
+    def test_inventory_failure_preserves_primary_timeout(self):
+        error, state, _, process = self.exercise(timeout=True, inventory_error=RuntimeError('inventory denied'))
+        self.assertIsInstance(error, subprocess.TimeoutExpired)
+        self.assertEqual(state['cleanupFailure']['message'], 'inventory denied')
+        process.wait.assert_not_called()
+
+    def test_inventory_live_member_times_out(self):
+        uid = launch.os.getuid()
+        with patch.object(launch, 'group_snapshot', return_value=f'42124 42123 {uid} S\n'), \
+                patch.object(launch.time, 'monotonic', side_effect=[0, 3]):
+            with self.assertRaisesRegex(RuntimeError, 'Live process group'):
+                launch.await_group_exit(MagicMock(pid=42123))
+
+    def test_inventory_failure_refuses_cleanup(self):
+        with patch.object(launch, 'group_snapshot', side_effect=RuntimeError('inventory denied')):
+            with self.assertRaisesRegex(RuntimeError, 'inventory denied'):
+                launch.await_group_exit(MagicMock(pid=42123))
+
+    def test_inventory_accepts_only_exited_group_members(self):
+        uid = launch.os.getuid()
+        with patch.object(launch, 'group_snapshot', return_value=f'42123 42123 {uid} Z\n'), \
+                patch.object(launch.os, 'waitid', return_value=object()):
+            launch.await_group_exit(MagicMock(pid=42123))
+
+    def test_inventory_rejects_malformed_or_wrong_identity(self):
+        for row in ('bad', '1 88 0 Z', '1 42123 0 ?'):
+            with self.subTest(row=row), patch.object(launch, 'group_snapshot', return_value=row):
+                with self.assertRaises(RuntimeError):
+                    launch.await_group_exit(MagicMock(pid=42123))
 
     def test_candidate_manifest_matches_all_local_inputs(self):
         root = Path(__file__).parent
@@ -112,9 +143,9 @@ class CaptureCleanupTests(unittest.TestCase):
                 self.assertEqual(process.wait.call_count, 0)
 
     def test_signal_failure_reported_without_losing_timeout(self):
-        error, state, _, _ = self.exercise(timeout=True, kill_error=PermissionError('denied'))
+        error, state, _, _ = self.exercise(timeout=True, kill_error=OSError('denied'))
         self.assertIsInstance(error, subprocess.TimeoutExpired)
-        self.assertEqual(state['cleanupFailure'], {'name': 'PermissionError', 'message': 'denied'})
+        self.assertEqual(state['cleanupFailure'], {'name': 'OSError', 'message': 'denied'})
 
 
 if __name__ == '__main__':

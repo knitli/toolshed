@@ -109,6 +109,65 @@ def verify_owned_group(process):
                 raise RuntimeError('Refusing cleanup of unowned process group')
 
 
+def group_snapshot(group):
+    """Read bounded process metadata from the fixed trusted operating-system tool."""
+    executable = Path('/bin/ps')
+    info = executable.stat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise RuntimeError('Untrusted process inventory executable')
+    output = bytearray()
+    probe = subprocess.Popen(  # nosec B603 - Fixed root-owned OS executable and generated numeric group.
+        ['/bin/ps', '-g', str(group), '-o', 'pid=,pgid=,uid=,stat='],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        env={'PATH': '/usr/bin:/bin', 'LANG': 'C', 'LC_ALL': 'C'}, close_fds=True)
+    deadline = time.monotonic() + 1
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(probe.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('Process inventory timeout')
+                for key, _ in selector.select(max(0, deadline - time.monotonic())):
+                    part = os.read(key.fileobj.fileno(), min(4096, 65537 - len(output)))
+                    output.extend(part)
+                    if len(output) > 65536:
+                        raise RuntimeError('Process inventory output limit')
+                    if not part:
+                        selector.unregister(key.fileobj)
+        code = probe.wait(timeout=max(0.01, deadline - time.monotonic()))
+        if code not in (0, 1) or (code == 1 and output.strip()):
+            raise RuntimeError('Process inventory failed')
+        return output.decode('ascii')
+    finally:
+        if probe.returncode is None:
+            probe.kill()
+            probe.wait(timeout=2)
+        probe.stdout.close()
+
+
+def await_group_exit(process):
+    """Require a bounded OS observation of no live members before releasing the PID."""
+    deadline = time.monotonic() + 2
+    while True:
+        live = False
+        for line in group_snapshot(process.pid).splitlines():
+            parts = line.split()
+            if len(parts) != 4 or not all(value.isdecimal() for value in parts[:3]):
+                raise RuntimeError('Malformed process inventory')
+            pid, group, uid = map(int, parts[:3])
+            status = parts[3]
+            if pid <= 0 or group != process.pid or uid != os.getuid() or not status or status[0] not in 'RSDTIZ':
+                raise RuntimeError('Unexpected process inventory identity or state')
+            live |= not status.startswith('Z')
+        if not live:
+            if os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+                raise RuntimeError('Host still running after group cleanup')
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError('Live process group members after cleanup')
+        time.sleep(0.01)
+
+
 def run_process(argv, scratch, env, streams, state):
     if not all(hasattr(os, name) for name in ('waitid', 'P_PID', 'WEXITED', 'WNOHANG', 'WNOWAIT')):
         raise RuntimeError('Capture requires non-reaping waitid support')
@@ -154,8 +213,10 @@ def run_process(argv, scratch, env, streams, state):
                         verify_owned_group(process)
                         try:
                             os.killpg(process.pid, signal.SIGKILL)
-                        except ProcessLookupError:
+                        except (ProcessLookupError, PermissionError):
+                            # Neither error proves absence; inspect the reserved group below.
                             pass
+                        await_group_exit(process)
                         process.wait(timeout=3)
                     state["exitCode"] = process.returncode
                     if primary_failure is None and process.returncode != 0:
