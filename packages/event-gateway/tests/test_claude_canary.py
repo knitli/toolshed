@@ -143,8 +143,9 @@ class CanaryTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(CANARY, 'child_peer_token', return_value=secrets.token_urlsafe(32)), \
                     patch.object(CANARY, 'ClaudeSocketTransport', return_value=transport), \
                     patch.object(CANARY, 'stop_child', new=AsyncMock(side_effect=TimeoutError)):
-                with self.assertRaises(TimeoutError):
+                with self.assertRaisesRegex(CANARY.CanaryError, '^no_native_proof_in_unit_test$') as raised:
                     await CANARY.canary('/binary', root, secrets.token_urlsafe(32), 'model')
+            self.assertIn('child_cleanup_failed', raised.exception.__notes__)
             wake = 'WAKE_' + identifiers[2].hex
             self.assertNotIn(wake, ' '.join(create.call_args.args))
             self.assertEqual(transport.send.call_args.args[0]['canonicalSubject']['subjectId'], wake)
@@ -994,7 +995,20 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         await self.run_busy_canary('timeout')
 
     async def test_busy_canary_timeout_cleans_held_response(self):
-        await self.run_busy_canary('held_timeout')
+        diagnostic = io.StringIO()
+        async with asyncio.timeout(5):
+            with patch.object(CANARY.sys, 'stderr', diagnostic):
+                await self.run_busy_canary('held_timeout')
+        records = [json.loads(line) for line in diagnostic.getvalue().splitlines()]
+        phases = [record['canaryPhase'] for record in records]
+        self.assertLess(phases.index('run_timeout'), phases.index('closing_provider'))
+        self.assertEqual(phases[-1], 'cleanup_complete')
+        for record in records:
+            self.assertEqual(set(record), {'canaryPhase', 'initialized', 'running',
+                'providerRequests', 'responseHeld', 'responseReleased', 'witnessComplete'})
+        for private in (self.key, self.session, self.ready, self.busy, self.initial['uuid'],
+                        self.frame['message']['content']):
+            self.assertNotIn(private, diagnostic.getvalue())
 
     async def run_busy_canary(self, scenario):
         parent = '/private/tmp' if Path('/private/tmp').is_dir() else '/tmp'  # nosec B108
@@ -1183,6 +1197,143 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_provider_close_cancels_held_response_without_writing(self):
         await self.run_held_provider('cancel')
+
+    async def test_local_provider_cleanup_bounds_stalls_and_errors(self):
+        for failure in ('provider_stall', 'server_stall', 'provider_error'):
+            with self.subTest(failure=failure):
+                baseline = asyncio.all_tasks()
+                owned = asyncio.create_task(asyncio.Event().wait())
+                server = Mock(wait_closed=AsyncMock())
+                provider = Mock(tasks={owned}, close=AsyncMock())
+                if failure == 'provider_stall':
+                    provider.close.side_effect = asyncio.Event().wait
+                elif failure == 'server_stall':
+                    server.wait_closed.side_effect = asyncio.Event().wait
+                else:
+                    provider.close.side_effect = RuntimeError('private-provider-error')
+                    aborted = asyncio.Event()
+                    server.abort_clients.side_effect = aborted.set
+
+                    async def finish_server_after_abort():
+                        await aborted.wait()
+                        server.shutdown_observed = True
+
+                    server.shutdown_observed = False
+                    server.wait_closed.side_effect = finish_server_after_abort
+                try:
+                    async with asyncio.timeout(5):
+                        with patch.object(CANARY, 'CLEANUP_SECONDS', 0.02), \
+                                patch.object(CANARY, 'ABORT_SECONDS', 0.02):
+                            with self.assertRaisesRegex(CANARY.CanaryError, '^local_provider_cleanup_failed$'):
+                                await CANARY.close_local_provider(server, provider)
+                    server.close.assert_called_once()
+                    server.abort_clients.assert_called_once()
+                    server.wait_closed.assert_awaited_once()
+                    if failure == 'provider_error':
+                        self.assertTrue(server.shutdown_observed)
+                    self.assertTrue(owned.cancelled())
+                    self.assertFalse(asyncio.all_tasks() - baseline)
+                finally:
+                    owned.cancel()
+                    await asyncio.gather(owned, return_exceptions=True)
+
+    async def test_cleanup_failure_preserves_primary_timeout_and_reports_failure(self):
+        diagnostic = io.StringIO()
+        provider = Mock(tasks=set(), close=AsyncMock(side_effect=RuntimeError('private-provider-error')))
+        server = Mock(wait_closed=AsyncMock())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'canary'
+            root.mkdir(mode=0o700)
+            async with asyncio.timeout(5):
+                with patch.object(CANARY.sys, 'stderr', diagnostic), \
+                        patch.object(CANARY, 'sandbox_profile', return_value='(deny default)'), \
+                        patch.object(CANARY, 'LocalProvider', return_value=provider), \
+                        patch.object(CANARY.asyncio, 'start_server', new=AsyncMock(return_value=server)), \
+                        patch.object(CANARY.asyncio, 'create_subprocess_exec', new=AsyncMock(side_effect=TimeoutError)):
+                    with self.assertRaises(TimeoutError):
+                        await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231, busy_probe=True)
+        phases = [json.loads(line)['canaryPhase'] for line in diagnostic.getvalue().splitlines()]
+        self.assertLess(phases.index('run_timeout'), phases.index('closing_provider'))
+        self.assertEqual(phases[-1], 'cleanup_failed')
+        self.assertNotIn('cleanup_complete', phases)
+        self.assertNotIn('private-provider-error', diagnostic.getvalue())
+        self.assertNotIn(self.key, diagnostic.getvalue())
+
+    async def test_local_server_cleanup_cancels_held_connection_before_wait_closed(self):
+        await self.run_local_server_cleanup(late_callback=False)
+
+    async def test_local_server_cleanup_aborts_late_accepted_callback(self):
+        await self.run_local_server_cleanup(late_callback=True)
+
+    async def run_local_server_cleanup(self, *, late_callback):
+        probe = self.new_probe()
+        probe.observe({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []})
+        probe.observe(self.state('running'))
+        provider = CANARY.LocalProvider('dummy-fixture', 'fixture', probe=probe)
+        body = json.dumps({'model': 'fixture', 'stream': True, 'tools': [],
+                           'system': [{'type': 'text', 'text': self.ready}],
+                           'messages': [{'role': 'user', 'content': 'Begin synthetic test.'}]}).encode()
+        server = writer = None
+        accepted, start_handler = asyncio.Event(), asyncio.Event()
+        handlers = set()
+
+        async def handle(reader, writer):
+            handlers.add(asyncio.current_task())
+            accepted.set()
+            if late_callback:
+                await start_handler.wait()
+            await provider.handle(reader, writer)
+
+        close_provider = provider.close
+
+        async def close_before_callback():
+            await close_provider()
+            start_handler.set()
+
+        cleanup_bound = CANARY.CLEANUP_SECONDS + CANARY.ABORT_SECONDS + 1
+        async with asyncio.timeout(cleanup_bound + 1):
+            try:
+                server = await asyncio.start_server(handle, '127.0.0.1', 0)
+                port = server.sockets[0].getsockname()[1]
+                reader, writer = await asyncio.open_connection('127.0.0.1', port)
+                writer.write((f'POST /v1/messages HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n'
+                              'Content-Type: application/json\r\nX-Api-Key: dummy-fixture\r\n'
+                              f'Content-Length: {len(body)}\r\n\r\n').encode() + body)
+                await writer.drain()
+                await accepted.wait()
+                if late_callback:
+                    self.assertFalse(provider.tasks)
+                    with patch.object(provider, 'close', side_effect=close_before_callback), \
+                            patch.object(CANARY, 'CLEANUP_SECONDS', 0.05), \
+                            patch.object(CANARY, 'ABORT_SECONDS', 0.05):
+                        with self.assertRaisesRegex(CANARY.CanaryError, '^local_provider_cleanup_failed$'):
+                            await CANARY.close_local_provider(server, provider)
+                else:
+                    await asyncio.wait_for(probe.ready_to_send.wait(), 1)
+                    self.assertTrue(provider.tasks)
+                    self.assertFalse(provider.failure)
+                    await asyncio.wait_for(CANARY.close_local_provider(server, provider), cleanup_bound)
+                self.assertTrue(probe.held)
+                self.assertEqual(await reader.read(), b'')
+                self.assertFalse(probe.release.is_set())
+                self.assertFalse(provider.tasks)
+                self.assertTrue(provider.failure)
+                self.assertTrue(probe.failed.is_set())
+                self.assertFalse(probe.complete.is_set())
+            finally:
+                start_handler.set()
+                if server is not None:
+                    server.close()
+                    server.abort_clients()
+                for task in handlers:
+                    task.cancel()
+                await asyncio.gather(*handlers, return_exceptions=True)
+                await provider.close()
+                if writer is not None:
+                    writer.close()
+                    await writer.wait_closed()
+                if server is not None:
+                    await server.wait_closed()
 
     async def run_held_provider(self, scenario):
         probe = self.new_probe()

@@ -25,6 +25,8 @@ from event_gateway.security import ensure_private_directory
 CLIENT_SHA256 = '5262ce9de86243fed0d21edc39b271555d56780d0112e2b194439fe1c6662d37'
 RUN_SECONDS = 90
 HTTP_IO_SECONDS = 5
+CLEANUP_SECONDS = 4
+ABORT_SECONDS = 1
 MAX_STREAM_BYTES = 1024 * 1024
 
 
@@ -554,6 +556,60 @@ async def stop_child(child):
             await asyncio.wait_for(child.wait(), 5)
 
 
+async def close_local_provider(server, provider):
+    """Settle owned connections within five seconds, including abort cleanup."""
+    if server is not None:
+        server.close()
+
+    owned = set()
+    if provider is not None:
+        owned.add(asyncio.create_task(provider.close()))
+    server_waiter = None
+    if server is not None:
+        server_waiter = asyncio.create_task(server.wait_closed())
+        owned.add(server_waiter)
+    if not owned:
+        return
+    try:
+        done, unfinished = await asyncio.wait(owned, timeout=CLEANUP_SECONDS,
+                                             return_when=asyncio.FIRST_EXCEPTION)
+        for task in done:
+            task.result()
+        if unfinished:
+            raise TimeoutError
+    except BaseException as error:
+        if server is not None:
+            server.abort_clients()
+        owned.update(() if provider is None else provider.tasks)
+        for task in owned:
+            if task is not server_waiter:
+                task.cancel()
+        done, unfinished = await asyncio.wait(owned, timeout=ABORT_SECONDS)
+        for task in done:
+            if not task.cancelled():
+                task.exception()
+        # Do not await cancellation-resistant tasks beyond the cleanup budget.
+        # Scratch remains retained after cleanup failure in every run mode.
+        for task in unfinished:
+            task.cancel()
+            task.add_done_callback(lambda finished: None if finished.cancelled() else finished.exception())
+        if unfinished:
+            await asyncio.sleep(0)  # deliver cancellation without extending the wait budget
+        if isinstance(error, asyncio.CancelledError):
+            raise
+        raise CanaryError('local_provider_cleanup_failed') from error
+
+
+def report_progress(phase, *, probe=None):
+    """Flush fixed lifecycle labels and bounded counters, never client payloads."""
+    progress = {'canaryPhase': phase}
+    if probe is not None:
+        progress.update(initialized=probe.initialized, running=probe.running,
+                        providerRequests=probe.requests, responseHeld=probe.held,
+                        responseReleased=probe.release.is_set(), witnessComplete=probe.complete.is_set())
+    print(json.dumps(progress), file=sys.stderr, flush=True)
+
+
 async def canary(binary, root, key, model, local_port=None, hosted_repository_id=None, *, busy_probe=False):
     """Run exactly two synthetic turns; every success criterion is observed."""
     require(not busy_probe or local_port is not None, 'busy_probe_requires_local_provider')
@@ -573,6 +629,7 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
         probe = BusyProbe(session_id, initial, 'READY_' + marker)
     for name in ('home', 'config', 'tmp', 'work'):
         (root / name).mkdir(mode=0o700)
+    report_progress('preparing', probe=probe)
     try:
         async with asyncio.timeout(RUN_SECONDS):
             command = child_command(binary, root, session_id, model, marker, busy_probe=busy_probe)
@@ -582,24 +639,29 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
                                    if hosted_repository_id is not None
                                    else sandbox_profile(binary, root, local_port))
                 provider = LocalProvider(key, model, probe=probe)
+                report_progress('provider_starting', probe=probe)
                 server = await asyncio.start_server(provider.handle, '127.0.0.1', local_port,
                                                     limit=16384, reuse_address=False)
                 command = ['/usr/bin/sandbox-exec', '-f', str(profile), *command]
+            report_progress('child_spawning', probe=probe)
             child = await asyncio.create_subprocess_exec(
                 *command,
                 env=child_environment(root, key, local_port, busy_probe=busy_probe), cwd=root / 'work',
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL, close_fds=True, limit=65536)
+            report_progress('child_spawned', probe=probe)
             state = {'bytes': 0, 'initialized': False}
             if probe:
                 observer = asyncio.create_task(observe_busy_stdout(child.stdout, probe))
             child.stdin.write((json.dumps(initial) + '\n').encode())
             await child.stdin.drain()
+            report_progress('waiting_initial_witness', probe=probe)
             if probe:
                 await wait_busy_witness(probe.ready_to_send, observer, probe)
             else:
                 await completed_turn(child.stdout, session_id, 'READY_' + marker, state)
                 await asyncio.sleep(1)
+            report_progress('initial_witness_observed', probe=probe)
             require(child.returncode is None, 'client_exited_before_wake')
             wake_marker = ('BUSY_' if probe else 'WAKE_') + uuid4().hex
             socket_path = root / 'inbox.sock'
@@ -615,12 +677,15 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
                         'eventReference': 'ref_' + str(uuid4())}
             if probe:
                 probe.prepare(event_frame(session_id, metadata))
+            report_progress('socket_sending', probe=probe)
             outcome = await transport.send(metadata)
+            report_progress('socket_sent', probe=probe)
             require(outcome['reason'] == 'claude_write_unacknowledged', 'socket_write_unconfirmed')
             if probe:
                 await wait_busy_witness(probe.ready_to_send, observer, probe)
                 probe.sent()
                 probe.release_response()
+                report_progress('waiting_final_witness', probe=probe)
                 await wait_busy_witness(probe.complete, observer, probe)
             else:
                 await completed_turn(child.stdout, session_id, wake_marker, state)
@@ -646,10 +711,23 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
                              matchingWakeTurnObserved=False, matchingBusyTurnObserved=True)
                 proof['busyProbe'] = probe.proof()
                 proof['busyProbe']['retainedChildPid'] = child.pid
+    except TimeoutError:
+        report_progress('run_timeout', probe=probe)
+        raise
     finally:
+        primary_error = sys.exception()
+        cleanup_failed = False
+        report_progress('stopping_child', probe=probe)
         try:
             if child is not None:
                 await stop_child(child)
+        except (Exception, asyncio.CancelledError) as error:
+            cleanup_failed = True
+            report_progress('child_cleanup_failed', probe=probe)
+            if primary_error is None:
+                primary_error = error
+                raise
+            primary_error.add_note('child_cleanup_failed')
         finally:
             if observer is not None:
                 try:
@@ -658,12 +736,19 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
                     observer_error = error
                 except (Exception, asyncio.CancelledError):
                     observer_error = CanaryError('busy_native_observation_failed')
-            if server is not None:
-                server.close()
-                await server.wait_closed()
-            if provider is not None:
-                await provider.close()
-        if hosted_repository_id is None:
+            report_progress('closing_provider', probe=probe)
+            try:
+                await close_local_provider(server, provider)
+            except (Exception, asyncio.CancelledError):
+                cleanup_failed = True
+                report_progress('cleanup_failed', probe=probe)
+                if primary_error is None:
+                    raise
+                primary_error.add_note('local_provider_cleanup_failed')
+            else:
+                if not cleanup_failed:
+                    report_progress('cleanup_complete', probe=probe)
+        if hosted_repository_id is None and not cleanup_failed:
             shutil.rmtree(root)
     # Pending requests can fail while the child/server/provider are shutting down.
     # Only settled provider state may authorize returning the selected proof.
