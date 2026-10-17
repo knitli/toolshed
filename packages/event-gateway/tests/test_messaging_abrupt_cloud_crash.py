@@ -1,7 +1,6 @@
 """Separately opt-in in-flight workerd SIGKILL matrix; offline preparation is not qualification."""
 import json
 import asyncio
-import base64
 import importlib.util
 from copy import deepcopy
 import os
@@ -13,11 +12,10 @@ import unittest
 from unittest.mock import Mock, patch
 from uuid import UUID
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from event_gateway.cloud import CloudClient, CloudError, Credentials
+from event_gateway.cloud import CloudError
 
 import test_messaging_process_restart as process_fixture
-from test_messaging_workerd import SETTINGS, fixture
+from test_messaging_workerd import SETTINGS, cloud_client, fixture
 
 
 def assert_reservation_budget(case, budget, attempt_id, *, charged):
@@ -151,15 +149,8 @@ class MessagingAbruptCloudCrashTests(unittest.TestCase):
                 broker = transport.broker_process
                 self.assertEqual(broker.pid, address['pid'])
                 self.assertIsNone(broker.poll())
-                directory = ledger.parent
-                native_log, http_log = directory / 'native-calls', directory / 'http-calls'
-                native_log.touch(mode=0o600)
-                http_log.touch(mode=0o600)
-                config = directory / 'child.json'
-                config.write_text(json.dumps({'ledger': str(ledger), 'address': address, 'seed': seed,
-                                              'nativeLog': str(native_log), 'httpLog': str(http_log),
-                                              'crashMarker': str(directory / 'cloud-crash-injected'),
-                                              'crashExpected': {'phase': phase, 'brokerPid': broker.pid}}))
+                config, native_log, http_log = process_fixture.gateway_child_config(
+                    ledger, address, seed, crash_expected={'phase': phase, 'brokerPid': broker.pid})
                 initial_cloud = transport.fixture('/fixture/read')
                 self.assertEqual(transport.fixture('/fixture/arm-crash', {'phase': phase}), {'armed': True})
                 with process_fixture.gateway_child(config, 'restart') as (first, uncertain):
@@ -233,15 +224,7 @@ class MessagingAbruptCloudCrashTests(unittest.TestCase):
                         transport.fixture('/fixture/change', {'kind': change})
                     event = seed['envelope']
 
-                    async def credentials():
-                        return Credentials(address['accessToken'], address['agentToken'])
-
-                    key = Ed25519PrivateKey.from_private_bytes(base64.urlsafe_b64decode(
-                        address['agentPrivateJwk']['d'] + '=='))
-                    client = CloudClient(origin='https://events.test', principal=event['principal'],
-                                         agent=event['agent'], node_id=event['nodeId'],
-                                         node_generation=event['nodeGeneration'], private_key=key,
-                                         credentials=credentials, send=transport.send)
+                    client = cloud_client(address, transport, event)
                     # Explicit same-attempt Cloud probe; the uncertain local gateway never resends.
                     if change == 'positive-replay':
                         admitted = asyncio.run(client.claim_messaging_history(event))

@@ -163,6 +163,18 @@ class LoopbackTransport:
         return response
 
 
+def cloud_client(address, transport, event):
+    key = Ed25519PrivateKey.from_private_bytes(base64.urlsafe_b64decode(
+        address['agentPrivateJwk']['d'] + '=='))
+
+    async def credentials():
+        return Credentials(address['accessToken'], address['agentToken'])
+
+    return CloudClient(origin='https://events.test', principal=event['principal'], agent=event['agent'],
+                       node_id=event['nodeId'], node_generation=event['nodeGeneration'], private_key=key,
+                       credentials=credentials, send=transport.send)
+
+
 @contextmanager
 def fixture(*, abrupt_crash=False):
     if abrupt_crash and os.environ.get('FIXTURE_ABRUPT_CLOUD_CRASH') != 'reviewed':
@@ -346,21 +358,13 @@ class MessagingWorkerdTests(unittest.IsolatedAsyncioTestCase):
                        leaseExpiresAt=time.time() + 120)
         if store.get_attachment(event['runtimeId']) is None:
             store.put_messaging_attachment(mapping)
-        private = address['agentPrivateJwk']['d']
-        key = Ed25519PrivateKey.from_private_bytes(base64.urlsafe_b64decode(private + '=='))
-
-        async def credentials():
-            return Credentials(address['accessToken'], address['agentToken'])
-
         native_calls = []
 
         def native_forbidden(*_):
             native_calls.append(True)
             self.fail('native adapter must never be constructed')
 
-        client = CloudClient(origin='https://events.test', principal=event['principal'], agent=event['agent'],
-                             node_id=event['nodeId'], node_generation=event['nodeGeneration'], private_key=key,
-                             credentials=credentials, send=transport.send)
+        client = cloud_client(address, transport, event)
         gateway = Gateway(store, client, native_forbidden, audience=seed['audience'],
                           keys={seed['keyId']: address['transportPublicKey']})
         gateway.accept_messaging_v2(seed['body'].encode(), signature=seed['signature'], audience=seed['audience'],

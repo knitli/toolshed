@@ -214,6 +214,31 @@
       "logSha256": "de1287b0fb8af3cb1469baf64d41abbfdeef182cb9abae5304173235c4725663",
       "executableFreezeMatched": true,
       "compiledInputClosureVerified": 335
+    },
+    "sourceFreezeScope": "Historical original alarm-composition run; sharedHelpersVerification records the later current-source run.",
+    "sharedHelpersVerification": {
+      "status": "PASS",
+      "unitTestsPassed": 26,
+      "crashSubtestsPassed": 12,
+      "seconds": 48.853,
+      "exitCode": 0,
+      "skips": 0,
+      "modules": [
+        "test_messaging_abrupt_cloud_crash",
+        "test_messaging_process_restart",
+        "test_messaging_workerd"
+      ],
+      "sourceFreeze": {
+        "packages/event-gateway/tests/test_messaging_abrupt_cloud_crash.py": "d82a901181b8bfebb1d6796683e1bb7fb5ba7c860921a14e89dbf6a2f63214d4",
+        "packages/event-gateway/tests/test_messaging_process_restart.py": "6b7c8b31e33fdfa81b6010cec141212487fd55cadc663269dfe42b382931d137",
+        "packages/event-gateway/tests/test_messaging_workerd.py": "aa2f12bfaded1ecd8dc0cc179be55ae7799b0133f4b316e3824d8073caaf45bb"
+      },
+      "log": "messaging166-duplication-tests.log",
+      "logSha256": "fe1b700b8e24f1b83cfa67c0852d22501d20cacc44cf4e1278bd99af733e9eab",
+      "assertionsUnchanged": true,
+      "rootVerification": "Reviewed exact helper extraction and frozen file hashes; extended Ruff and diff checks pass. Run executed by the bounded test agent; no claim of an independent second 26-test run.",
+      "runtimeFixtureBytesUnchanged": true,
+      "productionQualified": false
     }
   }
 }

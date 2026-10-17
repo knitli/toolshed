@@ -193,5 +193,14 @@ pin bytes were restored and matched the final positive-run source freeze. No ups
 source was mutated. The derived JSON receipt records the final run, source
 freeze, logs and these limits. Root independently repeated all twelve crash
 cases and six safety tests: seven unittest tests passed in 21.050 seconds with
-zero skips. The executable freeze still matches. Root approved signed PR
+zero skips. The original executable freeze matched that run. Root approved signed PR
 publication; CI, automatic Codex review and root merge gates remain pending.
+
+A later review correction extracts shared child configuration and Cloud client
+construction into the existing test helpers. Scenario assertions and runtime
+fixture bytes remain unchanged. A separately reviewed three-module run passed
+26 tests in 48.853 seconds with zero skips, including all twelve actual crash
+cases. The JSON receipt preserves the original run and records this newer run's
+three changed source hashes separately. Root reviewed the exact extraction and
+hashes and ran extended lint and diff checks; the bounded test agent executed
+the 26-test run. This adds no production qualification.
