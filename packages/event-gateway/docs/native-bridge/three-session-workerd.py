@@ -17,6 +17,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import select
 import signal
 import socket
@@ -42,6 +43,12 @@ GATEWAY_TEMP_PREFIX = "three-gateway-"
 DARWIN_SOCKET_PATH_BYTES = 104
 GATEWAY_SOCKET_SUFFIX = f"/{GATEWAY_TEMP_PREFIX}{'x' * 8}/state/c-{'0' * 36}.sock"
 DARWIN_TEMP_ROOT_BYTES = DARWIN_SOCKET_PATH_BYTES - 1 - len(GATEWAY_SOCKET_SUFFIX.encode("ascii"))
+NATIVE_REVOCATION_HELPER_SHA256 = "4ea6975f20941089c43ff472f8fecc850834f1b110155388edd8da46d604b1b2"
+NATIVE_DIAGNOSTIC_FILE_BYTES = 16 * 1024 * 1024
+NATIVE_DIAGNOSTIC_ROWS = 256
+NATIVE_DIAGNOSTIC_BYTES = 64 * 1024
+# Covers the fixed busy-stage waits, bounded fixture RPCs and follow-up probes.
+NATIVE_DIAGNOSTIC_WINDOW_SECONDS = 240
 
 args = None
 binary = node = cloud_source = package_source = None
@@ -658,6 +665,206 @@ def core_busy_observation(row, binding, now, seen):
             and now < deadline <= row["receivedAt"] + min(witness["leaseMs"], 750) / 1000)
 
 
+def load_revocation_parser():
+    """Execute only the pinned parser source, never neighboring bytecode."""
+    # Keep bounded NOFOLLOW reads local; the shared loader belongs to the pinned host qualification.
+    path = HERE / "native-metadata-launcher-smoke.py"
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as source:
+        info = os.fstat(source.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_size <= 262_144,
+                "unsafe native diagnostic parser")
+        raw = source.read(262_145)
+    require(len(raw) <= 262_144 and digest(raw) == NATIVE_REVOCATION_HELPER_SHA256,
+            "native diagnostic parser digest mismatch")
+    with tempfile.TemporaryDirectory(prefix="three-diagnostic-parser-") as directory:
+        snapshot = Path(directory) / path.name
+        with snapshot.open("xb") as output:
+            output.write(raw)
+        return load_module("three_diagnostic_parser", snapshot).parse_revocation
+
+
+def collect_native_revocations(session, started_unix, ended_unix):
+    """Best-effort diagnostics from C's owned scratch; absence proves nothing."""
+    # Double reads detect observable mutation, not same-uid tampering or atomic DB/WAL consistency.
+    # Dynamic snapshots are best-effort diagnostics, never integrity or authority evidence.
+    result = {"status": "unavailable", "records": [], "diagnosticOnly": True,
+              "exactRejectedWitnessAvailable": False}
+    try:
+        require(all(type(value) in (int, float) and math.isfinite(value)
+                    for value in (started_unix, ended_unix))
+                and 0 <= ended_unix - started_unix <= NATIVE_DIAGNOSTIC_WINDOW_SECONDS,
+                "invalid diagnostic interval")
+        parser = load_revocation_parser()
+        deadline = time.monotonic() + 2
+        with ExitStack() as stack:
+            root = os.open(session["root"], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            stack.callback(os.close, root)
+            info = os.fstat(root)
+            require((info.st_dev, info.st_ino) == session["rootIdentity"]
+                    and info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o700,
+                    "native diagnostic root changed")
+            home = os.open("codex-home", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
+            stack.callback(os.close, home)
+            info = os.fstat(home)
+            require((info.st_dev, info.st_ino) == session["homeIdentity"]
+                    and info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o700,
+                    "native diagnostic home changed")
+            with os.scandir(home) as entries:
+                names = []
+                for index, entry in enumerate(entries):
+                    require(index < 128, "native diagnostic directory bound")
+                    if re.fullmatch(r"logs_[0-9]{1,3}\.sqlite", entry.name):
+                        names.append(entry.name)
+            require(len(names) == 1, "native diagnostic database unavailable")
+            with tempfile.TemporaryDirectory(prefix="three-diagnostic-snapshot-") as temporary:
+                snapshot = Path(temporary)
+                for name in (names[0], names[0] + "-wal"):
+                    try:
+                        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=home)
+                    except FileNotFoundError:
+                        require(name.endswith("-wal"), "native diagnostic database disappeared")
+                        continue
+                    with os.fdopen(descriptor, "rb") as source:
+                        before = os.fstat(source.fileno())
+                        require(stat.S_ISREG(before.st_mode) and before.st_uid == os.getuid()
+                                and before.st_nlink == 1 and before.st_size <= NATIVE_DIAGNOSTIC_FILE_BYTES,
+                                "unsafe native diagnostic file")
+                        copied = hashlib.sha256()
+                        remaining = before.st_size
+                        with (snapshot / name).open("xb") as output:
+                            while remaining:
+                                require(time.monotonic() < deadline, "native diagnostic copy deadline")
+                                chunk = source.read(min(65_536, remaining))
+                                require(bool(chunk), "native diagnostic file changed")
+                                output.write(chunk)
+                                copied.update(chunk)
+                                remaining -= len(chunk)
+                        source.seek(0)
+                        reread = hashlib.sha256()
+                        remaining = before.st_size
+                        while remaining:
+                            require(time.monotonic() < deadline, "native diagnostic copy deadline")
+                            chunk = source.read(min(65_536, remaining))
+                            require(bool(chunk), "native diagnostic file changed")
+                            reread.update(chunk)
+                            remaining -= len(chunk)
+                        require(copied.digest() == reread.digest(), "native diagnostic file changed")
+                        after = os.fstat(source.fileno())
+                        require((before.st_size, before.st_mtime_ns) == (after.st_size, after.st_mtime_ns),
+                                "native diagnostic file changed")
+                require(time.monotonic() < deadline, "native diagnostic query deadline")
+                with closing(sqlite3.connect((snapshot / names[0]).as_uri() + "?mode=ro", uri=True,
+                                             timeout=0.1)) as database:
+                    database.execute("PRAGMA query_only=ON")
+                    database.execute("PRAGMA trusted_schema=OFF")
+                    database.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+                    rows = database.execute(
+                        "SELECT ts + ts_nanos / 1000000000.0, "
+                        "CASE WHEN length(feedback_log_body) <= 4096 THEN feedback_log_body END, target "
+                        "FROM logs WHERE target IN (?, ?) AND ts + ts_nanos / 1000000000.0 BETWEEN ? AND ? "
+                        "ORDER BY ts, ts_nanos LIMIT ?",
+                        ("codex_selection_witness", "codex_native_selection", started_unix - 2,
+                         ended_unix, NATIVE_DIAGNOSTIC_ROWS + 1),
+                    ).fetchall()
+                truncated = len(rows) > NATIVE_DIAGNOSTIC_ROWS
+                rejected = 0
+                for stamp, body, target in rows[:NATIVE_DIAGNOSTIC_ROWS]:
+                    record = parser(stamp, body, target)
+                    if record is None:
+                        rejected += 1
+                        continue
+                    if not started_unix - 2 <= stamp <= ended_unix:
+                        continue
+                    if len(json.dumps(result["records"] + [record]).encode()) > NATIVE_DIAGNOSTIC_BYTES:
+                        truncated = True
+                        break
+                    result["records"].append(record)
+                result.update(status="partial" if truncated or rejected else "available",
+                              truncated=truncated, rejectedRows=rejected)
+    except Exception as error:
+        result.update(status="unavailable", records=[], failureType=type(error).__name__[:64])
+    return result
+
+
+def diagnostic_native_response(command, response, *, expected_binding=None, challenge_id=None):
+    """Project typed fields only; never copy arbitrary native error text."""
+    if not isinstance(response, dict):
+        return {"status": "malformed"}
+    if "reason" in response:
+        reason = response["reason"]
+        return {"status": "refused", "reason": reason if isinstance(reason, str) and reason in {
+            "native_binding_changed", "native_binding_unavailable", "native_client_not_ready",
+        } else "other"}
+    if command == "binding":
+        return {"status": "observed", "binding": response} if launcher._valid_binding(response) else {"status": "malformed"}
+    if command == "status":
+        selection = response.get("selection")
+        if selection not in ("selected", "unavailable"):
+            return {"status": "malformed"}
+        observation = response.get("nativeObservation")
+        value = {"status": "observed", "selection": selection}
+        if isinstance(observation, dict) and launcher._valid_binding(observation.get("binding")):
+            value["binding"] = observation["binding"]
+            if isinstance(observation.get("eligible"), bool):
+                value["eligible"] = observation["eligible"]
+        return value
+    witness = response.get("witness")
+    if (set(response) != {"challengeId", "observedAt", "validUntilMonotonic", "witness"}
+            or response["challengeId"] != challenge_id or not launcher._valid_challenge_id(challenge_id)
+            or not launcher._valid_native_witness(witness)
+            or launcher._binding(witness) != expected_binding
+            or not launcher._valid_observed_at(response.get("observedAt"))
+            or not isinstance(response.get("validUntilMonotonic"), (int, float))
+            or isinstance(response.get("validUntilMonotonic"), bool)
+            or not math.isfinite(response["validUntilMonotonic"])):
+        return {"status": "malformed"}
+    now = time.monotonic()
+    if not now < response["validUntilMonotonic"] <= now + min(witness["leaseMs"], 750) / 1000:
+        return {"status": "stale"}
+    return {"status": "observed", "observedAt": response["observedAt"],
+            "validUntilMonotonic": response["validUntilMonotonic"],
+            "witness": {key: witness[key] for key in (*launcher.BINDING_FIELDS, "version", "nonce",
+                        "eligible", "sequence", "leaseMs", "nativeCoreTurnState")}}
+
+
+def capture_busy_failure(ctx, started_unix):
+    """Post-failure probes are diagnostics, never busy/claim authority evidence."""
+    # Count the whole capture through its final write, without authority-observer side effects.
+    with ctx.evidence.lock:
+        require(not ctx.evidence.closing and not ctx.evidence.sealed, "native observers are closed")
+        ctx.evidence.active += 1
+    try:
+        session = ctx.sessions["C"]
+        value = {"session": "C", "diagnosticOnly": True, "exactRejectedWitnessAvailable": False,
+                 "startedUnix": time.time(), "subsequentObservations": []}
+        binding = None
+        for command in ("status", "binding", "challenge"):
+            if command == "challenge" and binding is None:
+                break
+            request = {"command": command}
+            if command == "challenge":
+                request.update(challengeId=str(uuid4()), expectedBinding=binding)
+            observation = {"command": command, "startedUnix": time.time(), "startedMonotonic": time.monotonic()}
+            try:
+                # Bypass the normal observer: these cannot enter c_challenges or satisfy C2.
+                response = ctx.original_session_request(session["state"], session["sessionId"], request)
+                observation["result"] = diagnostic_native_response(command, response,
+                    expected_binding=request.get("expectedBinding"), challenge_id=request.get("challengeId"))
+                if command == "binding" and observation["result"].get("status") == "observed":
+                    binding = observation["result"]["binding"]
+            except Exception as error:
+                observation["result"] = {"status": "unavailable", "failureType": type(error).__name__[:64]}
+            observation.update(endedUnix=time.time(), endedMonotonic=time.monotonic())
+            value["subsequentObservations"].append(observation)
+        value["endedUnix"] = time.time()
+        value["nativeRevocations"] = collect_native_revocations(session, started_unix, value["endedUnix"])
+        record_evidence(ctx, "busyFailureDiagnostics", value)
+    finally:
+        with ctx.evidence.lock:
+            ctx.evidence.active -= 1
+
+
 def post(address, secret, path, body=None, headers=None, *, limit=65_536):
     connection = http.client.HTTPConnection("127.0.0.1", address, timeout=8)
     try:
@@ -1101,6 +1308,8 @@ def native_session(stack, label, ctx, *, hold=False):
     bridge = SessionNativeBridge(state, route)
     return {
         "label": label, "root": root, "state": state, "provider": provider, "process": process,
+        "rootIdentity": (root.stat().st_dev, root.stat().st_ino),
+        "homeIdentity": (home.stat().st_dev, home.stat().st_ino),
         "master": master, "tail": tail, "socket": socket_path, "sessionId": session_id,
         "binding": binding, "route": route, "bridge": bridge,
         "ptyPumpStats": pty_pump_stats,
@@ -1804,6 +2013,7 @@ async def run_ab_routes(ctx):
 
 
 async def run_busy_stage(ctx):
+    busy_started_unix = time.time()
     # C's first controlled turn holds its local model request open. A second
     # signed delivery must remain locally queued without a claim or native Start.
     c_first = ctx.fixture("/fixture/setup", {
@@ -1866,6 +2076,12 @@ async def run_busy_stage(ctx):
         await wait_until(lambda: bool(ctx.c_second_busy_dispositions()),
                          "production dispatch did not return C's busy disposition", timeout=10)
     except AssertionError as error:
+        try:
+            await asyncio.to_thread(capture_busy_failure, ctx, busy_started_unix)
+        # Cancellation intentionally propagates; diagnostics cannot override task shutdown.
+        except Exception as diagnostic_error:
+            # Keep the original failed gate; diagnostics cannot turn it into success.
+            print("busy failure diagnostics unavailable: " + type(diagnostic_error).__name__, file=sys.stderr)
         cloud = ctx.fixture("/fixture/read")
         diagnostic = {
             "cSecondDispatchCalls": ctx.dispatch_calls.count("C-busy-second"),
