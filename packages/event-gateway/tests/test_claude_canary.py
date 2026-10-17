@@ -802,6 +802,12 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
     async def test_busy_canary_late_failure_cleans_child_server_and_scratch(self):
         await self.run_busy_canary('late_failure')
 
+    async def test_busy_canary_late_native_failure_retains_diagnostic_and_cleans_up(self):
+        await self.run_busy_canary('late_native_failure')
+
+    async def test_busy_canary_late_malformed_frame_retains_diagnostic_and_cleans_up(self):
+        await self.run_busy_canary('late_malformed_frame')
+
     async def test_busy_canary_returns_ordered_observations_only_after_shutdown(self):
         await self.run_busy_canary('success')
 
@@ -853,6 +859,12 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         async def stop(_child):
             nonlocal stopped
             stopped = True
+            if scenario in ('late_native_failure', 'late_malformed_frame'):
+                self.assertTrue(provider.probe.complete.is_set())
+                if scenario == 'late_native_failure':
+                    feed(self.result(self.key))
+                else:
+                    reader.feed_data(self.key.encode() + b'\n')
             reader.feed_eof()
 
         async def late_failure():
@@ -908,7 +920,23 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         if scenario == 'success':
             return await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
                                        busy_probe=True)
-        if scenario in ('timeout', 'held_timeout'):
+        if scenario in ('late_native_failure', 'late_malformed_frame'):
+            code = ('busy_native_result_mismatch' if scenario == 'late_native_failure'
+                    else 'invalid_client_output')
+            with self.assertRaisesRegex(CANARY.CanaryError, '^' + code + '$') as raised:
+                await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
+                                    busy_probe=True)
+            diagnostic = raised.exception.diagnostic
+            self.assertEqual(len(diagnostic), 8)
+            last = diagnostic[-1]
+            self.assertEqual(last['eventType'],
+                             'result' if scenario == 'late_native_failure' else 'unknown')
+            self.assertEqual(last['eventSubtype'],
+                             'success' if scenario == 'late_native_failure' else 'unknown')
+            self.assertEqual(last['sessionId'],
+                             self.session if scenario == 'late_native_failure' else None)
+            self.assertNotIn(self.key, str(raised.exception) + json.dumps(diagnostic))
+        elif scenario in ('timeout', 'held_timeout'):
             with self.assertRaises(TimeoutError):
                 await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
                                     busy_probe=True)

@@ -514,7 +514,7 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
     child = None
     server = provider = None
     observer = None
-    observer_failed = False
+    observer_error = None
     initial = {'type': 'user', 'session_id': session_id,
                'message': {'role': 'user', 'content': 'Begin the synthetic transport test.'}}
     probe = None
@@ -604,8 +604,10 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
             if observer is not None:
                 try:
                     await asyncio.wait_for(observer, 1)
+                except CanaryError as error:
+                    observer_error = error
                 except (Exception, asyncio.CancelledError):
-                    observer_failed = True
+                    observer_error = CanaryError('busy_native_observation_failed')
             if server is not None:
                 server.close()
                 await server.wait_closed()
@@ -617,7 +619,8 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
     # Only settled provider state may authorize returning the selected proof.
     require(provider is None or provider.turns == 2 and not provider.failure,
             'local_provider_incomplete')
-    require(not observer_failed, 'busy_native_observation_failed')
+    if observer_error is not None:
+        raise observer_error
     if probe:
         # Include any final observations drained while the retained child stopped.
         proof['busyProbe'] = probe.proof() | {'retainedChildPid': child.pid}
