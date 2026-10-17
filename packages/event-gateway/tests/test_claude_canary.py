@@ -172,10 +172,12 @@ class LocalProviderTests(unittest.IsolatedAsyncioTestCase):
 
     def test_closed_local_environment_and_default_deny_profile(self):
         root = Path('/private/tmp/disposable')
-        with patch.dict(os.environ, {'ANTHROPIC_AUTH_TOKEN': 'owner', 'HTTPS_PROXY': 'http://owner'}):
+        inherited_token = secrets.token_urlsafe(32)
+        with patch.dict(os.environ, {'ANTHROPIC_AUTH_TOKEN': inherited_token, 'HTTPS_PROXY': 'http://owner'}):
             environment = CANARY.child_environment(root, self.key, 43231)
         self.assertEqual(environment['ANTHROPIC_BASE_URL'], 'http://127.0.0.1:43231')
         self.assertNotIn('ANTHROPIC_AUTH_TOKEN', environment)
+        self.assertNotIn(inherited_token, environment.values())
         self.assertNotIn('HTTPS_PROXY', environment)
         self.assertEqual(environment['CLAUDE_CODE_TMPDIR'], str(root / 'tmp'))
         self.assertEqual(environment['TMPDIR'], environment['CLAUDE_CODE_TMPDIR'])
