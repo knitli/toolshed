@@ -35,12 +35,20 @@ def normalize_monitor(value):
             or ('command' in value) == ('ws' in value)):
         raise MuseMonitorError()
     source = 'command' if 'command' in value else 'ws'
-    if not isinstance(value[source], str):
+    if not isinstance(value[source], str) or '\x00' in value[source]:
         raise MuseMonitorError()
     if source == 'ws':
+        # urlsplit removes some raw controls instead of rejecting them.
+        if any(char.isspace() or ord(char) < 32 or ord(char) == 127
+               or char in '<>\"{}|\\^`' for char in value['ws']):
+            raise MuseMonitorError()
         try:
             parsed = urlsplit(value['ws'])
             valid = parsed.scheme in ('ws', 'wss') and bool(parsed.hostname) and '#' not in value['ws']
+            authority = parsed.netloc.rsplit('@', 1)[-1]
+            if authority.startswith('['):
+                suffix = authority[authority.index(']') + 1:]
+                valid = valid and (suffix in ('', ':') or suffix.startswith(':') and suffix[1:].isdigit())
             # Reading port also rejects malformed/out-of-range URL ports.
             _ = parsed.port
         except ValueError:

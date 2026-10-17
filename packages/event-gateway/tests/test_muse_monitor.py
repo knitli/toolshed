@@ -146,6 +146,38 @@ class MuseMonitorTests(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertEqual(normalize_monitor({'description': 'Offline URL fixture', 'ws': url})['ws'], url)
 
+    def test_websocket_rejects_raw_whitespace_and_controls_before_parsing(self):
+        for character in (*map(chr, range(33)), '\x7f'):
+            for url in (f'{character}wss://example.test/events',
+                        f'wss://example.test/events{character}',
+                        f'wss://example.test/ev{character}ents',
+                        f'wss://exam{character}ple.test/events'):
+                with self.subTest(url=url), patch('event_gateway.muse.urlsplit') as parse:
+                    with self.assertRaises(MuseMonitorError):
+                        normalize_monitor({'description': 'Offline URL fixture', 'ws': url})
+                    parse.assert_not_called()
+
+    def test_websocket_authority_shape_and_valid_ipv6(self):
+        for url in ('wss://example\\.test/events', 'wss://[::1]trailing/events',
+                    'wss://[::1]trailing:443/events'):
+            with self.subTest(url=url), self.assertRaises(MuseMonitorError):
+                normalize_monitor({'description': 'Offline URL fixture', 'ws': url})
+        for url in ('wss://example.test:443/events?cursor=1', 'wss://[::1]/events',
+                    'wss://[2001:db8::1]:443/events', 'wss://[::1]:/events',
+                    'wss://example.test:/events'):
+            with self.subTest(url=url):
+                self.assertEqual(normalize_monitor({'description': 'Offline URL fixture', 'ws': url})['ws'], url)
+
+    def test_raw_command_rejects_nul_and_preserves_shell_source(self):
+        for command in ('\x00poll', 'poll\x00', 'printf "a\x00b"'):
+            with self.subTest(command=command), self.assertRaises(MuseMonitorError):
+                normalize_monitor({'description': 'Offline command fixture', 'command': command})
+        for command in ('printf first\nprintf second', 'X=1; printf "%s" "$X" | cat',
+                        "printf 'line\\nbreak'\n", '\tprintf done\n'):
+            with self.subTest(command=command):
+                result = normalize_monitor({'description': 'Offline command fixture', 'command': command})
+                self.assertEqual(result['command'], command)
+
     def test_argv_is_quoted_without_execution_or_mutation(self):
         argv = ['/trusted/poll command', '--session', '$(touch /tmp/not-run)',
                 "a'b", '; echo unsafe', '`whoami`', 'line\nbreak', '']
