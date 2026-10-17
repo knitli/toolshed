@@ -4,8 +4,9 @@
 delivery_id, attempt_id)` reads one exact attempt from a caller-trusted, already
 open **read-only** SQLite connection. It opens no paths and initializes no Store.
 One SELECT with `LIMIT 2` and `fetchmany(2)` detects duplicate matches without
-counting or materializing all matching rows. It snapshots the saved admission, original native request and previously
-validated InputRecorded receipt together. No current attachment, delivery envelope,
+counting or materializing all matching rows. It snapshots the attempt's independent
+saved envelope, admission, original native request and previously validated
+InputRecorded receipt together. No current attachment, delivery envelope,
 clock, native bridge, gateway or eligibility query participates.
 
 A successful result contains `admission`, `request`, `input_recorded_receipt` and
@@ -17,7 +18,8 @@ trusted caller must independently obtain that original route before any native
 query. This module has no dependency on the dormant terminal-query client.
 
 The request must explicitly select integer receipt version 3. The collector
-revalidates the historical admission at its saved issue time, request/admission
+revalidates the historical admission against the independent saved attempt
+envelope at its saved issue time, request/admission
 identity, exact queried attempt/delivery and full InputRecorded identity including
 generation. Started, unknown and terminal outcomes cannot substitute for an
 InputRecorded anchor. Duplicate rows, missing fields, malformed JSON, duplicate

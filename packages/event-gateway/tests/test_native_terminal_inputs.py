@@ -7,12 +7,14 @@ import unittest
 import uuid
 from pathlib import Path
 
+from event_gateway.cloud import _timestamp, validate_admission
 from event_gateway.native import IDENTITY, NativeError
 from event_gateway.native_terminal_inputs import collect_terminal_inputs
 from test_native import ADMISSION, request
 
 
 _UPDATE_JSON = {
+    'envelope': 'UPDATE attempts SET envelope=?',
     'admission': 'UPDATE attempts SET admission=?',
     'native_request': 'UPDATE attempts SET native_request=?',
     'input_recorded_receipt': 'UPDATE attempts SET input_recorded_receipt=?',
@@ -28,7 +30,8 @@ class NativeTerminalInputsTests(unittest.TestCase):
         self.addCleanup(self.db.close)
         # Deliberately omit PK to exercise ambiguous/corrupt journal rejection.
         self.db.execute('CREATE TABLE attempts (delivery_id TEXT, attempt_id TEXT, '
-                        'admission TEXT, native_request TEXT, input_recorded_receipt TEXT)')
+                        'envelope TEXT, admission TEXT, native_request TEXT, '
+                        'input_recorded_receipt TEXT)')
         self.item = {**request(), 'receiptVersion': 3}
         self.anchor = {key: self.item[key] for key in (*IDENTITY, 'generation')}
         self.anchor['outcome'] = {'status': 'inputRecorded',
@@ -38,8 +41,9 @@ class NativeTerminalInputsTests(unittest.TestCase):
 
     def save(self, admission=None, item=None, anchor=None):
         self.db.execute('DELETE FROM attempts')
-        self.db.execute('INSERT INTO attempts VALUES (?,?,?,?,?)', (
+        self.db.execute('INSERT INTO attempts VALUES (?,?,?,?,?,?)', (
             self.item['deliveryId'], self.item['attemptId'],
+            json.dumps(ADMISSION['envelope']),
             json.dumps(ADMISSION if admission is None else admission),
             json.dumps(self.item if item is None else item),
             json.dumps(self.anchor if anchor is None else anchor)))
@@ -94,6 +98,26 @@ class NativeTerminalInputsTests(unittest.TestCase):
                 admission['envelope'][key] = 'changed'
                 self.save(admission=admission)
                 self.reject()
+
+    def test_admission_envelope_must_match_independent_saved_envelope(self):
+        for key, value in (('principal', 'other@knitli.com'), ('agent', 'other-agent'),
+                           ('policyRevision', 2)):
+            with self.subTest(key=key):
+                admission = copy.deepcopy(ADMISSION)
+                admission['envelope'][key] = value
+                # Each altered envelope is individually valid and does not change
+                # the narrower native-request identity. Only the independent row
+                # envelope can reject this mismatch.
+                validate_admission(admission, admission['envelope'],
+                                   now_ms=_timestamp(admission['permitIssuedAt']))
+                self.save(admission=admission)
+                self.reject()
+
+    def test_independent_saved_envelope_tampering_is_rejected(self):
+        envelope = {**ADMISSION['envelope'], 'principal': 'other@knitli.com'}
+        self.db.execute(_UPDATE_JSON['envelope'], (json.dumps(envelope),))
+        self.db.commit()
+        self.reject()
 
     def test_request_admission_and_row_identities_must_match(self):
         for key in ('attemptId', 'deliveryId', 'permitId', 'permitIssuedAt', 'permitExpiresAt'):
@@ -151,7 +175,8 @@ class NativeTerminalInputsTests(unittest.TestCase):
             self.assertLess(steps, 1000, 'duplicate detection exhausted the SQLite work budget')
 
     def test_malformed_duplicate_deep_oversize_json_rejected(self):
-        for column, document in (('admission', ADMISSION), ('native_request', self.item),
+        for column, document in (('envelope', ADMISSION['envelope']),
+                                 ('admission', ADMISSION), ('native_request', self.item),
                                  ('input_recorded_receipt', self.anchor)):
             raw = json.dumps(document)
             first = next(iter(document))

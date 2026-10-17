@@ -9,8 +9,11 @@ from .protocol import _decode
 
 _BINDING = ('clientId', 'generation', 'serverInstanceId', 'serverGeneration', 'threadId')
 # Projection bounds apply before SQLite hands stored JSON to Python. A single SELECT
-# pairs all three original values in one read snapshot; no mutable attachment join.
+# pairs the independent envelope and three saved values in one read snapshot;
+# no mutable attachment join.
 _QUERY = """SELECT
+ CASE WHEN typeof(envelope)='text' AND length(CAST(envelope AS BLOB))<=4096
+      THEN envelope END,
  CASE WHEN typeof(admission)='text' AND length(CAST(admission AS BLOB))<=4096
       THEN admission END,
  CASE WHEN typeof(native_request)='text' AND length(CAST(native_request AS BLOB))<=4096
@@ -41,18 +44,18 @@ def collect_terminal_inputs(connection, delivery_id, attempt_id):
             return None
         if len(rows) != 1:
             raise ValueError()
-        admission_raw, request_raw, receipt_raw = rows[0]
+        envelope_raw, admission_raw, request_raw, receipt_raw = rows[0]
         # Existing decoder rejects duplicate keys, non-finite numbers and depth>32;
         # native copy also enforces its 4 KiB serialized-value contract.
-        admission, request, receipt = (
-            _copy(_decode(value)) for value in (admission_raw, request_raw, receipt_raw)
-        )
+        envelope, admission = (_copy(_decode(value))
+                               for value in (envelope_raw, admission_raw))
+        request, receipt = (_decode(value) for value in (request_raw, receipt_raw))
         if (not isinstance(request, dict)
                 or type(request.get('receiptVersion')) is not int  # pylint: disable=unidiomatic-typecheck
                 or request['receiptVersion'] != 3):
             raise ValueError()
         # Historical validation uses the original issue time, not current eligibility.
-        validate_admission(admission, admission['envelope'],
+        validate_admission(admission, envelope,
                            now_ms=_timestamp(admission['permitIssuedAt']))
         validate_request(request, admission)
         if request['deliveryId'] != delivery_id or request['attemptId'] != attempt_id:
