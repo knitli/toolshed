@@ -3,7 +3,8 @@
 from copy import deepcopy
 import re
 import shlex
-from urllib.parse import urlsplit
+from unicodedata import normalize
+from urllib.parse import unquote_to_bytes, urlsplit
 
 
 class MuseMonitorError(ValueError):
@@ -25,6 +26,48 @@ def _milliseconds(value, *, zero=False):
             and (1000 <= value <= 1800000 or zero and value == 0))
 
 
+def _ipv4_number(part):
+    """Parse WHATWG decimal/octal/hex syntax with bounded integer conversion."""
+    if not part:
+        return None
+    radix, digits = 10, part
+    if part.lower().startswith('0x'):
+        radix, digits = 16, part[2:]
+    elif len(part) > 1 and part.startswith('0'):
+        radix, digits = 8, part[1:]
+    pattern = {10: r'[0-9]*', 8: r'[0-7]*', 16: r'[0-9a-fA-F]*'}[radix]
+    if re.fullmatch(pattern, digits) is None:
+        return None
+    digits = digits.lstrip('0')
+    # Overflow is still numeric: it must not fall back to domain-name acceptance.
+    if len(digits) > 11:
+        return 2**32
+    return min(int(digits or '0', radix), 2**32)
+
+
+def _valid_domain_host(host):
+    """Preflight decoded host bytes and numeric IPv4; native IDNA remains final."""
+    decoded = unquote_to_bytes(host).decode('utf-8', errors='strict')
+    # Compatibility characters and DNS dot forms must not hide forbidden bytes or
+    # numeric overflow. This is not a replacement for native UTS46 processing.
+    domain = normalize('NFKC', decoded).translate({0x3002: '.', 0xFF0E: '.', 0xFF61: '.'})
+    if not domain or any(ord(char) <= 32 or ord(char) == 127
+                         or char in '#%/:<>?@[\\]^|\ufffd' for char in domain):
+        return False
+    parts = domain.split('.')
+    if parts[-1] == '':
+        parts.pop()
+    last = parts[-1] if parts else ''
+    if re.fullmatch(r'[0-9]+', last) is None and _ipv4_number(last) is None:
+        return True
+    if not 1 <= len(parts) <= 4:
+        return False
+    numbers = [_ipv4_number(part) for part in parts]
+    return (all(number is not None for number in numbers)
+            and all(number <= 255 for number in numbers[:-1])
+            and numbers[-1] < 256**(5 - len(numbers)))
+
+
 def _valid_websocket_uri(uri):
     # urlsplit removes some raw controls instead of rejecting them.
     if any(char.isspace() or ord(char) < 32 or ord(char) == 127
@@ -39,6 +82,8 @@ def _valid_websocket_uri(uri):
         if authority.startswith('['):
             suffix = authority[authority.index(']') + 1:]
             valid = valid and (suffix in ('', ':') or suffix.startswith(':') and suffix[1:].isdigit())
+        else:
+            valid = valid and _valid_domain_host(parsed.hostname)
         # Reading port also rejects malformed/out-of-range URL ports.
         _ = parsed.port
     except ValueError:

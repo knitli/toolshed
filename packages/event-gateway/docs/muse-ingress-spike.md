@@ -104,6 +104,14 @@ an asynchronous machine notification; source closure ends the watch. Persistent
 watches have no deadline until the source, session, or `muse.work_stop` stops them.
 `show_lines=true` also renders FEED cells. None of this constitutes a receipt.
 
+WebSocket preflight percent-decodes domain hosts as strict UTF-8, rejects forbidden
+host characters, and checks numeric IPv4 bounds while retaining valid shorthand,
+octal, and hexadecimal forms. Compatibility-character and Unicode-dot checks
+prevent those forms from hiding forbidden characters or numeric overflow. These
+are bounded guards informed by the [URL Standard](https://url.spec.whatwg.org/#host-parsing),
+not a complete WHATWG parser: native UTS46/IDNA validation remains authoritative.
+The original URL is preserved, and acceptance makes no connectivity claim.
+
 Once a separately implemented and authorized session polling command exists, the
 target session can prepare native tool input without shell interpolation:
 

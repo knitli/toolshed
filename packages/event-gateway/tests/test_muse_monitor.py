@@ -226,5 +226,22 @@ class MuseMonitorTests(unittest.TestCase):
             normalize.assert_not_called()
 
 
+class MuseWebsocketHostTests(unittest.TestCase):
+    def test_bounded_host_matrix_matches_network_free_url_oracle(self):
+        fixture = json.loads((Path(__file__).parent / 'fixtures/muse-websocket-host-matrix.json').read_text())
+        for case in fixture['cases']:
+            with self.subTest(group=case['group'], url=case['url']):
+                value = {'description': 'Offline host fixture', 'ws': case['url']}
+                if case['accepted']:
+                    try:
+                        actual = normalize_monitor(value)
+                    except MuseMonitorError:
+                        self.fail('normalizer rejected an oracle-permitted URL')
+                    self.assertEqual(actual['ws'], case['url'])
+                else:
+                    with self.assertRaises(MuseMonitorError):
+                        normalize_monitor(value)
+
+
 if __name__ == '__main__':
     unittest.main()
