@@ -25,13 +25,13 @@ def main():
     # Use a disposable patched checkout and an empty output directory.
     ROOT = pathlib.Path(os.environ["CODEX_SPIKE_ROOT"]).resolve()
     OUT = pathlib.Path(os.environ["SPIKE_PROOF_DIR"]).resolve()
-    OUT.mkdir(parents=True, exist_ok=False)
     JUST = pathlib.Path(os.environ["JUST_BIN"])
     if not JUST.is_absolute() or not JUST.is_file() or not os.access(JUST, os.X_OK):
         raise RuntimeError(
             "JUST_BIN must be an absolute existing executable selected by the owner"
         )
     JUST = str(JUST)
+    OUT.mkdir(parents=True, exist_ok=False)
     env = dict(os.environ, CARGO_NET_OFFLINE="true")
     artifact = pathlib.Path(__file__).resolve()
     historical = json.loads(

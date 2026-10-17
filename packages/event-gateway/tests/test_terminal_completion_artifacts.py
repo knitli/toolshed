@@ -45,6 +45,14 @@ class TerminalCompletionArtifactTests(unittest.TestCase):
                 expected[relative] = hashlib.sha256(source.read_bytes()).hexdigest()
             target.write_text(json.dumps({"fileSha256": expected}))
             self.manifests.append(expected)
+        historical, final = self.manifests
+        for relative in historical.keys() & final.keys():
+            historical[relative] = hashlib.sha256(
+                b"older historical source"
+            ).hexdigest()
+        (self.runner.parent.parent / HISTORICAL.name).write_text(
+            json.dumps({"fileSha256": historical})
+        )
         self.tool = self.root / "owner-selected-tool"
         self.tool.write_text("#!/bin/sh\nexit 0\n")
         self.tool.chmod(0o700)
@@ -76,6 +84,9 @@ class TerminalCompletionArtifactTests(unittest.TestCase):
         with self.assertRaises(ToolReached):
             self.execute(stop_at_tool)
         self.assertTrue(self.marker.exists())
+        generated = json.loads((self.proof / "source-hashes.json").read_text())
+        self.assertEqual(len(generated), 59)
+        self.assertEqual(generated, self.manifests[0] | self.manifests[1])
         self.marker.unlink()
         historical, final = self.manifests
         for index, relative in enumerate(
@@ -142,3 +153,33 @@ class TerminalCompletionArtifactTests(unittest.TestCase):
         self.tool.chmod(0o600)
         with self.assertRaisesRegex(RuntimeError, "absolute existing executable"):
             self.execute(lambda *args, **kwargs: self.fail("invalid tool launched"))
+
+        self.assertFalse(
+            self.proof.exists(), "invalid tools must not consume the output path"
+        )
+        self.tool.chmod(0o700)
+
+        def stop_at_tool(*args, **kwargs):
+            raise ToolReached()
+
+        with self.assertRaises(ToolReached):
+            self.execute(stop_at_tool)
+        self.assertTrue(self.proof.is_dir())
+        self.assertEqual(
+            json.loads((self.proof / "source-hashes.json").read_text()),
+            self.manifests[0] | self.manifests[1],
+        )
+
+    def test_frozen_hashes_describe_original_tested_sources(self):
+        frozen_path = SOURCE.parent / "proof/tested-source-hashes.json"
+        self.assertTrue(
+            frozen_path.is_file(), "label original tested evidence explicitly"
+        )
+        frozen = json.loads(frozen_path.read_text())
+        manifest = json.loads(SOURCE.with_name("manifest.json").read_text())
+        self.assertEqual(len(frozen), 11)
+        self.assertTrue(all(not path.startswith("codex-rs/") for path in frozen))
+        normalized = {f"codex-rs/{path}": checksum for path, checksum in frozen.items()}
+        self.assertEqual(normalized, manifest["testedSha256"])
+        self.assertNotEqual(normalized, manifest["fileSha256"])
+        self.assertFalse((SOURCE.parent / "proof/source-hashes.json").exists())
