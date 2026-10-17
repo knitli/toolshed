@@ -16,6 +16,7 @@ with gzip.open(Path(__file__).parent / "fixtures/native-v2-producer-receipts.jso
 
 class V2API(legacy.FakeAPI):
     def __init__(self, family="terminal-query-v1"):
+        """Load frozen blobs and receipts for the selected registered recipe family."""
         super().__init__()
         self.receipt = copy.deepcopy(FROZEN["receipts"][family])
         self.selected.update(schemaVersion=2, recipe=self.receipt["recipe"])
@@ -79,6 +80,7 @@ class NativeV2ProvenanceTests(unittest.TestCase):
                     location["recipe"][field] = value
                 with self.subTest(target=target, field=field, value=value):
                     self.assert_rejected_receipt(change)
+
             def remove(receipt):
                 del (receipt if target == "receipt" else receipt["build"])["recipe"]
             with self.subTest(target=target, missing=True):

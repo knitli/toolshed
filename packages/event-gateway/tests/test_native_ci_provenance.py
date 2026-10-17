@@ -456,6 +456,7 @@ class NativeCIProvenanceTests(unittest.TestCase):
         original = Path.read_bytes
         mutable = {SCRIPT.parents[3] / V.INPUTS[name]
                    for name in ("builderSha256", "producerSha256", "workflowSha256")}
+
         def read(path):
             if path in mutable:
                 raise AssertionError("legacy fixture read mutable current input")
@@ -813,7 +814,11 @@ class ProvenanceDriverTests(unittest.TestCase):
             raise AssertionError(endpoint)
 
         def blob(path, revision):
-            return b"changed" if (policy_changed or registry_changed and path == REGISTRY or asset_changed and path == RECIPE_ASSETS[-1]) and reads > 1 and revision == MAIN else b"policy"
+            changed_input = (policy_changed
+                             or (registry_changed and path == REGISTRY)
+                             or (asset_changed and path == RECIPE_ASSETS[-1]))
+            changed_after_read = changed_input and reads > 1 and revision == MAIN
+            return b"changed" if changed_after_read else b"policy"
 
         api.request.side_effect = request
         api.blob.side_effect = blob
