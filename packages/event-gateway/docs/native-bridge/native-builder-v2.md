@@ -7,6 +7,14 @@ only those family choices and passes the choice through a quoted environment
 variable; revision remains 1. Existing v1 artifacts require the verifier's
 separate registered historical-tuple compatibility path.
 
+The workflow carries an intentional, local `CKV_GHA_7` exception for this choice
+input. Both options select fixed protected-main recipes at revision 1; quoted
+argument forwarding, pinned source assets, and exact receipt identity checks
+retain the same provenance requirements for either family. Separate fixed-entry
+workflows would expand the verifier's accepted workflow identities without
+strengthening these checks. This exception does not disable the repository rule
+or permit arbitrary build parameters.
+
 The package evidence and receipt carry the same `recipe` object:
 `family`, integer `revision`, and `manifestSha256`. Receipt `inputs` contains
 exactly `builderSha256`, `producerSha256`, `workflowSha256`, `registrySha256`,

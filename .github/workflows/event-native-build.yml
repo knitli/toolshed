@@ -3,6 +3,7 @@ name: Native client candidate build
 on:
   workflow_dispatch:
     inputs:
+      #checkov:skip=CKV_GHA_7: protected-main enum selects fixed registered recipe/revision; source and receipt identities remain pinned
       family:
         description: Inactive native candidate recipe
         type: choice
