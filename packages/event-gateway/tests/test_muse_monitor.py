@@ -4,6 +4,8 @@ import copy
 import json
 from pathlib import Path
 import shlex
+import subprocess  # nosec B404 -- Fixed local shell exercises synthetic argv quoting.
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -67,10 +69,36 @@ class MuseMonitorTests(unittest.TestCase):
         self.assertEqual(normalize_monitor({**base, 'ws_subprotocols': []})['ws_subprotocols'], [])
         with self.assertRaises(MuseMonitorError):
             normalize_monitor({'description': 'x', 'command': 'poll', 'ws_subprotocols': []})
-        for url in ('https://example.test', 'ws:', 'ws://', 'ws://[bad', 'ws://example.test:99999'):  # nosemgrep -- Offline invalid URL fixtures; no connection is made.
+        for url in ('https://example.test', 'ws:', 'ws://', 'ws://[bad',
+                    'ws://example.test:99999'):  # nosemgrep -- Offline invalid URL; no connection.
             with self.subTest(url=url), self.assertRaises(MuseMonitorError):
                 normalize_monitor({**base, 'ws': url})
         self.assertEqual(normalize_monitor({**base, 'ws': 'ws://localhost:1234'})['ws'], 'ws://localhost:1234')
+
+    def test_command_position_is_literal_in_real_posix_shell(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for executable in ('X=1', 'if', '!', "a'b"):
+                path = Path(directory) / executable
+                path.write_text("#!/bin/sh\nprintf '%s\\0' called \"$@\"\n")
+                path.chmod(0o700)
+                args = ['literal argument', '$(exit 9)', "a'b", '']
+                command = command_monitor('Offline shell fixture', [executable, *args])['command']
+                with self.subTest(executable=executable):
+                    result = subprocess.run(  # nosec B603 -- Synthetic scripts in our private test directory.
+                        ['/bin/sh', '-c', command], env={'PATH': directory},
+                                            check=False, capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout, b'called\0' + b''.join(arg.encode() + b'\0' for arg in args))
+
+    def test_websocket_rejects_raw_fragments_including_empty_fragment(self):
+        for url in ('wss://example.test/events#fragment', 'wss://example.test/events#',
+                    'wss://example.test/events?cursor=1#'):
+            with self.subTest(url=url), self.assertRaises(MuseMonitorError):
+                normalize_monitor({'description': 'Offline URL fixture', 'ws': url})
+        for url in ('wss://example.test/events', 'wss://example.test/events%23fragment',
+                    'wss://example.test/events?cursor=%23'):
+            with self.subTest(url=url):
+                self.assertEqual(normalize_monitor({'description': 'Offline URL fixture', 'ws': url})['ws'], url)
 
     def test_argv_is_quoted_without_execution_or_mutation(self):
         argv = ['/trusted/poll command', '--session', '$(touch /tmp/not-run)',
@@ -81,11 +109,11 @@ class MuseMonitorTests(unittest.TestCase):
         self.assertEqual(shlex.split(result['command']), argv)
         self.assertEqual(argv, before)
         self.assertEqual(result['wake_delay_ms'], 0)
-        self.assertEqual(command_monitor('x', ('poll',))['command'], 'poll')
+        self.assertEqual(command_monitor('x', ('poll',))['command'], "'poll'")
         for value in ([], '', [''], ['poll', None], ['poll', 'bad\x00arg']):
             with self.subTest(value=value), self.assertRaises(MuseMonitorError):
                 command_monitor('x', value)
-        for options in ({'ws': 'ws://example.test'}, {'command': 'other'}, {'sessionId': 'x'}):  # nosemgrep -- Offline forbidden-option fixture; no connection is made.
+        for options in ({'ws': 'wss://example.test'}, {'command': 'other'}, {'sessionId': 'x'}):
             with self.assertRaises(MuseMonitorError):
                 command_monitor('x', ['poll'], **options)
 

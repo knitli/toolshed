@@ -39,9 +39,9 @@ def normalize_monitor(value):
     if source == 'ws':
         try:
             parsed = urlsplit(value['ws'])
-            valid = parsed.scheme in ('ws', 'wss') and bool(parsed.hostname)
+            valid = parsed.scheme in ('ws', 'wss') and bool(parsed.hostname) and '#' not in value['ws']
             # Reading port also rejects malformed/out-of-range URL ports.
-            _port = parsed.port
+            _ = parsed.port
         except ValueError:
             valid = False
         if not valid:
@@ -79,4 +79,7 @@ def command_monitor(description, argv, **options):
             or any(not isinstance(arg, str) or '\x00' in arg for arg in argv)
             or not argv[0] or set(options) - (_FIELDS - {'description', 'command', 'ws'})):
         raise MuseMonitorError()
-    return normalize_monitor({'description': description, 'command': shlex.join(argv), **options})
+    # Command position must be quoted even for shlex-safe assignments/reserved words.
+    executable = "'" + argv[0].replace("'", "'\"'\"'") + "'"
+    command = ' '.join((executable, *(shlex.quote(arg) for arg in argv[1:])))
+    return normalize_monitor({'description': description, 'command': command, **options})
