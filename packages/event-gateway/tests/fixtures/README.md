@@ -1,6 +1,6 @@
 # Trusted contract fixtures
 
-`trusted-contract-families.zip` contains immutable Git blob bytes for all ten
+`trusted-contract-families.zip` contains immutable Git blob bytes for all thirteen
 contract families. Tests read members with `ZipFile.read`; nothing is
 extracted or executed, and tests require neither network access nor Git history.
 
@@ -85,3 +85,27 @@ required snapshot and source-hash mutation/omission, closed provenance, all 45
 semantic verdicts, and a changed verdict with a self-rehashed event manifest.
 This authorizes exact bytes only; consumer rotation and runtime qualification
 remain separate.
+
+
+The `github-initial-custody` family pins the actual #902 merge
+`3ad64222999bc2aaa60f50623120e302edc5f8bd` for its 55 control sources, using
+Node 24.19.0 and Zod 4.6.5. Its snapshot identifier is `prepared-export:` plus
+that control revision. The private exporter verified every selected source hash
+before evaluating the reviewed DTO/proof modules. The control fixture bytes are
+unchanged; the control manifest records the expanded, merged-source provenance.
+
+All five event-v1 files retain their exact bytes and event revision
+`7b63bee97395a70e05ffb08ee214e8351f6dda06`, including all 45 semantic verdicts.
+The historical metadata source map at that revision remains the original
+41-entry union. All 315 historical archive payloads, twelve policy entries,
+snapshot mappings, and source maps are preserved; the archive adds seven
+snapshot members and 55 source members. Tests freeze historical payload and
+metadata digests, check the exact new source inventory and event-source subset,
+and reject snapshot/source-hash omissions, mutations and a self-rehashed
+semantic-verdict change.
+
+The sixteen additional sources cover GitHub initial conversion, manifest and
+watch custody, reconciliation, material access, source references, and
+quarantine inventory. This is selected GitHub/initial-custody provenance, not
+whole-runtime dependency closure. It does not adopt the consumer snapshot or
+exporter, deploy services, activate delivery, or release acknowledgments.
