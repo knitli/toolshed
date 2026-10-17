@@ -6,6 +6,7 @@ import ast
 import re
 from contextlib import ExitStack
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -13,6 +14,7 @@ from pathlib import Path, PurePosixPath
 import shutil
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import tomllib
@@ -20,14 +22,24 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[3]
 DOCS = ROOT / "packages/event-gateway/docs/native-bridge"
-PATCH = DOCS / "native-core-idle-v1-implementation.patch"
-SOURCE_MANIFEST = DOCS / "native-core-idle-v1-source-manifest.json"
+REGISTRY = Path(__file__).resolve().with_name("native_recipe_registry.py")
+registry = sys.modules.get("native_recipe_registry")
+if registry is None:
+    _registry_spec = importlib.util.spec_from_file_location("native_recipe_registry", REGISTRY)
+    registry = importlib.util.module_from_spec(_registry_spec)
+    sys.modules[_registry_spec.name] = registry
+    try:
+        _registry_spec.loader.exec_module(registry)
+    except BaseException:
+        sys.modules.pop(_registry_spec.name, None)
+        raise
+elif (getattr(registry, "__file__", None) != str(REGISTRY)
+      or getattr(getattr(registry, "__spec__", None), "origin", None) != str(REGISTRY)):
+    raise ImportError("native_recipe_registry_origin_mismatch")
 UPSTREAM_COMMIT = "a956835d020762cb2b570053af06f643a11c0ecc"
-PATCH_SHA256 = "ef74b28f308d4eb16556771cbfc47f3db00d83165e332f546edd9b65b6b302db"
-SOURCE_MANIFEST_SHA256 = "8c6f136f215deb4dca30b4d230eede5eaf8e65c1850635b199b62457a7759924"
 PINNED_CARGO_CONFIG_SHA256 = "b8ae1cea341beb2d4a3c8fb81f97a96f4aee1fd53f769c57f140dfe949806a80"
 PINNED_SOURCE_ROOT_CARGO_CONFIG_SHA256 = "b34b20f64e30695e8629ddad8b80885764e947f51e4ce49c6378a3b5a238d25e"
-PATCHED_FILE_COUNT = 57
+
 def _launcher_pin(path):
     """Read one literal launcher digest as data without executing launcher code."""
     tree = ast.parse(path.read_text())
@@ -70,25 +82,6 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
-def verify_manifest(manifest_bytes, patch_bytes):
-    """Check the checked-in patch and source inventory against their pins."""
-    manifest = json.loads(manifest_bytes)
-    if (sha256(manifest_bytes) != SOURCE_MANIFEST_SHA256
-            or manifest.get("baseCommit") != UPSTREAM_COMMIT
-            or manifest.get("patchSha256") != PATCH_SHA256
-            or sha256(patch_bytes) != PATCH_SHA256
-            or manifest.get("fileCount") != PATCHED_FILE_COUNT
-            or manifest.get("fileCount") != len(manifest.get("fileSha256", {}))
-            or manifest.get("fileCount") != len(manifest.get("files", []))):
-        raise ValueError("native_source_manifest_mismatch")
-    files = manifest["files"]
-    if (len({entry.get("path") for entry in files}) != len(files)
-            or {entry.get("path"): entry.get("sha256") for entry in files}
-            != manifest["fileSha256"]):
-        raise ValueError("native_source_manifest_mismatch")
-    return manifest
-
-
 def verify_patched_source(source, manifest):
     """Verify every pinned patched file and reject path escapes or symlinks."""
     entries = {entry["path"]: entry for entry in manifest["files"]}
@@ -111,6 +104,57 @@ def verify_patched_source(source, manifest):
         inventory.update(b"\0")
         inventory.update(bytes.fromhex(expected))
     return len(manifest["fileSha256"]), inventory.hexdigest()
+
+
+def recipe_identity(selected):
+    return {"family": selected.family, "revision": selected.revision,
+            "manifestSha256": selected.manifest.sha256}
+
+
+def _source_bytes(source, relative, limit):
+    path = PurePosixPath(relative)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError("native_source_manifest_mismatch")
+    candidate = source
+    for part in path.parts:
+        candidate = candidate / part
+        if candidate.is_symlink():
+            raise ValueError("native_source_manifest_mismatch")
+    if not candidate.is_file() or candidate.stat().st_size > limit:
+        raise ValueError("native_source_manifest_mismatch")
+    with candidate.open("rb") as stream:
+        contents = stream.read(limit + 1)
+    if len(contents) > limit:
+        raise ValueError("native_source_manifest_mismatch")
+    return contents
+
+
+def verify_base_prerequisites(source, selected):
+    for asset in selected.base_prerequisites:
+        contents = _source_bytes(source, asset.path, asset.bytes)
+        if len(contents) != asset.bytes or sha256(contents) != asset.sha256:
+            raise ValueError("native_base_prerequisite_mismatch")
+
+
+def verify_recipe_source(source, evidence):
+    selected = evidence.recipe
+    manifest_bytes = registry._read_asset(selected.manifest)
+    for asset in (*selected.parents, *selected.ordered_patches):
+        registry._read_asset(asset)
+    if selected.family == registry.DEFAULT_FAMILY:
+        manifest = json.loads(manifest_bytes)
+        return verify_patched_source(source, manifest)
+    inventory = hashlib.sha256()
+    for relative, expected in sorted(evidence.file_sha256.items()):
+        contents = _source_bytes(source, relative, registry.ASSET_LIMIT)
+        if sha256(contents) != expected:
+            raise ValueError("native_source_hash_mismatch")
+        inventory.update(relative.encode())
+        inventory.update(b"\0")
+        inventory.update(bytes.fromhex(expected))
+    if len(evidence.file_sha256) != evidence.recipe.file_count:
+        raise ValueError("native_source_manifest_mismatch")
+    return len(evidence.file_sha256), inventory.hexdigest()
 
 
 def lock_version_changes(before, after):
@@ -271,7 +315,7 @@ def _rustup_executable(env):
 
 def _run(command, *, cwd, env=None, capture=False, stdout=None, input=None):
     return subprocess.run(
-        command, cwd=cwd, env=env, check=True, text=True, stdout=stdout or (
+        command, cwd=cwd, env=env, check=True, text=not isinstance(input, bytes), stdout=stdout or (
             subprocess.PIPE if capture else None
         ), stderr=subprocess.PIPE if capture else None, input=input,
     )
@@ -504,17 +548,17 @@ def _copy_new(source, destination):
         raise
 
 
-def package(source, output, evidence_path, host_archive, *, prime_dependencies=False,
-            verify_release=False):
+def package(source, output, evidence_path, host_archive, *, family="core-idle-v1", revision=1,
+            prime_dependencies=False, verify_release=False):
     output, evidence_path = _resolve_output_pair(output, evidence_path)
     host_output = _resolve_new_output(output.parent / "codex-code-mode-host")
     if host_output in (output, evidence_path):
         raise ValueError("native_output_paths_must_differ")
     host_contents = _verified_code_mode_host(host_archive)
 
-    manifest_bytes = SOURCE_MANIFEST.read_bytes()
-    patch_bytes = PATCH.read_bytes()
-    manifest = verify_manifest(manifest_bytes, patch_bytes)
+    recipe_evidence = registry.validate_recipe(family, revision)
+    selected = recipe_evidence.recipe
+    patches = [(asset, registry._read_asset(asset)) for asset in selected.ordered_patches]
 
     with ExitStack() as rollback:
         with tempfile.TemporaryDirectory(prefix="codex-native-v3-build-") as directory:
@@ -524,11 +568,15 @@ def package(source, output, evidence_path, host_archive, *, prime_dependencies=F
             git_evidence = _binary_evidence(git)
             source = _clean_checkout(source, env, git)
             _archive_source(source, work, env, git)
+            verify_base_prerequisites(work, selected)
             git_env = _git_environment(env)
             git_args = [str(git), "-c", f"core.attributesFile={os.devnull}", "apply"]
-            _run([*git_args, "--check", "--whitespace=error", str(PATCH)], cwd=work, env=git_env)
-            _run([*git_args, "--whitespace=error", str(PATCH)], cwd=work, env=git_env)
-            patched_count, source_before_build = verify_patched_source(work, manifest)
+            for _asset, contents in patches:
+                _run([*git_args, "--check", "--whitespace=error", "-"],
+                     cwd=work, env=git_env, input=contents)
+                _run([*git_args, "--whitespace=error", "-"],
+                     cwd=work, env=git_env, input=contents)
+            patched_count, source_before_build = verify_recipe_source(work, recipe_evidence)
 
             codex_rs = work / "codex-rs"
             cargo_configuration = _cargo_configuration(codex_rs, env["CARGO_HOME"])
@@ -567,7 +615,7 @@ def package(source, output, evidence_path, host_archive, *, prime_dependencies=F
             cargo_configuration_after = _cargo_configuration(codex_rs, env["CARGO_HOME"])
             if cargo_configuration_after != cargo_configuration:
                 raise ValueError("cargo_configuration_changed_during_build")
-            patched_after_count, source_after_build = verify_patched_source(work, manifest)
+            patched_after_count, source_after_build = verify_recipe_source(work, recipe_evidence)
             if patched_after_count != patched_count or source_after_build != source_before_build:
                 raise ValueError("native_patched_source_changed_during_build")
 
@@ -598,10 +646,11 @@ def package(source, output, evidence_path, host_archive, *, prime_dependencies=F
                     "selection": "git archive of the pinned commit without pathspecs",
                     "extractionFilter": "tarfile.data_filter",
                 },
-                "patchSha256": PATCH_SHA256,
-                "sourceManifestSha256": sha256(manifest_bytes),
+                "recipe": recipe_identity(selected),
+                "appliedPatches": [registry._asset_record(asset) for asset, _contents in patches],
+                "sourceManifestSha256": selected.manifest.sha256,
                 "patchedFileCount": patched_count,
-                "patchedFileSha256": manifest["fileSha256"],
+                "patchedFileSha256": dict(recipe_evidence.file_sha256),
                 "patchedSourceInventoryBeforeBuildSha256": source_before_build,
                 "patchedSourceInventoryAfterBuildSha256": source_after_build,
                 "rustc": rustc,
@@ -637,6 +686,9 @@ def main(argv=None):
     parser.add_argument("--evidence", type=Path, required=True, help="new JSON evidence path")
     parser.add_argument("--code-mode-host-archive", type=Path, required=True,
                         help="local pinned official code-mode host archive (no download)")
+    parser.add_argument("--family", choices=sorted({key[0] for key in registry.RECIPES}),
+                        default=registry.DEFAULT_FAMILY)
+    parser.add_argument("--revision", type=int, choices=[1], default=1)
     parser.add_argument("--prime-dependencies", action="store_true",
                         help="fetch dependencies before the offline build; isolated CI cache only")
     parser.add_argument("--verify-release", action="store_true",
@@ -644,6 +696,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         evidence = package(args.source, args.output, args.evidence, args.code_mode_host_archive,
+                           family=args.family, revision=args.revision,
                            prime_dependencies=args.prime_dependencies,
                            verify_release=args.verify_release)
     except subprocess.CalledProcessError as error:

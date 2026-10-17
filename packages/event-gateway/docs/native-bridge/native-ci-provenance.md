@@ -1,7 +1,10 @@
 # CI provenance for native candidates
 
 The main-only `Native client candidate build` workflow builds a new candidate
-from the reviewed upstream commit, patch, and source manifest. It does not change
+from the pinned upstream commit and selected registry recipe. The default is
+`core-idle-v1`, revision 1 (57 selected source files); `terminal-query-v1`, revision 1
+(71 files), requires explicit selection. The workflow forwards the enumerated family
+through a quoted environment variable and fixes revision 1. It does not change
 the production launcher pin, install a client, dispatch itself, or establish live
 qualification. Its receipt is CI provenance, not a cryptographic attestation or
 a claim that another machine will reproduce identical bytes.
@@ -23,10 +26,12 @@ to be immutable or identical to the historical local build environment.
 
 The immutable artifact is named `native-client-<runId>-<runAttempt>` and contains
 exactly `codex`, `codex-code-mode-host`, and `build-receipt.json`. Retention is 90
-days. The legacy schema version 1 receipt has kind `native-client-ci-build`, repository,
-run, attempt, and head identity; hashes for the builder, producer, workflow,
-manifest, and patch; the observed build environment; and the builder evidence
-with independently computed executable hashes. The artifact ID and archive
+days. Every new schema version 2 receipt has kind `native-client-ci-build`,
+repository, run, attempt, and head identity; the selected recipe; hashes for the
+builder, producer, workflow, registry, and source manifest; the observed build
+environment; and builder evidence with independently computed executable hashes.
+Historical schema version 1 receipts retain their original manifest-and-patch
+input tuple. The artifact ID and archive
 digest come from GitHub after upload and appear in the workflow summary. They
 are external to the receipt because an artifact cannot contain its own final
 archive digest.
@@ -53,6 +58,15 @@ status publication. The strict nine-field schema version 1 selection remains:
 additional recipe fields and 71-family inputs are not accepted under v1. Both reviewed
 launcher transitions and the unchanged-pin no-artifact path remain available.
 
+Paired installation uses this same historical-v1 rule. Previously it required all
+five legacy build-input files to equal current main, rejecting the reviewed legacy
+artifact whenever shared builder, producer, or workflow code changed. It now
+requires the artifact's complete registered tuple and fixed legacy manifest/patch
+identity, preserving that immutable source family across shared tooling changes.
+It still checks local policy and registry bytes against protected main, main
+freshness, run and ancestry metadata, the archive, and both executable pins.
+This admits no arbitrary historical receipt; v2 inputs remain current-main-only.
+
 Schema version 2 uses the existing selection fields plus exactly
 `recipe: {family, revision, manifestSha256}`. Selection and receipt use integer
 `schemaVersion: 2`; the recipe object and builder evidence do not gain a schema
@@ -73,9 +87,12 @@ The authenticated builder checks upstream prerequisites in a fresh archive of th
 pinned upstream commit before applying patches in order. The verifier does not
 rebuild source or treat an upstream prerequisite as a documentation asset.
 
-This v2 verifier policy precedes builder/producer adoption. Once adopted, every
-new build emits v2, including the default `core-idle-v1` family; legacy artifacts
-retain the separate registered v1 path. V2 has no historical tuple fallback.
+The builder and producer use the registry for both families, and every new build
+emits v2, including the default `core-idle-v1` family. The producer hashes all
+implementation inputs and selected recipe assets before and after packaging.
+Legacy artifacts retain the separate registered v1 path; v2 has no historical
+tuple fallback. Adoption checks include source-only replay and mocked packaging;
+they do not produce an actual 71-family binary or establish native qualification.
 Recipe support does not establish native qualification or authorize dispatch,
 installation, or pin promotion. The failed full-suite result remains a hold;
 six targeted passes do not waive it.

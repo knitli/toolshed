@@ -19,12 +19,20 @@ import urllib.request
 import zipfile
 
 # The isolated workflow imports only its protected-checkout sibling, never PR data.
-_registry_spec = importlib.util.spec_from_file_location(
-    "_native_provenance_recipe_registry", Path(__file__).resolve().with_name("native_recipe_registry.py")
-)
-R = importlib.util.module_from_spec(_registry_spec)
-sys.modules[_registry_spec.name] = R
-_registry_spec.loader.exec_module(R)
+_registry_path = Path(__file__).resolve().with_name("native_recipe_registry.py")
+R = sys.modules.get("native_recipe_registry")
+if R is None:
+    _registry_spec = importlib.util.spec_from_file_location("native_recipe_registry", _registry_path)
+    R = importlib.util.module_from_spec(_registry_spec)
+    sys.modules[_registry_spec.name] = R
+    try:
+        _registry_spec.loader.exec_module(R)
+    except BaseException:
+        sys.modules.pop(_registry_spec.name, None)
+        raise
+elif (getattr(R, "__file__", None) != str(_registry_path)
+      or getattr(getattr(R, "__spec__", None), "origin", None) != str(_registry_path)):
+    raise ImportError("native_recipe_registry_origin_mismatch")
 
 REPOSITORY = "knitli/toolshed"
 REPOSITORY_ID = 1200860702
@@ -382,6 +390,14 @@ def resolve_v2_build_inputs(api, head, build, main, identity):
     return inputs, evidence
 
 
+def resolve_build_inputs(api, head, main, selected):
+    """Resolve authenticated version-specific evidence for promotion or installation."""
+    selected = selection(selected)
+    if selected["schemaVersion"] == 1:
+        return resolve_legacy_build_inputs(api, head, selected["headSha"], main)
+    return resolve_v2_build_inputs(api, head, selected["headSha"], main, selected["recipe"])
+
+
 def verify_candidate(api, head, main):
     require(sha(head, 40) and sha(main, 40))
     tree = api.request(f"git/trees/{head}?recursive=1")
@@ -410,10 +426,7 @@ def verify_candidate(api, head, main):
     artifact = api.request(f"actions/artifacts/{selected['artifactId']}")
     verify_metadata(selected, workflow, run, artifact)
     require_ancestry(api, selected["headSha"], main)
-    if selected["schemaVersion"] == 1:
-        inputs, manifest = resolve_legacy_build_inputs(api, head, selected["headSha"], main)
-    else:
-        inputs, manifest = resolve_v2_build_inputs(api, head, selected["headSha"], main, selected["recipe"])
+    inputs, manifest = resolve_build_inputs(api, head, main, selected)
     with tempfile.TemporaryDirectory(prefix="native-ci-verification-") as directory:
         archive = Path(directory) / "artifact.zip"
         api.download(selected["artifactId"], archive)

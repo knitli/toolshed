@@ -6,6 +6,7 @@ from contextlib import ExitStack
 import importlib.util
 import io
 import json
+import shutil
 import sys
 from pathlib import Path
 import tempfile
@@ -15,7 +16,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 from unittest.mock import patch
 
-from test_native_ci_provenance import FakeAPI, MAIN, archive_bytes, launcher
+from test_native_ci_provenance import BUILD, FakeAPI, MAIN, archive_bytes, launcher
+from test_native_ci_provenance_v2 import DOCS, V2API
 
 SPEC = importlib.util.spec_from_file_location('paired_install', Path(__file__).parents[1] / 'scripts/install_paired_client.py')
 INSTALL = importlib.util.module_from_spec(SPEC)
@@ -41,9 +43,11 @@ def wheel_bytes(payload, project, changes=None):
 
 
 class InstallAPI(FakeAPI):
-    def __init__(self):
+    def __init__(self, family=None):
         """Serve immutable main release data and synthetic native CI metadata."""
         super().__init__()
+        if family is not None:
+            self.__dict__.update(vars(V2API(family)))
         self.project = tomllib.loads((INSTALL.ROOT / 'pyproject.toml').read_text())['project']
         self.payload = {'event_gateway/__init__.py': b'raise RuntimeError("never import candidate")\n',
                         'event_gateway/launcher.py': launcher(self.selected['binarySha256'], self.selected['codeModeHostSha256']),
@@ -54,7 +58,7 @@ class InstallAPI(FakeAPI):
             path = INSTALL.PREFIX + (relative if relative.startswith('contracts/') else 'src/event_gateway/' + relative)
             self.blobs[path, MAIN] = value
             self.source_tree.append({'path': path, 'type': 'blob', 'mode': '100644'})
-        for path in (INSTALL.SELF, 'scripts/verify_native_ci_provenance.py', INSTALL.HELPER, 'pyproject.toml', 'uv.lock'):
+        for path in (INSTALL.SELF, 'scripts/verify_native_ci_provenance.py', 'scripts/native_recipe_registry.py', INSTALL.HELPER, 'pyproject.toml', 'uv.lock'):
             self.blobs[INSTALL.PREFIX + path, MAIN] = (INSTALL.ROOT / path).read_bytes()
         self.blobs[INSTALL.V.PROVENANCE, MAIN] = json.dumps(self.selected).encode()
         self.protected = True
@@ -99,12 +103,119 @@ class PairedInstallTests(unittest.TestCase):
         self.assertIn('pycparser==3.0', plan['requirements'])
         self.assertNotIn('ruff', plan['requirements'])
 
-    def test_old_recipe_is_rejected_even_with_unchanged_matching_pins(self):
-        path = INSTALL.V.INPUTS['patchSha256']
-        self.api.blobs[path, MAIN] = b'new Core-idle recipe'
-        with self.assertRaisesRegex(ValueError, 'native_recipe_not_current'):
-            self.preflight()
+    def test_registered_legacy_build_accepts_current_shared_input_drift(self):
+        for name in ('builderSha256', 'producerSha256', 'workflowSha256'):
+            self.api.blobs[INSTALL.V.INPUTS[name], MAIN] += b'\n# current shared inputs\n'
+        plan = self.preflight()
+        self.assertEqual(plan['inputs'], {name: INSTALL.V.digest(self.api.blobs[path, BUILD])
+                                          for name, path in INSTALL.V.INPUTS.items()})
         self.unchanged()
+
+    def test_unregistered_legacy_build_tuple_is_rejected_before_writes(self):
+        for name, path in INSTALL.V.INPUTS.items():
+            with self.subTest(input=name):
+                self.api = InstallAPI()
+                self.api.blobs[path, BUILD] += b'\nchanged'
+                with self.assertRaises(ValueError):
+                    self.preflight()
+                self.unchanged()
+
+    def select_v2(self, family):
+        self.api = InstallAPI(family)
+        self.wheel.write_bytes(wheel_bytes(self.api.payload, self.api.project))
+        self.artifact.write_bytes(self.api.archive)
+
+    def test_both_v2_families_pass_real_composed_preflight_without_writes(self):
+        for family in ('core-idle-v1', 'terminal-query-v1'):
+            with self.subTest(family=family):
+                self.select_v2(family)
+                before = sorted(self.root.iterdir())
+                plan = self.preflight()
+                self.assertEqual(plan['selected']['recipe']['family'], family)
+                self.assertEqual(plan['inputs'], {name: INSTALL.V.digest(self.api.blobs[path, BUILD])
+                                                  for name, path in self.api.paths.items()})
+                self.assertEqual(sorted(self.root.iterdir()), before)
+                self.unchanged()
+
+    def test_v2_local_registry_must_exist_and_match_protected_main(self):
+        original = INSTALL.read_file
+        registry = INSTALL.ROOT / 'scripts/native_recipe_registry.py'
+        for family in ('core-idle-v1', 'terminal-query-v1'):
+            for missing in (False, True):
+                with self.subTest(family=family, missing=missing):
+                    self.select_v2(family)
+
+                    def read(path, limit):
+                        if path == registry:
+                            if missing:
+                                raise FileNotFoundError(path)
+                            return b'altered registry'
+                        return original(path, limit)
+
+                    with patch.object(INSTALL, 'read_file', side_effect=read):
+                        with self.assertRaises((ValueError, FileNotFoundError)):
+                            self.preflight()
+                    self.unchanged()
+
+    def test_v2_protected_assets_must_exist_and_match_registry(self):
+        for family in ('core-idle-v1', 'terminal-query-v1'):
+            recipe = INSTALL.V.R.recipe(family, 1)
+            for asset in (recipe.manifest, *recipe.parents, *recipe.ordered_patches):
+                for missing in (False, True):
+                    with self.subTest(family=family, asset=asset.path, missing=missing):
+                        self.select_v2(family)
+                        key = (DOCS + asset.path, MAIN)
+                        if missing:
+                            del self.api.blobs[key]
+                        else:
+                            self.api.blobs[key] += b'changed'
+                        with self.assertRaises((ValueError, KeyError)):
+                            self.preflight()
+                        self.unchanged()
+
+    def test_v2_local_recipe_assets_must_exist_and_match_registry(self):
+        for family in ('core-idle-v1', 'terminal-query-v1'):
+            recipe = INSTALL.V.R.recipe(family, 1)
+            for asset in (recipe.manifest, *recipe.parents, *recipe.ordered_patches):
+                for missing in (False, True):
+                    with self.subTest(family=family, asset=asset.path, missing=missing):
+                        self.select_v2(family)
+                        with tempfile.TemporaryDirectory(dir=self.root) as temporary:
+                            docs = Path(temporary) / 'docs'
+                            shutil.copytree(INSTALL.V.R.DOCS, docs)
+                            target = docs / asset.path
+                            if missing:
+                                target.unlink()
+                            else:
+                                target.write_bytes(b'altered asset')
+                            with patch.object(INSTALL.V.R, 'DOCS', docs):
+                                with self.assertRaises(ValueError):
+                                    self.preflight()
+                        self.unchanged()
+
+    def test_v2_main_movement_refuses_before_writes(self):
+        for family in ('core-idle-v1', 'terminal-query-v1'):
+            with self.subTest(family=family):
+                self.select_v2(family)
+                self.test_main_movement_during_preflight_refuses_without_creation()
+
+    def test_v2_upstream_and_consumer_pin_mismatch_fail_before_writes(self):
+        for family in ('core-idle-v1', 'terminal-query-v1'):
+            for fault in ('upstream', 'pin', 'ancestry'):
+                with self.subTest(family=family, fault=fault):
+                    self.select_v2(family)
+                    if fault == 'upstream':
+                        self.api.receipt['build']['upstreamCommit'] = '0' * 40
+                        self.api.replace_receipt(self.api.receipt)
+                        self.artifact.write_bytes(self.api.archive)
+                    elif fault == 'pin':
+                        self.api.selected['codeModeHostSha256'] = '0' * 64
+                    else:
+                        self.api.comparison['baseTarget']['oid'] = '0' * 40
+                    self.api.blobs[INSTALL.V.PROVENANCE, MAIN] = json.dumps(self.api.selected).encode()
+                    with self.assertRaises(ValueError):
+                        self.preflight()
+                    self.unchanged()
 
     def test_mismatched_pair_policy_metadata_and_artifact_fail_before_writes(self):
         cases = ('pair', 'policy', 'artifact', 'run', 'protected')

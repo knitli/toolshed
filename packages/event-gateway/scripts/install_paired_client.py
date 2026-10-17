@@ -173,7 +173,7 @@ def preflight(api, wheel, artifact, destination):
     main = branch['commit']['sha']
     require(V.sha(main, 40), "invalid_main_revision")
     trusted_helpers = {}
-    for path in (SELF, 'scripts/verify_native_ci_provenance.py', HELPER):
+    for path in (SELF, 'scripts/verify_native_ci_provenance.py', V.REGISTRY.removeprefix(PREFIX), HELPER):
         trusted_helpers[path] = api.blob(PREFIX + path, main)
         require(read_file(ROOT / path, V.LIMIT) == trusted_helpers[path], "local_policy_differs_from_main")
     tree = api.request(f'git/trees/{main}?recursive=1')
@@ -206,12 +206,7 @@ def preflight(api, wheel, artifact, destination):
                       api.request(f"actions/runs/{selected['runId']}/attempts/{selected['runAttempt']}"),
                       api.request(f"actions/artifacts/{selected['artifactId']}"))
     V.require_ancestry(api, selected['headSha'], main)
-    inputs = {}
-    for name, path in V.INPUTS.items():
-        source_bytes = api.blob(path, main)
-        require(api.blob(path, selected['headSha']) == source_bytes, "native_recipe_not_current")
-        inputs[name] = V.digest(source_bytes)
-    manifest = json.loads(api.blob(V.INPUTS['sourceManifestSha256'], main))
+    inputs, manifest = V.resolve_build_inputs(api, main, main, selected)
     artifact = Path(artifact)
     require(stat.S_ISREG(artifact.lstat().st_mode), "unsafe_native_archive")
     V.verify_archive(artifact, selected, inputs, manifest)

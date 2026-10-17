@@ -567,6 +567,75 @@ class NativeCIProvenanceTests(unittest.TestCase):
             V.verify_candidate(api, HEAD, MAIN)
         self.assertNotIn(("download", 456), api.calls)
 
+    def test_registry_class_identity_is_shared_across_fixed_loaders_and_plain_import(self):
+        scripts = SCRIPT.parent
+        for first in ("package_native_client.py", "verify_native_ci_provenance.py", "plain"):
+            with self.subTest(first=first):
+                code = f"""import importlib, runpy, sys
+from pathlib import Path
+scripts = Path({str(scripts)!r})
+sys.path.insert(0, str(scripts))
+first = {first!r}
+if first == "plain":
+    importlib.import_module("native_recipe_registry")
+else:
+    runpy.run_path(str(scripts / first))
+builder = runpy.run_path(str(scripts / "package_native_client.py"))
+verifier = runpy.run_path(str(scripts / "verify_native_ci_provenance.py"))
+plain = importlib.import_module("native_recipe_registry")
+assert builder["registry"] is verifier["R"] is plain
+for family in ("core-idle-v1", "terminal-query-v1"):
+    evidence = builder["registry"].validate_recipe(family)
+    assert isinstance(evidence, verifier["R"].RecipeEvidence)
+    assert evidence.recipe == verifier["R"].recipe(family)
+    assert type(evidence.recipe) is plain.Recipe
+"""
+                result = subprocess.run(  # nosec B603 - Fixed interpreter and trusted import-test template; no shell.
+                    [sys.executable, "-I", "-B", "-c", code], capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_cached_registry_requires_both_fixed_file_and_spec_origin(self):
+        scripts = SCRIPT.parent
+        for script in ("package_native_client.py", "verify_native_ci_provenance.py"):
+            for wrong in ("file", "origin"):
+                with self.subTest(script=script, wrong=wrong):
+                    code = f"""import importlib.machinery, runpy, sys, types
+expected = {str(scripts / 'native_recipe_registry.py')!r}
+module = types.ModuleType("native_recipe_registry")
+module.__file__ = "/untrusted/registry.py" if {wrong!r} == "file" else expected
+module.__spec__ = importlib.machinery.ModuleSpec("native_recipe_registry", loader=None,
+    origin="/untrusted/registry.py" if {wrong!r} == "origin" else expected)
+sys.modules["native_recipe_registry"] = module
+try:
+    runpy.run_path({str(scripts / script)!r})
+except ImportError as error:
+    assert str(error) == "native_recipe_registry_origin_mismatch"
+else:
+    raise AssertionError("foreign cached registry was accepted")
+"""
+                    result = subprocess.run(  # nosec B603 - Fixed interpreter and trusted rejection-test template; no shell.
+                        [sys.executable, "-I", "-B", "-c", code], capture_output=True, text=True, timeout=20)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_failed_fixed_registry_load_does_not_leave_a_partial_cached_module(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "native_recipe_registry.py").write_text("raise RuntimeError('broken registry')\n")
+            script = root / SCRIPT.name
+            script.write_bytes(SCRIPT.read_bytes())
+            code = f"""import runpy, sys
+try:
+    runpy.run_path({str(script)!r})
+except RuntimeError as error:
+    assert str(error) == "broken registry"
+else:
+    raise AssertionError("broken registry loaded")
+assert "native_recipe_registry" not in sys.modules
+"""
+            result = subprocess.run(  # nosec B603 - Fixed interpreter and trusted failure-test template; no shell.
+                [sys.executable, "-I", "-B", "-c", code], capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_isolated_import_loads_fixed_sibling_registry_without_search_path(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
