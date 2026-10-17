@@ -266,6 +266,23 @@ class TerminalHistoryArtifactTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "formatting evidence"):
                     verifier.verify(self.bundle)
 
+    def test_repinned_formatting_diff_rejects_incomplete_lines_and_counts(self):
+        name = next(name for name in self.manifest["fileSha256"]
+                    if self.manifest["fileSha256"][name] != self.manifest["testedSha256"][name])
+        header = f"--- tested/{name}\n+++ formatted/{name}\n"
+        path = self.bundle / "tested-to-formatted.diff"
+        for hunk, error in (
+            ("@@ -1 +1 @@\n-old\n+new", "requires complete lines"),
+            ("@@ -1 +1 @@\n-old\n", "incomplete hunk"),
+            ("@@ -0,0 +1 @@\n-old\n+new\n", "incorrect hunk counts"),
+        ):
+            with self.subTest(error=error):
+                path.write_text(header + hunk)
+                self.manifest["bundledArtifactSha256"]["tested-to-formatted.diff"] = digest(path)
+                self.save()
+                with self.assertRaisesRegex(ValueError, error):
+                    verifier.verify(self.bundle)
+
     def test_nonpayload_inventory_file_size_is_bounded(self):
         with patch.object(verifier, "JSON_LIMIT", 1024 * 1024):
             (self.bundle / "README.md").write_bytes(b"x" * (1024 * 1024 + 1))

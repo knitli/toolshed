@@ -216,7 +216,7 @@
     "terminal-history-cumulative.patch": "c302089ef685d13a4179b0674ea5fae260a0bb440fb7e87aaadfba95d5b8dd07",
     "tested-to-formatted.diff": "58c572343c47a71f491eab0caa8c2b58ca80f4e966a979e43ca54cedacf5836e",
     "proof/package-validation.json": "f1782055d04ce57a1a100958da50b478c395392c8597a6356468d1abd0ab5048",
-    "proof/checker-refactor-validation.json": "029cb705294af5ba6a1b9b005f99774ff045a92660c676ba95934ebf784f041d",
+    "proof/checker-refactor-validation.json": "91fcc774f52f968b16e416b28ab1f5a7f56cbb6ea8f800513922e98a729ed1ef",
     "proof/original-canary-recovery.json": "d1744d704c973cd7625b31b5dedb826e776a6d075fa8389fef837d5056f63517"
   }
 }

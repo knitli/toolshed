@@ -109,8 +109,7 @@ def _validate_source_closure(manifest, provenance):
     return selected
 
 
-def _validate_inventory(bundle, pins):
-    files = NONPAYLOAD_FILES | pins.keys()
+def _inventory_directories(files):
     directories = set()
     if len(files) > INVENTORY_LIMIT:
         raise ValueError("bundle inventory exceeds limit")
@@ -123,6 +122,12 @@ def _validate_inventory(bundle, pins):
                 directories.add(parent.as_posix())
             if len(files) + len(directories) > INVENTORY_LIMIT:
                 raise ValueError("bundle inventory exceeds limit")
+    return directories
+
+
+def _validate_inventory(bundle, pins):
+    files = NONPAYLOAD_FILES | pins.keys()
+    directories = _inventory_directories(files)
     if bundle.is_symlink():
         raise ValueError("bundle inventory rejects symlink root")
     pending = [bundle]
@@ -152,6 +157,24 @@ def _validate_inventory(bundle, pins):
                     raise ValueError("unexpected bundle inventory entry")
     if found != files:
         raise ValueError("bundle inventory has missing files")
+
+
+def _formatting_hunk_lines(lines, index, old_count, new_count):
+    before, after = [], []
+    while len(before) < old_count or len(after) < new_count:
+        if index >= len(lines) or lines[index][:1] not in (b" ", b"-", b"+"):
+            raise ValueError("formatting evidence has incomplete hunk")
+        line = lines[index]
+        if not line.endswith(b"\n"):
+            raise ValueError("formatting evidence requires complete lines")
+        if line[:1] != b"+":
+            before.append(line[1:])
+        if line[:1] != b"-":
+            after.append(line[1:])
+        index += 1
+    if len(before) != old_count or len(after) != new_count:
+        raise ValueError("formatting evidence has incorrect hunk counts")
+    return index, before, after
 
 
 def _validate_formatting(manifest, payloads):
@@ -199,20 +222,9 @@ def _validate_formatting(manifest, payloads):
             ):
                 raise ValueError("formatting evidence has inconsistent hunk positions")
             index += 1
-            before, after = [], []
-            while len(before) < old_count or len(after) < new_count:
-                if index >= len(lines) or lines[index][:1] not in (b" ", b"-", b"+"):
-                    raise ValueError("formatting evidence has incomplete hunk")
-                line = lines[index]
-                if not line.endswith(b"\n"):
-                    raise ValueError("formatting evidence requires complete lines")
-                if line[:1] != b"+":
-                    before.append(line[1:])
-                if line[:1] != b"-":
-                    after.append(line[1:])
-                index += 1
-            if len(before) != old_count or len(after) != new_count:
-                raise ValueError("formatting evidence has incorrect hunk counts")
+            index, before, after = _formatting_hunk_lines(
+                lines, index, old_count, new_count
+            )
             file_hunks.append((new_start, before, after))
             old_end, new_end = old_start + old_count, new_start + new_count
         if not file_hunks:
