@@ -1211,6 +1211,15 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                     server.wait_closed.side_effect = asyncio.Event().wait
                 else:
                     provider.close.side_effect = RuntimeError('private-provider-error')
+                    aborted = asyncio.Event()
+                    server.abort_clients.side_effect = aborted.set
+
+                    async def finish_server_after_abort():
+                        await aborted.wait()
+                        server.shutdown_observed = True
+
+                    server.shutdown_observed = False
+                    server.wait_closed.side_effect = finish_server_after_abort
                 try:
                     async with asyncio.timeout(5):
                         with patch.object(CANARY, 'CLEANUP_SECONDS', 0.02), \
@@ -1219,6 +1228,9 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                                 await CANARY.close_local_provider(server, provider)
                     server.close.assert_called_once()
                     server.abort_clients.assert_called_once()
+                    server.wait_closed.assert_awaited_once()
+                    if failure == 'provider_error':
+                        self.assertTrue(server.shutdown_observed)
                     self.assertTrue(owned.cancelled())
                     self.assertFalse(asyncio.all_tasks() - baseline)
                 finally:
@@ -1278,7 +1290,8 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             await close_provider()
             start_handler.set()
 
-        async with asyncio.timeout(5):
+        cleanup_bound = CANARY.CLEANUP_SECONDS + CANARY.ABORT_SECONDS + 1
+        async with asyncio.timeout(cleanup_bound + 1):
             try:
                 server = await asyncio.start_server(handle, '127.0.0.1', 0)
                 port = server.sockets[0].getsockname()[1]
@@ -1299,7 +1312,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.wait_for(probe.ready_to_send.wait(), 1)
                     self.assertTrue(provider.tasks)
                     self.assertFalse(provider.failure)
-                    await asyncio.wait_for(CANARY.close_local_provider(server, provider), 1)
+                    await asyncio.wait_for(CANARY.close_local_provider(server, provider), cleanup_bound)
                 self.assertTrue(probe.held)
                 self.assertEqual(await reader.read(), b'')
                 self.assertFalse(probe.release.is_set())

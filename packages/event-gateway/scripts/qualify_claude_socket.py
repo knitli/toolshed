@@ -561,32 +561,40 @@ async def close_local_provider(server, provider):
     if server is not None:
         server.close()
 
-    async def settle():
-        if provider is not None:
-            await provider.close()
-        if server is not None:
-            await server.wait_closed()
-
-    pending = asyncio.create_task(settle())
+    owned = set()
+    if provider is not None:
+        owned.add(asyncio.create_task(provider.close()))
+    server_waiter = None
+    if server is not None:
+        server_waiter = asyncio.create_task(server.wait_closed())
+        owned.add(server_waiter)
+    if not owned:
+        return
     try:
-        done, _ = await asyncio.wait((pending,), timeout=CLEANUP_SECONDS)
-        if not done:
+        done, unfinished = await asyncio.wait(owned, timeout=CLEANUP_SECONDS,
+                                             return_when=asyncio.FIRST_EXCEPTION)
+        for task in done:
+            task.result()
+        if unfinished:
             raise TimeoutError
-        await pending
     except BaseException as error:
         if server is not None:
             server.abort_clients()
-        owned = {pending, *(() if provider is None else provider.tasks)}
+        owned.update(() if provider is None else provider.tasks)
         for task in owned:
-            task.cancel()
+            if task is not server_waiter:
+                task.cancel()
         done, unfinished = await asyncio.wait(owned, timeout=ABORT_SECONDS)
         for task in done:
             if not task.cancelled():
                 task.exception()
-        # Do not await cancellation-resistant tasks beyond the absolute cleanup
-        # budget. The caller reports failure and hosted scratch stays retained.
+        # Do not await cancellation-resistant tasks beyond the cleanup budget.
+        # Scratch remains retained after cleanup failure in every run mode.
         for task in unfinished:
+            task.cancel()
             task.add_done_callback(lambda finished: None if finished.cancelled() else finished.exception())
+        if unfinished:
+            await asyncio.sleep(0)  # deliver cancellation without extending the wait budget
         if isinstance(error, asyncio.CancelledError):
             raise
         raise CanaryError('local_provider_cleanup_failed') from error

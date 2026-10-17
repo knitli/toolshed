@@ -316,8 +316,9 @@ Hosted run `39067519862` timed out at the four-minute fixture step with no
 status or proof and an empty fixture log. Its exact startup phase is unknown.
 A bounded Python 3.13 loopback reproduction confirmed that waiting for the
 server to close before cancelling a held provider connection blocks cleanup.
-Cleanup now closes the listener, settles provider connections, then awaits
-server shutdown within four seconds. Failure aborts accepted clients and cancels
+Cleanup now closes the listener, settles provider connections and awaits
+server shutdown independently within four seconds. A provider failure cannot
+skip the server wait; the abort phase still allows server shutdown to finish. Failure aborts accepted clients and cancels
 owned tasks with a further one-second bound. Cleanup failure retains scratch,
 records a fixed failure label, and preserves the original run error. This fixes a demonstrated cleanup ordering defect; it does not
 establish why the native witness failed to complete within the 90-second run
