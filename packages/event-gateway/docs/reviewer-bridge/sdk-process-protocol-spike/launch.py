@@ -12,6 +12,7 @@ import time
 import uuid
 
 ROOT = Path(__file__).resolve().parent
+HISTORICAL_ROOT = Path('/private/tmp/reviewer-sdk-process-protocol-20261017')
 NODE = Path('/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node')
 LIMIT = 65536
 TIMEOUT = 20
@@ -33,6 +34,11 @@ def classify_stderr(raw):
 
 
 def verify_inputs():
+    if ROOT != HISTORICAL_ROOT:
+        raise RuntimeError(
+            'Historical proof launcher cannot run from this path. '
+            'A new path requires a reviewed rendered profile, manifest, and qualification run.'
+        )
     manifest = json.loads((ROOT / 'manifest.json').read_text())
     if str(NODE.resolve()) != manifest['node']['realpath'] or str(NODE.resolve()) != str(NODE):
         raise RuntimeError('Node path drift')

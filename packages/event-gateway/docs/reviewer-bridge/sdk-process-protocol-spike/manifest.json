@@ -19,12 +19,12 @@
     "repository": "knitli/.github",
     "revision": "e516ab4803311cd58fc860f57371aedb0fb24f4d"
   },
-  "dynamicFixtureExecution": "Attempt 4 passed at prior launcher hash; verification helper extracted unchanged and scoped B404/B603 annotations added; this revision awaits run 5.",
+  "dynamicFixtureExecution": "Attempt 5 passed at archived prior hashes; three fixture style fixes and explicit historical-path launcher preflight await run 6.",
   "files": {
-    "fixture.mjs": "cbbe8afa6d001e78b05e1686fd4ddbcc94fe665cdc81ced862c0468c2d13d7b9",
+    "fixture.mjs": "b2cc9e78a519784493abc612aac9263e584fb01a4d77e08beb44396f5763bc7f",
     "frozen/reviewer-completion-driver.mjs": "4ff7c66588d16f33f67ca89670b5efe4540170bf5708d28cea7b19a2d0298eee",
     "frozen/sdk.mjs": "7b3577a1078660a3ec43471e6738c730ca1b172070ddcf3f9a9384bcb68bd3ca",
-    "launch.py": "cba4372d4b2588548797b200298bd6eb94424dd36af8a6b1694c031d361b1d3e",
+    "launch.py": "bc476e72b9f9134913441a1eb4749746715418cdb7a5b736f760b9d6e139e145",
     "profile.sb": "be649085fd8dcf1436deea4bbe091f7e0b1b04a4637310122cfbc7ad584c27c9"
   },
   "fixtureDiagnostics": {
@@ -90,5 +90,5 @@
     "sha256": "7b3577a1078660a3ec43471e6738c730ca1b172070ddcf3f9a9384bcb68bd3ca",
     "version": "0.3.209"
   },
-  "state": "VERIFICATION_HELPER_EXTRACTED_FROZEN_AWAITING_RUN_5"
+  "state": "PR147_REVIEW_FIXES_FROZEN_AWAITING_RUN_6"
 }

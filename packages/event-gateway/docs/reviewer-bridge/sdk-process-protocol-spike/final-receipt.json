@@ -1,7 +1,7 @@
 {
   "abortObservation": "stdin-eof, kill:SIGTERM, exit, forwarded-abort, kill:SIGTERM; duplicate SIGTERM preserved, no single-kill guarantee",
   "aggregateCapturedBytes": 4900,
-  "attempt": 5,
+  "attempt": 6,
   "claimsExcluded": [
     "Docker adapter compatibility",
     "native runtime qualification",
@@ -10,32 +10,64 @@
     "owner credential access"
   ],
   "evidence": {
-    "actual-attempt-5.log": "005bf40e73d491c325bc475902c6496bc30dd2397a892f358fc445869d974bc9",
-    "capture-vf8ueeqa/capture.json": "4d4007675e51e2872c8c28a77f179025168ff22e3d6168a43a46a4b4b44f63d9",
-    "capture-vf8ueeqa/stderr.bin": "f2fd5a8dba96db5dfcab406ddb07af4772c93cfd3ea639062b3644a43a63e939",
-    "capture-vf8ueeqa/stdout.bin": "12900abaf4d536a1f8e386f616d7eb631429b71068171893c938e4a7cb76be76"
+    "actual-attempt-6-result.json": "534cb702cb7a90949416d1d0f8d5b20330bbf8be65c638e52e597f6e9f1e8522",
+    "actual-attempt-6.log": "19faa12e090c03c6b5d01c258ef6a380768ab6bcf7c888b0b2dd003427f42348",
+    "capture-qpp9s1g8/capture.json": "0d7eff1702f64b28d3f11747c941647a546d41dd88eae0a2b38660e3c4117591",
+    "capture-qpp9s1g8/stderr.bin": "cf66d1a2366998ddb3bd36dbb66a2513db60a2256bae53e1e97448b643d9a6e7",
+    "capture-qpp9s1g8/stdout.bin": "12900abaf4d536a1f8e386f616d7eb631429b71068171893c938e4a7cb76be76"
   },
   "executedInputs": {
-    "fixture.mjs": "cbbe8afa6d001e78b05e1686fd4ddbcc94fe665cdc81ced862c0468c2d13d7b9",
+    "fixture.mjs": "b2cc9e78a519784493abc612aac9263e584fb01a4d77e08beb44396f5763bc7f",
     "frozen/reviewer-completion-driver.mjs": "4ff7c66588d16f33f67ca89670b5efe4540170bf5708d28cea7b19a2d0298eee",
     "frozen/sdk.mjs": "7b3577a1078660a3ec43471e6738c730ca1b172070ddcf3f9a9384bcb68bd3ca",
-    "launch.py": "cba4372d4b2588548797b200298bd6eb94424dd36af8a6b1694c031d361b1d3e",
+    "launch.py": "bc476e72b9f9134913441a1eb4749746715418cdb7a5b736f760b9d6e139e145",
     "profile.sb": "be649085fd8dcf1436deea4bbe091f7e0b1b04a4637310122cfbc7ad584c27c9"
   },
   "exitCode": 0,
   "manifestAtRuntime": {
     "historicalStatePreserved": true,
     "path": "manifest.json",
-    "sha256": "7c594e4a8bf1c7d2a150fb69acdfb872f97956c71551c9fb8580624151c8b79e"
+    "sha256": "2b03c9ec561cf2f035f83af14aa8b80ae6496cd3428b995524b24758b9b9d5eb"
   },
   "outsideCanaryPreserved": true,
-  "priorAttempts": "Attempts 1-3 establish no PASS; attempt 4 passed before verification-helper extraction and scoped subprocess annotations; attempt 5 qualifies current packaged source.",
+  "priorAttempts": "Attempts 1-3 establish no PASS; attempts 4 and 5 passed prior source revisions; attempt 6 qualifies the current review-fixed source.",
   "priorPassingAttempt": {
-    "attempt": 4,
-    "logSha256": "ea7b63e855f4d9472c76a3ee7a8c54c26c121c47fb494cb43ebc34ecde880b1d",
-    "manifestSha256": "c9b5c97a97c2e9b84d1e4bd99b3fd2702afb7a03a0c6fdc66f9049d69e431976",
-    "receiptSha256": "4d49496c88e968eb92cec965f6f30afdc06bb26006b2846e020aaf3c6f091936",
-    "scope": "Same four-case actual SDK/in-memory process proof; full prior artifacts retained privately"
+    "archive": "historical-attempt-5.tar.gz",
+    "archivePolicy": "Exact ten-member allowlist; regular files only; no absolute/traversal paths, links, SDK or driver; forensic evidence, not a current executable entrypoint",
+    "archiveSha256": "95e5a83d42d3ad3c54575fee8c41546365002a5a21c4e1db7ecdd5b20f7fb601",
+    "attempt": 5,
+    "earlierAttempt4": {
+      "attempt": 4,
+      "logSha256": "ea7b63e855f4d9472c76a3ee7a8c54c26c121c47fb494cb43ebc34ecde880b1d",
+      "manifestSha256": "c9b5c97a97c2e9b84d1e4bd99b3fd2702afb7a03a0c6fdc66f9049d69e431976",
+      "receiptSha256": "4d49496c88e968eb92cec965f6f30afdc06bb26006b2846e020aaf3c6f091936",
+      "scope": "Same four-case actual SDK/in-memory process proof; full prior artifacts retained privately"
+    },
+    "memberSizesBytes": {
+      "README.md": 4914,
+      "actual-attempt-5.log": 14449,
+      "capture-vf8ueeqa/capture.json": 5601,
+      "capture-vf8ueeqa/stderr.bin": 4185,
+      "capture-vf8ueeqa/stdout.bin": 715,
+      "final-receipt.json": 3751,
+      "fixture.mjs": 13546,
+      "launch.py": 7621,
+      "manifest.json": 3831,
+      "profile.sb": 1811
+    },
+    "members": {
+      "README.md": "1d0b3a4d9980d6e2961108173b92b20c85d255b6eb8afdc53ea4be107d1c86b6",
+      "actual-attempt-5.log": "005bf40e73d491c325bc475902c6496bc30dd2397a892f358fc445869d974bc9",
+      "capture-vf8ueeqa/capture.json": "4d4007675e51e2872c8c28a77f179025168ff22e3d6168a43a46a4b4b44f63d9",
+      "capture-vf8ueeqa/stderr.bin": "f2fd5a8dba96db5dfcab406ddb07af4772c93cfd3ea639062b3644a43a63e939",
+      "capture-vf8ueeqa/stdout.bin": "12900abaf4d536a1f8e386f616d7eb631429b71068171893c938e4a7cb76be76",
+      "final-receipt.json": "f48f819e6253fd52391c903a4e23c8064a49b85ec6d50bdececfe927cf59edc6",
+      "fixture.mjs": "cbbe8afa6d001e78b05e1686fd4ddbcc94fe665cdc81ced862c0468c2d13d7b9",
+      "launch.py": "cba4372d4b2588548797b200298bd6eb94424dd36af8a6b1694c031d361b1d3e",
+      "manifest.json": "7c594e4a8bf1c7d2a150fb69acdfb872f97956c71551c9fb8580624151c8b79e",
+      "profile.sb": "be649085fd8dcf1436deea4bbe091f7e0b1b04a4637310122cfbc7ad584c27c9"
+    },
+    "scope": "Exact prior source and four-case PASS proof before PR147 review fixes; no SDK or driver included"
   },
   "result": {
     "cases": [

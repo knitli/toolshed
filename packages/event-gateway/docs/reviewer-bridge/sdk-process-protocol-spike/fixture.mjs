@@ -106,7 +106,7 @@ class FakeProcess extends EventEmitter {
     this.served = [];
     let input = '';
     this.stdin = new Writable({
-      write: (chunk, encoding, done) => {
+      write: (chunk, _encoding, done) => {
         try {
           this.receivedBytes += chunk.length;
           assert(this.receivedBytes <= 256 * 1024, 'fake input bound');
@@ -129,7 +129,7 @@ class FakeProcess extends EventEmitter {
   }
   record(name) { this.events.push({ name, at: performance.now() }); diagnostic('fake-process', { mode: this.mode, name }); }
   emitFrame(value) {
-    const raw = JSON.stringify(value) + '\n';
+    const raw = `${JSON.stringify(value)}\n`;
     assert(Buffer.byteLength(raw) <= 64 * 1024, 'fake output frame bound');
     // Exercise the actual SDK's newline framing across separate writes.
     const cut = Math.floor(raw.length / 2);
@@ -225,7 +225,8 @@ for (const mode of ['success', 'early-terminal', 'eof', 'abort']) {
       assert(options.signal instanceof AbortSignal);
       assert.equal(options.env.ANTHROPIC_API_KEY, 'offline-synthetic-not-a-credential');
       assert(options.args.includes('--bare') && options.args.includes('--no-chrome'));
-      return fake = new FakeProcess(options, mode);
+      fake = new FakeProcess(options, mode);
+      return fake;
     },
   });
   if (mode === 'success') {

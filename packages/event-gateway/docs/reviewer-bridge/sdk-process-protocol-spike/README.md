@@ -1,6 +1,6 @@
 # Historical SDK process-protocol proof
 
-Attempt 5 passed with the current packaged source. The actual hash-pinned Claude Agent SDK 0.3.209 passed four in-memory process
+Attempt 6 passed with the current packaged source. The actual hash-pinned Claude Agent SDK 0.3.209 passed four in-memory process
 protocol cases with the unchanged `runReview` driver from knitli/.github revision
 `e516ab4803311cd58fc860f57371aedb0fb24f4d`. This directory preserves historical
 source and evidence; it is **not runnable from this repository path**.
@@ -13,18 +13,25 @@ cleanup. Unexpected subprocess and fetch counts were zero. Outside-scratch
 reads and loopback access were denied, scratch writes succeeded, and the parent
 verified the outside canary unchanged. Captured output totals 4,900 bytes.
 
-[Raw stdout](capture-vf8ueeqa/stdout.bin), [raw stderr](capture-vf8ueeqa/stderr.bin),
-[capture metadata](capture-vf8ueeqa/capture.json), and the
-[parent attempt log](actual-attempt-5.log) retain the exact evidence hashed by the
+[Raw stdout](capture-qpp9s1g8/stdout.bin), [raw stderr](capture-qpp9s1g8/stderr.bin),
+[capture metadata](capture-qpp9s1g8/capture.json), and the
+[parent attempt log](actual-attempt-6.log), and [parent result](actual-attempt-6-result.json) retain the exact evidence hashed by the
 receipt. Abort events are stdin EOF → SIGTERM → exit → forwarded abort → a second
 SIGTERM. No exactly-once kill claim is made.
 
 [Prior attempts](failed-attempts.json) records startup failure, empty-output
 failure, and the merged-stream parser failure. These attempts establish no
-protocol PASS. Full historical startup probes are not packaged. Attempt 4 also passed; the
-final receipt preserves its receipt, manifest and log hashes. Attempt 5 reran
-the proof after extracting unchanged input verification into a helper and
-adding scoped Bandit annotations for the fixed subprocess launch. The unchanged
+protocol PASS. Full historical startup probes are not packaged. Attempt 5's exact source,
+manifest, receipt, log and captures are preserved in the immutable
+[historical attempt 5 archive](historical-attempt-5.tar.gz). The final receipt
+lists its archive hash and exact ten-member allowlist with individual hashes
+and sizes. Members are regular files only, without absolute/traversal paths or
+links. This forensic archive is not current source or an executable entrypoint.
+Those archived bytes describe
+prior behavior and are never imported or executed by the current launcher.
+Attempt 4 remains a brief hash reference in that provenance. Attempt 6 reran the
+proof after the three fixture review fixes and explicit historical-path preflight.
+The unchanged
 [runtime manifest](manifest.json) intentionally retains its pre-run state and
 private evidence paths; the final receipt records the later passing outcome.
 
@@ -43,7 +50,8 @@ layout expects these two externally provisioned inputs:
 
 Hydration must provision those exact bytes externally and verify both hashes;
 it must not substitute a newer SDK or driver. Hydration alone does not make this
-copy runnable: another path or runtime requires separately reviewed staging,
+copy runnable: the launcher now explicitly rejects other paths before reading
+the manifest or creating resources. Another path or runtime requires separately reviewed staging,
 a newly rendered exact-path profile and manifest, and a fresh qualification
 receipt. No acquisition, execution, portable launcher, or automatic staging is
 included here. Private source paths in the immutable manifest are provenance,
