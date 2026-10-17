@@ -73,7 +73,7 @@ class HostedNativeTests(unittest.TestCase):
                                output_dir=str(root / 'output'))
 
     def test_conjoined_result_requires_both_verified_scenarios_and_cleanup(self):
-        for fault in (None, 'first-exit', 'first-proof', 'cleanup', 'second-proof', 'timeout'):
+        for fault in (None, 'first-exit', 'first-proof', 'cleanup', 'second-proof', 'timeout', 'verifier-key', 'verifier-type', 'verifier-index'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 args = self.arguments(root)
@@ -92,6 +92,9 @@ class HostedNativeTests(unittest.TestCase):
 
                 def verify(_args, scenario, _destination):
                     evidence.append(scenario)
+                    errors = {'verifier-key': KeyError, 'verifier-type': TypeError, 'verifier-index': IndexError}
+                    if fault in errors:
+                        raise errors[fault]('synthetic verifier defect')
                     if fault == ('first-proof' if scenario == 'three-session' else 'second-proof'):
                         raise ValueError('invalid proof')
                     return {'scenario': scenario, 'proofSha256': 'd' * 64, 'semanticChecksPassed': True}
@@ -111,17 +114,65 @@ class HostedNativeTests(unittest.TestCase):
                 self.assertEqual(result['outcome'], 'FIXTURE_COMPLETED_PENDING_INDEPENDENT_VERIFICATION' if fault is None else 'INCOMPLETE')
                 self.assertFalse(result['nativePromoted'])
                 self.assertFalse(result['vmDisposalObserved'])
+                for name in ('network.sb', 'hosted-result.json', 'three-session/fixture.log'):
+                    self.assertEqual((root / 'output' / name).stat().st_mode & 0o777, 0o600)
+                if (root / 'output/native-recovery/fixture.log').exists():
+                    self.assertEqual((root / 'output/native-recovery/fixture.log').stat().st_mode & 0o777, 0o600)
+                if fault == 'first-exit':
+                    self.assertEqual(result['scenarioExecutions'], [{'scenario': 'three-session', 'returncode': 7}])
+                if fault in ('verifier-key', 'verifier-type', 'verifier-index'):
+                    self.assertEqual(result['failure']['exceptionType'], {'verifier-key': 'KeyError', 'verifier-type': 'TypeError', 'verifier-index': 'IndexError'}[fault])
+                    self.assertEqual(result['failure']['scenario'], 'three-session')
+                    self.assertTrue(result['failure']['frames'])
+                    self.assertEqual(result['reason'], 'verifier_error')
+                    self.assertNotIn('synthetic verifier defect', json.dumps(result))
                 if fault is None:
+                    self.assertEqual(result['scenarioExecutions'], [{'scenario': name, 'returncode': 0} for name in ('three-session', 'native-recovery')])
                     self.assertEqual(evidence, ['execute', 'three-session', 'execute', 'native-recovery'])
                 elif fault != 'second-proof':
                     self.assertLessEqual(evidence.count('execute'), 1)
+
+    def test_bounded_evidence_open_cannot_follow_a_late_symlink(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            evidence, other = root / 'proof', root / 'other'
+            evidence.write_bytes(b'original')
+            other.write_bytes(b'substituted')
+            original_open = Path.open
+
+            def swapped_open(path, *args, **kwargs):
+                if path == evidence:
+                    evidence.unlink()
+                    evidence.symlink_to(other)
+                return original_open(path, *args, **kwargs)
+
+            with patch.object(Path, 'open', swapped_open):
+                self.assertEqual(HOSTED.read_bounded(evidence, 32), b'original')
+
+    def test_bounded_evidence_rejects_nonregular_open_descriptor_and_size(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'proof'
+            path.write_bytes(b'12345')
+            with self.assertRaises(ValueError):
+                HOSTED.read_bounded(path, 4)
+            reader, writer = os.pipe()
+            try:
+                with patch.object(HOSTED.os, 'open', return_value=os.dup(reader)), self.assertRaises(ValueError):
+                    HOSTED.read_bounded(path, 32)
+            finally:
+                os.close(reader)
+                os.close(writer)
+            link = path.with_name('link')
+            link.symlink_to(path)
+            with self.assertRaises((OSError, ValueError)):
+                HOSTED.read_bounded(link, 32)
 
     def test_empty_json_or_missing_proof_is_never_verified(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             args = self.arguments(root)
             for scenario in ('three-session', 'native-recovery'):
-                with self.assertRaises(ValueError):
+                with self.assertRaises(OSError):
                     HOSTED.verify_proof(args, scenario, root)
                 (root / 'proof.json').write_text('{}')
                 with self.assertRaises(KeyError):
@@ -149,6 +200,31 @@ class HostedNativeTests(unittest.TestCase):
         with patch.object(HOSTED.socket, 'socket', return_value=listener) as factory, self.assertRaises(OSError):
             HOSTED.ports_released()
         self.assertEqual(factory.call_count, 1)
+
+    def test_port_probe_holds_both_families_for_every_fixed_port(self):
+        from unittest.mock import MagicMock
+        listeners = []
+
+        def create(family, kind):
+            self.assertEqual(kind, HOSTED.socket.SOCK_STREAM)
+            listener = MagicMock()
+            listener.__enter__.return_value = listener
+            def bind(address):
+                self.assertTrue(all(not prior.__exit__.called for prior in listeners))
+                self.assertEqual(address[0], '127.0.0.1' if family == HOSTED.socket.AF_INET else '::1')
+            listener.bind.side_effect = bind
+            listeners.append(listener)
+            return listener
+
+        with patch.object(HOSTED.socket, 'socket', side_effect=create) as factory:
+            HOSTED.ports_released()
+        self.assertEqual(factory.call_count, 14)
+        for index, listener in enumerate(listeners):
+            listener.bind.assert_called_once_with(('127.0.0.1' if index < 7 else '::1', HOSTED.PORTS[index % 7]))
+            listener.setsockopt.assert_any_call(HOSTED.socket.SOL_SOCKET, HOSTED.socket.SO_REUSEADDR, 1)
+            if index >= 7:
+                listener.setsockopt.assert_any_call(HOSTED.socket.IPPROTO_IPV6, HOSTED.socket.IPV6_V6ONLY, 1)
+            listener.__exit__.assert_called_once()
 
     def test_cloud_revision_and_source_root_are_verified_before_native(self):
         with tempfile.TemporaryDirectory() as temporary:

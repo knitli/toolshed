@@ -72,15 +72,8 @@ def inputs(argv=None):
     return parsed
 
 
-def hosted_guard():
-    # This module has stdlib-only top-level definitions and a guarded main. Its
-    # digest is retained with this scenario; no production launch code is changed.
-    helper = load_module('coupled_hosted_guard', HERE / 'three-session-workerd.py')
-    return helper.verify_trusted_hosted_network()
-
-
 @contextmanager
-def hosted_native_launches(launcher):
+def hosted_native_launches(launcher, helper):
     original = launcher.native_client
     if not getattr(args, 'trusted_hosted_vm', False):
         yield
@@ -88,7 +81,7 @@ def hosted_native_launches(launcher):
 
     @contextmanager
     def guarded(*values, **options):
-        hosted_guard()
+        helper.verify_trusted_hosted_network()
         # The coupled qualifier has no nested sandbox prefix to remove.
         with original(*values, **options) as client:
             yield client
@@ -551,14 +544,12 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
 
 def main():
     require(hashlib.sha256(BINARY.read_bytes()).hexdigest() == BINARY_SHA, 'frozen native binary')
-    containment = hosted_guard() if getattr(args, 'trusted_hosted_vm', False) else None
-    if containment is not None:
-        helper = load_module('coupled_hosted_preflight', HERE / 'three-session-workerd.py')
-        ranges = helper.ephemeral_port_ranges()
-        for name in ('model', 'entry', 'loopback', 'broker'):
-            port = getattr(args, name + '_port')
-            require(not any(first <= port <= last for first, last in ranges), 'hosted port overlaps ephemeral range')
-            require(helper.port_is_bindable(port), 'hosted recovery port unavailable')
+    helper = (load_module('coupled_hosted_guard', HERE / 'three-session-workerd.py')
+              if getattr(args, 'trusted_hosted_vm', False) else None)
+    containment = helper.verify_trusted_hosted_network() if helper is not None else None
+    if helper is not None:
+        helper.preflight_ports(args, ports=[getattr(args, name + '_port')
+                                          for name in ('model', 'entry', 'loopback', 'broker')])
     launcher = load_module('coupled_qualifier', QUALIFIER)
     with open(str(OUTPUT) + '.broker.log', 'w') as log:
         # Trusted resolved CLI Node path, fixed broker, argument array, synthetic environment.
@@ -580,7 +571,7 @@ def main():
                 finally:
                     model.release_primary.set()
             launcher.qualify_input_recorded = callback
-            with fixed_model_port(launcher, args.model_port), hosted_native_launches(launcher):
+            with fixed_model_port(launcher, args.model_port), hosted_native_launches(launcher, helper):
                 proof = launcher.qualify(BINARY, input_recorded=True, receipt_version=3 if args.restart_native or args.terminal_no_start else 2)
             paths = [Path(__file__), BROKER, BROKER.with_name('coupled-workerd-worker.ts'),
                      BROKER.with_name('coupled-workerd-source-hashes.mjs'), QUALIFIER,

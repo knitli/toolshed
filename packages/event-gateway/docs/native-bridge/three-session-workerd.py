@@ -151,9 +151,15 @@ def ephemeral_port_ranges():
     return ranges
 
 
-def preflight_ports(parsed):
-    ports = fixture_ports(parsed)
-    if getattr(parsed, "listener_port", None) is not None:
+def preflight_ports(parsed, *, ports=None):
+    fixed_ports = ports is not None or getattr(parsed, "listener_port", None) is not None
+    if ports is None:
+        ports = fixture_ports(parsed)
+    else:
+        for port in ports:
+            require_fixture_port(port)
+        require(len(set(ports)) == len(ports), "fixture ports must be distinct")
+    if fixed_ports:
         ranges = ephemeral_port_ranges()
         for port in ports:
             require(not any(first <= port <= last for first, last in ranges),
