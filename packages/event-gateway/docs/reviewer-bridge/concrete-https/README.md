@@ -6,20 +6,22 @@ admission, contract/pin changes elsewhere, listener, or production integration.
 The existing transport's download-host set remains empty. Every non-API origin
 is refused, including an artifact URL carrying an Authorization header.
 
-`request = adapter.bind(trusted_physical_node_path)` creates the transport's
-four-argument `request(url, headers, maximum, deadline)` seam using a fixed Node
-child. The trusted caller supplies an absolute physical runtime path; relative
-paths, symlinks and mismatched runtime bytes fail closed. No PATH/environment
-discovery or machine-specific publication path is used. The immutable Node hash
-remains enforced on every call; portability across locations does not qualify a
-different runtime build. The caller supplies the existing
-`transport` module on Python's trusted import path; the adapter imports that
-module's exact `Response` class, as required by the transport's nominal check.
-The composed offline test exercises bound request and the real transport call,
-using an inert fixture runtime with its test digest and faking child execution.
-A full bundle cannot succeed with the deliberately
-empty download-host policy.
-The caller supplies the existing
+The public adapter is intentionally unavailable. `adapter.bind(node_path)` and
+its internal `_request` entry point always raise
+`https_runtime_authority_unavailable` before inspecting a runtime path, reading
+pins, serializing credentials, loading native code or spawning a process. No
+configuration, environment variable or callback can enable them. The former
+path-check-then-spawn branch has been removed: matching file hashes could not
+prevent executable or script replacement before process creation.
+
+The private `_run` supervisor and `_decode` parser remain trusted-fixture
+utilities. They do not establish production runtime authority and must not be
+exposed as a request interface. The composed transport test supplies an explicit
+fixture response; it does not claim a successful public adapter binding. The
+adapter retains the existing `transport` module's exact `Response` class for
+that nominal protocol test.
+
+For private supervisor fixtures, the caller supplies the existing
 absolute monotonic deadline. A one-second cleanup reserve is subtracted from
 that deadline; it is never added to the transaction. A deadline with less than
 that reserve fails before spawning. Pin reads, spawn, I/O, exit, cleanup and
@@ -35,10 +37,10 @@ It closes every pipe and kills the owned process group while the leader remains
 unreaped, then reaps within the original deadline. No poll/early wait can release
 the leader PID before the signal. Environment contains only private HOME and C
 locale; cwd is a private temporary directory. URL/token go only through stdin,
-never argv/environment/error text. The private `_run` function accepts fake
-commands for offline tests; the public request uses only pinned runtime/child.
+never argv/environment/error text. The private `_run` function accepts commands only for explicitly trusted
+offline fixtures; public requests never call it.
 
-Node resolves only `api.github.com`, with IPv4-only `lookup(all=true,family=4)`;
+The standalone child fixture resolves only `api.github.com`, with IPv4-only `lookup(all=true,family=4)`;
 every answer must pass the conservative special-purpose CIDR denial list before
 any connection. It connects to the selected numeric IP with original SNI, Host,
 and certificate hostname verification, refuses any second lookup, and checks
@@ -73,9 +75,16 @@ local TLS/parser fixtures, exact API-only redirect-host observation, explicit
 host-policy change, and bounded actual transport acquisition. No source/runtime
 hash mismatch or new storage hostname is auto-enrolled.
 
-Open execution boundary: current path-based runtime/child checks do not close
-replacement between verification and process creation. Production execution
-qualification remains blocked on a macOS-compatible immutable runtime authority
-or independently measured sandboxed launch. A post-launch identity check alone
-would not contain a replaced executable's pre-check authority. Local fixture
-results cannot close this separate production launch finding.
+Production prerequisite: a separately reviewed, independently trusted immutable
+host/native-helper distribution and owner-provisioned runtime hierarchy must
+exist before any public launch path is added. The helper must not be loaded from
+a user-writable path and used to authenticate its own authority. A future
+implementation must validate protected runtime ancestors and capture verified
+child bytes once for a fixed bootstrap, without reopening the script pathname.
+It also needs bounded private source/request pipes and qualified cleanup.
+
+This change disables the unsafe public execution path; it does not implement or
+qualify that future guarded launcher. Native helper pinning, provisioning,
+loader qualification and actual protected-launch acceptance remain outstanding.
+Functional TLS/parser evidence belongs to explicitly trusted private fixtures
+and cannot establish production launcher or transport readiness.

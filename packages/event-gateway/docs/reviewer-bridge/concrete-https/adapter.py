@@ -1,6 +1,5 @@
 """Dormant API-only process adapter. No CLI, activation, or credential discovery."""
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,11 +15,7 @@ from transport import Response
 # Nominal protocol types reject bool-as-int and subclasses at this boundary.
 # pylint: disable=unidiomatic-typecheck
 
-NODE_SHA256 = 'e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b'
-CHILD_SHA256 = '8d4f9f954fd0724d0c121210768c6bfca496bc2be1c7f52b23f7635450d71795'
-CHILD = Path(__file__).with_name('child.mjs')
 HEADER_LIMIT = 32768
-BODY_LIMIT = 3 * 1024 * 1024
 CLEANUP_RESERVE = 1.0
 
 
@@ -31,13 +26,6 @@ class Refused(ValueError):
 def _need(condition, code):
     if not condition:
         raise Refused(code)
-
-
-def _pinned(path, digest):
-    _need(path.is_file() and path.resolve(strict=True) == path, 'https_pin')
-    with path.open('rb') as source:
-        actual = hashlib.file_digest(source, 'sha256').hexdigest()
-    _need(actual == digest, 'https_pin')
 
 
 def _stop(process, deadline):
@@ -92,7 +80,7 @@ def _pump(selector, process, payload, maximum, work_until):
 
 
 def _run(command, payload, maximum, deadline):
-    """Private offline-test seam. Production request supplies only pinned argv."""
+    """Private trusted-fixture supervisor; never reachable from public requests."""
     work_until = deadline - CLEANUP_RESERVE
     _need(time.monotonic() < work_until, 'https_deadline')
     _need(len(payload) <= 16384, 'https_input')
@@ -105,7 +93,7 @@ def _run(command, payload, maximum, deadline):
         directory = str(Path(directory).resolve(strict=True))
         try:
             with selectors.DefaultSelector() as selector:
-                process = subprocess.Popen(  # nosec B603 - public caller supplies only verified runtime/child argv
+                process = subprocess.Popen(  # nosec B603 - private trusted fixtures only; public requests always refuse
                     command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, cwd=directory,
                     env={'HOME': directory, 'LANG': 'C', 'LC_ALL': 'C'},
@@ -178,38 +166,16 @@ def _decode(raw, url, maximum):
 
 
 def bind(node_path):
-    """Trusted caller supplies a physical absolute runtime; no path discovery."""
-    try:
-        node = Path(node_path)
-        _need(node.is_absolute(), 'https_pin')
-    except (TypeError, ValueError):
-        raise Refused('https_pin') from None
+    """Unavailable until independently trusted native runtime authority exists.
 
-    def request(url, headers, maximum, deadline):
-        return _request(node, url, headers, maximum, deadline)
-
-    return request
+    No runtime path, configuration, environment or callback can enable this
+    prototype. Retain the binding signature while refusing before path access.
+    """
+    del node_path
+    raise Refused('https_runtime_authority_unavailable')
 
 
 def _request(node, url, headers, maximum, deadline):
-    """Bound four-argument transport seam; never follows redirects."""
-    try:
-        _need(type(maximum) is int and 0 <= maximum <= BODY_LIMIT, 'https_input')
-        _need(type(deadline) in (int, float) and time.monotonic() < deadline - CLEANUP_RESERVE, 'https_deadline')
-        _need(type(url) is str and url.startswith('https://api.github.com/'), 'https_origin')
-        _pinned(node, NODE_SHA256)
-        manifest = json.loads(CHILD.with_name('pins.json').read_text())
-        _need(manifest['childSha256'] == CHILD_SHA256, 'https_pin')
-        _pinned(CHILD, CHILD_SHA256)
-        remaining = (deadline - CLEANUP_RESERVE - time.monotonic()) * 1000
-        _need(0 < remaining <= 60000, 'https_deadline')
-        payload = json.dumps({'url': url, 'headers': headers, 'maximum': maximum,
-                              'remainingMs': remaining}, ensure_ascii=True).encode('ascii')
-        raw = _run([str(node), str(CHILD)], payload, maximum, deadline)
-        response = _decode(raw, url, maximum)
-        _need(time.monotonic() <= deadline, 'https_deadline')
-        return response
-    except (OSError, TypeError, KeyError, ValueError) as exc:
-        if isinstance(exc, Refused):
-            raise
-        raise Refused('https_input') from None
+    """Refuse direct calls too, before credential serialization or any launch."""
+    del node, url, headers, maximum, deadline
+    raise Refused('https_runtime_authority_unavailable')

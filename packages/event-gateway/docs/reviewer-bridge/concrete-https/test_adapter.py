@@ -1,7 +1,6 @@
 """Offline subprocess fixtures only: no DNS, sockets, listeners or credentials."""
 import os
 import json
-import hashlib
 from pathlib import Path
 import struct
 import subprocess  # nosec B404 - offline child fixtures only
@@ -17,26 +16,21 @@ import adapter
 
 
 class AdapterTests(unittest.TestCase):
-    def test_composed_transport_accepts_actual_adapter_response(self):
+    def test_private_fixture_response_composes_with_transport(self):
         policy = dict(repository='knitli/knitli-site', repositoryId=1058277548,
                       runId='123', runAttempt='2', sourceHeadSha='d' * 40,
                       workflowSha='711e265cc280cad7c4a44ba6d2d72f40a1378fec')
         metadata = json.dumps({'status': 200, 'headers': {}}).encode()
         frame = struct.pack('!I', len(metadata)) + metadata + b'{}'
-        # Exercise real pin checks using an inert fixture runtime and its test
-        # digest. No fixture executable is launched; only _run is faked.
-        with tempfile.TemporaryDirectory() as directory:
-            node = Path(directory).resolve() / 'node'
-            node.write_bytes(b'offline-inert-runtime')
-            digest = hashlib.sha256(node.read_bytes()).hexdigest()
-            with patch.object(adapter, 'NODE_SHA256', digest), patch.object(adapter, '_run', return_value=frame) as child:
-                client = transport._Transport(policy, 'offline-token', adapter.bind(node))
-                result = client.call('https://api.github.com/repos/knitli/knitli-site/actions/runs/123')
+        # Explicit fixture seam, not a successful public adapter binding.
+        def fixture_request(url, headers, maximum, deadline):
+            self.assertEqual(headers['Authorization'], 'Bearer offline-token')
+            self.assertGreater(deadline, time.monotonic())
+            return adapter._decode(frame, url, maximum)
+        client = transport._Transport(policy, 'offline-token', fixture_request)
+        result = client.call('https://api.github.com/repos/knitli/knitli-site/actions/runs/123')
         self.assertIs(adapter.Response, transport.Response)
         self.assertEqual(result, (b'{}', {}))
-        payload = json.loads(child.call_args.args[1])
-        self.assertEqual(payload['headers']['Authorization'], 'Bearer offline-token')
-        self.assertEqual(child.call_args.args[3], client.deadline)
 
     def run_child(self, source, maximum=8, seconds=2):
         return adapter._run([sys.executable, '-I', '-c', source], b'{}', maximum, time.monotonic() + seconds)
@@ -71,22 +65,6 @@ sys.stdout.buffer.write(struct.pack('!I',len(m))+m+b'ok')
             result = self.run_child('import sys,struct; assert sys.stdin.buffer.read()==b"{}"; sys.stdout.buffer.write(struct.pack("!I",2)+b"{}")')
         self.assertEqual(result, struct.pack('!I', 2) + b'{}')
         self.assertEqual(write.call_count, 2)
-
-    def test_changed_child_and_manifest_cannot_repin_adapter(self):
-        with tempfile.TemporaryDirectory() as directory:
-            child = Path(directory).resolve() / 'child.mjs'
-            child.write_bytes(b'changed-child')
-            child.with_name('pins.json').write_text(json.dumps({'childSha256': hashlib.sha256(child.read_bytes()).hexdigest()}))
-            node = child.with_name('node')
-            node.write_bytes(b'inert-runtime')
-            with (
-                patch.object(adapter, 'CHILD', child),
-                patch.object(adapter, 'NODE_SHA256', hashlib.sha256(node.read_bytes()).hexdigest()),
-                patch.object(adapter, '_run') as run,
-            ):
-                with self.assertRaisesRegex(adapter.Refused, '^https_pin$'):
-                    adapter.bind(node)('https://api.github.com/', {}, 8, time.monotonic() + 10)
-                run.assert_not_called()
 
     def test_hung_child_killed_reaped_pipes_and_scratch_closed(self):
         real = adapter.subprocess.Popen
@@ -176,25 +154,44 @@ sys.stdout.buffer.write(struct.pack('!I',len(m))+m+b'ok')
                 self.run_child('import time; time.sleep(60)', seconds=1.2)
         self.assertEqual(caught.exception.__notes__, ['https_cleanup_failed'])
 
-    def test_public_request_download_origin_refused_without_spawn(self):
-        with patch.object(adapter.subprocess, 'Popen') as spawn:
-            with self.assertRaisesRegex(adapter.Refused, '^https_origin$'):
-                adapter.bind('/unused/physical/node')('https://storage.invalid/?SECRET', {'Authorization': 'SECRET'}, 8, time.monotonic() + 10)
+    def test_public_binding_always_refuses_without_path_access(self):
+        class UntrustedPath:
+            def __fspath__(self):
+                raise AssertionError('path inspected')
+        with patch.object(adapter, '_run') as run, patch.object(adapter.subprocess, 'Popen') as spawn:
+            for candidate in ('node', '/physical/pinned/node', UntrustedPath(), None):
+                with self.subTest(candidate=type(candidate).__name__):
+                    with self.assertRaisesRegex(adapter.Refused, '^https_runtime_authority_unavailable$'):
+                        adapter.bind(candidate)
+            run.assert_not_called()
             spawn.assert_not_called()
 
-    def test_runtime_binding_rejects_relative_symlink_and_wrong_digest(self):
-        with self.assertRaisesRegex(adapter.Refused, '^https_pin$'):
-            adapter.bind('node')
-        with tempfile.TemporaryDirectory() as directory:
-            node = Path(directory).resolve() / 'node'
-            node.write_bytes(b'offline-inert-runtime')
-            alias = node.with_name('alias')
-            alias.symlink_to(node)
-            for candidate in (node, alias):
-                with patch.object(adapter, '_run') as child:
-                    with self.assertRaisesRegex(adapter.Refused, '^https_pin$'):
-                        adapter.bind(candidate)('https://api.github.com/', {}, 8, time.monotonic() + 10)
-                    child.assert_not_called()
+    def test_direct_request_refuses_before_secrets_or_manifest_are_processed(self):
+        with (
+            patch.object(adapter.json, 'dumps', side_effect=AssertionError('serialized')) as serialize,
+            patch.object(Path, 'read_text', side_effect=AssertionError('manifest read')) as manifest,
+            patch.object(Path, 'open', side_effect=AssertionError('path opened')) as opened,
+            patch.object(adapter, '_run') as run,
+            patch.object(adapter.subprocess, 'Popen') as spawn,
+        ):
+            for url in ('https://api.github.com/', 'https://storage.invalid/?SECRET'):
+                with self.assertRaisesRegex(adapter.Refused, '^https_runtime_authority_unavailable$') as caught:
+                    adapter._request('/physical/node', url, {'Authorization': 'SECRET'}, 8, time.monotonic() + 10)
+                self.assertNotIn('SECRET', str(caught.exception))
+            for operation in (serialize, manifest, opened, run, spawn):
+                operation.assert_not_called()
+
+    def test_environment_cannot_enable_public_requests(self):
+        with patch.dict(os.environ, {'NODE_OPTIONS': '--eval=BAD', 'GH_TOKEN': 'SECRET',
+                                    'REVIEWER_HTTPS_ENABLED': '1', 'REVIEWER_NATIVE_HELPER': '/tmp/helper'}):
+            with self.assertRaisesRegex(adapter.Refused, '^https_runtime_authority_unavailable$'):
+                adapter.bind('/physical/node')
+            with self.assertRaisesRegex(adapter.Refused, '^https_runtime_authority_unavailable$'):
+                adapter._request('/physical/node', 'https://api.github.com/', {}, 8, time.monotonic() + 10)
+
+    def test_public_binding_has_no_fixture_callback_override(self):
+        with self.assertRaises(TypeError):
+            adapter.bind('/physical/node', fixture=lambda: None)
 
 
 if __name__ == '__main__':
