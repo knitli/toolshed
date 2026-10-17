@@ -70,8 +70,8 @@ class MuseMonitorTests(unittest.TestCase):
         with self.assertRaises(MuseMonitorError):
             normalize_monitor({'description': 'x', 'command': 'poll', 'ws_subprotocols': []})
         for url in (  # nosemgrep -- Offline invalid URL fixtures; no connection.
-                'https://example.test', 'ws:', 'ws://', 'ws://[bad',
-                'ws://example.test:99999'):
+                'https://example.test', 'ws:', 'ws://', 'ws://[bad',  # nosemgrep -- Rejected offline inputs.
+                'ws://example.test:99999'):  # nosemgrep -- Rejected offline input.
             with self.subTest(url=url), self.assertRaises(MuseMonitorError):
                 normalize_monitor({**base, 'ws': url})
         self.assertEqual(normalize_monitor({**base, 'ws': 'ws://localhost:1234'})['ws'], 'ws://localhost:1234')
