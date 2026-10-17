@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import threading
+import time
 import asyncio
 from types import SimpleNamespace
 import unittest
@@ -354,13 +355,15 @@ class SubsequentObservationTests(unittest.TestCase):
 
     def check_diagnostic_failure(self, failure, expected, pattern):
         provider = SimpleNamespace(hold_lock=threading.Lock(), hold_started=threading.Event(),
-            release_hold=threading.Event(), requests=[], errors=[])
-        envelope = {"deliveryId": "delivery", "attemptId": "attempt"}
+            release_hold=threading.Event(), requests=[], errors=[], hold_deadline=time.monotonic() + 60)
+        envelope = {"deliveryId": "delivery", "attemptId": "attempt", "runtimeId": "runtime",
+                    "nodeGeneration": 1, "runtimeGeneration": 2, "attachmentGeneration": 2}
         ctx = SimpleNamespace(fixture=Mock(return_value={"envelope": envelope, "signedDelivery": {}}),
             runtime_ids={"C": "runtime"}, node_id="node", transport_key=Mock(),
             sessions={"C": {"provider": provider}}, dispatch_labels={}, listen_port=1234,
             state="state", start_calls={"C": [{}]}, dispatch_calls=[], dispatch_results=[],
-            daemon_task=SimpleNamespace(done=lambda: False), c_second_busy_dispositions=lambda: [])
+            daemon_task=SimpleNamespace(done=lambda: False), c_second_busy_dispositions=lambda: [],
+            c_busy_mapping=envelope)
         ctx.transport_key.private_bytes.return_value = b"fixture-key"
         serializer = SimpleNamespace(Encoding=SimpleNamespace(DER="der"),
             PrivateFormat=SimpleNamespace(PKCS8="pkcs8"), NoEncryption=lambda: None)
@@ -368,7 +371,8 @@ class SubsequentObservationTests(unittest.TestCase):
                     "permit_id": None, "submission_id": None, "turn_id": None}
         with patch.object(FIXTURE, "serialization", serializer), \
                 patch.object(FIXTURE, "listener_delivery", return_value=(202, {})), \
-                patch.object(FIXTURE, "wait_until", new=AsyncMock(side_effect=[None, None, None, AssertionError("original busy failure")])), \
+                patch.object(FIXTURE, "wait_until", new=AsyncMock(side_effect=[None, None, AssertionError("original busy failure")])), \
+                patch.object(FIXTURE, "attach_busy_session", new=AsyncMock()), \
                 patch.object(FIXTURE, "require_model_held"), \
                 patch.object(FIXTURE, "attempts_for", return_value=[]), \
                 patch.object(FIXTURE, "native_claims_for", return_value=[]), \

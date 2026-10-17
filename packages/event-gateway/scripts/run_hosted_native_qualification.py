@@ -3,9 +3,11 @@
 
 import argparse
 from contextlib import ExitStack
+from datetime import datetime
 import socket
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -14,6 +16,7 @@ import subprocess
 import stat
 import traceback
 import tempfile
+from uuid import UUID
 
 PORTS = (43121, 43122, 43123, 43124, 43125, 43126, 43127)
 
@@ -105,6 +108,7 @@ def cloud_identity(args, environment):
     source = Path(args.cloud_source).resolve(strict=True)
     require(source.parts[-5:] == ('apps', 'os', 'packages', 'event-runtime', 'src'), 'unexpected cloud source')
     root = source.parents[4]
+
     def git(*arguments):
         return subprocess.run(['/usr/bin/git', '-C', str(root), *arguments],
                               env={**environment, 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull,
@@ -164,6 +168,200 @@ def verify_proof(args, scenario, output):
             'semanticChecksPassed': True}
 
 
+def verify_busy_attach(proof, evidence):
+    """Bind the public result to the recorded CLI challenge, CAS and C1 history."""
+    message = 'three-session Busy attach evidence mismatch'
+
+    def exact_int(value, minimum=0, maximum=2**53 - 1):
+        return type(value) is int and minimum <= value <= maximum
+
+    def uuid_string(value):
+        return isinstance(value, str) and str(UUID(value)) == value
+
+    def finite(value):
+        return type(value) in (int, float) and math.isfinite(value)
+
+    def binding_valid(binding):
+        return (isinstance(binding, dict) and set(binding) == {
+            'clientId', 'connectionId', 'backendPid', 'threadId', 'serverInstanceId',
+            'generation', 'serverGeneration'}
+            and all(uuid_string(binding[key]) for key in
+                    ('clientId', 'connectionId', 'threadId', 'serverInstanceId'))
+            and exact_int(binding['backendPid'], 1, 2**32 - 1)
+            and exact_int(binding['generation']) and exact_int(binding['serverGeneration']))
+
+    try:
+        result = proof['busyFixtureAttach']
+        require(all(result[key] is True for key in (
+            'productionCliPath', 'coreBusyBeforeAndAfter', 'coreBusyDuringAttach',
+            'c1HistoryAndChargesUnchanged'))
+            and result['remoteStatus'] == 'attached' and result['localStatus'] == 'current', message)
+        for name in ('runtimeGeneration', 'attachmentGeneration'):
+            require(exact_int(result[name + 'Before'], 1) and exact_int(result[name + 'After'], 1)
+                    and result[name + 'After'] == result[name + 'Before'] + 1, message)
+        records = [json.loads(line) for line in evidence.splitlines() if line.strip()]
+        rows = [row['value'] for row in records if row.get('kind') == 'busyFixtureAttach']
+        require(len(rows) == 1, message)
+        row = rows[0]
+        hold_rows = [(index, record['value']) for index, record in enumerate(records)
+                     if record.get('kind') == 'providerHoldStarted' and record.get('value', {}).get('session') == 'C']
+        require(len(hold_rows) == 1, message)
+        hold_index, hold = hold_rows[0]
+        attach_index = next(index for index, record in enumerate(records) if record.get('kind') == 'busyFixtureAttach')
+        require(hold_index < attach_index and hold['phase'] == 'initial'
+                and all(finite(hold[key]) for key in ('startedAt', 'holdDeadline'))
+                and 0 < hold['holdDeadline'] - hold['startedAt'] <= 60
+                and finite(row['holdDeadline']) and row['holdDeadline'] == hold['holdDeadline'], message)
+        require(row['result'] == result, message)
+        history = row['before']
+        require(history == row['after'] and all(key in history for key in (
+            'localDelivery', 'localAttempts', 'workerdAttempts', 'workerdClaims',
+            'receiptStatuses', 'nativeStarts', 'cloudHistory', 'slots', 'budget')), message)
+        require(history['localDelivery']['state'] == 'observed'
+                and history['localDelivery']['ack_state'] == 'observed'
+                and len(history['localAttempts']) == len(history['workerdAttempts'])
+                == len(history['workerdClaims']) == len(history['nativeStarts']) == 1
+                and history['localAttempts'][0]['state'] == 'observed'
+                and history['workerdAttempts'][0]['state'] == 'observed'
+                and history['localAttempts'][0]['native_observed_ack'] is not None
+                and type(history['localAttempts'][0]['reserved_bytes']) is int
+                and history['localAttempts'][0]['reserved_bytes'] == 0
+                and history['receiptStatuses'] == ['inputRecorded']
+                and isinstance(history['cloudHistory'], dict)
+                and isinstance(history['slots'], list)
+                and all(isinstance(history['cloudHistory'].get(key), list) for key in (
+                    'attempts', 'deliveries', 'native_claims', 'native_correlations',
+                    'manual_sources', 'slot_intents', 'no_start_settlements'))
+                and isinstance(history['budget'], dict)
+                and all(key in history['budget'] for key in ('used', 'remaining', 'limit', 'windowMs')), message)
+        mapping, previous = row['mapping'], row['bindingBefore']
+        binding = mapping['nativeBinding']
+        require(binding_valid(previous) and binding_valid(binding)
+                and all(binding[key] == previous[key] for key in (
+                    'clientId', 'connectionId', 'backendPid', 'threadId', 'serverInstanceId'))
+                and all(binding[key] >= previous[key] for key in ('generation', 'serverGeneration'))
+                and any(binding[key] > previous[key] for key in ('generation', 'serverGeneration')),
+                message)
+        require(all(type(mapping[key]) is int and mapping[key] == result[key + 'After']
+                    for key in ('runtimeGeneration', 'attachmentGeneration')), message)
+        for field, raw in (('runtimeSha256', mapping['runtimeId']), ('sessionSha256', mapping['sessionId']),
+                           ('threadSha256', binding['threadId'])):
+            require(isinstance(raw, str) and hashlib.sha256(raw.encode()).hexdigest()
+                    == proof['nativeCliSessions']['C'][field], message)
+        spent = row['preAttachNonces']
+        require(isinstance(spent, list) and len(spent) >= 3
+                and all(exact_int(nonce) for nonce in spent)
+                and spent == sorted(set(spent)), message)
+        observations = row['busyEvidence']
+        require(isinstance(observations, list) and len(observations) == 3, message)
+        challenges, nonces, checked = [], [], []
+
+        def validate_observation(observation):
+            request, response = observation['request'], observation['response']
+            witness = response['witness']
+            received, checked_at = observation['receivedAt'], observation['checkedAt']
+            deadline = response['validUntilMonotonic']
+            require(request['command'] == 'challenge' and binding_valid(request['expectedBinding'])
+                    and request['expectedBinding'] == binding
+                    and uuid_string(request['challengeId'])
+                    and response['challengeId'] == request['challengeId']
+                    and set(response) == {'challengeId', 'observedAt', 'validUntilMonotonic', 'witness'}
+                    and set(witness) == set(binding) | {
+                        'version', 'nonce', 'sequence', 'cause', 'leaseMs', 'eligible', 'nativeCoreTurnState'}
+                    and binding_valid({key: witness[key] for key in binding})
+                    and {key: witness[key] for key in binding} == binding
+                    and type(witness['version']) is int and witness['version'] == 2
+                    and exact_int(witness['nonce']) and exact_int(witness['sequence'], 1)
+                    and isinstance(witness['cause'], str) and len(witness['cause']) <= 128
+                    and exact_int(witness['leaseMs'], 1) and witness['eligible'] is True
+                    and witness['nativeCoreTurnState'] == 'busy'
+                    and all(finite(value) for value in (received, checked_at, deadline))
+                    and hold['startedAt'] <= received <= checked_at < hold['holdDeadline']
+                    and received <= checked_at < deadline <= received + min(witness['leaseMs'], 750) / 1000,
+                    message)
+            observed = response['observedAt']
+            require(isinstance(observed, str) and len(observed) == 24 and observed.endswith('Z')
+                    and datetime.fromisoformat(observed[:-1] + '+00:00').isoformat(
+                        timespec='milliseconds').replace('+00:00', 'Z') == observed, message)
+            return request['challengeId'], witness['nonce'], checked_at
+
+        for observation in observations:
+            challenge_id, nonce, checked_at = validate_observation(observation)
+            challenges.append(challenge_id)
+            nonces.append(nonce)
+            checked.append(checked_at)
+        require(finite(row['holdDeadline']) and all(value < row['holdDeadline'] for value in checked), message)
+        require(len(set(challenges)) == len(set(nonces)) == 3 and checked == sorted(checked)
+                and nonces[0] in spent and nonces[1] not in spent and nonces[2] not in spent, message)
+        cli = observations[1]
+        attach = row['attachRequest']
+        require(cli['session'] == 'C' and cli['sessionId'] == mapping['sessionId']
+                and attach['operation'] == 'attach' and attach['runtimeId'] == mapping['runtimeId']
+                and attach['sessionId'] == mapping['sessionId']
+                and binding_valid(attach['expectedNativeBinding']) and attach['expectedNativeBinding'] == binding
+                and attach['challengeId'] == cli['request']['challengeId']
+                and all(type(attach['expected' + key[0].upper() + key[1:]]) is int
+                        and attach['expected' + key[0].upper() + key[1:]] == result[key + 'Before']
+                        for key in ('runtimeGeneration', 'attachmentGeneration')), message)
+        argv = row['attachArgv']
+        require(isinstance(argv, list) and len(argv) == 13 and all(isinstance(value, str) for value in argv)
+                and bool(argv[1]) and Path(argv[1]).is_absolute()
+                and argv == ['--state-dir', argv[1], 'attach', '--runtime-id', attach['runtimeId'],
+                             '--session-id', attach['sessionId'], '--cloud-config', str(Path(argv[1]) / 'cloud.json'),
+                             '--expected-runtime-generation', str(attach['expectedRuntimeGeneration']),
+                             '--expected-attachment-generation', str(attach['expectedAttachmentGeneration'])], message)
+
+        # C2 must remain authoritatively Busy on both sides of the daemon restart.
+        dispatches = [(index, record['value']) for index, record in enumerate(records)
+                      if record.get('kind') == 'c2CoreBusy']
+        restarts = [(index, record['value']) for index, record in enumerate(records)
+                    if record.get('kind') == 'c2BusyRestart']
+        require(len(restarts) == 1 and len(dispatches) >= 2
+                and not any(record.get('kind') == 'c2CoreBusyError' for record in records), message)
+        restart_index, restart = restarts[0]
+        require(restart['binding'] == binding and binding_valid(restart['binding'])
+                and uuid_string(restart['deliveryId']) and restart['evidenceError'] is None
+                and hashlib.sha256(restart['deliveryId'].encode()).hexdigest() == proof['busyC']['deliverySha256']
+                and finite(restart['checkedAt'])
+                and checked[-1] < restart['checkedAt'] < hold['holdDeadline'], message)
+        seen = set(spent) | set(nonces)
+        seen_challenges = set(challenges)
+        counts = {'initial': 0, 'post-restart': 0}
+        last_checked = checked[-1]
+        for index, dispatch in dispatches:
+            phase = 'initial' if index < restart_index else 'post-restart'
+            require(index > attach_index and dispatch['phase'] == phase
+                    and dispatch['binding'] == binding and binding_valid(dispatch['binding'])
+                    and dispatch['deliveryId'] == restart['deliveryId']
+                    and dispatch['evidenceError'] is None
+                    and dispatch['status'] == 'queued'
+                    and dispatch['reason'] == 'client_unavailable_or_busy'
+                    and finite(dispatch['checkedAt'])
+                    and last_checked <= dispatch['checkedAt'] < hold['holdDeadline']
+                    and isinstance(dispatch['observations'], list) and bool(dispatch['observations']), message)
+            for observation in dispatch['observations']:
+                challenge_id, nonce, checked_at = validate_observation(observation)
+                require(observation['session'] == 'C' and observation['sessionId'] == mapping['sessionId']
+                        and challenge_id not in seen_challenges and nonce not in seen
+                        and last_checked <= observation['receivedAt'] <= checked_at <= dispatch['checkedAt']
+                        and ((dispatch['checkedAt'] < restart['checkedAt']) if phase == 'initial'
+                             else (restart['checkedAt'] <= observation['receivedAt'])), message)
+                seen.add(nonce)
+                seen_challenges.add(challenge_id)
+            last_checked = dispatch['checkedAt']
+            counts[phase] += 1
+        require(all(counts.values())
+                and exact_int(proof['busyC']['busyDispatchCount'], 2)
+                and proof['busyC']['busyDispatchCount'] == len(dispatches)
+                and exact_int(proof['busyDeliveryRestart']['busyDispatchCountAfterRestart'], 1)
+                and proof['busyDeliveryRestart']['busyDispatchCountAfterRestart'] == counts['post-restart']
+                and exact_int(proof['privateEvidence']['coreBusyNonces'], 1)
+                and proof['privateEvidence']['coreBusyNonces'] == len(seen), message)
+
+    except (KeyError, TypeError, IndexError, AttributeError, ValueError, OverflowError) as error:
+        raise ValueError(message) from error
+
+
 def verify_three_session_proof(args, proof, output, fixture):
     require(proof['qualification'] == 'controlled-three-real-cli-production-daemon-workerd'
             and proof['nativeBinarySha256'] == args.binary_sha256
@@ -206,6 +404,7 @@ def verify_three_session_proof(args, proof, output, fixture):
     evidence = read_bounded(output / 'proof.private-evidence.jsonl', 64_000_000)
     require(proof['privateEvidence']['bytes'] == len(evidence)
             and proof['privateEvidence']['sha256'] == hashlib.sha256(evidence).hexdigest(), 'private evidence mismatch')
+    verify_busy_attach(proof, evidence)
     causal_raw = read_bounded(output / 'proof.private-causal.json', 2_000_000)
     require(proof['privateCausal']['bytes'] == len(causal_raw)
             and proof['privateCausal']['sha256'] == hashlib.sha256(causal_raw).hexdigest(),
