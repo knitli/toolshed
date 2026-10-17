@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-17",
+  "binary": "muse-bin-1.4.7-R6101.1",
+  "binarySha256": "87ff5a31b63e30b6ac04d3e8298285517e753c126fb6f3aee80accf28c4562f1",
+  "nativePeerList": {
+    "exit": 1,
+    "reason": "external_agent_ingress_closed"
+  },
+  "schemaSha256": "0eb3ef3ec63341b6b1f6f52ab61116e37cc59aaa6d69e9b6c265e2011e3e5931",
+  "candidateMethods": [
+    "subagent/sendMessage"
+  ],
+  "liveWakeProven": false,
+  "ownerConfigurationChanged": false,
+  "peerMessagesSent": 0,
+  "transportImplemented": false,
+  "schemaManifestSha256": "c8df4652426e4cf6e9a019e9a2f9bcd5cf7c9154b13078f42ccf90c4a0c62710",
+  "schemaManifestFingerprintAuthoritative": false
+}
