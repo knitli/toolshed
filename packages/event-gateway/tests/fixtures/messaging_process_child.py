@@ -25,11 +25,28 @@ def snapshot(gateway, delivery_id):
             'nativeCalls': gateway.fixture_native_calls}
 
 
+def read_crash_marker(path, expected):
+    try:
+        with Path(path).open('rb') as stream:
+            raw = stream.read(1025)
+        if len(raw) > 1024:
+            return None
+        value = json.loads(raw)
+        if (not isinstance(value, dict) or set(value) != {'phase', 'brokerPid', 'oldPid'}
+                or any(value[key] != expected[key] for key in ('phase', 'brokerPid'))
+                or type(value['oldPid']) is not int or value['oldPid'] <= 0):
+            return None
+        return value
+    except (OSError, ValueError):
+        return None
+
+
 async def run(config, phase):
     case = unittest.TestCase()
     transport = LoopbackTransport(config['address'])
     send = transport.send
     delivery_id = config['seed']['envelope']['deliveryId']
+    crash_observation = None
 
     def barrier():
         print(json.dumps({'phase': phase, 'pid': os.getpid(), 'claims': transport.claims,
@@ -39,8 +56,14 @@ async def run(config, phase):
         raise TimeoutError('parent did not kill gateway at crash barrier')
 
     async def observed_send(**wire):
+        nonlocal crash_observation
         record(config['httpLog'])
-        response = await send(**wire)
+        try:
+            response = await send(**wire)
+        finally:
+            if config.get('crashMarker'):
+                # Sample before the unknown outcome is returned; a later kill cannot repair missing evidence.
+                crash_observation = read_crash_marker(config['crashMarker'], config['crashExpected'])
         if phase == 'response':
             case.assertEqual(response[0], 200)
             case.assertEqual(json.loads(response[2])['status'], 'admitted')
@@ -85,7 +108,8 @@ async def run(config, phase):
         MessagingWorkerdTests.assert_inert(case, gateway, config['seed'])
         print(json.dumps({'phase': phase, 'pid': os.getpid(), 'claims': transport.claims,
                           'before': before, 'after': snapshot(gateway, delivery_id),
-                          'result': result, 'repeated': repeated}), flush=True)
+                          'result': result, 'repeated': repeated,
+                          **({'crashObservation': crash_observation} if config.get('crashMarker') else {})}), flush=True)
     finally:
         case.doCleanups()
 

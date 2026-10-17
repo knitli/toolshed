@@ -1,0 +1,8 @@
+{
+  "platform": "darwin",
+  "arch": "arm64",
+  "miniflareVersion": "5.20261001.0-alpha",
+  "miniflareModuleSha256": "d6c68c92bc33371e4baa88a1c6da0042b4fbf8c872a297b84e729556f49f9632",
+  "workerdVersion": "1.20261001.1",
+  "workerdSha256": "3fd4b350cebf887265a20222fc530b21d843791266476199d16968600fa01922"
+}

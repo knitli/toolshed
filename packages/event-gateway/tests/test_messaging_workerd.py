@@ -12,6 +12,7 @@ import shutil
 import subprocess  # nosec B404 - Explicit local Node runs the checked-in disposable fixture.
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import Mock, call, patch
@@ -163,15 +164,27 @@ class LoopbackTransport:
 
 
 @contextmanager
-def fixture():
+def fixture(*, abrupt_crash=False):
+    if abrupt_crash and os.environ.get('FIXTURE_ABRUPT_CLOUD_CRASH') != 'reviewed':
+        raise RuntimeError('abrupt cloud crash requires separate reviewed execution opt-in')
     with tempfile.TemporaryDirectory() as directory:
         with open(Path(directory) / 'broker.log', 'w+') as log:
             environment = {key: str(Path(os.environ[key]).resolve(strict=True)) for key in SETTINGS}
             environment.update(PATH='/usr/bin:/bin', HOME=directory)
+            if abrupt_crash:
+                environment['FIXTURE_ABRUPT_CLOUD_CRASH'] = 'reviewed'
             process = subprocess.Popen(  # nosec B603 - Explicit executable, fixed script, no shell.
                 [environment['FIXTURE_NODE'], str(BROKER.resolve())], cwd=BROKER.parent,
-                env=environment, stdout=subprocess.PIPE, stderr=log, start_new_session=True)
+                env=environment, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE if abrupt_crash else log, start_new_session=True)
+            capture, stopped, drainer = {'prefix': bytearray(), 'error': None}, threading.Event(), None
             try:
+                if abrupt_crash:
+                    # Runtime import avoids the test module cycle; reuse the same capped pipe drainer.
+                    from test_messaging_process_restart import _drain_stderr
+                    drainer = threading.Thread(target=_drain_stderr, args=(process, capture, stopped),
+                                               name=f'broker-stderr-{process.pid}', daemon=True)
+                    drainer.start()
                 try:
                     address = _read_startup_handshake(process.stdout)
                 except RuntimeError as error:
@@ -179,10 +192,33 @@ def fixture():
                     log.seek(max(0, log.tell() - 8000))
                     raise AssertionError('workerd startup failed: ' + log.read(8000)) from error
                 transport = LoopbackTransport(address)
+                transport.broker_process = process
                 seed = transport.fixture('/fixture/seed', {'nodeId': str(uuid4()), 'runtimeId': str(uuid4())})
                 yield Path(directory).resolve() / 'ledger', address, transport, seed
             finally:
-                _cleanup_fixture_process(process, sys.exc_info()[1])
+                primary = sys.exc_info()[1]
+                try:
+                    _cleanup_fixture_process(process, primary)
+                except BaseException as error:
+                    primary = error
+                    raise
+                finally:
+                    if drainer is not None:
+                        if drainer.ident is not None:
+                            drainer.join(timeout=1)
+                            stopped.set()
+                            drainer.join(timeout=1)
+                        process.stderr.close()
+                        diagnostic = capture['error']
+                        if drainer.is_alive():
+                            diagnostic = TimeoutError('broker stderr drainer did not stop')
+                        if primary is not None:
+                            primary.add_note('broker stderr: ' + capture['prefix'].decode('utf8', errors='replace'))
+                            if diagnostic is not None:
+                                primary.add_note(f'broker stderr capture also failed: {diagnostic}')
+                        elif diagnostic is not None:
+                            diagnostic.add_note('broker stderr: ' + capture['prefix'].decode('utf8', errors='replace'))
+                            raise diagnostic
 
 
 class FixtureSafetyTests(unittest.TestCase):

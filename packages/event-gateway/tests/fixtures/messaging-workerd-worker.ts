@@ -6,6 +6,7 @@ import { coordinatorName, type EventApiEnvironment } from 'fixture-event-runtime
 import { signedEventRequest, type TransportEnvironment } from 'fixture-event-runtime/delivery.ts';
 import { Mailbox } from 'gatekeeper-messaging/src/mailbox.ts';
 import { EventAuthority } from 'gatekeeper-messaging/src/event-authority.ts';
+import type { EventAuthorityAttemptV1, EventMessageAttemptV1 } from 'gatekeeper-messaging/src/event-authority-contract.ts';
 import { canonicalMessagePublication } from 'gatekeeper-messaging/src/event-bridge.ts';
 import { mailboxName, detach, NO_FLAGS } from 'gatekeeper-messaging/src/model.ts';
 export { MessageConsumerAuthority } from 'fixture-event-runtime/message-consumer-authority.ts';
@@ -23,9 +24,39 @@ const consumerOf = ({ nodeId, runtimeId }: Seed) => ({ nodeId, runtimeId, nodeGe
   runtimeGeneration: 1, attachmentGeneration: 1, consumerGeneration: 1 });
 
 export class FixtureEventAuthority extends EventAuthority {
-  constructor(ctx: ExecutionContext, env: ConstructorParameters<typeof EventAuthority>[1] & { FIXTURE_ACCESS_JWK: string }) {
+  private readonly crashBarrier?: Fetcher;
+
+  constructor(ctx: ExecutionContext, env: ConstructorParameters<typeof EventAuthority>[1] & {
+    FIXTURE_ACCESS_JWK: string; FIXTURE_CRASH_BARRIER?: Fetcher;
+  }) {
     super(ctx, env, { now: () => Math.floor(Date.now() / 1000),
       fetch: async () => Response.json({ keys: [JSON.parse(env.FIXTURE_ACCESS_JWK)] }) });
+    this.crashBarrier = env.FIXTURE_CRASH_BARRIER;
+  }
+
+  override async reserveMessageAttempt(input: EventMessageAttemptV1) {
+    if (this.crashBarrier) await this.crashBarrier.fetch('https://barrier.invalid/before-reserve');
+    const result = await super.reserveMessageAttempt(input);
+    // The Mailbox RPC response crossed its storage output gate; no pre-crash read or flush is added.
+    if (this.crashBarrier && result.status === 'reserved')
+      await this.crashBarrier.fetch('https://barrier.invalid/after-reserve');
+    return result;
+  }
+
+  override async reserveNativeAttempt(input: EventAuthorityAttemptV1) {
+    if (this.crashBarrier) {
+      await this.crashBarrier.fetch('https://barrier.invalid/generic-fallback');
+      throw new Error('unexpected_generic_reservation');
+    }
+    return super.reserveNativeAttempt(input);
+  }
+
+  override async nativeAttemptStatus(input: EventAuthorityAttemptV1) {
+    if (this.crashBarrier) {
+      await this.crashBarrier.fetch('https://barrier.invalid/generic-fallback');
+      throw new Error('unexpected_generic_status');
+    }
+    return super.nativeAttemptStatus(input);
   }
 }
 
@@ -63,7 +94,10 @@ export class FixtureMailbox extends Mailbox {
     return publication;
   }
 
-  fixtureRead() { return { budget: this.ctx.storage.kv.get('wake-budget:ws') ?? null }; }
+  fixtureRead() {
+    return { budget: this.ctx.storage.kv.get('wake-budget:ws') ?? null,
+      message_attempts: this.ctx.storage.sql.exec('SELECT attempt_id FROM message_wake_attempts').toArray() };
+  }
 
   fixtureChange(kind: string) {
     if (kind === 'route') this.ctx.storage.sql.exec("UPDATE message_wake_routes SET generation=generation+1 WHERE agent='ws'");
@@ -112,7 +146,7 @@ export class FixtureCoordinator extends AgentCoordinator {
 
   fixtureRead() {
     return {
-      attempts: this.ctx.storage.sql.exec('SELECT attempt_id,state FROM attempts').toArray(),
+      attempts: this.ctx.storage.sql.exec('SELECT attempt_id,state,permit_id,reservation_state FROM attempts').toArray(),
       native_claims: this.ctx.storage.sql.exec('SELECT attempt_id,state,permit_id FROM native_claims').toArray(),
       deliveries: this.ctx.storage.sql.exec('SELECT delivery_id,state FROM deliveries').toArray(),
       slot_intents: this.ctx.storage.sql.exec('SELECT delivery_id FROM slot_intents').toArray(),

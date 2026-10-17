@@ -1,0 +1,83 @@
+{
+  "status": "PASS",
+  "runDateUtc": "2026-10-17",
+  "receiptRecordedAtUtc": "2026-10-17T20:06:06Z",
+  "timestampPrecision": "Approximate receipt time; no exact start or finish time is claimed.",
+  "evidenceBasis": "Reviewed frozen executable test assertions and successful actual run; ephemeral fixture directories cleaned by context managers. Raw per-case PID/storage proofs were asserted during execution but not retained as separate artifacts.",
+  "preparationBase": "1a66233e2ae957e3015c84e188be6725a63a8cf9",
+  "preparationFreezeSha256": "c415cd9cc2c1b58488543648123a80616e9bd520f5c29b37785ca2956520a292",
+  "allElevenFrozenSourceHashesMatchedBeforeExecution": true,
+  "actualMatrix": {
+    "module": "test_messaging_abrupt_cloud_crash.MessagingAbruptCloudCrashTests",
+    "unitTestsPassed": 1,
+    "subtestPhasesPassed": [
+      "before-reserve",
+      "after-reserve",
+      "after-admission"
+    ],
+    "seconds": 6.412,
+    "exitCode": 0,
+    "skips": 0
+  },
+  "configuration": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "nodeVersion": "24.21.0",
+    "miniflareVersion": "5.20261001.0-alpha",
+    "miniflareModuleSha256": "d6c68c92bc33371e4baa88a1c6da0042b4fbf8c872a297b84e729556f49f9632",
+    "workerdVersion": "1.20261001.1",
+    "workerdSha256": "3fd4b350cebf887265a20222fc530b21d843791266476199d16968600fa01922",
+    "cloudCommit": "99655360630ca0e3f222d1e73d841aaf456378a7",
+    "upstreamPin": "949ee3cfa79121919cb8dced13971c6bec857df0",
+    "bundleSha256": "164bb39a7b1fb1b0fbc1a1aff9abf41418ebb6d03d676c08fb228a59be93b76b"
+  },
+  "reproduction": {
+    "cwd": "fixture checkout root",
+    "paths": {
+      "FIXTURE_NODE": "explicit existing Node 24.21.0 executable",
+      "FIXTURE_CLOUD_SOURCE": "apps/os in the pinned cloud checkout",
+      "FIXTURE_MINIFLARE": "existing pinned Miniflare package directory",
+      "GATEWAY_PYTHON": "existing gateway Python interpreter"
+    },
+    "environment": {
+      "FIXTURE_ABRUPT_CLOUD_CRASH": "reviewed",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONPATH": "packages/event-gateway/src:packages/event-gateway/tests"
+    },
+    "argv": [
+      "$GATEWAY_PYTHON",
+      "-m",
+      "unittest",
+      "test_messaging_abrupt_cloud_crash.MessagingAbruptCloudCrashTests",
+      "-v"
+    ]
+  },
+  "asserted": [
+    "exact owned workerd kill and one automatic replacement per phase",
+    "broker remains alive; original claim open at injection; causal kill marker sampled before unknown outcome",
+    "same persistence directory identity and replacement readiness",
+    "before-reserve has no charge or pending budget marker",
+    "after-reserve and after-admission preserve one exact linked message-budget charge",
+    "admitted phase preserves a valid exact UUID permit in both coordinator records",
+    "fresh Python process preserves held uncertain history without HTTP resend or native calls",
+    "no external Worker egress"
+  ],
+  "rawPerCaseProcessAndStorageArtifactsRetained": false,
+  "offlineChecks": {
+    "nodeMockTestsPassed": 26,
+    "pythonSafetyTestsPassed": 6
+  },
+  "limitations": [
+    "Local pinned Miniflare/workerd qualification only",
+    "Not power-loss or individual database-inode proof",
+    "Automatic cloud alarms suppressed",
+    "No deployed transport, native/provider execution, native ACK, settlement or unattended wake proof",
+    "Root content review approved publication after rebase onto merged main"
+  ],
+  "publicationPreparation": {
+    "dependencyPr": 153,
+    "dependencyMerge": "4182c8e593a70c8f752b812a45494dcbf693484c",
+    "rebasedBase": "4182c8e593a70c8f752b812a45494dcbf693484c",
+    "publicationPendingRootReview": true
+  }
+}

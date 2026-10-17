@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual, webcrypto } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { readFile, readdir, realpath } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
 import { join, resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,7 +13,7 @@ const rootRequire = createRequire(join(cloud, 'package.json'));
 const messagingRequire = createRequire(join(cloud, 'packages/gatekeeper-messaging/package.json'));
 const { build } = rootRequire('esbuild');
 const validateRpc = messagingRequire('capnweb-validate/esbuild');
-const { Miniflare, convertV4MiniflareOptions } = createRequire(join(resolve(process.env.FIXTURE_MINIFLARE), 'package.json'))('miniflare');
+const miniflareRequire = createRequire(join(resolve(process.env.FIXTURE_MINIFLARE), 'package.json'));
 const alias = {
   'fixture-event-runtime': join(cloud, 'packages/event-runtime/src'),
   'fixture-messaging': join(cloud, 'packages/gatekeeper-messaging/src'),
@@ -61,6 +62,33 @@ if (Object.keys(inputs).length !== Object.keys(expected.inputs).length
 if (!approvedHash(sha256(bundle.outputFiles[0].contents), expected.bundleSha256)) {
   throw new Error('unapproved compiled bundle');
 }
+let crash = null;
+let activeClaim = null;
+const requireActiveClaim = () => {
+  if (!activeClaim || activeClaim.socket.destroyed || activeClaim.response.destroyed
+      || activeClaim.response.headersSent || activeClaim.response.writableEnded)
+    throw new Error('claim ended before crash injection');
+  crash.requestOpenAtKill = true;
+};
+if (process.env.FIXTURE_ABRUPT_CLOUD_CRASH === 'reviewed') {
+  const pins = JSON.parse(await readFile(new URL('./messaging-workerd-runtime.json', import.meta.url), 'utf8'));
+  const workerd = miniflareRequire('workerd');
+  if (process.platform !== pins.platform || process.arch !== pins.arch
+      || process.env.MINIFLARE_WORKERD_PATH !== undefined
+      || miniflareRequire('miniflare/package.json').version !== pins.miniflareVersion
+      || workerd.version !== pins.workerdVersion
+      || !approvedHash(sha256(await readFile(miniflareRequire.resolve('miniflare'))), pins.miniflareModuleSha256)
+      || !approvedHash(sha256(await readFile(workerd.default)), pins.workerdSha256))
+    throw new Error('unapproved crash runtime');
+  const { OwnedWorkerdCrash } = await import('./messaging-workerd-crash.mjs');
+  crash = new OwnedWorkerdCrash({ binary: workerd.default, binarySha256: pins.workerdSha256,
+    persistencePath: join(process.env.HOME, 'durable-objects'),
+    afterKill: evidence => writeFileSync(join(process.env.HOME, 'cloud-crash-injected'),
+      JSON.stringify(evidence), { flag: 'wx', mode: 0o600, flush: true }) });
+  crash.install();
+}
+// Capture the owned ChildProcess before Miniflare imports node:child_process.
+const { Miniflare, convertV4MiniflareOptions } = miniflareRequire('miniflare');
 const ed25519 = async () => {
   const pair = await webcrypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
   return {
@@ -88,6 +116,7 @@ const receiptPublic = { ...receipt.publicJwk, kid: 'fixture-receipt' };
 const secret = randomUUID();
 let outboundCalls = 0;
 const options = convertV4MiniflareOptions({
+  ...(crash ? { unsafeHandleRuntimeRestart: () => crash.restarted() } : {}),
   resourcePersistencePath: join(process.env.HOME, 'durable-objects'),
   name: 'messaging-wire-fixture', modules: true, script: bundle.outputFiles[0].text,
   outboundService: async () => { outboundCalls++; return new Response(null, { status: 503 }); },
@@ -103,6 +132,16 @@ const options = convertV4MiniflareOptions({
     EVENT_TRANSPORT_KEY_ID: 'fixture-v2', EVENT_TRANSPORT_PRIVATE_KEY: transport.pkcs8.toString('base64url'),
   },
   serviceBindings: {
+    ...(crash ? { FIXTURE_CRASH_BARRIER: async request => {
+      const phase = new URL(request.url).pathname.slice(1);
+      if (!['before-reserve', 'after-reserve'].includes(phase)) {
+        crash.fail(new Error('unexpected Messaging reservation path'));
+        return new Response(null, { status: 500 });
+      }
+      if (crash.phase === phase) requireActiveClaim();
+      await crash.reach(phase);
+      return new Response(null, { status: 204 });
+    } } : {}),
     MESSAGE_AUTHORITY: { name: 'messaging-wire-fixture', entrypoint: 'FixtureEventAuthority' },
     EVENT_MESSAGE_CONSUMER: { name: 'messaging-wire-fixture', entrypoint: 'MessageConsumerAuthority' },
   },
@@ -114,8 +153,10 @@ const options = convertV4MiniflareOptions({
 });
 let mf = new Miniflare(options);
 let restarting = null;
-const paths = new Set(['/fixture/seed', '/fixture/read', '/fixture/change', '/fixture/restart', '/v1/dispatch/claim']);
+const paths = new Set(['/fixture/seed', '/fixture/read', '/fixture/change', '/fixture/restart', '/v1/dispatch/claim',
+  ...(crash ? ['/fixture/arm-crash', '/fixture/crash-proof'] : [])]);
 const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, maxHeaderSize: 16384 }, async (req, res) => {
+  let claim = null;
   try {
     if (req.method !== 'POST' || !paths.has(req.url) || req.headers['x-fixture-secret'] !== secret) {
       res.writeHead(403).end(); req.resume(); return;
@@ -123,7 +164,25 @@ const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, maxHea
     const chunks = []; let length = 0;
     for await (const chunk of req) { length += chunk.length; if (length > 8192) { res.writeHead(413).end(); req.resume(); return; } chunks.push(chunk); }
     if (restarting || stopping) { res.writeHead(409).end(); return; }
+    crash?.healthy();
+    if (req.url === '/fixture/arm-crash') {
+      const value = JSON.parse(Buffer.concat(chunks));
+      if (Object.keys(value).join(',') !== 'phase') throw new Error('invalid crash arm input');
+      crash.arm(value.phase);
+      res.writeHead(200, { 'content-type': 'application/json' }).end('{"armed":true}');
+      return;
+    }
+    if (req.url === '/fixture/crash-proof') {
+      await crash.proof();
+      const ready = await mf.dispatchFetch('https://events.test/fixture/read', {
+        method: 'POST', headers: { 'x-fixture-secret': secret }, body: '{}', signal: AbortSignal.timeout(1000) });
+      if (ready.status !== 200) throw new Error('replacement readiness failed');
+      await ready.arrayBuffer();
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(await crash.proof()));
+      return;
+    }
     if (req.url === '/fixture/restart') {
+      if (crash) throw new Error('orderly restart forbidden in abrupt crash case');
       restarting = (async () => {
         await mf.dispose();
         if (stopping) throw new Error('fixture stopping');
@@ -136,7 +195,20 @@ const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, maxHea
     }
     const headers = new Headers();
     for (const [key, value] of Object.entries(req.headers)) if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+    if (crash && req.url === '/v1/dispatch/claim') {
+      if (activeClaim) throw new Error('concurrent crash claim');
+      claim = { socket: req.socket, response: res };
+      activeClaim = claim;
+    }
     const response = await mf.dispatchFetch(`https://events.test${req.url}`, { method: 'POST', headers, body: Buffer.concat(chunks) });
+    if (req.url === '/v1/dispatch/claim' && crash?.phase === 'after-admission' && response.status === 200) {
+      const admission = await response.json();
+      if (admission.status !== 'admitted') throw new Error('crash admission barrier missed');
+      crash.admission = admission;
+      requireActiveClaim();
+      await crash.reach('after-admission');
+      req.socket.destroy(); return;
+    }
     if (req.url === '/v1/dispatch/claim' && headers.get('x-fixture-drop-reply') === 'true' && response.status === 200) {
       await response.arrayBuffer(); req.socket.destroy(); return;
     }
@@ -145,12 +217,16 @@ const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, maxHea
       res.end(JSON.stringify({ ...await response.json(), outboundCalls }));
     } else res.end(Buffer.from(await response.arrayBuffer()));
   } catch (error) { console.error(error); if (!res.headersSent) res.writeHead(502); res.end(); }
+  finally { if (claim && activeClaim === claim) activeClaim = null; }
 });
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;
+  crash?.stop();
   server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-  try { await restarting; } finally { await mf.dispose(); }
+  try { await restarting; } finally {
+    try { await mf.dispose(); } finally { crash?.restore(); }
+  }
 }
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => void stop().then(() => process.exit(0)));
 process.on('disconnect', () => void stop().then(() => process.exit(0)));
