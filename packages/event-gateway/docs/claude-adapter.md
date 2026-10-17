@@ -250,6 +250,31 @@ Repeated hints remain subject to the existing output cap and run deadline; hint-
 EOF or timeout fails. Unknown, malformed, error and wrong-session events still fail.
 This observer change has offline coverage only; no subsequent native run is claimed.
 
+Hosted run `39077401811` stopped at an exact-session `command_lifecycle`
+frame before init. Its diagnostic retained neither command UUID nor lifecycle
+state, so the phase is unknown; the failure does not establish that init would
+never follow. Static inspection of the pinned binary shows that the local
+transport enqueues these frames independently of the query generator's init,
+and verbose stream-json writes them before its output bookkeeping filter.
+
+The pinned lifecycle schema has `type`, string `command_uuid`, finite `state`,
+string `uuid` and `session_id`, and optional literal-true `ran_ahead` (described
+for repeated `queued` events). The fixture additionally requires canonical
+native UUIDs, the exact session, no extra fields, and `ran_ahead` only for
+`queued`. Command UUID must match the initial or prepared follow-up input,
+and native event UUIDs cannot repeat. Before init, only `queued` and
+`started` are passive; `completed`, `cancelled`, `discarded`, and `refused` clear
+pending running evidence and fail. After init, `queued` and `started` remain
+passive; `completed` requires the held response to have been released and the
+corresponding successful result already observed. Folded completion cannot
+substitute for the required separate second turn. Cancellation, discard, and
+refusal fail the experiment.
+These events never establish initialization, running, a held response, readiness,
+or admission. Evidence retains only a fixed event label, finite state, and
+monotonic observation time, under the existing observation cap. Genuine init,
+native session running, and a held provider response remain mandatory. This
+correction has offline coverage only and does not qualify another native run.
+
 `--busy-probe` requires `--local-provider` and uses the existing contained,
 disposable launch. It explicitly enables experimental
 `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` only in the child environment and adds

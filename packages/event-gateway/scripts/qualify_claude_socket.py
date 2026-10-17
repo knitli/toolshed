@@ -245,6 +245,37 @@ class BusyProbe:
             # initialize the session, mark it running, or satisfy a busy witness.
             validate_passive_ui_hint(value)
             return
+        if kind == 'command_lifecycle':
+            # The local transport queues these independently of query init.
+            # They describe a command's fate, never session readiness/admission.
+            required = {'type', 'command_uuid', 'state', 'uuid', 'session_id'}
+            state = value.get('state')
+            require(required <= value.keys() <= required | {'ran_ahead'}
+                    and state in ('queued', 'started', 'completed', 'cancelled', 'discarded', 'refused')
+                    and ('ran_ahead' not in value or value['ran_ahead'] is True and state == 'queued'),
+                    'busy_native_command_lifecycle')
+            command = value.get('command_uuid')
+            require(isinstance(command, str) and (command == self.initial.get('uuid')
+                    or self.expected is not None and command == self.expected['uuid']),
+                    'busy_native_command_lifecycle')
+            identity = value.get('uuid')
+            try:
+                require(isinstance(identity, str) and str(UUID(identity)) == identity, 'busy_native_identity')
+            except ValueError:
+                raise CanaryError('busy_native_identity') from None
+            require(identity not in self.native_ids, 'busy_native_duplicate')
+            if not self.initialized and state not in ('queued', 'started'):
+                self.pending_preinit_running = None
+                raise CanaryError('busy_native_preinit_terminal')
+            require(state not in ('cancelled', 'discarded', 'refused'), 'busy_native_command_terminal')
+            if state == 'completed':
+                # Fresh turns complete after their result. Folded completion
+                # cannot stand in for this fixture's required separate turn.
+                turn = 1 if command == self.initial.get('uuid') else 2
+                require(self.release.is_set() and self.results >= turn, 'busy_native_command_order')
+            self.native_ids.add(identity)
+            self.record('native_command_lifecycle', state=state)
+            return
         if kind == 'system' and value.get('subtype') == 'init':
             # Headless stream-json can emit init again for each queued turn.
             require(value.get('tools') == [], 'busy_native_init')
@@ -259,7 +290,7 @@ class BusyProbe:
         if not self.initialized and kind == 'system' and value.get('subtype') == 'session_state_changed':
             # The pinned native queue can drain one running notice before init.
             # Reserve its identity and observation time now; only actual init
-            # may activate it, and an intervening lifecycle notice invalidates it.
+            # may activate it, and a terminal command notice invalidates it.
             require(set(value) == {'type', 'subtype', 'session_id', 'uuid', 'state'},
                     'busy_native_state')
             identity = value.get('uuid')

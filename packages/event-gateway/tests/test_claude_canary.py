@@ -629,6 +629,180 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(probe.running)
             self.assertFalse(probe.ready_to_send.is_set())
 
+    def lifecycle(self, state='queued', command_uuid=None):
+        return {'type': 'command_lifecycle', 'command_uuid': command_uuid or self.initial['uuid'],
+                'state': state, 'uuid': str(uuid4()), 'session_id': self.session}
+
+    def test_lifecycle_preserves_preinit_running_and_requires_hold(self):
+        probe = self.new_probe()
+        probe.observe(self.state('running'))
+        pending = probe.pending_preinit_running
+        probe.observe(self.lifecycle() | {'ran_ahead': True})
+        self.assertEqual(probe.pending_preinit_running, pending)
+        self.assertFalse(probe.initialized)
+        self.assertFalse(probe.running)
+        self.assertFalse(probe.held)
+        self.assertFalse(probe.ready_to_send.is_set())
+        probe.observe({'type': 'system', 'subtype': 'init',
+                       'session_id': self.session, 'tools': []})
+        self.assertTrue(probe.running)
+        self.assertFalse(probe.ready_to_send.is_set())
+        with self.assertRaises(CANARY.CanaryError):
+            probe.prepare(self.frame)
+        probe.provider_request(self.ready)
+        probe.hold_response()
+        probe.prepare(self.frame)
+        probe.observe(self.frame | {'isReplay': True})
+        probe.sent()
+        probe.release_response()
+        self.finish(probe)
+        self.assertIsInstance(probe.proof(), dict)
+
+    def test_preinit_lifecycle_alone_never_authorizes_busy(self):
+        for state in ('queued', 'started'):
+            with self.subTest(state=state):
+                probe = self.new_probe()
+                probe.provider_request(self.ready)
+                probe.hold_response()
+                probe.observe(self.lifecycle(state))
+                self.assertFalse(probe.initialized)
+                self.assertFalse(probe.running)
+                self.assertIsNone(probe.pending_preinit_running)
+                self.assertFalse(probe.ready_to_send.is_set())
+                probe.observe({'type': 'system', 'subtype': 'init',
+                               'session_id': self.session, 'tools': []})
+                self.assertFalse(probe.running)
+                self.assertFalse(probe.ready_to_send.is_set())
+                with self.assertRaises(CANARY.CanaryError):
+                    probe.prepare(self.frame)
+
+    def test_preinit_terminal_lifecycle_clears_pending_running(self):
+        for state in ('completed', 'cancelled', 'discarded', 'refused'):
+            with self.subTest(state=state):
+                probe = self.new_probe()
+                probe.provider_request(self.ready)
+                probe.hold_response()
+                probe.observe(self.state('running'))
+                with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_preinit_terminal$'):
+                    probe.observe(self.lifecycle(state))
+                self.assertIsNone(probe.pending_preinit_running)
+                probe.observe({'type': 'system', 'subtype': 'init',
+                               'session_id': self.session, 'tools': []})
+                self.assertFalse(probe.running)
+                self.assertFalse(probe.ready_to_send.is_set())
+
+    def test_initialized_lifecycle_is_passive_and_private(self):
+        for state in ('queued', 'started'):
+            for prepared in (False, True):
+                with self.subTest(state=state, prepared=prepared):
+                    probe = self.started()
+                    if prepared:
+                        probe.prepare(self.frame)
+                    event = self.lifecycle(state, self.frame['uuid'] if prepared else None)
+                    before = (probe.initialized, probe.running, probe.held, probe.running_turn,
+                              probe.ready_to_send.is_set(), probe.complete.is_set())
+                    probe.observe(event)
+                    self.assertEqual(before, (probe.initialized, probe.running, probe.held,
+                        probe.running_turn, probe.ready_to_send.is_set(), probe.complete.is_set()))
+                    self.assertIn(event['uuid'], probe.native_ids)
+                    observed = probe.observations[-1]
+                    self.assertEqual(set(observed), {'kind', 'observedNs', 'state'})
+                    self.assertEqual(observed['kind'], 'native_command_lifecycle')
+                    self.assertEqual(observed['state'], state)
+                    self.assertNotIn(event['command_uuid'], json.dumps(observed))
+                    self.assertNotIn(event['uuid'], json.dumps(observed))
+
+    def test_initialized_lifecycle_terminal_and_completion_order(self):
+        for state in ('cancelled', 'discarded', 'refused', 'completed'):
+            for prepared in (False, True):
+                with self.subTest(state=state, prepared=prepared):
+                    probe = self.started()
+                    if prepared:
+                        probe.prepare(self.frame)
+                    reason = 'busy_native_command_order' if state == 'completed' else 'busy_native_command_terminal'
+                    with self.assertRaisesRegex(CANARY.CanaryError, '^' + reason + '$'):
+                        probe.observe(self.lifecycle(state, self.frame['uuid'] if prepared else None))
+        probe = self.released()
+        with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_command_order$'):
+            probe.observe(self.lifecycle('completed'))
+        probe.observe(self.assistant(self.ready))
+        probe.observe(self.result(self.ready))
+        with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_command_order$'):
+            probe.observe(self.lifecycle('completed', self.frame['uuid']))
+
+    def test_full_lifecycle_interleaving_requires_each_result(self):
+        probe = self.new_probe()
+        probe.observe(self.state('running'))
+        probe.observe(self.lifecycle('queued'))
+        probe.observe({'type': 'system', 'subtype': 'init',
+                       'session_id': self.session, 'tools': []})
+        probe.observe(self.lifecycle('started'))
+        probe.provider_request(self.ready)
+        probe.hold_response()
+        probe.prepare(self.frame)
+        probe.observe(self.lifecycle('queued', self.frame['uuid']))
+        probe.observe(self.frame | {'isReplay': True})
+        probe.sent()
+        probe.release_response()
+        probe.observe(self.assistant(self.ready))
+        probe.observe(self.result(self.ready))
+        probe.observe(self.lifecycle('completed'))
+        self.assertEqual(set(probe.observations[-1]), {'kind', 'observedNs', 'state'})
+        probe.observe(self.lifecycle('started', self.frame['uuid']))
+        probe.provider_request(self.busy)
+        probe.observe(self.assistant(self.busy))
+        probe.observe(self.result(self.busy))
+        probe.observe(self.lifecycle('completed', self.frame['uuid']))
+        self.assertEqual(set(probe.observations[-1]), {'kind', 'observedNs', 'state'})
+        self.assertFalse(probe.complete.is_set())
+        probe.observe(self.state('idle'))
+        self.assertIsInstance(probe.proof(), dict)
+
+    def test_lifecycle_rejects_malformed_unknown_and_cross_session(self):
+        event = self.lifecycle()
+        changes = [{'unexpected': 'private-payload'}, {'state': 'running'}, {'state': None},
+                   {'state': []}, {'command_uuid': str(uuid4())}, {'command_uuid': None},
+                   {'command_uuid': []}, {'session_id': str(uuid4())}, {'uuid': None},
+                   {'uuid': 1}, {'uuid': 'malformed'}, {'uuid': event['uuid'].upper()},
+                   {'uuid': '{' + event['uuid'] + '}'}, {'ran_ahead': False}, {'ran_ahead': 1},
+                   {'ran_ahead': None}, {'state': 'started', 'ran_ahead': True},
+                   {'state': 'completed', 'ran_ahead': True}]
+        malformed = [event | change for change in changes]
+        malformed += [{key: value for key, value in event.items() if key != missing}
+                      for missing in event]
+        for initialized in (False, True):
+            for value in malformed:
+                with self.subTest(initialized=initialized, value=value):
+                    probe = self.started() if initialized else self.new_probe()
+                    with self.assertRaises(CANARY.CanaryError):
+                        probe.observe(value)
+                    self.assertFalse(probe.complete.is_set())
+        with self.assertRaises(CANARY.CanaryError):
+            self.new_probe().observe(self.lifecycle(command_uuid=self.frame['uuid']))
+
+    def test_lifecycle_native_uuid_duplicates_and_evidence_bound(self):
+        for initialized in (False, True):
+            probe = self.started() if initialized else self.new_probe()
+            event = self.lifecycle()
+            probe.observe(event)
+            with self.subTest(initialized=initialized), self.assertRaisesRegex(
+                    CANARY.CanaryError, '^busy_native_duplicate$'):
+                probe.observe(event)
+            with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_duplicate$'):
+                probe.observe(self.state('running') | {'uuid': event['uuid']})
+        probe = self.new_probe()
+        running = self.state('running')
+        probe.observe(running)
+        with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_duplicate$'):
+            probe.observe(self.lifecycle() | {'uuid': running['uuid']})
+        probe = self.new_probe()
+        for _ in range(64):
+            probe.observe(self.lifecycle())
+        with self.assertRaisesRegex(CANARY.CanaryError, '^busy_evidence_limit$'):
+            probe.observe(self.lifecycle())
+        self.assertEqual(len(probe.observations), 64)
+        self.assertFalse(probe.ready_to_send.is_set())
+
     async def test_repeated_passive_ui_hints_remain_bounded_and_never_ready(self):
         hint = self.ui_hint()
         raw = (json.dumps(hint) + '\n').encode()
@@ -872,8 +1046,10 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                      'message': secret, 'request': {'subtype': secret},
                      'response': {'result': secret}, 'event': {'type': secret},
                      'value': secret, 'output': [secret], 'rate_limit_info': {secret: secret}}
+            reason = ('busy_native_command_lifecycle' if kind == 'command_lifecycle'
+                      else 'busy_native_missing_init')
             with self.subTest(kind=kind), self.assertRaisesRegex(
-                    CANARY.CanaryError, '^busy_native_missing_init$') as raised:
+                    CANARY.CanaryError, '^' + reason + '$') as raised:
                 await CANARY.observe_busy_stdout(
                     stream(self.ui_hint(), self.state('running'), event), probe)
             diagnostic = raised.exception.diagnostic
