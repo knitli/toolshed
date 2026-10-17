@@ -92,7 +92,8 @@ def assets(root, records, names, limit):
     for record, name in zip(records, names):
         require(isinstance(record, dict) and set(record) == {"path", "bytes", "sha256"}, "invalid asset record")
         require(record["path"] == name, "asset order mismatch")
-        require(type(record["bytes"]) is int and 0 < record["bytes"] <= limit, "invalid asset size")
+        require(isinstance(record["bytes"], int) and not isinstance(record["bytes"], bool)
+                and 0 < record["bytes"] <= limit, "invalid asset size")
         data = read_file(root, name, limit)
         require(len(data) == record["bytes"] and digest(data) == record["sha256"], "asset hash mismatch")
         result.append(data)
@@ -116,11 +117,13 @@ def verify(bundle, source_root=None):
         "schemaVersion", "kind", "upstreamCommit", "authorization", "coverage", "parents",
         "patches", "upstreamSupplement", "fileCount", "fileSha256",
     }, "invalid manifest fields")
-    require(type(manifest["schemaVersion"]) is int and manifest["schemaVersion"] == 1
+    require(isinstance(manifest["schemaVersion"], int) and not isinstance(manifest["schemaVersion"], bool)
+            and manifest["schemaVersion"] == 1
             and manifest["kind"] == "inactive-native-terminal-query-source-closure"
             and manifest["upstreamCommit"] == UPSTREAM and manifest["authorization"] == "none"
             and manifest["coverage"] == "selected_source_only", "invalid inactive recipe identity")
-    require(type(manifest["fileCount"]) is int and manifest["fileCount"] == 71, "source count mismatch")
+    require(isinstance(manifest["fileCount"], int) and not isinstance(manifest["fileCount"], bool)
+            and manifest["fileCount"] == 71, "source count mismatch")
     selected = source_map(manifest["fileSha256"], 71)
     require(manifest["upstreamSupplement"] == SUPPLEMENT, "upstream supplement mismatch")
     # Authenticate every parent and patch before parsing any parent's claims.

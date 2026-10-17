@@ -55,6 +55,29 @@ class TerminalQueryCandidatePreparationTests(unittest.TestCase):
         self.assertEqual({entry.name for entry in self.bundle.iterdir()},
                          {"manifest.json", "README.md", "verify.py"})
 
+    def test_manifest_integer_fields_reject_booleans(self):
+        original = copy.deepcopy(self.manifest)
+        for field, error in (("schemaVersion", "invalid inactive recipe identity"),
+                             ("fileCount", "source count mismatch")):
+            for value in (True, False):
+                with self.subTest(field=field, value=value):
+                    self.manifest = copy.deepcopy(original)
+                    self.manifest[field] = value
+                    self.authenticate_fixture_manifest()
+                    with self.assertRaisesRegex(ValueError, error):
+                        V.verify(self.bundle)
+
+    def test_one_byte_asset_size_rejects_boolean_true(self):
+        content = b"x"
+        (self.root / "one-byte.patch").write_bytes(content)
+        record = {"path": "one-byte.patch", "bytes": 1, "sha256": V.digest(content)}
+        self.assertEqual(V.assets(self.root, [record], [record["path"]], 1), [content])
+        for value in (True, False):
+            with self.subTest(value=value):
+                record["bytes"] = value
+                with self.assertRaisesRegex(ValueError, "invalid asset size"):
+                    V.assets(self.root, [record], [record["path"]], 1)
+
     def test_manifest_byte_change_is_rejected(self):
         with (self.bundle / "manifest.json").open("ab") as stream:
             stream.write(b"\n")
