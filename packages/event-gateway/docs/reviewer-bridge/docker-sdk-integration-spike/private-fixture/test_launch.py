@@ -1,5 +1,7 @@
 """Offline capture teardown tests; no executable or process is launched."""
+import hashlib
 import importlib.util
+import json
 import io
 from pathlib import Path
 import signal
@@ -16,13 +18,16 @@ class CaptureCleanupTests(unittest.TestCase):
     def exercise(self, *, timeout=False, pid=42123, pgid=42123, own_group=99, kill_error=None):
         process = MagicMock(pid=pid, returncode=None)
         process.stdout, process.stderr = io.BytesIO(), io.BytesIO()
-        calls = 0
+        signalled = []
+
+        def signal_group(*args):
+            self.assertIsNone(process.returncode)
+            signalled.append(args)
+            if kill_error:
+                raise kill_error
 
         def wait(**kwargs):
-            nonlocal calls
-            calls += 1
-            if timeout and calls == 1:
-                raise subprocess.TimeoutExpired('fixture', 1)
+            self.assertTrue(signalled, 'leader must remain unreaped until group cleanup')
             process.returncode = 0
             return 0
 
@@ -30,11 +35,13 @@ class CaptureCleanupTests(unittest.TestCase):
         selector = MagicMock()
         selector.__enter__.return_value.get_map.return_value = {}
         state = {}
-        with patch.object(launch.subprocess, 'Popen', return_value=process), \
+        with patch.object(launch, 'await_unreaped_exit', side_effect=subprocess.TimeoutExpired('fixture', 1) if timeout else None), \
+                patch.object(launch.subprocess, 'Popen', return_value=process), \
                 patch.object(launch.selectors, 'DefaultSelector', return_value=selector), \
+                patch.object(launch.os, 'waitid', return_value=None), \
                 patch.object(launch.os, 'getpgrp', return_value=own_group), \
                 patch.object(launch.os, 'getpgid', return_value=pgid), \
-                patch.object(launch.os, 'killpg', side_effect=kill_error) as kill:
+                patch.object(launch.os, 'killpg', side_effect=signal_group) as kill:
             error = None
             try:
                 launch.run_process([], None, {}, {'stdout': bytearray(b'{"status":"PASS"}'),
@@ -45,18 +52,54 @@ class CaptureCleanupTests(unittest.TestCase):
         self.assertTrue(process.stderr.closed)
         return error, state, kill, process
 
-    def test_successful_reaped_host_never_signalled(self):
+    def test_candidate_manifest_matches_all_local_inputs(self):
+        root = Path(__file__).parent
+        manifest = json.loads((root / 'manifest.json').read_text())
+        for name, expected in manifest['files'].items():
+            with self.subTest(name=name):
+                self.assertEqual(hashlib.sha256((root / name).read_bytes()).hexdigest(), expected)
+
+    def test_exit_observer_does_not_reap_live_leader(self):
+        process = MagicMock(pid=42123)
+        with patch.object(launch.os, 'waitid', side_effect=[None, object()]) as observe, \
+                patch.object(launch.time, 'sleep'):
+            launch.await_unreaped_exit(process, launch.time.monotonic() + 1)
+        self.assertEqual(observe.call_count, 2)
+        process.wait.assert_not_called()
+        process.poll.assert_not_called()
+
+    def test_exited_leader_retains_ownership_without_darwin_pgid_query(self):
+        process = MagicMock(pid=42123)
+        with patch.object(launch.os, 'waitid', return_value=object()), \
+                patch.object(launch.os, 'getpgrp', return_value=99), \
+                patch.object(launch.os, 'getpgid') as query:
+            launch.verify_owned_group(process)
+        query.assert_not_called()
+
+    def test_missing_observer_refused_before_spawn(self):
+        with patch.object(launch.os, 'waitid', create=True):
+            original = launch.os.waitid
+            del launch.os.waitid
+            try:
+                with patch.object(launch.subprocess, 'Popen') as spawn:
+                    with self.assertRaisesRegex(RuntimeError, 'non-reaping waitid'):
+                        launch.run_process([], None, {}, {}, {})
+                    spawn.assert_not_called()
+            finally:
+                launch.os.waitid = original
+
+    def test_successful_unreaped_host_group_signalled_before_reap(self):
         error, state, kill, process = self.exercise()
         self.assertIsNone(error)
         self.assertEqual(state['exitCode'], 0)
-        kill.assert_not_called()
+        kill.assert_called_once_with(42123, signal.SIGKILL)
         self.assertEqual(process.wait.call_count, 1)
 
     def test_owned_unreaped_timeout_signalled_then_reaped(self):
         error, state, kill, process = self.exercise(timeout=True)
         self.assertIsInstance(error, subprocess.TimeoutExpired)
         kill.assert_called_once_with(42123, signal.SIGKILL)
-        self.assertEqual(process.wait.call_count, 2)
+        self.assertEqual(process.wait.call_count, 1)
         self.assertEqual(state['exitCode'], 0)
 
     def test_wrong_or_unsafe_group_refused_without_losing_primary_failure(self):
@@ -66,7 +109,7 @@ class CaptureCleanupTests(unittest.TestCase):
                 self.assertIsInstance(error, subprocess.TimeoutExpired)
                 kill.assert_not_called()
                 self.assertIn('unowned process group', state['cleanupFailure']['message'])
-                self.assertEqual(process.wait.call_count, 1)
+                self.assertEqual(process.wait.call_count, 0)
 
     def test_signal_failure_reported_without_losing_timeout(self):
         error, state, _, _ = self.exercise(timeout=True, kill_error=PermissionError('denied'))

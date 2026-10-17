@@ -83,7 +83,35 @@ def verify_inputs():
     return manifest
 
 
+def await_unreaped_exit(process, deadline):
+    """Observe termination while retaining the child PID for owned-group cleanup."""
+    while os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired('fixture', TIMEOUT)
+        time.sleep(min(0.01, remaining))
+
+
+def verify_owned_group(process):
+    if process.pid <= 1 or process.pid == os.getpgrp():
+        raise RuntimeError('Refusing cleanup of unowned process group')
+    # Popen created this session; WNOWAIT retains its identity.
+    # Darwin cannot getpgid() a zombie, so query live leaders only.
+    exited = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    if exited is None:
+        try:
+            group = os.getpgid(process.pid)
+        except ProcessLookupError:
+            if os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+                raise
+        else:
+            if group != process.pid:
+                raise RuntimeError('Refusing cleanup of unowned process group')
+
+
 def run_process(argv, scratch, env, streams, state):
+    if not all(hasattr(os, name) for name in ('waitid', 'P_PID', 'WEXITED', 'WNOHANG', 'WNOWAIT')):
+        raise RuntimeError('Capture requires non-reaping waitid support')
     process = None
     primary_failure = None
     try:
@@ -110,9 +138,7 @@ def run_process(argv, scratch, env, streams, state):
                     total += min(len(part), available)
                     if len(part) > available:
                         raise RuntimeError('Aggregate output limit; capture truncated')
-        code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
-        if code != 0:
-            raise RuntimeError('Fixture failed: ' + str(code))
+        await_unreaped_exit(process, deadline)
         result = json.loads(streams['stdout'])
         if not isinstance(result, dict) or result.get('status') != 'PASS':
             raise RuntimeError('Expected one PASS JSON document on stdout')
@@ -125,14 +151,15 @@ def run_process(argv, scratch, env, streams, state):
                 try:
                     # An unreaped leader reserves its PID; never signal a reaped group ID.
                     if process.returncode is None:
-                        if process.pid <= 1 or process.pid == os.getpgrp() or os.getpgid(process.pid) != process.pid:
-                            raise RuntimeError('Refusing cleanup of unowned process group')
+                        verify_owned_group(process)
                         try:
                             os.killpg(process.pid, signal.SIGKILL)
                         except ProcessLookupError:
                             pass
                         process.wait(timeout=3)
                     state["exitCode"] = process.returncode
+                    if primary_failure is None and process.returncode != 0:
+                        raise RuntimeError('Fixture failed: ' + str(process.returncode))
                 finally:
                     process.stdout.close()
                     process.stderr.close()
