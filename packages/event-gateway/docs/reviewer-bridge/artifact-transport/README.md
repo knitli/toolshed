@@ -99,7 +99,7 @@ python -m unittest discover \
 ```
 
 Without the repository variable, both upstream-dependent tests explicitly skip;
-a skip is not composition evidence. With it, all 24 tests must pass with zero skips.
+a skip is not composition evidence. With it, all 25 tests must pass with zero skips.
 The Node fixture runs with an empty environment and a 15-second timeout. Its
 explicit **TEST ONLY verifier stub** fabricates identity evidence; the real
 signature verifier, GitHub requests, SDK and provider are never invoked. This is

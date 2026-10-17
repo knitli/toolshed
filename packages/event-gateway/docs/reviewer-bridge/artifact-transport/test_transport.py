@@ -236,10 +236,20 @@ class TransportTests(unittest.TestCase):
                 f'\turl = {repository.as_uri()}/missing\n\tpromisor = true\n'
                 '\tpartialclonefilter = blob:none\n'
             )
-            with self.assertRaises(subprocess.CalledProcessError) as caught:
-                acquisition_source(repository, "reviewer-host-acquisition.mjs")
-            self.assertNotIn(b"does not appear to be a git repository", caught.exception.stderr)
-            self.assertEqual(list((repository / "objects/pack").iterdir()), [])
+            run = subprocess.run
+            for disabled_guard, value in (("GIT_ALLOW_PROTOCOL", "file"),
+                                          ("GIT_NO_LAZY_FETCH", "0")):
+                with self.subTest(disabled_guard=disabled_guard):
+                    def disable_one_guard(*args, override=(disabled_guard, value), **kwargs):
+                        # Exercise the other guard with real Git against only the owned file:// remote.
+                        kwargs["env"] = {**kwargs["env"], override[0]: override[1]}
+                        return run(*args, **kwargs)
+
+                    with patch.object(subprocess, "run", side_effect=disable_one_guard):
+                        with self.assertRaises(subprocess.CalledProcessError) as caught:
+                            acquisition_source(repository, "reviewer-host-acquisition.mjs")
+                    self.assertNotIn(b"does not appear to be a git repository", caught.exception.stderr)
+                    self.assertEqual(list((repository / "objects/pack").iterdir()), [])
 
     @unittest.skipUnless(os.environ.get("REVIEWER_ACQUISITION_REPOSITORY"),
                          "replacement control requires the pinned upstream repository")
