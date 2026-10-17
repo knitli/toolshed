@@ -2,6 +2,14 @@ name: Native client candidate build
 
 on:
   workflow_dispatch:
+    inputs:
+      family:
+        description: Inactive native candidate recipe
+        type: choice
+        default: core-idle-v1
+        options:
+          - core-idle-v1
+          - terminal-query-v1
 
 permissions:
   contents: read
@@ -42,11 +50,13 @@ jobs:
       - name: Build candidate and record provenance
         shell: bash
         env:
+          NATIVE_RECIPE_FAMILY: ${{ inputs.family }}
           CARGO_HOME: ${{ runner.temp }}/native-cargo
           RUSTUP_HOME: ${{ runner.temp }}/native-rustup
         run: |
           set -euo pipefail
           uv run --no-project --python 3.13.14 python packages/event-gateway/scripts/produce_native_ci_artifact.py \
+            --family "$NATIVE_RECIPE_FAMILY" --revision 1 \
             --source "$RUNNER_TEMP/native-upstream" \
             --host-archive "$RUNNER_TEMP/native-host.tar.gz" \
             --output-dir "$RUNNER_TEMP/native-candidate"

@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import runpy
 import shlex
+import sys
+from dataclasses import replace
 import subprocess  # nosec B404 - fixed Git executable and disposable repo fixture, no shell
 import tarfile
 import tempfile
@@ -15,6 +17,9 @@ from unittest.mock import patch
 
 from event_gateway import launcher
 
+
+with patch.object(sys, "path", [str(Path(__file__).resolve().parents[1] / "scripts"), *sys.path]):
+    import native_recipe_registry as registry
 
 PACKAGER = runpy.run_path(
     str(Path(__file__).resolve().parents[1] / "scripts/package_native_client.py")
@@ -688,6 +693,15 @@ class NativePackagingTests(unittest.TestCase):
                         source, output, evidence_path, root / "host.tar.gz", verify_release=True,
                     )
                 self.assertTrue(evidence["launcherQualified"])
+                selected = registry.recipe()
+                self.assertEqual(evidence["recipe"], {
+                    "family": selected.family, "revision": selected.revision,
+                    "manifestSha256": selected.manifest.sha256,
+                })
+                self.assertEqual(evidence["appliedPatches"], [
+                    {"path": asset.path, "bytes": asset.bytes, "sha256": asset.sha256}
+                    for asset in selected.ordered_patches
+                ])
                 self.assertEqual(evidence["archiveScope"], {
                     "selection": "git archive of the pinned commit without pathspecs",
                     "extractionFilter": "tarfile.data_filter",
@@ -1012,6 +1026,170 @@ class NativePackagingTests(unittest.TestCase):
                         with self.assertRaises(FileExistsError):
                             create(destination)
                     self.assertEqual(destination.read_bytes(), b"created by another process")
+
+
+    def test_terminal_source_verification_hashes_all_71_files_and_rejects_invalid_files(self):
+        selected = registry.validate_recipe("terminal-query-v1", 1)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            hashes = {}
+            for index, name in enumerate(selected.file_sha256):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                content = f"source {index}".encode()
+                path.write_bytes(content)
+                hashes[name] = hashlib.sha256(content).hexdigest()
+            evidence = replace(selected, file_sha256=hashes)
+            count, inventory = PACKAGER["verify_recipe_source"](root, evidence)
+            expected = hashlib.sha256()
+            for name, digest in sorted(hashes.items()):
+                expected.update(name.encode() + b"\0" + bytes.fromhex(digest))
+            self.assertEqual(count, 71)
+            self.assertEqual(inventory, expected.hexdigest())
+            for name in hashes:
+                path = root / name
+                original = path.read_bytes()
+                path.write_bytes(b"tampered")
+                with self.subTest(path=name), self.assertRaises(ValueError):
+                    PACKAGER["verify_recipe_source"](root, evidence)
+                path.write_bytes(original)
+            path = root / next(iter(hashes))
+            for scenario in ("missing", "symlink", "oversize"):
+                path.unlink(missing_ok=True)
+                if scenario == "symlink":
+                    path.symlink_to(root / "missing")
+                elif scenario == "oversize":
+                    path.write_bytes(b"x" * (2 * 1024 * 1024 + 1))
+                with self.subTest(scenario=scenario), self.assertRaises(ValueError):
+                    PACKAGER["verify_recipe_source"](root, evidence)
+
+    def test_base_prerequisite_checks_exact_archived_bytes(self):
+        selected = registry.recipe("terminal-query-v1", 1)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            content = b"upstream source"
+            asset = replace(selected.base_prerequisites[0], bytes=len(content),
+                            sha256=hashlib.sha256(content).hexdigest())
+            selected = replace(selected, base_prerequisites=(asset,))
+            path = root / asset.path
+            path.parent.mkdir(parents=True)
+            path.write_bytes(content)
+            PACKAGER["verify_base_prerequisites"](root, selected)
+            path.write_bytes(b"tampered source")
+            with self.assertRaises(ValueError):
+                PACKAGER["verify_base_prerequisites"](root, selected)
+            path.unlink()
+            path.symlink_to(root / "missing")
+            with self.assertRaises(ValueError):
+                PACKAGER["verify_base_prerequisites"](root, selected)
+
+    def test_mocked_terminal_package_applies_authenticated_stack_and_checks_source_twice(self):
+        recipe_evidence = registry.validate_recipe("terminal-query-v1", 1)
+        selected = recipe_evidence.recipe
+        patches = [registry._read_asset(asset).decode() for asset in selected.ordered_patches]
+        for drift in (False, True):
+            with self.subTest(drift=drift), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                events = []
+                applied = []
+                checked = []
+
+                def archive(_source, work, *_args):
+                    events.append("archive")
+                    (work / "codex-rs").mkdir()
+                    (work / "codex-rs/Cargo.lock").write_text("version = 4\n")
+
+                def prerequisites(_work, recipe):
+                    self.assertEqual(recipe.family, selected.family)
+                    self.assertEqual(events, ["archive"])
+                    events.append("prerequisites")
+
+                def run(command, *, cwd, **kwargs):
+                    if "apply" in command:
+                        self.assertIn("prerequisites", events)
+                        content = kwargs["input"]
+                        if "--check" in command:
+                            checked.append(content)
+                        else:
+                            self.assertEqual(checked, patches[:len(applied) + 1])
+                            applied.append(content)
+                        events.append("apply")
+                    elif "metadata" in command:
+                        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({
+                            "target_directory": str(cwd / "target"),
+                        }))
+                    elif "build" in command:
+                        self.assertEqual(events[-1], "verify-before")
+                        events.append("build")
+                        binary = cwd / "target/dev-small/codex"
+                        binary.parent.mkdir(parents=True)
+                        binary.write_bytes(b"mock terminal CLI")
+                    else:
+                        self.fail(f"unexpected mocked command: {command}")
+                    return subprocess.CompletedProcess(command, 0)
+
+                def verify(_work, evidence):
+                    self.assertEqual(dict(evidence.file_sha256), dict(recipe_evidence.file_sha256))
+                    self.assertEqual(applied, patches)
+                    after = "build" in events
+                    events.append("verify-after" if after else "verify-before")
+                    return 71, ("b" if after and drift else "a") * 64
+
+                replacements = {
+                    "_verified_code_mode_host": lambda _path: b"mock host",
+                    "_git_executable": lambda _env: Path("/mock/git"),
+                    "_binary_evidence": lambda _path: {},
+                    "_clean_checkout": lambda source, *_args: source,
+                    "_archive_source": archive,
+                    "verify_base_prerequisites": prerequisites,
+                    "verify_recipe_source": verify,
+                    "_run": run,
+                    "_cargo_configuration": lambda *_args: {},
+                    "_toolchain": lambda _env: (["mock-rustup"], "mock rustc", "mock cargo", {}),
+                    "lock_version_changes": lambda *_args: 159,
+                }
+                output, record = root / "codex", root / "evidence.json"
+                with patch.dict(PACKAGER_GLOBALS, replacements), patch("builtins.print"):
+                    if drift:
+                        with self.assertRaisesRegex(ValueError, "native_patched_source_changed_during_build"):
+                            PACKAGER["package"](root, output, record, root / "host",
+                                                family=selected.family, revision=1)
+                        self.assertFalse(output.exists())
+                        self.assertFalse(record.exists())
+                    else:
+                        evidence = PACKAGER["package"](root, output, record, root / "host",
+                                                       family=selected.family, revision=1)
+                        self.assertEqual(evidence["recipe"], {
+                            "family": selected.family, "revision": 1,
+                            "manifestSha256": selected.manifest.sha256,
+                        })
+                        self.assertEqual(evidence["appliedPatches"], [
+                            {"path": a.path, "bytes": a.bytes, "sha256": a.sha256}
+                            for a in selected.ordered_patches
+                        ])
+                        self.assertEqual(evidence["patchedFileCount"], 71)
+                        self.assertEqual(evidence["patchedFileSha256"], dict(recipe_evidence.file_sha256))
+                        self.assertEqual(evidence["patchedSourceInventoryBeforeBuildSha256"], "a" * 64)
+                        self.assertEqual(evidence["patchedSourceInventoryAfterBuildSha256"], "a" * 64)
+                self.assertEqual(checked, patches)
+                self.assertEqual(applied, patches)
+                self.assertEqual(events.count("verify-before"), 1)
+                self.assertEqual(events.count("verify-after"), 1)
+
+    def test_builder_cli_limits_recipe_choices_and_defaults(self):
+        required = ["--source", "source", "--output", "output", "--evidence", "evidence",
+                    "--code-mode-host-archive", "host"]
+        for family in (None, "core-idle-v1", "terminal-query-v1"):
+            with patch.dict(PACKAGER_GLOBALS, {"package": lambda *args, **kwargs: kwargs}), \
+                    patch("builtins.print") as output:
+                PACKAGER["main"](required + ([] if family is None else ["--family", family]))
+                kwargs = json.loads(output.call_args.args[0])
+                self.assertEqual(kwargs["family"], family or "core-idle-v1")
+                self.assertEqual(kwargs["revision"], 1)
+        for invalid in (["--family", "unknown"], ["--revision", "2"]):
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                PACKAGER["main"](required + invalid)
+            self.assertEqual(error.exception.code, 2)
 
 
 if __name__ == "__main__":

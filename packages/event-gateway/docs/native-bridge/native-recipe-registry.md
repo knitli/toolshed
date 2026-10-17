@@ -11,8 +11,9 @@ frozen records and a read-only mapping:
 The trusted provenance verifier supports registered legacy schema version 1
 artifacts and schema version 2 recipe identities. It loads the registry from a
 fixed sibling file in its trusted checkout, including under Python isolated mode;
-candidate and build-head registry code is never run. Builder/producer adoption
-follows this verifier policy separately. Direct production consumers are limited
+candidate and build-head registry code is never run. The builder selects the
+registry recipe, defaulting to `core-idle-v1`, revision 1; `terminal-query-v1`
+requires explicit selection. Direct production consumers are limited
 to the verifier and builder; the producer accesses the registry through the
 builder. This policy does not change launcher pins or authorize a build.
 
@@ -73,10 +74,13 @@ insufficient. The authenticated builder checks upstream prerequisites in a fresh
 archive of the pinned upstream commit before applying patches; prerequisites are
 upstream files, not additional documentation assets.
 
-All new registry-dependent builds, including the default 57-entry family, must
-emit v2 receipts after builder adoption. Historical v1 tuples remain unchanged.
+All new builds, including the default 57-entry family, emit v2 receipts with
+the five inputs above. The producer hashes the registry and selected recipe
+assets before and after packaging and checks the returned recipe identity.
+Historical v1 tuples remain unchanged.
 
 The existing full-suite run failed. Six targeted reruns passed; those results do
-not replace the failed full-suite result or establish acceptance. Future builder adoption
-must retain the existing checks and separately establish the required build,
-provenance, and qualification evidence.
+not replace the failed full-suite result or establish acceptance. Builder adoption
+provides source replay and mocked packaging evidence, not an actual 71-family
+binary or native qualification. Build, provenance, exact-candidate qualification,
+installation, and pin promotion remain separate gates.
