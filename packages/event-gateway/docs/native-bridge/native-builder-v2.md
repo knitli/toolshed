@@ -7,6 +7,16 @@ only those family choices and passes the choice through a quoted environment
 variable; revision remains 1. Existing v1 artifacts require the verifier's
 separate registered historical-tuple compatibility path.
 
+Paired installation previously required all five legacy build-input files to
+match current main. It now accepts a legacy receipt only when its entire five-hash
+build tuple matches a reviewed registry entry for the immutable `core-idle-v1`,
+revision 1 recipe. This preserves the reviewed 57-file artifact when shared builder,
+producer, or workflow code changes; it does not admit arbitrary old receipts or
+mixed hashes. The installer still authenticates its local policy and registry
+against protected main, checks the registered manifest/patch identity, and verifies
+run, ancestry, artifact, and both executable pins. V2 build inputs must still match
+current main.
+
 The workflow carries an intentional, local `CKV_GHA_7` exception for this choice
 input. Both options select fixed protected-main recipes at revision 1; quoted
 argument forwarding, pinned source assets, and exact receipt identity checks
@@ -23,10 +33,11 @@ and `sourceManifestSha256`. The manifest digest equals the recipe digest.
 all seven terminal patches. No singular patch digest represents that family.
 
 The registry authenticates the selected manifest, parents, and patches. The
-builder applies authenticated patch contents to a fresh full archive of the
-pinned upstream commit. It checks the terminal base prerequisite in that archive
-before applying patches. It verifies every selected source hash before and
-after compilation, preserving the legacy byte-size checks and bounding terminal
+builder passes authenticated patch bytes unchanged to Git and applies them to a
+fresh full archive of the pinned upstream commit. It checks the terminal base prerequisite in that archive
+before applying patches. Standalone packaging reauthenticates the selected manifest,
+parents, and ordered patches before and after the build for both families. It
+verifies every selected source hash before and after compilation, preserving the legacy byte-size checks and bounding terminal
 source reads to 2 MiB per file. Inventory hashes use sorted UTF-8 paths followed
 by NUL and the raw SHA-256 digest for each file. The producer checks recipe
 assets and implementation input hashes before and after packaging and correlates

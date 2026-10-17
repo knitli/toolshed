@@ -58,6 +58,15 @@ status publication. The strict nine-field schema version 1 selection remains:
 additional recipe fields and 71-family inputs are not accepted under v1. Both reviewed
 launcher transitions and the unchanged-pin no-artifact path remain available.
 
+Paired installation uses this same historical-v1 rule. Previously it required all
+five legacy build-input files to equal current main, rejecting the reviewed legacy
+artifact whenever shared builder, producer, or workflow code changed. It now
+requires the artifact's complete registered tuple and fixed legacy manifest/patch
+identity, preserving that immutable source family across shared tooling changes.
+It still checks local policy and registry bytes against protected main, main
+freshness, run and ancestry metadata, the archive, and both executable pins.
+This admits no arbitrary historical receipt; v2 inputs remain current-main-only.
+
 Schema version 2 uses the existing selection fields plus exactly
 `recipe: {family, revision, manifestSha256}`. Selection and receipt use integer
 `schemaVersion: 2`; the recipe object and builder evidence do not gain a schema

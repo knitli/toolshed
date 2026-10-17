@@ -1086,7 +1086,7 @@ class NativePackagingTests(unittest.TestCase):
     def test_mocked_terminal_package_applies_authenticated_stack_and_checks_source_twice(self):
         recipe_evidence = registry.validate_recipe("terminal-query-v1", 1)
         selected = recipe_evidence.recipe
-        patches = [registry._read_asset(asset).decode() for asset in selected.ordered_patches]
+        patches = [registry._read_asset(asset) for asset in selected.ordered_patches]
         for drift in (False, True):
             with self.subTest(drift=drift), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -1175,6 +1175,109 @@ class NativePackagingTests(unittest.TestCase):
                 self.assertEqual(applied, patches)
                 self.assertEqual(events.count("verify-before"), 1)
                 self.assertEqual(events.count("verify-after"), 1)
+
+    def test_run_preserves_non_utf8_patch_input(self):
+        payload = b"patch bytes: \xff\xfe\x00\r\n"
+        with tempfile.TemporaryDirectory() as directory:
+            result = PACKAGER["_run"](
+                [sys.executable, "-c",
+                 "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"],
+                cwd=Path(directory), capture=True, input=payload,
+            )
+        self.assertEqual(result.stdout, payload)
+        self.assertEqual(result.stderr, b"")
+
+    def test_package_rejects_recipe_asset_drift_during_build(self):
+        for family in ("core-idle-v1", "terminal-query-v1"):
+            selected = registry.validate_recipe(family, 1).recipe
+            assets = (selected.manifest, *selected.parents, *selected.ordered_patches)
+            originals = {asset.path: registry._read_asset(asset) for asset in assets}
+            for changed in (None, *(asset.path for asset in assets)):
+                with self.subTest(family=family, changed=changed), \
+                        tempfile.TemporaryDirectory() as directory:
+                    self._assert_package_asset_drift(Path(directory), selected, originals, changed)
+
+    def _assert_package_asset_drift(self, root, selected, originals, changed):
+        docs = root / "docs"
+        docs.mkdir()
+        content = b"fixture source"
+        digest = hashlib.sha256(content).hexdigest()
+        manifest = json.dumps({
+            "fileSha256": {"fixture.rs": digest},
+            "files": [{"path": "fixture.rs", "sha256": digest, "bytes": len(content)}],
+        }).encode()
+        for relative, data in originals.items():
+            path = docs / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(manifest if relative == selected.manifest.path else data)
+        selected = replace(selected, file_count=1, base_prerequisites=(), manifest=replace(
+            selected.manifest, bytes=len(manifest), sha256=hashlib.sha256(manifest).hexdigest(),
+        ))
+        evidence = registry.RecipeEvidence(selected, {"fixture.rs": digest})
+        events = []
+
+        def validate(*_args):
+            for asset in (selected.manifest, *selected.parents, *selected.ordered_patches):
+                registry._read_asset(asset)
+            events.append("validated")
+            return evidence
+
+        def archive(_source, work, *_args):
+            (work / "fixture.rs").write_bytes(content)
+            (work / "codex-rs").mkdir()
+            (work / "codex-rs/Cargo.lock").write_text("version = 4\n")
+
+        def run(command, *, cwd, **kwargs):
+            if "apply" in command:
+                self.assertIsInstance(kwargs["input"], bytes)
+            elif "metadata" in command:
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps({
+                    "target_directory": str(cwd / "target"),
+                }))
+            elif "build" in command:
+                self.assertEqual(events, ["validated"])
+                events.append("built")
+                binary = cwd / "target/dev-small/codex"
+                binary.parent.mkdir(parents=True)
+                binary.write_bytes(b"mock CLI")
+                if changed is not None:
+                    path = docs / changed
+                    data = path.read_bytes()
+                    path.write_bytes(bytes([data[0] ^ 1]) + data[1:])
+            else:
+                self.fail(f"unexpected mocked command: {command}")
+            return subprocess.CompletedProcess(command, 0)
+
+        replacements = {
+            "registry": registry,
+            "_verified_code_mode_host": lambda _path: b"mock host",
+            "_git_executable": lambda _env: Path("/mock/git"),
+            "_binary_evidence": lambda _path: {},
+            "_clean_checkout": lambda source, *_args: source,
+            "_archive_source": archive,
+            "_run": run,
+            "_cargo_configuration": lambda *_args: {},
+            "_toolchain": lambda _env: (["mock-rustup"], "mock rustc", "mock cargo", {}),
+            "lock_version_changes": lambda *_args: 159,
+        }
+        output, record = root / "codex", root / "evidence.json"
+        with patch.object(registry, "DOCS", docs), \
+                patch.object(registry, "validate_recipe", side_effect=validate), \
+                patch.dict(PACKAGER_GLOBALS, replacements), patch("builtins.print"):
+            if changed is None:
+                result = PACKAGER["package"](root, output, record, root / "host",
+                                              family=selected.family)
+                self.assertEqual(result["patchedFileCount"], 1)
+                self.assertTrue(output.exists())
+                self.assertTrue(record.exists())
+            else:
+                with self.assertRaisesRegex(ValueError, "asset hash mismatch"):
+                    PACKAGER["package"](root, output, record, root / "host",
+                                        family=selected.family)
+                self.assertFalse(output.exists())
+                self.assertFalse(record.exists())
+                self.assertFalse((root / "codex-code-mode-host").exists())
+        self.assertEqual(events, ["validated", "built"])
 
     def test_builder_cli_limits_recipe_choices_and_defaults(self):
         required = ["--source", "source", "--output", "output", "--evidence", "evidence",

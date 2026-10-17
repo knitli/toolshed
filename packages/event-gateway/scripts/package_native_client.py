@@ -151,6 +151,9 @@ def verify_base_prerequisites(source, selected):
 
 
 def verify_recipe_source(source, evidence):
+    selected = evidence.recipe
+    for asset in (selected.manifest, *selected.parents, *selected.ordered_patches):
+        registry._read_asset(asset)
     if evidence.recipe.family == registry.DEFAULT_FAMILY:
         manifest = json.loads(registry._read_asset(evidence.recipe.manifest))
         return verify_patched_source(source, manifest)
@@ -325,7 +328,7 @@ def _rustup_executable(env):
 
 def _run(command, *, cwd, env=None, capture=False, stdout=None, input=None):
     return subprocess.run(
-        command, cwd=cwd, env=env, check=True, text=True, stdout=stdout or (
+        command, cwd=cwd, env=env, check=True, text=not isinstance(input, bytes), stdout=stdout or (
             subprocess.PIPE if capture else None
         ), stderr=subprocess.PIPE if capture else None, input=input,
     )
@@ -582,11 +585,10 @@ def package(source, output, evidence_path, host_archive, *, family="core-idle-v1
             git_env = _git_environment(env)
             git_args = [str(git), "-c", f"core.attributesFile={os.devnull}", "apply"]
             for _asset, contents in patches:
-                patch_text = contents.decode("utf-8")
                 _run([*git_args, "--check", "--whitespace=error", "-"],
-                     cwd=work, env=git_env, input=patch_text)
+                     cwd=work, env=git_env, input=contents)
                 _run([*git_args, "--whitespace=error", "-"],
-                     cwd=work, env=git_env, input=patch_text)
+                     cwd=work, env=git_env, input=contents)
             patched_count, source_before_build = verify_recipe_source(work, recipe_evidence)
 
             codex_rs = work / "codex-rs"
