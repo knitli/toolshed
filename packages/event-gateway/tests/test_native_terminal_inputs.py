@@ -12,6 +12,13 @@ from event_gateway.native_terminal_inputs import collect_terminal_inputs
 from test_native import ADMISSION, request
 
 
+_UPDATE_JSON = {
+    'admission': 'UPDATE attempts SET admission=?',
+    'native_request': 'UPDATE attempts SET native_request=?',
+    'input_recorded_receipt': 'UPDATE attempts SET input_recorded_receipt=?',
+}
+
+
 class NativeTerminalInputsTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -76,7 +83,7 @@ class NativeTerminalInputsTests(unittest.TestCase):
         for key in (*IDENTITY, 'generation'):
             with self.subTest(key=key):
                 anchor = copy.deepcopy(self.anchor)
-                anchor[key] = anchor[key] + 1 if type(anchor[key]) is int else 'changed'
+                anchor[key] = anchor[key] + 1 if isinstance(anchor[key], int) else 'changed'
                 self.save(anchor=anchor)
                 self.reject()
 
@@ -92,7 +99,7 @@ class NativeTerminalInputsTests(unittest.TestCase):
         for key in ('attemptId', 'deliveryId', 'permitId', 'permitIssuedAt', 'permitExpiresAt'):
             with self.subTest(key=key):
                 item = copy.deepcopy(self.item)
-                item[key] = item[key] + 1 if type(item[key]) is int else str(uuid.uuid4())
+                item[key] = item[key] + 1 if isinstance(item[key], int) else str(uuid.uuid4())
                 self.save(item=item)
                 self.reject()
         self.save()
@@ -153,7 +160,7 @@ class NativeTerminalInputsTests(unittest.TestCase):
                           raw + ' ' * 4097, duplicate, '{"a":NaN}'):
                 with self.subTest(column=column, value=value):
                     self.save()
-                    self.db.execute(f'UPDATE attempts SET {column}=?', (value,))
+                    self.db.execute(_UPDATE_JSON[column], (value,))
                     self.db.commit()
                     self.reject()
 

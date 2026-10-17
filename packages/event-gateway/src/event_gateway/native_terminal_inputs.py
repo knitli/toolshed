@@ -21,7 +21,8 @@ _QUERY = """SELECT
 
 
 def collect_terminal_inputs(connection, delivery_id, attempt_id):
-    """Read a trusted read-only journal connection; return saved inputs or None.
+    """
+    Read a trusted read-only journal connection; return saved inputs or None.
 
     None means only that this exact attempt is absent, never that no debt exists.
     Invalid/ambiguous/unsupported records raise one bounded NativeError. The caller
@@ -50,7 +51,7 @@ def collect_terminal_inputs(connection, delivery_id, attempt_id):
             _copy(_decode(value)) for value in (admission_raw, request_raw, receipt_raw)
         )
         if (not isinstance(request, dict)
-                or type(request.get('receiptVersion')) is not int
+                or type(request.get('receiptVersion')) is not int  # pylint: disable=unidiomatic-typecheck
                 or request['receiptVersion'] != 3):
             raise ValueError()
         # Historical validation uses the original issue time, not current eligibility.
