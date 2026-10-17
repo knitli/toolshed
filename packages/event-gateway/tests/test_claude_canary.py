@@ -1,5 +1,6 @@
 """Canary verification tests never launch Claude or contact a provider."""
 import asyncio
+from functools import partial
 import importlib.util
 import json
 import os
@@ -691,29 +692,12 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         def feed(*messages):
             reader.feed_data(b''.join((json.dumps(message) + '\n').encode() for message in messages))
 
-        async def initial_drain():
-            if scenario == 'timeout':
-                return
-            feed({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []},
-                 self.state('running'))
-            provider.probe.provider_request(self.ready)
-            provider.probe.hold_response()
-            provider.turns = 1
-
-        async def finish_native(frame):
-            await provider.probe.release.wait()
-            feed(frame | {'isReplay': True}, self.assistant(self.ready), self.result(self.ready))
-            self.busy = provider.probe.expected['marker']
-            provider.probe.provider_request(self.busy)
-            provider.turns = 2
-            feed(self.assistant(self.busy), self.result(self.busy), self.state('idle'))
-
         async def send(metadata):
             if scenario == 'held_timeout':
                 await asyncio.Event().wait()
             self.assertTrue(provider.probe.running)
             self.assertFalse(provider.probe.release.is_set())
-            pending.append(asyncio.create_task(finish_native(CANARY.event_frame(self.session, metadata))))
+            pending.append(asyncio.create_task(self.finish_busy_native(provider, feed, CANARY.event_frame(self.session, metadata))))
             return {'reason': 'claude_write_unacknowledged'}
 
         async def stop(_child):
@@ -725,7 +709,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             provider.failure = True
             provider.probe.failed.set()
 
-        child.stdin.drain = AsyncMock(side_effect=initial_drain)
+        child.stdin.drain = AsyncMock(side_effect=partial(self.initialize_busy_provider, scenario, feed, provider))
         provider.close = AsyncMock(side_effect=late_failure if scenario == 'late_failure' else None)
         transport = Mock(send=AsyncMock(side_effect=send))
         try:
@@ -739,54 +723,82 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(CANARY, 'child_peer_token', return_value=secrets.token_urlsafe(32)), \
                     patch.object(CANARY, 'ClaudeSocketTransport', return_value=transport), \
                     patch.object(CANARY, 'stop_child', new=AsyncMock(side_effect=stop)) as shutdown:
+                proof = await self.busy_scenario_outcome(scenario, root)
                 if scenario == 'success':
-                    proof = await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
-                                               busy_probe=True)
                     self.assertTrue(stopped)
                     provider.close.assert_awaited_once()
-                    witness = proof['busyProbe']
-                    self.assertEqual(witness['admission'], 'unknown')
-                    self.assertEqual(witness['delivery'], 'unknown')
-                    self.assertFalse(witness['restartQualified'])
-                    self.assertFalse(proof['productionQualified'])
-                    self.assertFalse(proof['nativeReceiptV3Proven'])
-                    self.assertEqual(witness['retainedChildPid'], child.pid)
-                    observations = witness['observations']
-                    timestamps = [item['observedNs'] for item in observations]
-                    self.assertEqual(timestamps, sorted(timestamps))
-                    self.assertGreaterEqual(timestamps[0], 0)
-                    kinds = [item['kind'] for item in observations]
-                    sequence = ['busy_input_prepared', 'socket_write_closed',
-                                'initial_response_released', 'native_user_replay', 'native_assistant']
-                    positions = [kinds.index(kind) for kind in sequence]
-                    self.assertEqual(positions, sorted(positions))
-                    self.assertEqual(observations[-1]['kind'], 'native_state')
-                    self.assertEqual(observations[-1]['state'], 'idle')
-                elif scenario in ('timeout', 'held_timeout'):
-                    with self.assertRaises(TimeoutError):
-                        await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
-                                            busy_probe=True)
-                else:
-                    with self.assertRaisesRegex(CANARY.CanaryError, '^local_provider_incomplete$'):
-                        await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
-                                            busy_probe=True)
+                    self.assert_busy_proof(proof, child.pid)
             shutdown.assert_awaited_once_with(child)
             server.close.assert_called_once()
             server.wait_closed.assert_awaited_once()
             provider.close.assert_awaited_once()
-            if scenario == 'timeout':
-                transport.send.assert_not_awaited()
-                self.assertEqual(generated, 3)
-            else:
-                if scenario == 'held_timeout':
-                    self.assertTrue(provider.probe.held)
-                    self.assertFalse(provider.probe.release.is_set())
-                    self.assertFalse(provider.probe.complete.is_set())
-                transport.send.assert_awaited_once()
-                self.assertEqual(generated, 6)
+            self.assert_busy_send_state(scenario, transport, provider.probe, generated)
             self.assertFalse(root.exists())
         finally:
             await asyncio.gather(*pending)
+
+    async def initialize_busy_provider(self, scenario, feed, provider):
+        if scenario == 'timeout':
+            return
+        feed({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []},
+             self.state('running'))
+        provider.probe.provider_request(self.ready)
+        provider.probe.hold_response()
+        provider.turns = 1
+
+    async def finish_busy_native(self, provider, feed, frame):
+        await provider.probe.release.wait()
+        feed(frame | {'isReplay': True}, self.assistant(self.ready), self.result(self.ready))
+        self.busy = provider.probe.expected['marker']
+        provider.probe.provider_request(self.busy)
+        provider.turns = 2
+        feed(self.assistant(self.busy), self.result(self.busy), self.state('idle'))
+
+    async def busy_scenario_outcome(self, scenario, root):
+        if scenario == 'success':
+            return await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
+                                       busy_probe=True)
+        if scenario in ('timeout', 'held_timeout'):
+            with self.assertRaises(TimeoutError):
+                await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
+                                    busy_probe=True)
+        else:
+            with self.assertRaisesRegex(CANARY.CanaryError, '^local_provider_incomplete$'):
+                await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
+                                    busy_probe=True)
+        return None
+
+    def assert_busy_proof(self, proof, child_pid):
+        witness = proof['busyProbe']
+        self.assertEqual(witness['admission'], 'unknown')
+        self.assertEqual(witness['delivery'], 'unknown')
+        self.assertFalse(witness['restartQualified'])
+        self.assertFalse(proof['productionQualified'])
+        self.assertFalse(proof['nativeReceiptV3Proven'])
+        self.assertEqual(witness['retainedChildPid'], child_pid)
+        observations = witness['observations']
+        timestamps = [item['observedNs'] for item in observations]
+        self.assertEqual(timestamps, sorted(timestamps))
+        self.assertGreaterEqual(timestamps[0], 0)
+        kinds = [item['kind'] for item in observations]
+        sequence = ['busy_input_prepared', 'socket_write_closed',
+                    'initial_response_released', 'native_user_replay', 'native_assistant']
+        positions = [kinds.index(kind) for kind in sequence]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(observations[-1]['kind'], 'native_state')
+        self.assertEqual(observations[-1]['state'], 'idle')
+
+    def assert_busy_send_state(self, scenario, transport, probe, generated):
+        if scenario == 'timeout':
+            transport.send.assert_not_awaited()
+            self.assertEqual(generated, 3)
+        else:
+            if scenario == 'held_timeout':
+                self.assertTrue(probe.held)
+                self.assertFalse(probe.release.is_set())
+                self.assertFalse(probe.complete.is_set())
+            transport.send.assert_awaited_once()
+            self.assertEqual(generated, 6)
 
     def test_optional_initial_replay_and_late_busy_replay_preserve_identity(self):
         probe = self.started()
