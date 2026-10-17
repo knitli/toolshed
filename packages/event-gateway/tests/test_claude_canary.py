@@ -857,6 +857,56 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                     **({'state': 'running'} if event.get('subtype') == 'session_state_changed' else {})}])
                 self.assertNotIn(secret, json.dumps(raised.exception.diagnostic))
 
+    async def test_stdout_type_labels_diagnose_preinit_failure_without_admission(self):
+        labels = ('active_goal', 'assistant', 'auth_status', 'autocompact_state',
+                  'command_lifecycle', 'control_cancel_request', 'control_request',
+                  'control_response', 'conversation_reset', 'keep_alive',
+                  'prompt_suggestion', 'rate_limit_event', 'result', 'stream_event',
+                  'system', 'tool_progress', 'tool_use_summary', 'transcript_mirror', 'user')
+        secret = 'private-payload-' + secrets.token_hex(16)
+        for kind in labels:
+            probe = self.new_probe()
+            probe.provider_request(self.ready)
+            probe.hold_response()
+            event = {'type': kind, 'subtype': secret, 'session_id': self.session,
+                     'message': secret, 'request': {'subtype': secret},
+                     'response': {'result': secret}, 'event': {'type': secret},
+                     'value': secret, 'output': [secret], 'rate_limit_info': {secret: secret}}
+            with self.subTest(kind=kind), self.assertRaisesRegex(
+                    CANARY.CanaryError, '^busy_native_missing_init$') as raised:
+                await CANARY.observe_busy_stdout(
+                    stream(self.ui_hint(), self.state('running'), event), probe)
+            diagnostic = raised.exception.diagnostic
+            self.assertEqual([item['eventType'] for item in diagnostic], ['system', 'system', kind])
+            self.assertEqual(diagnostic[-1]['eventSubtype'], 'unknown')
+            self.assertEqual(diagnostic[-1]['sessionId'], self.session)
+            self.assertNotIn(secret, json.dumps(diagnostic))
+            self.assertFalse(probe.initialized)
+            self.assertFalse(probe.running)
+            self.assertFalse(probe.ready_to_send.is_set())
+            self.assertFalse(probe.complete.is_set())
+
+    async def test_unknown_stdout_types_never_export_arbitrary_values(self):
+        secret = 'private_untrusted_discriminator_' + secrets.token_hex(16)
+        values = (secret, secret * 100, 'control_request' + secret,
+                  'CONTROL_REQUEST', 'control_request\n', None, {secret: secret},
+                  [secret], True, 17, 1.5, 'bash_command', 'session_notice',
+                  'queued_notification', 'set_expanded_view')
+        for value in values:
+            probe = self.new_probe()
+            event = {'type': value, 'subtype': secret, 'session_id': self.session,
+                     secret: secret, 'message': {secret: secret}}
+            with self.subTest(value=value), self.assertRaisesRegex(
+                    CANARY.CanaryError, '^busy_native_missing_init$') as raised:
+                await CANARY.observe_busy_stdout(stream(event), probe)
+            self.assertEqual(raised.exception.diagnostic[0]['eventType'], 'unknown')
+            self.assertEqual(raised.exception.diagnostic[0]['eventSubtype'], 'unknown')
+            self.assertNotIn(secret, json.dumps(raised.exception.diagnostic))
+            self.assertFalse(probe.initialized)
+            self.assertFalse(probe.running)
+            self.assertFalse(probe.ready_to_send.is_set())
+            self.assertFalse(probe.complete.is_set())
+
     async def test_failure_diagnostic_state_is_allowlisted_and_only_for_state_events(self):
         secret = 'private-state-' + secrets.token_hex(16)
         for state in ('running', 'idle', secret, None, {'content': secret}):
