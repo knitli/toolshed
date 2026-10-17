@@ -109,3 +109,5 @@ Next protocol work remains unimplemented: a Docker-aware producer spawn/lifecycl
 Historical repository packaging validation: 7 mock-only tests PASS; the event-gateway Ruff configuration and standalone C901 check PASS; all six files pass whitespace diff checks. No Docker re-execution or source changes occurred during that original packaging. These results do not validate the modified candidate.
 
 Prior hardened-source validation before attempt 3 staging: **20 mock-only tests passed**; event-gateway Ruff and standalone C901 (maximum complexity 15) passed. The three source hashes remained unchanged through attempt 3.
+
+After attempt 4, one blank line was added to the host-only mock test module for E306. The supervisor and child remain byte-identical to attempt 4; the test module is not executed in the container. All 20 mock tests, configured Ruff, explicit preview E306, and C901 checks passed on the updated test file; its hash is recorded under `currentCandidate.validation` in the combined receipt.

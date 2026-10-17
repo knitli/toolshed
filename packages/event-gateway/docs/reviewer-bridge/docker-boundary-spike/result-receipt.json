@@ -117,7 +117,7 @@
     "test_supervisor.py": "627e9f781d6be515df8f32170ec791a7087c655686c6fddc7caa35c0ad0fb020"
   },
   "currentCandidate": {
-    "execution": "Current lint-only revision executed from fresh byte-exact staging in attempt 4: PASS",
+    "execution": "Supervisor and child byte-identical to successful attempt 4; subsequent change is one blank line in host-only mock tests",
     "qualification": "Local staged Docker boundary passed; SDK/provider/hosted integration remains unqualified",
     "boundary": {
       "endpoint": "~/.docker/run/docker.sock",
@@ -155,7 +155,8 @@
       "ruff": "PASS with event-gateway configuration",
       "C901": "PASS, maximum complexity 15",
       "banditB404B603": "PASS with justified line-scoped annotations",
-      "evidence": "Mock and lint checks rerun on lint-only revision before attempt 4; these checks did not invoke Docker"
+      "evidence": "20 host-only mock tests, configured Ruff, explicit preview E306, and C901 checks passed after test-only whitespace change; test module is not executed in the container",
+      "testSourceSha256": "8b84dc9b147fadc5ec1b21a590739688f59ee48af19cafa098f7316d88e775e8"
     },
     "changesSinceAttempt3": "Lint-only nosec B404/B603 annotations, __init__ docstring, and test blank lines; source bytes change without intended behavior changes",
     "priorStagedExecution": {
@@ -177,6 +178,7 @@
       "supervisor.py": "1a23e76f5fe746613c5a082511c9c356e8ec562676c342a6421ca5c061bff1b9",
       "test_supervisor.py": "cb2b52b30e9775452d5543e5037b066adf8307f9a0e46bc9ca24aee596ccf168",
       "fixture/child.py": "0d53fe1df5c4253bd8770e931fb9c29176a3773513def15dd4f7ef776d4c8647"
-    }
+    },
+    "sourceSha256EvidenceScope": "Source bundle recorded for attempt 4; current host-only test hash is recorded under validation. Executed supervisor and child remain byte-identical."
   }
 }

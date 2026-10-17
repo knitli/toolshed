@@ -98,6 +98,7 @@ class Tests(unittest.TestCase):
         for failure in ('inspect', 'kill', 'running', 'rm', 'remaining'):
             calls = []
             count = 0
+
             def invoke(args):
                 nonlocal count
                 calls.append(args)
