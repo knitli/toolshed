@@ -53,6 +53,20 @@ def _drain_stderr(process, capture, stopped):
             pass
 
 
+def gateway_child_config(ledger, address, seed, *, crash_expected=None):
+    directory = ledger.parent
+    native_log, http_log = directory / 'native-calls', directory / 'http-calls'
+    native_log.touch(mode=0o600)
+    http_log.touch(mode=0o600)
+    config = directory / 'child.json'
+    value = {'ledger': str(ledger), 'address': address, 'seed': seed,
+             'nativeLog': str(native_log), 'httpLog': str(http_log)}
+    if crash_expected is not None:
+        value.update(crashMarker=str(directory / 'cloud-crash-injected'), crashExpected=crash_expected)
+    config.write_text(json.dumps(value))
+    return config, native_log, http_log
+
+
 @contextmanager
 def gateway_child(config_path, phase):
     directory = config_path.parent
@@ -156,13 +170,7 @@ class MessagingProcessRestartTests(unittest.TestCase):
 
     def crash_and_restart(self, phase, *, restart_cloud=False):
         with fixture() as (ledger, address, transport, seed):
-            directory = ledger.parent
-            native_log, http_log = directory / 'native-calls', directory / 'http-calls'
-            native_log.touch(mode=0o600)
-            http_log.touch(mode=0o600)
-            config = directory / 'child.json'
-            config.write_text(json.dumps({'ledger': str(ledger), 'address': address, 'seed': seed,
-                                          'nativeLog': str(native_log), 'httpLog': str(http_log)}))
+            config, native_log, http_log = gateway_child_config(ledger, address, seed)
             expected_claims = 0 if phase == 'intent' else 1
             with gateway_child(config, phase) as (child, stopped):
                 self.assertEqual(stopped['phase'], phase)

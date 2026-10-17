@@ -1,6 +1,6 @@
 # Messaging in-flight workerd crash matrix
 
-Status: the approved local three-case matrix passed on 2026-10-17. One unittest
+Historical crash-only result: the approved local three-case matrix passed on 2026-10-17. One unittest
 executed all three subtests in 5.260 seconds with exit code 0 and no skips. The
 preparation base is reviewed PR #153, commit `1a66233e2ae957e3015c84e188be6725a63a8cf9`.
 PR #153 has since merged as `4182c8e593a70c8f752b812a45494dcbf693484c`.
@@ -132,8 +132,75 @@ PYTHONPATH=packages/event-gateway/src:packages/event-gateway/tests \
 ```
 
 Do not widen the run to the whole integration suite or treat a skip as a pass.
-That class contains exactly three fresh crash subtests. The pass qualifies the
+The original run contained three fresh crash subtests; the extension below now contains twelve. The pass qualifies the
 local pinned Miniflare/workerd boundaries above. Deployment, machine power loss,
 automatic cloud-alarm recovery, native/provider execution, native completion,
 durable ACK, settlement and unattended wake remain unqualified. No install,
 recurring monitor or production activation is included.
+
+## Crash followed by production alarm composition
+
+The extended fixture runs twelve fresh owned-workerd crash cases: the three
+original barriers followed by the real production `AgentCoordinator.alarm()`,
+eight unadmitted cases (before/after reservation crossed with consumer, route,
+source and key changes), and one positive same-attempt replay after reservation.
+The fixture endpoint ages only claim deadlines (`updated_at` for reserving and
+`permit_until` for admitted) before invoking the production alarm. Automatic
+platform alarm scheduling remains suppressed. This proves the alarm method's
+post-crash composition, not autonomous scheduling or power-loss recovery.
+
+The first two phases become `unknown`; admitted claims become `ambiguous`.
+Snapshots require the exact attempt identity, budget ledger, message attempt,
+slot obligation and permit ID to survive. A second alarm must be idempotent.
+A reopened Python process must retain its exact held, uncertain attempt, with
+no automatic HTTP resend or native call. No native receipt, ACK or settlement
+is generated. The admitted deadline is deliberately aged; no claim is made
+that its timestamp is unchanged or that historical lookup was retested.
+
+The eight fencing probes explicitly replay the original unadmitted Cloud attempt
+with a fresh node proof after the alarm. Consumer/route/source changes return
+HTTP 409 `conflict`; key deactivation returns HTTP 403 `denied`. The Cloud
+snapshot must remain unchanged, with no permit or additional budget charge.
+The positive unchanged-consumer replay returns one valid permit for the original
+attempt while preserving the already charged ledger. This explicit probe is
+separate from local gateway custody, which remains uncertain and never resends.
+Admitted historical lookup intentionally retains its original permit; blanket
+refusal after consumer/source changes would contradict that production contract.
+
+Source trace on pinned Cloud `99655360630ca0e3f222d1e73d841aaf456378a7`:
+
+- `coordinator.ts:2275`: the alarm ages reserving claims to unknown and expired
+  admitted claims to ambiguous; it does not retry admission.
+- `coordinator.ts:1446` and `:2477`: new admission refreshes the source fence;
+  its local check compares runtime attachment generation against the delivery.
+- `messaging/delivery-authority.ts:26`: preparation is reread and must match
+  the retained source snapshot; route changes or revoked source grants conflict.
+- `event-authority.ts:146` and `coordinator.ts:1422`: active agent credentials
+  are rechecked; deactivated keys are denied before reservation.
+- `coordinator.ts:1550`: explicit same-attempt recovery checks Messaging status
+  before considering reservation; generic reservation/status remains forbidden.
+
+`coordinator.ts` is byte-identical at the fixture pin and reviewed Cloud
+`ba9824bc17c3b37464a1142cdb34253bf6198354`. All 334 upstream/dependency input
+hashes and both Cloud pins remain unchanged. Only the fixture worker input and
+compiled bundle hash rotate; the closure still has 335 inputs.
+
+Causal negative controls remove the fixture's production-alarm invocation
+(all twelve cases fail) or suppress the consumer/revocation stimulus
+(all eight refusal cases fail because admission succeeds). The latter is a
+stimulus control, not deletion of a production fence. Exact fixture source and
+pin bytes were restored and matched the final positive-run source freeze. No upstream
+source was mutated. The derived JSON receipt records the final run, source
+freeze, logs and these limits. Root independently repeated all twelve crash
+cases and six safety tests: seven unittest tests passed in 21.050 seconds with
+zero skips. The original executable freeze matched that run. Root approved signed PR
+publication; CI, automatic Codex review and root merge gates remain pending.
+
+A later review correction extracts shared child configuration and Cloud client
+construction into the existing test helpers. Scenario assertions and runtime
+fixture bytes remain unchanged. A separately reviewed three-module run passed
+26 tests in 48.853 seconds with zero skips, including all twelve actual crash
+cases. The JSON receipt preserves the original run and records this newer run's
+three changed source hashes separately. Root reviewed the exact extraction and
+hashes and ran extended lint and diff checks; the bounded test agent executed
+the 26-test run. This adds no production qualification.
