@@ -58,7 +58,7 @@ result=await acquireQualificationEvidence({directory,outputPath:output,handoffBy
   }
   return structuredClone(run);
  }
- if(endpoint===prefix+'/jobs?per_page=100&page=1')return {total_count:2,jobs:structuredClone(jobs)};
+ if(endpoint===`${prefix}/jobs?per_page=100&page=1`)return {total_count:2,jobs:structuredClone(jobs)};
  throw Error('Unexpected fixture endpoint');
 }});
 } catch (error) { acquisitionError = error; }

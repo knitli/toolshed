@@ -46,7 +46,8 @@ def acquisition_source(repository, filename):
          POLICY["workflowSha"] + ":scripts/" + filename],
         check=True, capture_output=True, timeout=10,
         env={"PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1",
-             "GIT_CONFIG_GLOBAL": "/dev/null"},
+             "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_NO_LAZY_FETCH": "1",
+             "GIT_ALLOW_PROTOCOL": ""},
     ).stdout
 
 
@@ -220,6 +221,26 @@ class TransportTests(unittest.TestCase):
                 self.assertNotIn("X-GitHub-Api-Version", headers)
             self.assertEqual(headers["Accept-Encoding"], "identity")
 
+    def test_acquisition_export_never_fetches_missing_objects(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary).resolve()
+            subprocess.run(  # nosec B603 - Fixed Git and owned disposable repository.
+                ["/usr/bin/git", "init", "--bare", "--template=", str(repository)],
+                check=True, capture_output=True, timeout=10,
+                env={"PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1",
+                     "GIT_CONFIG_GLOBAL": "/dev/null"},
+            )
+            # A local-only promisor points to a missing path, so a fetch is observable without a network.
+            (repository / "config").write_text(
+                '[core]\n\tbare = true\n[remote "origin"]\n'
+                f'\turl = {repository.as_uri()}/missing\n\tpromisor = true\n'
+                '\tpartialclonefilter = blob:none\n'
+            )
+            with self.assertRaises(subprocess.CalledProcessError) as caught:
+                acquisition_source(repository, "reviewer-host-acquisition.mjs")
+            self.assertNotIn(b"does not appear to be a git repository", caught.exception.stderr)
+            self.assertEqual(list((repository / "objects/pack").iterdir()), [])
+
     @unittest.skipUnless(os.environ.get("REVIEWER_ACQUISITION_REPOSITORY"),
                          "replacement control requires the pinned upstream repository")
     def test_acquisition_export_ignores_replacement_refs(self):
@@ -229,9 +250,9 @@ class TransportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary).resolve()
 
-            def git(at, *args, input=None):
+            def git(at, *args, input_bytes=None):
                 return subprocess.run(  # nosec B603 - Fixed Git; only owned disposable fixture mutations.
-                    ["/usr/bin/git", "-C", str(at), *args], input=input,
+                    ["/usr/bin/git", "-C", str(at), *args], input=input_bytes,
                     check=True, capture_output=True, timeout=10,
                     env={"PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1",
                          "GIT_CONFIG_GLOBAL": "/dev/null"},
@@ -241,9 +262,9 @@ class TransportTests(unittest.TestCase):
             # Borrow objects read-only; replacement refs and new objects live only here.
             objects = git(upstream, "rev-parse", "--path-format=absolute", "--git-path", "objects")
             (repository / "objects/info/alternates").write_bytes(objects)
-            original = git(repository, "hash-object", "--stdin", input=expected).decode().strip()
+            original = git(repository, "hash-object", "--stdin", input_bytes=expected).decode().strip()
             poison = b"throw new Error('replacement source must never execute');\n"
-            replacement = git(repository, "hash-object", "-w", "--stdin", input=poison).decode().strip()
+            replacement = git(repository, "hash-object", "-w", "--stdin", input_bytes=poison).decode().strip()
             git(repository, "update-ref", "refs/replace/" + original, replacement)
             reference = POLICY["workflowSha"] + ":scripts/" + filename
             self.assertEqual(git(repository, "show", reference), poison)
