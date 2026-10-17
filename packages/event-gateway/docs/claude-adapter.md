@@ -109,3 +109,48 @@ but the installed client gates cross-session messaging independently. Do not byp
 that gate or borrow owner credentials. Production closure needs exact-session native
 binding, observed idle/busy behavior, lost-write/restart reconciliation, and a durable
 receipt contract that distinguishes input recorded, turn started, and terminal no-start.
+
+## Dedicated-key idle-wake canary (not yet executed)
+
+`qualify_claude_socket.py` is a separate opt-in run. In a terminal, with the gateway
+installed in the selected Python environment, run this one command and enter a
+**dedicated canary API key** at its hidden prompt:
+
+```sh
+python packages/event-gateway/scripts/qualify_claude_socket.py \
+  --binary /Users/adampoulemanos/.local/share/claude/versions/2.1.302 \
+  --model YOUR_AUTHORIZED_MODEL \
+  --private-output /private/tmp/claude-canary-proof/proof.json
+```
+
+This invokes two small model turns and uses Claude's `$0.10` client budget guard
+and a 90-second overall deadline. The guard is not an independent billing cap.
+Do not pass a key on the command line, copy an owner token/configuration, or use
+an existing owner session. No model run was made during implementation.
+
+The script pins the inspected executable digest and retains its own child handle.
+It launches `--bare`, a fresh HOME/config/work/tmp, a closed environment, no tools,
+no skills, empty MCP configuration and empty settings sources. Only the key entered
+at the prompt enters the child environment. [Bare mode](https://code.claude.com/docs/en/headless)
+explicitly avoids subscription OAuth and keychain credentials. A separate config
+directory alone is insufficient: [authentication documentation](https://code.claude.com/docs/en/authentication)
+notes that Console profile sign-ins can live outside it.
+
+After native initialization confirms the exact session and zero tools, the script
+requires a matching READY assistant message and successful result. It leaves stdin
+open and writes no second stdin prompt. Following a one-second idle interval, it
+reads only that child's exact freshly generated inbox key under its new config,
+then submits unique synthetic metadata through `ClaudeSocketTransport`. The actual
+connected peer must match the retained child. A matching WAKE assistant message and
+successful result are required before any proof is published. Missing native
+messaging support, native hold/refuse policy, authentication failure or unexpected
+output fails closed; no hidden feature gate or permission bypass is enabled.
+
+Only boolean/hash evidence is published atomically to a new private file. No raw
+transcript or key is printed or stored by the harness. The disposable child is
+terminated and awaited before deleting its state. If shutdown cannot be confirmed,
+state is retained instead of deleting files under a live process. This is a trusted
+client canary, not hostile-code process-tree containment. A successful headless wake
+still does not prove TUI idle wake, busy queuing, receipt-v3, restart recovery,
+production enrollment or release qualification. Unit tests check parsing/refusal and
+isolation without executing Claude or manufacturing a native PASS artifact.
