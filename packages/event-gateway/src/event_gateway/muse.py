@@ -25,6 +25,25 @@ def _milliseconds(value, *, zero=False):
             and (1000 <= value <= 1800000 or zero and value == 0))
 
 
+def _valid_websocket_uri(uri):
+    # urlsplit removes some raw controls instead of rejecting them.
+    if any(char.isspace() or ord(char) < 32 or ord(char) == 127
+           or char in '<>\"{}|\\^`' for char in uri):
+        return False
+    try:
+        parsed = urlsplit(uri)
+        valid = parsed.scheme in ('ws', 'wss') and bool(parsed.hostname) and '#' not in uri
+        authority = parsed.netloc.rsplit('@', 1)[-1]
+        if authority.startswith('['):
+            suffix = authority[authority.index(']') + 1:]
+            valid = valid and (suffix in ('', ':') or suffix.startswith(':') and suffix[1:].isdigit())
+        # Reading port also rejects malformed/out-of-range URL ports.
+        _ = parsed.port
+    except ValueError:
+        valid = False
+    return valid
+
+
 def normalize_monitor(value):
     """Validate the reported input contract and materialize applicable defaults."""
     # A persistent monitor has no timeout key. A command is shell source, not argv;
@@ -37,24 +56,8 @@ def normalize_monitor(value):
     source = 'command' if 'command' in value else 'ws'
     if not isinstance(value[source], str) or '\x00' in value[source]:
         raise MuseMonitorError()
-    if source == 'ws':
-        # urlsplit removes some raw controls instead of rejecting them.
-        if any(char.isspace() or ord(char) < 32 or ord(char) == 127
-               or char in '<>\"{}|\\^`' for char in value['ws']):
-            raise MuseMonitorError()
-        try:
-            parsed = urlsplit(value['ws'])
-            valid = parsed.scheme in ('ws', 'wss') and bool(parsed.hostname) and '#' not in value['ws']
-            authority = parsed.netloc.rsplit('@', 1)[-1]
-            if authority.startswith('['):
-                suffix = authority[authority.index(']') + 1:]
-                valid = valid and (suffix in ('', ':') or suffix.startswith(':') and suffix[1:].isdigit())
-            # Reading port also rejects malformed/out-of-range URL ports.
-            _ = parsed.port
-        except ValueError:
-            valid = False
-        if not valid:
-            raise MuseMonitorError()
+    if source == 'ws' and not _valid_websocket_uri(value['ws']):
+        raise MuseMonitorError()
     if 'ws_subprotocols' in value:
         protocols = value['ws_subprotocols']
         if (source != 'ws' or not isinstance(protocols, list)
