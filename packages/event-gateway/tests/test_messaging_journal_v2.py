@@ -25,7 +25,8 @@ class MessagingJournalTests(unittest.IsolatedAsyncioTestCase):
         self.now = FIXTURE['nowMs'] / 1000
         self.path = Path(self.tmp.name).resolve() / 'private'
         self.store = Store(self.path, clock=lambda: self.now)
-        self.addCleanup(lambda: self.store.close())
+        # Resolve the store at cleanup because restart tests replace it.
+        self.addCleanup(lambda: self.store.close())  # pylint: disable=unnecessary-lambda
         self.event = copy.deepcopy(FIXTURE['envelope'])
         self.mapping = {key: self.event[key] for key in admission.ATTACHMENT_FIELDS}
         self.mapping.update(namespace='team/inbox', agentIncarnation=0,
@@ -123,7 +124,7 @@ class MessagingJournalTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.snapshot(), before)
 
     def test_integral_floats_are_normalized_in_mapping_and_semantics(self):
-        floating = {key: float(value) if type(value) is int else value
+        floating = {key: float(value) if isinstance(value, int) and not isinstance(value, bool) else value
                     for key, value in self.mapping.items()}
         try:
             self.store.put_messaging_attachment(floating)
@@ -133,7 +134,7 @@ class MessagingJournalTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(type(saved['nodeGeneration']), int)
         self.assertIs(type(saved['agentIncarnation']), int)
         self.accept()
-        event = {key: float(value) if type(value) is int else value
+        event = {key: float(value) if isinstance(value, int) and not isinstance(value, bool) else value
                  for key, value in self.event.items()}
         event['canonicalSubject'] = dict(event['canonicalSubject'], agentIncarnation=0.0)
         try:
@@ -147,7 +148,7 @@ class MessagingJournalTests(unittest.IsolatedAsyncioTestCase):
         for field in (*admission.ATTACHMENT_FIELDS, 'namespace', 'agentIncarnation'):
             mapping = dict(self.mapping)
             value = mapping[field]
-            mapping[field] = value + 1 if type(value) is int else (
+            mapping[field] = value + 1 if isinstance(value, int) and not isinstance(value, bool) else (
                 OTHER if field in ('nodeId', 'runtimeId') else 'other')
             with self.store.db:
                 self.store.db.execute('UPDATE attachments SET data=?', (json.dumps(mapping),))

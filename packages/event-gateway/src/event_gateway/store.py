@@ -329,7 +329,8 @@ class Store:
         from .messaging_admission_v2 import ATTACHMENT_FIELDS, _finite
         from . import messaging_protocol_v2 as protocol
 
-        if (type(mapping) is not dict
+        # Closed DTOs require exact built-in types, not user-defined subclasses.
+        if (type(mapping) is not dict  # pylint: disable=unidiomatic-typecheck
                 or set(mapping) != set(ATTACHMENT_FIELDS) | {"namespace", "agentIncarnation", "leaseExpiresAt"}):
             raise StoreError("invalid_attachment")
         try:
@@ -345,7 +346,7 @@ class Store:
                 or not protocol._integer(mapping["agentIncarnation"], 0)
                 or not _finite(mapping["leaseExpiresAt"])
                 or mapping["consumerGeneration"] != mapping["attachmentGeneration"]
-                or type(namespace) is not str or not 1 <= protocol._code_points(namespace) <= 256
+                or type(namespace) is not str or not 1 <= protocol._code_points(namespace) <= 256  # pylint: disable=unidiomatic-typecheck
                 or re.search(r"[\x00-\x1f\x7f]", namespace)):
             raise StoreError("invalid_attachment")
         try:
