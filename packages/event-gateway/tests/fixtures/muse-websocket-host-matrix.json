@@ -1,0 +1,421 @@
+{
+  "oracle": "Node v24.21.0 new URL(url)",
+  "scope": "Network-free constructor only; no WebSocket, DNS, connection, or wake qualification. Python tests preserve accepted source text.",
+  "cases": [
+    {
+      "group": "percent_host",
+      "url": "wss://%65xample.test/events",
+      "accepted": true,
+      "hostname": "example.test"
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%6dple.test/events",
+      "accepted": true,
+      "hostname": "example.test"
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://%65%78ample.test/events",
+      "accepted": true,
+      "hostname": "example.test"
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%2Fmple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%00mple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%23mple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%3Fmple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%40mple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%3Ample.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%5Bmple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%5Dmple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%5Cmple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%25mple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%20mple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%09mple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://exa%7Fmple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://%C0%AF.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://%ED%A0%80.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://%FF.test/events",
+      "accepted": false
+    },
+    {
+      "group": "percent_host",
+      "url": "wss://%E2%82.test/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://256.0.0.1/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://999.999.999.999/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://1.2.3.256/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://4294967296/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://0x100000000/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://1.2.65536/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://1.2.3.4.5/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://09/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://example.123/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://127.1/events",
+      "accepted": true,
+      "hostname": "127.0.0.1"
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://2130706433/events",
+      "accepted": true,
+      "hostname": "127.0.0.1"
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://0177.0.0.1/events",
+      "accepted": true,
+      "hostname": "127.0.0.1"
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://0x7f000001/events",
+      "accepted": true,
+      "hostname": "127.0.0.1"
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://127.0.0.1./events",
+      "accepted": true,
+      "hostname": "127.0.0.1"
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://0xffffffff/events",
+      "accepted": true,
+      "hostname": "255.255.255.255"
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://1.2.65535/events",
+      "accepted": true,
+      "hostname": "1.2.255.255"
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://0/events",
+      "accepted": true,
+      "hostname": "0.0.0.0"
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://1.2.3.255/events",
+      "accepted": true,
+      "hostname": "1.2.3.255"
+    },
+    {
+      "group": "ipv4",
+      "url": "wss://999.example/events",
+      "accepted": true,
+      "hostname": "999.example"
+    },
+    {
+      "group": "ipv4_boundaries",
+      "url": "wss://0x10000000000000000000000000000000000/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4_boundaries",
+      "url": "wss://example.0x10000000000000000000000000000000000/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4_boundaries",
+      "url": "wss://0x0000000000000000000000000000000007f/events",
+      "accepted": true,
+      "hostname": "0.0.0.127"
+    },
+    {
+      "group": "ipv4_boundaries",
+      "url": "wss://1.2.3.09/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4_boundaries",
+      "url": "wss://0x/events",
+      "accepted": true,
+      "hostname": "0.0.0.0"
+    },
+    {
+      "group": "ipv4_boundaries",
+      "url": "wss://255.16777215/events",
+      "accepted": true,
+      "hostname": "255.255.255.255"
+    },
+    {
+      "group": "ipv4_boundaries",
+      "url": "wss://255.16777216/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4_boundaries",
+      "url": "wss://4294967295/events",
+      "accepted": true,
+      "hostname": "255.255.255.255"
+    },
+    {
+      "group": "ipv4_boundaries",
+      "url": "wss://255.255.65535/events",
+      "accepted": true,
+      "hostname": "255.255.255.255"
+    },
+    {
+      "group": "ipv4_boundaries",
+      "url": "wss://255.255.65536/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv4_boundaries",
+      "url": "wss://255.255.255.255/events",
+      "accepted": true,
+      "hostname": "255.255.255.255"
+    },
+    {
+      "group": "ipv4_boundaries",
+      "url": "wss://256.1/events",
+      "accepted": false
+    },
+    {
+      "group": "unicode_normalization",
+      "url": "wss://exa%EF%BC%8Fmple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "unicode_normalization",
+      "url": "wss://exa%EF%BC%9Ample.test/events",
+      "accepted": false
+    },
+    {
+      "group": "unicode_normalization",
+      "url": "wss://exa%C2%A0mple.test/events",
+      "accepted": false
+    },
+    {
+      "group": "unicode_normalization",
+      "url": "wss://example。test/events",
+      "accepted": true,
+      "hostname": "example.test"
+    },
+    {
+      "group": "unicode_normalization",
+      "url": "wss://example．test/events",
+      "accepted": true,
+      "hostname": "example.test"
+    },
+    {
+      "group": "unicode_normalization",
+      "url": "wss://example｡test/events",
+      "accepted": true,
+      "hostname": "example.test"
+    },
+    {
+      "group": "unicode_normalization",
+      "url": "wss://２５６.０.０.１/events",
+      "accepted": false
+    },
+    {
+      "group": "unicode_normalization",
+      "url": "wss://１２７.０.０.１/events",
+      "accepted": true,
+      "hostname": "127.0.0.1"
+    },
+    {
+      "group": "unicode_normalization",
+      "url": "wss://%EF%BC%92%EF%BC%95%EF%BC%96.0.0.1/events",
+      "accepted": false
+    },
+    {
+      "group": "unicode_normalization",
+      "url": "wss://%EF%BC%91%EF%BC%92%EF%BC%97.0.0.1/events",
+      "accepted": true,
+      "hostname": "127.0.0.1"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[v1.example]/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[fe80::1%25eth0]/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[fe80::1%eth0]/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[::ffff:192.0.2.1]/events",
+      "accepted": true,
+      "hostname": "[::ffff:c000:201]"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[::]/events",
+      "accepted": true,
+      "hostname": "[::]"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]/events",
+      "accepted": true,
+      "hostname": "[ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[::1]:0/events",
+      "accepted": true,
+      "hostname": "[::1]"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[::1]:65535/events",
+      "accepted": true,
+      "hostname": "[::1]"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[::1]:/events",
+      "accepted": true,
+      "hostname": "[::1]"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[::1]:65536/events",
+      "accepted": false
+    },
+    {
+      "group": "domain_ipv6",
+      "url": "wss://example.test/events",
+      "accepted": true,
+      "hostname": "example.test"
+    },
+    {
+      "group": "domain_ipv6",
+      "url": "wss://bücher.example/events",
+      "accepted": true,
+      "hostname": "xn--bcher-kva.example"
+    },
+    {
+      "group": "domain_ipv6",
+      "url": "wss://%62%C3%BCcher.example/events",
+      "accepted": true,
+      "hostname": "xn--bcher-kva.example"
+    },
+    {
+      "group": "domain_ipv6",
+      "url": "wss://[2001:db8::1]/events",
+      "accepted": true,
+      "hostname": "[2001:db8::1]"
+    },
+    {
+      "group": "domain_ipv6",
+      "url": "wss://[::1]/events",
+      "accepted": true,
+      "hostname": "[::1]"
+    }
+  ]
+}

@@ -81,21 +81,76 @@ authorized peer delivery to an independent existing TUI session. Observing an
 The export's own help notes a
 separate deferral register, so absence is not proof of no internal capability.
 
-The concrete next prerequisite is access to a disposable eligible Muse TUI
-session's native tool interface (especially `monitor` or `send_session_message`),
-or a documented authenticated external ingress with durable receipts. Generic
-permission to run another CLI command does not supply either interface.
+## Owner-reported monitor contract and offline invocation
+
+The owner subsequently supplied native tool introspection, transcribed in
+[owner-monitor-contract.json](muse-ingress/owner-monitor-contract.json). This is
+a structured transcription of owner-reported evidence, not an independently
+exported native schema; no monitor was started and no synchronous return schema
+was supplied. `event_gateway.muse.normalize_monitor` validates that input, while
+`command_monitor` quotes trusted argv into the tool's shell-source `command`.
+Its executable must be an explicit path containing `/` (absolute or relative),
+so shell builtins cannot replace it. It does not resolve names using the
+constructor process's `PATH`; raw `command` input remains shell source.
+Neither function executes anything, locates a session, or grants read authority.
+
+The input requires `description` and exactly one of `command` or `ws`. Defaults
+are `persistent=false`, `timeout_ms=300000`, `wake_delay_ms=120000`, and
+`show_lines=false`. Explicit timeout is forbidden with persistence; the normalized
+persistent input therefore omits timeout. Timeout is 1000–1800000 ms. Wake delay
+is zero or 1000–1800000 ms. WebSocket subprotocols must be unique RFC6455 tokens
+and may appear only with `ws`. Each stdout line or UTF-8 WebSocket text frame is
+an asynchronous machine notification; source closure ends the watch. Persistent
+watches have no deadline until the source, session, or `muse.work_stop` stops them.
+`show_lines=true` also renders FEED cells. None of this constitutes a receipt.
+
+WebSocket preflight percent-decodes domain hosts as strict UTF-8, rejects forbidden
+host characters, and checks numeric IPv4 bounds while retaining valid shorthand,
+octal, and hexadecimal forms. Compatibility-character and Unicode-dot checks
+prevent those forms from hiding forbidden characters or numeric overflow. These
+are bounded guards informed by the [URL Standard](https://url.spec.whatwg.org/#host-parsing),
+not a complete WHATWG parser: native UTS46/IDNA validation remains authoritative.
+The original URL is preserved, and acceptance makes no connectivity claim.
+
+Once a separately implemented and authorized session polling command exists, the
+target session can prepare native tool input without shell interpolation:
+
+```python
+from event_gateway.muse import command_monitor
+
+# Illustrative argv only: no polling command is implemented by this slice.
+monitor_input = command_monitor(
+    "Read pending event references for this disposable session",
+    ["/absolute/path/to/authorized-poller", "--binding", "/private/session-binding.json"],
+    wake_delay_ms=0,
+)
+# The owning Muse session would pass monitor_input to its native monitor tool.
+```
+
+Quoting protects argument boundaries, not executable provenance. The caller must
+supply trusted executable/arguments and independently establish session ownership.
+Do not place credentials in command strings or confuse a supplied session UUID
+with an authenticated session binding. No CLI registration, native/provider call,
+configuration change, pull endpoint, cursor, or acknowledgment is added here.
 
 ## Concrete next action
 
-In a disposable eligible Muse TUI, ask:
+Push ingress remains a separate, unqualified path; see [Push ingress qualification](#push-ingress-qualification).
 
-> Inspect your available native monitor tool schema and report its exact
-> input/output contract; do not start any monitor or send any messages.
+Design the session-owned pull service against an independently trusted Muse
+session/generation binding. Existing `control.sock` authenticates the filesystem
+owner, not a Muse session. The HTTP listener accepts signed delivery intake only.
+`Store.list_pending` is scheduler state, not a durable consumer cursor, and Codex
+attachments do not establish Muse ownership. A real service needs bounded reads,
+a durable pending notification, explicit idempotent ACK, lost-read/ACK recovery,
+and generation fencing. It must also isolate Muse work from the existing native
+push dispatcher. Native receipt-v3 ACK/settlement methods cannot acknowledge a
+monitor line. Only after those boundaries exist can an owner-started disposable
+monitor establish idle/busy/restart behavior. Monitor output never authorizes
+source access or tools.
 
-That read-only schema is the next prerequisite for the pull path. Apply the
-pull monitor criteria above to the resulting fixture; use the separate push
-criteria only if Muse exposes an authenticated external peer ingress.
+`test_muse_monitor.py` covers the reported contract and shell quoting offline;
+these are contract-derived checks, not Muse wake or delivery qualification.
 
 ## Checks and artifacts
 
