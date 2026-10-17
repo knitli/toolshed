@@ -35,7 +35,7 @@ Both patches were applied to separate selected-source replays and reproduced **6
 
 ## Artifact-only verification
 
-The bounded checker uses only local file reads and hashes. It executes no native code, subprocesses, repository recipes, or database operations. It verifies all five bundled provenance pins before parsing their JSON or deriving a closure, then verifies all payload hashes before parsing proof JSON. It checks the historical57/prior13/prior61/final19/selected66 unions and patch pins. Optional source verification hashes every selected file.
+The bounded checker uses only local file reads and hashes. It executes no native code, subprocesses, repository recipes, or database operations. It verifies all five bundled provenance pins before parsing their JSON or deriving a closure, then verifies all payload hashes before parsing proof JSON. It checks the historical57/prior13/prior61/final19/selected66 unions and patch pins, requires tested hash values to match authenticated proof, and rejects every unlisted file or symlink in the bounded bundle inventory. It validates formatting-diff paths and hunk structure; optional source verification hashes every selected file and reverses the diff to reconstruct tested hashes. Without source bytes, formatting validation is explicitly structural evidence only.
 
 ```sh
 python3 packages/event-gateway/docs/native-bridge/terminal-history-spike/verify.py
@@ -47,3 +47,11 @@ python3 -m unittest discover -s packages/event-gateway/tests -p test_terminal_hi
 Keep the historical source manifest and sibling completion/ordering bundles alongside this directory. The original native-history manifest is unbundled and explicitly reported as unchecked unless supplied. Supplying it checks that file's hash only; original raw logs, rollouts, and other original evidence remain unverified. The checker assumes the reviewed manifest is trusted and makes no independent authenticity claim.
 
 The new Python artifact tests and `proof/package-validation.json` record packaging verification separately from native tests. Runtime integration, public terminal reporting, TUI/Python consumers, cloud integration, activation, and automatic round completion remain outside this unit.
+
+The helper extraction in the artifact checker is validated separately in `proof/checker-refactor-validation.json`, which records the current checker hash and causal guard check. `proof/package-validation.json` retains the historical checker hash and original packaging results. Frozen native evidence is unchanged; no native tests were rerun for this refactor.
+
+## Original historical canary recovery
+
+`proof/original-canary-recovery.json` separately records recovery from private copies of the original historical canary database and 38-record canonical rollout. The test reads the existing full reservation identity and input, runs normal State migrations, and calls the unchanged production history reader. Two fresh processes recovered the same Completed receipt. Original receipt columns, input, rollout, snapshots and owner files remained unchanged; copied database changes were normal migrations 60→62, terminal columns, and the copied rollout path.
+
+Raw databases, rollout/input text, logs and the profile-specific qualification test remain private. The new JSON links their locally audited results by hash; this checker cannot reverify those unbundled files or reproduce the native run. This proves one historical recovery on disposable copies. It does not prove live client/cloud recovery, complete historical coverage, quarantine clearance or production acceptance. The frozen synthetic fixture evidence above is unchanged.
