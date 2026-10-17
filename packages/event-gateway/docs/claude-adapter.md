@@ -275,6 +275,27 @@ monotonic observation time, under the existing observation cap. Genuine init,
 native session running, and a held provider response remain mandatory. This
 correction has offline coverage only and does not qualify another native run.
 
+Busy run `39079656838` reached init, native running, the held initial response,
+socket send and release, and two synthetic provider requests, then failed with
+`busy_native_replay_mismatch`. Cleanup completed; no completion proof was exported.
+The diagnostic did not retain which replay predicate failed. Static inspection of
+the pinned local socket path establishes that it constructs a peer-origin prompt,
+frames its content, and replays the constructed message. Comparing that message to
+the unwrapped socket input is incompatible with the producer.
+
+The observer now requires the known socket follow-up's exact fresh-turn peer
+wrapper: fixed UTF-8 prefix/suffix lengths and SHA-256 digests, exact total byte
+length, and unchanged expected middle bytes. The message must contain exactly
+`role: "user"` and string `content`. It accepts neither plain follow-up text nor
+substring, whitespace, or block-array normalization. Initial stdin replay still
+requires the original message exactly. Native framing prose stays private; the
+fixture carries only its lengths and hashes, tied to the fixed executable digest.
+The same session, input UUID, literal replay flag, null parent and no-duplicate
+checks remain mandatory, as do independent init/running/hold, both requests and
+results, and final idle. Offline synthetic framing tests and a private check of
+the actual pinned producer framing validate this matcher; they do not establish
+that every predicate matched in the failed run or qualify native busy delivery.
+
 `--busy-probe` requires `--local-provider` and uses the existing contained,
 disposable launch. It explicitly enables experimental
 `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` only in the child environment and adds
