@@ -17,7 +17,7 @@ from transport import Response
 # pylint: disable=unidiomatic-typecheck
 
 NODE_SHA256 = 'e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b'
-CHILD_SHA256 = 'b6f1dbb8ee71202034f9d137c3e334644ead22381120012866b74657e1178c0f'
+CHILD_SHA256 = '8d4f9f954fd0724d0c121210768c6bfca496bc2be1c7f52b23f7635450d71795'
 CHILD = Path(__file__).with_name('child.mjs')
 HEADER_LIMIT = 32768
 BODY_LIMIT = 3 * 1024 * 1024

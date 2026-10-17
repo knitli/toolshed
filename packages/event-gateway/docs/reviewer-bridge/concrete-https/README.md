@@ -72,3 +72,10 @@ SDK completion. Future steps require separate frozen review and execution GO:
 local TLS/parser fixtures, exact API-only redirect-host observation, explicit
 host-policy change, and bounded actual transport acquisition. No source/runtime
 hash mismatch or new storage hostname is auto-enrolled.
+
+Open execution boundary: current path-based runtime/child checks do not close
+replacement between verification and process creation. Production execution
+qualification remains blocked on a macOS-compatible immutable runtime authority
+or independently measured sandboxed launch. A post-launch identity check alone
+would not contain a replaced executable's pre-check authority. Local fixture
+results cannot close this separate production launch finding.

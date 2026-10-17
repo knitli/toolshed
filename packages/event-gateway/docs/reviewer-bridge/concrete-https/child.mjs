@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 export const CA_SHA256 = '1decfbbd96de12a0ff0677ea34b95586e646a7fb4c32f6352d95af26a7408624';
 export const HEADER_LIMIT = 32768;
 const MAX_BODY = 3 * 1024 * 1024;
+const USER_AGENT = 'knitli-reviewer-artifact-transport/1';
 const fail = () => { throw new Error('https_refused'); };
 
 // Conservative IPv4 special-purpose denial. Exceptions within these ranges are
@@ -80,7 +81,10 @@ export async function exchange(input, lookup = dns.lookup, request = https.reque
     req = request({
       protocol: 'https:', hostname: address, port: 443, family: 4,
       servername: url.hostname, method: 'GET', path: url.pathname + url.search,
-      headers: { ...input.headers, Host: url.hostname, 'Accept-Encoding': 'identity' },
+      headers: {
+        ...Object.fromEntries(Object.entries(input.headers).map(([name, value]) => [name.toLowerCase(), value])),
+        host: url.hostname, 'accept-encoding': 'identity', 'user-agent': USER_AGENT,
+      },
       agent: false, maxHeaderSize: HEADER_LIMIT, maxHeadersCount: 65,
       ca: tls.rootCertificates, rejectUnauthorized: true, minVersion: 'TLSv1.2',
       checkServerIdentity: (_host, cert) => tls.checkServerIdentity(url.hostname, cert),

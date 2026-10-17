@@ -38,14 +38,25 @@ test('fixed TLS roots, hostname verification, pinned address, no second DNS or p
   const options = calls[0];
   assert.equal(options.hostname, '140.82.112.5');
   assert.equal(options.servername, 'api.github.com');
-  assert.equal(options.headers.Host, 'api.github.com');
-  assert.equal(options.headers.Authorization, 'Bearer SECRET');
+  assert.equal(options.headers.host, 'api.github.com');
+  assert.equal(options.headers.authorization, 'Bearer SECRET');
+  assert.equal(options.headers['user-agent'], 'knitli-reviewer-artifact-transport/1');
   assert.equal(options.rejectUnauthorized, true);
   assert.equal(options.agent, false);
   assert.equal(options.minVersion, 'TLSv1.2');
   assert.equal(options.ca.length, 121);
   assert.ok(options.checkServerIdentity('ignored', { subjectaltname: 'DNS:wrong.example' }));
   options.lookup('api.github.com', {}, error => assert.ok(error));
+});
+test('fixed bounded user agent replaces any caller spelling', async () => {
+  for (const name of ['User-Agent', 'user-agent', 'USER-AGENT']) {
+    const fixture = fake();
+    const value = input();
+    value.headers[name] = 'caller-value';
+    await exchange(value, lookup, fixture.request);
+    assert.equal(fixture.calls[0].headers['user-agent'], 'knitli-reviewer-artifact-transport/1');
+    assert.equal(Object.keys(fixture.calls[0].headers).filter(key => key.toLowerCase() === 'user-agent').length, 1);
+  }
 });
 test('manual 302 returned once; signed URL never requested', async () => {
   const { request, calls } = fake({ status: 302, headers: ['Location', 'https://storage.example/private?secret=SIGNED'] });
