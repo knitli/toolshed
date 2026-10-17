@@ -1,6 +1,6 @@
 // Disposable loopback transport; production HTTP parsing, proofs and authority stay in workerd.
 import { createServer } from 'node:http';
-import { createHash, randomUUID, webcrypto } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual, webcrypto } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { readFile, readdir, realpath } from 'node:fs/promises';
 import { join, resolve, relative, dirname } from 'node:path';
@@ -49,14 +49,16 @@ const bundle = await build({
   plugins: [validateRpc({ cwd: join(cloud, 'packages/gatekeeper-messaging'), tsconfig: join(cloud, 'packages/gatekeeper-messaging/tsconfig.json') })],
 });
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+const approvedHash = (actual, expected) => typeof expected === 'string' && actual.length === expected.length
+  && timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
 const inputs = Object.fromEntries(await Promise.all(Object.keys(bundle.metafile.inputs).map(async path => [inputName(path), sha256(await readFile(path))])));
 const expected = JSON.parse(await readFile(new URL('./messaging-workerd-inputs.json', import.meta.url), 'utf8'));
 if (Object.keys(inputs).length !== Object.keys(expected.inputs).length
-    || Object.entries(inputs).some(([path, hash]) => expected.inputs[path] !== hash)) {
+    || Object.entries(inputs).some(([path, hash]) => !approvedHash(hash, expected.inputs[path]))) {
   throw new Error('unapproved compiled input set or hash');
 }
 // Pin the bytes actually executed, including plugin output, against source-read races.
-if (sha256(bundle.outputFiles[0].contents) !== expected.bundleSha256) {
+if (!approvedHash(sha256(bundle.outputFiles[0].contents), expected.bundleSha256)) {
   throw new Error('unapproved compiled bundle');
 }
 const ed25519 = async () => {
