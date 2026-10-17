@@ -1,5 +1,7 @@
 """Separately opt-in in-flight workerd SIGKILL matrix; offline preparation is not qualification."""
 import json
+import asyncio
+import base64
 import importlib.util
 from copy import deepcopy
 import os
@@ -10,6 +12,9 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 from uuid import UUID
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from event_gateway.cloud import CloudClient, CloudError, Credentials
 
 import test_messaging_process_restart as process_fixture
 from test_messaging_workerd import SETTINGS, fixture
@@ -137,8 +142,12 @@ class AbruptCrashSafetyTests(unittest.TestCase):
                      'requires separately reviewed abrupt workerd crash execution')
 class MessagingAbruptCloudCrashTests(unittest.TestCase):
     def test_unknown_commit_matrix_preserves_held_history_without_resend(self):
-        for phase in ('before-reserve', 'after-reserve', 'after-admission'):
-            with self.subTest(phase=phase), fixture(abrupt_crash=True) as (ledger, address, transport, seed):
+        cases = [(phase, None) for phase in ('before-reserve', 'after-reserve', 'after-admission')]
+        cases += [(phase, change) for phase in ('before-reserve', 'after-reserve')
+                  for change in ('consumer', 'route', 'source', 'key')]
+        cases.append(('after-reserve', 'positive-replay'))
+        for phase, change in cases:
+            with self.subTest(phase=phase, change=change), fixture(abrupt_crash=True) as (ledger, address, transport, seed):
                 broker = transport.broker_process
                 self.assertEqual(broker.pid, address['pid'])
                 self.assertIsNone(broker.poll())
@@ -204,6 +213,59 @@ class MessagingAbruptCloudCrashTests(unittest.TestCase):
                     self.assertIsNone(claim['permit_id'])
                     self.assertIsNone(cloud_attempt['permit_id'])
                     self.assertIsNone(proof['admission'])
+
+                self.assertEqual(transport.fixture('/fixture/recovery-alarm'), {'recovered': True})
+                after_alarm = transport.fixture('/fixture/read')
+                expected = deepcopy(cloud)
+                expected_state = 'ambiguous' if phase == 'after-admission' else 'unknown'
+                expected['attempts'][0]['state'] = expected_state
+                expected['native_claims'][0]['state'] = expected_state
+                if phase == 'after-admission':
+                    expected['deliveries'][0]['state'] = 'ambiguous'
+                else:
+                    expected['attempts'][0]['reservation_state'] = 'unknown'
+                self.assertEqual(after_alarm, expected)
+                # Repeated real alarm is idempotent and cannot create another reservation or permit.
+                transport.fixture('/fixture/recovery-alarm')
+                self.assertEqual(transport.fixture('/fixture/read'), after_alarm)
+                if change:
+                    if change != 'positive-replay':
+                        transport.fixture('/fixture/change', {'kind': change})
+                    event = seed['envelope']
+
+                    async def credentials():
+                        return Credentials(address['accessToken'], address['agentToken'])
+
+                    key = Ed25519PrivateKey.from_private_bytes(base64.urlsafe_b64decode(
+                        address['agentPrivateJwk']['d'] + '=='))
+                    client = CloudClient(origin='https://events.test', principal=event['principal'],
+                                         agent=event['agent'], node_id=event['nodeId'],
+                                         node_generation=event['nodeGeneration'], private_key=key,
+                                         credentials=credentials, send=transport.send)
+                    # Explicit same-attempt Cloud probe; the uncertain local gateway never resends.
+                    if change == 'positive-replay':
+                        admitted = asyncio.run(client.claim_messaging_history(event))
+                        self.assertEqual(admitted['status'], 'admitted')
+                        self.assertEqual(admitted['envelope']['attemptId'], event['attemptId'])
+                        assert_admission_permit(self, admitted['permitId'])
+                        expected = deepcopy(after_alarm)
+                        expected['attempts'][0].update(state='admitted', reservation_state='reserved',
+                                                       permit_id=admitted['permitId'])
+                        expected['native_claims'][0].update(state='admitted', permit_id=admitted['permitId'])
+                        self.assertEqual(transport.fixture('/fixture/read'), expected)
+                        after_alarm = expected
+                    else:
+                        with self.assertRaises(CloudError):
+                            asyncio.run(client.claim_messaging_history(event))
+                        self.assertEqual(transport.last_response[0], 403 if change == 'key' else 409)
+                        self.assertEqual(json.loads(transport.last_response[1])['error'],
+                                         'denied' if change == 'key' else 'conflict')
+                        self.assertEqual(transport.fixture('/fixture/read'), after_alarm)
+                        print(json.dumps({'phase': phase, 'change': change,
+                                          'httpStatus': transport.last_response[0],
+                                          'error': json.loads(transport.last_response[1])['error']}), flush=True)
+                    self.assertEqual(transport.claims, 1)
+                cloud = after_alarm
 
                 with process_fixture.gateway_child(config, 'restart') as (second, recovered):
                     self.assertNotEqual(second.pid, first.pid)

@@ -154,7 +154,7 @@ const options = convertV4MiniflareOptions({
 let mf = new Miniflare(options);
 let restarting = null;
 const paths = new Set(['/fixture/seed', '/fixture/read', '/fixture/change', '/fixture/restart', '/v1/dispatch/claim',
-  ...(crash ? ['/fixture/arm-crash', '/fixture/crash-proof'] : [])]);
+  ...(crash ? ['/fixture/arm-crash', '/fixture/crash-proof', '/fixture/recovery-alarm'] : [])]);
 const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, maxHeaderSize: 16384 }, async (req, res) => {
   let claim = null;
   try {

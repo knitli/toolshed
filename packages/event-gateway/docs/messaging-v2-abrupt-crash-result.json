@@ -99,5 +99,121 @@
   ],
   "revision": "Constructor test dependencies grouped and JSON PID check preserves boolean rejection; all 12 revised freeze hashes matched before the repeated exact three-case matrix.",
   "verifiedSourceFileCount": 12,
-  "allFrozenSourceHashesMatchedBeforeExecution": true
+  "allFrozenSourceHashesMatchedBeforeExecution": true,
+  "alarmComposition": {
+    "status": "PASS",
+    "base": "199488e7cc2622383ee360e6b74791ac63d65508",
+    "runDateUtc": "2026-10-17",
+    "unitTestsPassed": 7,
+    "crashSubtestsPassed": 12,
+    "seconds": 20.478,
+    "exitCode": 0,
+    "skips": 0,
+    "matrix": {
+      "alarmRetention": [
+        "before-reserve",
+        "after-reserve",
+        "after-admission"
+      ],
+      "unadmittedFencing": {
+        "phases": [
+          "before-reserve",
+          "after-reserve"
+        ],
+        "changes": [
+          "consumer",
+          "route",
+          "source",
+          "key"
+        ]
+      },
+      "positiveSameAttemptReplay": "after-reserve"
+    },
+    "refusals": {
+      "consumer": [
+        409,
+        "conflict"
+      ],
+      "route": [
+        409,
+        "conflict"
+      ],
+      "source": [
+        409,
+        "conflict"
+      ],
+      "key": [
+        403,
+        "denied"
+      ]
+    },
+    "sourceFreeze": {
+      "packages/event-gateway/tests/fixtures/messaging-workerd-worker.ts": "f38e8f5149a5b5b28f1daa3f72b7621d4ab5350b647e4b63e2540efc84b470ba",
+      "packages/event-gateway/tests/fixtures/messaging-workerd-broker.mjs": "cf034f5ef36b2936f373be8f1f7372bc499bcef12b92704e93d8fa0d1ddb754e",
+      "packages/event-gateway/tests/fixtures/messaging-workerd-inputs.json": "142b8e1a33b79c6c33716863515a7d0f23f233d0cab4f266b104b1f34a06b2b7",
+      "packages/event-gateway/tests/test_messaging_abrupt_cloud_crash.py": "eeff1a1a574c4c23f691040b32f93be8b12b9dfbe14b5a7f52dca7615dd301ed"
+    },
+    "log": "alarm-final-green.log",
+    "logSha256": "c4977af35029dcd3f6915ae4a006d3cce600351b833764c8eba1ac28a2228d9d",
+    "coordinatorByteIdentity": {
+      "commits": [
+        "99655360630ca0e3f222d1e73d841aaf456378a7",
+        "ba9824bc17c3b37464a1142cdb34253bf6198354"
+      ],
+      "sha256": "b50933325ae045094c7cef7fb1f8b8644625436b788bfd87fddc57afcb1edbff"
+    },
+    "pins": {
+      "upstreamInputsUnchanged": 334,
+      "totalInputs": 335,
+      "workerBefore": "1f68afde1484e391ee76b615f4ce7f2d5263d0ddce8ce2c6511f82de05d5c43d",
+      "workerAfter": "f38e8f5149a5b5b28f1daa3f72b7621d4ab5350b647e4b63e2540efc84b470ba",
+      "bundleBefore": "164bb39a7b1fb1b0fbc1a1aff9abf41418ebb6d03d676c08fb228a59be93b76b",
+      "bundleAfter": "383ba6a3eb5af42345dc81ea925e528dac5b79126de4b962eaf4e781312bb24b"
+    },
+    "limitations": [
+      "Explicit invocation of production alarm method; automatic platform alarm scheduling remains suppressed",
+      "Fixture ages only native_claims updated_at or permit_until; retained permit ID is asserted, not unchanged expiry timestamps",
+      "Fencing probes explicitly replay original unadmitted Cloud attempt; local Gateway never automatically resends",
+      "Admitted historical lookup is unchanged and not retested",
+      "Stimulus controls do not isolate or remove production fences",
+      "No upstream production source edits, native/provider calls, ACK, settlement, deployment or unattended wake qualification"
+    ],
+    "rootQaPending": false,
+    "negativeControls": [
+      {
+        "name": "alarm-noop",
+        "kind": "fixture production-method invocation removed",
+        "exitCode": 1,
+        "failedSubtests": 12,
+        "seconds": 18.267,
+        "log": "alarm-red-alarm-noop.log",
+        "logSha256": "8aa458f63c1cdbea483510fe89527b115f2d608f661b444d7348679459af7fa5"
+      },
+      {
+        "name": "fence-stimulus-noop",
+        "kind": "fixture consumer/revocation changes suppressed; production fences unchanged",
+        "exitCode": 1,
+        "failedSubtests": 8,
+        "seconds": 19.424,
+        "expectedFailure": "CloudError not raised",
+        "log": "alarm-red-fence-stimulus-noop.log",
+        "logSha256": "f5088c126beea5c75fd1956a013dbd7e20265435effc2b0d27670c018fd3ad6c"
+      }
+    ],
+    "exactSourceRestoredAfterControls": true,
+    "negativeControlRunner": "alarm-mutants.py",
+    "negativeControlRunnerSha256": "93e0a519b0d195709c174943debfb2397d62fce267d31072f9ae10efa6854c4a",
+    "publicationStatus": "Approved for signed PR publication; CI, automatic Codex review and root merge gates remain pending",
+    "rootVerification": {
+      "unitTestsPassed": 7,
+      "crashSubtestsPassed": 12,
+      "seconds": 21.05,
+      "exitCode": 0,
+      "skips": 0,
+      "log": "messaging-alarm-root-qa.log",
+      "logSha256": "de1287b0fb8af3cb1469baf64d41abbfdeef182cb9abae5304173235c4725663",
+      "executableFreezeMatched": true,
+      "compiledInputClosureVerified": 335
+    }
+  }
 }

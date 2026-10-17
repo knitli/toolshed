@@ -129,6 +129,14 @@ export class FixtureCoordinator extends AgentCoordinator {
     return attachment;
   }
 
+  async fixtureRecoveryAlarm() {
+    // Age only fixture deadlines so the real alarm runs without wall-clock waits.
+    this.ctx.storage.sql.exec("UPDATE native_claims SET updated_at=0 WHERE state='reserving'");
+    this.ctx.storage.sql.exec("UPDATE native_claims SET permit_until=0 WHERE state='admitted'");
+    await super.alarm();
+    await this.ctx.storage.deleteAlarm();
+  }
+
   fixtureRotateConsumer() {
     this.ctx.storage.sql.exec('UPDATE runtimes SET attachment_generation=attachment_generation+1');
   }
@@ -191,6 +199,10 @@ export default { async fetch(request: Request, env: FixtureEnv) {
     return Response.json({ envelope: transport.envelope, body: await signed.text(), attachment,
       signature: signed.headers.get('x-event-signature'), audience: signed.headers.get('x-event-audience'),
       keyId: signed.headers.get('x-event-key-id') });
+  }
+  if (path === '/fixture/recovery-alarm') {
+    await coordinator.fixtureRecoveryAlarm();
+    return Response.json({ recovered: true });
   }
   if (path === '/fixture/read') return Response.json({ ...await mailbox.fixtureRead(), ...await coordinator.fixtureRead() });
   if (path === '/fixture/change') {
