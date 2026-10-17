@@ -144,7 +144,7 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
         result, attach, identities = busy_attach_evidence()
         binding = attach['mapping']['nativeBinding']
         session_id = attach['mapping']['sessionId']
-        delivery_id = '00000000-0000-4000-8000-000000000002'
+        delivery_id = 'dly_' + 'a' * 64
         records = [json.loads(line) for line in attach_archive(attach).splitlines()]
         ctx = SimpleNamespace(dispatch_labels={delivery_id: 'C-busy-second'}, dispatch_calls=[],
                               dispatch_errors=[], dispatch_results=[], c_challenges=[], c_busy_nonces={1, 2, 3, 4, 5},
