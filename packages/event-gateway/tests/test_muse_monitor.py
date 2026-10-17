@@ -69,8 +69,9 @@ class MuseMonitorTests(unittest.TestCase):
         self.assertEqual(normalize_monitor({**base, 'ws_subprotocols': []})['ws_subprotocols'], [])
         with self.assertRaises(MuseMonitorError):
             normalize_monitor({'description': 'x', 'command': 'poll', 'ws_subprotocols': []})
-        for url in ('https://example.test', 'ws:', 'ws://', 'ws://[bad',
-                    'ws://example.test:99999'):  # nosemgrep -- Offline invalid URL; no connection.
+        for url in (  # nosemgrep -- Offline invalid URL fixtures; no connection.
+                'https://example.test', 'ws:', 'ws://', 'ws://[bad',
+                'ws://example.test:99999'):
             with self.subTest(url=url), self.assertRaises(MuseMonitorError):
                 normalize_monitor({**base, 'ws': url})
         self.assertEqual(normalize_monitor({**base, 'ws': 'ws://localhost:1234'})['ws'], 'ws://localhost:1234')
@@ -86,7 +87,7 @@ class MuseMonitorTests(unittest.TestCase):
                 with self.subTest(executable=executable):
                     result = subprocess.run(  # nosec B603 -- Synthetic scripts in our private test directory.
                         ['/bin/sh', '-c', command], env={'PATH': directory},
-                                            check=False, capture_output=True, timeout=5)
+                        check=False, capture_output=True, timeout=5)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(result.stdout, b'called\0' + b''.join(arg.encode() + b'\0' for arg in args))
 
