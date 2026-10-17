@@ -679,7 +679,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
     async def test_malformed_and_oversized_diagnostics_never_contain_raw_output(self):
         secret = ('private-output-' + secrets.token_hex(16)).encode()
         for payload in (secret + b'\n', secret * 2048 + b'\n', b'null\n', b'[]\n'):
-            reader = asyncio.StreamReader()
+            reader = asyncio.StreamReader(limit=len(payload) + 1)
             reader.feed_data(payload)
             reader.feed_eof()
             probe = self.new_probe()
@@ -696,6 +696,40 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             await CANARY.observe_busy_stdout(stream(self.initial), self.new_probe())
         self.assertEqual(raised.exception.diagnostic[0]['eventType'], 'unknown')
         self.assertIsNone(raised.exception.diagnostic[0]['sessionId'])
+
+    async def test_eof_and_read_failure_preserve_only_actual_output_events(self):
+        init = {'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []}
+        secret = 'private-read-error-' + secrets.token_hex(16)
+        for count in (0, 10):
+            for ending in (b'', OSError(secret)):
+                reader = Mock()
+                reader.readline = AsyncMock(side_effect=[
+                    *[(json.dumps(init) + '\n').encode()] * count, ending])
+                probe = self.new_probe()
+                reason = 'busy_native_stream_closed' if ending == b'' else 'busy_native_stream_failure'
+                with self.subTest(count=count, ending=type(ending).__name__), \
+                        self.assertRaisesRegex(CANARY.CanaryError, '^' + reason + '$') as raised:
+                    await CANARY.observe_busy_stdout(reader, probe)
+                diagnostic = raised.exception.diagnostic
+                self.assertEqual([entry['order'] for entry in diagnostic],
+                                 list(range(3, 11)) if count else [])
+                self.assertTrue(all(entry['eventType'] == 'system' and entry['eventSubtype'] == 'init'
+                                    and entry['sessionId'] == self.session for entry in diagnostic))
+                self.assertNotIn(secret, str(raised.exception) + json.dumps(diagnostic))
+                self.assertFalse(probe.ready_to_send.is_set())
+                self.assertFalse(probe.complete.is_set())
+
+    async def test_streamreader_limit_failure_has_no_output_diagnostic(self):
+        secret = ('private-overlong-' + secrets.token_hex(16)).encode()
+        reader = asyncio.StreamReader()
+        reader.feed_data(secret * 2048 + b'\n')
+        reader.feed_eof()
+        probe = self.new_probe()
+        with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_stream_failure$') as raised:
+            await CANARY.observe_busy_stdout(reader, probe)
+        self.assertEqual(raised.exception.diagnostic, [])
+        self.assertNotIn(secret.decode(), str(raised.exception))
+        self.assertFalse(probe.ready_to_send.is_set())
 
     async def test_failure_diagnostic_retains_only_last_eight_events(self):
         probe = self.new_probe()

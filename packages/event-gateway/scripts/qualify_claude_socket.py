@@ -312,12 +312,12 @@ async def observe_busy_stdout(reader, probe):
     diagnostic = []
     try:
         while True:
+            raw = await reader.readline()
+            if not raw:
+                require(probe.complete.is_set(), 'busy_native_stream_closed')
+                return
             value = None
             try:
-                raw = await reader.readline()
-                if not raw:
-                    require(probe.complete.is_set(), 'busy_native_stream_closed')
-                    return
                 size += len(raw)
                 require(size <= MAX_STREAM_BYTES, 'client_output_limit')
                 try:
