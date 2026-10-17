@@ -115,6 +115,7 @@ class LoopbackTransport:
     """Real bounded HTTP, translating only the fixed synthetic origin to loopback."""
 
     def __init__(self, address):
+        """Bind one private loopback broker and reset claim/fault observations."""
         self.address = address
         self.claims = 0
         self.lose_reply = False
