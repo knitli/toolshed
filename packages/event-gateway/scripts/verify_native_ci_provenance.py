@@ -382,6 +382,14 @@ def resolve_v2_build_inputs(api, head, build, main, identity):
     return inputs, evidence
 
 
+def resolve_build_inputs(api, head, main, selected):
+    """Resolve authenticated version-specific evidence for promotion or installation."""
+    selected = selection(selected)
+    if selected["schemaVersion"] == 1:
+        return resolve_legacy_build_inputs(api, head, selected["headSha"], main)
+    return resolve_v2_build_inputs(api, head, selected["headSha"], main, selected["recipe"])
+
+
 def verify_candidate(api, head, main):
     require(sha(head, 40) and sha(main, 40))
     tree = api.request(f"git/trees/{head}?recursive=1")
@@ -410,10 +418,7 @@ def verify_candidate(api, head, main):
     artifact = api.request(f"actions/artifacts/{selected['artifactId']}")
     verify_metadata(selected, workflow, run, artifact)
     require_ancestry(api, selected["headSha"], main)
-    if selected["schemaVersion"] == 1:
-        inputs, manifest = resolve_legacy_build_inputs(api, head, selected["headSha"], main)
-    else:
-        inputs, manifest = resolve_v2_build_inputs(api, head, selected["headSha"], main, selected["recipe"])
+    inputs, manifest = resolve_build_inputs(api, head, main, selected)
     with tempfile.TemporaryDirectory(prefix="native-ci-verification-") as directory:
         archive = Path(directory) / "artifact.zip"
         api.download(selected["artifactId"], archive)
