@@ -279,12 +279,8 @@ class NativeCIProvenanceTests(unittest.TestCase):
 
     def test_exact_terminal_query_source_transition_keeps_both_binary_pins(self):
         api = self.terminal_query_transition()
-        result = None
-        try:
-            result = V.verify_candidate(api, HEAD, MAIN)
-        except ValueError:
-            pass
-        self.assertEqual(result, "Current main-authorized native pins unchanged")
+        self.assertEqual(V.verify_candidate(api, HEAD, MAIN),
+                         "Current main-authorized native pins unchanged")
         self.assertEqual(api.calls, [f"git/trees/{HEAD}?recursive=1",
                                      (V.LAUNCHER, HEAD), (V.LAUNCHER, MAIN)])
 
