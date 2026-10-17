@@ -80,13 +80,37 @@ traversal, symlinks, CRC errors, oversized expansion, hidden central records,
 ZIP64, and cleanup. Removing digest, expiry or central-record guards makes the
 corresponding tests fail.
 
-A separate private composition check exported the exact upstream `711e265`
-producer/handoff/acquisition source, created the genuine synthetic producer files,
-transported their ZIP bytes through this module, and supplied the resulting files
-to unchanged `acquireQualificationEvidence` with an explicit trusted verifier
-**test stub**. It returned all four expected synthetic distinctions and removed
-the temporary transport directory. This checks interface composition only; no
-cryptographic, hosted transport, SDK or provider qualification follows from it.
+The repeatable composition regression uses those committed synthetic ZIPs with
+unchanged upstream `acquireQualificationEvidence` at `711e265`. It exports only
+seven fixed source modules from an existing local Git repository at that exact
+commit with `--no-replace-objects`; it never imports the upstream working tree.
+A disposable bare repository borrows upstream objects read-only and installs a
+replacement ref locally: ordinary `git show` returns the poisoned bytes, while
+the actual exporter must retain the original bytes. The upstream repository is
+never mutated. No fetch is performed.
+Provide a trusted absolute Node 24 executable and the local upstream repository:
+
+```sh
+REVIEWER_ACQUISITION_REPOSITORY=/absolute/path/to/knitli-dot-github \
+REVIEWER_ACQUISITION_NODE=/absolute/path/to/node \
+python -m unittest discover \
+  -s packages/event-gateway/docs/reviewer-bridge/artifact-transport \
+  -p test_transport.py -v
+```
+
+Without the repository variable, both upstream-dependent tests explicitly skip;
+a skip is not composition evidence. With it, all 25 tests must pass with zero skips.
+The Node fixture runs with an empty environment and a 15-second timeout. Its
+explicit **TEST ONLY verifier stub** fabricates identity evidence; the real
+signature verifier, GitHub requests, SDK and provider are never invoked. This is
+trusted fixture execution, not an OS sandbox or cryptographic qualification.
+
+The test checks exact producer/handoff/placeholder-attestation bytes and invokes
+acquisition while the transported directory exists. Success retains the four
+synthetic distinctions: `unavailable / missing-review-step / unverified / unknown`.
+A second case throws from the final source read after acquisition has staged its
+result. Both cases require transport-directory and acquisition-stage cleanup;
+the failing case must publish no result. No runtime artifact is executed.
 
 ## Host filesystem and hosted sample gates
 
