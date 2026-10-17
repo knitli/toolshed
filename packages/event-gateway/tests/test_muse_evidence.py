@@ -17,7 +17,9 @@ class MuseEvidenceTests(unittest.TestCase):
         self.assertFalse(proof['schemaManifestFingerprintAuthoritative'])
         schema = json.loads(raw)
         method = schema['methods']['subagent/sendMessage']
-        self.assertEqual(method['description'], "Queue a user note into a running child; admission-only ack, the note settles on the child session's view stream (SS3.16).")
+        self.assertEqual(method['description'],
+                         "Queue a user note into a running child; admission-only ack, "
+                         "the note settles on the child session's view stream (SS3.16).")
         self.assertEqual(method['params']['$ref'], '#/$defs/SubagentInputParams')
         self.assertEqual(method['result']['$ref'], '#/$defs/CommandAcceptedResult')
         self.assertFalse(proof['liveWakeProven'])
