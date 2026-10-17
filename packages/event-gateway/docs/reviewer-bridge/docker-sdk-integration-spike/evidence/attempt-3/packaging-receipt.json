@@ -1,0 +1,77 @@
+{
+  "schema": "private-reviewer-sdk-docker-packaging:v1",
+  "status": "PASS",
+  "candidateManifestSha256": "d4f23dfa5846905d57d61832e560ac69f73bd9c73ea4cd1653d62cc3f63f33d2",
+  "sourceCopy": "Byte-identical bounded regular allowlist; original private absolute paths retained",
+  "sourceFiles": {
+    "private-fixture/fixture.mjs": "c767125bbe5b90ef5cc1071f45810cff3d4ce09f86f9fa5f197fff6f7da399d4",
+    "private-fixture/launch.py": "0ba4e29155ea9baf4f6a36b82ff447c87cfdaa193f988711ee87cb509705ddb6",
+    "private-fixture/profile.sb": "dc6c4ddbf8c1fd356580842eb5c6df29d1941104b47fbfeb5c3dddc701919f87",
+    "private-fixture/manifest.json": "d4f23dfa5846905d57d61832e560ac69f73bd9c73ea4cd1653d62cc3f63f33d2",
+    "private-fixture/README.md": "03c24b1a7f67500a35d97b73bac1025faff94a1123ae7c7145c487dba4c1a2f8",
+    "adapter/adapter.mjs": "e41429491e43f4a05c3ba9f10a9d09df25779890e1ec166b0449c1a1f079c8af",
+    "adapter/test-adapter.mjs": "e9fd9eb63e82b902bfbf1401e979826211fcfebf59e78be91166dc3be9d71f42",
+    "adapter/ADAPTER-NOTES.md": "fe1fad6cf2736c1c11c04ef7e6e828a469bb3ba61cc5f7c76a6e0187e7ac9b00",
+    "adapter/fixture/protocol-child.py": "11777085c97fe3ebf8ce95e6bdd1dce91abe544256daad886b9b42b802d9a71c",
+    "adapter/fixture/test-protocol-child.py": "38d775bcdf7477cf9d2e7df55b2581b309ca15ccda9411103ac5e19217a4b633"
+  },
+  "historicalProof": "evidence/history-attempt-2; four-case PASS applies to recorded historical hashes only",
+  "nextRequired": "Separate design and qualification for any hosted or production integration",
+  "excluded": [
+    "native Claude",
+    "provider calls",
+    "hosted equivalence",
+    "production activation",
+    "general hostile-SDK containment",
+    "general Docker-daemon security boundary"
+  ],
+  "preproofValidation": {
+    "launcher": "Configured Ruff/E306/C90115, scoped Bandit, AST, mocked copied-path refusal and process cleanup PASS",
+    "fixture": "Node syntax and repository Biome lint PASS; no formatter",
+    "adapter": "Owner reports 20 fake cases, Node syntax, repository Biome lint PASS",
+    "protocolChild": "Owner reports 8 host-only unittest cases and configured Ruff/E306/compile PASS",
+    "execution": "Packaging worker performed no live SDK/Docker run; root separately executed and verified attempt3"
+  },
+  "currentProof": {
+    "attempt": 3,
+    "rootReceipt": "evidence/attempt-3/root-attempt-3.json",
+    "exactAbsenceReceipt": "evidence/attempt-3/root-attempt-3-exact-absence.json",
+    "captureReceipt": "evidence/attempt-3/capture.json",
+    "stdout": "evidence/attempt-3/stdout.log",
+    "stderr": "evidence/attempt-3/stderr.log",
+    "casesPassed": 4,
+    "containmentControlsPassed": 5,
+    "captureAggregateBytes": 6832,
+    "canaryPreservedAndRemoved": true,
+    "forbiddenListenerClosedAndRemoved": true,
+    "sameDaemonBeforeAfter": true,
+    "exactContainerIdAndNameAbsence": true,
+    "noOwnedHostProcesses": true,
+    "privateArchiveInventorySha256": "3eea5693db0f29edc5bb4b5445ba3e1b11bf32c5a0e35d40860abd6f784c3a87",
+    "evidenceHashes": {
+      "manifest.json": "d4f23dfa5846905d57d61832e560ac69f73bd9c73ea4cd1653d62cc3f63f33d2",
+      "root-attempt-3.json": "a50ccdb6e8c4608ab3a2215345b1d845f3884ab7ee595022d1be22c2eaf6eef2",
+      "root-attempt-3-exact-absence.json": "e1351f118cecc4063ed67917250685f0496f349c9625d501e459e2530b9f66f9",
+      "root-attempt-3-stdout.log": "5a014032c702dc8c45eeac0373d6c5a6c7240677ecd46a33457fb3a385ae5518",
+      "root-attempt-3-stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "capture.json": "0387e246047c97d08c33be18cd0c5453ec7fb613516ee7ba89861b2f31a483a2",
+      "stdout.log": "54ac4d8b439bfcf1f473f9e557a997ec96cf28da22cd3538f07012f45c37e6e1",
+      "stderr.log": "224917e34061d54dfb3e42276b200fdd0cfacadc7bf292c362eaeb60739f909b"
+    },
+    "sdkWarnings": {
+      "count": 4,
+      "code": "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED",
+      "evidence": "evidence/attempt-3/stderr.log",
+      "meaning": "Bare allowed-tool entry bypasses canUseTool for the frozen tool; not production authorization acceptance"
+    }
+  },
+  "manifestEvidenceScope": "Immutable pre-execution snapshot retains UNEXECUTED creation-time fields; subsequent attempt3 receipts qualify these exact bytes",
+  "qualification": "Pinned synthetic fixture using actual SDK0.3.209 and fixed Docker protocol child only",
+  "securityLimit": "The sandbox grants the whole Node process access to the Docker Unix socket. JavaScript API guards do not contain a hostile SDK using raw socket access; this is not a general hostile-SDK or Docker-daemon security boundary.",
+  "packagingValidation": {
+    "python": "Configured Ruff/E306 and launcher C901 maximum15 PASS",
+    "javascript": "Repository Biome lint on all three MJS files PASS",
+    "copiedLauncher": "Mocked actual repository path rejection before parser, manifest, physical checks, capture, socket or process creation PASS",
+    "sourceCopy": "All ten source-file hashes match current private frozen inputs; no live rerun by packaging worker"
+  }
+}

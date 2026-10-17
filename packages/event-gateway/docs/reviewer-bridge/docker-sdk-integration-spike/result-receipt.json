@@ -1,0 +1,220 @@
+{
+  "schema": "private-reviewer-sdk-docker-packaging:v1",
+  "status": "PASS",
+  "sourceCopy": "All ten packaged source/input-document files match private attempt5 frozen inputs; execution receipts qualify runtime behavior",
+  "historicalProof": "evidence/history-attempt-2; four-case PASS applies to recorded historical hashes only",
+  "nextRequired": "CI and review gates; native/provider/hosted/production qualification remains excluded",
+  "excluded": [
+    "native Claude",
+    "provider calls",
+    "hosted equivalence",
+    "production activation",
+    "general hostile-SDK containment",
+    "general Docker-daemon security boundary"
+  ],
+  "qualification": "Actual SDK 0.3.209 plus fixed Docker protocol fixture; attempt5 passes at exact frozen source hashes",
+  "securityLimit": "The sandbox grants the whole Node process access to the Docker Unix socket. JavaScript API guards do not contain a hostile SDK using raw socket access; this is not a general hostile-SDK or Docker-daemon security boundary.",
+  "historicalAttempt3": {
+    "attempt": 3,
+    "rootReceipt": "evidence/attempt-3/root-attempt-3.json",
+    "exactAbsenceReceipt": "evidence/attempt-3/root-attempt-3-exact-absence.json",
+    "captureReceipt": "evidence/attempt-3/capture.json",
+    "stdout": "evidence/attempt-3/stdout.log",
+    "stderr": "evidence/attempt-3/stderr.log",
+    "casesPassed": 4,
+    "containmentControlsPassed": 5,
+    "captureAggregateBytes": 6832,
+    "canaryPreservedAndRemoved": true,
+    "forbiddenListenerClosedAndRemoved": true,
+    "sameDaemonBeforeAfter": true,
+    "exactContainerIdAndNameAbsence": true,
+    "noOwnedHostProcesses": true,
+    "privateArchiveInventorySha256": "3eea5693db0f29edc5bb4b5445ba3e1b11bf32c5a0e35d40860abd6f784c3a87",
+    "evidenceHashes": {
+      "manifest.json": "d4f23dfa5846905d57d61832e560ac69f73bd9c73ea4cd1653d62cc3f63f33d2",
+      "root-attempt-3.json": "a50ccdb6e8c4608ab3a2215345b1d845f3884ab7ee595022d1be22c2eaf6eef2",
+      "root-attempt-3-exact-absence.json": "e1351f118cecc4063ed67917250685f0496f349c9625d501e459e2530b9f66f9",
+      "root-attempt-3-stdout.log": "5a014032c702dc8c45eeac0373d6c5a6c7240677ecd46a33457fb3a385ae5518",
+      "root-attempt-3-stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "capture.json": "0387e246047c97d08c33be18cd0c5453ec7fb613516ee7ba89861b2f31a483a2",
+      "stdout.log": "54ac4d8b439bfcf1f473f9e557a997ec96cf28da22cd3538f07012f45c37e6e1",
+      "stderr.log": "224917e34061d54dfb3e42276b200fdd0cfacadc7bf292c362eaeb60739f909b"
+    },
+    "sdkWarnings": {
+      "count": 4,
+      "code": "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED",
+      "evidence": "evidence/attempt-3/stderr.log",
+      "meaning": "Bare allowed-tool entry bypasses canUseTool for the frozen tool; not production authorization acceptance"
+    },
+    "packagingReceipt": "evidence/attempt-3/packaging-receipt.json"
+  },
+  "historicalSourceFiles": {
+    "private-fixture/fixture.mjs": "c767125bbe5b90ef5cc1071f45810cff3d4ce09f86f9fa5f197fff6f7da399d4",
+    "private-fixture/launch.py": "0ba4e29155ea9baf4f6a36b82ff447c87cfdaa193f988711ee87cb509705ddb6",
+    "private-fixture/profile.sb": "dc6c4ddbf8c1fd356580842eb5c6df29d1941104b47fbfeb5c3dddc701919f87",
+    "private-fixture/manifest.json": "d4f23dfa5846905d57d61832e560ac69f73bd9c73ea4cd1653d62cc3f63f33d2",
+    "private-fixture/README.md": "03c24b1a7f67500a35d97b73bac1025faff94a1123ae7c7145c487dba4c1a2f8",
+    "adapter/adapter.mjs": "e41429491e43f4a05c3ba9f10a9d09df25779890e1ec166b0449c1a1f079c8af",
+    "adapter/test-adapter.mjs": "e9fd9eb63e82b902bfbf1401e979826211fcfebf59e78be91166dc3be9d71f42",
+    "adapter/ADAPTER-NOTES.md": "fe1fad6cf2736c1c11c04ef7e6e828a469bb3ba61cc5f7c76a6e0187e7ac9b00",
+    "adapter/fixture/protocol-child.py": "11777085c97fe3ebf8ce95e6bdd1dce91abe544256daad886b9b42b802d9a71c",
+    "adapter/fixture/test-protocol-child.py": "38d775bcdf7477cf9d2e7df55b2581b309ca15ccda9411103ac5e19217a4b633"
+  },
+  "historicalCandidateManifestSha256": "d4f23dfa5846905d57d61832e560ac69f73bd9c73ea4cd1653d62cc3f63f33d2",
+  "historicalPreproofValidation": {
+    "launcher": "Configured Ruff/E306/C90115, scoped Bandit, AST, mocked copied-path refusal and process cleanup PASS",
+    "fixture": "Node syntax and repository Biome lint PASS; no formatter",
+    "adapter": "Owner reports 20 fake cases, Node syntax, repository Biome lint PASS",
+    "protocolChild": "Owner reports 8 host-only unittest cases and configured Ruff/E306/compile PASS",
+    "execution": "Packaging worker performed no live SDK/Docker run; root separately executed and verified attempt3"
+  },
+  "historicalPackagingValidation": {
+    "python": "Configured Ruff/E306 and launcher C901 maximum15 PASS",
+    "javascript": "Repository Biome lint on all three MJS files PASS",
+    "copiedLauncher": "Mocked actual repository path rejection before parser, manifest, physical checks, capture, socket or process creation PASS",
+    "sourceCopy": "All ten source-file hashes match current private frozen inputs; no live rerun by packaging worker"
+  },
+  "historicalManifestEvidenceScope": "Immutable pre-execution snapshot retains UNEXECUTED creation-time fields; subsequent attempt3 receipts qualify these exact bytes",
+  "manifestEvidenceScope": "Version-neutral frozen input manifest and notes are not execution receipts; attempt5 receipts qualify exact runtime hashes",
+  "historicalAttempt4": {
+    "attempt": 4,
+    "rootReceipt": "evidence/attempt-4/root-attempt-4.json",
+    "exactAbsenceReceipt": "evidence/attempt-4/root-attempt-4-exact-absence.json",
+    "captureReceipt": "evidence/attempt-4/capture.json",
+    "stdout": "evidence/attempt-4/stdout.log",
+    "stderr": "evidence/attempt-4/stderr.log",
+    "casesPassed": 4,
+    "containmentControlsPassed": 5,
+    "captureAggregateBytes": 6836,
+    "canaryPreservedAndRemoved": true,
+    "forbiddenListenerClosedAndRemoved": true,
+    "sameDaemonBeforeAfter": true,
+    "exactContainerIdAndNameAbsence": true,
+    "noOwnedHostProcesses": true,
+    "privateArchiveInventorySha256": "3586ece66d4edc3301fd386d13a7be7a955cb9607edc11a3441a5139ed3a691c",
+    "evidenceHashes": {
+      "manifest.json": "66dd375440977b510157c19f7ba872cc7277f0ff67a7fe00ff2e71893b70073b",
+      "root-attempt-4.json": "714ab6811a290da6b9499293a8de216f34a4b1460f0baac126337fc596628f1b",
+      "root-attempt-4-exact-absence.json": "aea661c44e61ac65b80251920b94ed3a654e779f45fdd66cf1fc3285b93da5d3",
+      "root-attempt-4-stdout.log": "858ba20e3aedfa6ef87d87bdde7e75bb634ce17b40ba6e6514bb327cbb04a552",
+      "root-attempt-4-stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "capture.json": "3db7110121f912c7a1bf5e220cdc3d0031d91ceb44d5459991e73359e71ab428",
+      "stdout.log": "2e874be9bc2b861ac118da1e988ce0256950cd667147217b40ccd711b54426fe",
+      "stderr.log": "830e9ca5cfe4e235b16fd7c28c02797803ddeb64a11685ee8236eeb5ffadbc49"
+    },
+    "sdkWarnings": {
+      "count": 4,
+      "code": "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED",
+      "evidence": "evidence/attempt-4/stderr.log",
+      "meaning": "Bare allowed-tool entry bypasses canUseTool for the frozen tool; not production authorization acceptance"
+    },
+    "packagingReceipt": "evidence/attempt-4/packaging-receipt.json"
+  },
+  "historicalAttempt4SourceFiles": {
+    "private-fixture/fixture.mjs": "c767125bbe5b90ef5cc1071f45810cff3d4ce09f86f9fa5f197fff6f7da399d4",
+    "private-fixture/launch.py": "14c37a59f5d75b79ff2c01fe25b07a843e74f0dea0ad90e4e40040a59f0e8cba",
+    "private-fixture/profile.sb": "dc6c4ddbf8c1fd356580842eb5c6df29d1941104b47fbfeb5c3dddc701919f87",
+    "private-fixture/manifest.json": "66dd375440977b510157c19f7ba872cc7277f0ff67a7fe00ff2e71893b70073b",
+    "private-fixture/README.md": "0aedbfe49ca830c3bd5dc57c9b6b2b66ce4600a418624dafc7061afcc36c8f00",
+    "adapter/adapter.mjs": "e36a2fc115c22f55e387e632db76732d75aebd7de87931ca3c600ca431edb6ca",
+    "adapter/test-adapter.mjs": "6bc4f22e744ac0fcd3d4fcdc46ce30d1b1748bc760050121e6c0b26e185bb2a1",
+    "adapter/ADAPTER-NOTES.md": "2a02465cf59e1d0f664ce90d461b37afdb7708e3475f21b2310a8e60a8f20d35",
+    "adapter/fixture/protocol-child.py": "f5d7ae681045266d2b9f2d806beee8b07c0f527f4feffd523037076c3d9d4cd6",
+    "adapter/fixture/test-protocol-child.py": "42af38491b283194b060cbec5b39adb4be2176b1fa97ef9634e5b5f660a01dc1"
+  },
+  "historicalAttempt4Candidate": {
+    "status": "PASS",
+    "privateExecutionInputsChanged": true,
+    "reviewFixes": [
+      "Rename assertion helper; bounded linear CID/UUID validators",
+      "Group fake-backend options",
+      "Preserve boolean rejection with isinstance; constructor documentation",
+      "Wrap fixed subprocess invocation",
+      "Reserve stdin.write/end input before queuing; reject strings exceeding combined budget before allocation; charge receipts exactly once"
+    ],
+    "sourceFiles": {
+      "private-fixture/fixture.mjs": "c767125bbe5b90ef5cc1071f45810cff3d4ce09f86f9fa5f197fff6f7da399d4",
+      "private-fixture/launch.py": "14c37a59f5d75b79ff2c01fe25b07a843e74f0dea0ad90e4e40040a59f0e8cba",
+      "private-fixture/profile.sb": "dc6c4ddbf8c1fd356580842eb5c6df29d1941104b47fbfeb5c3dddc701919f87",
+      "private-fixture/manifest.json": "66dd375440977b510157c19f7ba872cc7277f0ff67a7fe00ff2e71893b70073b",
+      "private-fixture/README.md": "0aedbfe49ca830c3bd5dc57c9b6b2b66ce4600a418624dafc7061afcc36c8f00",
+      "adapter/adapter.mjs": "e36a2fc115c22f55e387e632db76732d75aebd7de87931ca3c600ca431edb6ca",
+      "adapter/test-adapter.mjs": "6bc4f22e744ac0fcd3d4fcdc46ce30d1b1748bc760050121e6c0b26e185bb2a1",
+      "adapter/ADAPTER-NOTES.md": "2a02465cf59e1d0f664ce90d461b37afdb7708e3475f21b2310a8e60a8f20d35",
+      "adapter/fixture/protocol-child.py": "f5d7ae681045266d2b9f2d806beee8b07c0f527f4feffd523037076c3d9d4cd6",
+      "adapter/fixture/test-protocol-child.py": "42af38491b283194b060cbec5b39adb4be2176b1fa97ef9634e5b5f660a01dc1"
+    },
+    "validation": {
+      "adapter": "26 fake groups PASS; both Node parse checks PASS; Biome clean",
+      "causalMutants": "Five stdin guard/accounting/allocation/callback mutants rejected; CID and UUID validator mutants rejected",
+      "protocolChild": "9 host-only tests PASS; boolean-rejection mutant fails two tests",
+      "python": "Ruff E306/E501159/D107 child and C90115 launcher PASS; copied-path refusal mock PASS",
+      "execution": "Root attempt4 PASS: four cases/five controls, independent exact absence, unchanged daemon, no owned host processes",
+      "independentReview": "GO; frozen adapter/test hashes verified; fake suite rerun PASS; no blocking findings"
+    }
+  },
+  "historicalAttempt4ManifestSha256": "66dd375440977b510157c19f7ba872cc7277f0ff67a7fe00ff2e71893b70073b",
+  "currentCandidate": {
+    "status": "PASS",
+    "privateExecutionInputsChanged": true,
+    "reviewFixes": [
+      "Reject attach exit status inconsistent with inspected container exit",
+      "Apply shared attach stdout/stderr output budget regardless of stream ordering",
+      "Correct adapter notes to distinguish attempt4 proof from current qualification"
+    ],
+    "sourceFiles": {
+      "private-fixture/fixture.mjs": "c767125bbe5b90ef5cc1071f45810cff3d4ce09f86f9fa5f197fff6f7da399d4",
+      "private-fixture/launch.py": "14c37a59f5d75b79ff2c01fe25b07a843e74f0dea0ad90e4e40040a59f0e8cba",
+      "private-fixture/profile.sb": "dc6c4ddbf8c1fd356580842eb5c6df29d1941104b47fbfeb5c3dddc701919f87",
+      "private-fixture/manifest.json": "cac2c2d8d878cbc0c40c8b6accf487dc872b41fafff76232da085da649c3963a",
+      "private-fixture/README.md": "1e24771ebb3c0c705f115a565b8c631e897e08c1bbacd181726f2cc0d7c7c67a",
+      "adapter/adapter.mjs": "37f6f26e7d446939cbda7afed2ec7b33901e7140bcbfd670decaaa4c3f7a5f47",
+      "adapter/test-adapter.mjs": "32f30653d928b222d01469372f98b02d938c4aa747dad1a2503ba20318efcf20",
+      "adapter/ADAPTER-NOTES.md": "6dcefde3045379f18c5a40bca10bc6eff1e262bf1cf1c68aa819305d5ea565db",
+      "adapter/fixture/protocol-child.py": "f5d7ae681045266d2b9f2d806beee8b07c0f527f4feffd523037076c3d9d4cd6",
+      "adapter/fixture/test-protocol-child.py": "42af38491b283194b060cbec5b39adb4be2176b1fa97ef9634e5b5f660a01dc1"
+    },
+    "validation": {
+      "execution": "Root attempt5 PASS: four cases/five controls, exact absence, unchanged daemon, no owned host processes",
+      "adapter": "28 fake groups PASS; both Node parse checks PASS; Biome clean",
+      "causalMutants": "Removing attach exit agreement and restoring stdout-only budget both fail new regression assertions",
+      "abortCompatibility": "Root attempt5 abort137 with duplicate SIGTERM safely settles; duplicate143/137 fake cases pass",
+      "python": "No Python source changed since attempt4; prior targeted checks remain applicable",
+      "independentReview": "GO; frozen hashes verified and 28 fake groups rerun; no blocking findings"
+    }
+  },
+  "currentProof": {
+    "attempt": 5,
+    "rootReceipt": "evidence/attempt-5/root-attempt-5.json",
+    "exactAbsenceReceipt": "evidence/attempt-5/root-attempt-5-exact-absence.json",
+    "captureReceipt": "evidence/attempt-5/capture.json",
+    "stdout": "evidence/attempt-5/stdout.log",
+    "stderr": "evidence/attempt-5/stderr.log",
+    "casesPassed": 4,
+    "containmentControlsPassed": 5,
+    "captureAggregateBytes": 6836,
+    "canaryPreservedAndRemoved": true,
+    "forbiddenListenerClosedAndRemoved": true,
+    "sameDaemonBeforeAfter": true,
+    "exactContainerIdAndNameAbsence": true,
+    "noOwnedHostProcesses": true,
+    "privateArchiveInventorySha256": "4406fbf3ffcd1fa836dff567b708197d5869520f048c43631daddf8c99e412b3",
+    "evidenceHashes": {
+      "manifest.json": "cac2c2d8d878cbc0c40c8b6accf487dc872b41fafff76232da085da649c3963a",
+      "root-attempt-5.json": "627252b0fb98a05e4ba4be01c3956688f630cf3c2106a6ada93b9ad8425a5fee",
+      "root-attempt-5-exact-absence.json": "67b03b7a789dc0e6a0fb64c9d05aaf056515de3d6fd8b83b7a2ea3426a7185d3",
+      "root-attempt-5-stdout.log": "f038d4300a202e2ca870c99ed4581b3b3be177656e5f72069b11c2e3142882e6",
+      "root-attempt-5-stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "capture.json": "0fd4b3671df271cf2f83cf11cde62d96c404c085d3105e9fec959dfc9655af62",
+      "stdout.log": "86011c0a98ceb0c7b048c2506ca06eb6cddab8d2878b6745b1940d40518366c6",
+      "stderr.log": "c5140d4235a64f998472539a4163fccb7c6ef39c0031f7c730b09ee94c7094a2"
+    },
+    "sdkWarnings": {
+      "count": 4,
+      "code": "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED",
+      "evidence": "evidence/attempt-5/stderr.log",
+      "meaning": "Bare allowed-tool entry bypasses canUseTool for the frozen tool; not production authorization acceptance"
+    }
+  },
+  "candidateManifestSha256": "cac2c2d8d878cbc0c40c8b6accf487dc872b41fafff76232da085da649c3963a"
+}
