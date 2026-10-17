@@ -52,7 +52,9 @@ keys and storage path. The Node broker stays alive; workerd does not. Tests use
 `/usr/bin/pgrep` to observe its direct workerd child PIDs, require replacement PIDs,
 and require every old PID to be absent. The existing five-second HTTP deadline
 and owned-process-group shutdown bounds apply to a stalled restart too. This is
-a graceful workerd disposal/recreation, not a workerd crash or machine power loss.
+orderly Miniflare teardown/recreation; Miniflare internally sends SIGKILL to
+workerd. It does not exercise unexpected in-flight death, a partial cross-Durable
+Object commit, or machine power loss.
 
 Both Python crash boundaries after cloud admission are repeated with workerd
 replacement. The real Mailbox/coordinator readback preserves the exact attempt,
@@ -80,7 +82,7 @@ fails the PID replacement assertion; the second fails authoritative readback
 because retained coordinator tables are absent. Neither mutation changes source
 pins or production files. The ordinary three-barrier tests remain intact.
 
-This proves local Python process-crash recovery and graceful workerd replacement
+This proves local Python process-crash recovery and orderly Miniflare replacement
 at admission boundaries. It does not qualify deployed transport,
 provider/native execution, settlement, ACKs or unattended wake. Cloud approval,
 keys, routing and native binding remain synthetic seeded prior state. No production
