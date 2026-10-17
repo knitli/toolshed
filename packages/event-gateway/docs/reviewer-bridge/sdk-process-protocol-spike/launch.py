@@ -51,6 +51,61 @@ def verify_inputs():
     return manifest
 
 
+def retained_byte_count(streams):
+    """Count the bounded bytes retained for capture, including partial failures."""
+    return sum(len(stream) for stream in streams.values())
+
+
+def collect_output(process, deadline, streams, selector_factory=None, read=None, monotonic=None):
+    """Read both pipes fairly without accepting readiness observed at/after deadline."""
+    selector_factory = selector_factory or selectors.DefaultSelector
+    read = read or os.read
+    monotonic = monotonic or time.monotonic
+    total = 0
+    with selector_factory() as selector:
+        selector.register(process.stdout, selectors.EVENT_READ, 'stdout')
+        selector.register(process.stderr, selectors.EVENT_READ, 'stderr')
+        while selector.get_map():
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise RuntimeError('fixture timeout')
+            ready = selector.select(remaining)
+            # The pre-select remaining value is only the wait bound. Readiness
+            # observed after the absolute deadline cannot qualify as timely.
+            if not ready or monotonic() >= deadline:
+                raise RuntimeError('fixture timeout')
+            for key, _ in ready:
+                if monotonic() >= deadline:
+                    raise RuntimeError('fixture timeout')
+                part = read(key.fileobj.fileno(), min(4096, LIMIT - total + 1))
+                if not part:
+                    selector.unregister(key.fileobj)
+                    continue
+                available = LIMIT - total
+                streams[key.data].extend(part[:available])
+                total += min(len(part), available)
+                if len(part) > available:
+                    raise RuntimeError('fixture aggregate output limit; capture truncated at 65536 bytes')
+                if monotonic() >= deadline:
+                    raise RuntimeError('fixture timeout')
+    return total
+
+
+def wait_for_exit(process, deadline, monotonic=None):
+    """Bound process exit observation by the same absolute deadline."""
+    monotonic = monotonic or time.monotonic
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise RuntimeError('fixture timeout')
+    try:
+        code = process.wait(timeout=remaining)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError('fixture timeout') from error
+    if monotonic() >= deadline:
+        raise RuntimeError('fixture timeout')
+    return code
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--run', action='store_true')
@@ -85,27 +140,8 @@ def main():
             code = None
             failure = None
             try:
-                with selectors.DefaultSelector() as selector:
-                    selector.register(process.stdout, selectors.EVENT_READ, 'stdout')
-                    selector.register(process.stderr, selectors.EVENT_READ, 'stderr')
-                    while selector.get_map():
-                        remaining = deadline - time.monotonic()
-                        ready = selector.select(max(0, remaining))
-                        if remaining <= 0 or not ready:
-                            raise RuntimeError('fixture timeout')
-                        # One bounded read per ready descriptor per round; neither
-                        # stream can starve the other. Both share the same cap.
-                        for key, _ in ready:
-                            part = os.read(key.fileobj.fileno(), min(4096, LIMIT - total + 1))
-                            if not part:
-                                selector.unregister(key.fileobj)
-                                continue
-                            available = LIMIT - total
-                            streams[key.data].extend(part[:available])
-                            total += min(len(part), available)
-                            if len(part) > available:
-                                raise RuntimeError('fixture aggregate output limit; capture truncated at 65536 bytes')
-                code = process.wait(timeout=max(0.1, deadline - time.monotonic()))
+                total = collect_output(process, deadline, streams)
+                code = wait_for_exit(process, deadline)
                 if code != 0:
                     raise RuntimeError(f'fixture failed ({code})')
                 # A single JSON document is required; extra JSON or warning text
@@ -128,6 +164,7 @@ def main():
             finally:
                 # Persist exact bounded bytes even when JSON parsing or validation
                 # fails. Capture files live outside the child's readable sandbox.
+                total = retained_byte_count(streams)
                 try:
                     if process.poll() is None:
                         process.kill()

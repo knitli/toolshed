@@ -129,12 +129,12 @@ class FakeProcess extends EventEmitter {
   }
   record(name) { this.events.push({ name, at: performance.now() }); diagnostic('fake-process', { mode: this.mode, name }); }
   emitFrame(value) {
-    const raw = `${JSON.stringify(value)}\n`;
-    assert(Buffer.byteLength(raw) <= 64 * 1024, 'fake output frame bound');
-    // Exercise the actual SDK's newline framing across separate writes.
-    const cut = Math.floor(raw.length / 2);
-    this.stdout.write(raw.slice(0, cut));
-    this.stdout.write(raw.slice(cut));
+    const raw = Buffer.from(`${JSON.stringify(value)}\n`, 'utf8');
+    assert(raw.byteLength <= 64 * 1024, 'fake output frame bound');
+    // Split bytes so a UTF-8 code point may cross writes without corrupting it.
+    const cut = Math.floor(raw.byteLength / 2);
+    this.stdout.write(raw.subarray(0, cut));
+    this.stdout.write(raw.subarray(cut));
   }
   receive(message) {
     try {
