@@ -534,30 +534,77 @@ class NativePackagingTests(unittest.TestCase):
                 self.assertEqual(hashlib.sha256((docs / relative).read_bytes()).hexdigest(), expected)
 
     def test_current_recipe_covers_every_changed_file_and_rejects_tampering(self):
-        manifest_bytes = PACKAGER["SOURCE_MANIFEST"].read_bytes()
-        patch_bytes = PACKAGER["PATCH"].read_bytes()
-        manifest = PACKAGER["verify_manifest"](manifest_bytes, patch_bytes)
+        selected = registry.recipe()
+        evidence = registry.validate_recipe()
+        assets = (selected.manifest, *selected.ordered_patches)
+        contents = {asset.path: registry._read_asset(asset) for asset in assets}
         changed = [shlex.split(line)[3].removeprefix("b/")
-                   for line in patch_bytes.decode().splitlines() if line.startswith("diff --git ")]
+                   for line in contents[selected.ordered_patches[0].path].decode().splitlines()
+                   if line.startswith("diff --git ")]
+        self.assertEqual(selected.file_count, 57)
+        self.assertEqual(len(changed), 57)
         self.assertEqual(len(changed), len(set(changed)))
-        self.assertEqual(set(changed), set(manifest["fileSha256"]))
+        self.assertEqual(set(changed), set(evidence.file_sha256))
         self.assertIn("codex-rs/core/src/session/session.rs", changed)
-        for source, implementation in ((manifest_bytes + b" ", patch_bytes),
-                                        (manifest_bytes, patch_bytes + b" ")):
-            with self.subTest(manifest_changed=source != manifest_bytes), \
-                    self.assertRaisesRegex(ValueError, "native_source_manifest_mismatch"):
-                PACKAGER["verify_manifest"](source, implementation)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for asset in assets:
+                (root / asset.path).write_bytes(contents[asset.path])
+            with patch.object(registry, "DOCS", root):
+                for asset in assets:
+                    for malformed in (contents[asset.path] + b" ",
+                                      b"!" + contents[asset.path][1:]):
+                        with self.subTest(asset=asset.path, size=len(malformed)):
+                            (root / asset.path).write_bytes(malformed)
+                            with self.assertRaisesRegex(ValueError, "asset (size|hash) mismatch"):
+                                registry.validate_recipe()
+                            (root / asset.path).write_bytes(contents[asset.path])
 
     def test_manifest_rejects_a_missing_patched_file(self):
-        manifest_bytes = PACKAGER["SOURCE_MANIFEST"].read_bytes()
-        patch_bytes = PACKAGER["PATCH"].read_bytes()
-        manifest = PACKAGER["verify_manifest"](manifest_bytes, patch_bytes)
-        self.assertEqual(manifest["fileCount"], PACKAGER["PATCHED_FILE_COUNT"])
+        selected = registry.recipe()
+        manifest = json.loads(registry._read_asset(selected.manifest))
+        self.assertEqual(manifest["fileCount"], 57)
         manifest["fileCount"] -= 1
         removed = manifest["files"].pop()
         del manifest["fileSha256"][removed["path"]]
-        with self.assertRaisesRegex(ValueError, "native_source_manifest_mismatch"):
-            PACKAGER["verify_manifest"](json.dumps(manifest).encode(), patch_bytes)
+        original_read = registry._read_asset
+
+        def read_asset(asset):
+            return json.dumps(manifest).encode() if asset == selected.manifest else original_read(asset)
+
+        with patch.object(registry, "_read_asset", side_effect=read_asset):
+            with self.assertRaisesRegex(ValueError, "core manifest mismatch"):
+                registry.validate_recipe()
+            manifest["fileCount"] = 57
+            with self.assertRaisesRegex(ValueError, "source map count mismatch"):
+                registry.validate_recipe()
+
+    def test_core_source_verification_reads_each_asset_once_and_checks_file_sizes(self):
+        evidence = registry.validate_recipe()
+        selected = evidence.recipe
+        original_read = registry._read_asset
+        manifest = json.loads(original_read(selected.manifest))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for item in manifest["files"]:
+                path = root / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                content = item["path"].encode()
+                path.write_bytes(content)
+                item.update(bytes=len(content), sha256=hashlib.sha256(content).hexdigest())
+                manifest["fileSha256"][item["path"]] = item["sha256"]
+
+            def read_asset(asset):
+                return json.dumps(manifest).encode() if asset == selected.manifest else original_read(asset)
+
+            with patch.object(registry, "_read_asset", side_effect=read_asset) as read:
+                count, _ = PACKAGER["verify_recipe_source"](root, evidence)
+                self.assertEqual(count, 57)
+                self.assertEqual([call.args[0] for call in read.call_args_list],
+                                 [selected.manifest, *selected.ordered_patches])
+                manifest["files"][0]["bytes"] += 1
+                with self.assertRaisesRegex(ValueError, "native_source_hash_mismatch"):
+                    PACKAGER["verify_recipe_source"](root, evidence)
 
     def test_lock_normalization_rejects_any_dependency_or_external_change(self):
         before = {
@@ -634,7 +681,7 @@ class NativePackagingTests(unittest.TestCase):
                 digest = "b" * 64 if (
                     state["scenario"] == "drift" and state["build_completed"]
                 ) else "a" * 64
-                return PACKAGER["PATCHED_FILE_COUNT"], digest
+                return registry.recipe().file_count, digest
 
             original_copy = PACKAGER["_copy_new"]
 

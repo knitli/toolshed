@@ -79,7 +79,7 @@ class NativeCIProducerTests(unittest.TestCase):
                                  PRODUCER.builder.sha256_file(Path(PRODUCER.__file__)))
 
                 self.assertEqual(receipt["inputs"]["sourceManifestSha256"],
-                                 PRODUCER.builder.SOURCE_MANIFEST_SHA256)
+                                 registry.recipe().manifest.sha256)
                 self.assertEqual(receipt["schemaVersion"], 2)
                 self.assertEqual(receipt["recipe"], receipt["build"]["recipe"])
                 self.assertEqual(set(receipt["inputs"]), {

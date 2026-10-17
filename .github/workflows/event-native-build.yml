@@ -5,7 +5,7 @@ on:
     inputs:
       #checkov:skip=CKV_GHA_7: protected-main enum selects fixed registered recipe/revision; source and receipt identities remain pinned
       family:
-        description: Inactive native candidate recipe
+        description: Native candidate recipe family (terminal-query-v1 is inactive)
         type: choice
         default: core-idle-v1
         options:

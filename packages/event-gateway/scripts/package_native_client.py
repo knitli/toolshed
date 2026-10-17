@@ -22,19 +22,24 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[3]
 DOCS = ROOT / "packages/event-gateway/docs/native-bridge"
-REGISTRY = Path(__file__).with_name("native_recipe_registry.py")
-_registry_spec = importlib.util.spec_from_file_location("native_build_recipe_registry", REGISTRY)
-registry = importlib.util.module_from_spec(_registry_spec)
-sys.modules[_registry_spec.name] = registry
-_registry_spec.loader.exec_module(registry)
-PATCH = DOCS / "native-core-idle-v1-implementation.patch"
-SOURCE_MANIFEST = DOCS / "native-core-idle-v1-source-manifest.json"
+REGISTRY = Path(__file__).resolve().with_name("native_recipe_registry.py")
+registry = sys.modules.get("native_recipe_registry")
+if registry is None:
+    _registry_spec = importlib.util.spec_from_file_location("native_recipe_registry", REGISTRY)
+    registry = importlib.util.module_from_spec(_registry_spec)
+    sys.modules[_registry_spec.name] = registry
+    try:
+        _registry_spec.loader.exec_module(registry)
+    except BaseException:
+        sys.modules.pop(_registry_spec.name, None)
+        raise
+elif (getattr(registry, "__file__", None) != str(REGISTRY)
+      or getattr(getattr(registry, "__spec__", None), "origin", None) != str(REGISTRY)):
+    raise ImportError("native_recipe_registry_origin_mismatch")
 UPSTREAM_COMMIT = "a956835d020762cb2b570053af06f643a11c0ecc"
-PATCH_SHA256 = "ef74b28f308d4eb16556771cbfc47f3db00d83165e332f546edd9b65b6b302db"
-SOURCE_MANIFEST_SHA256 = "8c6f136f215deb4dca30b4d230eede5eaf8e65c1850635b199b62457a7759924"
 PINNED_CARGO_CONFIG_SHA256 = "b8ae1cea341beb2d4a3c8fb81f97a96f4aee1fd53f769c57f140dfe949806a80"
 PINNED_SOURCE_ROOT_CARGO_CONFIG_SHA256 = "b34b20f64e30695e8629ddad8b80885764e947f51e4ce49c6378a3b5a238d25e"
-PATCHED_FILE_COUNT = 57
+
 def _launcher_pin(path):
     """Read one literal launcher digest as data without executing launcher code."""
     tree = ast.parse(path.read_text())
@@ -75,25 +80,6 @@ def sha256_file(path):
         for block in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
-
-
-def verify_manifest(manifest_bytes, patch_bytes):
-    """Check the checked-in patch and source inventory against their pins."""
-    manifest = json.loads(manifest_bytes)
-    if (sha256(manifest_bytes) != SOURCE_MANIFEST_SHA256
-            or manifest.get("baseCommit") != UPSTREAM_COMMIT
-            or manifest.get("patchSha256") != PATCH_SHA256
-            or sha256(patch_bytes) != PATCH_SHA256
-            or manifest.get("fileCount") != PATCHED_FILE_COUNT
-            or manifest.get("fileCount") != len(manifest.get("fileSha256", {}))
-            or manifest.get("fileCount") != len(manifest.get("files", []))):
-        raise ValueError("native_source_manifest_mismatch")
-    files = manifest["files"]
-    if (len({entry.get("path") for entry in files}) != len(files)
-            or {entry.get("path"): entry.get("sha256") for entry in files}
-            != manifest["fileSha256"]):
-        raise ValueError("native_source_manifest_mismatch")
-    return manifest
 
 
 def verify_patched_source(source, manifest):
@@ -152,10 +138,11 @@ def verify_base_prerequisites(source, selected):
 
 def verify_recipe_source(source, evidence):
     selected = evidence.recipe
-    for asset in (selected.manifest, *selected.parents, *selected.ordered_patches):
+    manifest_bytes = registry._read_asset(selected.manifest)
+    for asset in (*selected.parents, *selected.ordered_patches):
         registry._read_asset(asset)
-    if evidence.recipe.family == registry.DEFAULT_FAMILY:
-        manifest = json.loads(registry._read_asset(evidence.recipe.manifest))
+    if selected.family == registry.DEFAULT_FAMILY:
+        manifest = json.loads(manifest_bytes)
         return verify_patched_source(source, manifest)
     inventory = hashlib.sha256()
     for relative, expected in sorted(evidence.file_sha256.items()):

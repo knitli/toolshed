@@ -32,12 +32,18 @@ and `sourceManifestSha256`. The manifest digest equals the recipe digest.
 `appliedPatches` records ordered `{path, bytes, sha256}` descriptors, including
 all seven terminal patches. No singular patch digest represents that family.
 
+The registry is the single source of recipe constants and manifest validation.
+Builder and verifier share the cached `native_recipe_registry` module only when
+its file and module-spec origin match their fixed sibling path; neither searches
+an untrusted import path. No additional loader file enters the build-input contract.
+
 The registry authenticates the selected manifest, parents, and patches. The
 builder passes authenticated patch bytes unchanged to Git and applies them to a
 fresh full archive of the pinned upstream commit. It checks the terminal base prerequisite in that archive
 before applying patches. Standalone packaging reauthenticates the selected manifest,
 parents, and ordered patches before and after the build for both families. It
-verifies every selected source hash before and after compilation, preserving the legacy byte-size checks and bounding terminal
+retains the authenticated manifest bytes for the legacy byte-size checks, without
+rereading the manifest. It verifies every selected source hash before and after compilation, preserving the legacy byte-size checks and bounding terminal
 source reads to 2 MiB per file. Inventory hashes use sorted UTF-8 paths followed
 by NUL and the raw SHA-256 digest for each file. The producer checks recipe
 assets and implementation input hashes before and after packaging and correlates

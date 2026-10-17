@@ -7,7 +7,6 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
-import sys
 import tempfile
 from types import MappingProxyType
 import unittest
@@ -16,10 +15,10 @@ from unittest.mock import patch
 
 PACKAGE = Path(__file__).resolve().parents[1]
 SCRIPT = PACKAGE / "scripts/native_recipe_registry.py"
-SPEC = importlib.util.spec_from_file_location("native_recipe_registry", SCRIPT)
-R = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = R
-SPEC.loader.exec_module(R)
+SPEC = importlib.util.spec_from_file_location("registry_test_verifier", PACKAGE / "scripts/verify_native_ci_provenance.py")
+_VERIFIER = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(_VERIFIER)
+R = _VERIFIER.R
 TERMINAL = "terminal-query-v1"
 
 
