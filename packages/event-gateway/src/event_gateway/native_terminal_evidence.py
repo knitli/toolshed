@@ -13,7 +13,7 @@ def validate_terminal_receipt(request, receipt):
     request, receipt = _copy(request), _copy(receipt)
     if (
         not isinstance(request, dict)
-        or type(request.get("receiptVersion")) is not int
+        or type(request.get("receiptVersion")) is not int  # pylint: disable=unidiomatic-typecheck
         or request["receiptVersion"] != 3
     ):
         raise NativeError("invalid_native_request")
@@ -50,11 +50,9 @@ class NativeTerminalEvidenceAdapter(NativeBridgeAdapter):
     """Explicitly injected query for a trusted recovery caller; no active gateway caller."""
 
     async def terminal_evidence(self, request, input_recorded_receipt):
-        """Cross-check native durable evidence against a trusted saved input receipt.
-
-        The caller supplies its original persisted v3 request and previously validated
-        InputRecorded receipt. This method neither loads nor changes settlement state.
-        """
+        """Cross-check native durable evidence against a trusted saved input receipt."""
+        # The caller supplies its original persisted v3 request and previously validated
+        # InputRecorded receipt. This method neither loads nor changes settlement state.
         request = _copy(request)
         anchor = validate_receipt(
             request, input_recorded_receipt, allow_input_recorded=True
