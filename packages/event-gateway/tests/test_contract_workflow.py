@@ -198,16 +198,7 @@ class ContractWorkflowTests(unittest.TestCase):
         blobs = self.approved_snapshot(name)
         path = SNAPSHOT + "event-v1/protocol-v1.json"
         fixture = json.loads(blobs[path])
-        vectors = fixture["semanticVectors"]
-        self.assertEqual(sum(len(vectors[key]) for key in
-                             ("rawCases", "digestCases", "bindingCases")), 45)
-        check = runpy.run_path(str(PACKAGE / "scripts/check_semantic_vectors.py"))["check"]
-        with tempfile.TemporaryDirectory() as directory:
-            corpus = Path(directory) / "semantic.json"
-            corpus.write_text(json.dumps(vectors))
-            with redirect_stdout(io.StringIO()) as output:
-                check(corpus)
-        self.assertEqual(output.getvalue().strip(), "PASS: 45 canonical semantic verdicts")
+        self.assert_semantic_corpus(blobs)
         fixture["semanticVectors"]["rawCases"][0]["expectedError"] = "invalid_schema"
         self.blobs = blobs.copy()
         self.blobs[path] = (json.dumps(fixture, indent=2) + "\n").encode()
@@ -445,7 +436,9 @@ class ContractWorkflowTests(unittest.TestCase):
                     self.assertEqual(current[SNAPSHOT + path], previous[SNAPSHOT + path])
 
     def test_github_watch_owner_rpc_semantic_corpus(self):
-        blobs = self.approved_snapshot("github-watch-owner-rpc")
+        self.assert_semantic_corpus(self.approved_snapshot("github-watch-owner-rpc"))
+
+    def assert_semantic_corpus(self, blobs):
         vectors = json.loads(blobs[SNAPSHOT + "event-v1/protocol-v1.json"])["semanticVectors"]
         self.assertEqual(sum(len(vectors[key]) for key in
                              ("rawCases", "digestCases", "bindingCases")), 45)
