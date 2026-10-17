@@ -81,6 +81,7 @@ class Tests(unittest.TestCase):
     def test_cleanup_requires_authoritative_stop_and_removal(self):
         calls = []
         count = 0
+
         def invoke(args):
             nonlocal count
             calls.append(args)
@@ -149,6 +150,7 @@ class LocalDockerTests(unittest.TestCase):
         self.socket = self.host / '.docker/run/docker.sock'
         self.socket_stat = os.stat_result((stat.S_IFSOCK | 0o600, 7, 8, 1, os.getuid(), os.getgid(), 0, 0, 0, 0))
         real_lstat = Path.lstat
+
         def lstat(path, *args, **kwargs):
             if path == self.socket:
                 return self.socket_stat

@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import selectors
 import stat
-import subprocess
+import subprocess  # nosec B404 - Fixed Docker executable, validated argv, no shell.
 import tempfile
 import time
 import uuid
@@ -60,6 +60,7 @@ class LocalDocker:
     """Only this invocation's fixed operations on the owned local daemon socket."""
 
     def __init__(self, host, name):
+        """Bind validated owned paths and name to the fixed local Docker socket."""
         require(isinstance(name, str) and re.fullmatch(r'reviewer-isolation-[0-9a-f]{32}', name),
                 'invalid owned container name')
         info = host.lstat()
@@ -104,8 +105,9 @@ class LocalDocker:
         self.validate_args(args)
         require(socket_identity(self.socket) == self.socket_identity, 'local Docker socket changed')
         argv = [DOCKER, '--host=unix://' + str(self.socket), '--config', str(self.config), *args]
-        return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, env=docker_env(), close_fds=True)
+        return subprocess.Popen(  # nosec B603 - Fixed Docker executable, validated argv, no shell.
+            argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, env=docker_env(), close_fds=True)
 
     def command(self, args, *, timeout=TIMEOUT):
         process = self.start(args)
