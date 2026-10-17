@@ -28,6 +28,11 @@ HTTP_IO_SECONDS = 5
 CLEANUP_SECONDS = 4
 ABORT_SECONDS = 1
 MAX_STREAM_BYTES = 1024 * 1024
+# Claude 2.1.302's fresh-turn peer framing, pinned without copying native prose.
+PEER_REPLAY_PREFIX_BYTES = 39
+PEER_REPLAY_SUFFIX_BYTES = 547
+PEER_REPLAY_PREFIX_SHA256 = '175c160f7750b0d6af1a569b23a6822b33e6d7bb6e5d27bc355c7a5edbf889bc'
+PEER_REPLAY_SUFFIX_SHA256 = 'cf678e57e50d5b586186df5ef480e35a155feab2915acb2e0644c5a81484b881'
 
 
 class CanaryError(RuntimeError):
@@ -172,6 +177,23 @@ def validate_passive_ui_hint(value):
             require(isinstance(instance, dict) and instance.keys() == fields
                     and all(isinstance(item, str) for item in instance.values()),
                     'busy_native_ui_hint')
+
+
+def matches_peer_replay(message, expected_content):
+    """Match only the pinned complete peer wrapper and unchanged input bytes."""
+    if (not isinstance(message, dict) or message.keys() != {'role', 'content'}
+            or message.get('role') != 'user' or not isinstance(message.get('content'), str)
+            or not isinstance(expected_content, str)):
+        return False
+    try:
+        content, expected = message['content'].encode('utf-8'), expected_content.encode('utf-8')
+    except UnicodeEncodeError:
+        return False
+    prefix, suffix = PEER_REPLAY_PREFIX_BYTES, PEER_REPLAY_SUFFIX_BYTES
+    return (len(content) == prefix + len(expected) + suffix
+            and hashlib.sha256(content[:prefix]).hexdigest() == PEER_REPLAY_PREFIX_SHA256
+            and content[prefix:-suffix] == expected
+            and hashlib.sha256(content[-suffix:]).hexdigest() == PEER_REPLAY_SUFFIX_SHA256)
 
 
 class BusyProbe:
@@ -335,11 +357,13 @@ class BusyProbe:
         if kind == 'user':
             identity = value.get('uuid')
             expected = self.initial if identity == self.initial.get('uuid') else None
+            message_matches = expected is not None and value.get('message') == expected['message']
             if self.expected is not None and identity == self.expected['uuid']:
                 expected = {'message': {'role': 'user', 'content': self.expected['content']}}
+                message_matches = matches_peer_replay(value.get('message'), self.expected['content'])
             require(expected is not None and value.get('isReplay') is True
                     and value.get('parent_tool_use_id') is None
-                    and value.get('message') == expected['message'] and identity not in self.replayed,
+                    and message_matches and identity not in self.replayed,
                     'busy_native_replay_mismatch')
             self.replayed.add(identity)
             self.record('native_user_replay', inputUuid=identity,

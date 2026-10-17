@@ -3,6 +3,7 @@ import ast
 import asyncio
 from functools import partial
 import importlib.util
+import hashlib
 import io
 import json
 import os
@@ -396,6 +397,18 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
     """Synthetic protocol checks are not evidence of native client qualification."""
 
     def setUp(self):
+        self.prefix = 'synthetic-peer-prefix: λ\n'
+        self.suffix = '\nsynthetic-peer-suffix: 🧪'
+        framing = {
+            'PEER_REPLAY_PREFIX_BYTES': len(self.prefix.encode()),
+            'PEER_REPLAY_SUFFIX_BYTES': len(self.suffix.encode()),
+            'PEER_REPLAY_PREFIX_SHA256': hashlib.sha256(self.prefix.encode()).hexdigest(),
+            'PEER_REPLAY_SUFFIX_SHA256': hashlib.sha256(self.suffix.encode()).hexdigest(),
+        }
+        for name, value in framing.items():
+            replacement = patch.object(CANARY, name, value)
+            replacement.start()
+            self.addCleanup(replacement.stop)
         self.session = str(uuid4())
         self.key = 'local-fixture-' + secrets.token_hex(24)
         self.ready = 'READY_' + uuid4().hex
@@ -408,6 +421,11 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             'source': 'manual', 'sourceStateVersion': 'canary-1',
             'canonicalSubject': {'kind': 'manual', 'subjectId': self.busy},
             'eventReference': 'ref_' + str(uuid4())})
+
+    def replay(self, frame=None):
+        frame = self.frame if frame is None else frame
+        return frame | {'isReplay': True, 'message': {
+            'role': 'user', 'content': self.prefix + frame['message']['content'] + self.suffix}}
 
     def new_probe(self):
         return CANARY.BusyProbe(self.session, self.initial, self.ready)
@@ -436,7 +454,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         probe = self.started(probe=probe)
         probe.prepare(self.frame)
         if replay:
-            probe.observe(self.frame | {'isReplay': True})
+            probe.observe(self.replay())
         probe.sent()
         probe.release_response()
         return probe
@@ -554,7 +572,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                     probe.hold_response()
                 self.assertTrue(probe.ready_to_send.is_set())
                 probe.prepare(self.frame)
-                probe.observe(self.frame | {'isReplay': True})
+                probe.observe(self.replay())
                 probe.sent()
                 probe.release_response()
                 self.finish(probe)
@@ -652,7 +670,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         probe.provider_request(self.ready)
         probe.hold_response()
         probe.prepare(self.frame)
-        probe.observe(self.frame | {'isReplay': True})
+        probe.observe(self.replay())
         probe.sent()
         probe.release_response()
         self.finish(probe)
@@ -741,7 +759,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         probe.hold_response()
         probe.prepare(self.frame)
         probe.observe(self.lifecycle('queued', self.frame['uuid']))
-        probe.observe(self.frame | {'isReplay': True})
+        probe.observe(self.replay())
         probe.sent()
         probe.release_response()
         probe.observe(self.assistant(self.ready))
@@ -886,21 +904,66 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
     def test_replay_requires_exact_uuid_content_session_and_boolean(self):
         changes = [{'uuid': str(uuid4())}, {'session_id': str(uuid4())},
                    {'message': {'role': 'user', 'content': self.busy}},
-                   {'isReplay': False}, {'isReplay': 'true'}, {'uuid': None}]
+                   {'isReplay': False}, {'isReplay': 'true'}, {'isReplay': 1},
+                   {'parent_tool_use_id': 'tool'}, {'uuid': None}]
         for change in changes:
             with self.subTest(change=change):
                 probe = self.started()
                 probe.prepare(self.frame)
                 with self.assertRaises(CANARY.CanaryError):
-                    probe.observe(self.frame | {'isReplay': True} | change)
+                    probe.observe(self.replay() | change)
+
+    def test_peer_wrapper_accepts_exact_unicode_bytes_only(self):
+        for content in ('plain', 'λ🧪', ''):
+            with self.subTest(content=content):
+                message = {'role': 'user', 'content': self.prefix + content + self.suffix}
+                self.assertTrue(CANARY.matches_peer_replay(message, content))
+                self.assertFalse(CANARY.matches_peer_replay(message, '\ud800'))
+                with patch.object(CANARY, 'PEER_REPLAY_PREFIX_BYTES', len(self.prefix)):
+                    self.assertFalse(CANARY.matches_peer_replay(message, content))
+                with patch.object(CANARY, 'PEER_REPLAY_SUFFIX_BYTES', len(self.suffix)):
+                    self.assertFalse(CANARY.matches_peer_replay(message, content))
+
+    def test_peer_wrapper_rejects_each_content_and_shape_boundary(self):
+        middle = self.frame['message']['content']
+        wrapped = self.replay()['message']
+        invalid_content = [middle, self.prefix[1:] + middle + self.suffix,
+                           self.prefix + 'x' + middle + self.suffix,
+                           'X' + self.prefix[1:] + middle + self.suffix,
+                           self.prefix + middle + self.suffix[:-1],
+                           self.prefix + middle + self.suffix + 'x',
+                           self.prefix + middle + self.suffix.replace('synthetic', 'Synthetic'),
+                           self.prefix + 'X' + middle[1:] + self.suffix,
+                           self.prefix + middle + 'x' + self.suffix,
+                           self.prefix + '\ud800' + self.suffix,
+                           None, 123, [{'type': 'text', 'text': wrapped['content']}]]
+        messages = [wrapped | {'content': content} for content in invalid_content]
+        messages += [wrapped | {'extra': True}, wrapped | {'role': 'assistant'},
+                     {'content': wrapped['content']}, {'role': 'user'}, None, []]
+        for message in messages:
+            with self.subTest(message=message):
+                self.assertFalse(CANARY.matches_peer_replay(message, middle))
+                probe = self.started()
+                probe.prepare(self.frame)
+                with self.assertRaises(CANARY.CanaryError):
+                    probe.observe(self.replay() | {'message': message})
+
+    def test_initial_replay_remains_exact_and_cannot_use_peer_wrapper(self):
+        probe = self.started()
+        with self.assertRaises(CANARY.CanaryError):
+            probe.observe(self.replay(self.initial))
+        probe = self.started()
+        probe.observe(self.initial | {'isReplay': True})
+        with self.assertRaises(CANARY.CanaryError):
+            probe.observe(self.initial | {'isReplay': True})
 
     def test_replay_before_send_preparation_and_duplicate_replay_rejected(self):
         probe = self.started()
         with self.assertRaises(CANARY.CanaryError):
-            probe.observe(self.frame | {'isReplay': True})
+            probe.observe(self.replay())
         probe = self.released()
         with self.assertRaises(CANARY.CanaryError):
-            probe.observe(self.frame | {'isReplay': True})
+            probe.observe(self.replay())
 
     def test_missing_replay_cannot_produce_proof(self):
         probe = self.released(replay=False)
@@ -1453,7 +1516,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
 
     async def finish_busy_native(self, provider, feed, frame):
         await provider.probe.release.wait()
-        feed(frame | {'isReplay': True}, self.assistant(self.ready), self.result(self.ready))
+        feed(self.replay(frame), self.assistant(self.ready), self.result(self.ready))
         self.busy = provider.probe.expected['marker']
         provider.probe.provider_request(self.busy)
         provider.turns = 2
@@ -1529,7 +1592,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         probe.release_response()
         probe.observe(self.assistant(self.ready))
         probe.observe(self.result(self.ready))
-        probe.observe(self.frame | {'isReplay': True})
+        probe.observe(self.replay())
         probe.provider_request(self.busy)
         probe.observe(self.assistant(self.busy))
         probe.observe(self.result(self.busy))
