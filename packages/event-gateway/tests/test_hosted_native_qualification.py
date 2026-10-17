@@ -158,7 +158,8 @@ class HostedNativeTests(unittest.TestCase):
             root = root.resolve()
             args = SimpleNamespace(cloud_source=str(source), cloud_commit='a' * 40)
             for response in (str(root) + '\n' + 'a' * 40 + '\n', str(root) + '\n' + 'b' * 40 + '\n', '/other\n' + 'a' * 40 + '\n'):
-                with patch.object(HOSTED.subprocess, 'run', return_value=SimpleNamespace(stdout=response)) as run:
+                with patch.object(HOSTED.subprocess, 'run', side_effect=lambda argv, **_kwargs:
+                                  SimpleNamespace(stdout=response if 'rev-parse' in argv else '')) as run:
                     if response == str(root) + '\n' + args.cloud_commit + '\n':
                         HOSTED.cloud_identity(args, {'HOME': str(root)})
                     else:
@@ -166,6 +167,35 @@ class HostedNativeTests(unittest.TestCase):
                             HOSTED.cloud_identity(args, {'HOME': str(root)})
                     self.assertEqual(run.call_args.args[0][0], '/usr/bin/git')
                     self.assertEqual(run.call_args.kwargs['timeout'], 10)
+
+    def test_cloud_identity_rejects_tracked_staged_and_untracked_source_changes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve() / 'cloud'
+            source = root / 'apps/os/packages/event-runtime/src'
+            source.mkdir(parents=True)
+            entry = source / 'index.ts'
+            entry.write_text('export {};\n')
+            (root / '.gitignore').write_text('ignored.ts\nnode_modules/\n')
+            def git(*arguments):
+                return subprocess.run(['/usr/bin/git', '-C', str(root), *arguments], check=True,
+                                      capture_output=True, text=True).stdout.strip()
+            git('init', '-q')
+            git('add', '.')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                '-c', 'commit.gpgsign=false', 'commit', '-qm', 'synthetic source')
+            args = SimpleNamespace(cloud_source=str(source), cloud_commit=git('rev-parse', 'HEAD'))
+            HOSTED.cloud_identity(args, {'PATH': '/usr/bin:/bin', 'HOME': str(root)})
+            for change in ('working-tree', 'index', 'untracked', 'ignored'):
+                with self.subTest(change=change):
+                    target = entry if change in ('working-tree', 'index') else source / ('ignored.ts' if change == 'ignored' else 'new.ts')
+                    target.write_text('export const changed = true;\n')
+                    if change == 'index':
+                        git('add', str(entry))
+                    with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+                        HOSTED.cloud_identity(args, {'PATH': '/usr/bin:/bin', 'HOME': str(root)})
+                    git('reset', '--hard', '-q', 'HEAD')
+                    if target != entry:
+                        target.unlink()
 
     def test_native_recovery_proof_checks_reject_mutated_causality_and_identity(self):
         import copy
@@ -216,6 +246,7 @@ class HostedNativeTests(unittest.TestCase):
                 lambda d: d['wire'][-1]['proof'].update(nonce=d['wire'][-2]['proof']['nonce']),
                 lambda d: d['sourceSha256'].update({str(required[0]): '0' * 64}),
                 lambda d: d['cloudBundle']['inputs'].update({str(source): '0' * 64}),
+                lambda d: d['cloudBundle'].update(inputs={'../cloud/apps/os/packages/event-runtime/src/index.ts': HOSTED.sha(source)}),
                 lambda d: d['settled']['slots'].append({'state': 'reserved'}),
                 lambda d: d['fixturePorts'].update(model=43126)]
             for index, mutate in enumerate(mutations):
@@ -290,6 +321,11 @@ class HostedNativeTests(unittest.TestCase):
                 else:
                     self.assertTrue(HOSTED.verify_proof(args, 'three-session', root)['semanticChecksPassed'])
             (root / 'proof.json').write_text(json.dumps(proof))
+            aliases = root / 'bin'
+            aliases.mkdir()
+            (aliases / 'codex').symlink_to(root / 'codex')
+            args.binary = str(aliases / 'codex')
+            self.assertTrue(HOSTED.verify_proof(args, 'three-session', root)['semanticChecksPassed'])
             (root / 'proof.private-evidence.jsonl').write_bytes(b'tampered')
             with self.assertRaises(ValueError):
                 HOSTED.verify_proof(args, 'three-session', root)

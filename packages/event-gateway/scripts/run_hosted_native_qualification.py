@@ -102,10 +102,19 @@ def cloud_identity(args, environment):
     source = Path(args.cloud_source).resolve(strict=True)
     require(source.parts[-5:] == ('apps', 'os', 'packages', 'event-runtime', 'src'), 'unexpected cloud source')
     root = source.parents[4]
-    checked = subprocess.run(['/usr/bin/git', '-C', str(root), 'rev-parse', '--show-toplevel', '--verify', 'HEAD'],
-                             env={**environment, 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull,
-                                  'GIT_OPTIONAL_LOCKS': '0'}, capture_output=True, text=True, check=True, timeout=10)
+    def git(*arguments):
+        return subprocess.run(['/usr/bin/git', '-C', str(root), *arguments],
+                              env={**environment, 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull,
+                                   'GIT_OPTIONAL_LOCKS': '0'}, capture_output=True, text=True, check=True, timeout=10)
+    checked = git('rev-parse', '--show-toplevel', '--verify', 'HEAD')
     require(checked.stdout.splitlines() == [str(root), args.cloud_commit], 'cloud source identity mismatch')
+    git('diff', '--quiet', '--ignore-submodules=none', 'HEAD', '--')
+    # Cached dependencies are pre-staged separately. Neither ignored nor ordinary
+    # untracked application files may silently participate in module resolution.
+    for ignored in (False, True):
+        extra = ('--ignored',) if ignored else ()
+        require(not git('ls-files', '--others', '--exclude-standard', *extra, '--', 'apps/os',
+                        ':(glob,exclude)**/node_modules/**').stdout, 'uncommitted cloud application input')
 
 
 def read_bounded(path, limit):
@@ -136,7 +145,7 @@ def verify_proof(args, scenario, output):
     if scenario == 'three-session':
         require(proof['qualification'] == 'controlled-three-real-cli-production-daemon-workerd'
                 and proof['nativeBinarySha256'] == args.binary_sha256
-                and proof['codeModeHostSha256'] == sha(Path(args.binary).parent / 'codex-code-mode-host'),
+                and proof['codeModeHostSha256'] == sha(Path(args.binary).resolve(strict=True).parent / 'codex-code-mode-host'),
                 'three-session candidate mismatch')
         sessions = proof['nativeCliSessions']
         require(set(sessions) == {'A', 'B', 'C'}, 'three-session identity set missing')
@@ -234,6 +243,8 @@ def verify_proof(args, scenario, output):
     inputs = (proof['workerdInputsSha256'] if scenario == 'three-session' else proof['cloudBundle']['inputs'])
     require(isinstance(inputs, dict) and bool(inputs), 'missing cloud source hashes')
     for name, expected in inputs.items():
+        if scenario == 'native-recovery':
+            require(Path(name).is_absolute(), 'recovery bundle input is not producer-normalized')
         source = (cloud_root / name).resolve(strict=True)
         require(source.is_relative_to(cloud_root) or source.is_relative_to(fixture), 'unexpected cloud bundle input')
         require(sha(source) == expected, 'cloud bundle source mismatch')

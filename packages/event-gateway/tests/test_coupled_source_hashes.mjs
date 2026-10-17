@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join,relative} from 'node:path';
 import {registerHooks} from 'node:module';
 import {test} from 'node:test';
 import {sourceHashes} from '../docs/native-bridge/coupled-workerd-source-hashes.mjs';
@@ -17,7 +17,7 @@ export const coordinatorName=()=>{throw new Error('unexpected coordinator lookup
 
 test('hashes only resolved sources inside qualified roots, before reading contents', t => {
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- Owned disposable test tree only; no user paths.
-  const temporary = fs.mkdtempSync(join(tmpdir(), 'native-source-hashes-'));
+  const temporary = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'native-source-hashes-')));
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- Owned disposable test tree only; no user paths.
   t.after(() => fs.rmSync(temporary, {recursive: true, force: true}));
   const root = join(temporary, 'qualified');
@@ -37,6 +37,17 @@ test('hashes only resolved sources inside qualified roots, before reading conten
   assert.deepEqual(sourceHashes([source, fixtureSource], [root, fixture]), {
     [source]: sha, [fixtureSource]: sha,
   });
+  const scratch = join(temporary, 'scratch');
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- Owned producer-cwd fixture.
+  fs.mkdirSync(scratch);
+  const priorCwd = process.cwd();
+  try {
+    process.chdir(scratch);
+    // esbuild metafile paths are relative to the broker's scratch cwd, not the checkout.
+    assert.deepEqual(sourceHashes([relative(scratch, source), relative(scratch, fixtureSource)], [root, fixture]), {
+      [source]: sha, [fixtureSource]: sha,
+    });
+  } finally { process.chdir(priorCwd); }
   const read = t.mock.method(fs, 'readFileSync');
   for (const path of [escaped, join(root, '..', 'qualified-other', 'outside.ts'), symlink]) {
     assert.throws(() => sourceHashes([source, path], [root, fixture]), /outside qualified source roots/);

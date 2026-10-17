@@ -54,6 +54,13 @@ Independent audit of the raw evidence and archive is still required. These
 checks are an acceptance filter for reviewed fixture code, not an independent
 observer of hostile code.
 
+Cloud identity checks reject tracked/index changes and untracked or ignored
+application inputs, excluding separately staged `node_modules` dependencies.
+The broker resolves esbuild's scratch-relative input paths before publishing
+canonical absolute paths in recovery evidence; the verifier never guesses a
+different working directory. Native companion lookup uses the resolved binary
+target, matching the executable passed to the fixture.
+
 Three-session retains four native Starts and five daemon coroutine invocations.
 Coupled recovery adds genuine native TUI/backend replacement while the synthetic
 response remains held, and exact durable receipt recovery in the new process.

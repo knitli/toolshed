@@ -35,7 +35,11 @@ class CoupledHostedTests(unittest.TestCase):
                 FIXTURE.inputs(changed)
 
     def test_optimized_hosted_execution_is_rejected(self):
-        with patch.object(FIXTURE.sys, 'flags', SimpleNamespace(optimize=1)), \
+        flags = SimpleNamespace(**{name: getattr(FIXTURE.sys.flags, name) for name in dir(FIXTURE.sys.flags)
+                                   if not name.startswith('_') and not callable(getattr(FIXTURE.sys.flags, name))})
+        flags.optimize = 1
+        self.assertEqual(flags.ignore_environment, FIXTURE.sys.flags.ignore_environment)
+        with patch.object(FIXTURE.sys, 'flags', flags), \
                 redirect_stderr(StringIO()), self.assertRaises(SystemExit):
             FIXTURE.inputs(self.arguments())
 
