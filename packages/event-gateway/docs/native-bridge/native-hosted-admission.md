@@ -28,19 +28,37 @@ means host-local addresses, not literal loopback. Broad Unix access and trusted
 same-user processes are explicit assumptions; this does not claim hostile IPC
 isolation or endpoint authentication. No production network call is permitted.
 
-The 240-second subprocess timeout kills the direct fixture process on expiry;
+Each scenario has a 240-second subprocess timeout. The timeout kills the direct fixture process on expiry;
 it does not prove every descendant exited. Scratch remains until VM disposal,
 avoiding deletion races with residual writers. The private workflow must use a
 bounded job timeout, no retry and no cancellation replacement. Ultimate lifetime
 containment relies on the provider's disposable-VM contract. Neither job
 completion nor the result file is an observed VM destruction receipt.
 
-Existing fixture cleanup, four native Starts, five daemon invocations, causal
-assertions, input hashes and private evidence checks remain authoritative.
-A zero exit with proof becomes
+The runner executes three-session followed by installed in-flight native recovery
+(`coupled-workerd.py --installed --restart-native --restart-inflight`), each in
+its own private evidence directory. Both use `-I -B`; optimization is forbidden
+because the native qualifier relies on assertions. Ports must be released before,
+between and after scenarios; occupied ports abort without fallback. The recovery
+fixture checks default kernel network denial before its broker and each native
+launch. Its temporary adapter restores the original qualifier helper on exit;
+it changes no production launcher and removes no sandbox prefix.
+
+The runner separately checks both proof identities, scenario outcomes, source
+hashes, recovery receipts, native identity rotation, exact lost-ACK replay,
+settlement and cleanup evidence. It also checks three-session private evidence
+and causal-sidecar hashes/nonces. Only both successful scenario checks produce
 `FIXTURE_COMPLETED_PENDING_INDEPENDENT_VERIFICATION`, never automatic PASS.
-Timeout, nonzero exit or missing proof remains INCOMPLETE. Independent proof and
-archive verification must precede any qualification or candidate promotion.
+Timeout, nonzero exit, malformed or mismatched evidence remains INCOMPLETE.
+Independent audit of the raw evidence and archive is still required. These
+checks are an acceptance filter for reviewed fixture code, not an independent
+observer of hostile code.
+
+Three-session retains four native Starts and five daemon coroutine invocations.
+Coupled recovery adds genuine native TUI/backend replacement while the synthetic
+response remains held, and exact durable receipt recovery in the new process.
+Neither proves OS gateway-daemon crash recovery, interrupted-turn completion,
+production admission, or observed VM destruction.
 
 ## Private workflow integration
 
@@ -74,8 +92,11 @@ The output directory must not already exist. Fixed ports 43121–43127 cover ent
 Miniflare loopback, broker, daemon and models A/B/C. Occupied ports abort without
 fallback. The fixture rejects ports inside the host's ephemeral range.
 
-Retain `hosted-result.json`, `network.sb`, proof and its referenced private causal
-and evidence files, plus bounded private logs. Archive only an explicit allowlist
+Retain `hosted-result.json`, `network.sb`, `three-session/proof.json`, its private
+causal and evidence sidecars, and `native-recovery/proof.json`, plus bounded private
+logs from each directory. The recovery proof contains raw synthetic native identities
+and wire bodies; it is private evidence. Update the cloud workflow export allowlist
+for both directories before enabling this runner. Archive only an explicit allowlist
 with size limits; never upload whole scratch or public raw evidence. Cancellation
 or incomplete archive retention cannot produce qualification PASS. The workflow
 must record its immutable execution SHA, Toolshed/overlay/cloud identities,

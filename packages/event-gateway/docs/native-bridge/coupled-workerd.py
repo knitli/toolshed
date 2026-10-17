@@ -39,6 +39,9 @@ def inputs(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('package', 'qualifier', 'binary', 'binary-sha', 'node', 'cloud-source', 'esbuild', 'miniflare', 'output'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--trusted-hosted-vm', action='store_true',
+                        help='Use admitted disposable VM network containment; no filesystem isolation claim')
+    parser.add_argument('--cloud-commit')
     parser.add_argument('--installed', action='store_true', help='Verify the installed wheel against --package/src/event_gateway before imports; requires -I')
     parser.add_argument('--restart-native', action='store_true', help='Recover an expired v3 receipt after native process restart')
     parser.add_argument('--restart-inflight', action='store_true',
@@ -57,7 +60,44 @@ def inputs(argv=None):
     ports = [getattr(parsed, name + '_port') for name in ('model', 'entry', 'loopback', 'broker')]
     if len(set(ports)) != 4 or any(not 1024 <= port <= 65535 for port in ports):
         parser.error('fixture ports must be distinct integers between 1024 and 65535')
+    if parsed.trusted_hosted_vm:
+        if not (parsed.installed and parsed.restart_native and parsed.restart_inflight):
+            parser.error('--trusted-hosted-vm requires installed in-flight native recovery')
+        if ports != [43125, 43121, 43122, 43123]:
+            parser.error('hosted recovery requires the four fixed hosted ports')
+        if not parsed.cloud_commit or len(parsed.cloud_commit) != 40 or any(c not in '0123456789abcdef' for c in parsed.cloud_commit):
+            parser.error('hosted recovery requires exact cloud commit')
+        if sys.flags.optimize:
+            parser.error('hosted recovery requires assertions enabled')
     return parsed
+
+
+def hosted_guard():
+    # This module has stdlib-only top-level definitions and a guarded main. Its
+    # digest is retained with this scenario; no production launch code is changed.
+    helper = load_module('coupled_hosted_guard', HERE / 'three-session-workerd.py')
+    return helper.verify_trusted_hosted_network()
+
+
+@contextmanager
+def hosted_native_launches(launcher):
+    original = launcher.native_client
+    if not getattr(args, 'trusted_hosted_vm', False):
+        yield
+        return
+
+    @contextmanager
+    def guarded(*values, **options):
+        hosted_guard()
+        # The coupled qualifier has no nested sandbox prefix to remove.
+        with original(*values, **options) as client:
+            yield client
+
+    launcher.native_client = guarded
+    try:
+        yield
+    finally:
+        launcher.native_client = original
 
 
 def configure(parsed):
@@ -462,6 +502,7 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
                 require(await NativeBridgeAdapter(mapping, bridge).check() == 'unavailable', 'old attachment unavailable')
                 restart = {'oldPid': old_process.pid, 'newPid': native_process.pid,
                            'oldWitness': witness, 'newWitness': new_witness,
+                           'processChecks': verify_native_restart(old_process, native_process, witness, new_witness, launcher),
                            'expiredBeforeRecovery': True, 'oldAttachmentUnavailable': True,
                            'stoppedBeforeHeldModelResponseReleased': args.restart_inflight,
                            'gatewayReceiptAbsentBeforeRecovery': True, 'independentlyRecorded': recorded}
@@ -510,6 +551,14 @@ async def exercise(bridge, model, native_process, witness, address, launcher):
 
 def main():
     require(hashlib.sha256(BINARY.read_bytes()).hexdigest() == BINARY_SHA, 'frozen native binary')
+    containment = hosted_guard() if getattr(args, 'trusted_hosted_vm', False) else None
+    if containment is not None:
+        helper = load_module('coupled_hosted_preflight', HERE / 'three-session-workerd.py')
+        ranges = helper.ephemeral_port_ranges()
+        for name in ('model', 'entry', 'loopback', 'broker'):
+            port = getattr(args, name + '_port')
+            require(not any(first <= port <= last for first, last in ranges), 'hosted port overlaps ephemeral range')
+            require(helper.port_is_bindable(port), 'hosted recovery port unavailable')
     launcher = load_module('coupled_qualifier', QUALIFIER)
     with open(str(OUTPUT) + '.broker.log', 'w') as log:
         # Trusted resolved CLI Node path, fixed broker, argument array, synthetic environment.
@@ -531,18 +580,25 @@ def main():
                 finally:
                     model.release_primary.set()
             launcher.qualify_input_recorded = callback
-            with fixed_model_port(launcher, args.model_port):
+            with fixed_model_port(launcher, args.model_port), hosted_native_launches(launcher):
                 proof = launcher.qualify(BINARY, input_recorded=True, receipt_version=3 if args.restart_native or args.terminal_no_start else 2)
             paths = [Path(__file__), BROKER, BROKER.with_name('coupled-workerd-worker.ts'),
                      BROKER.with_name('coupled-workerd-source-hashes.mjs'), QUALIFIER,
                      *sorted(Path(event_gateway.__file__).parent.glob('*.py'))]
             paths.append(HERE / 'qualification-installed.py')
+            if containment is not None:
+                paths.append(HERE / 'three-session-workerd.py')
+                proof['executionContainment'] = containment
+                proof['cloudSourceCommit'] = args.cloud_commit
             proof['installedProvenance'] = args.provenance
             proof['fixturePorts'] = {name: getattr(args, name + '_port') for name in ('model', 'entry', 'loopback', 'broker')}
             proof['cloudBundle'] = address['bundle']
             proof['sourceSha256'] = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
             target = OUTPUT
-            target.write_text(json.dumps(proof, indent=2)+'\n')
+            encoded = json.dumps(proof, indent=2)+'\n'
+            require(len(encoded.encode()) <= 2_000_000, 'recovery proof exceeds fixed bound')
+            with target.open('x') as stream:
+                stream.write(encoded)
             print(json.dumps({'result': 'PASS', 'proof': str(target), 'productionAdmissionProven': False}))
         finally:
             broker.terminate()

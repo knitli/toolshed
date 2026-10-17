@@ -2316,6 +2316,8 @@ def build_proof(ctx):
         "sourceNonceSha256": {"C1": ctx.c1_source_nonce_sha256, "C3": ctx.c3_source_nonce_sha256},
         "nonReuse": ctx.c1_source_nonce_sha256 != ctx.c3_source_nonce_sha256,
     }
+    causal_bytes = (json.dumps(ctx.private_nonce_record, separators=(",", ":")) + "\n").encode()
+    ctx.proof["privateCausal"] = {"bytes": len(causal_bytes), "sha256": digest(causal_bytes)}
     return ctx.proof, ctx.private_nonce_record
 
 
