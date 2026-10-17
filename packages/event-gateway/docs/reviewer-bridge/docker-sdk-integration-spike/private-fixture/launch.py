@@ -85,6 +85,7 @@ def verify_inputs():
 
 def run_process(argv, scratch, env, streams, state):
     process = None
+    primary_failure = None
     try:
         process = subprocess.Popen(  # nosec B603 - Fixed hash-verified executable, closed argv/environment.
             argv, cwd=scratch, env=env, close_fds=True, shell=False,
@@ -115,19 +116,30 @@ def run_process(argv, scratch, env, streams, state):
         result = json.loads(streams['stdout'])
         if not isinstance(result, dict) or result.get('status') != 'PASS':
             raise RuntimeError('Expected one PASS JSON document on stdout')
+    except BaseException as error:
+        primary_failure = error
+        raise
     finally:
         if process is not None:
-            # Descendants can remain after the group leader exits.
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            try:
-                process.wait(timeout=3)
-                state["exitCode"] = process.returncode
-            finally:
-                process.stdout.close()
-                process.stderr.close()
+                try:
+                    # An unreaped leader reserves its PID; never signal a reaped group ID.
+                    if process.returncode is None:
+                        if process.pid <= 1 or process.pid == os.getpgrp() or os.getpgid(process.pid) != process.pid:
+                            raise RuntimeError('Refusing cleanup of unowned process group')
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        process.wait(timeout=3)
+                    state["exitCode"] = process.returncode
+                finally:
+                    process.stdout.close()
+                    process.stderr.close()
+            except BaseException as error:
+                state["cleanupFailure"] = {"name": type(error).__name__, "message": str(error)[:1000]}
+                if primary_failure is None:
+                    raise
 
 
 def cleanup_canary(canary, canary_status):
@@ -258,6 +270,7 @@ def main():
         (evidence / 'stderr.bin').write_bytes(streams['stderr'])
         (evidence / 'capture.json').write_text(json.dumps({
             'exitCode': process_state['exitCode'], 'failure': failure, 'scratch': str(scratch),
+            'cleanupFailure': process_state.get('cleanupFailure'),
             'aggregateBytes': sum(map(len, streams.values())), 'aggregateLimit': LIMIT,
             'timeoutSeconds': TIMEOUT, 'independentDockerCleanupRequired': True,
             'manifestSha256': manifest_hash, 'outsideScratchCanary': canary_status,
