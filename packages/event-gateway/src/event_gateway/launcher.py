@@ -29,7 +29,7 @@ BINDING_FIELDS = (
     "clientId", "connectionId", "backendPid", "threadId", "generation",
     "serverInstanceId", "serverGeneration",
 )
-NATIVE_COMMANDS = frozenset(("nativeStart", "nativeReceipt"))
+NATIVE_COMMANDS = frozenset(("nativeStart", "nativeReceipt", "nativeTerminalEvidence"))
 NATIVE_OPERATION_SECONDS = 8
 
 
@@ -369,6 +369,9 @@ class NativeClient:
             if operation == "nativeReceipt":
                 self.bridge.restore_attempt(request)
                 outcome = self.bridge.receipt(request)
+            elif operation == "nativeTerminalEvidence":
+                self.bridge.restore_attempt(request)
+                outcome = self.bridge.terminal_evidence(request)
             else:
                 # Presence calls clear reader eligibility; reacquire and consume it under one lock.
                 witness = self.bridge.challenge()
@@ -380,8 +383,13 @@ class NativeClient:
                 else:
                     outcome = self.bridge.start(request)
             receipt = {**{key: request[key] for key in (*IDENTITY, "generation")}, "outcome": outcome}
-            validate_receipt({**request, "receiptVersion": 3}, receipt,
-                             allow_input_recorded=operation == "nativeReceipt")
+            if operation == "nativeTerminalEvidence":
+                from .native_terminal_evidence import validate_terminal_receipt
+
+                validate_terminal_receipt({**request, "receiptVersion": 3}, receipt)
+            else:
+                validate_receipt({**request, "receiptVersion": 3}, receipt,
+                                 allow_input_recorded=operation == "nativeReceipt")
             return receipt
         finally:
             self.lock.release()

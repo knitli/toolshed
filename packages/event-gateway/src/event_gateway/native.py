@@ -297,3 +297,16 @@ class SessionNativeBridge:
     def receipt(self, request):
         """Recover an exact receipt without acquiring Start eligibility."""
         return self._operation("nativeReceipt", request)
+
+    def terminal_evidence(self, request):
+        """Read durable terminal evidence through the original explicit session binding."""
+        from .launcher import session_native_operation
+        from .native_terminal_evidence import validate_terminal_receipt
+
+        request = self._request(request)
+        try:
+            receipt = session_native_operation(
+                self.state_dir, self.session_id, self.binding, "nativeTerminalEvidence", request)
+        except (OSError, ValueError):
+            raise NativeError("native_unavailable") from None
+        return validate_terminal_receipt({**request, "receiptVersion": 3}, receipt)
