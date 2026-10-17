@@ -66,6 +66,30 @@ class CaptureCleanupTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Live process group'):
                 launch.await_group_exit(MagicMock(pid=42123))
 
+    def test_uninterruptible_member_is_observed_until_exit(self):
+        uid = launch.os.getuid()
+        for final in (f'42124 42123 {uid} Z\n', ''):
+            with self.subTest(final=final), \
+                    patch.object(launch, 'group_snapshot', side_effect=[f'42124 42123 {uid} U\n', final]) as snapshot, \
+                    patch.object(launch.time, 'monotonic', return_value=0), \
+                    patch.object(launch.time, 'sleep') as pause, \
+                    patch.object(launch.os, 'waitid', return_value=object()):
+                launch.await_group_exit(MagicMock(pid=42123))
+                self.assertEqual(snapshot.call_count, 2)
+                pause.assert_called_once_with(0.01)
+
+    def test_uninterruptible_timeout_keeps_leader_unreaped(self):
+        observe = launch.await_group_exit
+        uid = launch.os.getuid()
+        with patch.object(launch, 'group_snapshot', return_value=f'42124 42123 {uid} U\n'), \
+                patch.object(launch.time, 'monotonic', side_effect=[0, 0, 3]):
+            error, state, kill, process = self.exercise(inventory_error=observe)
+        self.assertIsInstance(error, RuntimeError)
+        self.assertEqual(state['cleanupFailure']['message'], 'Live process group members after cleanup')
+        process.wait.assert_not_called()
+        self.assertIsNone(process.returncode)
+        kill.assert_called_once_with(42123, signal.SIGKILL)
+
     def test_inventory_failure_refuses_cleanup(self):
         with patch.object(launch, 'group_snapshot', side_effect=RuntimeError('inventory denied')):
             with self.assertRaisesRegex(RuntimeError, 'inventory denied'):

@@ -156,7 +156,7 @@ def await_group_exit(process):
                 raise RuntimeError('Malformed process inventory')
             pid, group, uid = map(int, parts[:3])
             status = parts[3]
-            if pid <= 0 or group != process.pid or uid != os.getuid() or not status or status[0] not in 'RSDTIZ':
+            if pid <= 0 or group != process.pid or uid != os.getuid() or not status or status[0] not in 'RSDTIZU':
                 raise RuntimeError('Unexpected process inventory identity or state')
             live |= not status.startswith('Z')
         if not live:
