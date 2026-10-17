@@ -4,7 +4,7 @@ import os
 import pathlib
 import resource
 import sqlite3
-import subprocess
+import subprocess  # nosec B404 - Offline proof uses the owner-selected trusted executable.
 
 
 def terminal_rows(home):
@@ -66,7 +66,7 @@ def main():
         ]
         with log.open("w") as f:
             # Owner-selected absolute executable; argv is fixed and no shell is used.
-            r = subprocess.run(  # noqa: B603
+            r = subprocess.run(  # noqa: B603  # nosec B603 - Trusted explicit executable, fixed argv, no shell.
                 cmd,
                 cwd=ROOT,
                 env=dict(env, **extra),
