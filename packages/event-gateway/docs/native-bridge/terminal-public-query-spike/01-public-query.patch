@@ -1,0 +1,576 @@
+diff --git a/codex-rs/app-server-protocol/src/protocol/common.rs b/codex-rs/app-server-protocol/src/protocol/common.rs
+index 6e3c5b2..dcd5780 100644
+--- a/codex-rs/app-server-protocol/src/protocol/common.rs
++++ b/codex-rs/app-server-protocol/src/protocol/common.rs
+@@ -573,6 +573,12 @@ client_request_definitions! {
+         serialization: thread_id(params.thread_id),
+         response: v2::ThreadStartReceiptResponse,
+     },
++    #[experimental("thread/terminalEvidence")]
++    ThreadTerminalEvidence => "thread/terminalEvidence" {
++        params: v2::ThreadStartIfIdleParams,
++        serialization: thread_id(params.thread_id),
++        response: v2::ThreadTerminalEvidenceResponse,
++    },
+     ThreadResume => "thread/resume" {
+         params: v2::ThreadResumeParams,
+         inspect_params: true,
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+index 3a1a90c..b7a1d7a 100644
+--- a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+@@ -1067,6 +1067,35 @@ pub enum ThreadStartReceiptResponse {
+     Unknown,
+ }
+ 
++/// Terminal outcome observed by native Core or recovered from its canonical history.
++#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
++#[serde(rename_all = "camelCase")]
++#[ts(rename_all = "camelCase", export_to = "v2/")]
++pub enum NativeTurnTerminalStatus {
++    Completed,
++    Failed,
++    Canceled,
++}
++
++/// An exact historical v3 lookup never submits input or renews selection authority.
++#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
++#[serde(
++    tag = "status",
++    rename_all = "camelCase",
++    rename_all_fields = "camelCase"
++)]
++#[ts(tag = "status", rename_all = "camelCase", export_to = "v2/")]
++pub enum ThreadTerminalEvidenceResponse {
++    Terminal {
++        turn_id: String,
++        item_id: String,
++        receipt_id: String,
++        terminal_status: NativeTurnTerminalStatus,
++        replayed: bool,
++    },
++    Unknown,
++}
++
+ #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+ #[serde(rename_all = "camelCase")]
+ #[ts(export_to = "v2/")]
+diff --git a/codex-rs/app-server/src/message_processor.rs b/codex-rs/app-server/src/message_processor.rs
+index a7554f3..238201e 100644
+--- a/codex-rs/app-server/src/message_processor.rs
++++ b/codex-rs/app-server/src/message_processor.rs
+@@ -385,6 +385,7 @@ impl MessageProcessor {
+             Arc::clone(&thread_manager),
+             thread_state_manager.clone(),
+             state_db.clone(),
++            Arc::clone(&thread_store),
+         );
+         let models_refresh_worker = crate::models_refresh_worker::spawn(&model_catalog);
+         let turn_cost_worker =
+@@ -1147,6 +1148,12 @@ impl MessageProcessor {
+                     .await
+                     .into(),
+             )),
++            ClientRequest::ThreadTerminalEvidence { params, .. } => Ok(Some(
++                self.native_selection_processor
++                    .thread_terminal_evidence(&params)
++                    .await
++                    .into(),
++            )),
+             ClientRequest::UserVerificationCancel { params, .. } => {
+                 self.outgoing
+                     .cancel_user_verification_request(&ConnectionRequestId {
+diff --git a/codex-rs/app-server/src/request_processors/native_selection_processor.rs b/codex-rs/app-server/src/request_processors/native_selection_processor.rs
+index 4a325ae..b13ac6d 100644
+--- a/codex-rs/app-server/src/request_processors/native_selection_processor.rs
++++ b/codex-rs/app-server/src/request_processors/native_selection_processor.rs
+@@ -1,3 +1,5 @@
++mod terminal_query;
++
+ use super::thread_input::ensure_direct_input_allowed;
+ use codex_app_server_protocol::ClientSelectionUpdateParams;
+ use codex_app_server_protocol::ClientSelectionUpdateResponse;
+@@ -257,6 +259,7 @@ pub(crate) struct NativeSelectionRequestProcessor {
+     server_instance_id: String,
+     thread_manager: Arc<ThreadManager>,
+     state_db: Option<StateDbHandle>,
++    thread_store: Arc<dyn codex_thread_store::ThreadStore>,
+     connections: Mutex<ConnectionSelections>,
+     receipts: Arc<Mutex<ReceiptStore>>,
+ }
+@@ -275,6 +278,7 @@ impl NativeSelectionRequestProcessor {
+         thread_manager: Arc<ThreadManager>,
+         thread_state_manager: crate::thread_state::ThreadStateManager,
+         state_db: Option<StateDbHandle>,
++        thread_store: Arc<dyn codex_thread_store::ThreadStore>,
+     ) -> Self {
+         let receipts = Arc::new(Mutex::new(ReceiptStore::default()));
+         install_native_receipt_observer(&thread_state_manager, &receipts, state_db.clone());
+@@ -282,6 +286,7 @@ impl NativeSelectionRequestProcessor {
+             server_instance_id: Uuid::now_v7().to_string(),
+             thread_manager,
+             state_db,
++            thread_store,
+             connections: Mutex::new(ConnectionSelections::default()),
+             receipts,
+         }
+diff --git a/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query.rs b/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query.rs
+new file mode 100644
+index 0000000..246bc24
+--- /dev/null
++++ b/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query.rs
+@@ -0,0 +1,76 @@
++use super::NativeSelectionRequestProcessor;
++use super::identity_from_params;
++use super::valid_start_params;
++use codex_app_server_protocol::NativeTurnTerminalStatus;
++use codex_app_server_protocol::ThreadStartIfIdleParams;
++use codex_app_server_protocol::ThreadTerminalEvidenceResponse;
++use codex_rollout::StateDbHandle;
++use codex_thread_store::LocalThreadStore;
++use codex_thread_store::ThreadStore;
++
++impl NativeSelectionRequestProcessor {
++    pub(crate) async fn thread_terminal_evidence(
++        &self,
++        params: &ThreadStartIfIdleParams,
++    ) -> ThreadTerminalEvidenceResponse {
++        terminal_evidence(self.state_db.as_ref(), self.thread_store.as_ref(), params).await
++    }
++}
++
++// This query may persist recovered evidence, but never loads a live thread, submits input,
++// renews a selection, or changes a cloud claim. Only the shared local store owns recovery locks.
++async fn terminal_evidence(
++    state: Option<&StateDbHandle>,
++    store: &dyn ThreadStore,
++    params: &ThreadStartIfIdleParams,
++) -> ThreadTerminalEvidenceResponse {
++    if !valid_start_params(params) || params.bridge_client_id.is_none() {
++        return ThreadTerminalEvidenceResponse::Unknown;
++    }
++    let Some(state) = state else {
++        return ThreadTerminalEvidenceResponse::Unknown;
++    };
++    let identity = identity_from_params(params);
++    let proof = match state.get_native_turn_terminal_proof(&identity).await {
++        Ok(Some(proof)) => Some(proof),
++        Ok(None) => {
++            let Some(local) = store.as_any().downcast_ref::<LocalThreadStore>() else {
++                return ThreadTerminalEvidenceResponse::Unknown;
++            };
++            local
++                .recover_native_terminal_history(&identity)
++                .await
++                .ok()
++                .flatten()
++        }
++        Err(_) => None,
++    };
++    let Some(proof) = proof else {
++        return ThreadTerminalEvidenceResponse::Unknown;
++    };
++    // A terminal row alone may be anchored only to Started. Expose it only with the
++    // exact durable input item; these immutable proofs cannot be evicted or rebound.
++    let Ok(Some(codex_state::NativeTurnStartProof::InputRecorded { turn_id, item_id })) =
++        state.get_native_turn_start_proof(&identity).await
++    else {
++        return ThreadTerminalEvidenceResponse::Unknown;
++    };
++    if turn_id != proof.turn_id {
++        return ThreadTerminalEvidenceResponse::Unknown;
++    }
++    ThreadTerminalEvidenceResponse::Terminal {
++        turn_id,
++        item_id,
++        receipt_id: proof.receipt_id,
++        terminal_status: match proof.status {
++            codex_state::NativeTurnTerminalStatus::Completed => NativeTurnTerminalStatus::Completed,
++            codex_state::NativeTurnTerminalStatus::Failed => NativeTurnTerminalStatus::Failed,
++            codex_state::NativeTurnTerminalStatus::Canceled => NativeTurnTerminalStatus::Canceled,
++        },
++        replayed: true,
++    }
++}
++
++#[cfg(test)]
++#[path = "terminal_query_tests.rs"]
++mod tests;
+diff --git a/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query_tests.rs b/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query_tests.rs
+new file mode 100644
+index 0000000..f57f496
+--- /dev/null
++++ b/codex-rs/app-server/src/request_processors/native_selection_processor/terminal_query_tests.rs
+@@ -0,0 +1,266 @@
++use super::*;
++use codex_protocol::ThreadId;
++use codex_protocol::protocol::SessionMeta;
++use codex_protocol::protocol::SessionMetaLine;
++use codex_protocol::protocol::SessionSource;
++use codex_protocol::protocol::ThreadHistoryMode;
++use codex_rollout::RolloutItem;
++use codex_state::NativeTurnStartProof;
++use codex_state::SqliteConfig;
++use codex_state::StateRuntime;
++use codex_thread_store::LocalThreadStoreConfig;
++use codex_utils_absolute_path::test_support::PathExt;
++use pretty_assertions::assert_eq;
++use serde_json::json;
++use tempfile::TempDir;
++use uuid::Uuid;
++
++async fn fixture() -> (
++    TempDir,
++    StateDbHandle,
++    LocalThreadStore,
++    ThreadStartIfIdleParams,
++    std::path::PathBuf,
++) {
++    let home = TempDir::new().unwrap();
++    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
++    let state = StateRuntime::init(sqlite.clone(), "test-provider".into())
++        .await
++        .unwrap();
++    let params = ThreadStartIfIdleParams {
++        server_instance_id: Uuid::now_v7().to_string(),
++        expected_generation: 4,
++        thread_id: ThreadId::new().to_string(),
++        attempt_id: "attempt".into(),
++        delivery_id: "delivery".into(),
++        client_user_message_id: Uuid::now_v7().to_string(),
++        permit_id: "permit".into(),
++        permit_issued_at: 1,
++        permit_expires_at: 5001,
++        input: "exact historical input".into(),
++        bridge_client_id: Some(Uuid::now_v7().to_string()),
++        bridge_client_generation: Some(7),
++    };
++    state
++        .begin_native_turn_start(&identity_from_params(&params), &[])
++        .await
++        .unwrap();
++    let path = home.path().join("rollout.jsonl");
++    let thread_id = ThreadId::from_string(&params.thread_id).unwrap();
++    let mut metadata = codex_state::ThreadMetadataBuilder::new(
++        thread_id,
++        path.clone(),
++        chrono::Utc::now(),
++        SessionSource::Cli,
++    )
++    .build("test-provider");
++    metadata.history_mode = ThreadHistoryMode::Paginated;
++    state.upsert_thread(&metadata).await.unwrap();
++    let store = LocalThreadStore::new(
++        LocalThreadStoreConfig {
++            codex_home: home.path().to_owned(),
++            sqlite,
++            default_model_provider_id: "test-provider".into(),
++        },
++        Some(state.clone()),
++    );
++    (home, state, store, params, path)
++}
++
++fn history(params: &ThreadStartIfIdleParams, terminal: serde_json::Value) -> Vec<u8> {
++    let meta = SessionMeta {
++        id: ThreadId::from_string(&params.thread_id).unwrap(),
++        session_id: ThreadId::new().into(),
++        history_mode: ThreadHistoryMode::Paginated,
++        ..Default::default()
++    };
++    let records = [
++        serde_json::to_value(RolloutItem::SessionMeta(SessionMetaLine {
++            meta,
++            git: None,
++        }))
++        .unwrap(),
++        json!({"type":"event_msg","payload":{"type":"item_completed",
++            "thread_id":params.thread_id,"turn_id":params.client_user_message_id,
++            "item":{"type":"UserMessage","id":Uuid::now_v7().to_string(),"client_id":params.client_user_message_id,
++            "content":[{"type":"text","text":params.input,"text_elements":[]}]},"completed_at_ms":1}}),
++        json!({"type":"event_msg","payload":terminal}),
++    ];
++    let mut bytes = Vec::new();
++    for (ordinal, mut record) in records.into_iter().enumerate() {
++        record["timestamp"] = json!("2026-10-17T00:00:00Z");
++        record["ordinal"] = json!(ordinal);
++        serde_json::to_writer(&mut bytes, &record).unwrap();
++        bytes.push(b'\n');
++    }
++    bytes
++}
++
++#[tokio::test]
++async fn terminal_query_recovers_all_outcomes_and_replays_durable_evidence() {
++    for status in [
++        NativeTurnTerminalStatus::Completed,
++        NativeTurnTerminalStatus::Failed,
++        NativeTurnTerminalStatus::Canceled,
++    ] {
++        let (home, state, store, params, path) = fixture().await;
++        let terminal = match status {
++            NativeTurnTerminalStatus::Completed => {
++                json!({"type":"task_complete","turn_id":params.client_user_message_id,"last_agent_message":null})
++            }
++            NativeTurnTerminalStatus::Failed => {
++                json!({"type":"task_complete","turn_id":params.client_user_message_id,"last_agent_message":null,"error":{"message":"failure","codex_error_info":null}})
++            }
++            NativeTurnTerminalStatus::Canceled => {
++                json!({"type":"turn_aborted","turn_id":params.client_user_message_id,"reason":"interrupted"})
++            }
++        };
++        let bytes = history(&params, terminal);
++        tokio::fs::write(&path, &bytes).await.unwrap();
++        let first = terminal_evidence(Some(&state), &store, &params).await;
++        let ThreadTerminalEvidenceResponse::Terminal {
++            ref turn_id,
++            ref receipt_id,
++            ref item_id,
++            terminal_status,
++            replayed,
++        } = first
++        else {
++            panic!("expected terminal evidence")
++        };
++        assert_eq!(turn_id, &params.client_user_message_id);
++        assert_eq!(terminal_status, status);
++        assert!(replayed);
++        assert!(Uuid::parse_str(item_id).is_ok());
++        assert_ne!(item_id, turn_id);
++        assert!(Uuid::parse_str(receipt_id).is_ok());
++        assert_eq!(tokio::fs::read(&path).await.unwrap(), bytes);
++        // Once committed, a new DB handle can answer without reading the rollout again.
++        tokio::fs::remove_file(&path).await.unwrap();
++        let reopened = StateRuntime::init(
++            SqliteConfig::new_for_testing(home.path().abs()),
++            "test-provider".into(),
++        )
++        .await
++        .unwrap();
++        assert_eq!(
++            terminal_evidence(Some(&reopened), &store, &params).await,
++            first
++        );
++    }
++}
++
++#[tokio::test]
++async fn terminal_query_rejects_every_changed_identity_and_v2_without_committing() {
++    let (_home, state, store, params, path) = fixture().await;
++    let bytes = history(
++        &params,
++        json!({"type":"task_complete","turn_id":params.client_user_message_id,"last_agent_message":null}),
++    );
++    tokio::fs::write(&path, bytes).await.unwrap();
++    let original = serde_json::to_value(&params).unwrap();
++    for (key, value) in [
++        ("serverInstanceId", json!(Uuid::now_v7().to_string())),
++        ("expectedGeneration", json!(5)),
++        ("threadId", json!(ThreadId::new().to_string())),
++        ("attemptId", json!("other")),
++        ("deliveryId", json!("other")),
++        ("clientUserMessageId", json!(Uuid::now_v7().to_string())),
++        ("permitId", json!("other")),
++        ("permitIssuedAt", json!(2)),
++        ("permitExpiresAt", json!(5002)),
++        ("input", json!("changed input")),
++        ("bridgeClientId", json!(Uuid::now_v7().to_string())),
++        ("bridgeClientGeneration", json!(8)),
++    ] {
++        let mut changed = original.clone();
++        changed[key] = value;
++        let changed = serde_json::from_value(changed).unwrap();
++        assert_eq!(
++            terminal_evidence(Some(&state), &store, &changed).await,
++            ThreadTerminalEvidenceResponse::Unknown,
++            "{key}"
++        );
++    }
++    let mut v2 = params.clone();
++    v2.bridge_client_id = None;
++    v2.bridge_client_generation = None;
++    assert_eq!(
++        terminal_evidence(Some(&state), &store, &v2).await,
++        ThreadTerminalEvidenceResponse::Unknown
++    );
++    assert_eq!(
++        state
++            .get_native_turn_start_proof(&identity_from_params(&params))
++            .await
++            .unwrap(),
++        Some(NativeTurnStartProof::Pending)
++    );
++    assert_eq!(
++        terminal_evidence(None, &store, &params).await,
++        ThreadTerminalEvidenceResponse::Unknown
++    );
++}
++
++#[tokio::test]
++async fn terminal_query_does_not_accept_incomplete_history_or_caller_proof() {
++    let (_home, state, store, params, path) = fixture().await;
++    let bytes = history(
++        &params,
++        json!({"type":"task_complete","turn_id":params.client_user_message_id,"last_agent_message":null}),
++    );
++    tokio::fs::write(&path, &bytes[..bytes.len() - 1])
++        .await
++        .unwrap();
++    let mut value = serde_json::to_value(&params).unwrap();
++    value["terminalStatus"] = json!("completed");
++    value["receiptId"] = json!(Uuid::now_v7().to_string());
++    let request: codex_app_server_protocol::ClientRequest =
++        serde_json::from_value(json!({"id":1,"method":"thread/terminalEvidence","params":value}))
++            .unwrap();
++    let codex_app_server_protocol::ClientRequest::ThreadTerminalEvidence {
++        params: supplied, ..
++    } = request
++    else {
++        panic!("wrong request")
++    };
++    assert_eq!(
++        terminal_evidence(Some(&state), &store, &supplied).await,
++        ThreadTerminalEvidenceResponse::Unknown
++    );
++    assert_eq!(
++        state
++            .get_native_turn_start_proof(&identity_from_params(&params))
++            .await
++            .unwrap(),
++        Some(NativeTurnStartProof::Pending)
++    );
++}
++
++#[tokio::test]
++async fn terminal_query_requires_durable_input_anchor_even_with_terminal_record() {
++    let (_home, state, store, params, _path) = fixture().await;
++    let identity = identity_from_params(&params);
++    state
++        .record_native_turn_started(&identity, &params.client_user_message_id)
++        .await
++        .unwrap();
++    state
++        .record_native_turn_terminal(
++            &identity,
++            &params.client_user_message_id,
++            codex_state::NativeTurnTerminalStatus::Completed,
++        )
++        .await
++        .unwrap();
++    assert_eq!(
++        terminal_evidence(Some(&state), &store, &params).await,
++        ThreadTerminalEvidenceResponse::Unknown
++    );
++    assert_eq!(
++        state.get_native_turn_start_proof(&identity).await.unwrap(),
++        Some(NativeTurnStartProof::Started {
++            turn_id: params.client_user_message_id
++        })
++    );
++}
+diff --git a/codex-rs/app-server/tests/suite/v2/mod.rs b/codex-rs/app-server/tests/suite/v2/mod.rs
+index d248969..8d217ed 100644
+--- a/codex-rs/app-server/tests/suite/v2/mod.rs
++++ b/codex-rs/app-server/tests/suite/v2/mod.rs
+@@ -162,3 +162,5 @@ mod workspace_routing;
+ 
+ mod user_verification;
+ mod user_verification_mcp;
++
++mod native_terminal_query;
+diff --git a/codex-rs/app-server/tests/suite/v2/native_terminal_query.rs b/codex-rs/app-server/tests/suite/v2/native_terminal_query.rs
+new file mode 100644
+index 0000000..ccc64ff
+--- /dev/null
++++ b/codex-rs/app-server/tests/suite/v2/native_terminal_query.rs
+@@ -0,0 +1,90 @@
++use app_test_support::TestAppServer;
++use codex_app_server_protocol::ClientSelectionUpdateResponse;
++use codex_app_server_protocol::NativeTurnTerminalStatus;
++use codex_app_server_protocol::ThreadLoadedListResponse;
++use codex_app_server_protocol::ThreadTerminalEvidenceResponse;
++use codex_protocol::ThreadId;
++use codex_protocol::protocol::SessionMeta;
++use codex_protocol::protocol::SessionMetaLine;
++use codex_protocol::protocol::SessionSource;
++use codex_protocol::protocol::ThreadHistoryMode;
++use codex_rollout::RolloutItem;
++use codex_state::NativeTurnStartIdentity;
++use codex_state::SqliteConfig;
++use codex_state::StateRuntime;
++use codex_utils_absolute_path::test_support::PathExt;
++use pretty_assertions::assert_eq;
++use serde_json::json;
++use tempfile::TempDir;
++use uuid::Uuid;
++
++#[tokio::test]
++async fn native_terminal_query_public_rpc_recovers_without_start_and_survives_restart()
++-> anyhow::Result<()> {
++    tokio::time::timeout(std::time::Duration::from_secs(30), async {
++    let home = TempDir::new()?;
++    std::fs::write(home.path().join("config.toml"), "cli_auth_credentials_store = \"file\"\nmodel_provider = \"query-test\"\nmodel = \"unused\"\n[model_providers.query-test]\nname = \"query test\"\nbase_url = \"http://127.0.0.1:9/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n")?;
++    let db = StateRuntime::init(SqliteConfig::new_for_testing(home.path().abs()), "query-test".into()).await?;
++    let thread_id = ThreadId::new();
++    let identity = NativeTurnStartIdentity {
++        server_instance_id: Uuid::now_v7().to_string(), selection_generation: 4,
++        bridge_client_id: Some(Uuid::now_v7().to_string()), bridge_client_generation: Some(7),
++        attempt_id: "historical-attempt".into(), delivery_id: "historical-delivery".into(),
++        thread_id: thread_id.to_string(), client_user_message_id: Uuid::now_v7().to_string(),
++        permit_id: "historical-permit".into(), permit_issued_at: 1, permit_expires_at: 5001,
++        input: "original historical input".into(),
++    };
++    db.begin_native_turn_start(&identity, &[]).await?;
++    let item_id = Uuid::now_v7().to_string();
++    let rollout = home.path().join("rollout.jsonl");
++    let mut metadata = codex_state::ThreadMetadataBuilder::new(thread_id, rollout.clone(), chrono::Utc::now(), SessionSource::Cli).build("query-test");
++    metadata.history_mode = ThreadHistoryMode::Paginated;
++    db.upsert_thread(&metadata).await?;
++    let meta = SessionMeta { id: thread_id, session_id: ThreadId::new().into(), history_mode: ThreadHistoryMode::Paginated, ..Default::default() };
++    let records = [
++        serde_json::to_value(RolloutItem::SessionMeta(SessionMetaLine { meta, git: None }))?,
++        json!({"type":"event_msg","payload":{"type":"item_completed","thread_id":identity.thread_id,"turn_id":identity.client_user_message_id,
++            "item":{"type":"UserMessage","id":item_id,"client_id":identity.client_user_message_id,"content":[{"type":"text","text":identity.input,"text_elements":[]}]},"completed_at_ms":1}}),
++        json!({"type":"event_msg","payload":{"type":"task_complete","turn_id":identity.client_user_message_id,"last_agent_message":null}}),
++    ];
++    let mut bytes = Vec::new();
++    for (ordinal, mut record) in records.into_iter().enumerate() {
++        record["timestamp"] = json!("2026-10-17T00:00:00Z"); record["ordinal"] = json!(ordinal);
++        serde_json::to_writer(&mut bytes, &record)?; bytes.push(b'\n');
++    }
++    std::fs::write(&rollout, &bytes)?;
++    let params = json!({"serverInstanceId":identity.server_instance_id,"expectedGeneration":identity.selection_generation,
++        "threadId":identity.thread_id,"attemptId":identity.attempt_id,"deliveryId":identity.delivery_id,
++        "clientUserMessageId":identity.client_user_message_id,"permitId":identity.permit_id,
++        "permitIssuedAt":identity.permit_issued_at,"permitExpiresAt":identity.permit_expires_at,"input":identity.input,
++        "bridgeClientId":identity.bridge_client_id,"bridgeClientGeneration":identity.bridge_client_generation});
++    let mut previous = None;
++    for _ in 0..2 {
++        let mut app = TestAppServer::builder().with_codex_home(home.path()).without_auto_env().without_managed_config()
++            .with_env_overrides(&[("OPENAI_API_KEY", None), ("CODEX_SQLITE_HOME", None)])
++            .build_initialized().await?;
++        let selection = json!({"expectedGeneration":0,"threadId":null,"ready":false});
++        let id = app.send_request("client/selection/update", Some(selection.clone())).await?;
++        let before: ClientSelectionUpdateResponse = app.read_response(id).await?;
++        let id = app.send_request("thread/terminalEvidence", Some(params.clone())).await?;
++        let evidence: ThreadTerminalEvidenceResponse = app.read_response(id).await?;
++        let proof = db.get_native_turn_terminal_proof(&identity).await?.expect("native proof");
++        assert_eq!(evidence, ThreadTerminalEvidenceResponse::Terminal {
++            turn_id: identity.client_user_message_id.clone(), item_id: item_id.clone(), receipt_id: proof.receipt_id,
++            terminal_status: NativeTurnTerminalStatus::Completed, replayed: true,
++        });
++        if let Some(previous) = previous { assert_eq!(evidence, previous); }
++        previous = Some(evidence);
++        let id = app.send_request("client/selection/update", Some(selection)).await?;
++        assert_eq!(app.read_response::<ClientSelectionUpdateResponse>(id).await?, before);
++        let id = app.send_request("thread/loaded/list", Some(json!({}))).await?;
++        assert_eq!(app.read_response::<ThreadLoadedListResponse>(id).await?, ThreadLoadedListResponse { data: vec![], next_cursor: None });
++        let mut wrong = params.clone(); wrong["input"] = json!("different input");
++        let id = app.send_request("thread/terminalEvidence", Some(wrong)).await?;
++        assert_eq!(app.read_response::<ThreadTerminalEvidenceResponse>(id).await?, ThreadTerminalEvidenceResponse::Unknown);
++        assert_eq!(std::fs::read(&rollout)?, bytes);
++        assert!(app.shutdown_gracefully().await?.success());
++    }
++    Ok(())
++    }).await?
++}

@@ -1,0 +1,489 @@
+diff --git a/codex-rs/tui/src/app/selection_bridge.rs b/codex-rs/tui/src/app/selection_bridge.rs
+index 129dcf4..5ad774b 100644
+--- a/codex-rs/tui/src/app/selection_bridge.rs
++++ b/codex-rs/tui/src/app/selection_bridge.rs
+@@ -58,6 +58,13 @@ enum Outcome {
+         item_id: String,
+         replayed: bool,
+     },
++    Terminal {
++        turn_id: String,
++        item_id: String,
++        replayed: bool,
++        receipt_id: String,
++        terminal_status: codex_app_server_protocol::NativeTurnTerminalStatus,
++    },
+     TerminalNotStarted {
+         reason: Reason,
+         receipt_id: String,
+@@ -123,6 +130,7 @@ enum Subject {
+ pub(super) enum Operation {
+     Start(BridgeEvent),
+     Receipt(BridgeEvent),
++    TerminalEvidence(BridgeEvent),
+ }
+ 
+ #[derive(Default)]
+@@ -278,6 +286,34 @@ fn native_receipt_outcome(
+     bound_outcome(outcome, expected_turn_id)
+ }
+ 
++fn native_terminal_outcome(
++    response: codex_app_server_protocol::ThreadTerminalEvidenceResponse,
++    expected_turn_id: &str,
++) -> Outcome {
++    match response {
++        codex_app_server_protocol::ThreadTerminalEvidenceResponse::Terminal {
++            turn_id,
++            item_id,
++            replayed: true,
++            receipt_id,
++            terminal_status,
++        } if turn_id == expected_turn_id
++            && canonical_uuid(&receipt_id)
++            && canonical_uuid(&item_id)
++            && item_id != expected_turn_id =>
++        {
++            Outcome::Terminal {
++                turn_id,
++                item_id,
++                replayed: true,
++                receipt_id,
++                terminal_status,
++            }
++        }
++        _ => Outcome::Unknown,
++    }
++}
++
+ fn receipt_lookup_fallback(outcome: Outcome, cached_started: Option<Outcome>) -> Outcome {
+     match outcome {
+         Outcome::Unknown => match cached_started {
+@@ -503,6 +539,32 @@ impl SelectionWitness {
+                 };
+                 (event, outcome)
+             }
++            Operation::TerminalEvidence(event) => {
++                // Terminal evidence always queries native authority, never the input receipt cache.
++                let outcome = if receipt_version == ReceiptVersion::V3
++                    && let Some(params) = event.params(receipt_version)
++                {
++                    let request =
++                        codex_app_server_protocol::ClientRequest::ThreadTerminalEvidence {
++                            request_id: codex_app_server_protocol::RequestId::String(format!(
++                                "bridge-terminal-{}",
++                                Uuid::new_v4()
++                            )),
++                            params,
++                        };
++                    let handle = server.request_handle();
++                    match tokio::time::timeout(
++                        Duration::from_millis(/*millis*/ 1750),
++                        handle.request_typed::<codex_app_server_protocol::ThreadTerminalEvidenceResponse>(request),
++                    ).await {
++                        Ok(Ok(response)) => native_terminal_outcome(response, &event.client_user_message_id),
++                        _ => Outcome::Unknown,
++                    }
++                } else {
++                    Outcome::Unknown
++                };
++                (event, outcome)
++            }
+             Operation::Receipt(event) => {
+                 let cached_started = self
+                     .attempts
+diff --git a/codex-rs/tui/src/app/selection_bridge_tests.rs b/codex-rs/tui/src/app/selection_bridge_tests.rs
+index 24da82c..90e25dd 100644
+--- a/codex-rs/tui/src/app/selection_bridge_tests.rs
++++ b/codex-rs/tui/src/app/selection_bridge_tests.rs
+@@ -490,3 +490,303 @@ fn event_requires_the_observed_local_and_server_generations() {
+     assert_ne!(event.generation, event.server_generation);
+     assert!(event.matches_selection(&witness));
+ }
++
++#[test]
++fn terminal_evidence_transport_requires_v3_and_preserves_original_identity() {
++    use std::os::fd::IntoRawFd;
++    let event = event();
++    for version in [ReceiptVersion::V2, ReceiptVersion::V3] {
++        let (mut parent, child) = UnixStream::pair().unwrap();
++        let mut transport = Transport::from_inherited_fd(child.into_raw_fd()).unwrap();
++        let mut state = SelectionState::new();
++        let frame = serde_json::json!({"nonce": 1, "terminalEvidence": event});
++        writeln!(parent, "{frame}").unwrap();
++        let result = transport.poll(&mut state, None, Some(version));
++        if version == ReceiptVersion::V2 {
++            assert_eq!(result.err().unwrap().stage, "challenge-size");
++            assert!(transport.operation.is_none());
++        } else {
++            assert!(
++                result.is_ok(),
++                "historical queries need no current selection binding"
++            );
++            let Some((nonce, Operation::TerminalEvidence(received))) = transport.operation.take()
++            else {
++                panic!("expected dedicated terminal evidence operation");
++            };
++            assert_eq!(nonce, 1);
++            assert_eq!(received, event);
++            assert_eq!(received.params(version), event.params(version));
++            writeln!(parent, "{frame}").unwrap();
++            assert_eq!(
++                transport
++                    .poll(&mut state, None, Some(version))
++                    .err()
++                    .unwrap()
++                    .stage,
++                "challenge-nonce"
++            );
++        }
++    }
++    // With native binding enabled, v2 reaches the operation guard rather than the frame cap.
++    let (mut parent, child) = UnixStream::pair().unwrap();
++    let mut transport = Transport::from_inherited_fd(child.into_raw_fd()).unwrap();
++    let binding = NativeBinding {
++        enabled: true,
++        ..Default::default()
++    };
++    writeln!(
++        parent,
++        "{}",
++        serde_json::json!({"nonce":1,"terminalEvidence":event})
++    )
++    .unwrap();
++    assert_eq!(
++        transport
++            .poll(
++                &mut SelectionState::new(),
++                binding.view(),
++                Some(ReceiptVersion::V2)
++            )
++            .err()
++            .unwrap()
++            .stage,
++        "challenge-operation"
++    );
++    assert!(transport.operation.is_none());
++}
++
++#[test]
++fn terminal_evidence_transport_rejects_mixed_operations() {
++    use std::os::fd::IntoRawFd;
++    let (mut parent, child) = UnixStream::pair().unwrap();
++    let mut transport = Transport::from_inherited_fd(child.into_raw_fd()).unwrap();
++    let frame = serde_json::json!({"nonce": 1, "terminalEvidence": event(), "receipt": event()});
++    writeln!(parent, "{frame}").unwrap();
++    assert_eq!(
++        transport
++            .poll(&mut SelectionState::new(), None, Some(ReceiptVersion::V3))
++            .err()
++            .unwrap()
++            .stage,
++        "challenge-operation"
++    );
++    assert!(transport.operation.is_none());
++}
++
++#[test]
++fn terminal_evidence_validates_native_identity_and_echoes_original_attempt() {
++    use codex_app_server_protocol::NativeTurnTerminalStatus;
++    use codex_app_server_protocol::ThreadTerminalEvidenceResponse;
++    let event = event();
++    let receipt_id = Uuid::now_v7().to_string();
++    let item_id = Uuid::now_v7().to_string();
++    for status in [
++        NativeTurnTerminalStatus::Completed,
++        NativeTurnTerminalStatus::Failed,
++        NativeTurnTerminalStatus::Canceled,
++    ] {
++        let response = ThreadTerminalEvidenceResponse::Terminal {
++            item_id: item_id.clone(),
++            replayed: true,
++            turn_id: event.client_user_message_id.clone(),
++            receipt_id: receipt_id.clone(),
++            terminal_status: status,
++        };
++        let bytes = event.receipt(
++            42,
++            native_terminal_outcome(response, &event.client_user_message_id),
++            ReceiptVersion::V3,
++        );
++        let wire: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
++        assert_eq!(
++            wire,
++            serde_json::json!({
++                "version": 3, "nonce": 42, "receipt": {
++                    "clientId": event.client_id, "generation": event.generation,
++                    "serverInstanceId": event.server_instance_id, "serverGeneration": event.server_generation,
++                    "threadId": event.thread_id, "attemptId": event.attempt_id, "deliveryId": event.delivery_id,
++                    "clientUserMessageId": event.client_user_message_id, "permitId": event.permit_id,
++                    "permitIssuedAt": event.permit_issued_at, "permitExpiresAt": event.permit_expires_at,
++                    "outcome": {"status": "terminal", "turnId": event.client_user_message_id,
++                        "receiptId": receipt_id, "terminalStatus": status, "itemId": item_id, "replayed": true}
++                }
++            })
++        );
++    }
++    for (turn_id, receipt_id) in [
++        (Uuid::new_v4().to_string(), receipt_id),
++        (event.client_user_message_id.clone(), "invalid".to_owned()),
++    ] {
++        assert_eq!(
++            native_terminal_outcome(
++                ThreadTerminalEvidenceResponse::Terminal {
++                    item_id: item_id.clone(),
++                    replayed: true,
++                    turn_id,
++                    receipt_id,
++                    terminal_status: NativeTurnTerminalStatus::Completed,
++                },
++                &event.client_user_message_id
++            ),
++            Outcome::Unknown
++        );
++    }
++    assert_eq!(
++        native_terminal_outcome(
++            ThreadTerminalEvidenceResponse::Unknown,
++            &event.client_user_message_id
++        ),
++        Outcome::Unknown
++    );
++    for (item_id, replayed) in [
++        (item_id, false),
++        ("invalid".to_owned(), true),
++        (event.client_user_message_id.clone(), true),
++    ] {
++        assert_eq!(
++            native_terminal_outcome(
++                ThreadTerminalEvidenceResponse::Terminal {
++                    turn_id: event.client_user_message_id.clone(),
++                    item_id,
++                    replayed,
++                    receipt_id: Uuid::now_v7().to_string(),
++                    terminal_status: NativeTurnTerminalStatus::Completed,
++                },
++                &event.client_user_message_id
++            ),
++            Outcome::Unknown
++        );
++    }
++}
++
++#[tokio::test]
++async fn terminal_evidence_bridge_tick_bypasses_cached_input_without_start_or_selection_renewal() {
++    use codex_app_server_client::AppServerClient;
++    use codex_app_server_client::RemoteAppServerClient;
++    use codex_app_server_client::RemoteAppServerConnectArgs;
++    use codex_app_server_client::RemoteAppServerEndpoint;
++    use futures::SinkExt;
++    use futures::StreamExt;
++    use std::os::fd::IntoRawFd;
++    use tokio_tungstenite::tungstenite::Message;
++    let event = event();
++    let item_id = Uuid::now_v7().to_string();
++    let expected_params = serde_json::to_value(event.params(ReceiptVersion::V3).unwrap()).unwrap();
++    let terminal = serde_json::json!({"status":"terminal", "turnId":event.client_user_message_id,
++        "itemId":item_id, "receiptId":Uuid::now_v7().to_string(), "terminalStatus":"completed", "replayed":true});
++    let native_terminal = terminal.clone();
++    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++    let websocket_url = format!("ws://{}", listener.local_addr().unwrap());
++    let (finish, finished) = tokio::sync::oneshot::channel::<()>();
++    let peer = tokio::spawn(async move {
++        let (stream, _) = listener.accept().await.unwrap();
++        let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
++        let initialize: serde_json::Value =
++            serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
++        assert_eq!(initialize["method"], "initialize");
++        ws.send(Message::Text(
++            serde_json::json!({"id":initialize["id"], "result":{"userAgent":"fixture"}})
++                .to_string()
++                .into(),
++        ))
++        .await
++        .unwrap();
++        let initialized: serde_json::Value =
++            serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
++        assert_eq!(initialized["method"], "initialized");
++        let query: serde_json::Value =
++            serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
++        assert_eq!(
++            query["method"], "thread/terminalEvidence",
++            "must not start or renew selection"
++        );
++        assert_eq!(query["params"], expected_params);
++        ws.send(Message::Text(
++            serde_json::json!({"id":query["id"], "result":native_terminal})
++                .to_string()
++                .into(),
++        ))
++        .await
++        .unwrap();
++        tokio::select! {
++            _ = finished => {},
++            extra = ws.next() => panic!("unexpected additional native RPC: {extra:?}"),
++        }
++    });
++    let client = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
++        endpoint: RemoteAppServerEndpoint::WebSocket {
++            websocket_url,
++            auth_token: None,
++        },
++        client_name: "terminal-evidence-test".to_owned(),
++        client_version: "0.0.0".to_owned(),
++        experimental_api: true,
++        mcp_server_openai_form_elicitation: false,
++        opt_out_notification_methods: Vec::new(),
++        channel_capacity: 8,
++    })
++    .await
++    .unwrap();
++    let server = AppServerSession::new(
++        AppServerClient::Remote(client),
++        crate::app_server_session::ThreadParamsMode::Remote,
++    );
++    let (mut parent, child) = UnixStream::pair().unwrap();
++    parent
++        .set_read_timeout(Some(Duration::from_secs(2)))
++        .unwrap();
++    let mut witness = SelectionWitness {
++        transport: Some(Transport::from_inherited_fd(child.into_raw_fd()).unwrap()),
++        receipt_version: Some(ReceiptVersion::V3),
++        state: SelectionState::new(),
++        last_poll: Instant::now(),
++        binding: NativeBinding {
++            enabled: true,
++            response: None,
++            sent_at: Some(Instant::now()),
++        },
++        attempts: AttemptLedger::default(),
++    };
++    witness.attempts.reserve(&event).unwrap();
++    let cached = Outcome::InputRecorded {
++        turn_id: event.client_user_message_id.clone(),
++        item_id,
++        replayed: true,
++    };
++    witness
++        .attempts
++        .cache_receipt_lookup_response(&event, cached.clone());
++    let selection = (
++        witness.state.thread_id,
++        witness.state.generation,
++        witness.state.eligible,
++    );
++    let lease = witness.binding.sent_at;
++    writeln!(
++        parent,
++        "{}",
++        serde_json::json!({"nonce":42,"terminalEvidence":event})
++    )
++    .unwrap();
++    tokio::time::timeout(Duration::from_secs(3), witness.bridge_tick(&server))
++        .await
++        .unwrap();
++    let mut line = String::new();
++    std::io::BufRead::read_line(&mut std::io::BufReader::new(&mut parent), &mut line).unwrap();
++    let wire: serde_json::Value = serde_json::from_str(&line).unwrap();
++    assert_eq!(wire["receipt"]["outcome"], terminal);
++    assert_eq!(wire["nonce"], 42);
++    assert_eq!(
++        (
++            witness.state.thread_id,
++            witness.state.generation,
++            witness.state.eligible
++        ),
++        selection
++    );
++    assert_eq!(witness.binding.sent_at, lease);
++    assert_eq!(witness.attempts.receipt(&event), Some(cached));
++    finish.send(()).unwrap();
++    peer.await.unwrap();
++}
+diff --git a/codex-rs/tui/src/app/selection_witness.rs b/codex-rs/tui/src/app/selection_witness.rs
+index 05a346f..7d5a753 100644
+--- a/codex-rs/tui/src/app/selection_witness.rs
++++ b/codex-rs/tui/src/app/selection_witness.rs
+@@ -82,6 +82,8 @@ struct Challenge {
+     start: Option<BridgeEvent>,
+     #[serde(default)]
+     receipt: Option<BridgeEvent>,
++    #[serde(default, rename = "terminalEvidence")]
++    terminal_evidence: Option<BridgeEvent>,
+ }
+ 
+ #[derive(Serialize)]
+@@ -157,6 +159,7 @@ impl Transport {
+         &mut self,
+         state: &mut SelectionState,
+         mut binding: Option<binding::BindingView<'_>>,
++        receipt_version: Option<ReceiptVersion>,
+     ) -> Result<(), TransportFailure> {
+         if let Some(pending) = self.pending.as_mut() {
+             if pending.created.elapsed() >= Duration::from_millis(/*millis*/ 750) {
+@@ -179,7 +182,11 @@ impl Transport {
+         if self.operation.is_some() {
+             return Ok(());
+         }
+-        let limit = if binding.is_some() { 4096 } else { 128 };
++        let limit = if binding.is_some() || receipt_version == Some(ReceiptVersion::V3) {
++            4096
++        } else {
++            128
++        };
+         let mut chunk = [0u8; 4096];
+         let count = match self.stream.read(&mut chunk) {
+             Ok(0) => {
+@@ -231,16 +238,24 @@ impl Transport {
+             });
+         }
+         self.last_nonce = challenge.nonce;
+-        match (challenge.start, challenge.receipt) {
+-            (None, None) => {}
+-            (Some(event), None) if binding.is_some() => {
++        match (
++            challenge.start,
++            challenge.receipt,
++            challenge.terminal_evidence,
++        ) {
++            (None, None, None) => {}
++            (Some(event), None, None) if binding.is_some() => {
+                 self.operation = Some((challenge.nonce, Operation::Start(event)));
+                 return Ok(());
+             }
+-            (None, Some(event)) if binding.is_some() => {
++            (None, Some(event), None) if binding.is_some() => {
+                 self.operation = Some((challenge.nonce, Operation::Receipt(event)));
+                 return Ok(());
+             }
++            (None, None, Some(event)) if receipt_version == Some(ReceiptVersion::V3) => {
++                self.operation = Some((challenge.nonce, Operation::TerminalEvidence(event)));
++                return Ok(());
++            }
+             _ => {
+                 return Err(TransportFailure {
+                     stage: "challenge-operation",
+@@ -445,7 +460,9 @@ impl SelectionWitness {
+         let Some(transport) = self.transport.as_mut() else {
+             return;
+         };
+-        if let Err(failure) = transport.poll(&mut self.state, self.binding.view()) {
++        if let Err(failure) =
++            transport.poll(&mut self.state, self.binding.view(), self.receipt_version)
++        {
+             self.trace_revocation("native-transport-unavailable");
+             tracing::warn!(target: "codex_selection_witness", stage = failure.stage, error_kind = ?failure.error.kind(), raw_errno = failure.error.raw_os_error(), sequence = self.state.sequence, generation = self.state.generation, "native witness unavailable");
+             self.state.select(self.state.thread_id, false);
+diff --git a/codex-rs/tui/src/app/selection_witness_tests.rs b/codex-rs/tui/src/app/selection_witness_tests.rs
+index cc41fda..e4d31f8 100644
+--- a/codex-rs/tui/src/app/selection_witness_tests.rs
++++ b/codex-rs/tui/src/app/selection_witness_tests.rs
+@@ -164,7 +164,7 @@ fn delayed_challenge_refreshes_from_original_sample_deadline() {
+         .transport
+         .as_mut()
+         .expect("witness transport")
+-        .poll(&mut witness.state, stale_view)
++        .poll(&mut witness.state, stale_view, witness.receipt_version)
+         .unwrap_or_else(|_| panic!("challenge response"));
+ 
+     let mut response = [0; 2048];

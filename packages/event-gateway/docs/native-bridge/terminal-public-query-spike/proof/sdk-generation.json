@@ -1,0 +1,139 @@
+{
+  "scope": "Isolated SDK generation only; no tests or source integration",
+  "lockSha256": "ca4f631445c81b74b11b05305cc580fa399f1f9bfe80b12acea610ce331e0354",
+  "stageLockUnchanged": true,
+  "sourceFinal18HashesUnchanged": true,
+  "installedPackageCount": 27,
+  "sdkOrCliInstalled": false,
+  "generatedFiles": {
+    "sdk/python/src/openai_codex/generated/v2_all.py": {
+      "before": "9fc11e2f08a244ef26c69118d915573f499c03062c03a39e6b8a83055cab70b0",
+      "after": "dbe4ba62945d93ad37dd3e0d512d2092032bccec97c34b0407b66eaf838e9d06"
+    }
+  },
+  "patchSha256": "256a7875231ed273c7fc2c4ac45aa52c878df8351e4636919f8ae040ce03ed41",
+  "environmentSha256": "90a437b009f64cf7045924c2bf2ddb58d83ebd473c77e312f3b50ee89beea016",
+  "cacheManifestSha256": "235610681f905bfc2fd90f07fb3c57b5c4ae20b7282eddfea754f10c899ac9f4",
+  "commandSha256": "26cb0d989b5cf8492e4ddc47c4263e70d678732be554a800453c7868bbe915b7",
+  "generationLogSha256": "cdc2f24680232229f1cb79fb192510f462cc7781e21000c02e492e932c9ee0a5",
+  "generationExitCode": 0,
+  "cacheFileCount": 1122,
+  "cacheFileBytes": 48672577,
+  "environment": {
+    "python": "3.13.14 (main, Aug  5 2026, 15:33:38) [Clang 22.1.3 ]",
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "packages": [
+      [
+        "Jinja2",
+        "3.1.6"
+      ],
+      [
+        "MarkupSafe",
+        "3.0.3"
+      ],
+      [
+        "PyYAML",
+        "6.0.3"
+      ],
+      [
+        "Pygments",
+        "2.20.0"
+      ],
+      [
+        "annotated-types",
+        "0.7.0"
+      ],
+      [
+        "argcomplete",
+        "3.6.3"
+      ],
+      [
+        "black",
+        "26.3.1"
+      ],
+      [
+        "click",
+        "8.3.3"
+      ],
+      [
+        "datamodel-code-generator",
+        "0.31.2"
+      ],
+      [
+        "genson",
+        "1.3.0"
+      ],
+      [
+        "inflect",
+        "7.5.0"
+      ],
+      [
+        "iniconfig",
+        "2.3.0"
+      ],
+      [
+        "isort",
+        "6.1.0"
+      ],
+      [
+        "more-itertools",
+        "11.0.2"
+      ],
+      [
+        "mypy_extensions",
+        "1.1.0"
+      ],
+      [
+        "packaging",
+        "26.2"
+      ],
+      [
+        "pathspec",
+        "1.1.1"
+      ],
+      [
+        "platformdirs",
+        "4.9.6"
+      ],
+      [
+        "pluggy",
+        "1.6.0"
+      ],
+      [
+        "pydantic",
+        "2.13.4"
+      ],
+      [
+        "pydantic_core",
+        "2.46.4"
+      ],
+      [
+        "pytest",
+        "9.0.3"
+      ],
+      [
+        "pytokens",
+        "0.4.1"
+      ],
+      [
+        "ruff",
+        "0.15.12"
+      ],
+      [
+        "typeguard",
+        "4.5.1"
+      ],
+      [
+        "typing-inspection",
+        "0.4.2"
+      ],
+      [
+        "typing_extensions",
+        "4.15.0"
+      ]
+    ]
+  },
+  "command": "uv run --frozen --only-group test --no-build python sdk/python/scripts/update_sdk_artifacts.py generate-types --schema-dir codex-rs/app-server-protocol/schema/json",
+  "nativeTestsRerun": false,
+  "originalFrozenProofUnchanged": true
+}
