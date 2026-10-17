@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from event_gateway.muse_pull import MusePullJournal
-from event_gateway.store import Store, StoreError
+from event_gateway.store import Store, StoreError, IDENTITY
 
 U = ["00000000-0000-4000-8000-" + str(n).zfill(12) for n in range(1, 5)]
 
@@ -22,7 +22,8 @@ class MusePullJournalTests(unittest.TestCase):
         self.now = 1000.0
         self.store = Store(self.path, clock=lambda: self.now, max_rows=8)
         self.addCleanup(lambda: self.store.close())
-        self.j = MusePullJournal(self.store)
+        self.j = MusePullJournal(self.store, max_rows=8)
+        self.addCleanup(lambda: self.j.close())
         self.b = dict(
             slotId="owner-muse",
             bindingGeneration=1,
@@ -41,14 +42,16 @@ class MusePullJournalTests(unittest.TestCase):
         self.j.put_binding(self.b)
 
     def reopen(self):
+        self.j.close()
         self.store.close()
         self.store = Store(self.path, clock=lambda: self.now, max_rows=8)
-        self.j = MusePullJournal(self.store)
+        self.j = MusePullJournal(self.store, max_rows=8)
 
     def snapshot(self):
-        return tuple(self.store.db.iterdump())
+        return tuple(self.j.db.iterdump())
 
     def test_lost_read_and_ack_response_after_abrupt_process_exit(self):
+        self.j.close()
         self.store.close()
         script = """import json,os,sys
 from event_gateway.store import Store
@@ -82,6 +85,7 @@ os._exit(0)
                 self.assertEqual(self.j.read(self.b), self.a)
                 self.assertEqual(self.j.read(self.b), self.a)
                 self.j.enqueue(self.b, self.z)
+                self.j.close()
                 self.store.close()
             else:
                 self.assertEqual(
@@ -91,21 +95,21 @@ os._exit(0)
                 self.assertEqual(self.j.read(self.b), self.z)
 
     def test_full_journal_allows_duplicates_and_ack_without_page_growth(self):
-        self.store.max_rows = 3
+        self.j.store.max_rows = 3
         self.j.enqueue(self.b, self.a)
         self.j.enqueue(self.b, self.z)
-        pages = self.store.db.execute("PRAGMA page_count").fetchone()[0]
-        with patch.object(self.store, "_capacity", side_effect=StoreError("capacity")):
+        pages = self.j.db.execute("PRAGMA page_count").fetchone()[0]
+        with patch.object(self.j.store, "_capacity", side_effect=StoreError("capacity")):
             self.assertEqual(self.j.put_binding(self.b), self.b)
             self.assertEqual(self.j.enqueue(self.b, self.a), self.a)
             self.j.ack(self.b, "one")
             self.j.ack(self.b, "one")
             self.assertEqual(self.j.enqueue(self.b, self.a), self.a)
         self.assertEqual(
-            self.store.db.execute("PRAGMA page_count").fetchone()[0], pages
+            self.j.db.execute("PRAGMA page_count").fetchone()[0], pages
         )
         self.reopen()
-        self.store.max_rows = 3
+        self.j.store.max_rows = 3
         before = self.snapshot()
         with self.assertRaises(StoreError):
             self.j.enqueue(
@@ -155,7 +159,7 @@ os._exit(0)
                 operation()
         self.assertIsNone(self.j.read(new))
         self.assertEqual(
-            self.store.db.execute(
+            self.j.db.execute(
                 "SELECT COUNT(*) FROM muse_pull_notifications_v1"
             ).fetchone()[0],
             1,
@@ -214,22 +218,22 @@ os._exit(0)
             with self.assertRaises(StoreError):
                 self.j.enqueue(self.b, item)
             self.assertEqual(self.snapshot(), before)
-        with patch.object(self.store, "_capacity", side_effect=StoreError("capacity")):
+        with patch.object(self.j.store, "_capacity", side_effect=StoreError("capacity")):
             with self.assertRaises(StoreError):
                 self.j.enqueue(self.b, self.a)
         self.assertEqual(self.snapshot(), before)
 
     def test_aborted_database_writes_rollback_enqueue_and_ack(self):
-        self.store.db.execute(
+        self.j.db.execute(
             "CREATE TRIGGER abort_enqueue AFTER INSERT ON muse_pull_notifications_v1 BEGIN SELECT RAISE(ABORT,'injected'); END"
         )
         before = self.snapshot()
         with self.assertRaises(StoreError):
             self.j.enqueue(self.b, self.a)
         self.assertEqual(self.snapshot(), before)
-        self.store.db.execute("DROP TRIGGER abort_enqueue")
+        self.j.db.execute("DROP TRIGGER abort_enqueue")
         self.j.enqueue(self.b, self.a)
-        self.store.db.execute(
+        self.j.db.execute(
             "CREATE TRIGGER abort_ack AFTER UPDATE ON muse_pull_notifications_v1 BEGIN SELECT RAISE(ABORT,'injected'); END"
         )
         before = self.snapshot()
@@ -239,7 +243,84 @@ os._exit(0)
         self.reopen()
         self.assertEqual(self.j.read(self.b), self.a)
 
-    def test_native_state_and_dispatch_are_untouched_and_lock_reused(self):
+    def test_separate_byte_capacity_does_not_block_parent_reopen_or_admission(self):
+        self.j.close()
+        limit = 512 * 1024
+        self.j = MusePullJournal(self.store, max_rows=10000, max_bytes=limit)
+        parent_before = tuple(self.store.db.iterdump())
+        accepted = []
+        for index in range(1000):
+            notification = dict(notificationId=f"bounded_{index}", eventReference="r" * 256)
+            try:
+                self.j.enqueue(self.b, notification)
+            except StoreError as error:
+                self.assertEqual(error.code, "capacity")
+                break
+            accepted.append(notification)
+        else:
+            self.fail("journal byte capacity was not reached")
+        self.assertGreater(len(accepted), 1)
+        self.assertLess(len(accepted), self.j.store.max_rows)
+        self.assertEqual(tuple(self.store.db.iterdump()), parent_before)
+        self.assertEqual(self.j.read(self.b), accepted[0])
+        self.j.ack(self.b, accepted[0]["notificationId"])
+        self.j.close()
+        self.store.close()
+        self.store = Store(self.path, clock=lambda: self.now, max_rows=8)
+        self.j = MusePullJournal(self.store, max_rows=10000, max_bytes=limit)
+        self.assertEqual(self.j.read(self.b), accepted[1])
+        self.assertEqual(self.j.enqueue(self.b, accepted[0]), accepted[0])
+        self.assertLessEqual(self.j.store._size(), limit)
+        self.now = 1791201630
+        fixture = Path(__file__).parents[1] / "contracts/event-v1/protocol-v1.json"
+        event = json.loads(fixture.read_text())["validEnvelopes"][0]
+        attachment = {key: event[key] for key in IDENTITY}
+        attachment.update(leaseExpiresAt=self.now + 3600, nativeSessionId="fixture-session",
+                          socketPath="/fixture/socket")
+        self.store.put_attachment(attachment)
+        self.assertEqual(self.store.accept(event)["deliveryId"], event["deliveryId"])
+
+    def test_independent_defaults_and_child_lock_lifecycle(self):
+        self.j.close()
+        with MusePullJournal(self.store) as journal:
+            self.assertEqual(journal.store.max_rows, 1000)
+            self.assertEqual(journal.store.max_bytes, 8 * 1024 * 1024)
+            self.assertEqual(journal.store.path, self.path / "muse-pull")
+            self.assertEqual(self.store.max_rows, 8)
+            with self.assertRaisesRegex(StoreError, "writer_locked"):
+                MusePullJournal(self.store)
+        with MusePullJournal(self.store) as journal:
+            self.assertEqual(journal.put_binding(self.b), self.b)
+        self.assertIsNotNone(self.store.db)
+        self.j = MusePullJournal(self.store, max_rows=8)
+        columns = [row[1] for row in self.j.db.execute("PRAGMA table_info(muse_pull_bindings_v1)")]
+        self.assertEqual(columns, ["slot", "metadata"])
+
+    def test_failed_child_schema_initialization_releases_its_lock(self):
+        self.j.close()
+        with patch.object(MusePullJournal, "_initialize_schema", side_effect=RuntimeError("injected")):
+            with self.assertRaisesRegex(RuntimeError, "injected"):
+                MusePullJournal(self.store)
+        self.j = MusePullJournal(self.store, max_rows=8)
+        self.assertEqual(self.j.put_binding(self.b), self.b)
+
+    def test_symlinked_child_directory_refused_without_affecting_parent(self):
+        self.j.close()
+        child = self.path / "muse-pull"
+        retained = self.path / "retained-child"
+        child.rename(retained)
+        child.symlink_to(retained, target_is_directory=True)
+        try:
+            with self.assertRaisesRegex(StoreError, "unsafe_state"):
+                MusePullJournal(self.store)
+            self.assertIsNotNone(self.store.db)
+        finally:
+            child.unlink()
+            retained.rename(child)
+        self.j = MusePullJournal(self.store, max_rows=8)
+        self.assertEqual(self.j.put_binding(self.b), self.b)
+
+    def test_native_state_and_dispatch_are_untouched_and_parent_lock_retained(self):
         tables = ("deliveries", "attempts", "attachments")
         before = [
             tuple(self.store.db.execute(f"SELECT * FROM {name}")) for name in tables

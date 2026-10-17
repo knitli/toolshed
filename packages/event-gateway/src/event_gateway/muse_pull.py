@@ -7,7 +7,7 @@ import re
 import sqlite3
 
 from .messaging_protocol_v2 import _PRINCIPAL, _UUID, _matches
-from .store import StoreError, _json
+from .store import Store, StoreError, _json
 
 _GENERATIONS = (
     "bindingGeneration",
@@ -65,17 +65,35 @@ def _binding(value, now):
 
 class MusePullJournal:
     """
-    Use an already-open Store's lock, connection and capacity, without dispatch wiring.
+    Use a separate bounded child ledger, without dispatch wiring.
 
     slotId is a stable host-owned consumer slot, never a caller-selected session key.
     A different slot is a different authority domain: this API promises no cross-slot
     fencing. Only an independently authenticated host may provision or use bindings.
     """
 
-    def __init__(self, store):
-        """Create the dormant journal tables using the already-open Store."""
-        self.store = store
-        self.db = store.db
+    def __init__(self, store, *, max_rows=1000, max_bytes=8 * 1024 * 1024):
+        """Own a private child Store with independent capacity and writer lock."""
+        self.store = Store(store.path / "muse-pull", clock=store.clock,
+                           max_rows=max_rows, max_bytes=max_bytes)
+        self.db = self.store.db
+        try:
+            self._initialize_schema()
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self):
+        """Release only this journal's connection and writer lock."""
+        self.store.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    def _initialize_schema(self):
         with self._transaction():
             existing = {
                 row[0]
@@ -87,9 +105,9 @@ class MusePullJournal:
             if existing and len(existing) != 2:
                 raise StoreError("invalid_muse_schema")
             if not existing:
-                store._capacity(65536)
+                self.store._capacity(65536)
                 self.db.execute("""CREATE TABLE muse_pull_bindings_v1 (
-                    slot TEXT PRIMARY KEY, generation INTEGER NOT NULL, metadata TEXT NOT NULL)""")
+                    slot TEXT PRIMARY KEY, metadata TEXT NOT NULL)""")
                 self.db.execute("""CREATE TABLE muse_pull_notifications_v1 (
                     sequence INTEGER PRIMARY KEY, slot TEXT NOT NULL, generation INTEGER NOT NULL,
                     notification_id TEXT NOT NULL, reference TEXT NOT NULL,
@@ -152,9 +170,9 @@ class MusePullJournal:
                         raise StoreError("muse_binding_fenced")
             self._capacity(0 if row else 1, 32768)
             self.db.execute(
-                """INSERT INTO muse_pull_bindings_v1 VALUES (?,?,?)
-                ON CONFLICT(slot) DO UPDATE SET generation=excluded.generation, metadata=excluded.metadata""",
-                (binding["slotId"], binding["bindingGeneration"], _json(binding)),
+                """INSERT INTO muse_pull_bindings_v1 VALUES (?,?)
+                ON CONFLICT(slot) DO UPDATE SET metadata=excluded.metadata""",
+                (binding["slotId"], _json(binding)),
             )
         return binding
 

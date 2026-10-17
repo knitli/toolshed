@@ -138,10 +138,15 @@ configuration change, pull endpoint, cursor, or acknowledgment is added here.
 Push ingress remains a separate, unqualified path; see [Push ingress qualification](#push-ingress-qualification).
 
 A dormant local journal now exists in `event_gateway.muse_pull.MusePullJournal`.
-It uses an already-open `Store` connection, private directory, exclusive writer
-lock, SQLite transactions, WAL/FULL durability and byte-capacity checks. Its two
-versioned tables are created only when this journal is explicitly constructed;
-ordinary Store opening and the native delivery schema remain unchanged.
+It uses the trusted parent Store only for its path and clock, and owns a separate
+private `muse-pull/` child Store with its own writer lock, SQLite connection,
+WAL/FULL durability and byte-capacity checks. Composition reuses Store's existing
+security and storage machinery, including its small empty native-schema overhead;
+no native delivery rows are written there. The two journal tables are created
+only on explicit journal construction. Use `with MusePullJournal(parent) as journal`
+or call `close()` to release its independent connection and lock. Parent Store
+opening and its delivery ledger remain unchanged. This unmerged dormant schema
+has no production-data migration claim.
 
 The interface is `put_binding(trusted_binding)`, `enqueue(trusted_binding,
 notification)`, `read(trusted_binding)`, and `ack(trusted_binding, notification_id)`.
@@ -165,12 +170,16 @@ re-enqueue is idempotent before and after ACK, while conflicting references fail
 ACK is local consumption only, not native receipt-v3 evidence or Cloud settlement.
 
 All binding rows, pending rows and ACK tombstones across generations count toward
-the journal's `Store.max_rows` bound; byte allocation uses Store's shared database
-budget. ACK updates an equal-width state field without adding rows or payload.
+the journal's independent `max_rows` bound (default 1000); its child ledger has an
+independent `max_bytes` budget (default 8 MiB). Both are constructor options and
+are unaffected by parent Store queue settings. ACK updates an equal-width state field without adding rows or payload.
 Duplicates and ACKs do not require spare enqueue capacity. No unacknowledged row
 or tombstone is automatically evicted. This dormant slice deliberately has no
-compaction: sustained use eventually refuses new work at capacity; a separately
-reviewed retirement policy is required before production use.
+compaction: sustained use eventually refuses new journal work at its own capacity.
+Its retained rows cannot consume the parent delivery ledger's SQLite/page budget
+or prevent that ledger reopening. Host filesystem exhaustion remains a shared
+resource limitation. A separately reviewed retirement policy is required before
+production use.
 
 Trusted metadata is not authentication. Existing `control.sock` authenticates the
 filesystem owner, not a Muse session, and Codex attachments do not establish Muse
