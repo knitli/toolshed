@@ -26,6 +26,21 @@ def _finite(value):
         return False
 
 
+def attachment_matches(attachment, envelope):
+    """Compare a validated envelope's destination tuple without granting authority."""
+    if type(attachment) is not dict:
+        return False
+    expected = {key: envelope[key] for key in ATTACHMENT_FIELDS}
+    expected.update((key, envelope['canonicalSubject'][key])
+                    for key in ('namespace', 'agentIncarnation'))
+    # Canonical JSON keeps bool distinct from integers but accepts integral floats.
+    try:
+        return all(protocol._json_bytes(attachment.get(key)) == protocol._json_bytes(value)
+                   for key, value in expected.items())
+    except (ValueError, TypeError, RecursionError, OverflowError):
+        return False
+
+
 def validate_authenticated_envelope(body, *, signature, audience, public_key,
                                     expected_audience, node_id, attachment, now_ms):
     """Authenticate exact bytes, then validate freshness and current destination metadata."""
@@ -49,16 +64,7 @@ def validate_authenticated_envelope(body, *, signature, audience, public_key,
     if (type(attachment) is not dict or not _finite(attachment.get('leaseExpiresAt'))
             or attachment['leaseExpiresAt'] <= now_ms / 1000):
         _fail('attachment_unavailable')
-    expected = {key: envelope[key] for key in ATTACHMENT_FIELDS}
-    expected.update((key, envelope['canonicalSubject'][key])
-                    for key in ('namespace', 'agentIncarnation'))
-    # Canonical JSON keeps bool distinct from integers but accepts integral floats.
-    try:
-        matches = all(protocol._json_bytes(attachment.get(key)) == protocol._json_bytes(value)
-                      for key, value in expected.items())
-    except (ValueError, TypeError, RecursionError, OverflowError):
-        matches = False
-    if not matches:
+    if not attachment_matches(attachment, envelope):
         _fail('attachment_fenced')
     return envelope
 

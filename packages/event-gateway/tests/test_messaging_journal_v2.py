@@ -249,6 +249,62 @@ class MessagingJournalTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(event['deliveryId'], self.event['deliveryId'])
         self.assertEqual(self.store.status()['counts'], {'held': 1, 'queued': 1})
 
+    def test_v1_polling_without_json1_still_excludes_corrupt_v2_states(self):
+        self.provision()
+        self.accept()
+        fixture = Path(__file__).resolve().parents[1] / 'contracts/event-v1/protocol-v1.json'
+        event = json.loads(fixture.read_text())['validEnvelopes'][0]
+        event.update(runtimeId=OTHER, issuedAt=self.event['issuedAt'],
+                     expiresAt=self.event['expiresAt'])
+        event['deliveryId'] = derive_delivery_id(event)
+        mapping = {key: event[key] for key in IDENTITY}
+        mapping.update(leaseExpiresAt=self.now + 60, nativeThreadId=OTHER)
+        self.store.put_attachment(mapping)
+        self.store.accept(event)
+
+        def unavailable_json1(*_args):
+            raise sqlite3.OperationalError('JSON1 unavailable')
+
+        self.store.db.create_function('json_extract', 2, unavailable_json1)
+        for state, poll in (('queued', self.store.list_pending),
+                            ('admitted', self.store.list_reconcilable)):
+            with self.subTest(state=state):
+                with self.store.db:
+                    self.store.db.execute('UPDATE deliveries SET state=?', (state,))
+                try:
+                    rows = poll()
+                except sqlite3.Error as error:
+                    self.fail(f'v1 polling requires optional SQLite JSON1: {error}')
+                self.assertEqual([row['deliveryId'] for row in rows], [event['deliveryId']])
+
+    def test_accept_rechecks_attachment_inside_write_transaction(self):
+        self.provision()
+        original = self.store._capacity
+        rotated = False
+
+        def rotate_after_precheck(required):
+            nonlocal rotated
+            original(required)
+            if not rotated:
+                rotated = True
+                self.store.put_messaging_attachment(dict(self.mapping, attachmentGeneration=4,
+                                                         consumerGeneration=4))
+
+        original_matches = self.store._matches
+        transaction_checks = []
+
+        def check_attachment(envelope):
+            transaction_checks.append(self.store.db.in_transaction)
+            return original_matches(envelope)
+
+        with patch.object(self.store, '_capacity', side_effect=rotate_after_precheck), \
+                patch.object(self.store, '_matches', side_effect=check_attachment):
+            with self.assertRaisesRegex(StoreError, 'attachment_fenced'):
+                self.store.accept(self.event)
+        self.assertTrue(transaction_checks[-1], 'final attachment check escaped the transaction')
+        self.assertIsNone(self.store.delivery(self.event['deliveryId']))
+        self.assertEqual(self.store.list_pending(), [])
+
     async def test_explicit_dispatch_reconcile_never_contact_external_authority(self):
         self.provision()
         self.accept()

@@ -528,13 +528,10 @@ class Store:
     def _matches(self, envelope):
         mapping = self.get_attachment(envelope.get("runtimeId"))
         if envelope.get("schemaVersion") == 2:
-            from .messaging_admission_v2 import ATTACHMENT_FIELDS
-            from .messaging_protocol_v2 import _json_bytes
+            from .messaging_admission_v2 import attachment_matches
 
-            expected = {key: envelope[key] for key in ATTACHMENT_FIELDS}
-            expected.update((key, envelope["canonicalSubject"][key]) for key in ("namespace", "agentIncarnation"))
             if (not mapping or mapping["leaseExpiresAt"] <= self.clock()
-                    or any(_json_bytes(mapping.get(key)) != _json_bytes(value) for key, value in expected.items())):
+                    or not attachment_matches(mapping, envelope)):
                 raise StoreError("stale", "attachment_fenced")
             return mapping
         if (
@@ -598,6 +595,7 @@ class Store:
         with self.db:
             if envelope["schemaVersion"] == 2:
                 self.db.execute("BEGIN IMMEDIATE")
+                self._matches(envelope)
                 self.db.execute("PRAGMA user_version=5")
             self.db.execute(
                 "INSERT INTO deliveries VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -1204,8 +1202,9 @@ class Store:
         return [
             self._public(row)
             for row in self.db.execute(
-                "SELECT * FROM deliveries WHERE state='queued' AND json_extract(envelope,'$.schemaVersion')=1 ORDER BY created,id"
+                "SELECT * FROM deliveries WHERE state='queued' ORDER BY created,id"
             )
+            if json.loads(row["envelope"]).get("schemaVersion") == 1
         ]
 
     def list_reconcilable(self):
@@ -1215,8 +1214,9 @@ class Store:
                 "SELECT * FROM deliveries WHERE (state IN "
                 "('claiming','admitted','settlement_pending','submitted','ambiguous') "
                 "OR (state='observed' AND ack_state IS NOT state)) "
-                "AND json_extract(envelope,'$.schemaVersion')=1 ORDER BY created,id"
+                "ORDER BY created,id"
             )
+            if json.loads(row["envelope"]).get("schemaVersion") == 1
         ]
 
     def cleanup(self):
