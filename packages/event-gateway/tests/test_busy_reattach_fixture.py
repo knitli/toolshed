@@ -3,6 +3,7 @@ import asyncio
 import copy
 from contextlib import ExitStack, asynccontextmanager
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -38,6 +39,81 @@ def busy_response(binding, challenge_id, nonce, deadline, *, eligible=True, turn
 
 
 class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_dispatch_observer_archive_passes_hosted_verifier(self):
+        from test_hosted_native_qualification import HOSTED, attach_archive, busy_attach_evidence, c2_proof
+        result, attach, identities = busy_attach_evidence()
+        binding = attach['mapping']['nativeBinding']
+        session_id = attach['mapping']['sessionId']
+        delivery_id = '00000000-0000-4000-8000-000000000002'
+        records = [json.loads(line) for line in attach_archive(attach).splitlines()]
+        ctx = SimpleNamespace(dispatch_labels={delivery_id: 'C-busy-second'}, dispatch_calls=[],
+                              dispatch_errors=[], dispatch_results=[], c_challenges=[], c_busy_nonces={1, 2, 3, 4, 5},
+                              c_busy_binding=binding, session_labels={session_id: 'C'}, challenge_calls={'C': 0},
+                              receipt_errors={}, receipt_calls={})
+        nonce = 6
+
+        def raw_exchange(state, session, request, **kwargs):
+            return busy_response(binding, request['challengeId'], nonce, F.time.monotonic() + 0.5)
+
+        ctx.original_session_request = raw_exchange
+
+        async def dispatch(*args):
+            # The real launcher validates the raw echo and returns its normalized three-field value.
+            response = launcher.session_challenge(Path('/fixture'), session_id, str(uuid4()), binding)
+            self.assertNotIn('challengeId', response)
+            return {'status': 'queued', 'reason': 'client_unavailable_or_busy'}
+
+        ctx.original_dispatch = dispatch
+
+        def record(context, kind, value):
+            records.append({'kind': kind, 'value': copy.deepcopy(value)})
+
+        with patch.object(F, 'record_evidence', side_effect=record), \
+                patch.object(launcher, '_session_request', side_effect=lambda *a, **kw: F.record_session_request(ctx, *a, **kw)):
+            with patch.object(F.time, 'monotonic', return_value=6.1):
+                await F.observe_dispatch(None, ctx, delivery_id)
+            records.append({'kind': 'c2BusyRestart', 'value': {'deliveryId': delivery_id, 'binding': binding,
+                            'checkedAt': 6.5, 'evidenceError': None}})
+            ctx.c_busy_phase = 'post-restart'
+            nonce = 7
+            with patch.object(F.time, 'monotonic', return_value=7.1):
+                await F.observe_dispatch(None, ctx, delivery_id)
+        proof = c2_proof(result, identities)
+        proof['privateEvidence']['coreBusyNonces'] = len(ctx.c_busy_nonces)
+        try:
+            HOSTED.verify_busy_attach(proof, '\n'.join(json.dumps(row) for row in records).encode())
+        except ValueError as error:
+            self.fail('Actual C2 observer archive must qualify: ' + str(error))
+        self.assertEqual([row['value']['phase'] for row in records if row['kind'] == 'c2CoreBusy'],
+                         ['initial', 'post-restart'])
+        self.assertEqual(ctx.challenge_calls['C'], 2)
+        for row in records:
+            if row['kind'] == 'c2CoreBusy':
+                row['value']['observations'][0]['response']['witness']['nonce'] = 4
+                break
+        with self.assertRaisesRegex(ValueError, 'Busy attach evidence mismatch'):
+            HOSTED.verify_busy_attach(proof, '\n'.join(json.dumps(row) for row in records).encode())
+
+    async def test_read_accepts_real_launcher_normalized_challenge_and_rejects_bad_echo(self):
+        binding = {key: str(uuid4()) for key in ('clientId', 'connectionId', 'threadId', 'serverInstanceId')}
+        binding.update(backendPid=42, generation=1, serverGeneration=1)
+        session = {'state': Path('/fixture'), 'sessionId': 'C', 'provider': object()}
+        seen = set()
+
+        def raw_exchange(state, session_id, request):
+            return busy_response(binding, request['challengeId'], 7, F.time.monotonic() + 0.5)
+
+        with patch.object(launcher, '_session_request', side_effect=raw_exchange), patch.object(F, 'require_model_held'):
+            row = await F.read_busy_binding(session, binding, seen)
+        self.assertEqual(row['response']['challengeId'], row['request']['challengeId'])
+        self.assertEqual(seen, {7})
+        self.assertTrue(F.core_busy_observation(row, binding, F.time.monotonic(), set()))
+        wrong_echo = busy_response(binding, str(uuid4()), 8, F.time.monotonic() + 0.5)
+        with patch.object(launcher, '_session_request', return_value=wrong_echo), patch.object(F, 'require_model_held'):
+            with self.assertRaisesRegex(launcher.LaunchError, 'invalid_client_challenge'):
+                await F.read_busy_binding(session, binding, seen)
+        self.assertEqual(seen, {7})
+
     async def test_read_requires_valid_busy_evidence_and_unreleased_hold(self):
         session = {"state": Path("/fixture"), "sessionId": "C", "provider": object()}
         response = {"witness": {"nonce": 7}}
@@ -53,7 +129,7 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(AssertionError, "hold released"):
                 await F.read_busy_binding(session, {}, seen)
             self.assertEqual(seen, {7})
-            self.assertEqual(check.call_args.args[0]["response"], response)
+            self.assertEqual(check.call_args.args[0]["response"]["witness"], response["witness"])
 
     async def test_binding_needs_three_consecutive_observations_after_churn(self):
         session = {"state": Path("/fixture"), "sessionId": "C",
@@ -167,15 +243,15 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
             else:
                 nonces = iter(witness_nonces)
 
-                def challenge(state, session_id, challenge_id, expected):
+                def challenge(state, session_id, request):
                     try:
                         nonce = next(nonces)
                     except StopIteration:
                         self.fail("Busy attachment exhausted the supplied native witnesses")
-                    return busy_response(binding, challenge_id, nonce, F.time.monotonic() + 0.5)
+                    return busy_response(binding, request["challengeId"], nonce, F.time.monotonic() + 0.5)
 
                 stack.enter_context(patch.object(F.launcher, "session_binding", return_value=binding))
-                stack.enter_context(patch.object(F.launcher, "session_challenge", side_effect=challenge))
+                stack.enter_context(patch.object(F.launcher, "_session_request", side_effect=challenge))
                 stack.enter_context(patch.object(F.asyncio, "sleep", new=AsyncMock()))
                 fresh = None
             cli = stack.enter_context(patch.object(F, "run_cli_capture", side_effect=cli_call))
@@ -247,18 +323,21 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
                        threadId=str(uuid4()), serverInstanceId=str(uuid4()), generation=2, serverGeneration=1)
         session = {"state": Path("/fixture"), "sessionId": "C", "provider": object()}
         for mutation in ("valid", "idle", "expired", "ineligible", "replayed"):
-            def challenge(state, session_id, challenge_id, expected):
-                return busy_response(binding, challenge_id, 7, 9.0 if mutation == "expired" else 10.5,
+            def challenge(state, session_id, request):
+                return busy_response(binding, request["challengeId"], 7, 9.0 if mutation == "expired" else 10.5,
                                      eligible=mutation != "ineligible",
                                      turn_state="idle" if mutation == "idle" else "busy")
             with self.subTest(mutation=mutation), \
-                    patch.object(F.launcher, "session_challenge", side_effect=challenge), \
+                    patch.object(F.launcher, "_session_request", side_effect=challenge), \
                     patch.object(F.time, "monotonic", return_value=10.0), \
                     patch.object(F, "require_model_held"):
                 seen = {7} if mutation == "replayed" else set()
                 if mutation == "valid":
                     await F.read_busy_binding(session, binding, seen)
                     self.assertEqual(seen, {7})
+                elif mutation in ("expired", "ineligible"):
+                    with self.assertRaisesRegex(launcher.LaunchError, "invalid_client_challenge"):
+                        await F.read_busy_binding(session, binding, seen)
                 else:
                     with self.assertRaisesRegex(AssertionError, "fresh eligible Core-busy"):
                         await F.read_busy_binding(session, binding, seen)
@@ -404,16 +483,16 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
         samples = iter([(1, False), (2, False), (3, True), (1, False), (4, False), (5, False), (6, False)])
         observed_nonces = []
 
-        def challenge(state, session_id, challenge_id, expected):
+        def challenge(state, session_id, request):
             try:
                 nonce, expired = next(samples)
             except StopIteration:
                 self.fail("Busy selection exhausted all fresh samples without settling")
             observed_nonces.append(nonce)
             now = F.time.monotonic()
-            return busy_response(binding, challenge_id, nonce, now - 1 if expired else now + 0.5)
+            return busy_response(binding, request["challengeId"], nonce, now - 1 if expired else now + 0.5)
         with patch.object(F.launcher, "session_binding", return_value=binding), \
-                patch.object(F.launcher, "session_challenge", side_effect=challenge), \
+                patch.object(F.launcher, "_session_request", side_effect=challenge), \
                 patch.object(F, "require_model_held"), \
                 patch.object(F.asyncio, "sleep", new=AsyncMock()):
             result, evidence = await F.wait_busy_session_binding(session, set())
@@ -428,10 +507,10 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
         session = {"state": Path("/fixture"), "sessionId": "C",
                    "provider": SimpleNamespace(hold_deadline=started + 0.03)}
 
-        def challenge(state, session_id, challenge_id, expected):
-            return busy_response(binding, challenge_id, 1, F.time.monotonic() - 1)
+        def challenge(state, session_id, request):
+            return busy_response(binding, request["challengeId"], 1, F.time.monotonic() - 1)
         with patch.object(F.launcher, "session_binding", return_value=binding), \
-                patch.object(F.launcher, "session_challenge", side_effect=challenge) as challenged, \
+                patch.object(F.launcher, "_session_request", side_effect=challenge) as challenged, \
                 patch.object(F, "require_model_held"):
             with self.assertRaises(TimeoutError):
                 await asyncio.wait_for(F.wait_busy_session_binding(session, set()), timeout=0.5)

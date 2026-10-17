@@ -255,7 +255,8 @@ def verify_busy_attach(proof, evidence):
         observations = row['busyEvidence']
         require(isinstance(observations, list) and len(observations) == 3, message)
         challenges, nonces, checked = [], [], []
-        for observation in observations:
+
+        def validate_observation(observation):
             request, response = observation['request'], observation['response']
             witness = response['witness']
             received, checked_at = observation['receivedAt'], observation['checkedAt']
@@ -282,8 +283,12 @@ def verify_busy_attach(proof, evidence):
             require(isinstance(observed, str) and len(observed) == 24 and observed.endswith('Z')
                     and datetime.fromisoformat(observed[:-1] + '+00:00').isoformat(
                         timespec='milliseconds').replace('+00:00', 'Z') == observed, message)
-            challenges.append(request['challengeId'])
-            nonces.append(witness['nonce'])
+            return request['challengeId'], witness['nonce'], checked_at
+
+        for observation in observations:
+            challenge_id, nonce, checked_at = validate_observation(observation)
+            challenges.append(challenge_id)
+            nonces.append(nonce)
             checked.append(checked_at)
         require(finite(row['holdDeadline']) and all(value < row['holdDeadline'] for value in checked), message)
         require(len(set(challenges)) == len(set(nonces)) == 3 and checked == sorted(checked)
@@ -305,6 +310,53 @@ def verify_busy_attach(proof, evidence):
                              '--session-id', attach['sessionId'], '--cloud-config', str(Path(argv[1]) / 'cloud.json'),
                              '--expected-runtime-generation', str(attach['expectedRuntimeGeneration']),
                              '--expected-attachment-generation', str(attach['expectedAttachmentGeneration'])], message)
+
+        # C2 must remain authoritatively Busy on both sides of the daemon restart.
+        dispatches = [(index, record['value']) for index, record in enumerate(records)
+                      if record.get('kind') == 'c2CoreBusy']
+        restarts = [(index, record['value']) for index, record in enumerate(records)
+                    if record.get('kind') == 'c2BusyRestart']
+        require(len(restarts) == 1 and len(dispatches) >= 2
+                and not any(record.get('kind') == 'c2CoreBusyError' for record in records), message)
+        restart_index, restart = restarts[0]
+        require(restart['binding'] == binding and binding_valid(restart['binding'])
+                and uuid_string(restart['deliveryId']) and restart['evidenceError'] is None
+                and hashlib.sha256(restart['deliveryId'].encode()).hexdigest() == proof['busyC']['deliverySha256']
+                and finite(restart['checkedAt'])
+                and checked[-1] < restart['checkedAt'] < hold['holdDeadline'], message)
+        seen = set(spent) | set(nonces)
+        seen_challenges = set(challenges)
+        counts = {'initial': 0, 'post-restart': 0}
+        last_checked = checked[-1]
+        for index, dispatch in dispatches:
+            phase = 'initial' if index < restart_index else 'post-restart'
+            require(index > attach_index and dispatch['phase'] == phase
+                    and dispatch['binding'] == binding and binding_valid(dispatch['binding'])
+                    and dispatch['deliveryId'] == restart['deliveryId']
+                    and dispatch['evidenceError'] is None
+                    and dispatch['status'] == 'queued'
+                    and dispatch['reason'] == 'client_unavailable_or_busy'
+                    and finite(dispatch['checkedAt'])
+                    and last_checked <= dispatch['checkedAt'] < hold['holdDeadline']
+                    and isinstance(dispatch['observations'], list) and bool(dispatch['observations']), message)
+            for observation in dispatch['observations']:
+                challenge_id, nonce, checked_at = validate_observation(observation)
+                require(observation['session'] == 'C' and observation['sessionId'] == mapping['sessionId']
+                        and challenge_id not in seen_challenges and nonce not in seen
+                        and last_checked <= observation['receivedAt'] <= checked_at <= dispatch['checkedAt']
+                        and ((dispatch['checkedAt'] < restart['checkedAt']) if phase == 'initial'
+                             else (restart['checkedAt'] <= observation['receivedAt'])), message)
+                seen.add(nonce)
+                seen_challenges.add(challenge_id)
+            last_checked = dispatch['checkedAt']
+            counts[phase] += 1
+        require(all(counts.values())
+                and exact_int(proof['busyC']['busyDispatchCount'], 2)
+                and proof['busyC']['busyDispatchCount'] == len(dispatches)
+                and exact_int(proof['busyDeliveryRestart']['busyDispatchCountAfterRestart'], 1)
+                and proof['busyDeliveryRestart']['busyDispatchCountAfterRestart'] == counts['post-restart']
+                and exact_int(proof['privateEvidence']['coreBusyNonces'], 1)
+                and proof['privateEvidence']['coreBusyNonces'] == len(seen), message)
 
     except (KeyError, TypeError, IndexError, AttributeError, ValueError, OverflowError) as error:
         raise ValueError(message) from error

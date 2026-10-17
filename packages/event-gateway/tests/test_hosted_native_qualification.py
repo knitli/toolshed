@@ -68,10 +68,44 @@ def busy_attach_evidence():
     return result, row, identities
 
 
-def busy_archive(row):
+def attach_archive(row):
     hold = {'kind': 'providerHoldStarted', 'value': {'session': 'C', 'phase': 'initial',
             'startedAt': 0.0, 'holdDeadline': 60.0}}
     return ('\n'.join(json.dumps(item) for item in (hold, {'kind': 'busyFixtureAttach', 'value': row})) + '\n').encode()
+
+
+def c2_archive(row):
+    records = [json.loads(line) for line in attach_archive(row).splitlines()]
+    delivery = '00000000-0000-4000-8000-000000000002'
+    binding = row['mapping']['nativeBinding']
+    for phase, nonce in (('initial', 6), ('post-restart', 7)):
+        observation = copy.deepcopy(row['busyEvidence'][-1])
+        challenge = str(uuid4())
+        observation['request']['challengeId'] = challenge
+        observation['response'].update(challengeId=challenge, validUntilMonotonic=nonce + .5)
+        observation['response']['witness'].update(nonce=nonce, sequence=nonce)
+        observation.update(receivedAt=float(nonce), checkedAt=nonce + .1,
+                           session='C', sessionId=row['mapping']['sessionId'])
+        records.append({'kind': 'c2CoreBusy', 'value': {
+            'deliveryId': delivery, 'binding': binding, 'phase': phase, 'checkedAt': nonce + .2,
+            'observations': [observation], 'evidenceError': None,
+            'status': 'queued', 'reason': 'client_unavailable_or_busy'}})
+        if phase == 'initial':
+            records.append({'kind': 'c2BusyRestart', 'value': {
+                'deliveryId': delivery, 'binding': binding, 'checkedAt': 6.5, 'evidenceError': None}})
+    return records
+
+
+def busy_archive(row):
+    return ('\n'.join(json.dumps(item) for item in c2_archive(row)) + '\n').encode()
+
+
+def c2_proof(result, identities):
+    return {'busyFixtureAttach': result, 'nativeCliSessions': {'C': identities},
+            'busyC': {'busyDispatchCount': 2, 'deliverySha256': hashlib.sha256(
+                b'00000000-0000-4000-8000-000000000002').hexdigest()},
+            'busyDeliveryRestart': {'busyDispatchCountAfterRestart': 1},
+            'privateEvidence': {'coreBusyNonces': 7}}
 
 
 class HostedNativeTests(unittest.TestCase):
@@ -395,9 +429,57 @@ class HostedNativeTests(unittest.TestCase):
                     else:
                         self.assertTrue(HOSTED.verify_proof(args, 'native-recovery', root)['semanticChecksPassed'])
 
+    def test_c2_dispatch_evidence_is_required_after_busy_attach(self):
+        result, row, identities = busy_attach_evidence()
+        proof = c2_proof(result, identities)
+        with self.assertRaises(ValueError):
+            HOSTED.verify_busy_attach(proof, attach_archive(row))
+
+    def test_c2_dispatch_archive_rejects_causal_forgery(self):
+        result, row, identities = busy_attach_evidence()
+        proof = c2_proof(result, identities)
+        records = c2_archive(row)
+        mutations = {
+            'missing_initial': lambda p, r: r.pop(2),
+            'missing_post_restart': lambda p, r: r.pop(4),
+            'missing_restart': lambda p, r: r.pop(3),
+            'duplicate_restart': lambda p, r: r.append(copy.deepcopy(r[3])),
+            'wrong_public_delivery': lambda p, r: p['busyC'].update(deliverySha256='0' * 64),
+            'wrong_session': lambda p, r: r[4]['value']['observations'][0].update(session='B'),
+            'wrong_session_id': lambda p, r: r[4]['value']['observations'][0].update(sessionId=str(uuid4())),
+            'wrong_phase': lambda p, r: r[4]['value'].update(phase='initial'),
+            'wrong_delivery': lambda p, r: r[4]['value'].update(deliveryId=str(uuid4())),
+            'wrong_binding': lambda p, r: r[4]['value']['binding'].update(generation=99),
+            'missing_witness': lambda p, r: r[4]['value'].update(observations=[]),
+            'idle': lambda p, r: r[4]['value']['observations'][0]['response']['witness'].update(nativeCoreTurnState='idle'),
+            'expired': lambda p, r: r[4]['value']['observations'][0]['response'].update(validUntilMonotonic=7.0),
+            'bool_nonce': lambda p, r: r[4]['value']['observations'][0]['response']['witness'].update(nonce=True),
+            'reused_attach_nonce': lambda p, r: r[4]['value']['observations'][0]['response']['witness'].update(nonce=4),
+            'reused_dispatch_nonce': lambda p, r: r[4]['value']['observations'][0]['response']['witness'].update(nonce=6),
+            'wrong_challenge': lambda p, r: r[4]['value']['observations'][0]['request'].update(challengeId=str(uuid4())),
+            'sticky_error': lambda p, r: r[2]['value'].update(evidenceError='invalid witness'),
+            'restart_error': lambda p, r: r[3]['value'].update(evidenceError='invalid witness'),
+            'wrong_status': lambda p, r: r[4]['value'].update(status='submitted'),
+            'wrong_reason': lambda p, r: r[4]['value'].update(reason='unqualified'),
+            'outside_hold': lambda p, r: r[4]['value'].update(checkedAt=60.0),
+            'restart_after_dispatch': lambda p, r: r[3]['value'].update(checkedAt=8.0),
+            'nonfinite_restart': lambda p, r: r[3]['value'].update(checkedAt=float('nan')),
+            'wrong_total': lambda p, r: p['busyC'].update(busyDispatchCount=3),
+            'wrong_post_total': lambda p, r: p['busyDeliveryRestart'].update(busyDispatchCountAfterRestart=2),
+            'wrong_nonce_count': lambda p, r: p['privateEvidence'].update(coreBusyNonces=8),
+            'bool_count': lambda p, r: p['busyDeliveryRestart'].update(busyDispatchCountAfterRestart=True),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(mutation=name):
+                candidate, archive = copy.deepcopy(proof), copy.deepcopy(records)
+                mutate(candidate, archive)
+                evidence = '\n'.join(json.dumps(record) for record in archive).encode()
+                with self.assertRaisesRegex(ValueError, 'Busy attach evidence mismatch'):
+                    HOSTED.verify_busy_attach(candidate, evidence)
+
     def test_busy_attach_rejects_primitive_argv_and_original_hold_forgery(self):
         result, row, identities = busy_attach_evidence()
-        proof = {'busyFixtureAttach': result, 'nativeCliSessions': {'C': identities}}
+        proof = c2_proof(result, identities)
         HOSTED.verify_busy_attach(proof, busy_archive(row))
         changes = {
             'witness_bool': lambda r: r['busyEvidence'][1]['response']['witness'].update(serverGeneration=True),
@@ -438,7 +520,7 @@ class HostedNativeTests(unittest.TestCase):
 
     def test_busy_attach_verifier_rejects_falsified_private_evidence(self):
         result, row, identities = busy_attach_evidence()
-        proof = {'busyFixtureAttach': result, 'nativeCliSessions': {'C': identities}}
+        proof = c2_proof(result, identities)
         HOSTED.verify_busy_attach(proof, busy_archive(row))
         mutations = {
             'missing_public_section': lambda p, r: p.pop('busyFixtureAttach'),
@@ -552,7 +634,9 @@ class HostedNativeTests(unittest.TestCase):
             proof['nativeCliSessions']['C'].update(identities)
             evidence = busy_archive(busy_row)
             (root / 'proof.private-evidence.jsonl').write_bytes(evidence)
-            proof['privateEvidence'] = {'bytes': len(evidence), 'sha256': hashlib.sha256(evidence).hexdigest()}
+            proof['privateEvidence'] = {'bytes': len(evidence), 'sha256': hashlib.sha256(evidence).hexdigest(), 'coreBusyNonces': 7}
+            proof['busyC'].update(c2_proof(busy_result, identities)['busyC'])
+            proof['busyDeliveryRestart']['busyDispatchCountAfterRestart'] = 1
             for field in (None, 'proofNonceChanged', 'ackBodyBytesIdentical', 'busyFixtureAttach'):
                 candidate = copy.deepcopy(proof)
                 if field == 'busyFixtureAttach':

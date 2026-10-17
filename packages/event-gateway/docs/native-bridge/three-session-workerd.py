@@ -1581,8 +1581,9 @@ async def read_busy_binding(session, binding, seen):
     response = await asyncio.to_thread(
         launcher.session_challenge, session["state"], session["sessionId"], challenge_id, binding,
     )
+    # session_challenge already validates the raw echo, then returns only its three normalized fields.
     row = {"request": {"command": "challenge", "challengeId": challenge_id,
-                       "expectedBinding": binding}, "response": response, "receivedAt": time.monotonic()}
+                       "expectedBinding": binding}, "response": {"challengeId": challenge_id, **response}, "receivedAt": time.monotonic()}
     accept_busy_observation(row, binding, seen)
     require_model_held(session["provider"])
     return row
@@ -1877,14 +1878,19 @@ async def observe_dispatch(gateway, ctx, delivery_id):
     if label == "C-busy-second" and result.get("reason") == "client_unavailable_or_busy":
         observations = []
         for row in ctx.c_challenges[challenge_offset:]:
-            if core_busy_observation(row, ctx.c_busy_binding, time.monotonic(), ctx.c_busy_nonces):
+            row["checkedAt"] = time.monotonic()
+            if core_busy_observation(row, ctx.c_busy_binding, row["checkedAt"], ctx.c_busy_nonces):
                 observations.append(row)
                 ctx.c_busy_nonces.add(row["response"]["witness"]["nonce"])
         if not observations:
             # Surface this in the main scenario poll, not the daemon's worker task.
             ctx.c_busy_evidence_error = "C2 busy disposition lacks fresh authoritative Core-busy evidence"
+        record_evidence(ctx, "c2CoreBusy", {"deliveryId": delivery_id, "binding": getattr(ctx, "c_busy_binding", None),
+                        "phase": getattr(ctx, "c_busy_phase", "initial"), "checkedAt": time.monotonic(),
+                        "observations": observations, "evidenceError": getattr(ctx, "c_busy_evidence_error", None),
+                        "status": result.get("status"), "reason": result.get("reason")})
+        if not observations:
             return result
-        record_evidence(ctx, "c2CoreBusy", observations)
     ctx.dispatch_results.append({"delivery": label, "status": result.get("status"),
                              "reason": result.get("reason")})
     if label == "A" and result.get("status") == "submitted":
@@ -2319,6 +2325,10 @@ async def run_held_busy_stage(ctx, busy_started_unix):
         len(ctx.start_calls["C"]) == ctx.starts_before_busy_delivery,
     )
     ctx.busy_result_count = len(ctx.c_second_busy_dispositions())
+    record_evidence(ctx, "c2BusyRestart", {"deliveryId": ctx.c_second_envelope["deliveryId"],
+                    "binding": ctx.c_busy_binding, "checkedAt": time.monotonic(),
+                    "evidenceError": getattr(ctx, "c_busy_evidence_error", None)})
+    ctx.c_busy_phase = "post-restart"
     ctx.daemon_task = await ctx.start_daemon()
     await wait_until(lambda: len(ctx.c_second_busy_dispositions()) > ctx.busy_result_count,
                      "restarted daemon did not observe C still busy", timeout=10)
@@ -2601,7 +2611,8 @@ def build_proof(ctx):
                                "CStarts": ctx.a_route_counts["C"], "observed": True},
                     "BOnly": {"AStarts": ctx.b_route_counts["A"], "BStarts": ctx.b_route_counts["B"],
                                "CStarts": ctx.b_route_counts["C"], "observed": True}},
-        "busyC": {"dispatchEligible": not bool(ctx.c_second_busy_dispositions()),
+        "busyC": {"deliverySha256": digest(ctx.c_second_envelope["deliveryId"].encode()),
+                  "dispatchEligible": not bool(ctx.c_second_busy_dispositions()),
                   "listenerAccepted": True,
                   "localStateWhileBusy": "queued", "transportAttemptUnchanged": True,
                   "nativeClaimCreated": False,

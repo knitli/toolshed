@@ -2421,7 +2421,12 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     with self.assertRaisesRegex(AssertionError, "authoritative Core-busy"):
                         FIXTURE.c_second_busy_dispositions(ctx)
                 records = [json.loads(line) for line in path.read_text().splitlines()]
-                self.assertEqual(records[-1], {"kind": "c2CoreBusy", "value": [row]})
+                self.assertEqual(records[1], {"kind": "c2CoreBusy", "value": {
+                    "deliveryId": "delivery", "binding": binding, "phase": "initial", "checkedAt": 10.1,
+                    "observations": [{**row, "checkedAt": 10.1}], "evidenceError": None,
+                    "status": "deferred", "reason": "client_unavailable_or_busy"}})
+                self.assertEqual(len(records), 4)
+                self.assertTrue(all(record["value"]["evidenceError"] for record in records[2:]))
                 self.assertEqual(len(ctx.dispatch_results), 1)
 
     def test_unavailable_dispatch_cannot_count_without_core_busy_evidence(self):
@@ -2433,7 +2438,8 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
 
         async def scenario():
             async def operation(delivery):
-                return await FIXTURE.observe_dispatch(None, ctx, delivery)
+                with patch.object(FIXTURE, "record_evidence"):
+                    return await FIXTURE.observe_dispatch(None, ctx, delivery)
             try:
                 await daemon._work_batch([{"deliveryId": "delivery"}], 0, operation)
             except Exception as error:
