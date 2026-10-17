@@ -68,8 +68,17 @@ inference, not runtime proof. Required evidence is the target session's advertis
 monitor tool schema, a permitted monitor started inside that session, and
 idle/busy/restart/acknowledgement tests tied to its exact identity. No public
 external monitor-start method was found in the installed binary's experimental
-MSP method export. The export contains `subagent/sendMessage`, not an existing
-independent TUI attachment or peer-send method. The export's own help notes a
+MSP method export. The export contains `subagent/sendMessage`, whose exact description is:
+
+> Queue a user note into a running child; admission-only ack, the note settles on the child session's view stream (SS3.16).
+
+Its `SubagentInputParams` requires `sessionId`, a durable child `subagentId`,
+`commandId`, and `body`. Its `CommandAcceptedResult` echoes the command identity
+and reports admission only, never the outcome. This contract targets a running
+child within the MSP subagent interface; it does not establish attachment or
+authorized peer delivery to an independent existing TUI session. Observing an
+`accepted` response would not prove that the child processed the note or woke.
+The export's own help notes a
 separate deferral register, so absence is not proof of no internal capability.
 
 The concrete next prerequisite is access to a disposable eligible Muse TUI
@@ -93,9 +102,14 @@ criteria only if Muse exposes an authenticated external peer ingress.
 Read-only CLI help, native peer-list refusal, and offline experimental MSP schema
 export were exercised against the installed binary. The [sanitized proof](muse-ingress/qualification.json),
 [experimental schema manifest](muse-ingress/schema-manifest.json) and
-[complete offline MSP schema](muse-ingress/msp.schema.json.gz) are committed here.
-Decompress the gzip to inspect the schema; its exact SHA-256 is
+[complete offline MSP schema](muse-ingress/msp.schema.json) are committed here.
+The schema is plain JSON with the original export bytes preserved; its exact SHA-256 is
 `0eb3ef3ec63341b6b1f6f52ab61116e37cc59aaa6d69e9b6c265e2011e3e5931`.
+The manifest's `fingerprint` is preserved exactly as observed, but its derivation
+and source semantics have not been established. It is nonauthoritative evidence,
+not the raw schema digest or a verified identity claim. The proof's separate
+`schemaManifestSha256` pins the complete manifest file bytes, and the evidence
+test verifies that digest independently of the raw schema digest.
 The schema is static protocol data, not a session export or credential file. No owner configuration, authentication, installation, or live session
 was changed; no peer message was sent. No replacement MSP session or terminal
 input was used. Live idle/busy/restart/lost-ack qualification remains unperformed.

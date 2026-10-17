@@ -13,5 +13,7 @@
   "liveWakeProven": false,
   "ownerConfigurationChanged": false,
   "peerMessagesSent": 0,
-  "transportImplemented": false
+  "transportImplemented": false,
+  "schemaManifestSha256": "c8df4652426e4cf6e9a019e9a2f9bcd5cf7c9154b13078f42ccf90c4a0c62710",
+  "schemaManifestFingerprintAuthoritative": false
 }
