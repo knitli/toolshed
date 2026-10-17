@@ -443,6 +443,43 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(probe.complete.is_set())
         self.assertIsInstance(probe.proof(), dict)
 
+    def test_repeated_init_between_turns_preserves_final_idle_requirement(self):
+        probe = self.released()
+        probe.observe(self.assistant(self.ready))
+        probe.observe(self.result(self.ready))
+        probe.observe({'type': 'system', 'subtype': 'init',
+                       'session_id': self.session, 'tools': []})
+        probe.provider_request(self.busy)
+        probe.observe(self.assistant(self.busy))
+        probe.observe(self.result(self.busy))
+        self.assertFalse(probe.complete.is_set())
+        with self.assertRaises(CANARY.CanaryError):
+            probe.proof()
+        probe.observe(self.state('idle'))
+        observations = probe.proof()['observations']
+        self.assertEqual(sum(item['kind'] == 'native_init' for item in observations), 2)
+        self.assertEqual(observations[-1]['state'], 'idle')
+
+    def test_repeated_init_rejects_session_tools_and_excess_evidence(self):
+        init = {'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []}
+        for change in ({'session_id': str(uuid4())}, {'tools': ['Bash']}, {'tools': None}):
+            with self.subTest(change=change):
+                probe = self.released()
+                probe.observe(self.assistant(self.ready))
+                probe.observe(self.result(self.ready))
+                count = len(probe.observations)
+                with self.assertRaises(CANARY.CanaryError):
+                    probe.observe(init | change)
+                self.assertEqual(len(probe.observations), count)
+                self.assertFalse(probe.complete.is_set())
+        probe = self.new_probe()
+        for _ in range(64):
+            probe.observe(init)
+        with self.assertRaisesRegex(CANARY.CanaryError, '^busy_evidence_limit$'):
+            probe.observe(init)
+        self.assertEqual(len(probe.observations), 64)
+        self.assertFalse(probe.complete.is_set())
+
     def test_provider_hold_alone_cannot_open_native_running_barrier(self):
         probe = self.new_probe()
         probe.observe({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []})
@@ -620,6 +657,9 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
     async def test_busy_canary_timeout_cleans_stalled_native_session(self):
         await self.run_busy_canary('timeout')
 
+    async def test_busy_canary_timeout_cleans_held_response(self):
+        await self.run_busy_canary('held_timeout')
+
     async def run_busy_canary(self, scenario):
         parent = '/private/tmp' if Path('/private/tmp').is_dir() else '/tmp'  # nosec B108
         root = Path(tempfile.mkdtemp(dir=parent)).resolve()
@@ -669,6 +709,8 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             feed(self.assistant(self.busy), self.result(self.busy), self.state('idle'))
 
         async def send(metadata):
+            if scenario == 'held_timeout':
+                await asyncio.Event().wait()
             self.assertTrue(provider.probe.running)
             self.assertFalse(provider.probe.release.is_set())
             pending.append(asyncio.create_task(finish_native(CANARY.event_frame(self.session, metadata))))
@@ -688,7 +730,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         transport = Mock(send=AsyncMock(side_effect=send))
         try:
             with patch.object(CANARY, 'uuid4', side_effect=generate_uuid), \
-                    patch.object(CANARY, 'RUN_SECONDS', 0.01 if scenario == 'timeout' else 1), \
+                    patch.object(CANARY, 'RUN_SECONDS', 0.01 if scenario in ('timeout', 'held_timeout') else 1), \
                     patch.object(CANARY, 'sandbox_profile', return_value='(deny default)'), \
                     patch.object(CANARY, 'LocalProvider', side_effect=make_provider), \
                     patch.object(CANARY.asyncio, 'start_server', new=AsyncMock(return_value=server)), \
@@ -720,7 +762,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(positions, sorted(positions))
                     self.assertEqual(observations[-1]['kind'], 'native_state')
                     self.assertEqual(observations[-1]['state'], 'idle')
-                elif scenario == 'timeout':
+                elif scenario in ('timeout', 'held_timeout'):
                     with self.assertRaises(TimeoutError):
                         await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
                                             busy_probe=True)
@@ -736,6 +778,10 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                 transport.send.assert_not_awaited()
                 self.assertEqual(generated, 3)
             else:
+                if scenario == 'held_timeout':
+                    self.assertTrue(provider.probe.held)
+                    self.assertFalse(provider.probe.release.is_set())
+                    self.assertFalse(provider.probe.complete.is_set())
                 transport.send.assert_awaited_once()
                 self.assertEqual(generated, 6)
             self.assertFalse(root.exists())
@@ -760,7 +806,16 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item['inputUuid'] for item in replay], [self.initial['uuid'], self.frame['uuid']])
         self.assertEqual([item['whileResponseHeld'] for item in replay], [True, False])
 
-    async def test_provider_http_waits_for_release_before_writing_response(self):
+    async def test_provider_http_hold_outlives_parse_deadline(self):
+        await self.run_held_provider('release')
+
+    async def test_provider_http_write_has_separate_deadline(self):
+        await self.run_held_provider('write_timeout')
+
+    async def test_provider_close_cancels_held_response_without_writing(self):
+        await self.run_held_provider('cancel')
+
+    async def run_held_provider(self, scenario):
         probe = self.new_probe()
         probe.observe({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []})
         probe.observe(self.state('running'))
@@ -774,20 +829,35 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                           f'Content-Length: {len(body)}\r\n\r\n').encode() + body)
         reader.feed_eof()
         writer = Mock(drain=AsyncMock(), wait_closed=AsyncMock())
-        task = asyncio.create_task(provider.handle(reader, writer))
-        try:
-            await asyncio.wait_for(probe.ready_to_send.wait(), 1)
-            writer.write.assert_not_called()
-            self.assertFalse(task.done())
-            probe.prepare(self.frame)
-            probe.sent()
-            probe.release_response()
-            await asyncio.wait_for(task, 1)
-            self.assertIn(self.ready.encode(), writer.write.call_args.args[0])
-            self.assertNotIn(self.busy.encode(), writer.write.call_args.args[0])
-            self.assertEqual(probe.requests, 1)
-            self.assertFalse(provider.failure)
-        finally:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-            await provider.close()
+        if scenario == 'write_timeout':
+            writer.drain.side_effect = asyncio.Event().wait
+        with patch.object(CANARY, 'HTTP_IO_SECONDS', 0.01):
+            task = asyncio.create_task(provider.handle(reader, writer))
+            try:
+                await asyncio.wait_for(probe.ready_to_send.wait(), 1)
+                await asyncio.sleep(0.03)
+                writer.write.assert_not_called()
+                self.assertFalse(task.done())
+                self.assertFalse(provider.failure)
+                self.assertFalse(probe.failed.is_set())
+                if scenario == 'cancel':
+                    await asyncio.wait_for(provider.close(), 1)
+                    writer.write.assert_not_called()
+                else:
+                    probe.prepare(self.frame)
+                    probe.sent()
+                    probe.release_response()
+                    await asyncio.wait_for(asyncio.shield(task), 1)
+                    self.assertIn(self.ready.encode(), writer.write.call_args.args[0])
+                    self.assertNotIn(self.busy.encode(), writer.write.call_args.args[0])
+                    writer.drain.assert_awaited_once()
+                self.assertEqual(probe.requests, 1)
+                self.assertEqual(provider.failure, scenario != 'release')
+                self.assertEqual(probe.failed.is_set(), scenario != 'release')
+                self.assertFalse(probe.complete.is_set())
+                writer.close.assert_called_once()
+                self.assertFalse(provider.tasks)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                await provider.close()

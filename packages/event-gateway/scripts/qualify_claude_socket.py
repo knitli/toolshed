@@ -24,6 +24,7 @@ from event_gateway.security import ensure_private_directory
 
 CLIENT_SHA256 = '5262ce9de86243fed0d21edc39b271555d56780d0112e2b194439fe1c6662d37'
 RUN_SECONDS = 90
+HTTP_IO_SECONDS = 5
 MAX_STREAM_BYTES = 1024 * 1024
 
 
@@ -219,7 +220,8 @@ class BusyProbe:
                 'busy_native_session_mismatch')
         kind = value.get('type')
         if kind == 'system' and value.get('subtype') == 'init':
-            require(not self.initialized and value.get('tools') == [], 'busy_native_init')
+            # Headless stream-json can emit init again for each queued turn.
+            require(value.get('tools') == [], 'busy_native_init')
             self.initialized = True
             self.record('native_init')
             return
@@ -375,7 +377,7 @@ class LocalProvider:
         task = asyncio.current_task()
         self.tasks.add(task)
         try:
-            async with asyncio.timeout(5):
+            async with asyncio.timeout(HTTP_IO_SECONDS):
                 header = await reader.readuntil(b'\r\n\r\n')
                 require(len(header) <= 16384, 'local_provider_headers_limit')
                 lines = header.decode('ascii').split('\r\n')
@@ -396,9 +398,12 @@ class LocalProvider:
                 require(0 < length <= 1024 * 1024, 'local_provider_body_limit')
                 value = json.loads(await reader.readexactly(length))
                 body = self.respond(value)
-                if self.probe and self.turns == 1:
-                    self.probe.hold_response()
-                    await self.probe.release.wait()
+            if self.probe and self.turns == 1:
+                self.probe.hold_response()
+                # The experiment owns this hold; the overall canary deadline and
+                # provider.close() bound it, independently of HTTP I/O budgets.
+                await self.probe.release.wait()
+            async with asyncio.timeout(HTTP_IO_SECONDS):
                 writer.write(b'HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n'
                              b'Cache-Control: no-cache\r\nConnection: close\r\nContent-Length: '
                              + str(len(body)).encode() + b'\r\n\r\n' + body)
