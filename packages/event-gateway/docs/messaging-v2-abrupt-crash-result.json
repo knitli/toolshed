@@ -5,7 +5,6 @@
   "evidenceBasis": "Reviewed frozen executable test assertions and successful actual run; ephemeral fixture directories cleaned by context managers. Raw per-case PID/storage proofs were asserted during execution but not retained as separate artifacts.",
   "preparationBase": "1a66233e2ae957e3015c84e188be6725a63a8cf9",
   "preparationFreezeSha256": "1beb36e89e86e88ac7c335838eaf3c6899cda4d45c0628abeaec004296c1070e",
-  "allElevenFrozenSourceHashesMatchedBeforeExecution": true,
   "actualMatrix": {
     "module": "test_messaging_abrupt_cloud_crash.MessagingAbruptCloudCrashTests",
     "unitTestsPassed": 1,
@@ -94,8 +93,11 @@
         "exitCode": 0,
         "skips": 0
       },
-      "receiptRecordedAtUtc": "2026-10-17T20:06:06Z"
+      "receiptRecordedAtUtc": "2026-10-17T20:06:06Z",
+      "verifiedSourceFileCount": 11
     }
   ],
-  "revision": "Constructor test dependencies grouped and JSON PID check preserves boolean rejection; all 12 revised freeze hashes matched before the repeated exact three-case matrix."
+  "revision": "Constructor test dependencies grouped and JSON PID check preserves boolean rejection; all 12 revised freeze hashes matched before the repeated exact three-case matrix.",
+  "verifiedSourceFileCount": 12,
+  "allFrozenSourceHashesMatchedBeforeExecution": true
 }
