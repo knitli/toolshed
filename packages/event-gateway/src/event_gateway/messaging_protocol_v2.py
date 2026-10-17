@@ -1,4 +1,4 @@
-"""Dormant Messaging v2 decoded-DTO conformance; no admission or wire parsing."""
+"""Dormant Messaging v2 DTO and raw-wire conformance; no admission authority."""
 
 # Separate from the active v1 contract: valid DTOs do not grant execution authority.
 
@@ -188,6 +188,35 @@ def validate_acknowledgment(value: object, now_ms: int | float | None = None) ->
         return math.isfinite(now) and _timestamp(value['acknowledgedAt']) <= now + CLOCK_SKEW_MS
     except OverflowError:
         return False
+
+
+def _parse_wire(body: str | bytes, acknowledgment: bool, now_ms: int | float | None) -> dict:
+    if type(body) not in (str, bytes):
+        raise MessagingProtocolError('invalid_json')
+    # Keep schema loading confined to explicit wire calls; reuse the audited decoder.
+    from .protocol import ProtocolError, _decode  # pylint: disable=import-outside-toplevel
+
+    try:
+        value = _decode(body)
+    except ProtocolError as exc:
+        raise MessagingProtocolError(exc.code) from None
+    shape = _ack_shape if acknowledgment else _envelope_shape
+    if not shape(value):
+        raise MessagingProtocolError('invalid_acknowledgment' if acknowledgment else 'invalid_envelope')
+    validate = validate_acknowledgment if acknowledgment else validate_envelope
+    if not validate(value, now_ms):
+        raise MessagingProtocolError('stale_message')
+    return value
+
+
+def parse_envelope(body: str | bytes, now_ms: int | float | None = None) -> dict:
+    """Parse bounded raw UTF-8 JSON without granting delivery authority."""
+    return _parse_wire(body, False, now_ms)
+
+
+def parse_acknowledgment(body: str | bytes, now_ms: int | float | None = None) -> dict:
+    """Parse a bounded raw ACK without authenticating or settling delivery."""
+    return _parse_wire(body, True, now_ms)
 
 
 def derive_delivery_id(identity: object) -> str:
