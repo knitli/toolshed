@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import stat
 import struct
+import subprocess  # nosec B404 - Fixed Git and explicit trusted Node; offline fixtures, no shell.
 import tempfile
 import time
 import unittest
@@ -36,6 +37,17 @@ SEALED = {
     "reviewer-host-handoff.json": b"handoff",
     "attestation.sigstore.json": b"attestation",
 }
+
+
+def acquisition_source(repository, filename):
+    """Read the pinned source without local replacement-object substitution."""
+    return subprocess.run(  # nosec B603 - Fixed Git, pinned object/path, no shell or network.
+        ["/usr/bin/git", "--no-replace-objects", "-C", str(repository), "show",
+         POLICY["workflowSha"] + ":scripts/" + filename],
+        check=True, capture_output=True, timeout=10,
+        env={"PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1",
+             "GIT_CONFIG_GLOBAL": "/dev/null"},
+    ).stdout
 
 
 def archive(entries, compression=zipfile.ZIP_STORED):
@@ -207,6 +219,103 @@ class TransportTests(unittest.TestCase):
                 self.assertNotIn("Authorization", headers)
                 self.assertNotIn("X-GitHub-Api-Version", headers)
             self.assertEqual(headers["Accept-Encoding"], "identity")
+
+    @unittest.skipUnless(os.environ.get("REVIEWER_ACQUISITION_REPOSITORY"),
+                         "replacement control requires the pinned upstream repository")
+    def test_acquisition_export_ignores_replacement_refs(self):
+        upstream = Path(os.environ["REVIEWER_ACQUISITION_REPOSITORY"]).resolve(strict=True)
+        filename = "reviewer-host-acquisition.mjs"
+        expected = acquisition_source(upstream, filename)
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary).resolve()
+
+            def git(at, *args, input=None):
+                return subprocess.run(  # nosec B603 - Fixed Git; only owned disposable fixture mutations.
+                    ["/usr/bin/git", "-C", str(at), *args], input=input,
+                    check=True, capture_output=True, timeout=10,
+                    env={"PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1",
+                         "GIT_CONFIG_GLOBAL": "/dev/null"},
+                ).stdout
+
+            git(repository, "init", "--bare", "--template=", ".")
+            # Borrow objects read-only; replacement refs and new objects live only here.
+            objects = git(upstream, "rev-parse", "--path-format=absolute", "--git-path", "objects")
+            (repository / "objects/info/alternates").write_bytes(objects)
+            original = git(repository, "hash-object", "--stdin", input=expected).decode().strip()
+            poison = b"throw new Error('replacement source must never execute');\n"
+            replacement = git(repository, "hash-object", "-w", "--stdin", input=poison).decode().strip()
+            git(repository, "update-ref", "refs/replace/" + original, replacement)
+            reference = POLICY["workflowSha"] + ":scripts/" + filename
+            self.assertEqual(git(repository, "show", reference), poison)
+            self.assertEqual(acquisition_source(repository, filename), expected)
+
+    @unittest.skipUnless(os.environ.get("REVIEWER_ACQUISITION_REPOSITORY"),
+                         "offline composition requires the pinned upstream repository")
+    def test_pinned_acquisition_composition_and_failure_cleanup(self):
+        # Export immutable Git blobs, never import a mutable upstream working tree.
+        repository = Path(os.environ["REVIEWER_ACQUISITION_REPOSITORY"]).resolve(strict=True)
+        node = Path(os.environ["REVIEWER_ACQUISITION_NODE"])
+        self.assertTrue(node.is_absolute())
+        node = node.resolve(strict=True)
+        self.assertTrue(node.is_absolute() and node.is_file())
+        fixture = Path(__file__).with_name("acquire-fixture.mjs").resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary).resolve()
+            scripts = source / "scripts"
+            scripts.mkdir()
+            for name in (
+                "reviewer-attempt-evidence", "reviewer-completion-driver",
+                "reviewer-execution-receipt", "reviewer-host-acquisition",
+                "reviewer-host-handoff", "reviewer-input-snapshot", "reviewer-producer-run",
+            ):
+                filename = name + ".mjs"
+                (scripts / filename).write_bytes(acquisition_source(repository, filename))
+            fixtures = Path(__file__).with_name("fixtures")
+            producer_zip = (fixtures / "producer.zip").read_bytes()
+            sealed_zip = (fixtures / "sealed.zip").read_bytes()
+            with zipfile.ZipFile(io.BytesIO(producer_zip)) as z:
+                producer = {name: z.read(name) for name in z.namelist()}
+            with zipfile.ZipFile(io.BytesIO(sealed_zip)) as z:
+                sealed = {name: z.read(name) for name in z.namelist()}
+            for mode in ("success", "throw"):
+                with self.subTest(mode=mode), tempfile.TemporaryDirectory() as staging:
+                    staging = Path(staging).resolve()
+                    fake = Fake()
+                    fake.replace_blob(1, producer_zip)
+                    fake.replace_blob(2, sealed_zip)
+                    outcome = None
+                    location = None
+                    try:
+                        with subject.transport(POLICY, TOKEN, fake, self.parent) as bundle:
+                            location = bundle.directory
+                            self.assertEqual({p.name: p.read_bytes() for p in location.iterdir()}, producer)
+                            self.assertEqual(bundle.handoff_bytes, sealed["reviewer-host-handoff.json"])
+                            self.assertEqual(bundle.attestation_bytes, sealed["attestation.sigstore.json"])
+                            (staging / "handoff.json").write_bytes(bundle.handoff_bytes)
+                            (staging / "attestation.json").write_bytes(bundle.attestation_bytes)
+                            outcome = subprocess.run(  # nosec B603 - Explicit trusted Node and fixed offline fixture.
+                                [str(node), str(fixture), str(source), str(location),
+                                 str(staging / "handoff.json"), str(staging / "attestation.json"),
+                                 str(staging / "result.json"), mode],
+                                check=True, capture_output=True, text=True, timeout=15, env={},
+                            )
+                            self.assertEqual(json.loads(outcome.stdout), {
+                                "status": "unavailable", "reason": "missing-review-step",
+                                "provenance": "unverified", "roundCompletion": "unknown",
+                            })
+                            self.assertTrue(location.is_dir())
+                            self.assertFalse(list(staging.glob(".host-acquisition-*")))
+                    except subprocess.CalledProcessError as error:
+                        if mode != "throw":
+                            self.fail(error.stderr)
+                        self.assertIn("acquisition_failed", error.stderr)
+                        self.assertFalse((staging / "result.json").exists())
+                    else:
+                        self.assertEqual(mode, "success", "acquisition did not throw")
+                    self.assertIsNotNone(location)
+                    self.assertFalse(location.exists())
+                    self.assertEqual(list(self.parent.iterdir()), [])
+                    self.assertFalse(list(staging.glob(".host-acquisition-*")))
 
     def test_consumer_exception_cleans_bundle(self):
         with self.assertRaisesRegex(RuntimeError, "consumer"):

@@ -145,7 +145,7 @@ security and storage machinery, including its small empty native-schema overhead
 no native delivery rows are written there. The two journal tables are created
 only on explicit journal construction. Use `with MusePullJournal(parent) as journal`
 or call `close()` to release its independent connection and lock. Parent Store
-opening and its delivery ledger remain unchanged. This unmerged dormant schema
+opening and its delivery ledger remain unchanged. This merged dormant schema
 has no production-data migration claim.
 
 The interface is `put_binding(trusted_binding)`, `enqueue(trusted_binding,
@@ -210,4 +210,6 @@ not the raw schema digest or a verified identity claim. The proof's separate
 test verifies that digest independently of the raw schema digest.
 The schema is static protocol data, not a session export or credential file. No owner configuration, authentication, installation, or live session
 was changed; no peer message was sent. No replacement MSP session or terminal
-input was used. Live idle/busy/restart/lost-ack qualification remains unperformed.
+input was used. The [controlled canary](muse-monitor-canary.md) subsequently established one
+owner-observed idle wake with inert dismissal. Durable adapter acceptance and
+native busy/restart/lost-ACK qualification remain unperformed.
