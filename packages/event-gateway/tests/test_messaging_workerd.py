@@ -128,7 +128,8 @@ class LoopbackTransport:
         self.last_response = None
 
     def post(self, path, body, headers=None):
-        connection = http.client.HTTPConnection('127.0.0.1', self.address['port'], timeout=5)
+        connection = http.client.HTTPConnection('127.0.0.1', self.address['port'],
+                                                timeout=1 if path == '/fixture/autonomous-observation' else 5)
         try:
             connection.request('POST', path, body, {**(headers or {}),
                 'x-fixture-secret': self.address['secret'], 'content-type': 'application/json'})
@@ -176,7 +177,10 @@ def cloud_client(address, transport, event):
 
 
 @contextmanager
-def fixture(*, abrupt_crash=False):
+def fixture(*, abrupt_crash=False, autonomous_alarm=None):
+    if autonomous_alarm is not None and (not abrupt_crash or autonomous_alarm not in ('positive', 'no-super', 'delete-alarm')
+                                         or os.environ.get('FIXTURE_AUTONOMOUS_ALARM') != autonomous_alarm):
+        raise RuntimeError('autonomous alarm requires separate matching execution opt-in')
     if abrupt_crash and os.environ.get('FIXTURE_ABRUPT_CLOUD_CRASH') != 'reviewed':
         raise RuntimeError('abrupt cloud crash requires separate reviewed execution opt-in')
     with tempfile.TemporaryDirectory() as directory:
@@ -185,6 +189,8 @@ def fixture(*, abrupt_crash=False):
             environment.update(PATH='/usr/bin:/bin', HOME=directory)
             if abrupt_crash:
                 environment['FIXTURE_ABRUPT_CLOUD_CRASH'] = 'reviewed'
+            if autonomous_alarm is not None:
+                environment['FIXTURE_AUTONOMOUS_ALARM'] = autonomous_alarm
             process = subprocess.Popen(  # nosec B603 - Explicit executable, fixed script, no shell.
                 [environment['FIXTURE_NODE'], str(BROKER.resolve())], cwd=BROKER.parent,
                 env=environment, stdout=subprocess.PIPE,
