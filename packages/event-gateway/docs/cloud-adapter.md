@@ -197,3 +197,50 @@ in [no-start settlement](no-start-settlement.md).
 
 These are local injected-port and cross-source conformance proofs. They do not
 establish a live Access session, production enrollment, or native delivery.
+
+## Current GitHub finding material
+
+`github-source-material` retrieves the text identified by a retained source
+projection's subject, `sourceId` and `fingerprint`. It signs each
+`POST /v1/github/source/material` using the existing enrolled node identity and
+fresh credentials. Cloud checks the current source grant and permission on every
+page; an old source projection does not grant historical access.
+
+```sh
+mkdir -m 700 ./private-findings
+knitli-event-gateway --state-dir "$STATE_DIR" github-source-material \
+  --cloud-config "$CLOUD_CONFIG" \
+  --installation-id 123 --repository-id 456 --pr-number 7 \
+  --source-id comment:890 --fingerprint "$FINGERPRINT" \
+  --private-output ./private-findings/finding.txt
+```
+
+The output path must be new, its parent must already be owned by the current
+user with mode `0700`, and no path component may be a symlink. Only after all
+pages verify does the command write a private sibling temporary file, sync it,
+and atomically publish the complete file with mode `0600`. It never replaces
+an existing file or prints finding text, source identity, or opaque cursors.
+The terminal reports only `materialRead: written` and `complete: true`, or a safe
+failure code.
+
+The client validates closed request/response shapes, subject/source/fingerprint
+binding, contiguous UTF-16 offsets, stable first version/body digest/total length,
+opaque cursor cycles, and the SHA-256 digest of the assembled UTF-8 text. It
+bounds requests to 4096 bytes, responses to 8192 bytes, material to 1 Mi UTF-16
+units, and a traversal to 4096 pages. Unavailable, deleted, conflict, malformed,
+changed, or interrupted reads return no partial text and create no output file.
+A process crash can leave a private `.finding-material-*` temporary file; it
+never exposes a partially written final filename. A filesystem failure after
+publication may leave the fully verified final file even when the command reports
+failure. Inspect/remove only that explicit output before retrying; existing files
+are never replaced.
+
+Retry the command from page zero after a read failure; reads are idempotent and there
+is no locally persisted continuation or partial body to trust after restart.
+
+`CloudClient.github_source_material()` exposes one validated page;
+`github_source_material_all()` is the complete verified-body API used by the CLI.
+Fetched text is untrusted review data. Reading or processing it does not mark a
+finding resolved, establish review completion, or authorize a repository change.
+This consumer does not enable a cloud route or change the pinned contract trust;
+the matching producer and normal contract rotation must land before live use.
