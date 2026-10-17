@@ -2,12 +2,12 @@
 import { createServer } from 'node:http';
 import { createHash, randomUUID, webcrypto } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { readFile, readdir } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { readFile, readdir, realpath } from 'node:fs/promises';
+import { join, resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 console.log = (...args) => console.error(...args); // stdout is the private parent handshake.
-const cloud = resolve(process.env.FIXTURE_CLOUD_SOURCE);
+const cloud = await realpath(process.env.FIXTURE_CLOUD_SOURCE);
 const rootRequire = createRequire(join(cloud, 'package.json'));
 const messagingRequire = createRequire(join(cloud, 'packages/gatekeeper-messaging/package.json'));
 const { build } = rootRequire('esbuild');
@@ -31,14 +31,34 @@ for (const directory of await readdir(join(cloud, 'packages'), { withFileTypes: 
     }
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
 }
+const fixtureDirectory = dirname(fileURLToPath(import.meta.url));
+const inputName = path => {
+  const absolute = resolve(path);
+  const dependency = absolute.split('/node_modules/.pnpm/')[1];
+  if (dependency) return `dependency/${dependency}`;
+  const local = relative(cloud, absolute);
+  if (!local.startsWith('../')) return `cloud/${local}`;
+  const fixture = relative(fixtureDirectory, absolute);
+  if (!fixture.startsWith('../')) return `fixture/${fixture}`;
+  throw new Error(`unapproved input location: ${absolute}`);
+};
 const bundle = await build({
   entryPoints: [fileURLToPath(new URL('./messaging-workerd-worker.ts', import.meta.url))],
-  alias, write: false, metafile: true, bundle: true, format: 'esm', platform: 'neutral', target: 'es2022',
+  alias, write: false, metafile: true, minifyWhitespace: true, bundle: true, format: 'esm', platform: 'neutral', target: 'es2022',
   external: ['cloudflare:workers', 'node:*'], logLevel: 'warning',
   plugins: [validateRpc({ cwd: join(cloud, 'packages/gatekeeper-messaging'), tsconfig: join(cloud, 'packages/gatekeeper-messaging/tsconfig.json') })],
 });
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
-const inputs = Object.fromEntries(await Promise.all(Object.keys(bundle.metafile.inputs).map(async path => [path, sha256(await readFile(path))])));
+const inputs = Object.fromEntries(await Promise.all(Object.keys(bundle.metafile.inputs).map(async path => [inputName(path), sha256(await readFile(path))])));
+const expected = JSON.parse(await readFile(new URL('./messaging-workerd-inputs.json', import.meta.url), 'utf8'));
+if (Object.keys(inputs).length !== Object.keys(expected.inputs).length
+    || Object.entries(inputs).some(([path, hash]) => expected.inputs[path] !== hash)) {
+  throw new Error('unapproved compiled input set or hash');
+}
+// Pin the bytes actually executed, including plugin output, against source-read races.
+if (sha256(bundle.outputFiles[0].contents) !== expected.bundleSha256) {
+  throw new Error('unapproved compiled bundle');
+}
 const ed25519 = async () => {
   const pair = await webcrypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
   return {

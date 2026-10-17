@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import selectors
 import signal
+import shutil
 import subprocess  # nosec B404 - Explicit local Node runs the checked-in disposable fixture.
 import sys
 import tempfile
@@ -344,6 +345,7 @@ class MessagingWorkerdTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(cloud['budget']['wakes']), 1)
             self.assertIsNotNone(cloud['native_claims'][0]['permit_id'])
             self.assertEqual(gateway.store.current_attempt(seed['envelope']['deliveryId'])['claim_uncertain'], 1)
+            self.assert_inert(gateway, seed)
             gateway.store.close()
             gateway = self.gateway(path, address, transport, seed)
             result = await gateway._claim_messaging_history(seed['envelope']['deliveryId'])
@@ -380,3 +382,70 @@ class MessagingWorkerdTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(row['permit_id'] is None for row in cloud['native_claims']))
             self.assertEqual(transport.last_response, (403, '{"error":"node_denied"}'))
             self.assert_inert(gateway, seed)
+
+
+@unittest.skipUnless(all(os.environ.get(key) for key in SETTINGS), 'requires explicit local workerd fixture paths')
+class FixtureMutationTests(unittest.IsolatedAsyncioTestCase):
+    def test_unapproved_inputs_are_rejected_before_worker_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            scratch = Path(directory)
+            broker = scratch / BROKER.name
+            broker_source = BROKER.read_text().replace(
+                'const ed25519 = async () => {',
+                "throw new Error('worker execution reached');\nconst ed25519 = async () => {")
+            shutil.copy(BROKER.with_name('messaging-workerd-worker.ts'), scratch)
+            manifest_path = broker.with_name('messaging-workerd-inputs.json')
+            manifest = json.loads(BROKER.with_name('messaging-workerd-inputs.json').read_text())
+            cloud = scratch / 'cloud'
+            shutil.copytree(os.environ['FIXTURE_CLOUD_SOURCE'], cloud, symlinks=True)
+            source_name = next(name for name in manifest['inputs'] if name.startswith('cloud/') and name.endswith('.ts'))
+            source = cloud / source_name.removeprefix('cloud/')
+            original = source.read_bytes()
+            for mutation in ('approved', 'dirty_source', 'missing_input', 'added_input', 'compiled_bytes'):
+                with self.subTest(mutation=mutation):
+                    expected = json.loads(json.dumps(manifest))
+                    if mutation == 'dirty_source':
+                        source.write_bytes(original + b'\n// unreviewed source change\n')
+                    elif mutation == 'missing_input':
+                        del expected['inputs'][source_name]
+                    elif mutation == 'added_input':
+                        expected['inputs']['cloud/unexpected.ts'] = '0' * 64
+                    broker.write_text(broker_source.replace('const expected =',
+                        "bundle.outputFiles[0].contents = Buffer.from('unreviewed compiled bytes');\nconst expected =")
+                        if mutation == 'compiled_bytes' else broker_source)
+                    manifest_path.write_text(json.dumps(expected))
+                    environment = {key: str(Path(os.environ[key]).resolve(strict=True)) for key in SETTINGS}
+                    environment.update(FIXTURE_CLOUD_SOURCE=str(cloud), PATH='/usr/bin:/bin', HOME=directory)
+                    result = subprocess.run(  # nosec B603 - Fixed scratch fixture, explicit local Node, no shell.
+                        [environment['FIXTURE_NODE'], str(broker)], cwd=scratch, env=environment,
+                        capture_output=True, text=True, timeout=60, check=False)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, '')
+                    reason = ('worker execution reached' if mutation == 'approved' else
+                              'unapproved compiled bundle' if mutation == 'compiled_bytes' else
+                              'unapproved compiled input set or hash')
+                    self.assertIn(reason, result.stderr)
+                    if mutation != 'approved':
+                        self.assertNotIn('worker execution reached', result.stderr)
+                    source.write_bytes(original)
+
+    async def test_lost_reply_assertion_catches_swallowed_native_construction(self):
+        original = Gateway._claim_messaging_history
+        constructed = False
+
+        async def mutant(gateway, delivery_id):
+            nonlocal constructed
+            result = await original(gateway, delivery_id)
+            if not constructed:
+                constructed = True
+                try:
+                    gateway.adapter_factory({})
+                except AssertionError:
+                    pass
+            return result
+
+        case = MessagingWorkerdTests('test_lost_committed_http_reply_retains_uncertainty_without_resend')
+        case.addCleanup = self.addCleanup
+        with (patch.object(Gateway, '_claim_messaging_history', mutant),
+              self.assertRaisesRegex(AssertionError, r'\[True\] != \[\]')):
+            await case.test_lost_committed_http_reply_retains_uncertainty_without_resend()

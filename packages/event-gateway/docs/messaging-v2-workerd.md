@@ -27,7 +27,10 @@ worker process and synthetic keys; the broker binds only to loopback and require
 an ephemeral secret on its closed fixture/API route set.
 
 Three host-only tests also verify a partial-handshake deadline, process-group shutdown,
-and preservation of the original failure when cleanup fails.
+and preservation of the original failure when cleanup fails. Two opt-in mutation tests
+verify rejection of dirty source, missing/added inputs and changed compiled bytes before
+worker execution, plus detection of a swallowed native-construction assertion on the
+original lost-reply gateway before its ledger is reopened.
 
 ## Run
 
@@ -36,6 +39,16 @@ installed OS dependencies. The fixture uses the installed `capnweb-validate`
 esbuild plugin, including generated RPC argument validation, and aliases OS
 workspace packages to the supplied checkout's source. Supply explicit local
 paths; no dependency install or provider access is performed by the test.
+
+`tests/fixtures/messaging-workerd-inputs.json` pins the exact approved input set and
+SHA-256 hashes from cloud `99655360630ca0e3f222d1e73d841aaf456378a7` with upstream
+`949ee3cfa79121919cb8dced13971c6bec857df0`. Paths are relative to the cloud source,
+fixture directory or dependency `.pnpm` directory, allowing checkout relocation.
+A pinned whitespace-minified bundle digest additionally binds the bytes actually
+executed, including RPC validation plugin output, closing the source-reread race.
+Both checks run before Miniflare construction. Updating source, dependencies or
+compiler output requires explicit review and a new manifest; a claimed Git revision
+alone never admits a build.
 
 From the Toolshed root, using its existing gateway Python environment:
 
