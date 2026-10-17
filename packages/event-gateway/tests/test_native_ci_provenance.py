@@ -590,8 +590,8 @@ for family in ("core-idle-v1", "terminal-query-v1"):
     assert evidence.recipe == verifier["R"].recipe(family)
     assert type(evidence.recipe) is plain.Recipe
 """
-                result = subprocess.run([sys.executable, "-I", "-B", "-c", code],  # nosec B603 - Fixed interpreter and closed, trusted import-test template; no shell.
-                                        capture_output=True, text=True, timeout=20)
+                result = subprocess.run(  # nosec B603 - Fixed interpreter and trusted import-test template; no shell.
+                    [sys.executable, "-I", "-B", "-c", code], capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_cached_registry_requires_both_fixed_file_and_spec_origin(self):
@@ -613,8 +613,8 @@ except ImportError as error:
 else:
     raise AssertionError("foreign cached registry was accepted")
 """
-                    result = subprocess.run([sys.executable, "-I", "-B", "-c", code],  # nosec B603 - Fixed interpreter and closed, trusted rejection-test template; no shell.
-                                            capture_output=True, text=True, timeout=20)
+                    result = subprocess.run(  # nosec B603 - Fixed interpreter and trusted rejection-test template; no shell.
+                        [sys.executable, "-I", "-B", "-c", code], capture_output=True, text=True, timeout=20)
                     self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_failed_fixed_registry_load_does_not_leave_a_partial_cached_module(self):
@@ -632,8 +632,8 @@ else:
     raise AssertionError("broken registry loaded")
 assert "native_recipe_registry" not in sys.modules
 """
-            result = subprocess.run([sys.executable, "-I", "-B", "-c", code],  # nosec B603 - Fixed interpreter and owned, trusted failure-test template; no shell.
-                                    capture_output=True, text=True, timeout=20)
+            result = subprocess.run(  # nosec B603 - Fixed interpreter and trusted failure-test template; no shell.
+                [sys.executable, "-I", "-B", "-c", code], capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_isolated_import_loads_fixed_sibling_registry_without_search_path(self):
