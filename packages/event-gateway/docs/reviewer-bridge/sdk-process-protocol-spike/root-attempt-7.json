@@ -1,0 +1,14 @@
+{
+  "startedAt": "2026-10-17T17:34:56.525027+00:00",
+  "manifestSha256": "69803ec19098cbc40949be8a81624a5bbc76a0d3fadd169379aeee7d7dc80c4e",
+  "exitCode": 0,
+  "captureDirectory": "/private/tmp/reviewer-sdk-process-protocol-20261017/capture-x6843ioa",
+  "capturedBytes": 4900,
+  "casesPassed": 4,
+  "containmentControlsPassed": 3,
+  "causalGuardsPassed": 2,
+  "failure": null,
+  "remainingOwnedProcesses": [],
+  "remainingCanaries": [],
+  "finishedAt": "2026-10-17T17:34:59.076741+00:00"
+}

@@ -1,0 +1,228 @@
+{
+  "aggregateCapturedBytes": 4900,
+  "aggregateLimitBytes": 65536,
+  "attempt": 7,
+  "capture": {
+    "directory": "capture-x6843ioa",
+    "files": {
+      "capture-x6843ioa/capture.json": "52665fe3ac2f6823bbda5341ad903327661eb86f4c16af668c2fa2ded154f40c",
+      "capture-x6843ioa/stderr.bin": "2d21f80ec6c8e8459f16307163992f69b046de17143d2d26d4a50f510b2a3309",
+      "capture-x6843ioa/stdout.bin": "12900abaf4d536a1f8e386f616d7eb631429b71068171893c938e4a7cb76be76"
+    },
+    "outsideCanaryPreserved": true,
+    "stderrAcceptance": "never used",
+    "stdoutAcceptance": "exactly one PASS JSON document"
+  },
+  "claimsExcluded": [
+    "Docker adapter compatibility",
+    "native runtime qualification",
+    "provider completion",
+    "hosted qualification",
+    "owner credential access",
+    "production permission safety"
+  ],
+  "evidence": {
+    "actual-attempt-7-result.json": "8bcc43cd68ae1a902a1574789be6933ad2b045f9eb8f7cf960bb5cdb8d11eab8",
+    "actual-attempt-7.log": "feb9393f128091b2baa10dc7c3e1539d821897c3f7719f1216bb35d8fef07707",
+    "capture-x6843ioa/capture.json": "52665fe3ac2f6823bbda5341ad903327661eb86f4c16af668c2fa2ded154f40c",
+    "capture-x6843ioa/stderr.bin": "2d21f80ec6c8e8459f16307163992f69b046de17143d2d26d4a50f510b2a3309",
+    "capture-x6843ioa/stdout.bin": "12900abaf4d536a1f8e386f616d7eb631429b71068171893c938e4a7cb76be76",
+    "root-attempt-7.json": "dc1f941b70211be7ba421193db75844844df4111229ba1b2f52b32ef81cfa395"
+  },
+  "executedInputs": {
+    "claudeAgentSdk": {
+      "bytesIncluded": false,
+      "sha256": "7b3577a1078660a3ec43471e6738c730ca1b172070ddcf3f9a9384bcb68bd3ca",
+      "version": "0.3.209"
+    },
+    "fixture.mjs": "8210375c43f66ea4e793042585e1f0cdf15988ae30557be954d1607d70c18837",
+    "launch.py": "94f6194ba29cb0b76fb9dcb689887a19b97c72b7650e4eb5af28e07b0ab6fd57",
+    "node": {
+      "path": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+      "realpath": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+      "sha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+      "version": "24.21.0"
+    },
+    "profile.sb": "be649085fd8dcf1436deea4bbe091f7e0b1b04a4637310122cfbc7ad584c27c9",
+    "reviewerCompletionDriver": {
+      "bytesIncluded": false,
+      "repository": "knitli/.github",
+      "revision": "e516ab4803311cd58fc860f57371aedb0fb24f4d",
+      "sha256": "4ff7c66588d16f33f67ca89670b5efe4540170bf5708d28cea7b19a2d0298eee"
+    }
+  },
+  "exitCode": 0,
+  "finishedAt": "2026-10-17T17:34:59.076741+00:00",
+  "historicalAttempt6": {
+    "archiveSafety": "regular files only; no links, absolute paths, or traversal members",
+    "memberCount": 13,
+    "members": {
+      "README.md": {
+        "bytes": 5496,
+        "sha256": "06c7221d31645dc7f765979a57944ecd4f4885d5754ba5df4eab4a5af7f9dd53"
+      },
+      "actual-attempt-6-result.json": {
+        "bytes": 14323,
+        "sha256": "534cb702cb7a90949416d1d0f8d5b20330bbf8be65c638e52e597f6e9f1e8522"
+      },
+      "actual-attempt-6.log": {
+        "bytes": 96,
+        "sha256": "19faa12e090c03c6b5d01c258ef6a380768ab6bcf7c888b0b2dd003427f42348"
+      },
+      "capture-qpp9s1g8/capture.json": {
+        "bytes": 5601,
+        "sha256": "0d7eff1702f64b28d3f11747c941647a546d41dd88eae0a2b38660e3c4117591"
+      },
+      "capture-qpp9s1g8/stderr.bin": {
+        "bytes": 4185,
+        "sha256": "cf66d1a2366998ddb3bd36dbb66a2513db60a2256bae53e1e97448b643d9a6e7"
+      },
+      "capture-qpp9s1g8/stdout.bin": {
+        "bytes": 715,
+        "sha256": "12900abaf4d536a1f8e386f616d7eb631429b71068171893c938e4a7cb76be76"
+      },
+      "failed-attempts.json": {
+        "bytes": 1036,
+        "sha256": "ff5d54def372bb8501d5a7dc1be5113e12b750aac49c1d3b70096155f3aedd8f"
+      },
+      "final-receipt.json": {
+        "bytes": 5648,
+        "sha256": "ec8203afb8811b31e32328afbf64c93ba125eaa2ef522c56604a5ec0011cbddf"
+      },
+      "fixture.mjs": {
+        "bytes": 13559,
+        "sha256": "b2cc9e78a519784493abc612aac9263e584fb01a4d77e08beb44396f5763bc7f"
+      },
+      "historical-attempt-5.tar.gz": {
+        "bytes": 15043,
+        "sha256": "95e5a83d42d3ad3c54575fee8c41546365002a5a21c4e1db7ecdd5b20f7fb601"
+      },
+      "launch.py": {
+        "bytes": 7933,
+        "sha256": "bc476e72b9f9134913441a1eb4749746715418cdb7a5b736f760b9d6e139e145"
+      },
+      "manifest.json": {
+        "bytes": 3801,
+        "sha256": "2b03c9ec561cf2f035f83af14aa8b80ae6496cd3428b995524b24758b9b9d5eb"
+      },
+      "profile.sb": {
+        "bytes": 1811,
+        "sha256": "be649085fd8dcf1436deea4bbe091f7e0b1b04a4637310122cfbc7ad584c27c9"
+      }
+    },
+    "path": "historical-attempt-6.tar.gz",
+    "sdkOrDriverBytesIncluded": false,
+    "sha256": "9af53054bff6fb8cce294f35f8616be60f23a18ee83a9c9af0f1809f2ab3e1cd",
+    "sourceHead": "30164591027c07d420bb5c47583af3d86428d252"
+  },
+  "manifestAtRuntime": {
+    "path": "manifest.json",
+    "preservedPreRunBytes": true,
+    "sha256": "69803ec19098cbc40949be8a81624a5bbc76a0d3fadd169379aeee7d7dc80c4e",
+    "state": "PR147_ATTEMPT_7_CANDIDATE_STAGED_AWAITING_RUN"
+  },
+  "priorPassingAttempt5": {
+    "path": "historical-attempt-5.tar.gz",
+    "sha256": "95e5a83d42d3ad3c54575fee8c41546365002a5a21c4e1db7ecdd5b20f7fb601",
+    "unchanged": true
+  },
+  "result": {
+    "cases": [
+      {
+        "events": [
+          "stdin-eof",
+          "exit"
+        ],
+        "mode": "success",
+        "pages": 3,
+        "passed": true
+      },
+      {
+        "events": [
+          "stdin-eof",
+          "exit"
+        ],
+        "mode": "early-terminal",
+        "pages": 0,
+        "passed": true
+      },
+      {
+        "events": [
+          "exit",
+          "stdin-eof"
+        ],
+        "mode": "eof",
+        "pages": 0,
+        "passed": true
+      },
+      {
+        "events": [
+          "stdin-eof",
+          "kill:SIGTERM",
+          "exit",
+          "forwarded-abort",
+          "kill:SIGTERM"
+        ],
+        "mode": "abort",
+        "pages": 0,
+        "passed": true
+      }
+    ],
+    "containment": {
+      "loopbackNetworkDenied": true,
+      "outsideScratchReadDenied": true,
+      "scratchWrite": true
+    },
+    "dockerExecuted": false,
+    "guards": {
+      "causalFetchRefusals": 1,
+      "causalSubprocessRefusals": 1,
+      "unexpectedFetchCalls": 0,
+      "unexpectedSubprocessCalls": 0
+    },
+    "nativeExecuted": false,
+    "providerCalled": false,
+    "scope": "Actual pinned SDK with in-memory fake process only",
+    "status": "PASS"
+  },
+  "rootReceipt": {
+    "path": "root-attempt-7.json",
+    "remainingCanaries": [],
+    "remainingOwnedProcesses": [],
+    "sha256": "dc1f941b70211be7ba421193db75844844df4111229ba1b2f52b32ef81cfa395"
+  },
+  "schema": "private-sdk-process-protocol-receipt:v2",
+  "scope": "Actual pinned SDK with an in-memory fake process and synthetic data only",
+  "sourceHashes": {
+    "README.md": "7f1d671c6ec1f35ba2e052f87226b67f52784e959f278464181561b487ee230c",
+    "fixture.mjs": "8210375c43f66ea4e793042585e1f0cdf15988ae30557be954d1607d70c18837",
+    "launch.py": "94f6194ba29cb0b76fb9dcb689887a19b97c72b7650e4eb5af28e07b0ab6fd57",
+    "manifest.json": "69803ec19098cbc40949be8a81624a5bbc76a0d3fadd169379aeee7d7dc80c4e",
+    "profile.sb": "be649085fd8dcf1436deea4bbe091f7e0b1b04a4637310122cfbc7ad584c27c9",
+    "tests/fixture-attempt7.test.mjs": "cd9452e4f1245b525943575b4e4f38b250fd7333ebeff25ce7ecd60c71b08928",
+    "tests/test_launch_attempt7.py": "33f88d67a8fa88d2a85ea1a8f694172af7a8c1c91c45d3f907a2b6a2cc2950f2"
+  },
+  "startedAt": "2026-10-17T17:34:56.525027+00:00",
+  "status": "PASS",
+  "validation": {
+    "biomeLint": "passed on promoted fixture and fixture mock test",
+    "nodeMockTests": {
+      "command": "node --test tests/fixture-attempt7.test.mjs",
+      "failed": 0,
+      "passed": 2
+    },
+    "pythonMockTests": {
+      "command": "python3 -B tests/test_launch_attempt7.py",
+      "failed": 0,
+      "passed": 4
+    },
+    "ruff": "preview E306/E501 with line length 159, C901 max-complexity 15, and D107 passed",
+    "sourceByteEquality": "published fixture, launcher, and manifest match the bytes staged for the run"
+  },
+  "warning": {
+    "code": "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED",
+    "meaning": "Bare allowedTools entry mcp__frozen__read_next auto-approves before canUseTool; callback is not its per-call authorization gate",
+    "occurrences": 4,
+    "productionPermissionSafetyQualified": false
+  }
+}
