@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 
 // Execute the actual fixture method without importing workerd or its cloud dependencies.
 const source = readFileSync(new URL('./messaging-workerd-worker.ts', import.meta.url), 'utf8');
-const method = source.match(/override async alarm\(\) \{[\s\S]*?\n  \}/)?.[0];
+const method = source.match(/override async alarm\(\) \{[\s\S]*?\n {2}\}/)?.[0];
 assert.ok(method, 'fixture alarm method is present');
 const Fixture = new Function('Parent', `return class extends Parent { ${method.replace('override ', '')} }`)(class {
   async alarm() { throw new Error('production alarm must not run'); }

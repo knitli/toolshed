@@ -43,6 +43,10 @@ mode to default/manual launches. Manual alarm helpers remain available, and the
 automatic alarm override remains disabled without the explicit fixture binding.
 After the guard change, two tests executing the actual alarm method passed
 (missing binding and default mode), alongside three repeated observer tests.
+A subsequent equivalent regex-formatting change affected only that inert test;
+those five tests passed again. The result records its current hash separately
+while preserving the actual guard-run source hashes. Worker and bundle bytes
+were unchanged, so no additional actual recovery run was performed.
 
 This establishes autonomous persisted-alarm discovery for the pinned local
 runtime after an actual process kill. It does not qualify production hosting,

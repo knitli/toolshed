@@ -194,5 +194,15 @@
         "executionReceiptSha256": "a9f138f4bb93b2eb33f63bd6a732ab8363bf79a344d42ba525734f35c13fb3b6"
       }
     ]
+  },
+  "inertTestOnlyFollowup": {
+    "file": "packages/event-gateway/tests/fixtures/messaging-autonomous-binding.test.mjs",
+    "currentSha256": "fd86ef532dd15650951bb81d7359318b2719477caaa3cdcfebb68f2543c0a4a8",
+    "change": "Equivalent regex formatting: spell two spaces as a quantified single space. Actual guard executedFiles retain their historical hashes.",
+    "bindingTestsPassed": 2,
+    "observerTestsPassed": 3,
+    "skips": 0,
+    "workerAndBundleChanged": false,
+    "actualCasesRerun": false
   }
 }
