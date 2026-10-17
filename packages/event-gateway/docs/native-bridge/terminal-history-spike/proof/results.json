@@ -1,0 +1,136 @@
+[
+  {
+    "phase": "regression",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "log": "regression.log",
+    "logSha256": "4a29253c98cf6510911edffe8a7133dc48c177e710be5e725cccd0f886bcb3ae",
+    "summary": "Summary [   0.472s] 35 tests run: 35 passed, 3144 skipped",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-state",
+      "-p",
+      "codex-thread-store",
+      "-p",
+      "codex-core",
+      "--lib",
+      "-E",
+      "test(native_) | test(tasks::mod_tests)",
+      "--retries",
+      "0"
+    ],
+    "env": {
+      "CARGO_NET_OFFLINE": "true",
+      "RUSTUP_HOME": "<isolated-rustup-home>",
+      "CARGO_HOME": "<isolated-cargo-home>"
+    }
+  },
+  {
+    "phase": "produce",
+    "exitCode": 100,
+    "expectedExitCode": 100,
+    "log": "produce.log",
+    "logSha256": "b9776863a4cb6bb3f73f70c85e32ec2cbab06632b2f095fc25c7b9d822f3cfbe",
+    "summary": "Summary [   0.910s] 1 test run: 0 passed, 1 failed, 2680 skipped",
+    "expectedChildExitCode": 71,
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-core",
+      "--lib",
+      "native_terminal_canonical_history_process_proof",
+      "--run-ignored",
+      "all",
+      "--retries",
+      "0"
+    ],
+    "env": {
+      "CARGO_NET_OFFLINE": "true",
+      "RUSTUP_HOME": "<isolated-rustup-home>",
+      "CARGO_HOME": "<isolated-cargo-home>",
+      "EVENT_NATIVE_HISTORY_PROOF": "<proof-directory>",
+      "EVENT_NATIVE_HISTORY_PHASE": "produce",
+      "EVENT_NATIVE_HISTORY_HARD_EXIT": "1"
+    }
+  },
+  {
+    "phase": "recover1",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "log": "recover1.log",
+    "logSha256": "c7195296b493f8842a698eebfb34aeea6614b8515eb16bcc9e13fc31d0678bbb",
+    "summary": "Summary [   0.094s] 1 test run: 1 passed, 2680 skipped",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-core",
+      "--lib",
+      "native_terminal_canonical_history_process_proof",
+      "--run-ignored",
+      "all",
+      "--retries",
+      "0"
+    ],
+    "env": {
+      "CARGO_NET_OFFLINE": "true",
+      "RUSTUP_HOME": "<isolated-rustup-home>",
+      "CARGO_HOME": "<isolated-cargo-home>",
+      "EVENT_NATIVE_HISTORY_PROOF": "<proof-directory>",
+      "EVENT_NATIVE_HISTORY_PHASE": "recover"
+    }
+  },
+  {
+    "phase": "recover2",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "log": "recover2.log",
+    "logSha256": "19a2364f881905eba6b7807790d0f0672c4eeae0da78bc2a3859dfe65cffbf91",
+    "summary": "Summary [   0.084s] 1 test run: 1 passed, 2680 skipped",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-core",
+      "--lib",
+      "native_terminal_canonical_history_process_proof",
+      "--run-ignored",
+      "all",
+      "--retries",
+      "0"
+    ],
+    "env": {
+      "CARGO_NET_OFFLINE": "true",
+      "RUSTUP_HOME": "<isolated-rustup-home>",
+      "CARGO_HOME": "<isolated-cargo-home>",
+      "EVENT_NATIVE_HISTORY_PROOF": "<proof-directory>",
+      "EVENT_NATIVE_HISTORY_PHASE": "recover"
+    }
+  },
+  {
+    "phase": "core-tasks",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "log": "core-tasks.log",
+    "logSha256": "de7788c05b9eac4e6f50382f83d8f9be4d32e55a8318d69f04ef5de9ed8efe6d",
+    "summary": "Summary [   0.092s] 11 tests run: 11 passed, 2670 skipped",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-core",
+      "--lib",
+      "tasks::tests",
+      "--retries",
+      "0"
+    ],
+    "env": {
+      "CARGO_NET_OFFLINE": "true",
+      "RUSTUP_HOME": "<isolated-rustup-home>",
+      "CARGO_HOME": "<isolated-cargo-home>"
+    }
+  }
+]

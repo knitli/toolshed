@@ -1,0 +1,76 @@
+{
+  "scope": "Artifact-only packaging validation; no native execution, database access, or new Rust tests.",
+  "pythonVersion": "3.13.14",
+  "ruffVersion": "0.16.10",
+  "checkerSha256": "9226286907934f13f9d6361b4a868edffe7cbc1cfced417b5d55149c0aacbe6b",
+  "checks": [
+    {
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "packages/event-gateway/tests",
+        "-p",
+        "test_terminal_history_artifacts.py",
+        "-v"
+      ],
+      "passed": 12
+    },
+    {
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "packages/event-gateway/tests",
+        "-p",
+        "test_terminal*artifacts.py"
+      ],
+      "passed": 24
+    },
+    {
+      "command": [
+        "ruff",
+        "check",
+        "packages/event-gateway/docs/native-bridge/terminal-history-spike/verify.py",
+        "packages/event-gateway/tests/test_terminal_history_artifacts.py"
+      ],
+      "result": "PASS"
+    }
+  ],
+  "causalChecks": [
+    {
+      "mutation": "Disable each bundled provenance hash comparison",
+      "test": "test_each_provenance_pin_precedes_json_parsing",
+      "assertionFailures": 5
+    },
+    {
+      "mutation": "Disable prior61/final19/selected66 union equality",
+      "test": "test_incomplete_and_inconsistent_source_unions",
+      "assertionFailures": 1
+    },
+    {
+      "mutation": "Disable bundled payload hash comparison",
+      "test": "test_payload_hashes_precede_proof_parsing_and_patch_pins_match",
+      "assertionFailures": 8
+    }
+  ],
+  "causalFailureKind": "AssertionError: ValueError not raised; zero test errors",
+  "causalExecution": "Each mutation ran the named unittest case in-process; exact checker bytes restored between mutations and in finally. All24 terminal artifact tests then passed.",
+  "causalRawOutput": "Observed in command output; raw stdout and temporary harness were not archived.",
+  "optionalSourceAndOriginalManifest": "PASS: all66 frozen source hashes and supplied original native-history manifest hash",
+  "selectedReplayHashes": {
+    "incremental": 66,
+    "cumulative": 66
+  },
+  "packagedPatchApplyChecks": {
+    "incremental": "PASS against frozen ordering source",
+    "cumulative": "PASS against historical Core idle generation overlay"
+  },
+  "priorBundlesByteIdenticalToBase": "4808cbf30c4895afc6dcc4ad64ea042a296b0769",
+  "nativeTestsRunDuringPackaging": false,
+  "unbundledRawNativeEvidence": "Original log/rollout/script hashes identify unbundled evidence, not reverified by artifact checker."
+}

@@ -1,0 +1,1195 @@
+--- tested/codex-rs/state/src/runtime/native_receipts_tests.rs
++++ formatted/codex-rs/state/src/runtime/native_receipts_tests.rs
+@@ -966,7 +966,11 @@
+         let turn = &request.client_user_message_id;
+         let item = "00000000-0000-7000-8000-000000000099";
+         let status = NativeTurnTerminalStatus::Completed;
+-        assert!(db.recover_native_turn_terminal(&request, turn, item, status).await.is_err());
++        assert!(
++            db.recover_native_turn_terminal(&request, turn, item, status)
++                .await
++                .is_err()
++        );
+         db.begin_native_turn_start(&request, &[]).await?;
+         if started {
+             db.record_native_turn_started(&request, turn).await?;
+@@ -974,23 +978,58 @@
+         let before = db.get_native_turn_start_proof(&request).await?;
+         sqlx::query("CREATE TRIGGER fail_history_terminal BEFORE UPDATE OF terminal_status ON native_turn_start_receipts BEGIN SELECT RAISE(ABORT, 'terminal write failed'); END")
+             .execute(db.pool.as_ref()).await?;
+-        assert!(db.recover_native_turn_terminal(&request, turn, item, status).await.is_err());
++        assert!(
++            db.recover_native_turn_terminal(&request, turn, item, status)
++                .await
++                .is_err()
++        );
+         db.close().await;
+         let db = runtime(&home).await?;
+         assert_eq!(db.get_native_turn_start_proof(&request).await?, before);
+         assert_eq!(db.get_native_turn_terminal_proof(&request).await?, None);
+-        sqlx::query("DROP TRIGGER fail_history_terminal").execute(db.pool.as_ref()).await?;
+-        let proof = db.recover_native_turn_terminal(&request, turn, item, status).await?;
+-        assert_eq!(db.get_native_turn_start_proof(&request).await?, Some(NativeTurnStartProof::InputRecorded {
+-            turn_id: turn.clone(), item_id: item.into(),
+-        }));
++        sqlx::query("DROP TRIGGER fail_history_terminal")
++            .execute(db.pool.as_ref())
++            .await?;
++        let proof = db
++            .recover_native_turn_terminal(&request, turn, item, status)
++            .await?;
++        assert_eq!(
++            db.get_native_turn_start_proof(&request).await?,
++            Some(NativeTurnStartProof::InputRecorded {
++                turn_id: turn.clone(),
++                item_id: item.into(),
++            })
++        );
+         db.close().await;
+         let db = runtime(&home).await?;
+-        assert_eq!(db.get_native_turn_terminal_proof(&request).await?, Some(proof.clone()));
+-        assert_eq!(db.recover_native_turn_terminal(&request, turn, item, status).await?, proof);
+-        assert!(db.recover_native_turn_terminal(&request, turn, item, NativeTurnTerminalStatus::Failed).await.is_err());
+-        assert!(db.recover_native_turn_terminal(&request, turn, "00000000-0000-7000-8000-000000000098", status).await.is_err());
+-        assert_eq!(db.get_native_turn_terminal_proof(&request).await?, Some(proof));
++        assert_eq!(
++            db.get_native_turn_terminal_proof(&request).await?,
++            Some(proof.clone())
++        );
++        assert_eq!(
++            db.recover_native_turn_terminal(&request, turn, item, status)
++                .await?,
++            proof
++        );
++        assert!(
++            db.recover_native_turn_terminal(&request, turn, item, NativeTurnTerminalStatus::Failed)
++                .await
++                .is_err()
++        );
++        assert!(
++            db.recover_native_turn_terminal(
++                &request,
++                turn,
++                "00000000-0000-7000-8000-000000000098",
++                status
++            )
++            .await
++            .is_err()
++        );
++        assert_eq!(
++            db.get_native_turn_terminal_proof(&request).await?,
++            Some(proof)
++        );
+     }
+     Ok(())
+ }
+@@ -1019,10 +1058,17 @@
+             9 => wrong.permit_issued_at += 1,
+             10 => wrong.permit_expires_at += 1,
+             11 => wrong.input.push('x'),
+-            12 => { wrong.bridge_client_id = None; wrong.bridge_client_generation = None; }
++            12 => {
++                wrong.bridge_client_id = None;
++                wrong.bridge_client_generation = None;
++            }
+             _ => unreachable!(),
+         }
+-        assert!(db.recover_native_turn_terminal(&wrong, &wrong.client_user_message_id, item, status).await.is_err());
++        assert!(
++            db.recover_native_turn_terminal(&wrong, &wrong.client_user_message_id, item, status)
++                .await
++                .is_err()
++        );
+     }
+     let turn = &request.client_user_message_id;
+     for (bad_turn, bad_item) in [
+@@ -1031,18 +1077,35 @@
+         (turn.as_str(), "not-a-uuid"),
+         (turn.as_str(), "00000000-0000-4000-8000-000000000099"),
+     ] {
+-        assert!(db.recover_native_turn_terminal(&request, bad_turn, bad_item, status).await.is_err());
++        assert!(
++            db.recover_native_turn_terminal(&request, bad_turn, bad_item, status)
++                .await
++                .is_err()
++        );
+     }
+-    assert_eq!(db.get_native_turn_start_proof(&request).await?, Some(NativeTurnStartProof::Pending));
++    assert_eq!(
++        db.get_native_turn_start_proof(&request).await?,
++        Some(NativeTurnStartProof::Pending)
++    );
+     assert_eq!(db.get_native_turn_terminal_proof(&request).await?, None);
+     db.record_native_turn_input(&request, turn, item).await?;
+-    assert!(db.recover_native_turn_terminal(&request, turn, "00000000-0000-7000-8000-000000000098", status).await.is_err());
++    assert!(
++        db.recover_native_turn_terminal(
++            &request,
++            turn,
++            "00000000-0000-7000-8000-000000000098",
++            status
++        )
++        .await
++        .is_err()
++    );
+     assert_eq!(db.get_native_turn_terminal_proof(&request).await?, None);
+     Ok(())
+ }
+ 
+ #[tokio::test]
+-async fn native_history_recovery_rejects_candidate_conflicts_without_promoting() -> anyhow::Result<()> {
++async fn native_history_recovery_rejects_candidate_conflicts_without_promoting()
++-> anyhow::Result<()> {
+     for conflict in [false, true] {
+         let home = unique_temp_dir();
+         let db = runtime(&home).await?;
+@@ -1051,14 +1114,32 @@
+         request.bridge_client_generation = Some(1);
+         let turn = &request.client_user_message_id;
+         db.begin_native_turn_start(&request, &[]).await?;
+-        db.observe_native_turn_terminal(&request.thread_id, turn, NativeTurnTerminalStatus::Failed).await?;
++        db.observe_native_turn_terminal(&request.thread_id, turn, NativeTurnTerminalStatus::Failed)
++            .await?;
+         if conflict {
+-            db.observe_native_turn_terminal(&request.thread_id, turn, NativeTurnTerminalStatus::Completed).await?;
++            db.observe_native_turn_terminal(
++                &request.thread_id,
++                turn,
++                NativeTurnTerminalStatus::Completed,
++            )
++            .await?;
+         }
+         db.close().await;
+         let db = runtime(&home).await?;
+-        assert!(db.recover_native_turn_terminal(&request, turn, "00000000-0000-7000-8000-000000000099", NativeTurnTerminalStatus::Completed).await.is_err());
+-        assert_eq!(db.get_native_turn_start_proof(&request).await?, Some(NativeTurnStartProof::Pending));
++        assert!(
++            db.recover_native_turn_terminal(
++                &request,
++                turn,
++                "00000000-0000-7000-8000-000000000099",
++                NativeTurnTerminalStatus::Completed
++            )
++            .await
++            .is_err()
++        );
++        assert_eq!(
++            db.get_native_turn_start_proof(&request).await?,
++            Some(NativeTurnStartProof::Pending)
++        );
+         assert_eq!(db.get_native_turn_terminal_proof(&request).await?, None);
+     }
+     Ok(())
+--- tested/codex-rs/core/src/tasks/native_terminal_history_tests.rs
++++ formatted/codex-rs/core/src/tasks/native_terminal_history_tests.rs
+@@ -31,19 +31,36 @@
+ }
+ 
+ impl SessionTask for HistoryTask {
+-    fn kind(&self) -> TaskKind { TaskKind::Regular }
+-    fn span_name(&self) -> &'static str { "session_task.native_history_fixture" }
+-    async fn run(self: Arc<Self>, session: Arc<Session>, turn: Arc<TurnContext>,
+-                 _input: Vec<TurnInput>, cancellation: CancellationToken) -> SessionTaskResult {
++    fn kind(&self) -> TaskKind {
++        TaskKind::Regular
++    }
++    fn span_name(&self) -> &'static str {
++        "session_task.native_history_fixture"
++    }
++    async fn run(
++        self: Arc<Self>,
++        session: Arc<Session>,
++        turn: Arc<TurnContext>,
++        _input: Vec<TurnInput>,
++        cancellation: CancellationToken,
++    ) -> SessionTaskResult {
+         if self.fault == "before_input" {
+             session.live_thread().unwrap().shutdown().await.unwrap();
+             assert!(session.flush_rollout().await.is_err());
+         }
+-        session.record_user_prompt_and_emit_turn_item(
+-            &turn, turn.model_info(),
+-            &[UserInput::Text { text: INPUT.to_string(), text_elements: Vec::new() }],
+-            Some(turn.sub_id.clone()), UserInputMetadata::default(), PersistContext::Standard,
+-        ).await;
++        session
++            .record_user_prompt_and_emit_turn_item(
++                &turn,
++                turn.model_info(),
++                &[UserInput::Text {
++                    text: INPUT.to_string(),
++                    text_elements: Vec::new(),
++                }],
++                Some(turn.sub_id.clone()),
++                UserInputMetadata::default(),
++                PersistContext::Standard,
++            )
++            .await;
+         if self.fault == "before_terminal" {
+             session.flush_rollout().await.unwrap();
+             session.live_thread().unwrap().shutdown().await.unwrap();
+@@ -53,18 +70,27 @@
+         if self.outcome == "canceled" {
+             cancellation.cancelled().await;
+         }
+-        if self.outcome == "failed" { Err(CodexErr::Fatal("history fixture failure".to_string())) }
+-        else { Ok(None) }
++        if self.outcome == "failed" {
++            Err(CodexErr::Fatal("history fixture failure".to_string()))
++        } else {
++            Ok(None)
++        }
+     }
+ }
+ 
+ fn identity(thread: &str, turn: &str) -> NativeTurnStartIdentity {
+     NativeTurnStartIdentity {
+-        server_instance_id: "original-history-server".to_string(), selection_generation: 7,
+-        bridge_client_id: Some("original-history-bridge".to_string()), bridge_client_generation: Some(3),
+-        attempt_id: format!("attempt-{turn}"), delivery_id: format!("delivery-{turn}"),
+-        thread_id: thread.to_string(), client_user_message_id: turn.to_string(),
+-        permit_id: format!("permit-{turn}"), permit_issued_at: 1, permit_expires_at: 5001,
++        server_instance_id: "original-history-server".to_string(),
++        selection_generation: 7,
++        bridge_client_id: Some("original-history-bridge".to_string()),
++        bridge_client_generation: Some(3),
++        attempt_id: format!("attempt-{turn}"),
++        delivery_id: format!("delivery-{turn}"),
++        thread_id: thread.to_string(),
++        client_user_message_id: turn.to_string(),
++        permit_id: format!("permit-{turn}"),
++        permit_issued_at: 1,
++        permit_expires_at: 5001,
+         input: INPUT.to_string(),
+     }
+ }
+@@ -83,40 +109,86 @@
+                 let home = root.join(format!("{fault}-{outcome}"));
+                 std::fs::create_dir_all(&home).unwrap();
+                 let sqlite = SqliteConfig::new_for_testing(home.clone().try_into().unwrap());
+-                let (mut session, mut turn, receiver) = crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
+-                    codex_login::CodexAuth::from_api_key("Test API Key"), Vec::new(), |config| {
+-                        config.codex_home = home.clone().try_into().unwrap(); config.sqlite = sqlite.clone();
++                let (mut session, mut turn, receiver) =
++                    crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
++                        codex_login::CodexAuth::from_api_key("Test API Key"),
++                        Vec::new(),
++                        |config| {
++                            config.codex_home = home.clone().try_into().unwrap();
++                            config.sqlite = sqlite.clone();
++                        },
++                    )
++                    .await;
++                let config = session.get_config().await;
++                let state = StateRuntime::init(sqlite, config.model_provider_id.clone())
++                    .await
++                    .unwrap();
++                let local = Arc::new(LocalThreadStore::new(
++                    LocalThreadStoreConfig::from_config(config.as_ref()),
++                    Some(Arc::clone(&state)),
++                ));
++                Arc::get_mut(&mut session).unwrap().services.thread_store = local.clone();
++                let live = codex_thread_store::LiveThread::create(
++                    local.clone(),
++                    codex_thread_store::CreateThreadParams {
++                        creator_user_id: None,
++                        creator_account_id: None,
++                        session_id: session.session_id(),
++                        thread_id: session.thread_id,
++                        extra_config: None,
++                        forked_from_id: None,
++                        parent_thread_id: None,
++                        source: codex_protocol::protocol::SessionSource::Exec,
++                        thread_source: None,
++                        originator: "native-history-proof".to_string(),
++                        base_instructions: codex_protocol::models::BaseInstructions::default(),
++                        dynamic_tools: Vec::new(),
++                        selected_capability_roots: Vec::new(),
++                        multi_agent_version: None,
++                        history_mode: codex_protocol::protocol::ThreadHistoryMode::Paginated,
++                        subagent_history_start_ordinal: None,
++                        history_base: None,
++                        initial_window_id: uuid::Uuid::now_v7().to_string(),
++                        runtime_workspace_roots: None,
++                        metadata: codex_thread_store::ThreadPersistenceMetadata {
++                            cwd: Some(config.cwd.to_path_buf()),
++                            model_provider: config.model_provider_id.clone(),
++                            memory_mode: codex_protocol::protocol::ThreadMemoryMode::Disabled,
++                        },
+                     },
+-                ).await;
+-                let config = session.get_config().await;
+-                let state = StateRuntime::init(sqlite, config.model_provider_id.clone()).await.unwrap();
+-                let local = Arc::new(LocalThreadStore::new(LocalThreadStoreConfig::from_config(config.as_ref()), Some(Arc::clone(&state))));
+-                Arc::get_mut(&mut session).unwrap().services.thread_store = local.clone();
+-                let live = codex_thread_store::LiveThread::create(local.clone(), codex_thread_store::CreateThreadParams {
+-                    creator_user_id: None, creator_account_id: None, session_id: session.session_id(),
+-                    thread_id: session.thread_id, extra_config: None, forked_from_id: None, parent_thread_id: None,
+-                    source: codex_protocol::protocol::SessionSource::Exec, thread_source: None,
+-                    originator: "native-history-proof".to_string(),
+-                    base_instructions: codex_protocol::models::BaseInstructions::default(),
+-                    dynamic_tools: Vec::new(), selected_capability_roots: Vec::new(), multi_agent_version: None,
+-                    history_mode: codex_protocol::protocol::ThreadHistoryMode::Paginated,
+-                    subagent_history_start_ordinal: None, history_base: None,
+-                    initial_window_id: uuid::Uuid::now_v7().to_string(), runtime_workspace_roots: None,
+-                    metadata: codex_thread_store::ThreadPersistenceMetadata { cwd: Some(config.cwd.to_path_buf()),
+-                        model_provider: config.model_provider_id.clone(), memory_mode: codex_protocol::protocol::ThreadMemoryMode::Disabled },
+-                }).await.unwrap();
++                )
++                .await
++                .unwrap();
+                 Arc::get_mut(&mut session).unwrap().services.live_thread = Some(live);
+-                session.ensure_rollout_materialized(PersistContext::Standard).await;
++                session
++                    .ensure_rollout_materialized(PersistContext::Standard)
++                    .await;
+                 session.flush_rollout().await.unwrap();
+                 let path = session.current_rollout_path().await.unwrap().unwrap();
+                 let turn_id = uuid::Uuid::new_v4().to_string();
+                 Arc::get_mut(&mut turn).unwrap().sub_id = turn_id.clone();
+                 let bound = identity(&session.thread_id.to_string(), &turn_id);
+-                assert_eq!(state.begin_native_turn_start(&bound, &[]).await.unwrap(), codex_state::NativeTurnStartBegin::Created);
++                assert_eq!(
++                    state.begin_native_turn_start(&bound, &[]).await.unwrap(),
++                    codex_state::NativeTurnStartBegin::Created
++                );
+                 // The offline reader must refuse a live writer, without shutting it down.
+-                assert_eq!(local.recover_native_terminal_history(&bound).await.unwrap(), None);
++                assert_eq!(
++                    local.recover_native_terminal_history(&bound).await.unwrap(),
++                    None
++                );
+                 let ready = Arc::new(tokio::sync::Notify::new());
+-                session.spawn_task(turn, Vec::new(), HistoryTask { outcome, fault, ready: Arc::clone(&ready) }).await;
++                session
++                    .spawn_task(
++                        turn,
++                        Vec::new(),
++                        HistoryTask {
++                            outcome,
++                            fault,
++                            ready: Arc::clone(&ready),
++                        },
++                    )
++                    .await;
+                 let mut item_id = None;
+                 tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                     loop {
+@@ -126,31 +198,56 @@
+                                 if let TurnItem::UserMessage(item) = event.item {
+                                     assert_eq!(item.client_id.as_deref(), Some(turn_id.as_str()));
+                                     item_id = Some(item.id);
+-                                    if outcome == "canceled" { ready.notified().await; session.abort_all_tasks(TurnAbortReason::Interrupted).await; }
++                                    if outcome == "canceled" {
++                                        ready.notified().await;
++                                        session.abort_all_tasks(TurnAbortReason::Interrupted).await;
++                                    }
+                                 }
+                             }
+                             EventMsg::TurnComplete(event) => {
+                                 assert_eq!(event.turn_id, turn_id);
+-                                assert_eq!(event.error.is_some(), outcome == "failed"); break;
++                                assert_eq!(event.error.is_some(), outcome == "failed");
++                                break;
+                             }
+                             EventMsg::TurnAborted(event) => {
+-                                assert_eq!(outcome, "canceled"); assert_eq!(event.turn_id.as_deref(), Some(turn_id.as_str())); break;
++                                assert_eq!(outcome, "canceled");
++                                assert_eq!(event.turn_id.as_deref(), Some(turn_id.as_str()));
++                                break;
+                             }
+                             _ => {}
+                         }
+                     }
+-                }).await.unwrap();
++                })
++                .await
++                .unwrap();
+                 assert!(item_id.is_some());
+-                assert_eq!(state.get_native_turn_start_proof(&bound).await.unwrap(), Some(NativeTurnStartProof::Pending));
+-                assert_eq!(state.get_native_turn_terminal_proof(&bound).await.unwrap(), None);
++                assert_eq!(
++                    state.get_native_turn_start_proof(&bound).await.unwrap(),
++                    Some(NativeTurnStartProof::Pending)
++                );
++                assert_eq!(
++                    state.get_native_turn_terminal_proof(&bound).await.unwrap(),
++                    None
++                );
+                 if fault == "none" {
+                     session.flush_rollout().await.unwrap();
+                     session.live_thread().unwrap().shutdown().await.unwrap();
+                 } else {
+                     assert!(session.flush_rollout().await.is_err());
+-                    assert!(!session.persist_rollout_items(&[codex_history::RolloutItem::EventMsg(EventMsg::TurnStarted(codex_protocol::protocol::TurnStartedEvent {
+-                        turn_id: turn_id.clone(), root_turn_id: None, trace_id: None, started_at: None, model_context_window: None, collaboration_mode_kind: Default::default(),
+-                    }))]).await);
++                    assert!(
++                        !session
++                            .persist_rollout_items(&[codex_history::RolloutItem::EventMsg(
++                                EventMsg::TurnStarted(codex_protocol::protocol::TurnStartedEvent {
++                                    turn_id: turn_id.clone(),
++                                    root_turn_id: None,
++                                    trace_id: None,
++                                    started_at: None,
++                                    model_context_window: None,
++                                    collaboration_mode_kind: Default::default(),
++                                })
++                            )])
++                            .await
++                    );
+                 }
+                 fixtures.push(serde_json::json!({"thread": bound.thread_id, "turn": turn_id, "item": item_id,
+                     "home": home, "rollout": path, "provider": config.model_provider_id, "outcome": outcome, "fault": fault}));
+@@ -163,18 +260,32 @@
+         }
+     } else {
+         assert_eq!(phase, "recover");
+-        let fixtures: Vec<serde_json::Value> = serde_json::from_slice(&std::fs::read(&fixtures_path).unwrap()).unwrap();
++        let fixtures: Vec<serde_json::Value> =
++            serde_json::from_slice(&std::fs::read(&fixtures_path).unwrap()).unwrap();
+         let mut proofs = Vec::new();
+         for fixture in fixtures {
+             let home = std::path::PathBuf::from(fixture["home"].as_str().unwrap());
+             let sqlite = SqliteConfig::new_for_testing(home.clone().try_into().unwrap());
+             let provider = fixture["provider"].as_str().unwrap().to_string();
+-            let state = StateRuntime::init(sqlite.clone(), provider.clone()).await.unwrap();
+-            let local = LocalThreadStore::new(LocalThreadStoreConfig { codex_home: home, sqlite, default_model_provider_id: provider }, Some(Arc::clone(&state)));
+-            let bound = identity(fixture["thread"].as_str().unwrap(), fixture["turn"].as_str().unwrap());
++            let state = StateRuntime::init(sqlite.clone(), provider.clone())
++                .await
++                .unwrap();
++            let local = LocalThreadStore::new(
++                LocalThreadStoreConfig {
++                    codex_home: home,
++                    sqlite,
++                    default_model_provider_id: provider,
++                },
++                Some(Arc::clone(&state)),
++            );
++            let bound = identity(
++                fixture["thread"].as_str().unwrap(),
++                fixture["turn"].as_str().unwrap(),
++            );
+             let proof = local.recover_native_terminal_history(&bound).await.unwrap();
+             if fixture["fault"] == "none" {
+-                let proof = proof.expect("genuine canonical history recovers after process restart");
++                let proof =
++                    proof.expect("genuine canonical history recovers after process restart");
+                 assert_eq!(proof.turn_id, bound.client_user_message_id);
+                 let expected = match fixture["outcome"].as_str().unwrap() {
+                     "completed" => NativeTurnTerminalStatus::Completed,
+@@ -183,19 +294,38 @@
+                     _ => unreachable!(),
+                 };
+                 assert_eq!(proof.status, expected);
+-                assert_eq!(state.get_native_turn_start_proof(&bound).await.unwrap(), Some(NativeTurnStartProof::InputRecorded {
+-                    turn_id: bound.client_user_message_id.clone(), item_id: fixture["item"].as_str().unwrap().to_string(),
+-                }));
+-                assert_eq!(local.recover_native_terminal_history(&bound).await.unwrap(), Some(proof.clone()));
++                assert_eq!(
++                    state.get_native_turn_start_proof(&bound).await.unwrap(),
++                    Some(NativeTurnStartProof::InputRecorded {
++                        turn_id: bound.client_user_message_id.clone(),
++                        item_id: fixture["item"].as_str().unwrap().to_string(),
++                    })
++                );
++                assert_eq!(
++                    local.recover_native_terminal_history(&bound).await.unwrap(),
++                    Some(proof.clone())
++                );
+                 proofs.push(serde_json::json!({"turn": proof.turn_id, "receipt": proof.receipt_id, "outcome": fixture["outcome"]}));
+             } else {
+                 assert_eq!(proof, None);
+-                assert_eq!(state.get_native_turn_start_proof(&bound).await.unwrap(), Some(NativeTurnStartProof::Pending));
+-                assert_eq!(state.get_native_turn_terminal_proof(&bound).await.unwrap(), None);
++                assert_eq!(
++                    state.get_native_turn_start_proof(&bound).await.unwrap(),
++                    Some(NativeTurnStartProof::Pending)
++                );
++                assert_eq!(
++                    state.get_native_turn_terminal_proof(&bound).await.unwrap(),
++                    None
++                );
+             }
+         }
+         let output = root.join("proofs.json");
+-        if output.exists() { assert_eq!(std::fs::read(&output).unwrap(), serde_json::to_vec_pretty(&proofs).unwrap()); }
+-        else { std::fs::write(output, serde_json::to_vec_pretty(&proofs).unwrap()).unwrap(); }
++        if output.exists() {
++            assert_eq!(
++                std::fs::read(&output).unwrap(),
++                serde_json::to_vec_pretty(&proofs).unwrap()
++            );
++        } else {
++            std::fs::write(output, serde_json::to_vec_pretty(&proofs).unwrap()).unwrap();
++        }
+     }
+ }
+--- tested/codex-rs/thread-store/src/local/mod.rs
++++ formatted/codex-rs/thread-store/src/local/mod.rs
+@@ -5,8 +5,8 @@
+ mod list_threads;
+ mod live_writer;
+ mod model_context;
++mod move_thread_to_section;
+ mod native_terminal_history;
+-mod move_thread_to_section;
+ mod paginated_fork;
+ mod pending_thread_metadata;
+ mod projects;
+--- tested/codex-rs/thread-store/src/local/native_terminal_history.rs
++++ formatted/codex-rs/thread-store/src/local/native_terminal_history.rs
+@@ -3,10 +3,15 @@
+ use crate::ThreadStoreResult;
+ use codex_protocol::ThreadId;
+ use codex_protocol::items::TurnItem;
+-use codex_protocol::protocol::{EventMsg, SessionSource, ThreadHistoryMode, ThreadSource};
++use codex_protocol::protocol::EventMsg;
++use codex_protocol::protocol::SessionSource;
++use codex_protocol::protocol::ThreadHistoryMode;
++use codex_protocol::protocol::ThreadSource;
+ use codex_protocol::user_input::UserInput;
+ use codex_rollout::RolloutItem;
+-use codex_state::{NativeTurnStartIdentity, NativeTurnTerminalProof, NativeTurnTerminalStatus};
++use codex_state::NativeTurnStartIdentity;
++use codex_state::NativeTurnTerminalProof;
++use codex_state::NativeTurnTerminalStatus;
+ use std::path::Path;
+ use tokio::io::AsyncReadExt;
+ 
+@@ -34,7 +39,8 @@
+             let first = snapshot(path).await?;
+             let (item_id, status) = terminal_anchor(&first.bytes, identity)?;
+             commit_snapshot(state, identity, path, &first, &item_id, status).await
+-        }.await;
++        }
++        .await;
+         Ok(proof)
+     }
+ }
+@@ -57,9 +63,10 @@
+     {
+         return None;
+     }
+-    state.recover_native_turn_terminal(
+-        identity, &identity.client_user_message_id, item_id, status,
+-    ).await.ok()
++    state
++        .recover_native_turn_terminal(identity, &identity.client_user_message_id, item_id, status)
++        .await
++        .ok()
+ }
+ 
+ struct Snapshot {
+@@ -70,7 +77,8 @@
+ 
+ impl Snapshot {
+     fn matches(&self, other: &Self) -> bool {
+-        self.path == other.path && self.bytes == other.bytes
++        self.path == other.path
++            && self.bytes == other.bytes
+             && same_metadata(&self.metadata, &other.metadata)
+     }
+ }
+@@ -79,13 +87,16 @@
+     #[cfg(unix)]
+     {
+         use std::os::unix::fs::MetadataExt;
+-        if left.dev() != right.dev() || left.ino() != right.ino()
+-            || left.ctime() != right.ctime() || left.ctime_nsec() != right.ctime_nsec()
++        if left.dev() != right.dev()
++            || left.ino() != right.ino()
++            || left.ctime() != right.ctime()
++            || left.ctime_nsec() != right.ctime_nsec()
+         {
+             return false;
+         }
+     }
+-    left.len() == right.len() && left.modified().ok() == right.modified().ok()
++    left.len() == right.len()
++        && left.modified().ok() == right.modified().ok()
+         && left.created().ok() == right.created().ok()
+ }
+ 
+@@ -102,7 +113,10 @@
+         return None;
+     }
+     let mut bytes = Vec::new();
+-    file.take((MAX_ROLLOUT_LINE_BYTES + 1) as u64).read_to_end(&mut bytes).await.ok()?;
++    file.take((MAX_ROLLOUT_LINE_BYTES + 1) as u64)
++        .read_to_end(&mut bytes)
++        .await
++        .ok()?;
+     if bytes.len() > MAX_ROLLOUT_LINE_BYTES
+         || !bytes.ends_with(b"\n")
+         || !same_metadata(&metadata, &tokio::fs::metadata(path).await.ok()?)
+@@ -110,10 +124,17 @@
+     {
+         return None;
+     }
+-    Some(Snapshot { bytes, metadata, path: canonical })
+-}
+-
+-fn terminal_anchor(bytes: &[u8], identity: &NativeTurnStartIdentity) -> Option<(String, NativeTurnTerminalStatus)> {
++    Some(Snapshot {
++        bytes,
++        metadata,
++        path: canonical,
++    })
++}
++
++fn terminal_anchor(
++    bytes: &[u8],
++    identity: &NativeTurnStartIdentity,
++) -> Option<(String, NativeTurnTerminalStatus)> {
+     if bytes.len() > MAX_ROLLOUT_LINE_BYTES || !bytes.ends_with(b"\n") {
+         return None;
+     }
+@@ -121,7 +142,10 @@
+     let mut terminal = None;
+     let mut target_started = false;
+     let mut user_item_ids = std::collections::HashSet::new();
+-    for (ordinal, raw) in bytes[..bytes.len() - 1].split(|byte| *byte == b'\n').enumerate() {
++    for (ordinal, raw) in bytes[..bytes.len() - 1]
++        .split(|byte| *byte == b'\n')
++        .enumerate()
++    {
+         if ordinal >= 256 || raw.iter().all(u8::is_ascii_whitespace) {
+             return None;
+         }
+@@ -131,15 +155,24 @@
+             return None;
+         }
+         if ordinal == 0 {
+-            let RolloutItem::SessionMeta(meta) = line.item else { return None; };
++            let RolloutItem::SessionMeta(meta) = line.item else {
++                return None;
++            };
+             let meta = meta.meta;
+             if meta.id.to_string() != identity.thread_id
+                 || meta.history_mode != ThreadHistoryMode::Paginated
+-                || meta.forked_from_id.is_some() || meta.forked_from_ordinal_exclusive.is_some()
+-                || meta.parent_thread_id.is_some() || meta.history_base.is_some()
++                || meta.forked_from_id.is_some()
++                || meta.forked_from_ordinal_exclusive.is_some()
++                || meta.parent_thread_id.is_some()
++                || meta.history_base.is_some()
+                 || meta.subagent_history_start_ordinal.is_some()
+-                || meta.agent_nickname.is_some() || meta.agent_role.is_some() || meta.agent_path.is_some()
+-                || matches!(meta.source, SessionSource::SubAgent(_) | SessionSource::Unknown)
++                || meta.agent_nickname.is_some()
++                || meta.agent_role.is_some()
++                || meta.agent_path.is_some()
++                || matches!(
++                    meta.source,
++                    SessionSource::SubAgent(_) | SessionSource::Unknown
++                )
+                 || matches!(meta.thread_source, Some(ThreadSource::Subagent))
+             {
+                 return None;
+@@ -148,8 +181,12 @@
+         }
+         match line.item {
+             RolloutItem::SessionMeta(_)
+-            | RolloutItem::EventMsg(EventMsg::UserMessage(_) | EventMsg::ThreadRolledBack(_)) => return None,
+-            RolloutItem::EventMsg(EventMsg::TurnAborted(ref event)) if event.turn_id.is_none() => return None,
++            | RolloutItem::EventMsg(EventMsg::UserMessage(_) | EventMsg::ThreadRolledBack(_)) => {
++                return None;
++            }
++            RolloutItem::EventMsg(EventMsg::TurnAborted(ref event)) if event.turn_id.is_none() => {
++                return None;
++            }
+             RolloutItem::EventMsg(EventMsg::ItemStarted(event)) => {
+                 if let TurnItem::UserMessage(item) = event.item
+                     && (event.turn_id == identity.client_user_message_id
+@@ -159,19 +196,25 @@
+                 }
+             }
+             RolloutItem::EventMsg(EventMsg::TurnStarted(event))
+-                if event.turn_id == identity.client_user_message_id => {
+-                if target_started || anchor.is_some() || terminal.is_some() { return None; }
++                if event.turn_id == identity.client_user_message_id =>
++            {
++                if target_started || anchor.is_some() || terminal.is_some() {
++                    return None;
++                }
+                 target_started = true;
+             }
+             RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
+                 if let TurnItem::UserMessage(item) = event.item {
+-                    if !user_item_ids.insert(item.id.clone()) { return None; }
++                    if !user_item_ids.insert(item.id.clone()) {
++                        return None;
++                    }
+                     if event.turn_id != identity.client_user_message_id
+                         && item.client_id.as_deref() != Some(&identity.client_user_message_id)
+                     {
+                         continue;
+                     }
+-                    if anchor.is_some() || terminal.is_some()
++                    if anchor.is_some()
++                        || terminal.is_some()
+                         || event.thread_id.to_string() != identity.thread_id
+                         || event.turn_id != identity.client_user_message_id
+                         || item.client_id.as_deref() != Some(&identity.client_user_message_id)
+@@ -180,7 +223,8 @@
+                         return None;
+                     }
+                     let id = ThreadId::from_string(&item.id).ok()?.to_string();
+-                    if id != item.id || id.as_bytes()[14] != b'7'
++                    if id != item.id
++                        || id.as_bytes()[14] != b'7'
+                         || !matches!(id.as_bytes()[19], b'8' | b'9' | b'a' | b'b')
+                         || !matches!(item.content.as_slice(), [UserInput::Text {text, text_elements}]
+                             if text == &identity.input && text_elements.is_empty())
+@@ -191,15 +235,23 @@
+                 }
+             }
+             RolloutItem::EventMsg(EventMsg::TurnComplete(event))
+-                if event.turn_id == identity.client_user_message_id => {
+-                if anchor.is_none() || terminal.is_some() { return None; }
++                if event.turn_id == identity.client_user_message_id =>
++            {
++                if anchor.is_none() || terminal.is_some() {
++                    return None;
++                }
+                 terminal = Some(if event.error.is_some() {
+                     NativeTurnTerminalStatus::Failed
+-                } else { NativeTurnTerminalStatus::Completed });
++                } else {
++                    NativeTurnTerminalStatus::Completed
++                });
+             }
+             RolloutItem::EventMsg(EventMsg::TurnAborted(event))
+-                if event.turn_id.as_deref() == Some(&identity.client_user_message_id) => {
+-                if anchor.is_none() || terminal.is_some() { return None; }
++                if event.turn_id.as_deref() == Some(&identity.client_user_message_id) =>
++            {
++                if anchor.is_none() || terminal.is_some() {
++                    return None;
++                }
+                 terminal = Some(NativeTurnTerminalStatus::Canceled);
+             }
+             _ => {}
+@@ -218,17 +270,35 @@
+             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                 formatter.write_str("JSON without duplicate object keys")
+             }
+-            fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<UniqueJson, E> { Ok(UniqueJson) }
+-            fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<UniqueJson, E> { Ok(UniqueJson) }
+-            fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<UniqueJson, E> { Ok(UniqueJson) }
+-            fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<UniqueJson, E> { Ok(UniqueJson) }
+-            fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<UniqueJson, E> { Ok(UniqueJson) }
+-            fn visit_unit<E: serde::de::Error>(self) -> Result<UniqueJson, E> { Ok(UniqueJson) }
+-            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<UniqueJson, A::Error> {
++            fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<UniqueJson, E> {
++                Ok(UniqueJson)
++            }
++            fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<UniqueJson, E> {
++                Ok(UniqueJson)
++            }
++            fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<UniqueJson, E> {
++                Ok(UniqueJson)
++            }
++            fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<UniqueJson, E> {
++                Ok(UniqueJson)
++            }
++            fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<UniqueJson, E> {
++                Ok(UniqueJson)
++            }
++            fn visit_unit<E: serde::de::Error>(self) -> Result<UniqueJson, E> {
++                Ok(UniqueJson)
++            }
++            fn visit_seq<A: serde::de::SeqAccess<'de>>(
++                self,
++                mut seq: A,
++            ) -> Result<UniqueJson, A::Error> {
+                 while seq.next_element::<UniqueJson>()?.is_some() {}
+                 Ok(UniqueJson)
+             }
+-            fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<UniqueJson, A::Error> {
++            fn visit_map<A: serde::de::MapAccess<'de>>(
++                self,
++                mut map: A,
++            ) -> Result<UniqueJson, A::Error> {
+                 let mut keys = std::collections::HashSet::new();
+                 while let Some(key) = map.next_key::<String>()? {
+                     if !keys.insert(key) {
+--- tested/codex-rs/thread-store/src/local/native_terminal_history_tests.rs
++++ formatted/codex-rs/thread-store/src/local/native_terminal_history_tests.rs
+@@ -1,29 +1,44 @@
++use super::super::test_support::test_config;
+ use super::*;
+ use crate::ThreadStore;
+-use super::super::test_support::test_config;
+-use codex_protocol::protocol::{SessionMeta, SessionMetaLine};
++use codex_protocol::protocol::SessionMeta;
++use codex_protocol::protocol::SessionMetaLine;
+ use pretty_assertions::assert_eq;
+-use serde_json::{Value, json};
++use serde_json::Value;
++use serde_json::json;
+ use tempfile::TempDir;
+ 
+ fn identity() -> NativeTurnStartIdentity {
+     NativeTurnStartIdentity {
+-        server_instance_id: "server".into(), selection_generation: 3,
+-        bridge_client_id: Some("bridge".into()), bridge_client_generation: Some(2),
+-        attempt_id: "attempt".into(), delivery_id: "delivery".into(),
++        server_instance_id: "server".into(),
++        selection_generation: 3,
++        bridge_client_id: Some("bridge".into()),
++        bridge_client_generation: Some(2),
++        attempt_id: "attempt".into(),
++        delivery_id: "delivery".into(),
+         thread_id: ThreadId::new().to_string(),
+         client_user_message_id: uuid::Uuid::now_v7().to_string(),
+-        permit_id: "permit".into(), permit_issued_at: 1, permit_expires_at: 2,
++        permit_id: "permit".into(),
++        permit_issued_at: 1,
++        permit_expires_at: 2,
+         input: "exact input".into(),
+     }
+ }
+ 
+ fn records(identity: &NativeTurnStartIdentity) -> Vec<Value> {
+     let thread_id = ThreadId::from_string(&identity.thread_id).unwrap();
+-    let meta = SessionMeta { id: thread_id, session_id: ThreadId::new().into(),
+-        history_mode: ThreadHistoryMode::Paginated, ..Default::default() };
++    let meta = SessionMeta {
++        id: thread_id,
++        session_id: ThreadId::new().into(),
++        history_mode: ThreadHistoryMode::Paginated,
++        ..Default::default()
++    };
+     vec![
+-        serde_json::to_value(RolloutItem::SessionMeta(SessionMetaLine {meta, git: None})).unwrap(),
++        serde_json::to_value(RolloutItem::SessionMeta(SessionMetaLine {
++            meta,
++            git: None,
++        }))
++        .unwrap(),
+         json!({"type":"event_msg", "payload":{"type":"item_completed",
+             "thread_id": identity.thread_id, "turn_id":identity.client_user_message_id,
+             "item":{"type":"UserMessage", "id":uuid::Uuid::now_v7().to_string(),
+@@ -51,12 +66,24 @@
+ fn strict_complete_snapshot_accepts_three_terminal_statuses() {
+     let identity = identity();
+     let mut records = records(&identity);
+-    let item_id = records[1]["payload"]["item"]["id"].as_str().unwrap().to_owned();
+-    assert_eq!(terminal_anchor(&encode(&records), &identity), Some((item_id.clone(), NativeTurnTerminalStatus::Completed)));
++    let item_id = records[1]["payload"]["item"]["id"]
++        .as_str()
++        .unwrap()
++        .to_owned();
++    assert_eq!(
++        terminal_anchor(&encode(&records), &identity),
++        Some((item_id.clone(), NativeTurnTerminalStatus::Completed))
++    );
+     records[2]["payload"]["error"] = json!({"message":"failed", "codex_error_info":null});
+-    assert_eq!(terminal_anchor(&encode(&records), &identity), Some((item_id.clone(), NativeTurnTerminalStatus::Failed)));
++    assert_eq!(
++        terminal_anchor(&encode(&records), &identity),
++        Some((item_id.clone(), NativeTurnTerminalStatus::Failed))
++    );
+     records[2]["payload"] = json!({"type":"turn_aborted", "turn_id": identity.client_user_message_id, "reason":"interrupted"});
+-    assert_eq!(terminal_anchor(&encode(&records), &identity), Some((item_id, NativeTurnTerminalStatus::Canceled)));
++    assert_eq!(
++        terminal_anchor(&encode(&records), &identity),
++        Some((item_id, NativeTurnTerminalStatus::Canceled))
++    );
+ }
+ 
+ #[test]
+@@ -64,18 +91,32 @@
+     let identity = identity();
+     let records = records(&identity);
+     let valid = encode(&records);
+-    for bytes in [Vec::new(), valid[..valid.len()-1].to_vec(), [valid.clone(), b"bad\n".to_vec()].concat(),
+-        [valid.clone(), b"\n".to_vec()].concat(), encode(&records[..2]),
++    for bytes in [
++        Vec::new(),
++        valid[..valid.len() - 1].to_vec(),
++        [valid.clone(), b"bad\n".to_vec()].concat(),
++        [valid.clone(), b"\n".to_vec()].concat(),
++        encode(&records[..2]),
+         vec![b'x'; MAX_ROLLOUT_LINE_BYTES + 1],
+         [valid.clone(), valid.clone()].concat(),
+     ] {
+         assert_eq!(terminal_anchor(&bytes, &identity), None);
+     }
+-    let duplicated_key = String::from_utf8(valid.clone()).unwrap().replace("\"ordinal\":1", "\"ordinal\":99,\"ordinal\":1");
++    let duplicated_key = String::from_utf8(valid.clone())
++        .unwrap()
++        .replace("\"ordinal\":1", "\"ordinal\":99,\"ordinal\":1");
+     assert_eq!(terminal_anchor(duplicated_key.as_bytes(), &identity), None);
+-    let duplicate_nested = String::from_utf8(valid.clone()).unwrap().replace("\"text\":\"exact input\"", "\"text\":\"wrong\",\"text\":\"exact input\"");
+-    assert_eq!(terminal_anchor(duplicate_nested.as_bytes(), &identity), None);
+-    let bad_ordinal = String::from_utf8(valid).unwrap().replace("\"ordinal\":1", "\"ordinal\":9");
++    let duplicate_nested = String::from_utf8(valid.clone()).unwrap().replace(
++        "\"text\":\"exact input\"",
++        "\"text\":\"wrong\",\"text\":\"exact input\"",
++    );
++    assert_eq!(
++        terminal_anchor(duplicate_nested.as_bytes(), &identity),
++        None
++    );
++    let bad_ordinal = String::from_utf8(valid)
++        .unwrap()
++        .replace("\"ordinal\":1", "\"ordinal\":9");
+     assert_eq!(terminal_anchor(bad_ordinal.as_bytes(), &identity), None);
+     let filler = json!({"type":"event_msg","payload":{"type":"task_complete", "turn_id":"other", "last_agent_message":null}});
+     let mut bounded = records;
+@@ -98,11 +139,18 @@
+         ("/payload/item/id", json!("invalid")),
+         ("/payload/item/content/0/text", json!("wrong")),
+         ("/payload/item/content", json!([])),
+-        ("/payload/item/content/0/text_elements", json!([{"byte_range":{"start":0,"end":1},"placeholder":null}])),
++        (
++            "/payload/item/content/0/text_elements",
++            json!([{"byte_range":{"start":0,"end":1},"placeholder":null}]),
++        ),
+     ] {
+         let mut mutated = good.clone();
+         *mutated[1].pointer_mut(pointer).unwrap() = value;
+-        assert_eq!(terminal_anchor(&encode(&mutated), &identity), None, "{pointer}");
++        assert_eq!(
++            terminal_anchor(&encode(&mutated), &identity),
++            None,
++            "{pointer}"
++        );
+     }
+     for duplicate in [good[0].clone(), good[1].clone(), good[2].clone()] {
+         let mut mutated = good.clone();
+@@ -118,8 +166,10 @@
+     legacy[1] = json!({"type":"event_msg", "payload":{"type":"user_message", "message":identity.input,
+         "client_id":identity.client_user_message_id, "images":null,"local_images":[], "text_elements":[]}});
+     assert_eq!(terminal_anchor(&encode(&legacy), &identity), None);
+-    for payload in [json!({"type":"turn_aborted", "turn_id":null,"reason":"interrupted"}),
+-        json!({"type":"thread_rolled_back", "num_turns":1})] {
++    for payload in [
++        json!({"type":"turn_aborted", "turn_id":null,"reason":"interrupted"}),
++        json!({"type":"thread_rolled_back", "num_turns":1}),
++    ] {
+         let mut ambiguous = good.clone();
+         ambiguous.push(json!({"type":"event_msg", "payload":payload}));
+         assert_eq!(terminal_anchor(&encode(&ambiguous), &identity), None);
+@@ -135,7 +185,8 @@
+     let good = records(&identity);
+     for (field, value) in [
+         ("id", json!(ThreadId::new().to_string())),
+-        ("history_mode", json!("legacy")), ("source", json!("unknown")),
++        ("history_mode", json!("legacy")),
++        ("source", json!("unknown")),
+         ("parent_thread_id", json!(ThreadId::new().to_string())),
+         ("forked_from_id", json!(ThreadId::new().to_string())),
+         ("forked_from_ordinal_exclusive", json!(2)),
+@@ -144,7 +195,11 @@
+     ] {
+         let mut mutated = good.clone();
+         mutated[0]["payload"][field] = value;
+-        assert_eq!(terminal_anchor(&encode(&mutated), &identity), None, "{field}");
++        assert_eq!(
++            terminal_anchor(&encode(&mutated), &identity),
++            None,
++            "{field}"
++        );
+     }
+ }
+ 
+@@ -161,11 +216,17 @@
+     tokio::fs::write(&replacement, &bytes).await.unwrap();
+     tokio::fs::rename(&replacement, &path).await.unwrap();
+     assert!(!first.matches(&snapshot(&path).await.unwrap()));
+-    tokio::fs::write(&path, [bytes.clone(), b"\n".to_vec()].concat()).await.unwrap();
++    tokio::fs::write(&path, [bytes.clone(), b"\n".to_vec()].concat())
++        .await
++        .unwrap();
+     assert!(!first.matches(&snapshot(&path).await.unwrap()));
+-    tokio::fs::write(&path, &bytes[..bytes.len()-1]).await.unwrap();
++    tokio::fs::write(&path, &bytes[..bytes.len() - 1])
++        .await
++        .unwrap();
+     assert!(snapshot(&path).await.is_none());
+-    tokio::fs::write(&path, vec![b'\n'; MAX_ROLLOUT_LINE_BYTES + 1]).await.unwrap();
++    tokio::fs::write(&path, vec![b'\n'; MAX_ROLLOUT_LINE_BYTES + 1])
++        .await
++        .unwrap();
+     assert!(snapshot(&path).await.is_none());
+ }
+ 
+@@ -173,53 +234,120 @@
+ async fn invalid_history_never_commits_and_offline_history_recovers() {
+     let home = TempDir::new().unwrap();
+     let config = test_config(home.path());
+-    let state = codex_state::StateRuntime::init(config.sqlite.clone(), "test-provider".into()).await.unwrap();
++    let state = codex_state::StateRuntime::init(config.sqlite.clone(), "test-provider".into())
++        .await
++        .unwrap();
+     let identity = identity();
+     state.begin_native_turn_start(&identity, &[]).await.unwrap();
+     let thread_id = ThreadId::from_string(&identity.thread_id).unwrap();
+-    let path = home.path().join(format!("rollout-2026-10-17T00-00-00-{thread_id}.jsonl"));
+-    let mut metadata = codex_state::ThreadMetadataBuilder::new(thread_id, path.clone(), chrono::Utc::now(), SessionSource::Cli).build("test-provider");
++    let path = home
++        .path()
++        .join(format!("rollout-2026-10-17T00-00-00-{thread_id}.jsonl"));
++    let mut metadata = codex_state::ThreadMetadataBuilder::new(
++        thread_id,
++        path.clone(),
++        chrono::Utc::now(),
++        SessionSource::Cli,
++    )
++    .build("test-provider");
+     metadata.history_mode = ThreadHistoryMode::Paginated;
+     state.upsert_thread(&metadata).await.unwrap();
+     let store = LocalThreadStore::new(config.clone(), Some(state.clone()));
+     let good = encode(&records(&identity));
+-    for bytes in [good[..good.len()-1].to_vec(), [good.clone(), b"bad\n".to_vec()].concat()] {
++    for bytes in [
++        good[..good.len() - 1].to_vec(),
++        [good.clone(), b"bad\n".to_vec()].concat(),
++    ] {
+         tokio::fs::write(&path, bytes).await.unwrap();
+-        assert_eq!(store.recover_native_terminal_history(&identity).await.unwrap(), None);
+-        assert_eq!(state.get_native_turn_start_proof(&identity).await.unwrap(), Some(codex_state::NativeTurnStartProof::Pending));
++        assert_eq!(
++            store
++                .recover_native_terminal_history(&identity)
++                .await
++                .unwrap(),
++            None
++        );
++        assert_eq!(
++            state.get_native_turn_start_proof(&identity).await.unwrap(),
++            Some(codex_state::NativeTurnStartProof::Pending)
++        );
+     }
+     tokio::fs::write(&path, &good).await.unwrap();
+     let competing = LocalThreadStore::new(config.clone(), Some(state.clone()));
+     let guard = competing.acquire_writer_lock(thread_id).unwrap();
+-    assert_eq!(store.recover_native_terminal_history(&identity).await.unwrap(), None);
++    assert_eq!(
++        store
++            .recover_native_terminal_history(&identity)
++            .await
++            .unwrap(),
++        None
++    );
+     drop(guard);
+     let without_db = LocalThreadStore::new(config, None);
+-    assert_eq!(without_db.recover_native_terminal_history(&identity).await.unwrap(), None);
+-    store.resume_thread(crate::ResumeThreadParams {
+-        thread_id, rollout_path: Some(path.clone()), history: None, include_archived: true,
+-        metadata: crate::ThreadPersistenceMetadata {
+-            cwd: Some(home.path().to_path_buf()), model_provider: "test-provider".into(),
+-            memory_mode: codex_protocol::protocol::ThreadMemoryMode::Enabled,
+-        },
+-    }).await.unwrap();
+-    assert_eq!(store.recover_native_terminal_history(&identity).await.unwrap(), None);
+-    assert_eq!(state.get_native_turn_start_proof(&identity).await.unwrap(), Some(codex_state::NativeTurnStartProof::Pending));
++    assert_eq!(
++        without_db
++            .recover_native_terminal_history(&identity)
++            .await
++            .unwrap(),
++        None
++    );
++    store
++        .resume_thread(crate::ResumeThreadParams {
++            thread_id,
++            rollout_path: Some(path.clone()),
++            history: None,
++            include_archived: true,
++            metadata: crate::ThreadPersistenceMetadata {
++                cwd: Some(home.path().to_path_buf()),
++                model_provider: "test-provider".into(),
++                memory_mode: codex_protocol::protocol::ThreadMemoryMode::Enabled,
++            },
++        })
++        .await
++        .unwrap();
++    assert_eq!(
++        store
++            .recover_native_terminal_history(&identity)
++            .await
++            .unwrap(),
++        None
++    );
++    assert_eq!(
++        state.get_native_turn_start_proof(&identity).await.unwrap(),
++        Some(codex_state::NativeTurnStartProof::Pending)
++    );
+     store.shutdown_thread(thread_id).await.unwrap();
+-    let proof = store.recover_native_terminal_history(&identity).await.unwrap().unwrap();
++    let proof = store
++        .recover_native_terminal_history(&identity)
++        .await
++        .unwrap()
++        .unwrap();
+     assert_eq!(proof.status, NativeTurnTerminalStatus::Completed);
+-    assert!(matches!(state.get_native_turn_start_proof(&identity).await.unwrap(), Some(codex_state::NativeTurnStartProof::InputRecorded {..})));
++    assert!(matches!(
++        state.get_native_turn_start_proof(&identity).await.unwrap(),
++        Some(codex_state::NativeTurnStartProof::InputRecorded { .. })
++    ));
+ }
+ 
+ #[tokio::test]
+ async fn snapshot_race_cannot_commit_state_evidence() {
+     let home = TempDir::new().unwrap();
+     let config = test_config(home.path());
+-    let state = codex_state::StateRuntime::init(config.sqlite.clone(), "test-provider".into()).await.unwrap();
++    let state = codex_state::StateRuntime::init(config.sqlite.clone(), "test-provider".into())
++        .await
++        .unwrap();
+     let identity = identity();
+     state.begin_native_turn_start(&identity, &[]).await.unwrap();
+     let thread_id = ThreadId::from_string(&identity.thread_id).unwrap();
+-    let path = home.path().join(format!("rollout-2026-10-17T00-00-00-{thread_id}.jsonl"));
+-    let mut metadata = codex_state::ThreadMetadataBuilder::new(thread_id, path.clone(), chrono::Utc::now(), SessionSource::Cli).build("test-provider");
++    let path = home
++        .path()
++        .join(format!("rollout-2026-10-17T00-00-00-{thread_id}.jsonl"));
++    let mut metadata = codex_state::ThreadMetadataBuilder::new(
++        thread_id,
++        path.clone(),
++        chrono::Utc::now(),
++        SessionSource::Cli,
++    )
++    .build("test-provider");
+     metadata.history_mode = ThreadHistoryMode::Paginated;
+     state.upsert_thread(&metadata).await.unwrap();
+     let store = LocalThreadStore::new(config, Some(state.clone()));
+@@ -237,12 +365,26 @@
+             tokio::fs::write(&temporary, &good).await.unwrap();
+             tokio::fs::rename(temporary, &path).await.unwrap();
+         } else {
+-            let changed = String::from_utf8(good.clone()).unwrap().replace("exact input", "wrong input");
++            let changed = String::from_utf8(good.clone())
++                .unwrap()
++                .replace("exact input", "wrong input");
+             tokio::fs::write(&path, changed).await.unwrap();
+         }
+-        assert_eq!(commit_snapshot(&state, &identity, &path, &first, &item_id, status).await, None);
+-        assert_eq!(state.get_native_turn_start_proof(&identity).await.unwrap(), Some(codex_state::NativeTurnStartProof::Pending));
+-        assert_eq!(state.get_native_turn_terminal_proof(&identity).await.unwrap(), None);
++        assert_eq!(
++            commit_snapshot(&state, &identity, &path, &first, &item_id, status).await,
++            None
++        );
++        assert_eq!(
++            state.get_native_turn_start_proof(&identity).await.unwrap(),
++            Some(codex_state::NativeTurnStartProof::Pending)
++        );
++        assert_eq!(
++            state
++                .get_native_turn_terminal_proof(&identity)
++                .await
++                .unwrap(),
++            None
++        );
+     }
+ }
+ 
