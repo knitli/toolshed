@@ -4,7 +4,7 @@ import json
 import os
 import re
 from pathlib import Path
-import subprocess  # nosec B404 - every process invocation in these tests is mocked.
+import subprocess  # nosec B404 - mocked providers and fixed Git commands in disposable test repositories.
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -65,89 +65,362 @@ class HostedNativeTests(unittest.TestCase):
                          {f'localhost:{port}' for port in HOSTED.PORTS})
         self.assertEqual(profile.count('(allow network-bind '), 7)
 
-    def test_failed_launch_nonzero_and_missing_proof_remain_incomplete(self):
-        for outcome in (OSError('private error'), SimpleNamespace(returncode=7), SimpleNamespace(returncode=0)):
-            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as temporary:
+    def arguments(self, root):
+        binary = root / 'codex'
+        binary.write_bytes(b'native fixture')
+        return SimpleNamespace(repository_id='123', binary_sha256=HOSTED.sha(binary), binary=str(binary),
+                               package_root=str(SCRIPT.parents[1]), cloud_commit='c' * 40,
+                               output_dir=str(root / 'output'))
+
+    def test_conjoined_result_requires_both_verified_scenarios_and_cleanup(self):
+        for fault in (None, 'first-exit', 'first-proof', 'cleanup', 'second-proof', 'timeout', 'verifier-key', 'verifier-type', 'verifier-index'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
-                args = SimpleNamespace(repository_id='123', binary_sha256='b' * 64,
-                                       cloud_commit='c' * 40, output_dir=str(root / 'output'))
-                effect = {'side_effect': outcome} if isinstance(outcome, OSError) else {'return_value': outcome}
+                args = self.arguments(root)
+                evidence = []
+
+                def execute(*values, **options):
+                    self.assertEqual(values[0], ['fixture'])
+                    self.assertEqual(set(options['env']), {'PATH', 'HOME', 'TMPDIR', 'TERM', 'LANG'})
+                    self.assertEqual(options['umask'], 0o077)
+                    self.assertEqual(options['timeout'], 240)
+                    self.assertTrue(options['close_fds'])
+                    evidence.append('execute')
+                    if fault == 'timeout':
+                        raise subprocess.TimeoutExpired('fixture', 240)
+                    return SimpleNamespace(returncode=7 if fault == 'first-exit' else 0)
+
+                def verify(_args, scenario, _destination):
+                    evidence.append(scenario)
+                    errors = {'verifier-key': KeyError, 'verifier-type': TypeError, 'verifier-index': IndexError}
+                    if fault in errors:
+                        raise errors[fault]('synthetic verifier defect')
+                    if fault == ('first-proof' if scenario == 'three-session' else 'second-proof'):
+                        raise ValueError('invalid proof')
+                    return {'scenario': scenario, 'proofSha256': 'd' * 64, 'semanticChecksPassed': True}
+
+                port_checks = [None, OSError('occupied')] if fault == 'cleanup' else [None] * 4
                 with patch.dict(os.environ, ENV, clear=True), patch.object(HOSTED, 'admit'), \
+                        patch.object(HOSTED, 'cloud_identity'), patch.object(HOSTED, 'ports_released', side_effect=port_checks), \
                         patch.object(HOSTED, 'command', return_value=['fixture']), \
+                        patch.object(HOSTED, 'recovery_command', return_value=['fixture']), \
+                        patch.object(HOSTED, 'verify_proof', side_effect=verify), \
                         patch.object(HOSTED.tempfile, 'mkdtemp', return_value=str(root)), \
-                        patch.object(HOSTED.subprocess, 'run', **effect):
-                    self.assertEqual(HOSTED.run(args), 1)
+                        patch.object(HOSTED.subprocess, 'run', side_effect=execute):
+                    self.assertEqual(HOSTED.run(args), 0 if fault is None else 1)
+                    with self.assertRaises(FileExistsError):
+                        HOSTED.run(args)
                 result = json.loads((root / 'output/hosted-result.json').read_text())
-                self.assertEqual(result['outcome'], 'INCOMPLETE')
-                for name in ('network.sb', 'fixture.log', 'hosted-result.json'):
+                self.assertEqual(result['outcome'], 'FIXTURE_COMPLETED_PENDING_INDEPENDENT_VERIFICATION' if fault is None else 'INCOMPLETE')
+                self.assertFalse(result['nativePromoted'])
+                self.assertFalse(result['vmDisposalObserved'])
+                for name in ('network.sb', 'hosted-result.json', 'three-session/fixture.log'):
                     self.assertEqual((root / 'output' / name).stat().st_mode & 0o777, 0o600)
+                if (root / 'output/native-recovery/fixture.log').exists():
+                    self.assertEqual((root / 'output/native-recovery/fixture.log').stat().st_mode & 0o777, 0o600)
+                if fault == 'first-exit':
+                    self.assertEqual(result['scenarioExecutions'], [{'scenario': 'three-session', 'returncode': 7}])
+                if fault in ('verifier-key', 'verifier-type', 'verifier-index'):
+                    self.assertEqual(
+                        result['failure']['exceptionType'],
+                        {'verifier-key': 'KeyError', 'verifier-type': 'TypeError', 'verifier-index': 'IndexError'}[fault],
+                    )
+                    self.assertEqual(result['failure']['scenario'], 'three-session')
+                    self.assertTrue(result['failure']['frames'])
+                    self.assertEqual(result['reason'], 'verifier_error')
+                    self.assertNotIn('synthetic verifier defect', json.dumps(result))
+                if fault is None:
+                    self.assertEqual(result['scenarioExecutions'], [{'scenario': name, 'returncode': 0} for name in ('three-session', 'native-recovery')])
+                    self.assertEqual(evidence, ['execute', 'three-session', 'execute', 'native-recovery'])
+                elif fault != 'second-proof':
+                    self.assertLessEqual(evidence.count('execute'), 1)
 
-    def test_timeout_retains_incomplete_evidence_and_closed_environment(self):
+    def test_bounded_evidence_open_cannot_follow_a_late_symlink(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            args = SimpleNamespace(repository_id='123', binary_sha256='b' * 64,
-                                   cloud_commit='c' * 40, output_dir=str(root / 'output'))
-            with patch.dict(os.environ, ENV, clear=True), patch.object(HOSTED, 'admit'), \
-                    patch.object(HOSTED, 'command', return_value=['fixture']), \
-                    patch.object(HOSTED.tempfile, 'mkdtemp', return_value=str(root)), \
-                    patch.object(HOSTED.subprocess, 'run', side_effect=subprocess.TimeoutExpired('fixture', 240)) as run:
-                self.assertEqual(HOSTED.run(args), 1)
-                kwargs = run.call_args.kwargs
-                self.assertEqual(set(kwargs['env']), {'PATH', 'HOME', 'TMPDIR', 'TERM', 'LANG'})
-                self.assertTrue(kwargs['close_fds'])
-                self.assertEqual(kwargs['timeout'], 240)
-            result = json.loads((root / 'output/hosted-result.json').read_text())
-            self.assertEqual(result['outcome'], 'INCOMPLETE')
-            self.assertFalse(result['vmDisposalObserved'])
-            self.assertFalse(result['completeDescendantTerminationProven'])
-            self.assertTrue(root.is_dir())
+            evidence, other = root / 'proof', root / 'other'
+            evidence.write_bytes(b'original')
+            other.write_bytes(b'substituted')
+            original_open = Path.open
 
-    def test_completion_is_not_pass_and_output_cannot_be_reused(self):
+            def swapped_open(path, *args, **kwargs):
+                if path == evidence:
+                    evidence.unlink()
+                    evidence.symlink_to(other)
+                return original_open(path, *args, **kwargs)
+
+            with patch.object(Path, 'open', swapped_open):
+                self.assertEqual(HOSTED.read_bounded(evidence, 32), b'original')
+
+    def test_bounded_evidence_rejects_nonregular_open_descriptor_and_size(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'proof'
+            path.write_bytes(b'12345')
+            with self.assertRaises(ValueError):
+                HOSTED.read_bounded(path, 4)
+            reader, writer = os.pipe()
+            try:
+                with patch.object(HOSTED.os, 'open', return_value=os.dup(reader)), self.assertRaises(ValueError):
+                    HOSTED.read_bounded(path, 32)
+            finally:
+                os.close(reader)
+                os.close(writer)
+            link = path.with_name('link')
+            link.symlink_to(path)
+            with self.assertRaises((OSError, ValueError)):
+                HOSTED.read_bounded(link, 32)
+
+    def test_empty_json_or_missing_proof_is_never_verified(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            args = SimpleNamespace(repository_id='123', binary_sha256='b' * 64,
-                                   cloud_commit='c' * 40, output_dir=str(root / 'output'))
+            args = self.arguments(root)
+            for scenario in ('three-session', 'native-recovery'):
+                with self.assertRaises(OSError):
+                    HOSTED.verify_proof(args, scenario, root)
+                (root / 'proof.json').write_text('{}')
+                with self.assertRaises(KeyError):
+                    HOSTED.verify_proof(args, scenario, root)
+                (root / 'proof.json').unlink()
 
-            def complete(*_args, **_kwargs):
-                (root / 'output/proof.json').write_text('{}')
-                return SimpleNamespace(returncode=0)
-
-            with patch.dict(os.environ, ENV, clear=True), patch.object(HOSTED, 'admit'), \
-                    patch.object(HOSTED, 'command', return_value=['fixture']), \
-                    patch.object(HOSTED.tempfile, 'mkdtemp', return_value=str(root)), \
-                    patch.object(HOSTED.subprocess, 'run', side_effect=complete):
-                self.assertEqual(HOSTED.run(args), 0)
-                with self.assertRaises(FileExistsError):
-                    HOSTED.run(args)
-            result = json.loads((root / 'output/hosted-result.json').read_text())
-            self.assertEqual(result['outcome'], 'FIXTURE_COMPLETED_PENDING_INDEPENDENT_VERIFICATION')
-            self.assertFalse(result['nativePromoted'])
-
-    def test_unreadable_proof_cannot_report_completed_fixture(self):
+    def test_recovery_command_keeps_assertions_and_fixed_scope(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            args = SimpleNamespace(repository_id='123', binary_sha256='b' * 64,
-                                   cloud_commit='c' * 40, output_dir=str(root / 'output'))
-            read_bytes = Path.read_bytes
+            args = SimpleNamespace(package_root=str(SCRIPT.parents[1]), python=str(root / 'python'),
+                                   binary=str(root), binary_sha256='b' * 64, node=str(root),
+                                   cloud_source=str(root), cloud_commit='c' * 40, esbuild=str(root), miniflare=str(root))
+            argv = HOSTED.recovery_command(args, root / 'network.sb', root)
+            self.assertEqual(argv[4:6], ['-I', '-B'])
+            self.assertNotIn('-O', argv)
+            for flag in ('--installed', '--restart-native', '--restart-inflight', '--trusted-hosted-vm'):
+                self.assertIn(flag, argv)
+            self.assertEqual(argv[-8:], ['--entry-port', '43121', '--loopback-port', '43122', '--broker-port', '43123', '--model-port', '43125'])
 
-            def read(path):
-                if path.name == 'proof.json':
-                    raise OSError('proof disappeared')
-                return read_bytes(path)
+    def test_port_probe_fails_closed_without_retry(self):
+        from unittest.mock import MagicMock
+        listener = MagicMock()
+        listener.__enter__.return_value = listener
+        listener.bind.side_effect = OSError('occupied')
+        with patch.object(HOSTED.socket, 'socket', return_value=listener) as factory, self.assertRaises(OSError):
+            HOSTED.ports_released()
+        self.assertEqual(factory.call_count, 1)
 
-            def complete(*_args, **_kwargs):
-                (root / 'output/proof.json').write_text('{}')
-                return SimpleNamespace(returncode=0)
+    def test_port_probe_holds_both_families_for_every_fixed_port(self):
+        from unittest.mock import MagicMock
+        listeners = []
 
-            with patch.dict(os.environ, ENV, clear=True), patch.object(HOSTED, 'admit'), \
-                    patch.object(HOSTED, 'command', return_value=['fixture']), \
-                    patch.object(HOSTED.tempfile, 'mkdtemp', return_value=str(root)), \
-                    patch.object(HOSTED.subprocess, 'run', side_effect=complete), \
-                    patch.object(Path, 'read_bytes', read):
-                self.assertEqual(HOSTED.run(args), 1)
-            result = json.loads((root / 'output/hosted-result.json').read_text())
-            self.assertEqual(result['outcome'], 'INCOMPLETE')
-            self.assertNotIn('proofSha256', result)
+        def create(family, kind):
+            self.assertEqual(kind, HOSTED.socket.SOCK_STREAM)
+            listener = MagicMock()
+            listener.__enter__.return_value = listener
+
+            def bind(address):
+                self.assertTrue(all(not prior.__exit__.called for prior in listeners))
+                self.assertEqual(address[0], '127.0.0.1' if family == HOSTED.socket.AF_INET else '::1')
+            listener.bind.side_effect = bind
+            listeners.append(listener)
+            return listener
+
+        with patch.object(HOSTED.socket, 'socket', side_effect=create) as factory:
+            HOSTED.ports_released()
+        self.assertEqual(factory.call_count, 14)
+        for index, listener in enumerate(listeners):
+            listener.bind.assert_called_once_with(('127.0.0.1' if index < 7 else '::1', HOSTED.PORTS[index % 7]))
+            listener.setsockopt.assert_any_call(HOSTED.socket.SOL_SOCKET, HOSTED.socket.SO_REUSEADDR, 1)
+            if index >= 7:
+                listener.setsockopt.assert_any_call(HOSTED.socket.IPPROTO_IPV6, HOSTED.socket.IPV6_V6ONLY, 1)
+            listener.__exit__.assert_called_once()
+
+    def test_cloud_revision_and_source_root_are_verified_before_native(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'cloud'
+            source = root / 'apps/os/packages/event-runtime/src'
+            source.mkdir(parents=True)
+            root = root.resolve()
+            args = SimpleNamespace(cloud_source=str(source), cloud_commit='a' * 40)
+            for response in (str(root) + '\n' + 'a' * 40 + '\n', str(root) + '\n' + 'b' * 40 + '\n', '/other\n' + 'a' * 40 + '\n'):
+                with patch.object(HOSTED.subprocess, 'run', side_effect=lambda argv, **_kwargs:
+                                  SimpleNamespace(stdout=response if 'rev-parse' in argv else '')) as run:
+                    if response == str(root) + '\n' + args.cloud_commit + '\n':
+                        HOSTED.cloud_identity(args, {'HOME': str(root)})
+                    else:
+                        with self.assertRaises(ValueError):
+                            HOSTED.cloud_identity(args, {'HOME': str(root)})
+                    self.assertEqual(run.call_args.args[0][0], '/usr/bin/git')
+                    self.assertEqual(run.call_args.kwargs['timeout'], 10)
+
+    def test_cloud_identity_rejects_tracked_staged_and_untracked_source_changes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve() / 'cloud'
+            source = root / 'apps/os/packages/event-runtime/src'
+            source.mkdir(parents=True)
+            entry = source / 'index.ts'
+            entry.write_text('export {};\n')
+            (root / '.gitignore').write_text('ignored.ts\nnode_modules/\n')
+
+            def git(*arguments):
+                # Fixed executable and test-owned arguments; no shell or external input.
+                return subprocess.run(['/usr/bin/git', '-C', str(root), *arguments], check=True,  # nosec B603
+                                      capture_output=True, text=True).stdout.strip()
+            git('init', '-q')
+            git('add', '.')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                '-c', 'commit.gpgsign=false', 'commit', '-qm', 'synthetic source')
+            args = SimpleNamespace(cloud_source=str(source), cloud_commit=git('rev-parse', 'HEAD'))
+            HOSTED.cloud_identity(args, {'PATH': '/usr/bin:/bin', 'HOME': str(root)})
+            for change in ('working-tree', 'index', 'untracked', 'ignored'):
+                with self.subTest(change=change):
+                    target = entry if change in ('working-tree', 'index') else source / ('ignored.ts' if change == 'ignored' else 'new.ts')
+                    target.write_text('export const changed = true;\n')
+                    if change == 'index':
+                        git('add', str(entry))
+                    with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+                        HOSTED.cloud_identity(args, {'PATH': '/usr/bin:/bin', 'HOME': str(root)})
+                    git('reset', '--hard', '-q', 'HEAD')
+                    if target != entry:
+                        target.unlink()
+
+    def test_native_recovery_proof_checks_reject_mutated_causality_and_identity(self):
+        import copy
+        package = SCRIPT.parents[1].resolve()
+        fixture = package / 'docs/native-bridge'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = self.arguments(root)
+            cloud = root / 'cloud/apps/os/packages/event-runtime/src'
+            cloud.mkdir(parents=True)
+            source = cloud / 'index.ts'
+            source.write_text('export {};')
+            args.cloud_source = str(cloud)
+            proof = json.loads((fixture / 'coupled-workerd-recovery-proof.json').read_text())
+            proof.update(binarySha256=args.binary_sha256, cloudSourceCommit=args.cloud_commit,
+                         nativeInFlightRestartProven=True, installedPackage=True,
+                         interruptedTurnCompletionProven=False)
+            proof['executionContainment'] = {'mode': 'trusted-hosted-vm-network-sandbox',
+                'kernelSandboxActive': True, 'defaultNetworkDenied': True,
+                'filesystemIsolationProven': False, 'vmDisposalObserved': False}
+            proof['restart']['stoppedBeforeHeldModelResponseReleased'] = True
+            proof['restart']['processChecks'] = {key: True for key in ('oldTuiStopped', 'oldBackendStopped',
+                'tuiPidRotated', 'clientIdRotated', 'serverInstanceIdRotated', 'backendPidRotated', 'threadIdRotated')}
+            proof['fixturePorts'] = {'model': 43125, 'entry': 43121, 'loopback': 43122, 'broker': 43123}
+            required = [fixture / name for name in ('coupled-workerd.py', 'coupled-workerd-broker.mjs',
+                        'coupled-workerd-worker.ts', 'coupled-workerd-source-hashes.mjs',
+                        'qualification-installed.py', 'three-session-workerd.py')]
+            required.append(package / 'scripts/qualify_native_bridge.py')
+            proof['sourceSha256'] = {str(path): HOSTED.sha(path) for path in required}
+            proof['cloudBundle'] = {'inputs': {str(source): HOSTED.sha(source)}}
+            mutations = [None,
+                lambda d: d.update(binarySha256='0' * 64),
+                lambda d: d.update(nativeInFlightRestartProven=False),
+                lambda d: d['restart'].update(stoppedBeforeHeldModelResponseReleased=False),
+                lambda d: d['restart']['processChecks'].update(oldBackendStopped=False),
+                lambda d: d['restart'].update(newPid=d['restart']['oldPid']),
+                lambda d: d['fullInputRecordedReceipt'].update(attemptId='wrong'),
+                lambda d: d['fullInputRecordedReceipt']['outcome'].update(itemId='wrong'),
+                lambda d: (d['nativeRequest'].update(attemptId=str(uuid4())),
+                           d['fullInputRecordedReceipt'].update(attemptId=d['nativeRequest']['attemptId'])),
+                lambda d: d['nativeRequest'].update(receiptVersion=2),
+                lambda d: d['settled']['cloud']['attempts'][0].update(permit_id=str(uuid4())),
+                lambda d: d['settled']['cloud']['native_claims'][0].update(attempt_id=str(uuid4())),
+                lambda d: d['settled']['cloud']['deliveries'][0].update(event_id=str(uuid4())),
+                lambda d: d['settled']['cloud']['attempts'][0].update(native_observed_ack_json='{}'),
+                lambda d: d['fixtureAdmission']['attached']['nativeBinding'].update(clientId=str(uuid4())),
+                lambda d: d['wire'][1].update(body=json.dumps({**json.loads(d['wire'][1]['body']), 'attemptId': str(uuid4())})),
+                lambda d: d['wire'][-1]['proof'].update(nonce=d['wire'][-2]['proof']['nonce']),
+                lambda d: d['sourceSha256'].update({str(required[0]): '0' * 64}),
+                lambda d: d['cloudBundle']['inputs'].update({str(source): '0' * 64}),
+                lambda d: d['cloudBundle'].update(inputs={'../cloud/apps/os/packages/event-runtime/src/index.ts': HOSTED.sha(source)}),
+                lambda d: d['settled']['slots'].append({'state': 'reserved'}),
+                lambda d: d['fixturePorts'].update(model=43126)]
+            for index, mutate in enumerate(mutations):
+                with self.subTest(index=index):
+                    candidate = copy.deepcopy(proof)
+                    if mutate:
+                        mutate(candidate)
+                    (root / 'proof.json').write_text(json.dumps(candidate))
+                    if mutate:
+                        with self.assertRaises(ValueError):
+                            HOSTED.verify_proof(args, 'native-recovery', root)
+                    else:
+                        self.assertTrue(HOSTED.verify_proof(args, 'native-recovery', root)['semanticChecksPassed'])
+
+    def test_three_session_proof_requires_private_evidence_and_expected_outcomes(self):
+        import copy
+        package = SCRIPT.parents[1].resolve()
+        fixture = package / 'docs/native-bridge'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = self.arguments(root)
+            companion = root / 'codex-code-mode-host'
+            companion.write_bytes(b'companion')
+            cloud = root / 'cloud/apps/os/packages/event-runtime/src'
+            cloud.mkdir(parents=True)
+            source = cloud / 'index.ts'
+            source.write_text('export {};')
+            args.cloud_source = str(cloud)
+            evidence = b'{"fixture":true}\n'
+            (root / 'proof.private-evidence.jsonl').write_bytes(evidence)
+            (root / 'proof.private-causal.json').write_text(json.dumps({'nonReuse': True,
+                'sourceNonceSha256': {'C1': 'a' * 64, 'C3': 'b' * 64}}))
+            proof = {'result': 'PASS', 'productionAdmissionProven': False, 'realModelCalls': 0,
+                'cloudSourceCommit': args.cloud_commit, 'qualification': 'controlled-three-real-cli-production-daemon-workerd',
+                'nativeBinarySha256': args.binary_sha256, 'codeModeHostSha256': HOSTED.sha(companion),
+                'executionContainment': {'mode': 'trusted-hosted-vm-network-sandbox',
+                    'kernelSandboxActive': True, 'defaultNetworkDenied': True,
+                    'filesystemIsolationProven': False, 'vmDisposalObserved': False},
+                'nativeCliSessions': {label: {**{key: str(index) * 64 for key in ('runtimeSha256', 'sessionSha256', 'threadSha256')},
+                    'nativeStartCount': 2 if label == 'C' else 1, 'initiallySelectedIdle': True}
+                    for index, label in enumerate(('A', 'B', 'C'), 1)},
+                'nativeProcessCleanup': {label: {key: True for key in ('launcherExited', 'processGroupClosed',
+                    'backendStopped', 'controlSocketRemoved')} for label in ('A', 'B', 'C')},
+                'brokerCleanup': {'ownedProcessGroupClosed': True, 'loopbackPortsClosed': True},
+                'controlledAssertions': {key: True for key in ('threeIndependentAttachments',
+                    'aOnlyAndBOnlySessionIsolation', 'busyDeliveryRemainsDurableWithoutStart',
+                    'changedBindingRequiresExplicitAttach', 'oldGenerationDeliveryFencedWithoutStart',
+                    'newGenerationDeliverySettledExactlyOnce', 'observedAckReplayLeavesWorkerdStateUnchanged',
+                    'exactObservedAckRetryAfterDaemonRestart')},
+                'observedAckRestart': {'daemonRestarted': True, 'firstReplyLostAfterWorkerdCommit': True,
+                    'ackBodyBytesIdentical': True, 'proofNonceChanged': True, 'nativeProcessRestarted': False,
+                    'nativeStartCount': 1},
+                'busyC': {'nativeClaimCreated': False, 'nativeStartWhileBusy': False},
+                'busyDeliveryRestart': {'queuedAfterBusyRestart': True},
+                'postAttachC3': {'nativeStartCount': 1, 'workerdClaimCount': 1, 'localState': 'observed'},
+                'sourceSha256': {key: HOSTED.sha(fixture / name) for key, name in {
+                    'runner': 'three-session-workerd.py', 'workerFixture': 'coupled-workerd-worker.ts',
+                    'broker': 'coupled-workerd-broker.mjs', 'nativeHostQualifier': 'native-host-launcher-qualification.py',
+                    'launcherSmoke': 'native-release-launcher-smoke.py', 'installedPreflight': 'qualification-installed.py'}.items()},
+                'privateEvidence': {'bytes': len(evidence), 'sha256': __import__('hashlib').sha256(evidence).hexdigest()},
+                'privateCausal': {'bytes': (root / 'proof.private-causal.json').stat().st_size,
+                                  'sha256': HOSTED.sha(root / 'proof.private-causal.json')},
+                'workerdInputsSha256': {str(source.relative_to(cloud.parents[2])): HOSTED.sha(source)}}
+            for field in (None, 'proofNonceChanged', 'ackBodyBytesIdentical'):
+                candidate = copy.deepcopy(proof)
+                if field:
+                    candidate['observedAckRestart'][field] = False
+                (root / 'proof.json').write_text(json.dumps(candidate))
+                if field:
+                    with self.assertRaises(ValueError):
+                        HOSTED.verify_proof(args, 'three-session', root)
+                else:
+                    self.assertTrue(HOSTED.verify_proof(args, 'three-session', root)['semanticChecksPassed'])
+            (root / 'proof.json').write_text(json.dumps(proof))
+            aliases = root / 'bin'
+            aliases.mkdir()
+            (aliases / 'codex').symlink_to(root / 'codex')
+            args.binary = str(aliases / 'codex')
+            self.assertTrue(HOSTED.verify_proof(args, 'three-session', root)['semanticChecksPassed'])
+            (root / 'proof.private-evidence.jsonl').write_bytes(b'tampered')
+            with self.assertRaises(ValueError):
+                HOSTED.verify_proof(args, 'three-session', root)
+            (root / 'proof.private-evidence.jsonl').write_bytes(evidence)
+            causal_path = root / 'proof.private-causal.json'
+            causal_path.write_text(json.dumps({'nonReuse': True, 'sourceNonceSha256': {'C1': 'c' * 64, 'C3': 'd' * 64}}))
+            with self.assertRaisesRegex(ValueError, 'private causal evidence mismatch'):
+                HOSTED.verify_proof(args, 'three-session', root)
+            causal_path.write_text(json.dumps({'nonReuse': True, 'sourceNonceSha256': {'C1': 'short', 'C3': 'different'}}))
+            proof['privateCausal'] = {'bytes': causal_path.stat().st_size, 'sha256': HOSTED.sha(causal_path)}
+            (root / 'proof.json').write_text(json.dumps(proof))
+            with self.assertRaisesRegex(ValueError, 'causal nonce evidence mismatch'):
+                HOSTED.verify_proof(args, 'three-session', root)
 
 
 if __name__ == '__main__':

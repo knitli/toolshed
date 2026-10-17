@@ -51,7 +51,7 @@ existing Node 24.19.0, esbuild 0.28.1, and Miniflare 5.20261001.0-alpha packages
 From this directory, with those paths set:
 
 ```sh
-"$EVENT_PROOF_PYTHON" -I -O coupled-workerd.py \
+"$EVENT_PROOF_PYTHON" -I -B coupled-workerd.py \
   --installed --restart-native --package "$EVENT_LOCAL_PACKAGE" \
   --qualifier "$EVENT_QUALIFIER" --binary "$EVENT_NATIVE_BINARY" \
   --binary-sha 0fb3a5de06ab2ccb8dcc20c11cb71cad1f0c1b85fbfa3a5c6fd16ca1f57d22de \
@@ -213,3 +213,15 @@ harness, and all of Stage 1 remain unqualified. The earlier v5 false start remai
 a retained blocked run (supervisor exit 1): its fixture expected two challenges where the production path
 required three; it did not establish a production bug. Earlier proofs are unchanged,
 and the v6 input check makes no claim about all historical scratch bytes.
+
+## Disposable hosted recovery scenario
+
+The hosted runner now pairs three-session qualification with this fixture's
+`--installed --restart-native --restart-inflight --trusted-hosted-vm` mode.
+Use `-I -B`, never `-O`; assertions must stay enabled. Hosted mode requires
+`--cloud-commit` and model/entry/loopback/broker ports 43125/43121/43122/43123.
+It checks inherited kernel network denial before the broker and every native
+launch, with no filesystem isolation claim. The wrapper checks source identity
+and both scenario proofs before reporting completion pending independent audit.
+See [hosted admission](native-hosted-admission.md). No new native run or
+production qualification is claimed by adding this execution path.

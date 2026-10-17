@@ -14,10 +14,12 @@ export function sourceHashes(paths, roots) {
       return child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child);
     });
     if (!contained) throw new Error('outside qualified source roots');
-    return [path, source];
+    return source;
   });
   // Every source above is bounded before any source contents are read.
-  return Object.fromEntries(sources.map(([path, source]) => [path,
+  // Metafile names use the broker cwd. Publish canonical absolute keys so consumers
+  // never reinterpret scratch-relative names against a different checkout cwd.
+  return Object.fromEntries(sources.map(source => [source,
     // eslint-disable-next-line security/detect-non-literal-fs-filename -- All canonical sources were bounded to the explicit roots above.
     createHash('sha256').update(fs.readFileSync(source)).digest('hex')])); // nosemgrep: javascript_pathtraversal_rule-non-literal-fs-filename
 }

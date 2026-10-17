@@ -151,9 +151,15 @@ def ephemeral_port_ranges():
     return ranges
 
 
-def preflight_ports(parsed):
-    ports = fixture_ports(parsed)
-    if getattr(parsed, "listener_port", None) is not None:
+def preflight_ports(parsed, *, ports=None):
+    fixed_ports = ports is not None or getattr(parsed, "listener_port", None) is not None
+    if ports is None:
+        ports = fixture_ports(parsed)
+    else:
+        for port in ports:
+            require_fixture_port(port)
+        require(len(set(ports)) == len(ports), "fixture ports must be distinct")
+    if fixed_ports:
         ranges = ephemeral_port_ranges()
         for port in ports:
             require(not any(first <= port <= last for first, last in ranges),
@@ -2316,6 +2322,8 @@ def build_proof(ctx):
         "sourceNonceSha256": {"C1": ctx.c1_source_nonce_sha256, "C3": ctx.c3_source_nonce_sha256},
         "nonReuse": ctx.c1_source_nonce_sha256 != ctx.c3_source_nonce_sha256,
     }
+    causal_bytes = (json.dumps(ctx.private_nonce_record, separators=(",", ":")) + "\n").encode()
+    ctx.proof["privateCausal"] = {"bytes": len(causal_bytes), "sha256": digest(causal_bytes)}
     return ctx.proof, ctx.private_nonce_record
 
 
