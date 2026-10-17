@@ -1,9 +1,13 @@
-"""Dormant Messaging v2 decoded-DTO conformance; no admission or wire parsing.
+"""
+Dormant Messaging v2 decoded-DTO conformance; no admission or wire parsing.
 
 This module is deliberately separate from the active v1 contract and gateway.
 A valid shape, matching digest or ACK does not authenticate a publisher/runtime,
 prove current routing consent, or grant native execution authority.
 """
+
+# Exact built-in types reject bool-as-int and subclasses outside decoded JSON DTOs.
+# pylint: disable=unidiomatic-typecheck
 
 import hashlib
 import json
@@ -41,6 +45,7 @@ class MessagingProtocolError(ValueError):
     """A safe reason code, without caller-supplied metadata."""
 
     def __init__(self, code: str):
+        """Store the safe protocol reason code."""
         self.code = code
         super().__init__(code)
 

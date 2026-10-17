@@ -18,55 +18,64 @@ GENERATIONS = ('nodeGeneration', 'runtimeGeneration', 'attachmentGeneration',
                'consumerGeneration', 'routingGeneration')
 
 
-def decoded_cases():
-    """All JSON-representable schema/freshness cases, for both language drivers."""
-    result = []
+def _add_identity_cases(add, kind, base):
+    """Append identity conformance cases in stable order."""
+    add(kind, 'portable-fixture', base, True)
+    for field in base:
+        changed = copy.deepcopy(base)
+        del changed[field]
+        add(kind, 'required-' + field, changed, False)
+    for field in ('candidateGeneration', 'body', 'url', 'path', 'pid', 'prompt', 'sessionId'):
+        add(kind, 'unknown-' + field, dict(base, **{field: 1}), False)
+    for field in ('eventId', 'nodeId', 'runtimeId', 'attemptId'):
+        for name, value in [('v4', OTHER), ('uppercase', OTHER.upper()),
+                            ('v1', OTHER.replace('4def', '1def')), ('opaque', 'opaque-id'),
+                            ('newline', OTHER + '\n'), ('nonascii', '界' * 36)]:
+            add(kind, field + '-' + name, dict(base, **{field: value}), name == 'v4')
 
-    def add(kind, name, value, expected, now=NOW):
-        result.append(dict(kind=kind, case=name, value=value, nowMs=now, expected=expected))
 
-    for kind, base in [('envelope', ENVELOPE), ('acknowledgment', ACK)]:
-        add(kind, 'portable-fixture', base, True)
-        for field in base:
-            changed = copy.deepcopy(base)
-            del changed[field]
-            add(kind, 'required-' + field, changed, False)
-        for field in ('candidateGeneration', 'body', 'url', 'path', 'pid', 'prompt', 'sessionId'):
-            add(kind, 'unknown-' + field, dict(base, **{field: 1}), False)
-        for field in ('eventId', 'nodeId', 'runtimeId', 'attemptId'):
-            for name, value in [('v4', OTHER), ('uppercase', OTHER.upper()),
-                                ('v1', OTHER.replace('4def', '1def')), ('opaque', 'opaque-id'),
-                                ('newline', OTHER + '\n'), ('nonascii', '界' * 36)]:
-                add(kind, field + '-' + name, dict(base, **{field: value}), name == 'v4')
-        for field in (*GENERATIONS, *(('policyRevision',) if kind == 'envelope' else ())):
-            for value in (True, False, 0, -1, 1.5, 2**53, '1', None):
-                add(kind, f'{field}-invalid-{value!r}', dict(base, **{field: value}), False)
-            for name, value in [('safe-max', 2**53 - 1), ('integral-float', 4.0)]:
-                changed = dict(base, **{field: value})
-                if field in ('attachmentGeneration', 'consumerGeneration'):
-                    changed.update(attachmentGeneration=value, consumerGeneration=value)
-                add(kind, field + '-' + name, changed, True)
-        for field, value in [('schemaVersion', 1), ('schemaVersion', True), ('schemaVersion', '2'),
-                             ('principal', 'Adam@knitli.com'), ('principal', 'adâm@knitli.com'),
-                             ('principal', 'a@Knitli.com'), ('principal', 'a..b@example.com'),
-                             ('principal', 'a' * 65 + '@example.com'), ('principal', 'a@example.com\n'),
-                             ('agent', 'bad agent'), ('agent', 'pilot\n'), ('agent', 'é'),
-                             ('agent', 'x' * 33), ('deliveryId', 'dly_' + 'A' * 64)]:
-            add(kind, f'invalid-{field}-{value!r}', dict(base, **{field: value}), False)
-        add(kind, 'schema-version-integral-float', dict(base, schemaVersion=2.0), True)
-        add(kind, 'consumer-attachment-mismatch', dict(base, consumerGeneration=4), False)
-        source_field = 'sourceStateVersion' if kind == 'envelope' else 'deliveredSourceStateVersion'
-        for value in ('msg:' + 'A' * 64, 'msg:' + 'a' * 63, 'manual-1', 'msg:' + 'a' * 64 + '\n'):
-            add(kind, 'invalid-source-' + value, dict(base, **{source_field: value}), False)
-        times = ('observedAt', 'issuedAt', 'expiresAt') if kind == 'envelope' else ('acknowledgedAt',)
-        for field in times:
-            for value in ('2026-10-17T12:00:00Z', '2026-10-17T12:00:00.000+00:00',
-                          '2026-02-30T12:00:00.000Z', '2026-10-17T24:00:00.000Z',
-                          '2026-10-17T12:00:00.000Z\n', '２０２６-10-17T12:00:00.000Z', 1, None):
-                add(kind, f'noncanonical-{field}-{value!r}', dict(base, **{field: value}), False)
-        for value in (None, [], 'not a decoded object', True, 2):
-            add(kind, 'not-dto-' + repr(value), value, False)
+def _add_generations_cases(add, kind, base):
+    """Append generations conformance cases in stable order."""
+    for field in (*GENERATIONS, *(('policyRevision',) if kind == 'envelope' else ())):
+        for value in (True, False, 0, -1, 1.5, 2**53, '1', None):
+            add(kind, f'{field}-invalid-{value!r}', dict(base, **{field: value}), False)
+        for name, value in [('safe-max', 2**53 - 1), ('integral-float', 4.0)]:
+            changed = dict(base, **{field: value})
+            if field in ('attachmentGeneration', 'consumerGeneration'):
+                changed.update(attachmentGeneration=value, consumerGeneration=value)
+            add(kind, field + '-' + name, changed, True)
 
+
+def _add_scalar_cases(add, kind, base):
+    """Append scalar conformance cases in stable order."""
+    for field, value in [('schemaVersion', 1), ('schemaVersion', True), ('schemaVersion', '2'),
+                         ('principal', 'Adam@knitli.com'), ('principal', 'adâm@knitli.com'),
+                         ('principal', 'a@Knitli.com'), ('principal', 'a..b@example.com'),
+                         ('principal', 'a' * 65 + '@example.com'), ('principal', 'a@example.com\n'),
+                         ('agent', 'bad agent'), ('agent', 'pilot\n'), ('agent', 'é'),
+                         ('agent', 'x' * 33), ('deliveryId', 'dly_' + 'A' * 64)]:
+        add(kind, f'invalid-{field}-{value!r}', dict(base, **{field: value}), False)
+    add(kind, 'schema-version-integral-float', dict(base, schemaVersion=2.0), True)
+    add(kind, 'consumer-attachment-mismatch', dict(base, consumerGeneration=4), False)
+
+
+def _add_timestamps_cases(add, kind, base):
+    """Append timestamps conformance cases in stable order."""
+    source_field = 'sourceStateVersion' if kind == 'envelope' else 'deliveredSourceStateVersion'
+    for value in ('msg:' + 'A' * 64, 'msg:' + 'a' * 63, 'manual-1', 'msg:' + 'a' * 64 + '\n'):
+        add(kind, 'invalid-source-' + value, dict(base, **{source_field: value}), False)
+    times = ('observedAt', 'issuedAt', 'expiresAt') if kind == 'envelope' else ('acknowledgedAt',)
+    for field in times:
+        for value in ('2026-10-17T12:00:00Z', '2026-10-17T12:00:00.000+00:00',
+                      '2026-02-30T12:00:00.000Z', '2026-10-17T24:00:00.000Z',
+                      '2026-10-17T12:00:00.000Z\n', '２０２６-10-17T12:00:00.000Z', 1, None):
+            add(kind, f'noncanonical-{field}-{value!r}', dict(base, **{field: value}), False)
+    for value in (None, [], 'not a decoded object', True, 2):
+        add(kind, 'not-dto-' + repr(value), value, False)
+
+
+def _add_subject_cases(add):
+    """Append subject conformance cases in stable order."""
     for field, value in [('source', 'manual'), ('eventKind', 'attention'), ('reasonCode', 'owner_canary'),
                          ('eventReference', OTHER), ('eventReference', 'ref_' + OTHER.upper())]:
         add('envelope', 'invalid-' + field, dict(ENVELOPE, **{field: value}), False)
@@ -95,6 +104,9 @@ def decoded_cases():
         del subject[field]
         add('envelope', 'required-subject-' + field, dict(ENVELOPE, canonicalSubject=subject), False)
 
+
+def _add_correlation_cases(add):
+    """Append correlation conformance cases in stable order."""
     submitted = dict(ACK, status='submitted', nativeCorrelation={
         'kind': 'native_turn_started', 'permitId': OTHER, 'turnId': OTHER})
     add('acknowledgment', 'submitted-stage', submitted, True)
@@ -115,6 +127,9 @@ def decoded_cases():
             add('acknowledgment', stage['status'] + '-required-correlation-' + field,
                 dict(stage, nativeCorrelation=correlation), False)
 
+
+def _add_freshness_cases(add):
+    """Append freshness conformance cases in stable order."""
     issued, expires = NOW - 30_000, NOW + 30_000
     for offset, valid in [(30_000, True), (30_001, False)]:
         add('envelope', f'expiration-skew-{offset}', ENVELOPE, valid, expires + offset)
@@ -128,6 +143,24 @@ def decoded_cases():
     add('acknowledgment', 'ack-past-future-boundary', dict(ACK, acknowledgedAt='2026-10-17T12:01:00.001Z'), False)
     ancient = dict(ENVELOPE, observedAt='0000-01-01T00:00:00.001Z', issuedAt='0000-01-01T00:00:00.001Z', expiresAt='0000-01-01T00:01:00.001Z')
     add('envelope', 'year-zero', ancient, True, -62167219170000)
+
+
+def decoded_cases():
+    """All JSON-representable schema/freshness cases, for both language drivers."""
+    result = []
+
+    def add(kind, name, value, expected, now=NOW):
+        result.append(dict(kind=kind, case=name, value=value, nowMs=now, expected=expected))
+
+    for kind, base in [('envelope', ENVELOPE), ('acknowledgment', ACK)]:
+        _add_identity_cases(add, kind, base)
+        _add_generations_cases(add, kind, base)
+        _add_scalar_cases(add, kind, base)
+        _add_timestamps_cases(add, kind, base)
+
+    _add_subject_cases(add)
+    _add_correlation_cases(add)
+    _add_freshness_cases(add)
     return result
 
 
