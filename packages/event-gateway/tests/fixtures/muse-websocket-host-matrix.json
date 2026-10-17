@@ -332,6 +332,62 @@
       "hostname": "127.0.0.1"
     },
     {
+      "group": "ipv6_boundaries",
+      "url": "wss://[v1.example]/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[fe80::1%25eth0]/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[fe80::1%eth0]/events",
+      "accepted": false
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[::ffff:192.0.2.1]/events",
+      "accepted": true,
+      "hostname": "[::ffff:c000:201]"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[::]/events",
+      "accepted": true,
+      "hostname": "[::]"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]/events",
+      "accepted": true,
+      "hostname": "[ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[::1]:0/events",
+      "accepted": true,
+      "hostname": "[::1]"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[::1]:65535/events",
+      "accepted": true,
+      "hostname": "[::1]"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[::1]:/events",
+      "accepted": true,
+      "hostname": "[::1]"
+    },
+    {
+      "group": "ipv6_boundaries",
+      "url": "wss://[::1]:65536/events",
+      "accepted": false
+    },
+    {
       "group": "domain_ipv6",
       "url": "wss://example.test/events",
       "accepted": true,

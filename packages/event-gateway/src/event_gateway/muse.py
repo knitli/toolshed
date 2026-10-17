@@ -1,6 +1,7 @@
 """Owner-reported Muse monitor contract; never starts a monitor or grants authority."""
 
 from copy import deepcopy
+from ipaddress import IPv6Address
 import re
 import shlex
 from unicodedata import normalize
@@ -80,8 +81,11 @@ def _valid_websocket_uri(uri):
                  and '#' not in uri and '@' not in authority
                  and re.search(r'%(?![0-9A-Fa-f]{2})', authority) is None)
         if authority.startswith('['):
+            # urlsplit also accepts IPvFuture and scoped addresses, unlike native URLs.
+            IPv6Address(parsed.hostname)
             suffix = authority[authority.index(']') + 1:]
-            valid = valid and (suffix in ('', ':') or suffix.startswith(':') and suffix[1:].isdigit())
+            valid = (valid and '%' not in parsed.hostname
+                     and (suffix in ('', ':') or suffix.startswith(':') and suffix[1:].isdigit()))
         else:
             valid = valid and _valid_domain_host(parsed.hostname)
         # Reading port also rejects malformed/out-of-range URL ports.
