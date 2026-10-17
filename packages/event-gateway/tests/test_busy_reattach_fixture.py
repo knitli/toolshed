@@ -370,7 +370,6 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
                 stack.enter_context(patch.object(F.asyncio, "sleep", new=AsyncMock()))
                 fresh = None
             cli = stack.enter_context(patch.object(F, "run_cli_capture", side_effect=cli_call))
-            stack.enter_context(patch.object(F, "Store", Store))
             stack.enter_context(patch.object(F, "record_evidence"))
             await F.attach_busy_session(ctx)
         return ctx, cli, fresh, binding
