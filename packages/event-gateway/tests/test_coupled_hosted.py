@@ -63,6 +63,7 @@ class CoupledHostedTests(unittest.TestCase):
 
     def test_main_loads_one_helper_and_checks_it_before_each_launch(self):
         events = []
+
         def guard():
             events.append('guard')
             if events.count('guard') == 4:
@@ -70,11 +71,13 @@ class CoupledHostedTests(unittest.TestCase):
             return {}
         helper = SimpleNamespace(verify_trusted_hosted_network=Mock(side_effect=guard),
                                  preflight_ports=Mock())
+
         def native(*values, **options):
             events.append('launch')
             return nullcontext('native')
         original = Mock(side_effect=native)
         launcher = SimpleNamespace(native_client=original, ThreadingHTTPServer=Mock())
+
         def qualify(*values, **options):
             for _ in range(3):
                 with launcher.native_client():

@@ -121,7 +121,10 @@ class HostedNativeTests(unittest.TestCase):
                 if fault == 'first-exit':
                     self.assertEqual(result['scenarioExecutions'], [{'scenario': 'three-session', 'returncode': 7}])
                 if fault in ('verifier-key', 'verifier-type', 'verifier-index'):
-                    self.assertEqual(result['failure']['exceptionType'], {'verifier-key': 'KeyError', 'verifier-type': 'TypeError', 'verifier-index': 'IndexError'}[fault])
+                    self.assertEqual(
+                        result['failure']['exceptionType'],
+                        {'verifier-key': 'KeyError', 'verifier-type': 'TypeError', 'verifier-index': 'IndexError'}[fault],
+                    )
                     self.assertEqual(result['failure']['scenario'], 'three-session')
                     self.assertTrue(result['failure']['frames'])
                     self.assertEqual(result['reason'], 'verifier_error')
@@ -209,6 +212,7 @@ class HostedNativeTests(unittest.TestCase):
             self.assertEqual(kind, HOSTED.socket.SOCK_STREAM)
             listener = MagicMock()
             listener.__enter__.return_value = listener
+
             def bind(address):
                 self.assertTrue(all(not prior.__exit__.called for prior in listeners))
                 self.assertEqual(address[0], '127.0.0.1' if family == HOSTED.socket.AF_INET else '::1')

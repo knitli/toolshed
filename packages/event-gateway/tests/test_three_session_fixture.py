@@ -84,6 +84,11 @@ class ThreeSessionReleasedPortTests(unittest.TestCase):
                         occupied.listen()
                     port = occupied.getsockname()[1]
                     self.assertFalse(FIXTURE.port_is_released(port))
+                # Match stop_broker's bounded cleanup wait: Darwin may not release
+                # the just-closed binding before the first immediate probe.
+                deadline = time.monotonic() + 5
+                while not FIXTURE.port_is_released(port) and time.monotonic() < deadline:
+                    time.sleep(0.01)
                 self.assertTrue(FIXTURE.port_is_released(port))
 
     @unittest.skipUnless(FIXTURE.sys.platform == "darwin", "Darwin cleanup semantics")
