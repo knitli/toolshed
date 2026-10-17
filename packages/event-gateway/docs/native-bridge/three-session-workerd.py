@@ -1354,6 +1354,16 @@ def listener_delivery(port, signed):
         connection.close()
 
 
+def db_attachment(state, runtime_id):
+    """Read one committed mapping without acquiring the daemon's writer lock."""
+    db_path = Path(state) / "ledger.sqlite"
+    uri = db_path.absolute().as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
+        row = db.execute("SELECT data FROM attachments WHERE runtime=?", (runtime_id,)).fetchone()
+        value = json.loads(row[0]) if row else None
+        return value if value and value["leaseExpiresAt"] != 0 else None
+
+
 def db_delivery(state, delivery_id):
     db_path = Path(state) / "ledger.sqlite"
     uri = db_path.absolute().as_uri() + "?mode=ro"
@@ -1688,8 +1698,7 @@ async def attach_busy_session(ctx):
     require(exit_code == 0 and result.get("remoteStatus") == "attached"
             and result.get("localStatus") == "current", "production busy attach did not commit and persist")
     status_after = await ctx.admission_cloud.runtime_status(ctx.runtime_ids["C"])
-    with Store(ctx.state) as store:
-        mapping = store.get_attachment(ctx.runtime_ids["C"])
+    mapping = await asyncio.to_thread(db_attachment, ctx.state, ctx.runtime_ids["C"])
     require(attachment_matches_current(mapping, status_after, status_before, binding, session["sessionId"])
             and status_after["storedQualified"] is True and status_after["nativeBinding"] == binding,
             "busy attach cloud and Store generations or binding differ")
@@ -2415,8 +2424,7 @@ async def run_fixture_attach(ctx):
         ctx.c_first_attempts_before_attach, ctx.c_first_claims_before_attach,
         ctx.c_first_receipts_before_attach,
     )
-    with Store(ctx.state) as store:
-        c_mapping_before_attach = store.get_attachment(ctx.runtime_ids["C"])
+    c_mapping_before_attach = await asyncio.to_thread(db_attachment, ctx.state, ctx.runtime_ids["C"])
     require(c_mapping_before_attach is not None,
             "C local attachment was missing before fixture attach")
     require(c_mapping_before_attach["nativeBinding"] == ctx.c_busy_binding,
@@ -2448,8 +2456,7 @@ async def run_fixture_attach(ctx):
                 attach_exit == 0, ctx.attach_result.get("remoteStatus") == "attached",
                 ctx.attach_result.get("localStatus") == "current")
     ctx.c_status_after_attach = await ctx.admission_cloud.runtime_status(ctx.runtime_ids["C"])
-    with Store(ctx.state) as store:
-        ctx.c_mapping_after_attach = store.get_attachment(ctx.runtime_ids["C"])
+    ctx.c_mapping_after_attach = await asyncio.to_thread(db_attachment, ctx.state, ctx.runtime_ids["C"])
     attached_current = attachment_matches_current(
         ctx.c_mapping_after_attach, ctx.c_status_after_attach, ctx.c_status_before_attach,
         ctx.current_binding, ctx.sessions["C"]["sessionId"],

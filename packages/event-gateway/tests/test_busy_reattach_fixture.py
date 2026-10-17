@@ -8,9 +8,10 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 import threading
+import tempfile
 from uuid import uuid4
 from event_gateway import cli as gateway_cli, launcher
-from event_gateway.store import Store
+from event_gateway.store import Store, StoreError
 from unittest.mock import AsyncMock, Mock, patch
 
 
@@ -50,6 +51,38 @@ def busy_response(binding, challenge_id, nonce, deadline, *, eligible=True, turn
             "witness": {**binding, "version": 2, "nonce": nonce, "sequence": nonce,
                         "cause": "heartbeat", "leaseMs": 750, "eligible": eligible,
                         "nativeCoreTurnState": turn_state}}
+
+
+class AttachmentReadbackTests(unittest.TestCase):
+    def test_readback_uses_committed_snapshot_while_writer_lock_is_held(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory).resolve()
+            with Store(state) as owner:
+                mapping = {"runtimeId": "fixture-runtime", "leaseExpiresAt": 1, "value": "committed"}
+                owner.db.execute("INSERT INTO attachments VALUES (?,?)", ("fixture-runtime", json.dumps(mapping)))
+                owner.db.commit()
+                with self.assertRaisesRegex(StoreError, "writer_locked"):
+                    Store(state)
+                owner.db.execute("UPDATE attachments SET data=? WHERE runtime=?", (
+                    json.dumps({**mapping, "value": "uncommitted"}), "fixture-runtime"))
+                self.assertEqual(F.db_attachment(state, "fixture-runtime"), mapping)
+                self.assertIsNone(F.db_attachment(state, "absent-runtime"))
+                owner.db.rollback()
+                self.assertEqual(owner.get_attachment("fixture-runtime"), mapping)
+                with self.assertRaisesRegex(StoreError, "writer_locked"):
+                    Store(state)
+
+    def test_revoked_and_empty_mapping_keep_store_null_semantics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory).resolve()
+            with Store(state) as owner:
+                for value in ({"leaseExpiresAt": 0}, {}, None):
+                    with self.subTest(value=value):
+                        owner.db.execute("INSERT OR REPLACE INTO attachments VALUES (?,?)", (
+                            "fixture-runtime", json.dumps(value)))
+                        owner.db.commit()
+                        self.assertIsNone(owner.get_attachment("fixture-runtime"))
+                        self.assertIsNone(F.db_attachment(state, "fixture-runtime"))
 
 
 class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
@@ -305,11 +338,13 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
                     F.record_session_request(ctx, ctx.state, request_session, message)
             return 0, {"remoteStatus": "attached", "localStatus": "current"}
         first, last = attachment_history(changed_history)
-        store = Mock()
-        store.__enter__ = Mock(return_value=store)
-        store.__exit__ = Mock(return_value=False)
-        store.get_attachment.return_value = mapping
         with ExitStack() as stack:
+            ctx.state = Path(stack.enter_context(tempfile.TemporaryDirectory())).resolve()
+            owner = stack.enter_context(Store(ctx.state))
+            owner.put_attachment(mapping)
+            # Match the live daemon's exclusive writer ownership throughout readback.
+            with self.assertRaisesRegex(StoreError, "writer_locked"):
+                Store(ctx.state)
             stack.enter_context(patch.object(F, "require_model_held"))
             stack.enter_context(patch.object(F, "c1_busy_history", side_effect=[first, copy.deepcopy(first), last]))
             if witness_nonces is None:
@@ -335,7 +370,6 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
                 stack.enter_context(patch.object(F.asyncio, "sleep", new=AsyncMock()))
                 fresh = None
             cli = stack.enter_context(patch.object(F, "run_cli_capture", side_effect=cli_call))
-            stack.enter_context(patch.object(F, "Store", return_value=store))
             stack.enter_context(patch.object(F, "record_evidence"))
             await F.attach_busy_session(ctx)
         return ctx, cli, fresh, binding
