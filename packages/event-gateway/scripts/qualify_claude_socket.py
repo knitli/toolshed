@@ -182,6 +182,7 @@ class BusyProbe:
         self.ready_to_send, self.release, self.complete, self.failed = (asyncio.Event() for _ in range(4))
         self.initialized = self.running = self.held = self.sent_once = False
         self.expected = None
+        self.pending_preinit_running = None
         self.requests = self.assistants = self.results = 0
         self.running_turn = 0
         self.replayed, self.native_ids, self.observations = set(), set(), []
@@ -249,6 +250,29 @@ class BusyProbe:
             require(value.get('tools') == [], 'busy_native_init')
             self.initialized = True
             self.record('native_init')
+            if self.pending_preinit_running is not None:
+                self.pending_preinit_running = None
+                self.running = True
+                self.running_turn = 1
+                self._ready()
+            return
+        if not self.initialized and kind == 'system' and value.get('subtype') == 'session_state_changed':
+            # The pinned native queue can drain one running notice before init.
+            # Reserve its identity and observation time now; only actual init
+            # may activate it, and an intervening lifecycle notice invalidates it.
+            require(set(value) == {'type', 'subtype', 'session_id', 'uuid', 'state'},
+                    'busy_native_state')
+            identity = value.get('uuid')
+            try:
+                require(isinstance(identity, str) and str(UUID(identity)) == identity, 'busy_native_identity')
+            except ValueError:
+                raise CanaryError('busy_native_identity') from None
+            require(identity not in self.native_ids, 'busy_native_duplicate')
+            require(self.pending_preinit_running is None, 'busy_native_preinit_order')
+            require(value.get('state') == 'running', 'busy_native_state')
+            self.native_ids.add(identity)
+            self.pending_preinit_running = identity
+            self.record('native_state', state='running', nativeUuid=identity, awaitingInit=True)
             return
         require(self.initialized, 'busy_native_missing_init')
         if kind == 'system' and value.get('subtype') == 'session_state_changed':
