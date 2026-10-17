@@ -678,16 +678,20 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_startup_system_discriminators_remain_rejected_and_payload_free(self):
         secret = 'private-startup-' + secrets.token_hex(16)
-        subtypes = ('hook_started', 'hook_progress', 'hook_response', 'status',
-                    'session_metadata', 'init_milestone')
-        for subtype in subtypes:
+        manifest = json.loads((SCRIPT.parent.parent / 'docs/claude-system-subtypes-2.1.302.json').read_text())
+        self.assertEqual(len(manifest['schemaSubtypeOffsets']), 64)
+        subtypes = (set(manifest['schemaSubtypeOffsets']) - {'init', 'session_state_changed'}
+                    | set(manifest['retainedConstructorSubtypeOffsets']))
+        self.assertEqual(len(subtypes), 63)
+        for subtype in sorted(subtypes):
             for initialized in (False, True):
                 probe = self.new_probe()
                 probe.initialized = initialized
                 event = {'type': 'system', 'subtype': subtype, 'session_id': self.session,
                          'metadata': {secret: secret}, 'status': secret, 'hook_id': secret,
                          'hook_event': secret, 'message': secret, 'stdout': secret,
-                         'stderr': secret, 'output': secret, 'exit_code': 17, secret: secret}
+                         'stderr': secret, 'output': secret, 'exit_code': 17, 'content': secret, 'tasks': [secret],
+                         'commands': [secret], 'title': secret, secret: secret}
                 reason = 'busy_native_premature_result' if initialized else 'busy_native_missing_init'
                 with self.subTest(subtype=subtype, initialized=initialized), \
                         self.assertRaisesRegex(CANARY.CanaryError, '^' + reason + '$') as raised:
@@ -705,7 +709,9 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_system_discriminator_shapes_are_fixed_and_bounded(self):
         secret = 'private-discriminator-' + secrets.token_hex(16)
-        values = ((secret, 'string'), (secret * 100, 'string'), (None, 'null'),
+        values = ((secret, 'string'), (secret * 100, 'string'),
+                  ('informational' + secret, 'string'), (secret + 'commands_changed', 'string'),
+                  ('INFORMATIONAL', 'string'), ('informational\\n', 'string'), (None, 'null'),
                   ({secret: secret}, 'object'), ([secret], 'array'),
                   (True, 'boolean'), (17, 'number'), (1.5, 'number'))
         for value, shape in values:
