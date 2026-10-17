@@ -158,11 +158,12 @@ function makeBackend(options = {}) {
       child.signalCode = null;
       child.finish = code => {
         if (child.exitCode !== null) return;
-        child.exitCode = code;
+        child.exitCode = options.attachExit ? options.attachExit.code : code;
+        child.signalCode = options.attachExit?.signal ?? null;
         if (options.neverCloseClient) return;
         child.stdout.end();
         child.stderr.end();
-        child.emit('close', code, null);
+        child.emit('close', child.exitCode, child.signalCode);
       };
       child.kill = signal => {
         data.clientSignals.push(signal);
@@ -183,7 +184,11 @@ function makeBackend(options = {}) {
           stop(container, 0);
           return;
         }
-        child.stdout.write(`${JSON.stringify({ type: 'result', subtype: mode, session_id: SESSION })}\n`);
+        if (options.attachOutput) {
+          for (const [stream, bytes] of options.attachOutput) child[stream].write(bytes);
+        } else {
+          child.stdout.write(`${JSON.stringify({ type: 'result', subtype: mode, session_id: SESSION })}\n`);
+        }
         if (options.outputOverflowAfterTerminal) child.stdout.write(Buffer.alloc(70 * 1024, 65));
         if (!options.leaveRunningAfterAttach) stop(container, 0);
         else child.finish(0);
@@ -474,7 +479,8 @@ const ignoresTerm = await runCase({ mode: 'abort', ignorePid1Term: true,
 const ignoreInputClosed = new Promise(resolvePromise => ignoresTerm.facade.stdin.end(resolvePromise));
 await ignoreInputClosed;
 const ignoresTermStartedAt = Date.now();
-ignoresTerm.facade.kill('SIGTERM');
+assert.equal(ignoresTerm.facade.kill('SIGTERM'), true);
+assert.equal(ignoresTerm.facade.kill('SIGTERM'), true);
 const ignoredTermResult = await ignoresTerm.adapter.settle();
 assert(Date.now() - ignoresTermStartedAt < 1_500, 'SIGKILL escalation is bounded');
 assert.equal(ignoredTermResult.exitCode, 137);
@@ -482,6 +488,45 @@ assert.deepEqual(ignoresTerm.backend.data.commands.filter(args => args[0] === 'k
   ['--signal=SIGTERM', '--signal=SIGKILL']);
 assert.equal(ignoresTerm.backend.data.containers.size, 0);
 ignoresTerm.close();
+
+for (const code of [1, 125, null, -1, 0.5, '0']) {
+  const run = await runCase({ attachExit: { code } });
+  run.facade.stdin.end();
+  await assert.rejects(run.adapter.settle(), /Docker attach exit code disagrees/);
+  assert.equal(run.backend.data.containers.size, 0, 'exit mismatch still removes the owned stopped container');
+  assert.equal(run.facade.exitCode, 1, 'CLI failure cannot become facade success');
+  run.close();
+}
+
+const signaledAttach = await runCase({ attachExit: { code: 0, signal: 'SIGTERM' } });
+signaledAttach.facade.stdin.end();
+await assert.rejects(signaledAttach.adapter.settle(), /Docker attach client was signaled/);
+assert.equal(signaledAttach.backend.data.containers.size, 0);
+signaledAttach.close();
+
+for (const streams of [
+  ['stderr', 'stdout'], ['stdout', 'stderr'],
+  ['stderr', 'stdout', 'stderr', 'stdout'], ['stdout', 'stderr', 'stdout', 'stderr'],
+]) {
+  for (const extraByte of [0, 1]) {
+    const chunkSize = 64 * 1024 / streams.length;
+    const attachOutput = streams.map((stream, index) =>
+      [stream, Buffer.alloc(chunkSize + (index === streams.length - 1 ? extraByte : 0), 10)]);
+    const run = await runCase({ attachOutput });
+    run.facade.stdin.end();
+    if (extraByte) {
+      await assert.rejects(run.adapter.settle(), /Docker attach (output|diagnostic) limit/);
+      assert.equal(run.facade.exitCode, 1);
+    } else {
+      const result = await run.adapter.settle();
+      assert.equal(result.exitCode, 0, 'exact shared 64 KiB limit remains accepted');
+      assert.equal(result.transportBytes.output, 32 * 1024, 'stderr is excluded from protocol receipts');
+      assert.equal(Buffer.concat(run.received).length, 32 * 1024);
+    }
+    assert.equal(run.backend.data.containers.size, 0, 'shared stream budget always preserves owned cleanup');
+    run.close();
+  }
+}
 
 const cliExitRunning = await runCase({ leaveRunningAfterAttach: true });
 cliExitRunning.facade.stdin.end();
@@ -624,6 +669,8 @@ console.log(JSON.stringify({ status: 'PASS', cases: [
   'queued and corked write/end admission; pending callbacks released; cumulative frame and transport caps',
   'UTF8, hex default encoding, callback overloads and repeated empty end',
   'bounded startup buffering and clean exit code', 'early terminal', 'EOF', 'abort and duplicate kill',
+  'attach CLI exit code must agree with inspected status; malformed and signaled exits rejected',
+  'shared stdout/stderr 64 KiB exact boundary and overflow in both orders and interleavings',
   'PID 1 ignores TERM and receives bounded SIGKILL', 'attach CLI exit while container runs',
   'lost create response recovery', 'lost create with bad policy recovers exact owned container',
   'kill before CID', 'command timeout', 'daemon identity mismatch', 'wrong ID fails closed',

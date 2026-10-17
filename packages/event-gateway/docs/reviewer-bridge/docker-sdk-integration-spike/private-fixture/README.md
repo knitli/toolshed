@@ -1,8 +1,6 @@
-CURRENT REPOSITORY REVIEW-FIX CANDIDATE: UNEXECUTED. The actual private execution inputs and attempt 3 receipts are unchanged. The previous execution is archived at published commit 9fd45beeb633060c497a4d6a136c880efcf40f97 and in the evidence directory; it does not qualify the changed source below. Full review and a new root freeze/rerun are required.
-
 # Private SDK / Docker integration candidate
 
-CURRENT REVISION UNEXECUTED AFTER PACKAGING FIXES. Controlled attempt 2 passed all four SDK/Docker fixture cases at its archived source hashes. The subsequent launcher preflight/lint and adapter formatting changes require one fresh root proof before this current bundle is qualified. `node --check` only parsed the fixture; Python AST and inert source assertions checked the launcher.
+This is a creation-time input document, not an execution receipt. Attempt 4 passed all four SDK/Docker fixture cases and five controls at manifest `66dd375440977b510157c19f7ba872cc7277f0ff67a7fe00ff2e71893b70073b`; its source and receipts remain immutable historical evidence. Later candidate edits require a new matching root-controlled proof. Consult the repository root README and result-receipt.json for current qualification; do not infer execution from this frozen input document.
 
 The fixture imports the frozen adapter first, then guards Node child_process entrypoints (including the exported ChildProcess constructor) and global fetch, synchronizes builtin exports, and only then imports the actual SDK 0.3.209 and unchanged canonical runReview driver. The adapter captures its trusted spawn callable by value. The original ChildProcess prototype is deliberately untouched because trusted spawn uses it internally.
 

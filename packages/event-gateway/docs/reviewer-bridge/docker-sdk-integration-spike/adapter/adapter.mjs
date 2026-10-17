@@ -670,7 +670,7 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
         const bytes = Buffer.from(chunk);
         total += bytes.length;
         const bounded = checkFrameBytes(bytes, 'output');
-        if (!bounded || total > MAX_OUTPUT) {
+        if (!bounded || total + diagnosticBytes > MAX_OUTPUT) {
           transportError('Docker attach output limit');
           void terminateClient(child, closeState, terminationOptions);
           return;
@@ -729,6 +729,8 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
       if (!failure) {
         invariant(current.Running === false && current.Pid === 0 && Number.isInteger(current.ExitCode)
           && current.ExitCode >= 0, 'container exit status unavailable');
+        invariant(Number.isInteger(attachedExit.code) && attachedExit.code === current.ExitCode,
+          'Docker attach exit code disagrees with container exit status');
         finalExitCode = current.ExitCode;
         if (attachedExit.signal) failure = new Error('Docker attach client was signaled before completion');
       }

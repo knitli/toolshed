@@ -1,18 +1,28 @@
 # Local reviewer SDK / Docker integration spike
 
-The current review fixes passed **attempt 4: four cases and all five containment controls**, using actual SDK **0.3.209** with a fixed Docker protocol fixture. The run completed on 2026-10-17 at 17:21:44–17:21:58 UTC. Root independently confirmed all four exact container IDs and names absent, unchanged daemon identity, and no owned host processes. The [result receipt](result-receipt.json) records exact source and evidence hashes.
+The current candidate passed **attempt 5: four cases and all five containment controls**, at 2026-10-17 17:47:42–17:47:56 UTC. Attach exit status now must be an integer matching inspected container exit status, and stdout/stderr share one output budget regardless of ordering. Root independently confirmed exact container absence, stable daemon identity, and no owned host processes.
 
-The fixes reserve `stdin.write()` and `stdin.end()` payload budgets before queueing, count processed bytes once, and preserve completion callbacks. They also replace the ambiguous assertion-helper name, validate canonical CID/UUID values linearly, simplify fake-backend options, preserve boolean rejection, and satisfy targeted Python lint.
+The prior review-fix bundle passed **attempt 4: four cases and all five containment controls**, using actual SDK **0.3.209** with a fixed Docker protocol fixture. The run completed on 2026-10-17 at 17:21:44–17:21:58 UTC. Root independently confirmed all four exact container IDs and names absent, unchanged daemon identity, and no owned host processes. The [result receipt](result-receipt.json) separates historical proof from the current candidate.
+
+The attempt 4 fixes reserve `stdin.write()` and `stdin.end()` payload budgets before queueing, count processed bytes once, and preserve completion callbacks. They also replace the ambiguous assertion-helper name, validate canonical CID/UUID values linearly, simplify fake-backend options, preserve boolean rejection, and satisfy targeted Python lint.
 
 The sandbox permits the **whole Node process** to access Docker's Unix socket. API guards do **not** contain a hostile SDK using a raw socket to reach the daemon. This is a pinned synthetic-fixture proof, not a general hostile-SDK or daemon security boundary.
 
-## Current attempt 4 evidence
+## Current attempt 5 evidence
+
+The [root receipt](evidence/attempt-5/root-attempt-5.json), [exact absence receipt](evidence/attempt-5/root-attempt-5-exact-absence.json), [capture](evidence/attempt-5/capture.json), and [stdout](evidence/attempt-5/stdout.log) qualify manifest `cac2c2d8d878cbc0c40c8b6accf487dc872b41fafff76232da085da649c3963a`. All four expected outcomes passed, including abort exit 137 with duplicate SIGTERM; five controls passed. The canary was preserved and removed; the forbidden Unix listener closed and was removed. Capture retained 6,836 bytes under its 1 MiB limit.
+
+All ten packaged source and input-document files match the private frozen inputs. Runtime execution is established by the receipts, while version-neutral input notes link to this current qualification record. Eight explicit regular-file evidence copies retain exact bytes. Complete source history is private in `history-attempt-5`; SDK/driver bytes are not vendored.
+
+[Captured stderr](evidence/attempt-5/stderr.log) retains four `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warnings with the same authorization limitation described below. Validation passed 28 fake groups, both Node syntax checks, Biome, and two causal mutants restoring the attach-exit and stdout-only budget bugs. Boundary tests cover both stream orders/interleavings at exactly 64 KiB and one byte over, plus duplicate-SIGTERM 143/137 fake aborts.
+
+## Historical attempt 4 evidence
 
 The [root receipt](evidence/attempt-4/root-attempt-4.json), [exact absence receipt](evidence/attempt-4/root-attempt-4-exact-absence.json), [capture receipt](evidence/attempt-4/capture.json), and [stdout](evidence/attempt-4/stdout.log) qualify manifest `66dd375440977b510157c19f7ba872cc7277f0ff67a7fe00ff2e71893b70073b`. Success completed; early terminal, EOF, and abort produced expected `incomplete`, `missing_terminal`, and `timeout` refusals. All five controls passed; the canary was preserved and removed, and the forbidden Unix listener was closed and removed. Capture retained 6,836 bytes under its 1 MiB limit.
 
 [Captured stderr](evidence/attempt-4/stderr.log) retains four `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warnings. These record the bare allowed-tool entry bypassing `canUseTool`; they do not establish production authorization or hostile-SDK containment.
 
-All ten packaged source files match executed private inputs. Their creation-time README and manifest retain UNEXECUTED wording; these subsequent receipts establish execution. Eight explicitly allowlisted regular evidence files are copied byte for byte, with capture `.bin` files renamed `.log`. Complete source history remains in private `history-attempt-4`; SDK/driver bytes are not vendored.
+All ten attempt 4 source files matched its executed private inputs. Their creation-time README and manifest retain UNEXECUTED wording; these subsequent receipts establish execution. Eight explicitly allowlisted regular evidence files are copied byte for byte, with capture `.bin` files renamed `.log`. Complete source history remains in private `history-attempt-4`; SDK/driver bytes are not vendored.
 
 ## Historical attempt 3 evidence
 
@@ -62,10 +72,10 @@ These hashes come from the attempt 2 manifest and identify that historical sourc
 
 The completion driver was recorded unchanged from `knitli/.github` revision `e516ab4803311cd58fc860f57371aedb0fb24f4d`, path `scripts/reviewer-completion-driver.mjs`.
 
-## Current candidate and limits
+## Qualification limits
 
-The copied launcher rejects invocation outside its approved private location before reading files or allocating resources. SDK and completion-driver dependencies remain external hash references only. Root performed attempt 4 privately; packaging performed no further live execution.
+The copied launcher rejects invocation outside its approved private location before reading files or allocating resources. SDK and completion-driver dependencies remain external hash references only. Root performed attempt 5 privately; packaging performed no further live execution.
 
-Validation passed: 26 fake-adapter groups, nine host-only protocol-child tests, five stdin causal mutants rejected, boolean-rejection mutant rejected, Node syntax, Biome, targeted Ruff/E306/E501/D107/C901 ≤15, copied-path refusal, and exact source/evidence hash checks.
+Attempt 4 validation passed: 26 fake-adapter groups, nine host-only protocol-child tests, five stdin causal mutants rejected, boolean-rejection mutant rejected, Node syntax, Biome, targeted Ruff/E306/E501/D107/C901 ≤15, copied-path refusal, and exact source/evidence hash checks.
 
 The result is limited to the tested local actual-SDK / fixed-Docker-protocol integration. Native Claude execution, provider calls, hosted qualification, and production activation remain excluded. It does not establish a production reviewer transport or complete dynamic runtime read closure.
