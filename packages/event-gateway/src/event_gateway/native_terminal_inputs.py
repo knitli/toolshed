@@ -21,15 +21,12 @@ _QUERY = """SELECT
 
 
 def collect_terminal_inputs(connection, delivery_id, attempt_id):
-    """
-    Read a trusted read-only journal connection; return saved inputs or None.
-
-    None means only that this exact attempt is absent, never that no debt exists.
-    Invalid/ambiguous/unsupported records raise one bounded NativeError. The caller
-    owns connection provenance and must open it read-only. This function executes
-    one SELECT, never opens a database, creates a Store, or changes transactions.
-    Returned binding is historical native identity, not a complete session route.
-    """
+    """Read a trusted read-only journal connection; return saved inputs or None."""
+    # None means only that this exact attempt is absent, never that no debt exists.
+    # Invalid/ambiguous/unsupported records raise one bounded NativeError. The caller
+    # owns connection provenance and must open it read-only. This function executes
+    # one SELECT, never opens a database, creates a Store, or changes transactions.
+    # Returned binding is historical native identity, not a complete session route.
     try:
         if (not isinstance(delivery_id, str)
                 or re.fullmatch(r'dly_[0-9a-f]{64}', delivery_id) is None
