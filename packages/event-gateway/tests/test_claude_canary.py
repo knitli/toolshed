@@ -422,21 +422,20 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         probe.release_response()
         return probe
 
-    def finish(self, probe):
+    def complete_turns(self, probe):
         probe.observe(self.assistant(self.ready))
         probe.observe(self.result(self.ready))
         probe.provider_request(self.busy)
         probe.observe(self.assistant(self.busy))
         probe.observe(self.result(self.busy))
+
+    def finish(self, probe):
+        self.complete_turns(probe)
         probe.observe(self.state('idle'))
 
     def test_complete_synthetic_sequence_requires_final_idle(self):
         probe = self.released()
-        probe.observe(self.assistant(self.ready))
-        probe.observe(self.result(self.ready))
-        probe.provider_request(self.busy)
-        probe.observe(self.assistant(self.busy))
-        probe.observe(self.result(self.busy))
+        self.complete_turns(probe)
         self.assertFalse(probe.complete.is_set())
         with self.assertRaises(CANARY.CanaryError):
             probe.proof()
