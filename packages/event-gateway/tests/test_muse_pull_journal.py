@@ -137,7 +137,7 @@ os._exit(0)
                 continue
             changed = (
                 value + 1
-                if type(value) is int
+                if isinstance(value, int)
                 else ("other@example.com" if key == "principal" else U[3])
             )
             with self.subTest(key=key), self.assertRaises(StoreError):

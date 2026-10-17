@@ -64,7 +64,8 @@ def _binding(value, now):
 
 
 class MusePullJournal:
-    """Use an already-open Store's lock, connection and capacity, without dispatch wiring.
+    """
+    Use an already-open Store's lock, connection and capacity, without dispatch wiring.
 
     slotId is a stable host-owned consumer slot, never a caller-selected session key.
     A different slot is a different authority domain: this API promises no cross-slot
@@ -72,6 +73,7 @@ class MusePullJournal:
     """
 
     def __init__(self, store):
+        """Create the dormant journal tables using the already-open Store."""
         self.store = store
         self.db = store.db
         with self._transaction():
