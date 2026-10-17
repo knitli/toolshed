@@ -1,5 +1,5 @@
 """Bounded private failure diagnostics; no native CLI or model execution."""
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import importlib.util
 import json
 import os
@@ -87,6 +87,48 @@ class NativeRevocationDiagnosticsTests(unittest.TestCase):
             self.assertTrue(result["diagnosticOnly"])
             self.assertFalse(result["exactRejectedWitnessAvailable"])
 
+    def test_readonly_snapshot_reconstructs_shm_without_copying_live_shm(self):
+        with native_home() as (session, home):
+            source = database(home, [row()], wal=True)
+            connect = sqlite3.connect
+            observations = []
+
+            def inspect_snapshot(database_uri, **kwargs):
+                self.assertTrue(database_uri.endswith("?mode=ro"))
+                self.assertTrue(kwargs["uri"])
+                snapshot = Path(database_uri.removeprefix("file:").removesuffix("?mode=ro"))
+                self.assertNotEqual(snapshot.parent, home)
+                before = {path.name for path in snapshot.parent.iterdir()}
+                self.assertEqual(before, {"logs_2.sqlite", "logs_2.sqlite-wal"})
+                connection = connect(database_uri, **kwargs)
+                self.assertEqual(connection.execute("SELECT count(*) FROM logs").fetchone(), (1,))
+                self.assertTrue(snapshot.with_name("logs_2.sqlite-shm").is_file())
+                observations.append("readonly SQLite reconstructed snapshot SHM")
+                return connection
+
+            try:
+                self.assertTrue((home / "logs_2.sqlite-shm").is_file())
+                with closing(connect((home / "logs_2.sqlite").as_uri() + "?immutable=1", uri=True)) as main_only:
+                    with self.assertRaises(sqlite3.OperationalError):
+                        main_only.execute("SELECT count(*) FROM logs")
+                with patch.object(FIXTURE.sqlite3, "connect", side_effect=inspect_snapshot):
+                    result = FIXTURE.collect_native_revocations(session, 99, 101)
+            finally:
+                source.close()
+            self.assertEqual(result["status"], "available")
+            self.assertEqual(len(result["records"]), 1)
+            self.assertEqual(observations, ["readonly SQLite reconstructed snapshot SHM"])
+
+    def test_full_busy_budget_keeps_older_than_sixty_second_trace_with_fixed_upper_bound(self):
+        with native_home() as (session, home):
+            database(home, [row(stamp=160)]).close()
+            for end in (175, 340):
+                with self.subTest(end=end):
+                    result = FIXTURE.collect_native_revocations(session, 100, end)
+                    self.assertEqual(result["status"], "available")
+                    self.assertEqual(len(result["records"]), 1)
+            self.assertEqual(FIXTURE.collect_native_revocations(session, 100, 341)["status"], "unavailable")
+
     def test_missing_corrupt_and_unparseable_are_not_absence_proof(self):
         with native_home() as (session, home):
             self.assertEqual(FIXTURE.collect_native_revocations(session, 99, 101)["status"], "unavailable")
@@ -145,7 +187,7 @@ class NativeRevocationDiagnosticsTests(unittest.TestCase):
             database(home, [row()]).close()
             with patch.object(FIXTURE.time, "monotonic", side_effect=[0, 0, 3]):
                 self.assertEqual(FIXTURE.collect_native_revocations(session, 99, 101)["status"], "unavailable")
-            for start, end in [(float("nan"), 101), (102, 101), (1, 101)]:
+            for start, end in [(float("nan"), 101), (102, 101), (1, 242)]:
                 self.assertEqual(FIXTURE.collect_native_revocations(session, start, end)["status"], "unavailable")
 
 
@@ -164,6 +206,19 @@ class SubsequentObservationTests(unittest.TestCase):
             "validUntilMonotonic": 200, "witness": {**self.binding, "version": 2, "nonce": 10,
                 "eligible": True, "sequence": 10, "cause": "never copy me", "leaseMs": 500,
                 "nativeCoreTurnState": "busy"}}
+
+    def test_status_preserves_production_selection_and_rejects_unknown_states(self):
+        for selection in ("selected", "unavailable"):
+            self.assertEqual(FIXTURE.diagnostic_native_response("status", {"selection": selection}),
+                             {"status": "observed", "selection": selection})
+        for response in ({}, {"selection": "unselected"}, {"selection": "other"}, {"selection": None}):
+            self.assertEqual(FIXTURE.diagnostic_native_response("status", response), {"status": "malformed"})
+        for eligible in (True, False, 0, 1, "true", None):
+            response = {"selection": "unavailable", "nativeObservation": {"binding": self.binding, "eligible": eligible}}
+            result = FIXTURE.diagnostic_native_response("status", response)
+            self.assertEqual("eligible" in result, isinstance(eligible, bool))
+            if isinstance(eligible, bool):
+                self.assertIs(result["eligible"], eligible)
 
     def test_followup_busy_witness_never_satisfies_failed_busy_gate(self):
         request = Mock(side_effect=lambda state, session, message: self.response(message))

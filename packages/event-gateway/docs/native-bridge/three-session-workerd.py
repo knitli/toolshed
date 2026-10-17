@@ -47,6 +47,8 @@ NATIVE_REVOCATION_HELPER_SHA256 = "4ea6975f20941089c43ff472f8fecc850834f1b110155
 NATIVE_DIAGNOSTIC_FILE_BYTES = 16 * 1024 * 1024
 NATIVE_DIAGNOSTIC_ROWS = 256
 NATIVE_DIAGNOSTIC_BYTES = 64 * 1024
+# Covers the fixed busy-stage waits, bounded fixture RPCs and follow-up probes.
+NATIVE_DIAGNOSTIC_WINDOW_SECONDS = 240
 
 args = None
 binary = node = cloud_source = package_source = None
@@ -694,7 +696,8 @@ def collect_native_revocations(session, started_unix, ended_unix):
     try:
         require(all(type(value) in (int, float) and math.isfinite(value)
                     for value in (started_unix, ended_unix))
-                and 0 <= ended_unix - started_unix <= 60, "invalid diagnostic interval")
+                and 0 <= ended_unix - started_unix <= NATIVE_DIAGNOSTIC_WINDOW_SECONDS,
+                "invalid diagnostic interval")
         parser = load_revocation_parser()
         deadline = time.monotonic() + 2
         with ExitStack() as stack:
@@ -787,11 +790,14 @@ def diagnostic_native_response(command, response, *, expected_binding=None, chal
     if command == "binding":
         return {"status": "observed", "binding": response} if launcher._valid_binding(response) else {"status": "malformed"}
     if command == "status":
+        selection = response.get("selection")
+        if selection not in ("selected", "unavailable"):
+            return {"status": "malformed"}
         observation = response.get("nativeObservation")
-        value = {"status": "observed", "selection": "selected" if response.get("selection") == "selected" else "unselected"}
+        value = {"status": "observed", "selection": selection}
         if isinstance(observation, dict) and launcher._valid_binding(observation.get("binding")):
             value["binding"] = observation["binding"]
-            if type(observation.get("eligible")) is bool:
+            if isinstance(observation.get("eligible"), bool):
                 value["eligible"] = observation["eligible"]
         return value
     witness = response.get("witness")
