@@ -128,10 +128,12 @@ export class FixtureCoordinator extends AgentCoordinator {
   // Automatic recovery is enabled only for the separately reviewed autonomous proof.
   override async alarm() {
     if (!this.autonomous.FIXTURE_AUTONOMOUS_ALARM) return;
+    const observer = this.autonomous.FIXTURE_ALARM_OBSERVER;
+    if (!observer) throw new Error('fixture_alarm_observer_binding_missing');
     const claims = this.fixtureRead().native_claims;
     if (claims.length !== 1) return;
     if (this.autonomous.FIXTURE_AUTONOMOUS_ALARM !== 'no-super') await super.alarm();
-    const response = await this.autonomous.FIXTURE_ALARM_OBSERVER!.fetch('https://observer.invalid/completed', {
+    const response = await observer.fetch('https://observer.invalid/completed', {
       method: 'POST', body: JSON.stringify({ attemptId: claims[0].attempt_id,
         instanceNonce: this.instanceNonce, executedAt: Date.now(), state: this.fixtureRead() }),
       signal: AbortSignal.timeout(1000),

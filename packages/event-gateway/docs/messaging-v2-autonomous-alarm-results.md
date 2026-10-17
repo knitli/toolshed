@@ -1,15 +1,19 @@
 # Persisted alarm recovery after workerd SIGKILL
 
-All three local cases passed on 2026-10-17 with the frozen test sources in
+All three current guarded-fixture cases passed on 2026-10-17 with the frozen test sources in
 [messaging-v2-autonomous-alarm-result.json](messaging-v2-autonomous-alarm-result.json).
 The [preparation plan](messaging-v2-autonomous-alarm-plan.md) remains the historical
 pre-execution plan. These results add executed evidence without changing it.
+The current fixture explicitly rejects a missing observer binding before state
+reads or production alarm effects. All three cases were rerun after this guard
+and its bundle/source pins changed. The prior pre-guard baseline also passed
+once per mode; its original receipts, logs and hashes remain recorded separately.
 
 | Mode | Observed assertion outcome | Test duration | Passed / skipped |
 | --- | --- | --- | --- |
-| positive | Replacement instance autonomously completed the production alarm; reserving/pending became unknown/unknown | 11.771 s | 1 / 0 |
-| no-super | Replacement alarm signaled, but reserving/pending remained; positive recovery oracle rejected that state | 11.388 s | 1 / 0 |
-| delete-alarm | No completion for the full 25-second observation interval; subsequent diagnostic retained reserving/pending | 26.318 s | 1 / 0 |
+| positive | Replacement instance autonomously completed the production alarm; reserving/pending became unknown/unknown | 11.657 s | 1 / 0 |
+| no-super | Replacement alarm signaled, but reserving/pending remained; positive recovery oracle rejected that state | 11.406 s | 1 / 0 |
+| delete-alarm | No completion for the full 25-second observation interval; subsequent diagnostic retained reserving/pending | 26.481 s | 1 / 0 |
 
 The positive case recorded the production-scheduled persisted alarm before the
 owned after-reserve SIGKILL. During restart and recovery, the test polled only
@@ -37,9 +41,12 @@ run: 16 Python safety tests, 29 Node mock tests and two mocked launch cases
 passed. The sanitized child environment does not forward an ambient autonomous
 mode to default/manual launches. Manual alarm helpers remain available, and the
 automatic alarm override remains disabled without the explicit fixture binding.
+After the guard change, two tests executing the actual alarm method passed
+(missing binding and default mode), alongside three repeated observer tests.
 
 This establishes autonomous persisted-alarm discovery for the pinned local
 runtime after an actual process kill. It does not qualify production hosting,
 power-loss durability, native clients, provider execution, production attachment,
-or real idle-session wake. Each mode ran once; these timings do not establish a
-reliability or latency distribution.
+or real idle-session wake. Each mode has one current guarded run and one retained
+pre-guard baseline run; these timings do not establish a reliability or latency
+distribution.
