@@ -423,16 +423,16 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         return {'type': 'result', 'session_id': self.session, 'uuid': str(uuid4()),
                 'subtype': 'success', 'is_error': False, 'result': marker}
 
-    def started(self):
-        probe = self.new_probe()
+    def started(self, *, probe=None):
+        probe = self.new_probe() if probe is None else probe
         probe.observe({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []})
         probe.observe(self.state('running'))
         probe.provider_request(self.ready)
         probe.hold_response()
         return probe
 
-    def released(self, replay=True):
-        probe = self.started()
+    def released(self, replay=True, *, probe=None):
+        probe = self.started(probe=probe)
         probe.prepare(self.frame)
         if replay:
             probe.observe(self.frame | {'isReplay': True})
@@ -477,15 +477,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(probe.observations, [])
                 self.assertFalse(probe.ready_to_send.is_set())
                 self.assertFalse(probe.complete.is_set())
-                probe.observe({'type': 'system', 'subtype': 'init',
-                               'session_id': self.session, 'tools': []})
-                probe.observe(self.state('running'))
-                probe.provider_request(self.ready)
-                probe.hold_response()
-                probe.prepare(self.frame)
-                probe.observe(self.frame | {'isReplay': True})
-                probe.sent()
-                probe.release_response()
+                probe = self.released(probe=probe)
                 probe.observe(self.ui_hint() | optional)
                 self.finish(probe)
                 self.assertIsInstance(probe.proof(), dict)
