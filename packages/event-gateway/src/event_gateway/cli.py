@@ -5,6 +5,8 @@ import asyncio
 import base64
 from functools import partial
 import json
+import os
+import stat
 from pathlib import Path
 import re
 import sys
@@ -77,6 +79,13 @@ def main(argv=None):
     for flag in ("installation-id", "repository-id", "pr-number", "from-version", "to-version"):
         source_read.add_argument("--" + flag, type=int, required=True)
     source_read.add_argument("--cursor", help="Exact nextCursor JSON from the preceding page")
+    material = commands.add_parser("github-source-material", help="Verify all finding text pages into a new private file")
+    material.add_argument("--cloud-config", type=Path, required=True)
+    for flag in ("installation-id", "repository-id", "pr-number", "from-version", "to-version"):
+        material.add_argument("--" + flag, type=int, required=True)
+    material.add_argument("--source-id", required=True)
+    material.add_argument("--fingerprint", required=True)
+    material.add_argument("--private-output", type=Path, required=True)
     reconcile = commands.add_parser("reconcile", help="Reconcile retained attach/renew evidence with a fresh session")
     reconcile.add_argument("--operation", choices=("attach", "renew", "transfer"), required=True)
     reconcile.add_argument("--original-session-id", required=True)
@@ -124,6 +133,8 @@ def _execute_command(args, state_dir, parser):
     if args.command == "run":
         asyncio.run(serve(state_dir, dispatch_config=args.dispatch_config))
         return 0
+    if args.command == "github-source-material":
+        return _execute_github_source_material(args, state_dir)
     if args.command == "github-source-read":
         return _execute_github_source_read(args, state_dir)
     if args.command == "runtime-status":
@@ -144,6 +155,77 @@ def _execute_command(args, state_dir, parser):
     if args.command == "enroll":
         return _execute_enrollment(args, state_dir, parser)
     return _execute_status_or_detach(args, state_dir)
+
+
+
+def _material_output_directory(path):
+    """Pin every directory component without following links; never overwrite output."""
+    path = Path(path).absolute()
+    directory = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for component in path.parts[1:-1]:
+            next_directory = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = next_directory
+        info = os.fstat(directory)
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+            raise SecurityError("unsafe_material_output")
+        try:
+            os.stat(path.name, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            return directory, path.name
+        raise SecurityError("unsafe_material_output")
+    except (OSError, SecurityError):
+        os.close(directory)
+        raise SecurityError("unsafe_material_output") from None
+
+
+
+def _publish_material(directory, filename, body):
+    """Publish complete private bytes atomically; never replace another file."""
+    temporary = ".finding-material-" + os.urandom(16).hex()
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600, dir_fd=directory)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(body.encode("utf-8"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        # A hard link is an atomic no-overwrite publish within the pinned directory.
+        os.link(temporary, filename, src_dir_fd=directory, dst_dir_fd=directory,
+                follow_symlinks=False)
+        os.fsync(directory)
+    finally:
+        os.unlink(temporary, dir_fd=directory)
+    os.fsync(directory)
+
+
+def _execute_github_source_material(args, state_dir):
+    directory, filename = _material_output_directory(args.private_output)
+    try:
+        try:
+            cloud = load_cloud_client(args.cloud_config, state_dir)
+            result = asyncio.run(cloud.github_source_material_all({
+                "subject": {"installationId": args.installation_id, "repositoryId": args.repository_id,
+                            "prNumber": args.pr_number},
+                "sourceId": args.source_id, "fingerprint": args.fingerprint,
+                "fromVersion": args.from_version, "toVersion": args.to_version,
+            }))
+        except CloudError as error:
+            print(json.dumps({"materialRead": None, "reason": error.code}))
+            return 2
+        if result["status"] != "ok":
+            print(json.dumps({"materialRead": None, "reason": result["status"]}))
+            return 2
+        info = os.fstat(directory)
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+            raise SecurityError("unsafe_material_output")
+        _publish_material(directory, filename, result["body"])
+        print(json.dumps({"materialRead": "written", "complete": True}))
+        return 0
+    finally:
+        os.close(directory)
 
 
 def _execute_github_source_read(args, state_dir):

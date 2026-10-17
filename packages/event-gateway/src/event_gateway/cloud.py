@@ -203,6 +203,61 @@ def _github_source_request(value):
     return json.loads(_json(value))
 
 
+
+def _github_material_request(value):
+    code = "invalid_request"
+    if not isinstance(value, dict):
+        raise CloudError(code)
+    _closed(value, {"subject", "sourceId", "fingerprint", "fromVersion", "toVersion"}
+            | ({"cursor"} if "cursor" in value else set()), code=code)
+    _closed(value["subject"], ("installationId", "repositoryId", "prNumber"), code=code)
+    if (any(not _generation(number) for number in value["subject"].values())
+            or any(not _generation(value[key]) for key in ("fromVersion", "toVersion"))
+            or value["fromVersion"] > value["toVersion"]
+            or not _github_text(value["sourceId"], 4096)
+            or re.fullmatch(r"(?:review:[1-9][0-9]*|comment:[1-9][0-9]*|thread-comment:.+)", value["sourceId"], re.DOTALL) is None
+            or not isinstance(value["fingerprint"], str)
+            or re.fullmatch(r"[a-f0-9]{64}", value["fingerprint"]) is None
+            or ("cursor" in value and (not isinstance(value["cursor"], str)
+                or re.fullmatch(r"[A-Za-z0-9_-]{1,256}", value["cursor"]) is None))):
+        raise CloudError(code)
+    encoded = _json(value)
+    if len(encoded) > 4096:
+        raise CloudError(code)
+    return json.loads(encoded)
+
+
+def _github_material_response(value, request):
+    if isinstance(value, dict) and value.get("status") in ("unavailable", "deleted", "conflict"):
+        _closed(value, ("status",))
+        return value
+    _closed(value, ("status", "subject", "sourceId", "fingerprint", "requestedRange", "firstVersion", "bodyDigest",
+                    "offset", "totalLength", "body", "nextCursor", "complete"))
+    if (value["status"] != "ok"
+            or any(not _same_json_value(value[key], request[key]) for key in ("subject", "sourceId", "fingerprint"))
+            or not _same_json_value(value["requestedRange"], {key: request[key] for key in ("fromVersion", "toVersion")})
+            or not _generation(value["firstVersion"])
+            or not request["fromVersion"] <= value["firstVersion"] <= request["toVersion"]
+            or not isinstance(value["bodyDigest"], str)
+            or re.fullmatch(r"[a-f0-9]{64}", value["bodyDigest"]) is None
+            or any(not _safe_uint(value[key]) or value[key] > 1048576 for key in ("offset", "totalLength"))
+            or not isinstance(value["body"], str) or not isinstance(value["complete"], bool)
+            or (value["nextCursor"] is not None and (not isinstance(value["nextCursor"], str)
+                or re.fullmatch(r"[A-Za-z0-9_-]{1,256}", value["nextCursor"]) is None))):
+        raise CloudError("invalid_response")
+    try:
+        length = len(value["body"].encode("utf-16-le")) // 2
+    except UnicodeError:
+        raise CloudError("invalid_response") from None
+    if (length > 2048 or value["offset"] + length > value["totalLength"]
+            or value["complete"] != (value["nextCursor"] is None)
+            or value["complete"] != (value["offset"] + length == value["totalLength"])
+            or (length == 0 and value["totalLength"] != 0)
+            or ("cursor" not in request and value["offset"] != 0)):
+        raise CloudError("invalid_response")
+    return value
+
+
 def _github_state(value):
     return isinstance(value, str) and value in ("open", "closed", "merged")
 
@@ -834,6 +889,42 @@ class CloudClient:
         request = _github_source_request(request)
         result = await self._post("/v1/github/source/read", request)
         return _github_source_response(result, request)
+
+    async def github_source_material(self, request):
+        """Read one signed current-authority material page; never infer finding resolution."""
+        request = _github_material_request(request)
+        result = await self._post("/v1/github/source/material", request)
+        return _github_material_response(result, request)
+
+    async def github_source_material_all(self, request):
+        """Return text only after complete bounded traversal and digest verification."""
+        # Reads restart at page zero and authorize every page; failures expose no partial body.
+        request = _github_material_request(request)
+        if "cursor" in request:
+            raise CloudError("invalid_request")
+        chunks, seen = [], set()
+        offset, anchor = 0, None
+        for _ in range(4096):
+            page = await self.github_source_material(request)
+            if page["status"] != "ok":
+                return page
+            identity = tuple(page[key] for key in ("firstVersion", "bodyDigest", "totalLength"))
+            if page["offset"] != offset or (anchor is not None and identity != anchor):
+                raise CloudError("invalid_response")
+            anchor = identity
+            chunks.append(page["body"])
+            offset += len(page["body"].encode("utf-16-le")) // 2
+            if page["complete"]:
+                body = "".join(chunks)
+                if hashlib.sha256(body.encode("utf-8")).hexdigest() != page["bodyDigest"]:
+                    raise CloudError("invalid_response")
+                return {**page, "offset": 0, "body": body}
+            cursor = page["nextCursor"]
+            if cursor in seen:
+                raise CloudError("invalid_response")
+            seen.add(cursor)
+            request = {**request, "cursor": cursor}
+        raise CloudError("material_read_limit")
 
     async def runtime_status(self, runtime_id):
         """Read stored authority; this does not assert live presence or current eligibility."""

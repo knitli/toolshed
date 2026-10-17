@@ -1,0 +1,47 @@
+{
+  "path": "/v1/github/source/material",
+  "requestBytes": 4096,
+  "responseBytes": 8192,
+  "offsetUnit": "utf16-code-unit",
+  "request": {
+    "subject": {
+      "installationId": 1,
+      "repositoryId": 2,
+      "prNumber": 3
+    },
+    "sourceId": "comment:1",
+    "fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "fromVersion": 1,
+    "toVersion": 1
+  },
+  "response": {
+    "status": "ok",
+    "subject": {
+      "installationId": 1,
+      "repositoryId": 2,
+      "prNumber": 3
+    },
+    "sourceId": "comment:1",
+    "fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "firstVersion": 1,
+    "bodyDigest": "eeb1a10b10a18f6e1e82269978e5043602e8d40cc9087b4454ff00b23afb42ee",
+    "offset": 0,
+    "totalLength": 12,
+    "body": "Original \ud83d\udc4b\n",
+    "nextCursor": null,
+    "complete": true,
+    "requestedRange": {
+      "fromVersion": 1,
+      "toVersion": 1
+    }
+  },
+  "unavailable": {
+    "status": "unavailable"
+  },
+  "deleted": {
+    "status": "deleted"
+  },
+  "conflict": {
+    "status": "conflict"
+  }
+}
