@@ -3,7 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
-import subprocess
+import subprocess  # nosec B404 - fixed-interpreter import-isolation test only
 import sys
 import unittest
 from unittest.mock import patch
@@ -111,7 +111,8 @@ class MessagingProtocolV2WireTests(unittest.TestCase):
             'assert "event_gateway.protocol" not in sys.modules; '
             'assert "jsonschema" not in sys.modules'
         )
-        result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=False)
+        # Only the current interpreter and literal test code; no shell or caller input.
+        result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=False)  # nosec B603
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
