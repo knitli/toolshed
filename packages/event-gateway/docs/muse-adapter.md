@@ -32,9 +32,9 @@ The inspected binary SHA-256 is
   describe a spawned `muse serve` host over stdio. Starting that host is not
   attachment to an already running TUI.
 
-## Missing prerequisite
+## Push ingress qualification
 
-Qualification requires an authorized external sender binding accepted by Muse
+Push qualification requires an authorized external sender binding accepted by Muse
 for the exact existing interactive session, with a supported ingress gate and
 recipient approval lifecycle. It also needs atomic busy handling, generation
 fencing across restart, caller-stable delivery identity, and a durable receipt
@@ -42,7 +42,17 @@ lookup (or an explicit supported no-retry policy for ambiguous sends). Installed
 CLI help and bundled source do not establish that interface. Simply enabling a
 setting would not establish these guarantees.
 
-## Plugin and native monitor alternatives
+## Pull monitor qualification
+
+A session-owned pull monitor needs its actual advertised tool contract, an
+owner-started monitor bound to the exact session, an authenticated gateway read
+with a durable cursor, and an explicit acknowledgement before advancing that
+cursor. Prove idle wake, busy queuing, restart generation fencing and lost-read/ACK
+recovery. It does not need an external peer sender or push-ingress approval; those
+requirements apply only to the push path above. Monitor output cannot itself
+authorize tools or source access.
+
+### Plugin and native monitor evidence
 
 [Official extension documentation](https://dev.meta.ai/docs/muse-code/extending)
 describes lifecycle hooks and model-invoked MCP tools; it does not establish an
@@ -74,15 +84,18 @@ In a disposable eligible Muse TUI, ask:
 > Inspect your available native monitor tool schema and report its exact
 > input/output contract; do not start any monitor or send any messages.
 
-That read-only schema determines whether a session-owned pull monitor can support
-the gateway. An actual monitor must then prove exact-session idle wake, busy
-behavior, restart fencing and ambiguous-outcome handling before activation.
+That read-only schema is the next prerequisite for the pull path. Apply the
+pull monitor criteria above to the resulting fixture; use the separate push
+criteria only if Muse exposes an authenticated external peer ingress.
 
 ## Checks and artifacts
 
 Read-only CLI help, native peer-list refusal, and offline experimental MSP schema
-export were exercised against the installed binary. Sanitized proof and schema
-are under `.local-artifacts/event-all-stages-20261017/muse/` (directories 0700,
-files 0600). No owner configuration, authentication, installation, or live session
+export were exercised against the installed binary. The [sanitized proof](muse-ingress/qualification.json),
+[experimental schema manifest](muse-ingress/schema-manifest.json) and
+[complete offline MSP schema](muse-ingress/msp.schema.json.gz) are committed here.
+Decompress the gzip to inspect the schema; its exact SHA-256 is
+`0eb3ef3ec63341b6b1f6f52ab61116e37cc59aaa6d69e9b6c265e2011e3e5931`.
+The schema is static protocol data, not a session export or credential file. No owner configuration, authentication, installation, or live session
 was changed; no peer message was sent. No replacement MSP session or terminal
 input was used. Live idle/busy/restart/lost-ack qualification remains unperformed.
