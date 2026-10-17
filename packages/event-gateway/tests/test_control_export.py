@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 import re
 import shutil
-import subprocess
+
+# Test-only subprocesses invoke fixed git/node source-pin probes.
+import subprocess  # nosec B404
 import tempfile
 import unittest
 
@@ -20,10 +22,15 @@ class ControlExportTests(unittest.TestCase):
         names = re.findall(r"'([^']+)'", source.split('const names = [', 1)[1].split('];', 1)[0])
         for name in NEW_SOURCES:
             self.assertIn(name, names)
-        git_dir = subprocess.check_output(
-            ['git', '-C', str(PACKAGE), 'rev-parse', '--absolute-git-dir'], text=True).strip()
-        revision = subprocess.check_output(
-            ['git', '-C', str(PACKAGE), 'rev-parse', 'HEAD'], text=True).strip()
+        git = shutil.which("git")
+        node = shutil.which("node")
+        self.assertIsNotNone(git, "git is required for the source pin test")
+        self.assertIsNotNone(node, "node is required for the source pin test")
+        # Resolved executables, fixed arguments, no shell; inspect this checkout only.
+        git_dir = subprocess.check_output(  # nosec B603
+            [git, '-C', str(PACKAGE), 'rev-parse', '--absolute-git-dir'], text=True).strip()
+        revision = subprocess.check_output(  # nosec B603
+            [git, '-C', str(PACKAGE), 'rev-parse', 'HEAD'], text=True).strip()
         with tempfile.TemporaryDirectory(prefix='control-export-test-') as directory:
             root = Path(directory).resolve()
             (root / '.git').write_text(f'gitdir: {git_dir}\n')
@@ -47,9 +54,11 @@ class ControlExportTests(unittest.TestCase):
             pin.write_text(json.dumps(manifest))
 
             def run():
-                return subprocess.run(['node', str(output / 'export.mjs'), str(os_root),
-                                       str(zod / 'index.mjs'), '--check'],
-                                      text=True, capture_output=True, check=False)
+                # Resolved executable, fixed arguments, no shell; owned disposable fixture.
+                return subprocess.run(  # nosec B603
+                    [node, str(output / 'export.mjs'), str(os_root),
+                     str(zod / 'index.mjs'), '--check'],
+                    text=True, capture_output=True, check=False, timeout=10)
 
             # Matching pins reach evaluation, so the negative checks cannot pass vacuously.
             result = run()
