@@ -1,0 +1,178 @@
+{
+  "schema": "sdk-broker-derived-public-summary:v1",
+  "evidenceKind": "Derived summary of private historical receipts; not raw execution evidence",
+  "startedAt": "2026-10-17T19:17:54.176519+00:00",
+  "finishedAt": "2026-10-17T19:18:08.070787+00:00",
+  "status": "PASS",
+  "cases": [
+    {
+      "mode": "success",
+      "status": "PASS",
+      "containerExitCode": 0,
+      "reviewError": null,
+      "transportBytes": {
+        "input": 3747,
+        "output": 1834,
+        "total": 5581
+      },
+      "rawCaptureBytes": 2209,
+      "siblingExitCodes": {
+        "host": 0,
+        "sdk": 0
+      },
+      "containmentChecksPassed": 10,
+      "authoritativeSettlementMatchesSdk": true,
+      "ownerFilesPreservedHostWitness": true,
+      "exactIdAndNameIndependentlyAbsent": true,
+      "containmentObservations": {
+        "daemonSocketDenied": true,
+        "dockerExecDenied": true,
+        "ipv4Denied": true,
+        "ipv6Denied": true,
+        "otherUnixDenied": true,
+        "ownerReadDenied": true,
+        "fixtureWriteDenied": true,
+        "fixtureAliasWriteDenied": true,
+        "ownerSignalDenied": true,
+        "scratchWrite": true
+      },
+      "sdkCounters": {
+        "subprocess": 0,
+        "fetch": 0,
+        "customSpawn": 1
+      }
+    },
+    {
+      "mode": "early-terminal",
+      "status": "PASS",
+      "containerExitCode": 0,
+      "reviewError": "Reviewer completion refused: incomplete",
+      "transportBytes": {
+        "input": 1355,
+        "output": 1196,
+        "total": 2551
+      },
+      "rawCaptureBytes": 2267,
+      "siblingExitCodes": {
+        "host": 0,
+        "sdk": 0
+      },
+      "containmentChecksPassed": 10,
+      "authoritativeSettlementMatchesSdk": true,
+      "ownerFilesPreservedHostWitness": true,
+      "exactIdAndNameIndependentlyAbsent": true,
+      "containmentObservations": {
+        "daemonSocketDenied": true,
+        "dockerExecDenied": true,
+        "ipv4Denied": true,
+        "ipv6Denied": true,
+        "otherUnixDenied": true,
+        "ownerReadDenied": true,
+        "fixtureWriteDenied": true,
+        "fixtureAliasWriteDenied": true,
+        "ownerSignalDenied": true,
+        "scratchWrite": true
+      },
+      "sdkCounters": {
+        "subprocess": 0,
+        "fetch": 0,
+        "customSpawn": 1
+      }
+    },
+    {
+      "mode": "eof",
+      "status": "PASS",
+      "containerExitCode": 0,
+      "reviewError": "Reviewer completion refused: missing_terminal",
+      "transportBytes": {
+        "input": 927,
+        "output": 251,
+        "total": 1178
+      },
+      "rawCaptureBytes": 2196,
+      "siblingExitCodes": {
+        "host": 0,
+        "sdk": 0
+      },
+      "containmentChecksPassed": 10,
+      "authoritativeSettlementMatchesSdk": true,
+      "ownerFilesPreservedHostWitness": true,
+      "exactIdAndNameIndependentlyAbsent": true,
+      "containmentObservations": {
+        "daemonSocketDenied": true,
+        "dockerExecDenied": true,
+        "ipv4Denied": true,
+        "ipv6Denied": true,
+        "otherUnixDenied": true,
+        "ownerReadDenied": true,
+        "fixtureWriteDenied": true,
+        "fixtureAliasWriteDenied": true,
+        "ownerSignalDenied": true,
+        "scratchWrite": true
+      },
+      "sdkCounters": {
+        "subprocess": 0,
+        "fetch": 0,
+        "customSpawn": 1
+      }
+    },
+    {
+      "mode": "abort",
+      "status": "PASS",
+      "containerExitCode": 137,
+      "reviewError": "Reviewer completion refused: timeout",
+      "transportBytes": {
+        "input": 927,
+        "output": 251,
+        "total": 1178
+      },
+      "rawCaptureBytes": 2346,
+      "siblingExitCodes": {
+        "host": 0,
+        "sdk": 0
+      },
+      "containmentChecksPassed": 10,
+      "authoritativeSettlementMatchesSdk": true,
+      "ownerFilesPreservedHostWitness": true,
+      "exactIdAndNameIndependentlyAbsent": true,
+      "eofToFirstCancelMs": 2001.273417,
+      "containmentObservations": {
+        "daemonSocketDenied": true,
+        "dockerExecDenied": true,
+        "ipv4Denied": true,
+        "ipv6Denied": true,
+        "otherUnixDenied": true,
+        "ownerReadDenied": true,
+        "fixtureWriteDenied": true,
+        "fixtureAliasWriteDenied": true,
+        "ownerSignalDenied": true,
+        "scratchWrite": true
+      },
+      "sdkCounters": {
+        "subprocess": 0,
+        "fetch": 0,
+        "customSpawn": 1
+      }
+    }
+  ],
+  "aggregateRawCaptureBytes": 9018,
+  "independentCleanup": {
+    "allFourExactNamesAndIdsAbsent": true,
+    "daemonUnchanged": true,
+    "observedOwnedProcessesRemaining": [],
+    "listenerCleanup": "closed and removed; path absent on audit"
+  },
+  "warning": "SDK canUseTool callback is shadowed for bare-allowlisted mcp__frozen__read_next in every case; this proof does not establish callback-based tool authorization.",
+  "limits": [
+    "Fixed local fixture and pinned real SDK; no native Claude binary or provider/model call",
+    "Host authoritative settlement required; SDK reports alone are not authority",
+    "Process ancestry/birth observations are sampled and second-resolution, not race-free containment",
+    "No hosted/runtime production integration or portable execution claim"
+  ],
+  "sourceOriginals": {
+    "manifestSha256": "62537de951703c207b7cf3639a546e5e437fde2b6f3cec44350fa4c8443a6753",
+    "rootReceiptSha256": "45ec233ec3ba236d54926bb21da8fd91684f488036bf9237d47d32cbe0370a92",
+    "auditLedgerSha256": "c2bdc0235a55f78e8ca2dcd7c5e52ee10c586bca52470769abef39ad556556cd",
+    "hashMeaning": "These hashes identify privately retained historical originals, not this derived public summary."
+  }
+}
