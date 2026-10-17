@@ -17,43 +17,62 @@ const SOCKET = '/Users/adampoulemanos/.docker/run/docker.sock';
 const MAX_OUTPUT = 64 * 1024;
 const MAX_TRANSPORT = 2 * 1024 * 1024;
 const MAX_FRAME = 64 * 1024;
-const FIXTURE_SHA256 = '11777085c97fe3ebf8ce95e6bdd1dce91abe544256daad886b9b42b802d9a71c';
+const FIXTURE_SHA256 = 'f5d7ae681045266d2b9f2d806beee8b07c0f527f4feffd523037076c3d9d4cd6';
 const COMMAND_TIMEOUT_MS = 15_000;
 const CONTAINER_WAIT_MS = 2_000;
 const TMPFS = 'rw,noexec,nosuid,nodev,size=16777216,uid=65532,gid=65532,mode=0700';
 const MODES = new Set(['success', 'early-terminal', 'eof', 'abort']);
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const CID = /^[0-9a-f]{64}$/;
+function isHex(value) {
+  for (const char of value) {
+    if (!'0123456789abcdef'.includes(char)) return false;
+  }
+  return true;
+}
+
+function isContainerId(value) {
+  return typeof value === 'string' && value.length === 64 && isHex(value);
+}
+
+function isUuid(value) {
+  if (typeof value !== 'string' || value.length !== 36) return false;
+  if (!'12345678'.includes(value[14]) || !'89ab'.includes(value[19])) return false;
+  for (let index = 0; index < value.length; index++) {
+    if ([8, 13, 18, 23].includes(index)) {
+      if (value[index] !== '-') return false;
+    } else if (!isHex(value[index])) return false;
+  }
+  return true;
+}
 const DIAGNOSTIC_LIMIT = 2048;
 
-function require(condition, message) {
+function invariant(condition, message) {
   if (!condition) throw new Error(message);
 }
 
 function rootInfo(root) {
-  require(typeof root === 'string' && root.length > 0 && isAbsolute(root), 'root must be absolute');
+  invariant(typeof root === 'string' && root.length > 0 && isAbsolute(root), 'root must be absolute');
   const normalized = resolve(root);
   const info = lstatSync(normalized);
-  require(realpathSync(normalized) === normalized && info.isDirectory() && !info.isSymbolicLink(), 'root must be a physical directory');
-  require(typeof process.getuid === 'function' && info.uid === process.getuid(), 'root must be owned by this user');
-  require((info.mode & 0o777) === 0o700 && !normalized.includes(','), 'root must be private and contain no comma');
+  invariant(realpathSync(normalized) === normalized && info.isDirectory() && !info.isSymbolicLink(), 'root must be a physical directory');
+  invariant(typeof process.getuid === 'function' && info.uid === process.getuid(), 'root must be owned by this user');
+  invariant((info.mode & 0o777) === 0o700 && !normalized.includes(','), 'root must be private and contain no comma');
   const fixture = join(normalized, 'fixture');
   const fixtureInfo = lstatSync(fixture);
-  require(fixtureInfo.isDirectory() && !fixtureInfo.isSymbolicLink() && realpathSync(fixture) === fixture,
+  invariant(fixtureInfo.isDirectory() && !fixtureInfo.isSymbolicLink() && realpathSync(fixture) === fixture,
     'fixture directory must be physical');
-  require(!fixture.includes(','), 'fixture path contains a Docker mount delimiter');
+  invariant(!fixture.includes(','), 'fixture path contains a Docker mount delimiter');
   const child = join(fixture, 'protocol-child.py');
   const childInfo = lstatSync(child);
-  require(childInfo.isFile() && !childInfo.isSymbolicLink() && realpathSync(child) === child,
+  invariant(childInfo.isFile() && !childInfo.isSymbolicLink() && realpathSync(child) === child,
     'protocol child must be a physical file');
-  require(createHash('sha256').update(readFileSync(child)).digest('hex') === FIXTURE_SHA256,
+  invariant(createHash('sha256').update(readFileSync(child)).digest('hex') === FIXTURE_SHA256,
     'protocol child source hash mismatch');
   return { root: normalized, fixture };
 }
 
 function socketIdentity() {
   const info = lstatSync(SOCKET);
-  require(info.isSocket() && info.uid === process.getuid(), 'untrusted local Docker socket');
+  invariant(info.isSocket() && info.uid === process.getuid(), 'untrusted local Docker socket');
   return `${info.dev}:${info.ino}:${info.mode}:${info.uid}`;
 }
 
@@ -70,7 +89,7 @@ function listIds(bytes) {
   const text = Buffer.from(bytes).toString('utf8');
   if (!text.trim()) return [];
   const values = text.trimEnd().split('\n');
-  require(values.every(value => CID.test(value)), 'invalid Docker identity listing');
+  invariant(values.every(value => isContainerId(value)), 'invalid Docker identity listing');
   return values;
 }
 
@@ -90,7 +109,7 @@ function sameArgs(actual, expected) {
 }
 
 function assertDockerOperation(args, state) {
-  require(Array.isArray(args) && args.every(value => typeof value === 'string'), 'invalid Docker arguments');
+  invariant(Array.isArray(args) && args.every(value => typeof value === 'string'), 'invalid Docker arguments');
   const { name, fixture, mode, sessionId, ownedId } = state;
   const fixed = [
     ['info', '--format', '{{.ID}}'],
@@ -99,7 +118,7 @@ function assertDockerOperation(args, state) {
     createArgs(name, fixture, mode, sessionId),
   ];
   if (fixed.some(item => sameArgs(args, item))) return;
-  if (args.length === 2 && args[0] === 'inspect' && CID.test(args[1])) return;
+  if (args.length === 2 && args[0] === 'inspect' && isContainerId(args[1])) return;
   if (ownedId && [
     ['start', '--attach', '--interactive', ownedId],
     ['kill', '--signal=SIGTERM', ownedId],
@@ -190,7 +209,7 @@ export function createCliOutputCollectorForTest() { return makeCliOutputCollecto
 
 async function runCli(args, context, timeoutMs = COMMAND_TIMEOUT_MS) {
   const { configPath, expectedSocketIdentity } = context;
-  require(socketIdentity() === expectedSocketIdentity, 'local Docker socket changed');
+  invariant(socketIdentity() === expectedSocketIdentity, 'local Docker socket changed');
   const child = nodeSpawn(DOCKER, [
     `--host=unix://${SOCKET}`, '--config', configPath, ...args,
   ], { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: dockerEnv(), cwd: configPath });
@@ -246,7 +265,7 @@ function createRealBackend() {
     async command(args, context, timeoutMs) { return runCli(args, context, timeoutMs); },
     attach(args, context) {
       const { expectedSocketIdentity, configPath } = context;
-      require(socketIdentity() === expectedSocketIdentity, 'local Docker socket changed');
+      invariant(socketIdentity() === expectedSocketIdentity, 'local Docker socket changed');
       return nodeSpawn(DOCKER, [
         `--host=unix://${SOCKET}`, '--config', configPath, ...args,
       ], { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: dockerEnv(), cwd: configPath });
@@ -256,12 +275,12 @@ function createRealBackend() {
 
 function validateImage(value) {
   const image = parseJson(value, 'invalid local image inspection');
-  require(Array.isArray(image) && image.length === 1 && image[0].Id === IMAGE
+  invariant(Array.isArray(image) && image.length === 1 && image[0].Id === IMAGE
     && image[0].Os === 'linux' && image[0].Architecture === 'arm64', 'pinned local image mismatch');
 }
 
 function validateOwnership(value, id, name) {
-  require(value && value.Id === id && value.Name === `/${name}`
+  invariant(value && value.Id === id && value.Name === `/${name}`
     && value.Config?.Labels?.['reviewer.fixture'] === name, 'container ownership mismatch');
 }
 
@@ -274,7 +293,7 @@ function hasEntries(value) {
 
 function validateInspect(value, state, id, { beforeStart = false } = {}) {
   validateOwnership(value, id, state.name);
-  require(value.Image === IMAGE && value.Config?.Image === IMAGE, 'container image mismatch');
+  invariant(value.Image === IMAGE && value.Config?.Image === IMAGE, 'container image mismatch');
   const host = value.HostConfig ?? {};
   const config = value.Config ?? {};
   const limits = {
@@ -282,47 +301,47 @@ function validateInspect(value, state, id, { beforeStart = false } = {}) {
     Memory: 134217728, MemorySwap: 134217728, NanoCpus: 1000000000,
     IpcMode: 'private', PublishAllPorts: false, AutoRemove: false,
   };
-  require(Object.entries(limits).every(([key, expected]) => host[key] === expected), 'container isolation/limits mismatch');
-  require((host.PidMode ?? '') === '' || host.PidMode === 'private', 'non-private PID namespace');
-  require(JSON.stringify(host.CapDrop) === JSON.stringify(['ALL']) && !(host.CapAdd?.length), 'container capabilities mismatch');
-  require(JSON.stringify(host.SecurityOpt) === JSON.stringify(['no-new-privileges:true']), 'container security options mismatch');
-  require(JSON.stringify(host.Tmpfs) === JSON.stringify({ '/work': TMPFS }), 'container scratch policy mismatch');
-  require(host.LogConfig?.Type === 'none' && host.RestartPolicy?.Name === 'no', 'container retention policy mismatch');
-  require(!['Devices', 'DeviceRequests', 'VolumesFrom', 'PortBindings', 'Links'].some(key => hasEntries(host[key])),
+  invariant(Object.entries(limits).every(([key, expected]) => host[key] === expected), 'container isolation/limits mismatch');
+  invariant((host.PidMode ?? '') === '' || host.PidMode === 'private', 'non-private PID namespace');
+  invariant(JSON.stringify(host.CapDrop) === JSON.stringify(['ALL']) && !(host.CapAdd?.length), 'container capabilities mismatch');
+  invariant(JSON.stringify(host.SecurityOpt) === JSON.stringify(['no-new-privileges:true']), 'container security options mismatch');
+  invariant(JSON.stringify(host.Tmpfs) === JSON.stringify({ '/work': TMPFS }), 'container scratch policy mismatch');
+  invariant(host.LogConfig?.Type === 'none' && host.RestartPolicy?.Name === 'no', 'container retention policy mismatch');
+  invariant(!['Devices', 'DeviceRequests', 'VolumesFrom', 'PortBindings', 'Links'].some(key => hasEntries(host[key])),
     'additional container access');
   const mounts = value.Mounts ?? [];
   const binds = mounts.filter(mount => mount.Type === 'bind');
-  require(mounts.every(mount => mount.Type === 'bind'
+  invariant(mounts.every(mount => mount.Type === 'bind'
     || (mount.Type === 'tmpfs' && mount.Destination === '/work')) && binds.length === 1,
   'unexpected container mounts');
-  require(binds[0].Source === state.fixture && binds[0].Destination === '/fixture' && binds[0].RW === false,
+  invariant(binds[0].Source === state.fixture && binds[0].Destination === '/fixture' && binds[0].RW === false,
     'fixture mount mismatch');
-  require(config.User === '65532:65532' && JSON.stringify(config.Entrypoint) === JSON.stringify(['python3'])
+  invariant(config.User === '65532:65532' && JSON.stringify(config.Entrypoint) === JSON.stringify(['python3'])
     && JSON.stringify(config.Cmd) === JSON.stringify(['-I', '-B', '/fixture/protocol-child.py', state.mode, state.sessionId]),
   'container process command mismatch');
-  require(!(config.Env ?? []).some(item => /^(GH_|GITHUB_|ACTIONS_|ANTHROPIC_|AWS_|AZURE_|GOOGLE_|OTEL_|HOST_CANARY)/.test(item)),
+  invariant(!(config.Env ?? []).some(item => /^(GH_|GITHUB_|ACTIONS_|ANTHROPIC_|AWS_|AZURE_|GOOGLE_|OTEL_|HOST_CANARY)/.test(item)),
     'credential environment passed to container');
-  if (beforeStart) require(value.State?.Status === 'created' && value.State?.Running === false,
+  if (beforeStart) invariant(value.State?.Status === 'created' && value.State?.Running === false,
     'container started before ownership validation');
 }
 
 function readState(bytes, state, id) {
   const values = parseJson(bytes, 'invalid container inspection');
-  require(Array.isArray(values) && values.length === 1, 'ambiguous container inspection');
+  invariant(Array.isArray(values) && values.length === 1, 'ambiguous container inspection');
   validateInspect(values[0], state, id);
   return values[0].State ?? {};
 }
 
 function checkUuidArg(args, sessionId) {
-  require(Array.isArray(args) && args.every(value => typeof value === 'string'), 'invalid SDK command arguments');
+  invariant(Array.isArray(args) && args.every(value => typeof value === 'string'), 'invalid SDK command arguments');
   const at = args.indexOf('--session-id');
-  require(at >= 0 && args.indexOf('--session-id', at + 1) < 0 && args[at + 1] === sessionId
-    && UUID.test(args[at + 1]), 'SDK session id mismatch');
+  invariant(at >= 0 && args.indexOf('--session-id', at + 1) < 0 && args[at + 1] === sessionId
+    && isUuid(args[at + 1]), 'SDK session id mismatch');
 }
 
 function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
-  require(MODES.has(mode), 'unsupported protocol mode');
-  require(UUID.test(sessionId), 'sessionId must be a canonical UUID');
+  invariant(MODES.has(mode), 'unsupported protocol mode');
+  invariant(isUuid(sessionId), 'sessionId must be a canonical UUID');
   const { root: ownedRoot, fixture } = rootInfo(root);
   const name = `reviewer-isolation-${randomBytes(16).toString('hex')}`;
   const state = { name, fixture, mode, sessionId, ownedId: null };
@@ -348,6 +367,9 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
   let transportBytes = 0;
   let inputBytes = 0;
   let outputBytes = 0;
+  let inputEncoding = 'utf8';
+  let admittedInputBytes = 0;
+  let admittedFrameBytes = 0;
   let inputFrameBytes = 0;
   let outputFrameBytes = 0;
   let cidReadyResolve;
@@ -398,19 +420,52 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
         if (outputFrameBytes > MAX_FRAME) { transportError('protocol output frame limit'); return false; }
       }
     }
-    if (transportBytes > MAX_TRANSPORT) { transportError('combined protocol transport limit'); return false; }
+    if (Math.max(inputBytes, admittedInputBytes) + outputBytes > MAX_TRANSPORT) { transportError('combined protocol transport limit'); return false; }
+    return true;
+  }
+
+  function admitInput(chunk, encoding, ending) {
+    if (chunk === null || chunk === undefined || typeof chunk === 'function') return true;
+    if (stdin.destroyed) return false;
+    let buffer;
+    try {
+      if (typeof chunk === 'string') {
+        const selectedEncoding = typeof encoding === 'string' ? encoding : inputEncoding;
+        if (!Buffer.isEncoding(selectedEncoding)) return true; // Let Writable report invalid encodings.
+        // shortcut: malformed hex/base64 may be overestimated; refine if the SDK uses these encodings.
+        if (Buffer.byteLength(chunk, selectedEncoding) + admittedInputBytes + outputBytes > MAX_TRANSPORT) {
+          transportError(stdin.writableEnded ? 'write after end' : 'combined protocol transport limit');
+          return false;
+        }
+        buffer = Buffer.from(chunk, selectedEncoding);
+      } else if (ArrayBuffer.isView(chunk)) buffer = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+      else return true; // Let Writable reject unsupported input types.
+    } catch { return true; } // Let Writable report invalid encodings or detached buffers.
+    if (stdin.writableEnded) {
+      if (!ending || buffer.length > 0) { transportError('write after end'); return false; }
+      return true;
+    }
+    admittedInputBytes += buffer.length;
+    if (admittedInputBytes + outputBytes > MAX_TRANSPORT) {
+      transportError('combined protocol transport limit');
+      return false;
+    }
+    for (const byte of buffer) {
+      admittedFrameBytes = byte === 10 ? 0 : admittedFrameBytes + 1;
+      if (admittedFrameBytes > MAX_FRAME) { transportError('protocol input frame limit'); return false; }
+    }
     return true;
   }
 
   function docker(args, timeoutMs) {
     assertDockerOperation(args, state);
-    if (backend.real) require(socketIdentity() === socketId, 'local Docker socket changed');
+    if (backend.real) invariant(socketIdentity() === socketId, 'local Docker socket changed');
     return backend.command(args, context(), timeoutMs);
   }
 
   async function daemonIdentity() {
     const value = (await docker(['info', '--format', '{{.ID}}'])).toString('utf8').trim();
-    require(/^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/.test(value), 'invalid Docker daemon identity');
+    invariant(/^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/.test(value), 'invalid Docker daemon identity');
     return value;
   }
 
@@ -423,10 +478,10 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
       'container', 'ls', '--all', '--no-trunc', '--filter', `name=^/${name}$`, '--format', '{{.ID}}',
     ]));
     if (ids.length === 0) return null;
-    require(ids.length === 1, 'ambiguous owned-container recovery');
+    invariant(ids.length === 1, 'ambiguous owned-container recovery');
     const id = ids[0];
     const values = parseJson(await docker(['inspect', id]), 'invalid recovery inspection');
-    require(Array.isArray(values) && values.length === 1, 'ambiguous recovery inspection');
+    invariant(Array.isArray(values) && values.length === 1, 'ambiguous recovery inspection');
     validateOwnership(values[0], id, name);
     state.ownedId = id;
     setCidReady(id);
@@ -440,7 +495,7 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
     while (Date.now() <= deadline) {
       last = await inspect(id);
       if (last.Running === false && last.Pid === 0) {
-        require(Number.isInteger(last.ExitCode) && last.ExitCode >= 0, 'container exit code unavailable');
+        invariant(Number.isInteger(last.ExitCode) && last.ExitCode >= 0, 'container exit code unavailable');
         return last.ExitCode;
       }
       await new Promise(resolvePromise => setTimeout(resolvePromise, 100));
@@ -454,7 +509,7 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
     try { await docker(['kill', '--signal=SIGTERM', id]); } catch { /* verify before deciding whether to escalate */ }
     if (await waitStopped(id, stopWaitMs) !== null) return;
     await docker(['kill', '--signal=SIGKILL', id]);
-    require(await waitStopped(id, stopWaitMs) !== null, 'owned container did not stop');
+    invariant(await waitStopped(id, stopWaitMs) !== null, 'owned container did not stop');
   }
 
   function requestTermination() {
@@ -479,7 +534,7 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
       } catch (error) { failures.push(`state: ${error.message}`); }
       try {
         const stateAfterStop = await inspect(id);
-        require(stateAfterStop.Running === false && stateAfterStop.Pid === 0
+        invariant(stateAfterStop.Running === false && stateAfterStop.Pid === 0
           && Number.isInteger(stateAfterStop.ExitCode) && stateAfterStop.ExitCode >= 0,
         'container process namespace did not stop');
         exitCode = stateAfterStop.ExitCode;
@@ -490,10 +545,10 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
         ['id absence', ['container', 'ls', '--all', '--no-trunc', '--filter', `id=${id}`, '--format', '{{.ID}}']],
         ['name absence', ['container', 'ls', '--all', '--no-trunc', '--filter', `name=^/${name}$`, '--format', '{{.ID}}']],
       ]) {
-        try { require(listIds(await docker(args)).length === 0, `container ${label} unconfirmed`); }
+        try { invariant(listIds(await docker(args)).length === 0, `container ${label} unconfirmed`); }
         catch (error) { failures.push(`${label}: ${error.message}`); }
       }
-      require(failures.length === 0, `container cleanup incomplete: ${failures.join('; ')}`);
+      invariant(failures.length === 0, `container cleanup incomplete: ${failures.join('; ')}`);
       return exitCode;
     })();
     return cleanupPromise;
@@ -520,24 +575,44 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
     stdin = new Writable({
       highWaterMark: 64 * 1024,
       write(chunk, _encoding, callback) {
+        if (!checkFrameBytes(chunk, 'input')) { callback(primaryError); return; }
         if (!attachProcess?.stdin) {
           stdin._pendingWrite = { chunk: Buffer.from(chunk), callback };
           return;
         }
         attachProcess.stdin.write(chunk, callback);
       },
+      destroy(error, callback) {
+        const pendingWrite = stdin._pendingWrite;
+        const pendingFinal = stdin._pendingFinal;
+        stdin._pendingWrite = null;
+        stdin._pendingFinal = null;
+        const pendingError = error ?? new Error('adapter closed before stdin attach');
+        pendingWrite?.callback(pendingError);
+        pendingFinal?.(pendingError);
+        callback(error);
+      },
       final(callback) {
         if (!attachProcess?.stdin) stdin._pendingFinal = callback;
         else attachProcess.stdin.end(callback);
       },
     });
+    const setDefaultEncoding = stdin.setDefaultEncoding.bind(stdin);
+    stdin.setDefaultEncoding = encoding => {
+      const result = setDefaultEncoding(encoding);
+      inputEncoding = encoding;
+      return result;
+    };
     const write = stdin.write.bind(stdin);
+    const end = stdin.end.bind(stdin);
+    // Reserve before Node queues chunks; _write records bytes exactly once when processing them.
     stdin.write = (chunk, encoding, callback) => {
-      let buffer;
-      try { buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, typeof encoding === 'string' ? encoding : undefined); }
-      catch (error) { transportError(error.message); return false; }
-      if (!checkFrameBytes(buffer, 'input')) return false;
-      return write(chunk, encoding, callback);
+      const admitted = admitInput(chunk, encoding, false);
+      return write(admitted ? chunk : Buffer.alloc(0), encoding, callback);
+    };
+    stdin.end = (chunk, encoding, callback) => {
+      const admitted = admitInput(chunk, encoding, true);
+      return end(admitted ? chunk : null, encoding, callback);
     };
     stdin.on('error', error => markFailure(error));
     stdout.on('error', error => markFailure(error));
@@ -566,7 +641,7 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
       try {
         const args = ['start', '--attach', '--interactive', id];
         assertDockerOperation(args, state);
-        if (backend.real) require(socketIdentity() === socketId, 'local Docker socket changed');
+        if (backend.real) invariant(socketIdentity() === socketId, 'local Docker socket changed');
         child = backend.attach(args, context());
         attachProcess = child;
       } catch (error) { reject(error); return; }
@@ -624,7 +699,7 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
     configPath = mkdtempSync(join(ownedRoot, '.docker-config-'));
     try {
       const configInfo = lstatSync(configPath);
-      require(realpathSync(configPath) === configPath && configInfo.isDirectory()
+      invariant(realpathSync(configPath) === configPath && configInfo.isDirectory()
         && configInfo.uid === process.getuid() && (configInfo.mode & 0o777) === 0o700,
       'fresh Docker config directory ownership/mode mismatch');
       socketId = backend.real ? socketIdentity() : 'fake-control-plane';
@@ -633,15 +708,15 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
       const existing = listIds(await docker([
         'container', 'ls', '--all', '--no-trunc', '--filter', `name=^/${name}$`, '--format', '{{.ID}}',
       ]));
-      require(existing.length === 0, 'owned container name already exists');
+      invariant(existing.length === 0, 'owned container name already exists');
       if (killed) throw primaryError ?? new Error('adapter terminated before container creation');
-      require(createHash('sha256').update(readFileSync(join(fixture, 'protocol-child.py'))).digest('hex') === FIXTURE_SHA256,
+      invariant(createHash('sha256').update(readFileSync(join(fixture, 'protocol-child.py'))).digest('hex') === FIXTURE_SHA256,
         'protocol child source changed before creation');
       creationAttempted = true;
       const created = (await docker(createArgs(name, fixture, mode, sessionId))).toString('utf8').trim();
-      require(CID.test(created), 'invalid created container identity');
+      invariant(isContainerId(created), 'invalid created container identity');
       const createInspection = parseJson(await docker(['inspect', created]), 'invalid created container inspection');
-      require(Array.isArray(createInspection) && createInspection.length === 1, 'ambiguous created container inspection');
+      invariant(Array.isArray(createInspection) && createInspection.length === 1, 'ambiguous created container inspection');
       validateOwnership(createInspection[0], created, name);
       state.ownedId = created;
       setCidReady(created);
@@ -652,7 +727,7 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
       const current = await inspect(created);
       if (current.Running) failure ??= new Error('Docker attach exited while the owned container remained running');
       if (!failure) {
-        require(current.Running === false && current.Pid === 0 && Number.isInteger(current.ExitCode)
+        invariant(current.Running === false && current.Pid === 0 && Number.isInteger(current.ExitCode)
           && current.ExitCode >= 0, 'container exit status unavailable');
         finalExitCode = current.ExitCode;
         if (attachedExit.signal) failure = new Error('Docker attach client was signaled before completion');
@@ -676,7 +751,7 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
               const remaining = listIds(await docker([
                 'container', 'ls', '--all', '--no-trunc', '--filter', `name=^/${name}$`, '--format', '{{.ID}}',
               ]));
-              require(remaining.length === 0, 'owned container absence unconfirmed after failed create');
+              invariant(remaining.length === 0, 'owned container absence unconfirmed after failed create');
             });
           }
         }
@@ -697,7 +772,7 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
       await cleanupStage('daemon readback', async () => {
         if (daemonBefore !== undefined) {
           daemonAfter = await daemonIdentity();
-          require(daemonAfter === daemonBefore, 'Docker daemon identity changed');
+          invariant(daemonAfter === daemonBefore, 'Docker daemon identity changed');
         }
       });
       const attachCloseConfirmed = [...cliCloseStates].every(closeState => closeState.seen)
@@ -707,13 +782,9 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
       } else if (configPath) {
         cleanupErrors.push('config retained because Docker CLI close was unconfirmed');
       }
-      if (stdin && !stdin.destroyed) {
-        stdin._pendingWrite?.callback(new Error('adapter closed before stdin attach'));
-        stdin._pendingWrite = null;
-        stdin._pendingFinal?.(new Error('adapter closed before stdin attach'));
-        stdin._pendingFinal = null;
-        stdin.destroy();
-      }
+      // Let native stream finish/error callbacks run before forced teardown.
+      await new Promise(resolvePromise => process.nextTick(resolvePromise));
+      if (stdin && !stdin.destroyed) stdin.destroy();
       if (stdout && !stdout.destroyed && !stdout.writableEnded) stdout.end();
     }
     failure ??= primaryError;
@@ -724,20 +795,20 @@ function createAdapter({ root, mode, sessionId = randomUUID() }, backend) {
         : cleanupFailure;
     }
     if (failure) throw failure;
-    require(finalExitCode !== null, 'container exit code was not proven');
+    invariant(finalExitCode !== null, 'container exit code was not proven');
     return { name, containerId: state.ownedId, daemonBefore, daemonAfter, exitCode: finalExitCode,
       transportBytes: { input: inputBytes, output: outputBytes, total: transportBytes } };
   }
 
   function spawn(options) {
-    require(!spawned, 'SDK process facade can only be spawned once');
-    require(options && options.command === join(ownedRoot, 'NEVER-EXECUTED-claude')
+    invariant(!spawned, 'SDK process facade can only be spawned once');
+    invariant(options && options.command === join(ownedRoot, 'NEVER-EXECUTED-claude')
       && options.cwd === ownedRoot, 'unexpected SDK command or working directory');
     checkUuidArg(options.args, sessionId);
     spawned = true;
     buildFacade();
     if (options.signal) {
-      require(typeof options.signal.addEventListener === 'function', 'invalid SDK abort signal');
+      invariant(typeof options.signal.addEventListener === 'function', 'invalid SDK abort signal');
       // SDK controls its grace period; the signal is never forwarded to Docker or the container.
     }
     queueMicrotask(() => {
@@ -782,7 +853,7 @@ export function createDockerAdapter(options) {
 
 // Explicit offline-only seam for the sibling unit fixture; production callers use the fixed backend above.
 export function createDockerAdapterWithFakeBackend(options, fakeBackend) {
-  require(fakeBackend && typeof fakeBackend.command === 'function' && typeof fakeBackend.attach === 'function',
+  invariant(fakeBackend && typeof fakeBackend.command === 'function' && typeof fakeBackend.attach === 'function',
     'fake backend must implement command and attach');
   return createAdapter(options, { ...fakeBackend, real: false });
 }

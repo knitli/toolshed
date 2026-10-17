@@ -1,0 +1,29 @@
+{
+  "exitCode": 0,
+  "failure": null,
+  "scratch": "/private/tmp/reviewer-docker-sdk-integration-20261017/scratch-cfaorb8s",
+  "aggregateBytes": 6836,
+  "aggregateLimit": 1048576,
+  "timeoutSeconds": 240,
+  "independentDockerCleanupRequired": true,
+  "manifestSha256": "66dd375440977b510157c19f7ba872cc7277f0ff67a7fe00ff2e71893b70073b",
+  "outsideScratchCanary": {
+    "beforeSha256": "14225aeb1a6feced82462e5f8e42769096e67e1894304437b137a0563f7c766b",
+    "afterSha256": "14225aeb1a6feced82462e5f8e42769096e67e1894304437b137a0563f7c766b",
+    "preserved": true,
+    "verificationFailure": null,
+    "cleanupFailure": null,
+    "removed": true
+  },
+  "forbiddenUnixSocket": {
+    "identity": {
+      "dev": 16777233,
+      "ino": 342146094,
+      "mode": 49600,
+      "uid": 501
+    },
+    "closed": true,
+    "removed": true,
+    "cleanupFailures": []
+  }
+}

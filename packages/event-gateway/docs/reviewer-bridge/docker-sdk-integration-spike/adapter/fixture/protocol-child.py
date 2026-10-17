@@ -30,6 +30,7 @@ def parse(raw):
 
 class Child:
     def __init__(self, mode, session):
+        """Initialize a success, early-terminal, eof, or abort fixture with a validated UUID session."""
         self.mode, self.session = mode, session
         self.input_bytes = self.output_bytes = self.counter = 0
         self.initialized = self.started = False
@@ -129,7 +130,8 @@ class Child:
                     self.digest = page['snapshotSha256']
                 require(page['snapshotSha256'] == self.digest
                         and page.get('unit') == ['manifest', 'diff', 'file:0:after'][self.pages]
-                        and type(page.get('remaining')) is int and page['remaining'] == 2 - self.pages)
+                        and isinstance(page.get('remaining'), int) and not isinstance(page['remaining'], bool)
+                        and page['remaining'] == 2 - self.pages)
                 self.pages += 1
                 if self.pages == 3:
                     self.terminal()

@@ -118,6 +118,22 @@ class ProtocolTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 2)
                 self.assertEqual(completed.stderr, b'synthetic protocol refused\n')
 
+    def test_remaining_rejects_booleans_and_accepts_integers(self):
+        for remaining, page_index, expected_code in [(False, 2, 2), (True, 1, 2), (0, 2, 0), (1, 1, 0)]:
+            with self.subTest(remaining=remaining, value_type=type(remaining).__name__):
+                values = frames()
+                content = values[4 + page_index]['response']['response']['mcp_response']['result']['content'][0]
+                page = json.loads(content['text'])
+                page['remaining'] = remaining
+                content['text'] = json.dumps(page)
+                completed = self.launch('success', encode(values))
+                self.assertEqual(completed.returncode, expected_code, completed.stderr)
+                if expected_code:
+                    self.assertEqual(completed.stderr, b'synthetic protocol refused\n')
+                    self.assertNotIn(b'"type":"result"', completed.stdout)
+                else:
+                    self.assertEqual(json.loads(completed.stdout.splitlines()[-1])['type'], 'result')
+
     def test_total_input_bound(self):
         values = frames()
         for value in values:

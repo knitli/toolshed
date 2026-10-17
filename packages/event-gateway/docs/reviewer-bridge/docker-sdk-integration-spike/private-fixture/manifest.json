@@ -1,6 +1,6 @@
 {
   "schema": "private-reviewer-docker-sdk-integration:v1",
-  "state": "UNEXECUTED_PACKAGING_FIXES_AWAITING_FINAL_ROOT_PROOF",
+  "state": "UNEXECUTED_PR149_REVIEW_FIXES_AWAITING_ROOT_PROOF",
   "sdkVersion": "0.3.209",
   "driver": {
     "repository": "knitli/.github",
@@ -10,15 +10,15 @@
   },
   "files": {
     "fixture.mjs": "c767125bbe5b90ef5cc1071f45810cff3d4ce09f86f9fa5f197fff6f7da399d4",
-    "launch.py": "0ba4e29155ea9baf4f6a36b82ff447c87cfdaa193f988711ee87cb509705ddb6",
+    "launch.py": "14c37a59f5d75b79ff2c01fe25b07a843e74f0dea0ad90e4e40040a59f0e8cba",
     "profile.sb": "dc6c4ddbf8c1fd356580842eb5c6df29d1941104b47fbfeb5c3dddc701919f87",
-    "README.md": "03c24b1a7f67500a35d97b73bac1025faff94a1123ae7c7145c487dba4c1a2f8"
+    "README.md": "0aedbfe49ca830c3bd5dc57c9b6b2b66ce4600a418624dafc7061afcc36c8f00"
   },
   "dependencies": {
     "/private/tmp/reviewer-sdk-process-protocol-20261017/frozen/sdk.mjs": "7b3577a1078660a3ec43471e6738c730ca1b172070ddcf3f9a9384bcb68bd3ca",
     "/private/tmp/reviewer-sdk-process-protocol-20261017/frozen/reviewer-completion-driver.mjs": "4ff7c66588d16f33f67ca89670b5efe4540170bf5708d28cea7b19a2d0298eee",
-    "/private/tmp/reviewer-docker-sdk-adapter-20261017/adapter.mjs": "e41429491e43f4a05c3ba9f10a9d09df25779890e1ec166b0449c1a1f079c8af",
-    "/private/tmp/reviewer-docker-sdk-adapter-20261017/fixture/protocol-child.py": "11777085c97fe3ebf8ce95e6bdd1dce91abe544256daad886b9b42b802d9a71c"
+    "/private/tmp/reviewer-docker-sdk-adapter-20261017/adapter.mjs": "e36a2fc115c22f55e387e632db76732d75aebd7de87931ca3c600ca431edb6ca",
+    "/private/tmp/reviewer-docker-sdk-adapter-20261017/fixture/protocol-child.py": "f5d7ae681045266d2b9f2d806beee8b07c0f527f4feffd523037076c3d9d4cd6"
   },
   "socket": "/Users/adampoulemanos/.docker/run/docker.sock",
   "cases": [
@@ -31,7 +31,7 @@
     "javascriptSyntax": "node --check PASS; fixture not executed",
     "pythonSyntax": "AST PASS; copied-path mocked refusal PASS before resources; mock process cleanup PASS",
     "sandboxSyntax": "Profile accepted in historical attempt 1; real forbidden Unix socket denial unproven",
-    "sdkDockerIntegration": "CURRENT BYTES UNEXECUTED; historical attempt2 PASS is not current qualification",
+    "sdkDockerIntegration": "CURRENT REVIEW-FIX BYTES UNEXECUTED; historical attempt3 PASS qualifies archived hashes only",
     "pythonLint": "Configured Ruff plus explicit preview E306 and C901 maximum15 PASS",
     "javascriptLint": "Repository Biome rules with private VCS-disabled config PASS; no formatter"
   },
@@ -137,5 +137,11 @@
     "Launcher process/cleanup helper extraction for C901 <=15",
     "Fixture two template literals and one optional chain; no formatter",
     "Adapter unused constant/state and catch-rethrow removal plus indentation"
-  ]
+  ],
+  "historicalAttempt3": {
+    "manifestSha256": "d4f23dfa5846905d57d61832e560ac69f73bd9c73ea4cd1653d62cc3f63f33d2",
+    "manifest": "../evidence/attempt-3/manifest.json",
+    "rootReceipt": "../evidence/attempt-3/root-attempt-3.json",
+    "result": "PASS only at historical hashes"
+  }
 }

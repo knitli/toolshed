@@ -23,7 +23,7 @@ PROTOCOL = Path('/private/tmp/reviewer-sdk-process-protocol-20261017/frozen')
 PINNED = {
     str(PROTOCOL / 'sdk.mjs'): '7b3577a1078660a3ec43471e6738c730ca1b172070ddcf3f9a9384bcb68bd3ca',
     str(PROTOCOL / 'reviewer-completion-driver.mjs'): '4ff7c66588d16f33f67ca89670b5efe4540170bf5708d28cea7b19a2d0298eee',
-    str(CHILD): '11777085c97fe3ebf8ce95e6bdd1dce91abe544256daad886b9b42b802d9a71c',
+    str(CHILD): 'f5d7ae681045266d2b9f2d806beee8b07c0f527f4feffd523037076c3d9d4cd6',
 }
 LIMIT = 1024 * 1024
 TIMEOUT = 240
@@ -86,9 +86,10 @@ def verify_inputs():
 def run_process(argv, scratch, env, streams, state):
     process = None
     try:
-        process = subprocess.Popen(argv, cwd=scratch, env=env, close_fds=True, shell=False,  # nosec B603 - Fixed hash-verified executable, closed argv/environment.
-                                   start_new_session=True, stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        process = subprocess.Popen(  # nosec B603 - Fixed hash-verified executable, closed argv/environment.
+            argv, cwd=scratch, env=env, close_fds=True, shell=False,
+            start_new_session=True, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         deadline = time.monotonic() + TIMEOUT
         total = 0
         with selectors.DefaultSelector() as selector:

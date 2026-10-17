@@ -1,18 +1,28 @@
 # Local reviewer SDK / Docker integration spike
 
-Current packaged source passed **attempt 3: four cases and all five containment controls**, using actual SDK **0.3.209** with a fixed Docker protocol fixture. Root recorded launcher exit 0, independent absence for all four exact container IDs and four names, unchanged daemon identity, and no remaining owned host processes. The repository source is copied byte for byte from the qualified private bundle; the [result receipt](result-receipt.json) records its provenance.
+The current review fixes passed **attempt 4: four cases and all five containment controls**, using actual SDK **0.3.209** with a fixed Docker protocol fixture. The run completed on 2026-10-17 at 17:21:44–17:21:58 UTC. Root independently confirmed all four exact container IDs and names absent, unchanged daemon identity, and no owned host processes. The [result receipt](result-receipt.json) records exact source and evidence hashes.
+
+The fixes reserve `stdin.write()` and `stdin.end()` payload budgets before queueing, count processed bytes once, and preserve completion callbacks. They also replace the ambiguous assertion-helper name, validate canonical CID/UUID values linearly, simplify fake-backend options, preserve boolean rejection, and satisfy targeted Python lint.
 
 The sandbox permits the **whole Node process** to access Docker's Unix socket. API guards do **not** contain a hostile SDK using a raw socket to reach the daemon. This is a pinned synthetic-fixture proof, not a general hostile-SDK or daemon security boundary.
 
-## Current attempt 3 evidence
+## Current attempt 4 evidence
 
-The [root receipt](evidence/attempt-3/root-attempt-3.json), [exact absence receipt](evidence/attempt-3/root-attempt-3-exact-absence.json), [capture receipt](evidence/attempt-3/capture.json), and [stdout](evidence/attempt-3/stdout.log) record the final run. The frozen manifest SHA256 is `d4f23dfa5846905d57d61832e560ac69f73bd9c73ea4cd1653d62cc3f63f33d2`. Daemon ID remained `804dc7e7-2939-459e-b28d-4e1a35038c92` through execution and independent readback.
+The [root receipt](evidence/attempt-4/root-attempt-4.json), [exact absence receipt](evidence/attempt-4/root-attempt-4-exact-absence.json), [capture receipt](evidence/attempt-4/capture.json), and [stdout](evidence/attempt-4/stdout.log) qualify manifest `66dd375440977b510157c19f7ba872cc7277f0ff67a7fe00ff2e71893b70073b`. Success completed; early terminal, EOF, and abort produced expected `incomplete`, `missing_terminal`, and `timeout` refusals. All five controls passed; the canary was preserved and removed, and the forbidden Unix listener was closed and removed. Capture retained 6,836 bytes under its 1 MiB limit.
+
+[Captured stderr](evidence/attempt-4/stderr.log) retains four `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warnings. These record the bare allowed-tool entry bypassing `canUseTool`; they do not establish production authorization or hostile-SDK containment.
+
+All ten packaged source files match executed private inputs. Their creation-time README and manifest retain UNEXECUTED wording; these subsequent receipts establish execution. Eight explicitly allowlisted regular evidence files are copied byte for byte, with capture `.bin` files renamed `.log`. Complete source history remains in private `history-attempt-4`; SDK/driver bytes are not vendored.
+
+## Historical attempt 3 evidence
+
+The [root receipt](evidence/attempt-3/root-attempt-3.json), [exact absence receipt](evidence/attempt-3/root-attempt-3-exact-absence.json), [capture receipt](evidence/attempt-3/capture.json), and [stdout](evidence/attempt-3/stdout.log) record the prior bundle’s attempt 3 run. The frozen manifest SHA256 is `d4f23dfa5846905d57d61832e560ac69f73bd9c73ea4cd1653d62cc3f63f33d2`. Daemon ID remained `804dc7e7-2939-459e-b28d-4e1a35038c92` through execution and independent readback.
 
 Success completed; early terminal, EOF, and abort produced the expected `incomplete`, `missing_terminal`, and `timeout` refusals. The abort container's exit 137 was expected. All five controls passed: denied outside-scratch read, positive scratch write, denied IPv4, denied IPv6, and denied access to the other Unix socket. The canary remained unchanged and was removed; the forbidden listener was closed and removed.
 
 [Captured stderr](evidence/attempt-3/stderr.log) retains four `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warnings: the bare allowed-tool entry bypasses `canUseTool` for `mcp__frozen__read_next`. Their presence is recorded, not accepted as production authorization behavior or used as evidence of security containment.
 
-The private-fixture manifest and README remain unchanged creation-time snapshots, including UNEXECUTED wording. The subsequent attempt 3 receipts establish execution; those frozen files were not rewritten after the run.
+The archived attempt 3 manifest remains an unchanged creation-time snapshot. Its receipts qualify only that historical source bundle.
 
 ## Historical evidence
 
@@ -37,7 +47,7 @@ For historical attempt 2, only eight explicitly allowlisted regular, non-symlink
 
 ## Historical source inventory
 
-These hashes come from the attempt 2 manifest and identify that historical source only. They are not the current attempt 3 source inventory.
+These hashes come from the attempt 2 manifest and identify that historical source only. They identify neither attempt 3 nor the current candidate source inventory.
 
 | Original file / dependency | SHA256 |
 | --- | --- |
@@ -54,8 +64,8 @@ The completion driver was recorded unchanged from `knitli/.github` revision `e51
 
 ## Current candidate and limits
 
-The candidate is copied byte for byte into `private-fixture/` (the five-file private bundle: `fixture.mjs`, `launch.py`, `profile.sb`, `manifest.json`, and its frozen `README.md`) and `adapter/` (adapter sources, tests, and protocol child), with the frozen manifest bound to successful root attempt 3. This root README is separate from the frozen private README. Launch paths remain historical; the copied launcher is designed to reject invocation outside its approved private location before reading files or allocating resources. SDK and completion-driver dependencies remain external hash references only. The root performed the recorded actual SDK/Docker run privately; documentation packaging performed no live execution. The [result receipt](result-receipt.json) records copied source hashes and current qualification.
+The copied launcher rejects invocation outside its approved private location before reading files or allocating resources. SDK and completion-driver dependencies remain external hash references only. Root performed attempt 4 privately; packaging performed no further live execution.
+
+Validation passed: 26 fake-adapter groups, nine host-only protocol-child tests, five stdin causal mutants rejected, boolean-rejection mutant rejected, Node syntax, Biome, targeted Ruff/E306/E501/D107/C901 ≤15, copied-path refusal, and exact source/evidence hash checks.
 
 The result is limited to the tested local actual-SDK / fixed-Docker-protocol integration. Native Claude execution, provider calls, hosted qualification, and production activation remain excluded. It does not establish a production reviewer transport or complete dynamic runtime read closure.
-
-Pre-proof checks passed: launcher Ruff/E306/C901 ≤15 and mocked historical-path refusal; fixture Node syntax and repository Biome lint; adapter owner reports 20 fake-backend cases and 8 host-only protocol-child unit cases. The separate root SDK/Docker proof passed as recorded above. No formatter or quality configuration change was applied.

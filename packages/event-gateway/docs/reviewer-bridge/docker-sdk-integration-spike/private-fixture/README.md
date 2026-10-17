@@ -1,3 +1,5 @@
+CURRENT REPOSITORY REVIEW-FIX CANDIDATE: UNEXECUTED. The actual private execution inputs and attempt 3 receipts are unchanged. The previous execution is archived at published commit 9fd45beeb633060c497a4d6a136c880efcf40f97 and in the evidence directory; it does not qualify the changed source below. Full review and a new root freeze/rerun are required.
+
 # Private SDK / Docker integration candidate
 
 CURRENT REVISION UNEXECUTED AFTER PACKAGING FIXES. Controlled attempt 2 passed all four SDK/Docker fixture cases at its archived source hashes. The subsequent launcher preflight/lint and adapter formatting changes require one fresh root proof before this current bundle is qualified. `node --check` only parsed the fixture; Python AST and inert source assertions checked the launcher.

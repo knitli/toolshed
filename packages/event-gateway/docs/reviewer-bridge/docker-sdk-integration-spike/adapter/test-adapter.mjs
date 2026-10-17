@@ -58,24 +58,8 @@ function fakeInspect(container) {
   };
 }
 
-function makeBackend({
-  mode = 'success',
-  createDelay,
-  loseCreateResponse = false,
-  wrongInspect = false,
-  leaveRunningAfterAttach = false,
-  refuseRemove = false,
-  timeoutImageInspect = false,
-  changeDaemonAfter = false,
-  nonEmptyPortBindings = false,
-  ignorePid1Term = false,
-  failKill = false,
-  attachError = false,
-  attachErrorThenClose = false,
-  neverCloseClient = false,
-  outputOverflowAfterTerminal = false,
-  testTimeouts,
-} = {}) {
+function makeBackend(options = {}) {
+  const mode = options.mode ?? 'success';
   const createEntered = deferred();
   const commands = [];
   const data = { mode, containers: new Map(), attached: null, input: Buffer.alloc(0), eof: false,
@@ -96,9 +80,9 @@ function makeBackend({
       switch (args[0]) {
         case 'info':
           data.daemonCalls++;
-          return output(changeDaemonAfter && data.daemonCalls > 1 ? 'fake-daemon-2\n' : 'fake-daemon-1\n');
+          return output(options.changeDaemonAfter && data.daemonCalls > 1 ? 'fake-daemon-2\n' : 'fake-daemon-1\n');
         case 'image':
-          if (timeoutImageInspect) throw new Error('docker image inspect timed out');
+          if (options.timeoutImageInspect) throw new Error('docker image inspect timed out');
           return output([{ Id: IMAGE, Os: 'linux', Architecture: 'arm64' }]);
         case 'container': {
           const filter = args[args.indexOf('--filter') + 1];
@@ -125,38 +109,38 @@ function makeBackend({
           assert.equal(args.find(value => value.startsWith('type=bind,src=')),
             `type=bind,src=${data.fixture},dst=/fixture,readonly`);
           createEntered.resolve();
-          if (createDelay) await createDelay.promise;
+          if (options.createDelay) await options.createDelay.promise;
           const container = { id: CID, name: data.name, mode, sessionId: data.sessionId, fixture: data.fixture,
             state: { Status: 'created', Running: false, Pid: 0, ExitCode: 0 } };
           data.containers.set(CID, container);
-          if (loseCreateResponse) throw new Error('simulated response loss after daemon dispatch');
+          if (options.loseCreateResponse) throw new Error('simulated response loss after daemon dispatch');
           return output(`${CID}\n`);
         }
         case 'inspect': {
           const container = data.containers.get(args[1]);
           if (!container) throw new Error('no such container');
           const value = fakeInspect(container);
-      if (wrongInspect) value.Id = 'b'.repeat(64);
-      if (nonEmptyPortBindings) value.HostConfig.PortBindings = { '8080/tcp': [] };
+      if (options.wrongInspect) value.Id = 'b'.repeat(64);
+      if (options.nonEmptyPortBindings) value.HostConfig.PortBindings = { '8080/tcp': [] };
           return output([value]);
         }
         case 'kill': {
           const container = data.containers.get(args.at(-1));
           assert(container, 'only an existing exact ID may be killed');
-          if (failKill) throw new Error('simulated Docker kill failure');
+          if (options.failKill) throw new Error('simulated Docker kill failure');
           const code = args[1] === '--signal=SIGTERM' ? 143 : 137;
-          if (container.state.Running && !(ignorePid1Term && args[1] === '--signal=SIGTERM')) stop(container, code);
+          if (container.state.Running && !(options.ignorePid1Term && args[1] === '--signal=SIGTERM')) stop(container, code);
           return output('');
         }
         case 'rm': {
           assert.equal(args[1], '--force');
-          if (!refuseRemove) data.containers.delete(args[2]);
+          if (!options.refuseRemove) data.containers.delete(args[2]);
           return output('');
         }
         default: throw new Error(`fake backend rejected operation: ${args.join(' ')}`);
       }
     },
-    testTimeouts,
+    testTimeouts: options.testTimeouts,
     attach(args, context) {
       record(args);
       assert.deepEqual(args, ['start', '--attach', '--interactive', CID]);
@@ -175,33 +159,33 @@ function makeBackend({
       child.finish = code => {
         if (child.exitCode !== null) return;
         child.exitCode = code;
-        if (neverCloseClient) return;
+        if (options.neverCloseClient) return;
         child.stdout.end();
         child.stderr.end();
         child.emit('close', code, null);
       };
       child.kill = signal => {
         data.clientSignals.push(signal);
-        if (signal === 'SIGKILL' && !neverCloseClient) child.finish(137);
+        if (signal === 'SIGKILL' && !options.neverCloseClient) child.finish(137);
         return true;
       };
       data.attached = child;
       data.attachEntered.resolve();
       data.cliConfigPath = context?.configPath ?? null;
-      if (attachError || attachErrorThenClose) queueMicrotask(() => {
+      if (options.attachError || options.attachErrorThenClose) queueMicrotask(() => {
         child.emit('error', new Error('simulated attach failure'));
-        if (attachErrorThenClose) child.finish(1);
+        if (options.attachErrorThenClose) child.finish(1);
       });
       const complete = () => {
-        if (attachError || attachErrorThenClose) return;
+        if (options.attachError || options.attachErrorThenClose) return;
         if (mode === 'abort') return;
         if (mode === 'eof') {
           stop(container, 0);
           return;
         }
         child.stdout.write(`${JSON.stringify({ type: 'result', subtype: mode, session_id: SESSION })}\n`);
-        if (outputOverflowAfterTerminal) child.stdout.write(Buffer.alloc(70 * 1024, 65));
-        if (!leaveRunningAfterAttach) stop(container, 0);
+        if (options.outputOverflowAfterTerminal) child.stdout.write(Buffer.alloc(70 * 1024, 65));
+        if (!options.leaveRunningAfterAttach) stop(container, 0);
         else child.finish(0);
       };
       queueMicrotask(() => {
@@ -245,6 +229,61 @@ async function shouldReject(promise, pattern) {
   await assert.rejects(promise, pattern);
 }
 
+const validationRoot = makeRoot();
+try {
+  const backend = makeBackend();
+  const config = { root: validationRoot, mode: 'success', sessionId: SESSION };
+  for (const version of '12345678') {
+    for (const variant of '89ab') {
+      const sessionId = `${SESSION.slice(0, 14)}${version}${SESSION.slice(15, 19)}${variant}${SESSION.slice(20)}`;
+      assert.doesNotThrow(() => createDockerAdapterWithFakeBackend({ ...config, sessionId }, backend));
+    }
+  }
+  for (const sessionId of [null, 42, '', SESSION.toUpperCase(), `${SESSION}\n`, 'a'.repeat(100_000),
+    SESSION.replace('-','_'), `${SESSION.slice(0, 14)}0${SESSION.slice(15)}`,
+    `${SESSION.slice(0, 14)}9${SESSION.slice(15)}`, `${SESSION.slice(0, 19)}7${SESSION.slice(20)}`,
+    `${SESSION.slice(0, 19)}c${SESSION.slice(20)}`, `g${SESSION.slice(1)}`]) {
+    assert.throws(() => createDockerAdapterWithFakeBackend({ ...config, sessionId }, backend), /canonical UUID/);
+  }
+  const adapter = createDockerAdapterWithFakeBackend(config, backend);
+  for (const args of [[], ['--session-id'], ['--session-id', SESSION, '--session-id', SESSION],
+    ['--session-id', `${SESSION}\n`], ['--session-id', 'a'.repeat(100_000)], ['--session-id', 42]]) {
+    assert.throws(() => adapter.spawn({ ...sdkOptions(validationRoot), args }), /SDK (session id mismatch|command arguments)/);
+  }
+  for (const overrides of [{ command: '/bin/sh' }, { cwd: '/' },
+    { command: `${validationRoot}/../NEVER-EXECUTED-claude` }]) {
+    assert.throws(() => adapter.spawn({ ...sdkOptions(validationRoot), ...overrides }), /unexpected SDK command/);
+  }
+  assert.throws(() => createDockerAdapterWithFakeBackend({ ...config, root: 'relative' }, backend), /root must be absolute/);
+  assert.equal(backend.data.commands.length, 0, 'invalid arguments must fail before Docker dispatch');
+} finally {
+  rmSync(validationRoot, { recursive: true, force: true });
+}
+
+for (const invalidId of ['', 'a'.repeat(63), 'a'.repeat(65), 'A'.repeat(64),
+  `${'a'.repeat(63)}g`, 'a'.repeat(100_000)]) {
+  for (const operation of ['create', 'container']) {
+    const root = makeRoot();
+    try {
+      const backend = makeBackend();
+      const command = backend.command;
+      backend.command = async args => {
+        const result = await command(args);
+        return args[0] === operation ? Buffer.from(`${invalidId}\n`) : result;
+      };
+      // An empty listing is valid and means no matching container.
+      if (operation === 'container' && invalidId === '') continue;
+      const adapter = createDockerAdapterWithFakeBackend({ root, mode: 'success', sessionId: SESSION }, backend);
+      const facade = adapter.spawn(sdkOptions(root));
+      facade.on('error', () => {});
+      await assert.rejects(adapter.settle(), /invalid (created container identity|Docker identity listing)/);
+      assert.equal(backend.data.attached, null, 'invalid identities must never reach attach');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+}
+
 const cliOutput = createCliOutputCollectorForTest();
 cliOutput.collect('stdout', Buffer.alloc(40 * 1024, 65));
 cliOutput.collect('stderr', Buffer.alloc(40 * 1024, 66));
@@ -256,6 +295,138 @@ assert.equal(cliOutput.allocatedBytes, 64 * 1024,
 assert.equal(cliOutput.bytes('stdout').length, 40 * 1024);
 assert.equal(cliOutput.bytes('stderr').length, 24 * 1024);
 assert.equal(cliOutput.overflow, true);
+
+for (const [payload, pattern] of [
+  [Buffer.alloc(64 * 1024 + 1, 65), /protocol input frame limit/],
+  [Buffer.alloc(2 * 1024 * 1024 + 1, 10), /combined protocol transport limit/],
+  ['\n'.repeat(2 * 1024 * 1024 + 1), /combined protocol transport limit/],
+]) {
+  const delay = deferred();
+  const run = await runCase({ createDelay: delay });
+  await run.backend.data.createEntered.promise;
+  let callbackError;
+  const originalBufferFrom = Buffer.from;
+  let oversizedStringCopies = 0;
+  Buffer.from = (value, ...args) => {
+    if (typeof value === 'string' && value.length > 2 * 1024 * 1024) oversizedStringCopies++;
+    return originalBufferFrom(value, ...args);
+  };
+  let ended;
+  try {
+    ended = new Promise(resolvePromise => run.facade.stdin.end(payload, error => {
+      callbackError = error;
+      resolvePromise();
+    }));
+  } finally { Buffer.from = originalBufferFrom; }
+  assert.equal(oversizedStringCopies, 0, 'oversized encoded input is bounded before allocation');
+  assert.equal(run.facade.stdin._pendingWrite, null, 'oversized end payload is rejected before pending retention');
+  assert.equal(run.facade.stdin.destroyed, true);
+  delay.resolve();
+  await ended;
+  assert(callbackError instanceof Error, 'failed end callback receives an error');
+  await assert.rejects(run.adapter.settle(), pattern);
+  assert.equal(run.backend.data.attached, null, 'failed end payload must prevent attach');
+  assert.equal(run.backend.data.input.length, 0);
+  assert.equal(run.backend.data.containers.size, 0);
+  run.close();
+}
+
+for (const [first, last, encoding, expected] of [
+  [null, Buffer.from('buffer\n'), undefined, Buffer.from('buffer\n')],
+  [null, 'c3a90a', 'hex', Buffer.from('é\n')],
+  [null, new Uint8Array([116, 121, 112, 101, 100, 10]), undefined, Buffer.from('typed\n')],
+  ['first\n', Buffer.from('last\n'), undefined, Buffer.from('first\nlast\n')],
+]) {
+  const delay = deferred();
+  const run = await runCase({ createDelay: delay });
+  await run.backend.data.createEntered.promise;
+  if (first !== null) run.facade.stdin.write(first);
+  run.facade.stdin.end(last, encoding);
+  assert.equal(run.backend.data.attached, null);
+  assert(run.facade.stdin._pendingWrite, 'valid input waits for attach');
+  delay.resolve();
+  const result = await run.adapter.settle();
+  assert.deepEqual(run.backend.data.input, expected);
+  assert.equal(result.transportBytes.input, expected.length, 'write and end bytes count exactly once');
+  assert.equal(result.transportBytes.total, result.transportBytes.input + result.transportBytes.output);
+  assert.equal(run.facade.stdin._pendingWrite, null);
+  assert.equal(run.backend.data.eof, true);
+  run.close();
+}
+
+for (const corked of [false, true]) {
+  for (const [first, last, pattern] of [
+    [Buffer.from('a'), Buffer.alloc(64 * 1024, 65), /protocol input frame limit/],
+    [Buffer.from('\n'), Buffer.alloc(2 * 1024 * 1024, 10), /combined protocol transport limit/],
+  ]) {
+    const delay = deferred();
+    const run = await runCase({ createDelay: delay });
+    await run.backend.data.createEntered.promise;
+    if (corked) run.facade.stdin.cork();
+    let firstError;
+    const firstDone = new Promise(resolvePromise => run.facade.stdin.write(first, error => {
+      firstError = error;
+      resolvePromise();
+    }));
+    const endDone = new Promise(resolvePromise => run.facade.stdin.end(last, resolvePromise));
+    assert.equal(run.facade.stdin.destroyed, true, 'queued end is rejected synchronously before attach');
+    assert.equal(run.facade.stdin._pendingWrite, null, 'destruction releases pending input');
+    assert(run.facade.stdin.writableLength <= first.length, 'rejected payload never enters the native queue');
+    delay.resolve();
+    await Promise.all([firstDone, endDone]);
+    assert.equal(run.facade.stdin.writableLength, 0, 'destroyed input queue is drained');
+    assert(firstError instanceof Error, 'pending write callback is released with failure');
+    await assert.rejects(run.adapter.settle(), pattern);
+    assert.equal(run.backend.data.attached, null);
+    assert.equal(run.backend.data.input.length, 0);
+    assert.equal(run.backend.data.containers.size, 0);
+    run.close();
+  }
+}
+
+for (const corked of [false, true]) {
+  const run = await runCase();
+  if (corked) run.facade.stdin.cork();
+  const wrote = new Promise((resolvePromise, reject) => run.facade.stdin.write('é\n', 'utf8', error => {
+    if (error) reject(error); else resolvePromise();
+  }));
+  run.facade.stdin.setDefaultEncoding('hex');
+  const ended = new Promise((resolvePromise, reject) => run.facade.stdin.end('650a', error => {
+    if (error) reject(error); else resolvePromise();
+  }));
+  await Promise.all([wrote, ended]);
+  const result = await run.adapter.settle();
+  assert.deepEqual(run.backend.data.input, Buffer.from('é\ne\n'));
+  assert.equal(result.transportBytes.input, 5);
+  run.close();
+}
+
+for (const endArgs of [[], [null], ['', 'utf8'], [Buffer.alloc(0)]]) {
+  const run = await runCase();
+  const ended = new Promise((resolvePromise, reject) => run.facade.stdin.end(...endArgs, error => {
+    if (error) reject(error); else resolvePromise();
+  }));
+  const endedAgain = new Promise((resolvePromise, reject) => run.facade.stdin.end(error => {
+    if (error) reject(error); else resolvePromise();
+  }));
+  await Promise.all([ended, endedAgain]);
+  assert.equal((await run.adapter.settle()).transportBytes.input, 0, 'empty and repeated end reserve no bytes');
+  run.close();
+}
+
+const combinedOutput = await runCase();
+combinedOutput.facade.stdin.end(Buffer.alloc(2 * 1024 * 1024, 10));
+await assert.rejects(combinedOutput.adapter.settle(), /combined protocol transport limit/);
+assert.equal(combinedOutput.backend.data.input.length, 2 * 1024 * 1024);
+assert.equal(combinedOutput.backend.data.containers.size, 0);
+combinedOutput.close();
+
+const endAfterEnd = await runCase();
+endAfterEnd.facade.stdin.end();
+endAfterEnd.facade.stdin.end('late\n');
+await assert.rejects(endAfterEnd.adapter.settle(), /write after end/);
+assert.equal(endAfterEnd.backend.data.attached, null);
+endAfterEnd.close();
 
 const normal = await runCase();
 normal.facade.stdin.write('{"type":"user","message":"early prompt"}\n');
@@ -338,12 +509,22 @@ lostCreateBadPolicy.close();
 const cidGate = deferred();
 const killBeforeCid = await runCase({ createDelay: cidGate });
 await killBeforeCid.backend.data.createEntered.promise;
+let pendingCallbackCalls = 0;
+const pendingInputClosed = new Promise(resolvePromise => killBeforeCid.facade.stdin.write('pending\n', error => {
+  pendingCallbackCalls++;
+  assert.match(error.message, /closed before stdin attach/);
+  resolvePromise();
+}));
 assert.equal(killBeforeCid.facade.kill('SIGTERM'), true);
 cidGate.resolve();
 await shouldReject(killBeforeCid.adapter.settle(), /terminated during container creation/);
 assert(killBeforeCid.backend.data.commands.some(args => args[0] === 'rm'));
 assert(!killBeforeCid.backend.data.commands.some(args => args[0] === 'start'));
 assert.equal(killBeforeCid.backend.data.containers.size, 0);
+await pendingInputClosed;
+assert.equal(pendingCallbackCalls, 1);
+assert.equal(killBeforeCid.facade.stdin._pendingWrite, null);
+assert.equal(killBeforeCid.facade.stdin.destroyed, true);
 killBeforeCid.close();
 
 const timeout = await runCase({ timeoutImageInspect: true });
@@ -383,7 +564,7 @@ unconfirmedRemove.close();
 const overflow = await runCase();
 overflow.facade.stdin.end();
 assert.equal(overflow.facade.stdin.write(Buffer.alloc(2 * 1024 * 1024 + 1, 10)), false);
-await shouldReject(overflow.adapter.settle(), /protocol input frame limit|combined protocol transport limit/);
+await shouldReject(overflow.adapter.settle(), /write after end/);
 assert.equal(overflow.backend.data.commands.some(args => args[0] === 'create'), false);
 overflow.close();
 
@@ -436,6 +617,12 @@ assert.equal(cleanupStages.backend.data.containers.size, 0);
 cleanupStages.close();
 
 console.log(JSON.stringify({ status: 'PASS', cases: [
+  'canonical UUID versions and variants; malformed and oversized UUID rejection',
+  'SDK session and exact path policy rejected before dispatch',
+  'malformed and oversized CID listings and create results rejected before attach',
+  'end payload frame and transport limits before attach; exact Buffer/string/typed-array accounting',
+  'queued and corked write/end admission; pending callbacks released; cumulative frame and transport caps',
+  'UTF8, hex default encoding, callback overloads and repeated empty end',
   'bounded startup buffering and clean exit code', 'early terminal', 'EOF', 'abort and duplicate kill',
   'PID 1 ignores TERM and receives bounded SIGKILL', 'attach CLI exit while container runs',
   'lost create response recovery', 'lost create with bad policy recovers exact owned container',
