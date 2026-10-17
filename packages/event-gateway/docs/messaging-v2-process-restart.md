@@ -87,3 +87,8 @@ at admission boundaries. It does not qualify deployed transport,
 provider/native execution, settlement, ACKs or unattended wake. Cloud approval,
 keys, routing and native binding remain synthetic seeded prior state. No production
 activation, runtime changes, dependency installation or CI wiring is included.
+
+The hashes above identify that orderly-replacement qualification. Separate
+[in-flight crash qualification](messaging-v2-abrupt-crash.md) changes the fixture
+worker and its manifest; its three local abrupt cases passed on 2026-10-17.
+That result is separate from the orderly-replacement evidence above.
