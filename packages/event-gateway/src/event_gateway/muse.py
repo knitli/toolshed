@@ -11,7 +11,8 @@ class MuseMonitorError(ValueError):
 
     def __init__(self):
         """Expose a safe monitor validation code."""
-        super().__init__('invalid_muse_monitor')
+        self.code = 'invalid_muse_monitor'
+        super().__init__(self.code)
 
 
 _FIELDS = frozenset(('description', 'command', 'ws', 'ws_subprotocols', 'persistent',
@@ -77,7 +78,7 @@ def command_monitor(description, argv, **options):
     # authority. A real authorized polling command remains a separate prerequisite.
     if (not isinstance(argv, (list, tuple)) or not argv
             or any(not isinstance(arg, str) or '\x00' in arg for arg in argv)
-            or not argv[0] or set(options) - (_FIELDS - {'description', 'command', 'ws'})):
+            or not argv[0] or set(options) - (_FIELDS - {'description', 'command', 'ws', 'ws_subprotocols'})):
         raise MuseMonitorError()
     # Command position must be quoted even for shlex-safe assignments/reserved words.
     executable = "'" + argv[0].replace("'", "'\"'\"'") + "'"

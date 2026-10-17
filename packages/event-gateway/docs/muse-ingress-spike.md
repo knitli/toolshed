@@ -124,6 +124,8 @@ configuration change, pull endpoint, cursor, or acknowledgment is added here.
 
 ## Concrete next action
 
+Push ingress remains a separate, unqualified path; see [Push ingress qualification](#push-ingress-qualification).
+
 Design the session-owned pull service against an independently trusted Muse
 session/generation binding. Existing `control.sock` authenticates the filesystem
 owner, not a Muse session. The HTTP listener accepts signed delivery intake only.

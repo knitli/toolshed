@@ -13,6 +13,13 @@ from event_gateway.muse import MuseMonitorError, command_monitor, normalize_moni
 
 
 class MuseMonitorTests(unittest.TestCase):
+    def test_validation_error_exposes_only_safe_code(self):
+        with self.assertRaises(MuseMonitorError) as caught:
+            normalize_monitor({'description': 'private description', 'ws': 'wss://private.test/#private-token'})
+        self.assertEqual(caught.exception.code, 'invalid_muse_monitor')
+        self.assertEqual(str(caught.exception), caught.exception.code)
+        self.assertEqual(caught.exception.args, ('invalid_muse_monitor',))
+
     def test_reported_defaults_and_contract_provenance(self):
         contract = json.loads((Path(__file__).resolve().parents[1]
                                / 'docs/muse-ingress/owner-monitor-contract.json').read_text())
@@ -114,9 +121,11 @@ class MuseMonitorTests(unittest.TestCase):
         for value in ([], '', [''], ['poll', None], ['poll', 'bad\x00arg']):
             with self.subTest(value=value), self.assertRaises(MuseMonitorError):
                 command_monitor('x', value)
-        for options in ({'ws': 'wss://example.test'}, {'command': 'other'}, {'sessionId': 'x'}):
-            with self.assertRaises(MuseMonitorError):
+        for options in ({'ws': 'wss://example.test'}, {'ws_subprotocols': []},
+                        {'ws_subprotocols': ['private-token']}, {'command': 'other'}, {'sessionId': 'x'}):
+            with patch('event_gateway.muse.normalize_monitor') as normalize, self.assertRaises(MuseMonitorError):
                 command_monitor('x', ['poll'], **options)
+            normalize.assert_not_called()
 
 
 if __name__ == '__main__':
