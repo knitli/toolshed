@@ -4,7 +4,10 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+from types import MappingProxyType
 import stat
+import subprocess
+import sys
 import struct
 import tempfile
 import unittest
@@ -17,6 +20,7 @@ SPEC = importlib.util.spec_from_file_location("native_ci_verifier", SCRIPT)
 V = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(V)
 HEAD, MAIN, BUILD = "a" * 40, "b" * 40, "c" * 40
+REGISTRY = "packages/event-gateway/scripts/native_recipe_registry.py"
 
 
 def launcher(binary="1" * 64, host="2" * 64):
@@ -28,9 +32,8 @@ def launcher(binary="1" * 64, host="2" * 64):
 def fixture():
     binary = struct.pack("<II", 0xFEEDFACF, 0x0100000C) + b"actual cli bytes"
     host = struct.pack("<II", 0xFEEDFACF, 0x0100000C) + b"actual host bytes"
-    manifest = {"baseCommit": "d" * 40, "fileSha256": {"src/main.rs": "e" * 64}, "fileCount": 1}
-    blobs = {path: (name + " reviewed recipe").encode() for name, path in V.INPUTS.items()}
-    blobs[V.INPUTS["sourceManifestSha256"]] = json.dumps(manifest).encode()
+    blobs = {path: (SCRIPT.parents[3] / path).read_bytes() for path in V.INPUTS.values()}
+    manifest = json.loads(blobs[V.INPUTS["sourceManifestSha256"]])
     inputs = {name: V.digest(blobs[path]) for name, path in V.INPUTS.items()}
     selected = {"schemaVersion": 1, "repositoryId": V.REPOSITORY_ID, "runId": 123,
                 "runAttempt": 2, "headSha": BUILD, "artifactId": 456,
@@ -44,7 +47,7 @@ def fixture():
                                "clangVersion": "clang 18", "linkerVersion": "ld 1"},
                "build": {"upstreamCommit": manifest["baseCommit"], "patchSha256": inputs["patchSha256"],
                          "sourceManifestSha256": inputs["sourceManifestSha256"],
-                         "patchedFileSha256": manifest["fileSha256"], "patchedFileCount": 1,
+                         "patchedFileSha256": manifest["fileSha256"], "patchedFileCount": manifest["fileCount"],
                          "binarySha256": V.digest(binary), "codeModeHost": {"executableSha256": V.digest(host)},
                          "host": "aarch64-apple-darwin", "normalizedCargoLockSha256": "f" * 64}}
     return selected, inputs, manifest, blobs, [("codex", binary), ("codex-code-mode-host", host),
@@ -81,6 +84,8 @@ class FakeAPI:
         self.selected["artifactSha256"] = V.digest(self.archive)
         self.workflow, self.run, self.artifact = metadata(self.selected)
         self.blobs = {(path, revision): data for path, data in recipes.items() for revision in (HEAD, MAIN, BUILD)}
+        for revision in (HEAD, MAIN):
+            self.blobs[REGISTRY, revision] = (SCRIPT.parents[3] / REGISTRY).read_bytes()
         self.blobs[V.LAUNCHER, MAIN] = launcher()
         self.blobs[V.LAUNCHER, HEAD] = launcher(self.selected["binarySha256"], self.selected["codeModeHostSha256"])
         self.blobs[V.PROVENANCE, HEAD] = json.dumps(self.selected).encode()
@@ -88,6 +93,15 @@ class FakeAPI:
                                                    for path in (V.LAUNCHER, V.PROVENANCE)]}
         self.calls = []
         self.comparison = {"status": "BEHIND", "baseTarget": {"oid": MAIN}, "headTarget": {"oid": BUILD}}
+
+    def replace_receipt(self, receipt):
+        with zipfile.ZipFile(io.BytesIO(self.archive)) as archive:
+            members = [(name, archive.read(name)) for name in ("codex", "codex-code-mode-host")]
+        self.archive = archive_bytes([*members, ("build-receipt.json", json.dumps(receipt).encode())])
+        self.selected["artifactSha256"] = V.digest(self.archive)
+        self.artifact["digest"] = "sha256:" + self.selected["artifactSha256"]
+        self.artifact["size_in_bytes"] = len(self.archive)
+        self.blobs[V.PROVENANCE, HEAD] = json.dumps(self.selected).encode()
 
     def request(self, endpoint, payload=None):
         if endpoint == "graphql" and payload["query"] == V.ANCESTRY_QUERY:
@@ -118,7 +132,7 @@ class NativeCIProvenanceTests(unittest.TestCase):
         push = workflow.split("\n  push:\n", 1)[1]
         paths = push.split("\n    paths:\n", 1)[1].split("\n\n", 1)[0]
         triggered = {line.removeprefix("      - ") for line in paths.splitlines()}
-        required = {V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, *V.INPUTS.values()}
+        required = {V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, REGISTRY, *V.INPUTS.values()}
         self.assertFalse(required - triggered, required - triggered)
 
     def test_pins_parse_literals_without_executing_candidate(self):
@@ -231,6 +245,7 @@ class NativeCIProvenanceTests(unittest.TestCase):
         api = FakeAPI()
         api.blobs[V.LAUNCHER, HEAD] = launcher()
         self.assertIn("unchanged", V.verify_candidate(api, HEAD, MAIN))
+        self.assertFalse(any(isinstance(call, tuple) and call[0] in {REGISTRY, *V.INPUTS.values()} for call in api.calls))
         self.assertFalse(any(isinstance(call, str) and call.startswith("actions/") or
                              isinstance(call, tuple) and call[0] == "download" for call in api.calls))
         for source in (launcher() + b'globals()["QUALIFIED_SHA256"] = "bad"\n',
@@ -427,6 +442,132 @@ class NativeCIProvenanceTests(unittest.TestCase):
                     V.verify_candidate(api, HEAD, MAIN)
                 self.assertNotIn(("download", 456), api.calls)
 
+    def test_registered_legacy_build_survives_current_builder_policy_drift(self):
+        api = FakeAPI()
+        for name in ("builderSha256", "producerSha256", "workflowSha256"):
+            path = V.INPUTS[name]
+            for revision in (HEAD, MAIN):
+                api.blobs[path, revision] += b"\n# newer protected policy\n"
+        self.assertEqual(len(api.manifest["fileSha256"]), 57)
+        self.assertIn("verified main CI", V.verify_candidate(api, HEAD, MAIN))
+        self.assertIn(("download", 456), api.calls)
+        self.assertNotIn((REGISTRY, BUILD), api.calls)
+        for path in V.INPUTS.values():
+            self.assertIn((path, BUILD), api.calls)
+
+    def test_unregistered_build_tuple_is_rejected_even_when_candidate_and_main_match(self):
+        for name, path in V.INPUTS.items():
+            api = FakeAPI()
+            changed = api.blobs[path, BUILD] + b"\n"
+            for revision in (BUILD, HEAD, MAIN):
+                api.blobs[path, revision] = changed
+            receipt = json.loads(fixture()[4][2][1])
+            receipt["inputs"][name] = V.digest(changed)
+            if name in ("patchSha256", "sourceManifestSha256"):
+                receipt["build"][name] = V.digest(changed)
+            api.replace_receipt(receipt)
+            with self.subTest(field=name):
+                with self.assertRaises(ValueError):
+                    V.verify_candidate(api, HEAD, MAIN)
+                self.assertNotIn(("download", 456), api.calls)
+
+    def test_legacy_resolver_cannot_mix_individually_registered_build_hashes(self):
+        original = FakeAPI()
+        alternate = FakeAPI()
+        for name in ("builderSha256", "producerSha256", "workflowSha256"):
+            alternate.blobs[V.INPUTS[name], BUILD] += b"\n# synthetic reviewed fixture\n"
+        first = V.R.HistoricalInputs(**original.inputs)
+        second = V.R.HistoricalInputs(**{name: V.digest(alternate.blobs[path, BUILD])
+                                         for name, path in V.INPUTS.items()})
+        records = MappingProxyType({("core-idle-v1", 1): (first, second), ("terminal-query-v1", 1): ()})
+        with patch.object(V.R, "HISTORICAL_INPUTS", records):
+            for api in (original, alternate):
+                inputs, manifest = V.resolve_legacy_build_inputs(api, HEAD, BUILD, MAIN)
+                self.assertEqual(inputs, {name: V.digest(api.blobs[path, BUILD]) for name, path in V.INPUTS.items()})
+                self.assertEqual(manifest["fileCount"], 57)
+            original.blobs[V.INPUTS["builderSha256"], BUILD] = alternate.blobs[V.INPUTS["builderSha256"], BUILD]
+            with self.assertRaises(ValueError):
+                V.resolve_legacy_build_inputs(original, HEAD, BUILD, MAIN)
+
+    def test_registered_tuple_still_requires_fixed_legacy_manifest_and_patch(self):
+        for name in ("sourceManifestSha256", "patchSha256"):
+            api = FakeAPI()
+            api.blobs[V.INPUTS[name], BUILD] += b"\n"
+            inputs = {field: V.digest(api.blobs[path, BUILD]) for field, path in V.INPUTS.items()}
+            record = V.R.HistoricalInputs(**inputs)
+            with self.subTest(field=name), patch.object(V.R, "HISTORICAL_INPUTS",
+                    MappingProxyType({("core-idle-v1", 1): (record,)})), self.assertRaises(ValueError):
+                V.resolve_legacy_build_inputs(api, HEAD, BUILD, MAIN)
+
+    def test_candidate_registry_cannot_self_authorize_a_promotion(self):
+        api = FakeAPI()
+        api.blobs[REGISTRY, HEAD] += b"\nraise AssertionError('candidate registry executed')\n"
+        with self.assertRaises(ValueError):
+            V.verify_candidate(api, HEAD, MAIN)
+        self.assertNotIn(("download", 456), api.calls)
+
+    def test_historical_receipt_cannot_claim_current_policy_hashes(self):
+        api = FakeAPI()
+        path = V.INPUTS["builderSha256"]
+        for revision in (HEAD, MAIN):
+            api.blobs[path, revision] += b"\n# current builder\n"
+        receipt = json.loads(fixture()[4][2][1])
+        receipt["inputs"]["builderSha256"] = V.digest(api.blobs[path, MAIN])
+        api.replace_receipt(receipt)
+        with self.assertRaises(ValueError):
+            V.verify_candidate(api, HEAD, MAIN)
+        self.assertIn(("download", 456), api.calls)
+
+    def test_v1_selection_cannot_request_v2_or_terminal_recipe(self):
+        for change in ({"schemaVersion": 2}, {"recipe": {"family": "terminal-query-v1", "revision": 1}},
+                       {"family": "terminal-query-v1"}):
+            api = FakeAPI()
+            api.blobs[V.PROVENANCE, HEAD] = json.dumps({**api.selected, **change}).encode()
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                V.verify_candidate(api, HEAD, MAIN)
+            self.assertNotIn(("download", 456), api.calls)
+        for schema in (2, True):
+            api = FakeAPI()
+            receipt = json.loads(fixture()[4][2][1])
+            receipt["schemaVersion"] = schema
+            api.replace_receipt(receipt)
+            with self.subTest(receipt_schema=schema), self.assertRaises(ValueError):
+                V.verify_candidate(api, HEAD, MAIN)
+            self.assertIn(("download", 456), api.calls)
+
+    def test_v1_build_rejects_terminal_71_source_closure(self):
+        api = FakeAPI()
+        terminal = (SCRIPT.parents[1] / "docs/native-bridge/terminal-query-candidate-preparation/manifest.json").read_bytes()
+        self.assertEqual(json.loads(terminal)["fileCount"], 71)
+        api.blobs[V.INPUTS["sourceManifestSha256"], BUILD] = terminal
+        with self.assertRaises(ValueError):
+            V.verify_candidate(api, HEAD, MAIN)
+        self.assertNotIn(("download", 456), api.calls)
+
+    def test_isolated_import_loads_fixed_sibling_registry_without_search_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / "hostile-import-executed"
+            (root / "native_recipe_registry.py").write_text(f"from pathlib import Path\nPath({str(marker)!r}).touch()\nraise RuntimeError('hostile import')\n")
+            code = ("import runpy; namespace=runpy.run_path(" + repr(str(SCRIPT)) + "); "
+                    "assert namespace['R'].__file__ == " + repr(str(SCRIPT.with_name('native_recipe_registry.py'))) + "; "
+                    "assert namespace['R'].recipe().family == 'core-idle-v1'")
+            completed = subprocess.run([sys.executable, "-I", "-B", "-c", code], cwd=root,
+                                       capture_output=True, text=True, timeout=20,
+                                       env={**V.os.environ, "PYTHONPATH": str(root), "PYTHONDONTWRITEBYTECODE": "1"})
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertFalse(marker.exists())
+            missing = root / "missing-sibling"
+            missing.mkdir()
+            isolated = missing / SCRIPT.name
+            isolated.write_bytes(SCRIPT.read_bytes())
+            failed = subprocess.run([sys.executable, "-I", "-B", "-c",
+                                     "import runpy; runpy.run_path(" + repr(str(isolated)) + ")"],
+                                    cwd=root, capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("FileNotFoundError", failed.stderr)
+            self.assertFalse(marker.exists())
+
 
 class GitHubTransportTests(unittest.TestCase):
     def api(self, responses):
@@ -493,7 +634,7 @@ class GitHubTransportTests(unittest.TestCase):
                 for state in ("pending", "success"):
                     self.assertTrue(V.publish(api, number, HEAD, state, "checked", BUILD))
         endpoints = [call.args[0] for call in api.request.call_args_list]
-        paths = {V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, *V.INPUTS.values()}
+        paths = {V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, REGISTRY, *V.INPUTS.values()}
         # Two HTTP reads per path/revision, shared across both phases of all PRs.
         self.assertEqual(sum(e.startswith("contents/") for e in endpoints), 2 * len(paths))
         self.assertEqual(sum(e.startswith("git/blobs/") for e in endpoints), 2 * len(paths))
@@ -623,7 +764,7 @@ class GitHubTransportTests(unittest.TestCase):
 
 
 class ProvenanceDriverTests(unittest.TestCase):
-    def driver(self, event_name, event, *, fresh_head=HEAD, policy_changed=False):
+    def driver(self, event_name, event, *, fresh_head=HEAD, policy_changed=False, registry_changed=False):
         api = unittest.mock.Mock()
         pull = {"number": 7, "head": {"sha": HEAD}, "state": "open"}
         statuses = []
@@ -648,7 +789,7 @@ class ProvenanceDriverTests(unittest.TestCase):
             raise AssertionError(endpoint)
 
         def blob(path, revision):
-            return b"changed" if policy_changed and reads > 1 and revision == MAIN else b"policy"
+            return b"changed" if (policy_changed or registry_changed and path == REGISTRY) and reads > 1 and revision == MAIN else b"policy"
 
         api.request.side_effect = request
         api.blob.side_effect = blob
@@ -680,7 +821,7 @@ class ProvenanceDriverTests(unittest.TestCase):
                 self.assertTrue(all(status["context"] == V.CONTEXT for status in statuses))
 
     def test_final_status_withheld_after_head_or_policy_changes(self):
-        for options in ({"fresh_head": "d" * 40}, {"policy_changed": True}):
+        for options in ({"fresh_head": "d" * 40}, {"policy_changed": True}, {"registry_changed": True}):
             with self.subTest(options=options):
                 statuses = self.driver("push", {"ref": "refs/heads/main"}, **options)
                 self.assertEqual([status["state"] for status in statuses], ["pending"])

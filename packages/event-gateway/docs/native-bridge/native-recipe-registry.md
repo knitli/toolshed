@@ -1,4 +1,4 @@
-# Inactive native recipe registry
+# Native recipe registry
 
 `scripts/native_recipe_registry.py` records two fixed source families using
 frozen records and a read-only mapping:
@@ -8,9 +8,12 @@ frozen records and a read-only mapping:
 | `core-idle-v1` | 1 | 57 | Default |
 | `terminal-query-v1` | 1 | 71 | Explicit only |
 
-The registry is an inactive foundation. No production code imports it. The active
-builder, workflow, producer, verifier, launcher, release pins, and receipt schemas
-remain unchanged. Adoption by protected main is a separate future change.
+The trusted provenance verifier adopts only the registered `core-idle-v1`,
+revision 1 historical build-input tuples for legacy schema version 1 artifacts.
+It loads the registry from a fixed sibling file in its trusted checkout, including
+under Python isolated mode; candidate and build-head registry code is never run.
+The builder and producer do not import the registry. The 71-entry family remains
+inactive, and launcher pins and receipt schemas remain unchanged.
 
 ## API
 
@@ -41,7 +44,17 @@ current launcher, protected-main, or provenance checks. Source registration does
 not establish successful native builds, full test coverage, installed-client
 qualification, or permission to promote pins.
 
+For changed-pin candidates, the five candidate build-input files and registry
+bytes must equal current main. The artifact's five build-head hashes must match
+one complete registered legacy tuple, with the fixed legacy manifest and patch
+identities. A later current-main tuple is not automatically accepted under v1.
+The receipt must attest those authenticated historical inputs, even when current
+builder, producer, or workflow bytes have changed. Registry freshness is checked
+before publishing pending, success, or failure statuses. Unchanged current pins
+retain their no-artifact fast path; both reviewed launcher transitions remain.
+Schema version 2, recipe selection fields, and 71-family artifacts are rejected.
+
 The existing full-suite run failed. Six targeted reruns passed; those results do
-not replace the failed full-suite result or establish acceptance. Future adoption
+not replace the failed full-suite result or establish acceptance. Future builder adoption
 must retain the existing checks and separately establish the required build,
 provenance, and qualification evidence.

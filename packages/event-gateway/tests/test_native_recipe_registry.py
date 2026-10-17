@@ -1,4 +1,4 @@
-"""Inactive registry checks only; no patch application, build, or native execution."""
+"""Registry and verifier-only adoption checks; no build or native execution."""
 
 import ast
 from dataclasses import FrozenInstanceError, asdict, replace
@@ -272,13 +272,15 @@ class NativeRecipeRegistryTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     R.validate_recipe()
 
-    def test_no_active_imports_or_runtime_actions(self):
+    def test_only_trusted_verifier_adopts_registry_without_runtime_actions(self):
+        consumers = set()
         for directory in (PACKAGE / "src", PACKAGE / "scripts"):
             for path in directory.rglob("*.py"):
                 if path == SCRIPT:
                     continue
-                with self.subTest(path=path):
-                    self.assertNotIn("native_recipe_registry", path.read_text())
+                if "native_recipe_registry" in path.read_text():
+                    consumers.add(path.relative_to(PACKAGE).as_posix())
+        self.assertEqual(consumers, {"scripts/verify_native_ci_provenance.py"})
         tree = ast.parse(SCRIPT.read_text())
         imports = {item.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import)
                    for item in node.names}

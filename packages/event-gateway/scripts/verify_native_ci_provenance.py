@@ -4,17 +4,27 @@
 import ast
 import base64
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import re
 import stat
 import struct
+import sys
 import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+
+# The isolated workflow imports only its protected-checkout sibling, never PR data.
+_registry_spec = importlib.util.spec_from_file_location(
+    "_native_provenance_recipe_registry", Path(__file__).resolve().with_name("native_recipe_registry.py")
+)
+R = importlib.util.module_from_spec(_registry_spec)
+sys.modules[_registry_spec.name] = R
+_registry_spec.loader.exec_module(R)
 
 REPOSITORY = "knitli/toolshed"
 REPOSITORY_ID = 1200860702
@@ -22,6 +32,7 @@ API = "https://api.github.com/repos/" + REPOSITORY + "/"
 WORKFLOW = ".github/workflows/event-native-build.yml"
 VERIFIER_WORKFLOW = ".github/workflows/event-native-provenance.yml"
 SCRIPT = "packages/event-gateway/scripts/verify_native_ci_provenance.py"
+REGISTRY = "packages/event-gateway/scripts/native_recipe_registry.py"
 LAUNCHER = "packages/event-gateway/src/event_gateway/launcher.py"
 PROVENANCE = "packages/event-gateway/docs/native-bridge/native-release-provenance.json"
 # Reviewed Core-idle consumer: exact source bytes, with both release pins unchanged.
@@ -173,7 +184,8 @@ def verify_archive(path, selected, inputs, manifest):
                 hashes[item.filename] = hashlib.file_digest(stream, "sha256").hexdigest()
     require(hashes["codex"] == selected["binarySha256"]
             and hashes["codex-code-mode-host"] == selected["codeModeHostSha256"])
-    require(isinstance(receipt, dict) and receipt.get("schemaVersion") == 1
+    require(isinstance(receipt, dict) and type(receipt.get("schemaVersion")) is int
+            and receipt["schemaVersion"] == 1
             and receipt.get("kind") == "native-client-ci-build" and receipt.get("repositoryId") == REPOSITORY_ID
             and receipt.get("runId") == selected["runId"] and receipt.get("runAttempt") == selected["runAttempt"]
             and receipt.get("headSha") == selected["headSha"] and receipt.get("artifactName") == artifact_name(selected)
@@ -277,6 +289,21 @@ def require_ancestry(api, build, main):
             and comparison["headTarget"].get("oid") == build)
 
 
+def resolve_legacy_build_inputs(api, head, build, main):
+    """Authenticate one reviewed legacy tuple while requiring a current candidate."""
+    require(api.blob(REGISTRY, head) == api.blob(REGISTRY, main))
+    build_blobs = {}
+    for name, path in INPUTS.items():
+        require(api.blob(path, head) == api.blob(path, main))
+        build_blobs[name] = api.blob(path, build)
+    inputs = {name: digest(value) for name, value in build_blobs.items()}
+    require(R.matches_historical_inputs("core-idle-v1", 1, inputs))
+    legacy = R.recipe("core-idle-v1", 1)
+    require(inputs["sourceManifestSha256"] == legacy.manifest.sha256
+            and inputs["patchSha256"] == legacy.ordered_patches[0].sha256)
+    return inputs, json.loads(build_blobs["sourceManifestSha256"])
+
+
 def verify_candidate(api, head, main):
     require(sha(head, 40) and sha(main, 40))
     tree = api.request(f"git/trees/{head}?recursive=1")
@@ -305,12 +332,7 @@ def verify_candidate(api, head, main):
     artifact = api.request(f"actions/artifacts/{selected['artifactId']}")
     verify_metadata(selected, workflow, run, artifact)
     require_ancestry(api, selected["headSha"], main)
-    inputs = {}
-    for name, path in INPUTS.items():
-        trusted = api.blob(path, main)
-        require(api.blob(path, selected["headSha"]) == trusted and api.blob(path, head) == trusted)
-        inputs[name] = digest(trusted)
-    manifest = json.loads(api.blob(INPUTS["sourceManifestSha256"], main))
+    inputs, manifest = resolve_legacy_build_inputs(api, head, selected["headSha"], main)
     with tempfile.TemporaryDirectory(prefix="native-ci-verification-") as directory:
         archive = Path(directory) / "artifact.zip"
         api.download(selected["artifactId"], archive)
@@ -341,7 +363,7 @@ def open_pulls(api):
 
 def current_policy(api, workflow_sha, main):
     return all(api.blob(path, workflow_sha) == api.blob(path, main)
-               for path in (SCRIPT, VERIFIER_WORKFLOW, LAUNCHER, *INPUTS.values()))
+               for path in (SCRIPT, VERIFIER_WORKFLOW, REGISTRY, LAUNCHER, *INPUTS.values()))
 
 
 def publish(api, number, head, state, description, workflow_sha, verified_main=None):
