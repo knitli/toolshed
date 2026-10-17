@@ -1,0 +1,37 @@
+{
+  "purpose": "dormant_source_conformance_only",
+  "protocolVersion": 2,
+  "trustedPolicyAdoption": false,
+  "sourceRepository": "https://github.com/knitli/knitli-site.git",
+  "sourceBaseCommit": "d98ed6a25aadb81e0962d5e7c048db1d5f155f15",
+  "sourceState": "committed_candidate_pending_review",
+  "sourceFiles": [
+    {
+      "path": "apps/os/packages/event-runtime/src/messaging/protocol-v2.ts",
+      "sha256": "24a1d426c669b163437320e87eddfb79c589e8ecb0f536e10322a605d48e8a38"
+    },
+    {
+      "path": "apps/os/packages/event-runtime/src/protocol.ts",
+      "sha256": "ed1946cbe16e38d01d67bf40413a844d37c050f434337ff4a967c557793e530b"
+    },
+    {
+      "path": "apps/os/packages/event-runtime/src/policy.ts",
+      "sha256": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3"
+    },
+    {
+      "path": "apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json",
+      "sha256": "9b5c4030c7059f68c55d1e0a2dad51eb276ed585b8dac18b437ff9ae97900129"
+    },
+    {
+      "path": "apps/os/pnpm-lock.yaml",
+      "sha256": "73f5f367585a055a1a723ba521cd496c66509357d9462f1e17059ea106bec4f5"
+    }
+  ],
+  "fixture": {
+    "file": "messaging-v2-wire.json",
+    "sha256": "9b5c4030c7059f68c55d1e0a2dad51eb276ed585b8dac18b437ff9ae97900129"
+  },
+  "sharedDecoder": "Cloud exports its existing decoder without changing behavior; Python lazily reuses event_gateway.protocol._decode unchanged.",
+  "reasonCodePrecedence": "Multiply-invalid input may have platform-specific reason codes; both platforms reject. Optional pythonCode records the preserved Python decoder reason.",
+  "sourceCommit": "603e2c3a46502e8e9819d7f3d01c0fc27774e477"
+}

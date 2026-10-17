@@ -1,7 +1,7 @@
 # Dormant Messaging v2 source conformance
 
-`event_gateway.messaging_protocol_v2` implements only the decoded DTO contract
-from Cloud's `src/messaging/protocol-v2.ts`. It is not imported by the gateway,
+`event_gateway.messaging_protocol_v2` implements the decoded DTO and dormant raw-wire
+contracts from Cloud's `src/messaging/protocol-v2.ts`. It is not imported by the gateway,
 listener, store, native adapters, claim path or producer. Version 1 validation,
 contract pins, trusted families, packaging configuration and workflows are
 unchanged. This module does not enable Messaging delivery or native execution.
@@ -15,6 +15,8 @@ existing wheel's v1 contract-data packaging is unchanged.
 
 | Function | Meaning |
 | --- | --- |
+| `parse_envelope(body, now_ms=None)` | Parse bounded raw JSON and validate envelope shape/freshness |
+| `parse_acknowledgment(body, now_ms=None)` | Parse bounded raw JSON and validate ACK shape/freshness |
 | `validate_envelope(value, now_ms=None)` | Strict decoded envelope shape, compact JSON byte limit, canonical timestamps and freshness |
 | `validate_acknowledgment(value, now_ms=None)` | Strict decoded submitted/observed ACK and timestamp/skew checks |
 | `derive_delivery_id(identity)` | Version-2 SHA-256 digest over the eight Cloud destination/identity selectors |
@@ -30,8 +32,9 @@ consumer qualification and native evidence remain external requirements.
 
 ## Exact value semantics
 
-Only plain decoded dictionaries and JSON scalar types are accepted. There is no
-wire parser, duplicate-key claim, `toJSON` hook, or authentication wrapper.
+Decoded validators accept only plain decoded dictionaries and JSON scalar types.
+Their behavior is unchanged; passing raw JSON to them still returns false. There
+is no `toJSON` hook or authentication wrapper.
 Integers must be safe JavaScript integers; booleans, nonintegral numbers,
 nonfinite numbers and values above `2**53 - 1` are refused. Integral floats such
 as `1.0` are valid JavaScript integer numbers and serialize as `1`. The optional
@@ -46,12 +49,44 @@ combines surrogate pairs and escapes lone surrogates as `JSON.stringify` does.
 Canonical timestamps require exactly three fractional digits and `Z`, including
 ECMAScript year `0000`; invalid calendar dates are refused.
 
+## Dormant raw-wire boundary
+
+`parse_envelope` and `parse_acknowledgment` accept only exact built-in `str` or
+`bytes`. They return a validated DTO or raise `MessagingProtocolError` containing
+only a safe reason code. They lazily reuse `event_gateway.protocol._decode`:
+4096 raw UTF-8 bytes maximum, strict UTF-8, duplicate decoded keys rejected at
+any nesting level, and maximum depth 32 (root depth zero, scalar leaves counted).
+The v1 decoder and active entry points are unchanged. Importing the decoded v2
+module does not load the v1 schema or `jsonschema`; an explicit wire call does.
+
+Whitespace counts toward the raw byte cap. BOM-prefixed JSON and malformed UTF-8
+are rejected. Escaped lone surrogates retain the decoded DTO semantics above;
+a literal surrogate in a Python string is not UTF-8 and is rejected. JSON
+`NaN`/`Infinity` tokens are invalid JSON; exponent overflow such as `1e400` is
+rejected by the DTO shape. Unsafe integer fields are rejected by that same shape.
+
+Wire errors are `invalid_json`, `duplicate_json_key`, `message_too_large`,
+`invalid_envelope`, `invalid_acknowledgment`, or `stale_message`. Structural wire
+checks precede shape validation, and shape validation precedes freshness checks.
+For inputs violating multiple wire rules, rejection is shared but the specific
+reason may differ: Cloud validates JSON syntax before its duplicate scan, while
+Python detects duplicates during decoding. These inherited decoder priorities
+are preserved; consumers must not depend on identical reasons for such input.
+Successful parsing establishes no publisher identity, route consent, current
+consumer authority, native execution, acknowledgment settlement, or activation.
+
+`messaging-v2-wire.json` mirrors the Cloud-owned raw fixture exactly. Its cases
+encode raw bytes as `utf8Hex`, including malformed UTF-8, and record verdicts and
+safe reason codes for both implementations. The separate wire source receipt
+records upstream source/fixture hashes as provenance only; it does not update
+active contract pins or adopt a trusted runtime policy.
+
 ## Local verification
 
 From the repository root, using existing installed Python dependencies:
 
 ```sh
-PYTHONPATH=packages/event-gateway/src python3 -m unittest discover -s packages/event-gateway/tests -p test_messaging_protocol_v2.py -v
+PYTHONPATH=packages/event-gateway/src python3 -m unittest discover -s packages/event-gateway/tests -p 'test_messaging_protocol_v2*.py' -v
 PYTHONPATH=packages/event-gateway/src python3 -m unittest discover -s packages/event-gateway/tests -p test_protocol.py -v
 PYTHONPATH=packages/event-gateway/src python3 -m unittest discover -s packages/event-gateway/tests -p test_semantic_vectors.py -v
 ```
