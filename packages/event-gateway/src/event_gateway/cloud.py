@@ -638,6 +638,21 @@ def validate_admission(admission, expected_envelope, *, now_ms, node_id=None):
     return json.loads(_json(admission))
 
 
+def validate_over_budget(result):
+    """Closed definitive claim refusal; counters are data, never a local fallback."""
+    _closed(result, ("status", "budget"))
+    if result["status"] != "over_budget":
+        raise CloudError("invalid_response")
+    budget = result["budget"]
+    _closed(budget, ("used", "remaining", "limit", "windowMs"))
+    if (any(type(budget[key]) is not int or budget[key] < 0 for key in budget)  # pylint: disable=unidiomatic-typecheck
+            or budget["limit"] != 10 or budget["windowMs"] != 3600000
+            or budget["used"] < budget["limit"]
+            or budget["remaining"] != max(0, 10 - budget["used"])):
+        raise CloudError("invalid_response")
+    return json.loads(_json(result))
+
+
 def _no_start_evidence(evidence, *, code):
     if not isinstance(evidence, dict):
         raise CloudError(code)
@@ -796,20 +811,39 @@ class CloudClient:
         result = await self._post("/v1/dispatch/claim", {key: expected[key] for key in ("deliveryId", "attemptId")})
         try:
             if isinstance(result, dict) and result.get("status") == "over_budget":
-                _closed(result, ("status", "budget"))
-                budget = result["budget"]
-                _closed(budget, ("used", "remaining", "limit", "windowMs"))
-                # Budget counters reject booleans even though isinstance(True, int).
-                if (any(type(budget[key]) is not int or budget[key] < 0 for key in budget)  # pylint: disable=unidiomatic-typecheck
-                        or budget["limit"] != 10 or budget["windowMs"] != 3600000
-                        or budget["used"] < budget["limit"]
-                        or budget["remaining"] != max(0, 10 - budget["used"])):
-                    raise CloudError("invalid_response")
-                return result
+                return validate_over_budget(result)
             return validate_admission(result, expected, now_ms=self._clock() * 1000, node_id=self.node_id)
         except CloudError as error:
             # A malformed success cannot prove that the cloud did not admit the claim.
             raise CloudError(error.code, ambiguous=True) from None
+
+    async def claim_messaging_history(self, envelope):
+        """Authenticated v2 claim history only; this grants no native start authority."""
+        from .messaging_admission_v2 import _historical_envelope, validate_admission as validate_messaging_admission
+        from .messaging_protocol_v2 import MessagingProtocolError
+
+        try:
+            expected = _historical_envelope(envelope, self._clock() * 1000)
+        except MessagingProtocolError as error:
+            raise CloudError("invalid_envelope") from error
+        if any(expected[key] != value for key, value in (
+                ("principal", self.principal), ("agent", self.agent),
+                ("nodeId", self.node_id), ("nodeGeneration", self.node_generation))):
+            raise CloudError("identity_mismatch")
+        result = await self._post("/v1/dispatch/claim", {
+            key: expected[key] for key in ("deliveryId", "attemptId")
+        })
+        try:
+            if isinstance(result, dict) and result.get("status") == "over_budget":
+                return validate_over_budget(result)
+            admitted = validate_messaging_admission(
+                result, expected, now_ms=self._clock() * 1000, node_id=self.node_id,
+            )
+            if not _same_json_value(admitted["envelope"], expected):
+                raise CloudError("identity_mismatch")
+            return admitted
+        except (CloudError, MessagingProtocolError) as error:
+            raise CloudError("invalid_response", ambiguous=True) from error
 
     async def settle_no_start(self, admission, evidence):
         _closed(admission, ("status", "permitId", "nodeId", "permitIssuedAt", "permitExpiresAt", "envelope"))
