@@ -12,6 +12,7 @@ import { mailboxName, detach, NO_FLAGS } from 'gatekeeper-messaging/src/model.ts
 export { MessageConsumerAuthority } from 'fixture-event-runtime/message-consumer-authority.ts';
 
 const principal = 'b@knitli.com', sender = 'a@knitli.com', agent = 'ws', namespace = 'fixture-messaging';
+type AutonomousEnv = { FIXTURE_AUTONOMOUS_ALARM?: string; FIXTURE_ALARM_OBSERVER?: Fetcher };
 type Seed = { nodeId: string; runtimeId: string };
 type FixtureEnv = Omit<EventApiEnvironment, 'OWNER_REGISTRY' | 'AGENT_COORDINATOR'> & TransportEnvironment & {
   FIXTURE_SECRET: string;
@@ -25,21 +26,26 @@ const consumerOf = ({ nodeId, runtimeId }: Seed) => ({ nodeId, runtimeId, nodeGe
 
 export class FixtureEventAuthority extends EventAuthority {
   private readonly crashBarrier?: Fetcher;
+  private readonly fixtureEnv: { AGENT_COORDINATOR: DurableObjectNamespace<FixtureCoordinator>; FIXTURE_AUTONOMOUS_ALARM?: string };
 
   constructor(ctx: ExecutionContext, env: ConstructorParameters<typeof EventAuthority>[1] & {
-    FIXTURE_ACCESS_JWK: string; FIXTURE_CRASH_BARRIER?: Fetcher;
+    FIXTURE_ACCESS_JWK: string; FIXTURE_CRASH_BARRIER?: Fetcher; AGENT_COORDINATOR: DurableObjectNamespace<FixtureCoordinator>; FIXTURE_AUTONOMOUS_ALARM?: string;
   }) {
     super(ctx, env, { now: () => Math.floor(Date.now() / 1000),
       fetch: async () => Response.json({ keys: [JSON.parse(env.FIXTURE_ACCESS_JWK)] }) });
     this.crashBarrier = env.FIXTURE_CRASH_BARRIER;
+    this.fixtureEnv = env;
   }
 
   override async reserveMessageAttempt(input: EventMessageAttemptV1) {
     if (this.crashBarrier) await this.crashBarrier.fetch('https://barrier.invalid/before-reserve');
     const result = await super.reserveMessageAttempt(input);
-    // The Mailbox RPC response crossed its storage output gate; no pre-crash read or flush is added.
-    if (this.crashBarrier && result.status === 'reserved')
-      await this.crashBarrier.fetch('https://barrier.invalid/after-reserve');
+    // Reservation crossed the Mailbox output gate; autonomous mode also records the persisted coordinator alarm.
+    if (this.crashBarrier && result.status === 'reserved') {
+      const evidence = this.fixtureEnv.FIXTURE_AUTONOMOUS_ALARM
+        ? await this.fixtureEnv.AGENT_COORDINATOR.getByName(coordinatorName(principal, agent)).fixtureAlarmBarrier() : null;
+      await this.crashBarrier.fetch('https://barrier.invalid/after-reserve', { method: 'POST', body: JSON.stringify(evidence) });
+    }
     return result;
   }
 
@@ -108,16 +114,38 @@ export class FixtureMailbox extends Mailbox {
 }
 
 export class FixtureCoordinator extends AgentCoordinator {
-  constructor(ctx: DurableObjectState, env: ConstructorParameters<typeof AgentCoordinator>[1]) {
+  private readonly instanceNonce = crypto.randomUUID();
+  private readonly autonomous: AutonomousEnv;
+  constructor(ctx: DurableObjectState, env: ConstructorParameters<typeof AgentCoordinator>[1] & AutonomousEnv) {
     super(ctx, { ...env, DELIVERY_QUEUE: {
       send: async () => ({ metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } } }),
       sendBatch: async () => { throw new Error('unexpected_fixture_queue_batch'); },
       metrics: async () => { throw new Error('unexpected_fixture_queue_metrics'); },
     } });
+    this.autonomous = env;
   }
 
-  // Fixture controls scheduling; the production alarm is invoked explicitly after publication.
-  override async alarm() {}
+  // Automatic recovery is enabled only for the separately reviewed autonomous proof.
+  override async alarm() {
+    if (!this.autonomous.FIXTURE_AUTONOMOUS_ALARM) return;
+    const claims = this.fixtureRead().native_claims;
+    if (claims.length !== 1) return;
+    if (this.autonomous.FIXTURE_AUTONOMOUS_ALARM !== 'no-super') await super.alarm();
+    const response = await this.autonomous.FIXTURE_ALARM_OBSERVER!.fetch('https://observer.invalid/completed', {
+      method: 'POST', body: JSON.stringify({ attemptId: claims[0].attempt_id,
+        instanceNonce: this.instanceNonce, executedAt: Date.now(), state: this.fixtureRead() }),
+      signal: AbortSignal.timeout(1000),
+    });
+    if (!response.ok) throw new Error('fixture_alarm_observation_rejected');
+  }
+
+  async fixtureAlarmBarrier() {
+    const scheduledAlarm = await this.ctx.storage.getAlarm();
+    const state = this.fixtureRead();
+    if (this.autonomous.FIXTURE_AUTONOMOUS_ALARM === 'delete-alarm') await this.ctx.storage.deleteAlarm();
+    return { scheduledAlarm, instanceNonce: this.instanceNonce, observedAt: Date.now(),
+      attemptId: state.native_claims[0]?.attempt_id, state };
+  }
 
   async fixtureSeed(input: Seed, thumbprint: string) {
     await this.setEnabled({ enabled: true });

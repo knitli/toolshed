@@ -1,0 +1,130 @@
+{
+  "status": "PASS",
+  "preparationBase": "64e0fd2fd0040f07ee341922d1594dae984e58bb",
+  "preparedPatchSha256": "a95a08af4cc024a4a229d294258a9b4a2650b069293ec0b7d65457711134da10",
+  "evidenceBasis": "Frozen test assertions and three successful actual local runs. Logs contain unittest results; ephemeral PID, storage identity and state observations were asserted during each run, not retained as raw snapshots.",
+  "executedFiles": {
+    "packages/event-gateway/docs/messaging-v2-autonomous-alarm-plan.md": "3aa493974a5cd4cf036d842ef19fe394a19ed1cbe3951169a68a629e9e038370",
+    "packages/event-gateway/tests/fixtures/messaging-autonomous-observer.mjs": "cd98791a63608ca42554e8c4db7e44bf6614cd91350cce14890c597242bf74ca",
+    "packages/event-gateway/tests/fixtures/messaging-autonomous-observer.test.mjs": "e87c25c86c12a5efbd18ccde1f6ce1c0de41aac0a5ef1ea08d049361bebc184e",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-broker.mjs": "a4ce61a829b0685804862859992e26b9d01f550e8af29aea3572076e4bb3690d",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-crash.mjs": "e803adf37ad2fdbba8e2857e816acde94fd54ce15a3c210af45f88b8dad02d41",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-inputs.json": "6087c46a8ed70a6cb672127f0432a7fdc8a37fc98a492225f84fb4203b6ce379",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-runtime.json": "d8a69221828d38a5c7140fbbc68ee3d837fb046eff86c80290ecc81857c776ac",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-worker.ts": "53d834612a59d3448d8cdca21b89dcc1fc48e22fd0ed1f8d1369c2e5bffacdcf",
+    "packages/event-gateway/tests/test_messaging_abrupt_cloud_crash.py": "d82a901181b8bfebb1d6796683e1bb7fb5ba7c860921a14e89dbf6a2f63214d4",
+    "packages/event-gateway/tests/test_messaging_autonomous_alarm.py": "ecf9e7d724d9f5039d65d081ec34e5b1bb8bf2b6654ffa83e3ab1fc3202283d8",
+    "packages/event-gateway/tests/test_messaging_process_restart.py": "6b7c8b31e33fdfa81b6010cec141212487fd55cadc663269dfe42b382931d137",
+    "packages/event-gateway/tests/test_messaging_workerd.py": "9df79d3a1aadd4e688b18c5e1204427e167f6705d0096df13c68a7634fa0b365"
+  },
+  "configuration": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "miniflareVersion": "5.20261001.0-alpha",
+    "miniflareModuleSha256": "d6c68c92bc33371e4baa88a1c6da0042b4fbf8c872a297b84e729556f49f9632",
+    "workerdVersion": "1.20261001.1",
+    "workerdSha256": "3fd4b350cebf887265a20222fc530b21d843791266476199d16968600fa01922",
+    "nodeVersion": "24.21.0",
+    "cloudCommit": "99655360630ca0e3f222d1e73d841aaf456378a7",
+    "upstreamPin": "949ee3cfa79121919cb8dced13971c6bec857df0",
+    "bundleSha256": "2818bd9c81edb2e68004d1e3f76ad6cc782bf39330ecbe0d91683c78b0bb2ba0",
+    "compiledInputCount": 335
+  },
+  "actualCases": [
+    {
+      "mode": "positive",
+      "status": "PASS",
+      "testsPassed": 1,
+      "skips": 0,
+      "testSeconds": 11.771,
+      "commandSeconds": 11.862,
+      "exitCode": 0,
+      "completedAtUtc": "2026-10-17T22:13:52.244526+00:00",
+      "log": "messaging-autonomous-positive-root.log",
+      "logSha256": "e0a2300e93f9f4511ddee0f9b5ba93ad2af6b2c18b2eb5da2c2224d0845ea7a8",
+      "executionReceipt": "messaging-autonomous-positive-root-execution.json",
+      "executionReceiptSha256": "548b12db53066b3dea64fd2fccdf1dcaea052e026c7db2909fd019e96e411a88"
+    },
+    {
+      "mode": "no-super",
+      "status": "PASS",
+      "testsPassed": 1,
+      "skips": 0,
+      "testSeconds": 11.388,
+      "commandSeconds": 11.498,
+      "exitCode": 0,
+      "completedAtUtc": "2026-10-17T22:14:35.259331+00:00",
+      "log": "messaging-autonomous-no-super-root.log",
+      "logSha256": "0e77110428b6b1101e1968aaf629aa4927bc9472b8cb4f0aff5790b5f449be25",
+      "executionReceipt": "messaging-autonomous-no-super-root-execution.json",
+      "executionReceiptSha256": "234a0d817e4cb095251c5c5734cd6adb2381b10b1b9707e35cf0eda70ad0f856"
+    },
+    {
+      "mode": "delete-alarm",
+      "status": "PASS",
+      "testsPassed": 1,
+      "skips": 0,
+      "testSeconds": 26.318,
+      "commandSeconds": 26.444,
+      "exitCode": 0,
+      "completedAtUtc": "2026-10-17T22:15:54.750814+00:00",
+      "log": "messaging-autonomous-delete-alarm-root.log",
+      "logSha256": "3e0ccdc9b88942b53a4f893a53b41b3964c632686688eea0febb57e2f031df1a",
+      "executionReceipt": "messaging-autonomous-delete-alarm-root-execution.json",
+      "executionReceiptSha256": "a9f138f4bb93b2eb33f63bd6a732ab8363bf79a344d42ba525734f35c13fb3b6"
+    }
+  ],
+  "asserted": [
+    "Production persisted alarm observed before after-reserve SIGKILL",
+    "One owned kill and one automatic restart: two distinct workerd PIDs, one surviving broker, same persistence directory identity",
+    "No postrestart DO traffic before completion; only broker-owned observation polling",
+    "Positive: replacement coordinator automatically completes real production alarm; reserving/pending becomes unknown/unknown",
+    "No-super: replacement alarm signal occurs but state stays reserving/pending and positive state oracle rejects it",
+    "Delete-alarm: no completion throughout 25-second monotonic interval; first diagnostic retains reserving/pending",
+    "One message reservation and one exact budget charge; no permit; deliveries and slot intents unchanged",
+    "Local outcome remains held uncertain, no resend, one HTTP claim, zero native/provider calls",
+    "Fixture cleanup completes before persistence directory removal"
+  ],
+  "reproduction": {
+    "cwd": "fixture checkout root",
+    "environment": {
+      "FIXTURE_NODE": "existing pinned Node executable",
+      "FIXTURE_CLOUD_SOURCE": "apps/os in pinned cloud checkout",
+      "FIXTURE_MINIFLARE": "existing pinned Miniflare package directory",
+      "FIXTURE_ABRUPT_CLOUD_CRASH": "reviewed",
+      "FIXTURE_AUTONOMOUS_ALARM": "one of positive, no-super, delete-alarm",
+      "PYTHONPATH": "packages/event-gateway/src:packages/event-gateway/tests"
+    },
+    "argv": [
+      "$GATEWAY_PYTHON",
+      "-m",
+      "unittest",
+      "test_messaging_autonomous_alarm.MessagingAutonomousAlarmTests",
+      "-v"
+    ]
+  },
+  "rawPerCaseProcessAndStorageSnapshotsRetained": false,
+  "productionQualified": false,
+  "nativeClientQualified": false,
+  "limitations": [
+    "Pinned local Miniflare/workerd process-crash evidence only; no production deployment or Cloudflare hosting qualification",
+    "No power-loss, individual database inode, external provider, native client, production attachment or real idle-session wake qualification",
+    "One actual run per mode; no general reliability or timing distribution claim"
+  ],
+  "inertRegression": {
+    "pythonTestsPassed": 16,
+    "nodeTestsPassed": 29,
+    "mockedDefaultLaunchCasesPassed": 2,
+    "skips": 0,
+    "checks": [
+      "Startup/cleanup and abrupt-crash safety classes",
+      "Autonomous observation deadline, no early diagnostic, and one-second observation HTTP timeout",
+      "Ambient autonomous environment not forwarded to default or manual abrupt-crash fixture launches",
+      "Automatic alarm remains disabled without autonomous binding; manual production-alarm helpers preserved"
+    ],
+    "commands": [
+      "$GATEWAY_PYTHON -m unittest -v test_messaging_workerd.FixtureSafetyTests test_messaging_abrupt_cloud_crash.AbruptCrashSafetyTests test_messaging_autonomous_alarm.AutonomousAlarmSafetyTests",
+      "$FIXTURE_NODE --test packages/event-gateway/tests/fixtures/messaging-workerd-crash.test.mjs packages/event-gateway/tests/fixtures/messaging-autonomous-observer.test.mjs"
+    ]
+  }
+}

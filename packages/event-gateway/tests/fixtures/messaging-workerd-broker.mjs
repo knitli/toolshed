@@ -1,4 +1,5 @@
 // Disposable loopback transport; production HTTP parsing, proofs and authority stay in workerd.
+import { AutonomousObserver } from './messaging-autonomous-observer.mjs';
 import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual, webcrypto } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -62,6 +63,9 @@ if (Object.keys(inputs).length !== Object.keys(expected.inputs).length
 if (!approvedHash(sha256(bundle.outputFiles[0].contents), expected.bundleSha256)) {
   throw new Error('unapproved compiled bundle');
 }
+const autonomousMode = process.env.FIXTURE_AUTONOMOUS_ALARM;
+const observer = autonomousMode ? new AutonomousObserver(autonomousMode) : null;
+if (observer && process.env.FIXTURE_ABRUPT_CLOUD_CRASH !== 'reviewed') throw new Error('autonomous mode requires owned crash');
 let crash = null;
 let activeClaim = null;
 const requireActiveClaim = () => {
@@ -83,8 +87,8 @@ if (process.env.FIXTURE_ABRUPT_CLOUD_CRASH === 'reviewed') {
   const { OwnedWorkerdCrash } = await import('./messaging-workerd-crash.mjs');
   crash = new OwnedWorkerdCrash({ binary: workerd.default, binarySha256: pins.workerdSha256,
     persistencePath: join(process.env.HOME, 'durable-objects'),
-    afterKill: evidence => writeFileSync(join(process.env.HOME, 'cloud-crash-injected'),
-      JSON.stringify(evidence), { flag: 'wx', mode: 0o600, flush: true }) });
+    afterKill: evidence => { observer?.killed(); writeFileSync(join(process.env.HOME, 'cloud-crash-injected'),
+      JSON.stringify(evidence), { flag: 'wx', mode: 0o600, flush: true }); } });
   crash.install();
 }
 // Capture the owned ChildProcess before Miniflare imports node:child_process.
@@ -122,6 +126,7 @@ const options = convertV4MiniflareOptions({
   outboundService: async () => { outboundCalls++; return new Response(null, { status: 503 }); },
   compatibilityDate: '2026-10-05', compatibilityFlags: ['nodejs_compat'], host: '127.0.0.1', port: 0,
   bindings: {
+    ...(observer ? { FIXTURE_AUTONOMOUS_ALARM: autonomousMode } : {}),
     FIXTURE_SECRET: secret, FIXTURE_ACCESS_JWK: JSON.stringify(accessJwk), FIXTURE_AGENT_JWK: JSON.stringify(agent.publicJwk),
     RECEIPT_PUBLIC_KEYS: '', RECEIPT_KEYS: JSON.stringify({ current: receiptPublic.kid, keys: { [receiptPublic.kid]: { pkcs8: receipt.pkcs8.toString('base64'), publicJwk: receiptPublic } } }),
     EVENT_ENABLED: 'true', EVENT_NATIVE_BINDING_ENABLED: 'true', EVENT_MESSAGING_ACCEPT_ENABLED: 'true', EVENT_MESSAGING_DELIVERY_ENABLED: 'true',
@@ -132,13 +137,29 @@ const options = convertV4MiniflareOptions({
     EVENT_TRANSPORT_KEY_ID: 'fixture-v2', EVENT_TRANSPORT_PRIVATE_KEY: transport.pkcs8.toString('base64url'),
   },
   serviceBindings: {
+    ...(observer ? { FIXTURE_ALARM_OBSERVER: async request => {
+      try {
+        if (request.method !== 'POST' || new URL(request.url).pathname !== '/completed') throw new Error('invalid alarm signal');
+        const body = await request.text();
+        if (body.length > 8192) throw new Error('oversized alarm signal');
+        observer.signal(JSON.parse(body), crash.restartCount === 1);
+        return new Response(null, { status: 204 });
+      } catch (error) { crash.fail(error); return new Response(null, { status: 500 }); }
+    } } : {}),
     ...(crash ? { FIXTURE_CRASH_BARRIER: async request => {
       const phase = new URL(request.url).pathname.slice(1);
       if (!['before-reserve', 'after-reserve'].includes(phase)) {
         crash.fail(new Error('unexpected Messaging reservation path'));
         return new Response(null, { status: 500 });
       }
-      if (crash.phase === phase) requireActiveClaim();
+      if (crash.phase === phase) {
+        requireActiveClaim();
+        if (observer) {
+          const body = await request.text();
+          if (body.length > 8192) throw new Error('oversized alarm barrier');
+          observer.beforeKill(JSON.parse(body));
+        }
+      }
       await crash.reach(phase);
       return new Response(null, { status: 204 });
     } } : {}),
@@ -154,7 +175,7 @@ const options = convertV4MiniflareOptions({
 let mf = new Miniflare(options);
 let restarting = null;
 const paths = new Set(['/fixture/seed', '/fixture/read', '/fixture/change', '/fixture/restart', '/v1/dispatch/claim',
-  ...(crash ? ['/fixture/arm-crash', '/fixture/crash-proof', '/fixture/recovery-alarm'] : [])]);
+  ...(crash ? ['/fixture/arm-crash', '/fixture/crash-proof', '/fixture/recovery-alarm', ...(observer ? ['/fixture/autonomous-observation'] : [])] : [])]);
 const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, maxHeaderSize: 16384 }, async (req, res) => {
   let claim = null;
   try {
@@ -168,10 +189,21 @@ const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, maxHea
     if (req.url === '/fixture/arm-crash') {
       const value = JSON.parse(Buffer.concat(chunks));
       if (Object.keys(value).join(',') !== 'phase') throw new Error('invalid crash arm input');
+      if (observer && value.phase !== 'after-reserve') throw new Error('autonomous phase must be after-reserve');
       crash.arm(value.phase);
       res.writeHead(200, { 'content-type': 'application/json' }).end('{"armed":true}');
       return;
     }
+    if (req.url === '/fixture/autonomous-observation') {
+      const proof = crash.restartCount === 1 ? await crash.proof() : null;
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+        proof, barrier: observer.barrier, completion: observer.completion,
+        elapsedSinceKillMs: observer.killedAt === null ? null : observer.now() - observer.killedAt,
+        observationTimeout: observer.killedAt !== null && observer.now() - observer.killedAt >= 25000 }));
+      return;
+    }
+    if (observer && (!observer.canDispatch() || ['/fixture/crash-proof', '/fixture/recovery-alarm', '/fixture/restart'].includes(req.url)))
+      throw new Error('autonomous observation forbids fixture dispatch');
     if (req.url === '/fixture/crash-proof') {
       await crash.proof();
       const ready = await mf.dispatchFetch('https://events.test/fixture/read', {
