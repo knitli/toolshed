@@ -1,0 +1,184 @@
+{
+  "actualRun": {
+    "command": "python3 /private/tmp/reviewer-docker-isolation-20261017/supervisor.py --run",
+    "executor": "root agent after approval",
+    "log": "actual-run-1.log",
+    "result": {
+      "checks": {
+        "checks": {
+          "caps_zero": true,
+          "credential_env_absent": true,
+          "descendant_parent": true,
+          "descendant_same_namespace": true,
+          "docker_socket_absent": true,
+          "fixture_write_denied": true,
+          "groups": true,
+          "host_canary_unreadable": true,
+          "no_new_privileges": true,
+          "private_init": true,
+          "root_write_denied": true,
+          "uid_gid": true,
+          "work_write": true
+        },
+        "descendant_pid": 7,
+        "init_pid": 1
+      },
+      "container_id": "c0d7012ef4d2378fd589fc1517556472ffdc6f3f8f5ac4211a71f4f32a3fa6ac",
+      "container_name": "reviewer-isolation-59f55c5eec7a48689bc61766cdac3a7d",
+      "failures": [],
+      "image": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d",
+      "scope": "Docker boundary only; no SDK/provider/hosted-handoff qualification",
+      "status": "PASS"
+    },
+    "sourceCommit": "dc8c028e0cc09f45e85879ade6c59a0ff6551fa6",
+    "evidenceScope": "Historical run 1 of original source; does not establish execution of the current modified candidate"
+  },
+  "additionalDockerExecutionDuringPackaging": false,
+  "cleanup": {
+    "independentAbsenceReadback": {
+      "absentByExactIdAndName": true,
+      "at": "2026-10-17T15:38:53.580435+00:00",
+      "resultSha256": "481cd1e2073dc31aa58311a263a7ccbe2bbffde9863ed01c111957bfe8640b75",
+      "source": "Root independent observation receipt; no raw inspect transcript",
+      "sourceReceiptSha256": "2489fff918445f422ea1e74f0889e9826ba10a647da378e6f51f2c24e22aae82"
+    },
+    "rootReported": "Owned container killed, stopped with State.Pid=0, removed, and exact-ID/name absence independently confirmed.",
+    "supervisorResult": "PASS requires owned-container stopped with State.Pid=0, removal and empty exact-ID list readback"
+  },
+  "date": "2026-10-17",
+  "environment": {
+    "architecture": "arm64",
+    "containerOS": "linux",
+    "dockerContext": "Configured local Docker Desktop context; name not captured, not explicitly pinned",
+    "engine": "29.7.2",
+    "evidence": "Root-reported host/engine; supervisor verified image OS/architecture",
+    "host": "macOS / Docker Desktop"
+  },
+  "image": {
+    "id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d",
+    "inventoryTag": "official python:3.12-slim",
+    "pullPolicy": "never",
+    "tagUsedForExecution": false
+  },
+  "limits": {
+    "cpuCount": 1,
+    "memoryBytes": 134217728,
+    "memorySwapBytes": 134217728,
+    "pids": 32,
+    "readOutputLimitBytes": 65536,
+    "readTimeoutSeconds": 15,
+    "timeoutScope": "Per bounded read/command, not a 15-second whole-run deadline; CLI exit waits add bounded time",
+    "tmpfsBytes": 16777216
+  },
+  "mockTests": {
+    "command": "cd /private/tmp/reviewer-docker-isolation-20261017 && python3 -m unittest -v test_supervisor.py",
+    "dockerInvoked": false,
+    "evidence": "Observed pre-execution unittest output; not rerun for packaging",
+    "failed": 0,
+    "passed": 7,
+    "rootRepeat": "Root independently repeated the same seven mock-only tests: PASS."
+  },
+  "nextRequired": "Implement and separately qualify a Docker-aware spawn/lifecycle seam. Docker CLI exit/kill alone does not prove container or descendant termination.",
+  "notQualified": [
+    "SDK spawn/ChildProcess compatibility",
+    "native Claude runtime",
+    "provider networking or review completion",
+    "hosted-runner equivalence",
+    "protected hosted digest handoff",
+    "authenticated artifact acquisition",
+    "durable admission ordering",
+    "clean round notification",
+    "kernel or Docker VM isolation against compromise"
+  ],
+  "packaging": {
+    "diffCheck": "PASS, git diff --no-index --check against /dev/null for all six files",
+    "dockerReexecuted": false,
+    "executedSourceBytesUnchanged": true,
+    "mockTests": {
+      "command": "python3 -m unittest -v test_supervisor.py",
+      "failed": 0,
+      "passed": 7
+    },
+    "rawDockerInspectTranscriptsIncluded": false,
+    "ruff": {
+      "C901": "PASS",
+      "config": "packages/event-gateway/pyproject.toml",
+      "status": "PASS"
+    },
+    "sourceFileCount": 3,
+    "evidenceScope": "Historical original packaging at dc8c028e0cc09f45e85879ade6c59a0ff6551fa6; invariants and checks do not apply to the current modified candidate"
+  },
+  "schema": "private-reviewer-docker-boundary-proof:v1",
+  "scope": "Local Docker boundary only",
+  "sha256": {
+    "actual-run-1.log": "481cd1e2073dc31aa58311a263a7ccbe2bbffde9863ed01c111957bfe8640b75",
+    "fixture/child.py": "0d53fe1df5c4253bd8770e931fb9c29176a3773513def15dd4f7ef776d4c8647",
+    "supervisor.py": "9b97e86cfb497b33c422fa5151e4d6f9acf76ffbccb710164811c957269ce838",
+    "test_supervisor.py": "627e9f781d6be515df8f32170ec791a7087c655686c6fddc7caa35c0ad0fb020"
+  },
+  "currentCandidate": {
+    "execution": "Supervisor and child byte-identical to successful attempt 4; subsequent change is one blank line in host-only mock tests",
+    "qualification": "Local staged Docker boundary passed; SDK/provider/hosted integration remains unqualified",
+    "boundary": {
+      "endpoint": "~/.docker/run/docker.sock",
+      "socketChecks": "lstat type and current-user ownership; identity rechecked before each command",
+      "client": "Explicit --host=unix://<socket> and fresh owned configuration for every Docker command; no ambient DOCKER_* environment",
+      "commands": "Supported operations and arguments validated",
+      "daemonIdentity": "Docker info ID recorded before and after run in candidate receipt"
+    },
+    "historicalHashes": "Top-level sha256 values identify original run 1 source and log only",
+    "priorHardenedAttempt": {
+      "receipt": "hardened-attempt-1-receipt.json",
+      "status": "FAIL",
+      "exitCode": 1,
+      "cleanupReadback": "Root independent exact-name absence confirmed: exit0/empty; CID unknown and no prior stopped-PID transition proven; supervisor failure retained"
+    },
+    "diagnostics": "Bounded Docker error output captured explicit bind source path rejection in attempt 2",
+    "dockerExecuted": true,
+    "status": "PASS",
+    "latestAttempt": {
+      "receipt": "hardened-attempt-4-receipt.json",
+      "exitCode": 0,
+      "cleanupReadback": "Operator supplied explicitly local exact-ID and exact-name readbacks: exit 0, empty output"
+    },
+    "failedDiagnosticAttempt": {
+      "receipt": "hardened-attempt-2-receipt.json",
+      "exitCode": 1,
+      "cleanupReadback": "Root independent exact-name absence confirmed: exit0/empty; CID unknown and no prior stopped-PID transition proven; supervisor failure retained"
+    },
+    "validation": {
+      "mockTests": {
+        "passed": 20,
+        "failed": 0,
+        "dockerInvoked": false
+      },
+      "ruff": "PASS with event-gateway configuration",
+      "C901": "PASS, maximum complexity 15",
+      "banditB404B603": "PASS with justified line-scoped annotations",
+      "evidence": "20 host-only mock tests, configured Ruff, explicit preview E306, and C901 checks passed after test-only whitespace change; test module is not executed in the container",
+      "testSourceSha256": "8b84dc9b147fadc5ec1b21a590739688f59ee48af19cafa098f7316d88e775e8"
+    },
+    "changesSinceAttempt3": "Lint-only nosec B404/B603 annotations, __init__ docstring, and test blank lines; source bytes change without intended behavior changes",
+    "priorStagedExecution": {
+      "manifest": "hardened-staging-manifest.json",
+      "status": "PASS",
+      "dockerExecuted": true,
+      "sourceBytesUnchanged": true,
+      "receipt": "hardened-attempt-3-receipt.json",
+      "evidenceScope": "Historical attempt 3 staging and execution; prior source bytes only"
+    },
+    "stagedExecution": {
+      "status": "PASS",
+      "dockerExecuted": true,
+      "sourceBytesUnchanged": true,
+      "stagedRoot": "/private/tmp/reviewer-docker-final-y9lu18gi",
+      "receipt": "hardened-attempt-4-receipt.json"
+    },
+    "sourceSha256": {
+      "supervisor.py": "1a23e76f5fe746613c5a082511c9c356e8ec562676c342a6421ca5c061bff1b9",
+      "test_supervisor.py": "cb2b52b30e9775452d5543e5037b066adf8307f9a0e46bc9ca24aee596ccf168",
+      "fixture/child.py": "0d53fe1df5c4253bd8770e931fb9c29176a3773513def15dd4f7ef776d4c8647"
+    },
+    "sourceSha256EvidenceScope": "Source bundle recorded for attempt 4; current host-only test hash is recorded under validation. Executed supervisor and child remain byte-identical."
+  }
+}

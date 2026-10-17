@@ -1,0 +1,47 @@
+{
+  "schema": "private-reviewer-docker-boundary-attempt:v1",
+  "attempt": "hardened-attempt-1",
+  "executor": "root agent",
+  "executionEvidence": "Root-captured session 45732, exit 1",
+  "exitCode": 1,
+  "sourceSha256": {
+    "supervisor.py": "27e9b24bda45bb4378201448563f42b5018d36d68666e6baa9754ea23661d7cc"
+  },
+  "log": "hardened-attempt-1.log",
+  "logSha256": "9b5eaa63cedf3cd1c9bf6a614e6982c1e397d086e2bf0ffcf7fb26751ab7c91d",
+  "result": {
+    "checks": null,
+    "container_id": null,
+    "container_name": "reviewer-isolation-0ed2dd034cb24a67a3d6a80287b16a32",
+    "daemon": {
+      "endpoint": "/Users/adampoulemanos/.docker/run/docker.sock",
+      "idAfter": "804dc7e7-2939-459e-b28d-4e1a35038c92",
+      "idBefore": "804dc7e7-2939-459e-b28d-4e1a35038c92"
+    },
+    "failures": [
+      "docker create failed",
+      "container identity unavailable; creation/cleanup incomplete"
+    ],
+    "image": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d",
+    "scope": "Docker boundary only; no SDK/provider/hosted-handoff qualification",
+    "status": "FAIL"
+  },
+  "cause": "unknown; Docker create failed without detailed error output",
+  "cleanup": {
+    "status": "incomplete",
+    "independentAbsenceReadback": {
+      "evidence": "Root separate read-only exact-name list returned exit0 and empty stdout; no raw transcript retained",
+      "endpoint": "/Users/adampoulemanos/.docker/run/docker.sock",
+      "exactContainerName": "reviewer-isolation-0ed2dd034cb24a67a3d6a80287b16a32",
+      "nameReadback": {
+        "exitCode": 0,
+        "output": ""
+      },
+      "absentByExactName": true,
+      "cidUnknown": true,
+      "limits": "Does not establish a prior stopped-PID transition, prove creation never occurred, or change failed qualification"
+    },
+    "qualification": "No CID or child evidence was obtained; this does not establish that creation never happened"
+  },
+  "evidenceScope": "Historical failed hardened revision; later diagnostic revision and staged success remain separate evidence"
+}
