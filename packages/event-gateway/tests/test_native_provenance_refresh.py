@@ -47,12 +47,12 @@ class SweepAPI(fixtures.FakeAPI):
 
 
 class NativeProvenanceRefreshTests(unittest.TestCase):
-    def sweep(self, api, event_name="schedule", ref="refs/heads/main"):
+    def sweep(self, api, event_name="schedule", ref="refs/heads/main", workflow_sha=fixtures.MAIN):
         with tempfile.TemporaryDirectory() as directory:
             event = Path(directory) / "event.json"
             event.write_text(json.dumps({}))
             environment = {"GITHUB_REPOSITORY": V.REPOSITORY, "GH_TOKEN": self.id(),
-                           "WORKFLOW_SHA": fixtures.MAIN, "GITHUB_EVENT_PATH": str(event),
+                           "WORKFLOW_SHA": workflow_sha, "GITHUB_EVENT_PATH": str(event),
                            "GITHUB_EVENT_NAME": event_name, "GITHUB_REF": ref,
                            "GITHUB_SERVER_URL": "https://github.com", "GITHUB_RUN_ID": "123"}
             with patch.dict(os.environ, environment, clear=True), \
@@ -88,6 +88,14 @@ class NativeProvenanceRefreshTests(unittest.TestCase):
             with self.subTest(event=event), self.assertRaises(ValueError):
                 self.sweep(api, event, "refs/heads/untrusted")
             self.assertEqual(api.published, [])
+
+    def test_refresh_withholds_status_when_only_registry_policy_is_stale(self):
+        api = SweepAPI()
+        for path in (V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, fixtures.REGISTRY, *V.INPUTS.values()):
+            api.blobs[path, fixtures.BUILD] = api.blobs[path, fixtures.MAIN]
+        api.blobs[fixtures.REGISTRY, fixtures.BUILD] += b"\n# stale workflow registry\n"
+        self.assertEqual(self.sweep(api, workflow_sha=fixtures.BUILD), [])
+        self.assertNotIn(("download", 456), api.calls)
 
     def test_final_success_withheld_if_main_changes_after_verification(self):
         api = SweepAPI()

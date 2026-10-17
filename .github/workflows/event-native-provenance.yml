@@ -16,6 +16,7 @@ on:
       - .github/workflows/event-native-provenance.yml
       - .github/workflows/event-native-build.yml
       - packages/event-gateway/scripts/verify_native_ci_provenance.py
+      - packages/event-gateway/scripts/native_recipe_registry.py
       - packages/event-gateway/scripts/produce_native_ci_artifact.py
       - packages/event-gateway/scripts/package_native_client.py
       - packages/event-gateway/src/event_gateway/launcher.py

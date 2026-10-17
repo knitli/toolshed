@@ -40,6 +40,19 @@ for the two digest literals, preventing indirect pin overrides or weakened hash
 checks. Other launcher code changes require a separately reviewed trust-policy
 update before promotion.
 
+Legacy schema version 1 promotion accepts only complete historical five-input
+tuples registered for `core-idle-v1`, revision 1, with its fixed manifest and
+patch identities. The verifier loads this policy from a fixed sibling registry
+in the trusted checkout, never from candidate or build-head code. Candidate
+build-input files and registry bytes must equal current main, while the artifact
+receipt must match its authenticated historical build inputs. This permits reuse
+of a reviewed legacy artifact after shared builder, producer, or workflow changes;
+it does not automatically admit later current-main tuples. Registry changes
+trigger provenance refresh and participate in policy freshness checks before
+status publication. The strict nine-field schema version 1 selection remains:
+v2, additional recipe fields, and 71-family inputs are not accepted. Both reviewed
+launcher transitions and the unchanged-pin no-artifact path remain available.
+
 The explicit exception for [PR #89](https://github.com/knitli/toolshed/pull/89)
 authorizes only the raw launcher bytes at
 [`98c87baaaf88ea3a65d2ffea980066a1a69f606c`](https://github.com/knitli/toolshed/blob/98c87baaaf88ea3a65d2ffea980066a1a69f606c/packages/event-gateway/src/event_gateway/launcher.py),
