@@ -31,6 +31,19 @@ def history():
             "slots": [{"used": 0}], "budget": {"used": 0}}
 
 
+def attachment_history(changed_history):
+    first, last = history(), history()
+    if changed_history == "ack":
+        last["localAttempts"][0]["native_observed_ack"] = "different-ack"
+    elif changed_history == "slots":
+        last["slots"][0]["used"] = 1
+    elif changed_history in ("native_correlations", "slot_intents"):
+        last["cloudHistory"][changed_history][0]["state"] = "changed"
+    elif changed_history:
+        last["budget"]["used"] = 1
+    return first, last
+
+
 def busy_response(binding, challenge_id, nonce, deadline, *, eligible=True, turn_state="busy"):
     return {"challengeId": challenge_id, "observedAt": "2026-10-15T08:00:00.000Z",
             "validUntilMonotonic": deadline,
@@ -291,15 +304,7 @@ class BusyReattachTests(unittest.IsolatedAsyncioTestCase):
                 else:
                     F.record_session_request(ctx, ctx.state, request_session, message)
             return 0, {"remoteStatus": "attached", "localStatus": "current"}
-        first, last = history(), history()
-        if changed_history == "ack":
-            last["localAttempts"][0]["native_observed_ack"] = "different-ack"
-        elif changed_history == "slots":
-            last["slots"][0]["used"] = 1
-        elif changed_history in ("native_correlations", "slot_intents"):
-            last["cloudHistory"][changed_history][0]["state"] = "changed"
-        elif changed_history:
-            last["budget"]["used"] = 1
+        first, last = attachment_history(changed_history)
         store = Mock()
         store.__enter__ = Mock(return_value=store)
         store.__exit__ = Mock(return_value=False)
