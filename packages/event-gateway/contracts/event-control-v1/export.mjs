@@ -10,6 +10,23 @@ const [root, zodPath, check] = process.argv.slice(2);
 if (!root || !zodPath || (check && check !== '--check')) throw Error('usage: export.mjs OS_ROOT ZOD_ESM_PATH [--check]');
 const base = resolve(root, 'packages/event-runtime/src');
 const names = [
+  'github/conversion-manifest-store.ts',
+  'github/conversion-planning.ts',
+  'github/initial-conversion.ts',
+  'github/initial-watch-host-store.ts',
+  'github/initial-watch-preparation.ts',
+  'github/material-cache.ts',
+  'github/material-delete.ts',
+  'github/material-read-contract.ts',
+  'github/material-read.ts',
+  'github/reconciliation-internal.ts',
+  'github/reconciliation-store.ts',
+  'github/source-reference-contract.ts',
+  'github/source-reference-store.ts',
+  'quarantine-inventory.ts',
+  'quarantine-inventory-contract.ts',
+  'quarantine-inventory-validation.ts',
+
   'contracts.ts', 'api.ts', 'registry.ts', 'coordinator.ts', 'coordinator-admission.ts',
   'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts',
   'native-runtime-store.ts', 'native-admission-gate.ts', 'github/readback-contract.ts',

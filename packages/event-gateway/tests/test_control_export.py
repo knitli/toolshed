@@ -13,13 +13,34 @@ import unittest
 
 PACKAGE = Path(__file__).resolve().parents[1]
 EXPORTER = PACKAGE / 'contracts/event-control-v1/export.mjs'
-NEW_SOURCES = ('github/host-storage-version.ts', 'messaging/protocol-v2.ts')
+NEW_SOURCES = (
+    'github/host-storage-version.ts',
+    'messaging/protocol-v2.ts',
+    'github/conversion-manifest-store.ts',
+    'github/conversion-planning.ts',
+    'github/initial-conversion.ts',
+    'github/initial-watch-host-store.ts',
+    'github/initial-watch-preparation.ts',
+    'github/material-cache.ts',
+    'github/material-delete.ts',
+    'github/material-read-contract.ts',
+    'github/material-read.ts',
+    'github/reconciliation-internal.ts',
+    'github/reconciliation-store.ts',
+    'github/source-reference-contract.ts',
+    'github/source-reference-store.ts',
+    'quarantine-inventory.ts',
+    'quarantine-inventory-contract.ts',
+    'quarantine-inventory-validation.ts',
+)
 
 
 class ControlExportTests(unittest.TestCase):
     def test_new_sources_are_checked_before_evaluation(self):
         source = EXPORTER.read_text()
         names = re.findall(r"'([^']+)'", source.split('const names = [', 1)[1].split('];', 1)[0])
+        self.assertEqual(len(names), 55)
+        self.assertEqual(len(set(names)), 55)
         for name in NEW_SOURCES:
             self.assertIn(name, names)
         git = shutil.which("git")
