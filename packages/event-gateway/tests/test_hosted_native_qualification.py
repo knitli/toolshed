@@ -16,7 +16,7 @@ SPEC = importlib.util.spec_from_file_location('hosted_native', SCRIPT)
 HOSTED = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(HOSTED)
 ENV = {'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_NAME': 'workflow_dispatch',
-       'GITHUB_REF': 'refs/heads/main', 'GITHUB_RUN_ATTEMPT': '1',
+       'GITHUB_REF': 'refs/heads/main', 'GITHUB_REF_PROTECTED': 'true', 'GITHUB_RUN_ATTEMPT': '1',
        'RUNNER_ENVIRONMENT': 'github-hosted', 'RUNNER_OS': 'macOS', 'RUNNER_ARCH': 'ARM64',
        'GITHUB_REPOSITORY_ID': '123', 'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '42',
        'ImageOS': 'macos15', 'ImageVersion': 'test', 'GH_TOKEN': str(uuid4())}
@@ -29,11 +29,11 @@ class HostedNativeTests(unittest.TestCase):
             HOSTED.admit(ENV, '123')
             for key, value in [('RUNNER_ENVIRONMENT', 'self-hosted'), ('GITHUB_RUN_ATTEMPT', '2'),
                                ('GITHUB_EVENT_NAME', 'push'), ('GITHUB_REF', 'refs/heads/candidate'),
-                               ('GITHUB_REPOSITORY_ID', '456'), ('ImageVersion', '')]:
+                               ('GITHUB_REPOSITORY_ID', '456'), ('GITHUB_REF_PROTECTED', 'false'), ('ImageVersion', '')]:
                 with self.subTest(key=key), self.assertRaises(ValueError):
                     HOSTED.admit({**ENV, key: value}, '123')
 
-    def test_command_preserves_installed_verification_and_native_sandbox(self):
+    def test_command_preserves_installed_verification_and_selects_hosted_network_mode(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             args = SimpleNamespace(package_root=str(root), python=str(root / 'venv/bin/python'),
@@ -53,6 +53,7 @@ class HostedNativeTests(unittest.TestCase):
                 parsed = fixture.cli()
             self.assertEqual(parsed.model_ports, [43125, 43126, 43127])
             self.assertFalse(parsed.outer_contained)
+            self.assertTrue(parsed.trusted_hosted_vm)
 
     def test_policy_has_only_seven_fixed_tcp_endpoints(self):
         profile = HOSTED.network_profile()
@@ -121,6 +122,32 @@ class HostedNativeTests(unittest.TestCase):
             result = json.loads((root / 'output/hosted-result.json').read_text())
             self.assertEqual(result['outcome'], 'FIXTURE_COMPLETED_PENDING_INDEPENDENT_VERIFICATION')
             self.assertFalse(result['nativePromoted'])
+
+    def test_unreadable_proof_cannot_report_completed_fixture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = SimpleNamespace(repository_id='123', binary_sha256='b' * 64,
+                                   cloud_commit='c' * 40, output_dir=str(root / 'output'))
+            read_bytes = Path.read_bytes
+
+            def read(path):
+                if path.name == 'proof.json':
+                    raise OSError('proof disappeared')
+                return read_bytes(path)
+
+            def complete(*_args, **_kwargs):
+                (root / 'output/proof.json').write_text('{}')
+                return SimpleNamespace(returncode=0)
+
+            with patch.dict(os.environ, ENV, clear=True), patch.object(HOSTED, 'admit'), \
+                    patch.object(HOSTED, 'command', return_value=['fixture']), \
+                    patch.object(HOSTED.tempfile, 'mkdtemp', return_value=str(root)), \
+                    patch.object(HOSTED.subprocess, 'run', side_effect=complete), \
+                    patch.object(Path, 'read_bytes', read):
+                self.assertEqual(HOSTED.run(args), 1)
+            result = json.loads((root / 'output/hosted-result.json').read_text())
+            self.assertEqual(result['outcome'], 'INCOMPLETE')
+            self.assertNotIn('proofSha256', result)
 
 
 if __name__ == '__main__':

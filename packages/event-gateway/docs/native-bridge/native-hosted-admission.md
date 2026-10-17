@@ -14,11 +14,16 @@ hostile-code isolation assessment. The VM contains no installed owner client or
 owner credentials. Checkout must disable persisted credentials, and acquisition
 must use only the job's read-only token before execution.
 
-The runner rejects non-main, automatic, self-hosted, wrong-platform and rerun
+The runner rejects unprotected/non-main, automatic, self-hosted, wrong-platform and rerun
 attempts. It supplies a closed child environment, explicit descriptor closure,
 a fresh short private scratch path, and an exclusive evidence directory. The
 whole fixture inherits a network sandbox with seven fixed host-local TCP ports
-and Unix sockets; existing per-native sandboxes remain enabled. `localhost`
+and Unix sockets. Its distinct `--trusted-hosted-vm` fixture mode verifies an
+active kernel sandbox and default bind/inbound/outbound network denial before
+broker startup and each native launch, then omits the nested sandbox wrapper.
+The older `--outer-contained` mode retains its filesystem checks and cannot be
+combined with the hosted mode. Neither hosted mode nor VM disposal proves
+filesystem isolation. `localhost`
 means host-local addresses, not literal loopback. Broad Unix access and trusted
 same-user processes are explicit assumptions; this does not claim hostile IPC
 isolation or endpoint authentication. No production network call is permitted.

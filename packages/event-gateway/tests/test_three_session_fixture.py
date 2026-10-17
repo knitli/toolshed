@@ -207,6 +207,11 @@ class ThreeSessionFixedPortTests(unittest.TestCase):
         with patch.object(FIXTURE.sys, "argv", base + ["--outer-contained", "--listener-port", "49735",
                                                        "--model-ports", "49736", "49737", "49738"]):
             self.assertEqual(FIXTURE.fixture_ports(FIXTURE.cli()), list(range(49732, 49739)))
+        with patch.object(FIXTURE.sys, "argv", base + ["--trusted-hosted-vm"]):
+            with self.assertRaisesRegex(AssertionError, "requires listener and three model ports"):
+                FIXTURE.fixture_ports(FIXTURE.cli())
+        with self.assertRaisesRegex(AssertionError, "mutually exclusive"):
+            FIXTURE.fixture_ports(self.parsed(trusted_hosted_vm=True))
 
     def test_containment_requires_complete_distinct_valid_ports_before_probing(self):
         faults = [dict(listener_port=None), dict(model_ports=None), dict(model_ports=[49736, 49737]),
@@ -360,6 +365,55 @@ class ThreeSessionFixedPortTests(unittest.TestCase):
 
 
 class ThreeSessionContainmentTests(unittest.TestCase):
+    def test_hosted_mode_requires_active_network_denials_without_filesystem_claim(self):
+        for fault in (None, 'unsandboxed', 'invalid', 'errno', b'network-bind', b'network-outbound', b'network-inbound'):
+            calls = []
+
+            def check(pid, operation, filter_type):
+                self.assertEqual(pid, os.getpid())
+                if operation is None:
+                    return 0 if fault == 'unsandboxed' else 1
+                calls.append(operation)
+                self.assertEqual(filter_type, 1024)
+                if fault == 'errno':
+                    FIXTURE.ctypes.set_errno(5)
+                return -1 if fault == 'invalid' else 0 if fault == operation else 1
+
+            library = SimpleNamespace(sandbox_check=Mock(side_effect=check))
+            with self.subTest(fault=fault), patch.object(FIXTURE.sys, 'platform', 'darwin'), \
+                    patch.object(FIXTURE.ctypes, 'CDLL', return_value=library), \
+                    patch.object(FIXTURE.ctypes.c_int, 'in_dll', return_value=SimpleNamespace(value=1024)):
+                if fault is None:
+                    proof = FIXTURE.verify_trusted_hosted_network()
+                    self.assertEqual(proof['mode'], 'trusted-hosted-vm-network-sandbox')
+                    self.assertFalse(proof['filesystemIsolationProven'])
+                    self.assertFalse(proof['vmDisposalObserved'])
+                    self.assertFalse(proof['completeDescendantTerminationProven'])
+                    self.assertEqual(calls, [b'network-bind', b'network-outbound', b'network-inbound'])
+                else:
+                    with self.assertRaises(AssertionError):
+                        FIXTURE.verify_trusted_hosted_network()
+
+    def test_hosted_network_is_rechecked_before_native_launch_and_broker(self):
+        profile = Path('/fixture/offline.sb')
+        original = ['/usr/bin/sandbox-exec', '-f', str(profile), FIXTURE.sys.executable, '-I', '-m', 'event_gateway.cli']
+        qualifier = SimpleNamespace(launch_argv=Mock(return_value=original))
+        with patch.object(FIXTURE, 'args', SimpleNamespace(outer_contained=False, trusted_hosted_vm=True)), \
+                patch.object(FIXTURE, 'host_qualifier', qualifier), \
+                patch.object(FIXTURE, 'verify_outer_containment') as strict, \
+                patch.object(FIXTURE, 'verify_trusted_hosted_network') as network, \
+                patch.object(FIXTURE, 'private_temp_root', return_value=Path('/fixture')), \
+                patch.object(FIXTURE, 'start_broker') as broker:
+            self.assertEqual(FIXTURE.native_launch_argv(profile, 'cache', 'state', 'root'), original[3:])
+            network.assert_called_once_with()
+            strict.assert_not_called()
+            network.side_effect = AssertionError('network permits default traffic')
+            with self.assertRaisesRegex(AssertionError, 'default traffic'):
+                FIXTURE.native_launch_argv(profile, 'cache', 'state', 'root')
+            with self.assertRaisesRegex(AssertionError, 'default traffic'):
+                asyncio.run(FIXTURE.run_scenario())
+            broker.assert_not_called()
+
     def test_kernel_checks_require_active_denials_and_writable_positive_control(self):
         for fault in (None, 'unsandboxed', 'owner', 'outside', 'network', 'scratch', 'invalid', 'errno', 'missing'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as directory:

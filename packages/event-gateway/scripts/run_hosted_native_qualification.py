@@ -21,7 +21,7 @@ def require(value, message):
 
 def admit(environment, repository_id):
     expected = {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "workflow_dispatch",
-                "GITHUB_REF": "refs/heads/main", "GITHUB_RUN_ATTEMPT": "1",
+                "GITHUB_REF": "refs/heads/main", "GITHUB_REF_PROTECTED": "true", "GITHUB_RUN_ATTEMPT": "1",
                 "RUNNER_ENVIRONMENT": "github-hosted", "RUNNER_OS": "macOS",
                 "RUNNER_ARCH": "ARM64", "GITHUB_REPOSITORY_ID": repository_id}
     require(all(environment.get(key) == value for key, value in expected.items()),
@@ -62,6 +62,7 @@ def command(args, profile, output):
             '--esbuild', str(Path(args.esbuild).resolve(strict=True)),
             '--miniflare', str(Path(args.miniflare).resolve(strict=True)),
             '--output', str(output / 'proof.json'),
+            '--trusted-hosted-vm',
             '--entry-port', str(PORTS[0]), '--loopback-port', str(PORTS[1]),
             '--broker-port', str(PORTS[2]), '--listener-port', str(PORTS[3]),
             '--model-ports', *(str(port) for port in PORTS[4:])]
@@ -97,8 +98,8 @@ def run(args):
         result['returncode'] = completed.returncode
         proof = output / 'proof.json'
         if completed.returncode == 0 and proof.is_file():
-            result['outcome'] = 'FIXTURE_COMPLETED_PENDING_INDEPENDENT_VERIFICATION'
             result['proofSha256'] = hashlib.sha256(proof.read_bytes()).hexdigest()
+            result['outcome'] = 'FIXTURE_COMPLETED_PENDING_INDEPENDENT_VERIFICATION'
     except subprocess.TimeoutExpired:
         result['reason'] = 'attempt_timeout_vm_lifetime_contains_remaining_descendants'
     except OSError:

@@ -72,7 +72,9 @@ def require_fixture_port(port):
 def fixture_ports(parsed):
     listener_port = getattr(parsed, "listener_port", None)
     model_ports = getattr(parsed, "model_ports", None)
-    if getattr(parsed, "outer_contained", False) or listener_port is not None or model_ports is not None:
+    hosted = getattr(parsed, "trusted_hosted_vm", False)
+    require(not (hosted and getattr(parsed, "outer_contained", False)), "containment modes are mutually exclusive")
+    if hosted or getattr(parsed, "outer_contained", False) or listener_port is not None or model_ports is not None:
         require(listener_port is not None and model_ports is not None,
                 "fixed port selection requires listener and three model ports")
     ports = [parsed.entry_port, parsed.loopback_port, parsed.broker_port]
@@ -340,9 +342,7 @@ def private_temp_root():
     return root
 
 
-def verify_outer_containment(scratch):
-    import pwd
-
+def active_sandbox_query():
     require(sys.platform == "darwin", "outer containment requires macOS kernel checks")
     library = ctypes.CDLL("/usr/lib/libsandbox.1.dylib", use_errno=True)
     check = library.sandbox_check
@@ -361,6 +361,24 @@ def verify_outer_containment(scratch):
     ctypes.set_errno(0)
     require(check(os.getpid(), None, 0) == 1 and ctypes.get_errno() == 0,
             "outer containment requires an active kernel sandbox")
+    return query
+
+
+def verify_trusted_hosted_network():
+    query = active_sandbox_query()
+    for operation in (b"network-bind", b"network-outbound", b"network-inbound"):
+        require(query(operation) == 1, "hosted sandbox permits unqualified network access")
+    return {"mode": "trusted-hosted-vm-network-sandbox", "kernelSandboxActive": True,
+            "defaultNetworkDenied": True, "filesystemIsolationProven": False,
+            "vmDisposalBasis": "providerLifecycleContract", "vmDisposalObserved": False,
+            "completeDescendantTerminationProven": False,
+            "addressSpecificPolicyRequiresIndependentAudit": True}
+
+
+def verify_outer_containment(scratch):
+    import pwd
+
+    query = active_sandbox_query()
     owner_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
     owner_roots = (owner_home, owner_home / ".codex", Path(sys.prefix).parent / "codex-home")
     require(all(root.is_absolute() and not root.is_relative_to(scratch) for root in owner_roots),
@@ -389,8 +407,13 @@ def verify_outer_containment(scratch):
 
 def native_launch_argv(profile, cache, state, root):
     argv = host_qualifier.launch_argv(profile, cache, state, binary, root)
-    if args.outer_contained:
-        verify_outer_containment(private_temp_root())
+    hosted = getattr(args, "trusted_hosted_vm", False)
+    if args.outer_contained or hosted:
+        require(not (args.outer_contained and hosted), "containment modes are mutually exclusive")
+        if hosted:
+            verify_trusted_hosted_network()
+        else:
+            verify_outer_containment(private_temp_root())
         require(argv[:3] == ["/usr/bin/sandbox-exec", "-f", str(profile)]
                 and len(argv) > 3 and argv[3] == sys.executable,
                 "native sandbox launch prefix changed")
@@ -2406,8 +2429,12 @@ async def finish_stage(ctx, stage, failure):
 
 async def run_scenario(directory_fd=None, publication_stack=None):
     temporary_root = private_temp_root()
-    containment = (verify_outer_containment(temporary_root) if args.outer_contained
-                   else {"mode": "per-native-profile"})
+    if getattr(args, "trusted_hosted_vm", False):
+        require(not args.outer_contained, "containment modes are mutually exclusive")
+        containment = verify_trusted_hosted_network()
+    else:
+        containment = (verify_outer_containment(temporary_root) if args.outer_contained
+                       else {"mode": "per-native-profile"})
     preflight_ports(args)
     evidence_path = Path(args.output).with_suffix(".private-evidence.jsonl")
     with ExitStack() as local_stack:
@@ -2517,8 +2544,11 @@ def cli():
     for name in ("package-source", "binary", "binary-sha256", "node", "cloud-source",
                  "esbuild", "miniflare", "output"):
         parser.add_argument("--" + name, required=True)
-    parser.add_argument("--outer-contained", action="store_true",
+    containment = parser.add_mutually_exclusive_group()
+    containment.add_argument("--outer-contained", action="store_true",
                         help="Verify an independently audited outer macOS sandbox instead of nesting native profiles")
+    containment.add_argument("--trusted-hosted-vm", action="store_true",
+                        help="Use the admitted disposable VM's inherited network sandbox; no filesystem isolation claim")
     parser.add_argument("--cloud-commit", required=True)
     parser.add_argument("--entry-port", type=int, default=49732)
     parser.add_argument("--loopback-port", type=int, default=49733)
