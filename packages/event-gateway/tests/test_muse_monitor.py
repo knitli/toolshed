@@ -123,18 +123,36 @@ class MuseMonitorTests(unittest.TestCase):
 
     def test_command_position_is_literal_in_real_posix_shell(self):
         with tempfile.TemporaryDirectory() as directory:
-            for executable in ('X=1', 'if', '!', "a'b"):
+            for executable in ('true', 'printf', 'test', 'X=1', 'if', '!', "a'b"):
                 path = Path(directory) / executable
                 path.write_text("#!/bin/sh\nprintf '%s\\0' called \"$@\"\n")
                 path.chmod(0o700)
                 args = ['literal argument', '$(exit 9)', "a'b", '']
-                command = command_monitor('Offline shell fixture', [executable, *args])['command']
+                command = command_monitor('Offline shell fixture', [str(path), *args])['command']
                 with self.subTest(executable=executable):
                     result = subprocess.run(  # nosec B603 -- Synthetic scripts in our private test directory.
                         ['/bin/sh', '-c', command], env={'PATH': directory},
                         check=False, capture_output=True, timeout=5)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(result.stdout, b'called\0' + b''.join(arg.encode() + b'\0' for arg in args))
+
+    def test_argv_rejects_bare_commands_builtins_and_reserved_words(self):
+        for executable in ('poll', 'true', 'printf', 'test', 'exec', 'command',
+                           'if', '!', 'X=1', "a'b"):
+            with self.subTest(executable=executable), self.assertRaises(MuseMonitorError):
+                command_monitor('Offline argv fixture', [executable, 'literal argument'])
+
+    def test_websocket_rejects_malformed_percent_escapes_in_authority(self):
+        for authority in ('exa%mple.test', 'example%GG.test', 'example.test%',
+                          'example.test%6', 'example%6G.test', 'example%65%.test'):
+            url = f'wss://{authority}/events'
+            with self.subTest(url=url), self.assertRaises(MuseMonitorError):
+                normalize_monitor({'description': 'Offline URL fixture', 'ws': url})
+        for authority in ('%65xample.test', '%65%78ample.test', 'exa%6dple.test',
+                          'exa%6Dple.test', '%65xample.test:443'):
+            url = f'wss://{authority}/events'
+            with self.subTest(url=url):
+                self.assertEqual(normalize_monitor({'description': 'Offline URL fixture', 'ws': url})['ws'], url)
 
     def test_websocket_rejects_raw_fragments_including_empty_fragment(self):
         for url in ('wss://example.test/events#fragment', 'wss://example.test/events#',
@@ -197,14 +215,14 @@ class MuseMonitorTests(unittest.TestCase):
         self.assertEqual(shlex.split(result['command']), argv)
         self.assertEqual(argv, before)
         self.assertEqual(result['wake_delay_ms'], 0)
-        self.assertEqual(command_monitor('x', ('poll',))['command'], "'poll'")
-        for value in ([], '', [''], ['poll', None], ['poll', 'bad\x00arg']):
+        self.assertEqual(command_monitor('x', ('./poll',))['command'], "'./poll'")
+        for value in ([], '', [''], ['/trusted/poll', None], ['/trusted/poll', 'bad\x00arg']):
             with self.subTest(value=value), self.assertRaises(MuseMonitorError):
                 command_monitor('x', value)
         for options in ({'ws': 'wss://example.test'}, {'ws_subprotocols': []},
                         {'ws_subprotocols': ['private-token']}, {'command': 'other'}, {'sessionId': 'x'}):
             with patch('event_gateway.muse.normalize_monitor') as normalize, self.assertRaises(MuseMonitorError):
-                command_monitor('x', ['poll'], **options)
+                command_monitor('x', ['/trusted/poll'], **options)
             normalize.assert_not_called()
 
 

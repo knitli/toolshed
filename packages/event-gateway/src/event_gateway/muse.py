@@ -32,9 +32,10 @@ def _valid_websocket_uri(uri):
         return False
     try:
         parsed = urlsplit(uri)
-        valid = (parsed.scheme in ('ws', 'wss') and bool(parsed.hostname)
-                 and '#' not in uri and '@' not in parsed.netloc)
         authority = parsed.netloc
+        valid = (parsed.scheme in ('ws', 'wss') and bool(parsed.hostname)
+                 and '#' not in uri and '@' not in authority
+                 and re.search(r'%(?![0-9A-Fa-f]{2})', authority) is None)
         if authority.startswith('['):
             suffix = authority[authority.index(']') + 1:]
             valid = valid and (suffix in ('', ':') or suffix.startswith(':') and suffix[1:].isdigit())
@@ -90,8 +91,10 @@ def command_monitor(description, argv, **options):
     # authority. A real authorized polling command remains a separate prerequisite.
     if (not isinstance(argv, (list, tuple)) or not argv
             or any(not isinstance(arg, str) or '\x00' in arg for arg in argv)
-            or not argv[0] or set(options) - (_FIELDS - {'description', 'command', 'ws', 'ws_subprotocols'})):
+            or not argv[0] or '/' not in argv[0]
+            or set(options) - (_FIELDS - {'description', 'command', 'ws', 'ws_subprotocols'})):
         raise MuseMonitorError()
+    # A slash bypasses shell builtin lookup without resolving against our process PATH.
     # Command position must be quoted even for shlex-safe assignments/reserved words.
     executable = "'" + argv[0].replace("'", "'\"'\"'") + "'"
     command = ' '.join((executable, *(shlex.quote(arg) for arg in argv[1:])))

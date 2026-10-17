@@ -89,6 +89,9 @@ a structured transcription of owner-reported evidence, not an independently
 exported native schema; no monitor was started and no synchronous return schema
 was supplied. `event_gateway.muse.normalize_monitor` validates that input, while
 `command_monitor` quotes trusted argv into the tool's shell-source `command`.
+Its executable must be an explicit path containing `/` (absolute or relative),
+so shell builtins cannot replace it. It does not resolve names using the
+constructor process's `PATH`; raw `command` input remains shell source.
 Neither function executes anything, locates a session, or grants read authority.
 
 The input requires `description` and exactly one of `command` or `ws`. Defaults
