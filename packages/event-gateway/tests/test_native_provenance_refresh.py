@@ -91,7 +91,7 @@ class NativeProvenanceRefreshTests(unittest.TestCase):
 
     def test_refresh_withholds_status_when_only_registry_policy_is_stale(self):
         api = SweepAPI()
-        for path in (V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, fixtures.REGISTRY, *V.INPUTS.values()):
+        for path in (V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, fixtures.REGISTRY, *V.INPUTS.values(), *fixtures.RECIPE_ASSETS):
             api.blobs[path, fixtures.BUILD] = api.blobs[path, fixtures.MAIN]
         api.blobs[fixtures.REGISTRY, fixtures.BUILD] += b"\n# stale workflow registry\n"
         self.assertEqual(self.sweep(api, workflow_sha=fixtures.BUILD), [])

@@ -1,3 +1,4 @@
+import base64
 import copy
 import gzip
 import importlib.util
@@ -21,6 +22,9 @@ V = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(V)
 HEAD, MAIN, BUILD = "a" * 40, "b" * 40, "c" * 40
 REGISTRY = "packages/event-gateway/scripts/native_recipe_registry.py"
+RECIPE_ASSETS = tuple(sorted({"packages/event-gateway/docs/native-bridge/" + asset.path
+    for recipe in V.R.RECIPES.values()
+    for asset in (recipe.manifest, *recipe.parents, *recipe.ordered_patches)}))
 
 
 def launcher(binary="1" * 64, host="2" * 64):
@@ -32,7 +36,10 @@ def launcher(binary="1" * 64, host="2" * 64):
 def fixture():
     binary = struct.pack("<II", 0xFEEDFACF, 0x0100000C) + b"actual cli bytes"
     host = struct.pack("<II", 0xFEEDFACF, 0x0100000C) + b"actual host bytes"
-    blobs = {path: (SCRIPT.parents[3] / path).read_bytes() for path in V.INPUTS.values()}
+    with gzip.open(Path(__file__).parent / "fixtures/native-legacy-v1-inputs.json.gz", "rt") as stream:
+        frozen = json.load(stream)["blobs"]
+    blobs = {path: base64.b64decode(frozen[path]) if path in frozen else (SCRIPT.parents[3] / path).read_bytes()
+             for path in V.INPUTS.values()}
     manifest = json.loads(blobs[V.INPUTS["sourceManifestSha256"]])
     inputs = {name: V.digest(blobs[path]) for name, path in V.INPUTS.items()}
     selected = {"schemaVersion": 1, "repositoryId": V.REPOSITORY_ID, "runId": 123,
@@ -86,6 +93,9 @@ class FakeAPI:
         self.blobs = {(path, revision): data for path, data in recipes.items() for revision in (HEAD, MAIN, BUILD)}
         for revision in (HEAD, MAIN):
             self.blobs[REGISTRY, revision] = (SCRIPT.parents[3] / REGISTRY).read_bytes()
+        for path in RECIPE_ASSETS:
+            for revision in (HEAD, MAIN, BUILD):
+                self.blobs[path, revision] = (SCRIPT.parents[3] / path).read_bytes()
         self.blobs[V.LAUNCHER, MAIN] = launcher()
         self.blobs[V.LAUNCHER, HEAD] = launcher(self.selected["binarySha256"], self.selected["codeModeHostSha256"])
         self.blobs[V.PROVENANCE, HEAD] = json.dumps(self.selected).encode()
@@ -132,7 +142,7 @@ class NativeCIProvenanceTests(unittest.TestCase):
         push = workflow.split("\n  push:\n", 1)[1]
         paths = push.split("\n    paths:\n", 1)[1].split("\n\n", 1)[0]
         triggered = {line.removeprefix("      - ") for line in paths.splitlines()}
-        required = {V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, REGISTRY, *V.INPUTS.values()}
+        required = {V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, REGISTRY, *V.INPUTS.values(), *RECIPE_ASSETS}
         self.assertFalse(required - triggered, required - triggered)
 
     def test_pins_parse_literals_without_executing_candidate(self):
@@ -442,6 +452,18 @@ class NativeCIProvenanceTests(unittest.TestCase):
                     V.verify_candidate(api, HEAD, MAIN)
                 self.assertNotIn(("download", 456), api.calls)
 
+    def test_legacy_fixture_does_not_read_mutable_current_builder_inputs(self):
+        original = Path.read_bytes
+        mutable = {SCRIPT.parents[3] / V.INPUTS[name]
+                   for name in ("builderSha256", "producerSha256", "workflowSha256")}
+        def read(path):
+            if path in mutable:
+                raise AssertionError("legacy fixture read mutable current input")
+            return original(path)
+        with patch.object(Path, "read_bytes", read):
+            inputs = fixture()[1]
+        self.assertTrue(V.R.matches_historical_inputs("core-idle-v1", 1, inputs))
+
     def test_registered_legacy_build_survives_current_builder_policy_drift(self):
         api = FakeAPI()
         for name in ("builderSha256", "producerSha256", "workflowSha256"):
@@ -636,7 +658,7 @@ class GitHubTransportTests(unittest.TestCase):
                 for state in ("pending", "success"):
                     self.assertTrue(V.publish(api, number, HEAD, state, "checked", BUILD))
         endpoints = [call.args[0] for call in api.request.call_args_list]
-        paths = {V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, REGISTRY, *V.INPUTS.values()}
+        paths = {V.SCRIPT, V.VERIFIER_WORKFLOW, V.LAUNCHER, REGISTRY, *V.INPUTS.values(), *RECIPE_ASSETS}
         # Two HTTP reads per path/revision, shared across both phases of all PRs.
         self.assertEqual(sum(e.startswith("contents/") for e in endpoints), 2 * len(paths))
         self.assertEqual(sum(e.startswith("git/blobs/") for e in endpoints), 2 * len(paths))
@@ -766,7 +788,7 @@ class GitHubTransportTests(unittest.TestCase):
 
 
 class ProvenanceDriverTests(unittest.TestCase):
-    def driver(self, event_name, event, *, fresh_head=HEAD, policy_changed=False, registry_changed=False):
+    def driver(self, event_name, event, *, fresh_head=HEAD, policy_changed=False, registry_changed=False, asset_changed=False):
         api = unittest.mock.Mock()
         pull = {"number": 7, "head": {"sha": HEAD}, "state": "open"}
         statuses = []
@@ -791,7 +813,7 @@ class ProvenanceDriverTests(unittest.TestCase):
             raise AssertionError(endpoint)
 
         def blob(path, revision):
-            return b"changed" if (policy_changed or registry_changed and path == REGISTRY) and reads > 1 and revision == MAIN else b"policy"
+            return b"changed" if (policy_changed or registry_changed and path == REGISTRY or asset_changed and path == RECIPE_ASSETS[-1]) and reads > 1 and revision == MAIN else b"policy"
 
         api.request.side_effect = request
         api.blob.side_effect = blob
@@ -823,7 +845,7 @@ class ProvenanceDriverTests(unittest.TestCase):
                 self.assertTrue(all(status["context"] == V.CONTEXT for status in statuses))
 
     def test_final_status_withheld_after_head_or_policy_changes(self):
-        for options in ({"fresh_head": "d" * 40}, {"policy_changed": True}, {"registry_changed": True}):
+        for options in ({"fresh_head": "d" * 40}, {"policy_changed": True}, {"registry_changed": True}, {"asset_changed": True}):
             with self.subTest(options=options):
                 statuses = self.driver("push", {"ref": "refs/heads/main"}, **options)
                 self.assertEqual([status["state"] for status in statuses], ["pending"])

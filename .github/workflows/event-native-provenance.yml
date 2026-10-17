@@ -22,6 +22,15 @@ on:
       - packages/event-gateway/src/event_gateway/launcher.py
       - packages/event-gateway/docs/native-bridge/native-core-idle-v1-source-manifest.json
       - packages/event-gateway/docs/native-bridge/native-core-idle-v1-implementation.patch
+      - packages/event-gateway/docs/native-bridge/terminal-history-spike/manifest.json
+      - packages/event-gateway/docs/native-bridge/terminal-history-spike/terminal-history-cumulative.patch
+      - packages/event-gateway/docs/native-bridge/terminal-public-query-spike/01-public-query.patch
+      - packages/event-gateway/docs/native-bridge/terminal-public-query-spike/02-tui-terminal-query.patch
+      - packages/event-gateway/docs/native-bridge/terminal-public-query-spike/03-generated-protocol.patch
+      - packages/event-gateway/docs/native-bridge/terminal-public-query-spike/04-generated-sdk.patch
+      - packages/event-gateway/docs/native-bridge/terminal-public-query-spike/05-terminal-query-recovery.patch
+      - packages/event-gateway/docs/native-bridge/terminal-public-query-spike/manifest.json
+      - packages/event-gateway/docs/native-bridge/terminal-query-candidate-preparation/manifest.json
 
 permissions:
   contents: read
