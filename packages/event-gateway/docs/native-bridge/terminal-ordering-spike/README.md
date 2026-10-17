@@ -30,15 +30,16 @@ The recorded upstream base is `a956835d020762cb2b570053af06f643a11c0ecc`. The or
 
 ## Bounded verification
 
-The short checker executes no native commands, subprocesses, repository recipes, or database operations. It verifies bundled artifact hashes and the historical/final manifest union; optionally it checks every selected source file. Consequently it needs neither `JUST_BIN` nor SQLite URI handling. It does not rerun or independently reproduce the native behavior.
+The short checker executes no native commands, subprocesses, repository recipes, or database operations. Before loading the historical source entries, it enforces the recorded byte hashes of the parent historical manifest and sibling terminal-completion patch. It then verifies bundled artifact hashes and the historical/final manifest union; optionally it checks every selected source file. The original frozen manifest is not bundled: its recorded hash is checked only when supplied with `--frozen-manifest`, otherwise the result explicitly reports it as not checked. Consequently it needs neither `JUST_BIN` nor SQLite URI handling. It does not rerun or independently reproduce the native behavior.
 
 ```sh
 python3 packages/event-gateway/docs/native-bridge/terminal-ordering-spike/verify.py
 python3 packages/event-gateway/docs/native-bridge/terminal-ordering-spike/verify.py --source-root /absolute/path/to/disposable-patched-source
+python3 packages/event-gateway/docs/native-bridge/terminal-ordering-spike/verify.py --frozen-manifest /absolute/path/to/original-frozen-manifest.json
 python3 -m unittest discover -s packages/event-gateway/tests -p test_terminal_ordering_artifacts.py -v
 ```
 
-Keep the parent historical manifest alongside this folder. The artifact tests include a qualified synthetic source control followed by historical-only and final-file mutations, rejection, restoration, and a passing control. Deliberately skipping historical-only hashes, skipping final hashes, and leaking an executable path each produced a failing artifact-test assertion before restoration; all six tests then passed. `proof/package-validation.json` records these checks. Packaging checks do not execute Rust tests.
+Keep both the parent historical manifest and sibling `terminal-completion-spike/terminal-completion.patch` alongside this folder. The artifact tests include a qualified synthetic source control followed by historical-only and final-file mutations, rejection, restoration, and a passing control. Deliberately skipping historical-only hashes, skipping final hashes, and leaking an executable path each produced a failing artifact-test assertion before restoration; all six tests then passed. `proof/package-validation.json` records these checks. A later provenance regression changes the historical manifest metadata and prior patch bytes while preserving the selected source closure, and tests the optional frozen-manifest check; all seven artifact tests pass. The original six-test packaging record remains unchanged. Packaging checks do not execute Rust tests.
 
 ## Remaining limits
 

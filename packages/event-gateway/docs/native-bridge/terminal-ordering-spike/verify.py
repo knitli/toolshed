@@ -20,11 +20,24 @@ def relative_file(root, name):
     return resolved
 
 
-def verify(bundle, source_root=None):
+def verify(bundle, source_root=None, frozen_manifest=None):
     manifest = json.loads((bundle / "manifest.json").read_text())
-    historical = json.loads(
-        (bundle.parent / "native-core-idle-v1-source-manifest.json").read_text()
-    )["fileSha256"]
+    provenance = {}
+    for field, name in [
+        ("historicalManifestSha256", "native-core-idle-v1-source-manifest.json"),
+        (
+            "priorTerminalPatchSha256",
+            "terminal-completion-spike/terminal-completion.patch",
+        ),
+    ]:
+        data = relative_file(bundle.parent, name).read_bytes()
+        if hashlib.sha256(data).hexdigest() != manifest[field]:
+            raise ValueError(f"provenance hash mismatch: {field}")
+        provenance[field] = data
+    if frozen_manifest is not None:
+        if digest(frozen_manifest) != manifest["frozenManifestSha256"]:
+            raise ValueError("provenance hash mismatch: frozenManifestSha256")
+    historical = json.loads(provenance["historicalManifestSha256"])["fileSha256"]
     # Final bytes supersede historical entries for overlapping paths.
     expected = historical | manifest["fileSha256"]
     if len(expected) != 61 or expected != manifest["selectedSourceClosureSha256"]:
@@ -38,6 +51,13 @@ def verify(bundle, source_root=None):
                 raise ValueError(f"selected source hash mismatch: {name}")
     return {
         "bundle": "PASS",
+        "provenanceHashes": {
+            "historicalManifest": "PASS",
+            "priorTerminalPatch": "PASS",
+            "frozenManifest": "PASS"
+            if frozen_manifest is not None
+            else "not checked (not bundled)",
+        },
         "selectedSourceFiles": len(expected),
         "sourceHashes": "PASS" if source_root is not None else "not checked",
     }
@@ -46,8 +66,19 @@ def verify(bundle, source_root=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", type=Path)
+    parser.add_argument(
+        "--frozen-manifest",
+        type=Path,
+        help="Original unbundled manifest to hash-check when available",
+    )
     args = parser.parse_args()
-    print(json.dumps(verify(Path(__file__).resolve().parent, args.source_root)))
+    print(
+        json.dumps(
+            verify(
+                Path(__file__).resolve().parent, args.source_root, args.frozen_manifest
+            )
+        )
+    )
 
 
 if __name__ == "__main__":

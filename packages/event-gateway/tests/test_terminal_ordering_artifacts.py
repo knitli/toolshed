@@ -173,6 +173,14 @@ class TerminalOrderingArtifactTests(unittest.TestCase):
             bundle = root / "artifacts" / BUNDLE.name
             shutil.copytree(BUNDLE, bundle)
             historical_path = bundle.parent / "native-core-idle-v1-source-manifest.json"
+            prior_patch = (
+                bundle.parent / "terminal-completion-spike/terminal-completion.patch"
+            )
+            prior_patch.parent.mkdir()
+            shutil.copy2(
+                BRIDGE / "terminal-completion-spike/terminal-completion.patch",
+                prior_patch,
+            )
             historical = read_json(BRIDGE / historical_path.name)
             manifest = read_json(bundle / "manifest.json")
             source_root = root / "checkout"
@@ -216,3 +224,82 @@ class TerminalOrderingArtifactTests(unittest.TestCase):
                         verifier.verify(bundle, source_root)
                     source.write_bytes(original)
                     verifier.verify(bundle, source_root)
+
+    def test_provenance_bytes_are_pinned_even_when_source_closure_is_unchanged(self):
+        spec = importlib.util.spec_from_file_location(
+            "ordering_verify", BUNDLE / "verify.py"
+        )
+        verifier = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(verifier)
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / BUNDLE.name
+            shutil.copytree(BUNDLE, bundle)
+            paths = [
+                "native-core-idle-v1-source-manifest.json",
+                "terminal-completion-spike/terminal-completion.patch",
+            ]
+            for relative in paths:
+                destination = bundle.parent / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(BRIDGE / relative, destination)
+            verifier.verify(bundle)
+            selected = read_json(bundle / "manifest.json")[
+                "selectedSourceClosureSha256"
+            ]
+            for relative in paths:
+                with self.subTest(relative=relative):
+                    target = bundle.parent / relative
+                    original = target.read_bytes()
+                    try:
+                        if target.suffix == ".json":
+                            historical = json.loads(original)
+                            original_sources = historical["fileSha256"].copy()
+                            historical["baseCommit"] = (
+                                "changed provenance, unchanged sources"
+                            )
+                            target.write_text(json.dumps(historical))
+                            self.assertEqual(
+                                read_json(target)["fileSha256"], original_sources
+                            )
+                        else:
+                            target.write_bytes(original + b"\n")
+                        self.assertEqual(
+                            read_json(bundle / "manifest.json")[
+                                "selectedSourceClosureSha256"
+                            ],
+                            selected,
+                        )
+                        with self.assertRaisesRegex(
+                            ValueError, "provenance hash mismatch"
+                        ):
+                            verifier.verify(bundle)
+                    finally:
+                        target.write_bytes(original)
+                    verifier.verify(bundle)
+
+            frozen = Path(directory) / "original-manifest.json"
+            frozen.write_bytes(b'{"original": "unbundled provenance"}\n')
+            manifest_path = bundle / "manifest.json"
+            manifest = read_json(manifest_path)
+            manifest["frozenManifestSha256"] = hashlib.sha256(
+                frozen.read_bytes()
+            ).hexdigest()
+            manifest_path.write_text(json.dumps(manifest))
+            self.assertEqual(
+                verifier.verify(bundle)["provenanceHashes"]["frozenManifest"],
+                "not checked (not bundled)",
+            )
+            self.assertEqual(
+                verifier.verify(bundle, frozen_manifest=frozen)["provenanceHashes"][
+                    "frozenManifest"
+                ],
+                "PASS",
+            )
+            original = frozen.read_bytes()
+            frozen.write_bytes(original + b" ")
+            with self.assertRaisesRegex(
+                ValueError, "provenance hash mismatch: frozenManifestSha256"
+            ):
+                verifier.verify(bundle, frozen_manifest=frozen)
+            frozen.write_bytes(original)
+            verifier.verify(bundle, frozen_manifest=frozen)
