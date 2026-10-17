@@ -219,8 +219,6 @@ def run_process(argv, scratch, env, streams, state):
                         await_group_exit(process)
                         process.wait(timeout=3)
                     state["exitCode"] = process.returncode
-                    if primary_failure is None and process.returncode != 0:
-                        raise RuntimeError('Fixture failed: ' + str(process.returncode))
                 finally:
                     process.stdout.close()
                     process.stderr.close()
@@ -228,6 +226,8 @@ def run_process(argv, scratch, env, streams, state):
                 state["cleanupFailure"] = {"name": type(error).__name__, "message": str(error)[:1000]}
                 if primary_failure is None:
                     raise
+    if process.returncode != 0:
+        raise RuntimeError('Fixture failed: ' + str(process.returncode))
 
 
 def cleanup_canary(canary, canary_status):

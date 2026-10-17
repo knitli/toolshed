@@ -15,7 +15,7 @@ SPEC.loader.exec_module(launch)
 
 
 class CaptureCleanupTests(unittest.TestCase):
-    def exercise(self, *, timeout=False, pid=42123, pgid=42123, own_group=99, kill_error=None, inventory_error=None):
+    def exercise(self, *, timeout=False, pid=42123, pgid=42123, own_group=99, kill_error=None, inventory_error=None, exit_code=0):
         process = MagicMock(pid=pid, returncode=None)
         process.stdout, process.stderr = io.BytesIO(), io.BytesIO()
         signalled = []
@@ -28,8 +28,8 @@ class CaptureCleanupTests(unittest.TestCase):
 
         def wait(**kwargs):
             self.assertTrue(signalled, 'leader must remain unreaped until group cleanup')
-            process.returncode = 0
-            return 0
+            process.returncode = exit_code
+            return exit_code
 
         process.wait.side_effect = wait
         selector = MagicMock()
@@ -52,6 +52,19 @@ class CaptureCleanupTests(unittest.TestCase):
         self.assertTrue(process.stdout.closed)
         self.assertTrue(process.stderr.closed)
         return error, state, kill, process
+
+    def test_nonzero_fixture_exit_is_primary_not_cleanup_failure(self):
+        error, state, kill, process = self.exercise(exit_code=7)
+        self.assertIsInstance(error, RuntimeError)
+        self.assertEqual(str(error), 'Fixture failed: 7')
+        self.assertEqual(state, {'exitCode': 7})
+        kill.assert_called_once_with(42123, signal.SIGKILL)
+        process.wait.assert_called_once()
+
+    def test_nonzero_exit_does_not_replace_primary_timeout(self):
+        error, state, _, _ = self.exercise(timeout=True, exit_code=-9)
+        self.assertIsInstance(error, subprocess.TimeoutExpired)
+        self.assertEqual(state, {'exitCode': -9})
 
     def test_inventory_failure_preserves_primary_timeout(self):
         error, state, _, process = self.exercise(timeout=True, inventory_error=RuntimeError('inventory denied'))
