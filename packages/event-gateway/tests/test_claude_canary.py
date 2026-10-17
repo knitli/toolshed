@@ -676,6 +676,76 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(raised.exception.diagnostic[0]['sessionId'])
             self.assertNotIn(self.key, json.dumps(raised.exception.diagnostic))
 
+    async def test_startup_system_discriminators_remain_rejected_and_payload_free(self):
+        secret = 'private-startup-' + secrets.token_hex(16)
+        subtypes = ('hook_started', 'hook_progress', 'hook_response', 'status',
+                    'session_metadata', 'init_milestone')
+        for subtype in subtypes:
+            for initialized in (False, True):
+                probe = self.new_probe()
+                probe.initialized = initialized
+                event = {'type': 'system', 'subtype': subtype, 'session_id': self.session,
+                         'metadata': {secret: secret}, 'status': secret, 'hook_id': secret,
+                         'hook_event': secret, 'message': secret, 'stdout': secret,
+                         'stderr': secret, 'output': secret, 'exit_code': 17, secret: secret}
+                reason = 'busy_native_premature_result' if initialized else 'busy_native_missing_init'
+                with self.subTest(subtype=subtype, initialized=initialized), \
+                        self.assertRaisesRegex(CANARY.CanaryError, '^' + reason + '$') as raised:
+                    await CANARY.observe_busy_stdout(stream(event), probe)
+                diagnostic = raised.exception.diagnostic[0]
+                self.assertEqual(diagnostic['eventSubtype'], subtype)
+                self.assertEqual(diagnostic['fieldShapes'], {
+                    'subtype': 'string', 'metadata': 'object', 'status': 'string',
+                    'hook_id': 'string', 'hook_event': 'string', 'message': 'string',
+                    'stdout': 'string', 'stderr': 'string', 'output': 'string', 'exit_code': 'number'})
+                self.assertNotIn(secret, json.dumps(diagnostic))
+                self.assertNotIn('17', json.dumps(diagnostic['fieldShapes']))
+                self.assertFalse(probe.ready_to_send.is_set())
+                self.assertFalse(probe.complete.is_set())
+
+    async def test_unknown_system_discriminator_shapes_are_fixed_and_bounded(self):
+        secret = 'private-discriminator-' + secrets.token_hex(16)
+        values = ((secret, 'string'), (secret * 100, 'string'), (None, 'null'),
+                  ({secret: secret}, 'object'), ([secret], 'array'),
+                  (True, 'boolean'), (17, 'number'), (1.5, 'number'))
+        for value, shape in values:
+            probe = self.new_probe()
+            event = {'type': 'system', 'session_id': self.session, 'subtype': value,
+                     'message': {secret: secret}, secret: secret}
+            with self.subTest(shape=shape), \
+                    self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_missing_init$') as raised:
+                await CANARY.observe_busy_stdout(stream(event), probe)
+            diagnostic = raised.exception.diagnostic[0]
+            self.assertEqual(diagnostic['eventSubtype'], 'unknown')
+            self.assertEqual(diagnostic['fieldShapes'], {
+                'subtype': shape, 'metadata': 'absent', 'status': 'absent',
+                'hook_id': 'absent', 'hook_event': 'absent', 'message': 'object',
+                'stdout': 'absent', 'stderr': 'absent', 'output': 'absent', 'exit_code': 'absent'})
+            self.assertLess(len(json.dumps(diagnostic)), 700)
+            self.assertNotIn(secret, json.dumps(diagnostic))
+        with self.assertRaises(CANARY.CanaryError) as raised:
+            await CANARY.observe_busy_stdout(stream({'type': 'system', 'session_id': self.session}),
+                                            self.new_probe())
+        self.assertEqual(raised.exception.diagnostic[0]['fieldShapes']['subtype'], 'absent')
+        for kind in ('user', 'assistant', 'result', secret):
+            with self.subTest(kind=kind), self.assertRaises(CANARY.CanaryError) as raised:
+                await CANARY.observe_busy_stdout(stream({'type': kind, 'subtype': 'hook_started',
+                    'session_id': self.session}), self.new_probe())
+            self.assertEqual(raised.exception.diagnostic[0]['eventSubtype'], 'unknown')
+            self.assertNotIn('fieldShapes', raised.exception.diagnostic[0])
+
+    async def test_startup_shape_diagnostic_preserves_eight_event_limit(self):
+        init = {'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []}
+        event = {'type': 'system', 'subtype': 'session_metadata', 'session_id': self.session,
+                 'metadata': {'private-key': 'private-value'}}
+        with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_premature_result$') as raised:
+            await CANARY.observe_busy_stdout(stream(*([init] * 10), event), self.new_probe())
+        diagnostic = raised.exception.diagnostic
+        self.assertEqual([item['order'] for item in diagnostic], list(range(4, 12)))
+        self.assertEqual(diagnostic[-1]['eventSubtype'], 'session_metadata')
+        self.assertLess(len(json.dumps(diagnostic)), 4096)
+        self.assertNotIn('private-', json.dumps(diagnostic))
+
     async def test_malformed_and_oversized_diagnostics_never_contain_raw_output(self):
         secret = ('private-output-' + secrets.token_hex(16)).encode()
         for payload in (secret + b'\n', secret * 2048 + b'\n', b'null\n', b'[]\n'):

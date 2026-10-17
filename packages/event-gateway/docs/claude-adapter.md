@@ -211,6 +211,13 @@ Busy observation failures retain at most eight classified stdout envelopes in th
 existing bounded `fixture.log`: event type/subtype from fixed allowlists, exact
 expected session UUID (or null), parent monotonic timestamp, and sequence number.
 Session-state events additionally retain only `running`, `idle`, or `unknown`.
+Unexpected system events additionally classify the fixed `hook_started`,
+`hook_progress`, `hook_response`, `status`, `session_metadata`, and `init_milestone`
+subtypes. Their diagnostic includes only JSON type/absence labels for ten fixed
+fields: subtype, metadata, status, hook_id, hook_event, message, stdout, stderr,
+output, and exit_code. Field values and arbitrary field names are never retained.
+These labels come from the pinned 2.1.302 executable's static source; they do not
+identify the earlier failed run's redacted event or establish valid startup order.
 Unknown labels, malformed JSON, and oversized reads retain no raw frame text.
 This diagnostic is failure evidence only; init, native running, held-response,
 identity and completion requirements remain unchanged. It does not prove admission.

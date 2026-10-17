@@ -334,6 +334,17 @@ async def observe_busy_stdout(reader, probe):
                         'error_during_execution', 'error_max_turns', 'error_max_budget_usd',
                         'error_during_result_validation') else 'unknown',
                     'sessionId': probe.session_id if envelope.get('session_id') == probe.session_id else None})
+                if kind == 'system' and subtype not in ('init', 'session_state_changed'):
+                    # Fixed labels and JSON shapes identify startup failures without retaining payloads.
+                    if subtype in ('hook_started', 'hook_progress', 'hook_response', 'status',
+                                   'session_metadata', 'init_milestone'):
+                        diagnostic[-1]['eventSubtype'] = subtype
+                    shapes = {str: 'string', dict: 'object', list: 'array', type(None): 'null',
+                              bool: 'boolean', int: 'number', float: 'number'}
+                    diagnostic[-1]['fieldShapes'] = {
+                        name: shapes.get(type(envelope[name]), 'unknown') if name in envelope else 'absent'
+                        for name in ('subtype', 'metadata', 'status', 'hook_id', 'hook_event',
+                                     'message', 'stdout', 'stderr', 'output', 'exit_code')}
                 if kind == 'system' and subtype == 'session_state_changed':
                     state = envelope.get('state')
                     diagnostic[-1]['state'] = state if state in ('running', 'idle') else 'unknown'
