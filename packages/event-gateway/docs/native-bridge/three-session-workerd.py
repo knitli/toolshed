@@ -684,13 +684,8 @@ def load_revocation_parser():
 
 
 def collect_native_revocations(session, started_unix, ended_unix):
-    """
-    Best-effort diagnostics from C's owned scratch; absence proves nothing.
-
-    Snapshot bounded DB/WAL files through no-follow descriptors before querying.
-    Live copies can be inconsistent: that is unavailable evidence, never an
-    assertion that no revocation happened. No source database is opened by SQLite.
-    """
+    """Best-effort diagnostics from C's owned scratch; absence proves nothing."""
+    # Live DB/WAL copies can be inconsistent; SQLite opens only the private snapshot.
     result = {"status": "unavailable", "records": [], "diagnosticOnly": True,
               "exactRejectedWitnessAvailable": False}
     try:
