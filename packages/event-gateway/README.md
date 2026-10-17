@@ -212,7 +212,7 @@ presence/authority seams are implemented.
 ## Contract and validation
 
 `contracts/event-v1/manifest.json` pins the canonical OS schema, semantic
-reference, and fixture bytes at `59940bde10db5584247c8648c985f246f546226f`.
+reference, and fixture bytes at `7b63bee97395a70e05ffb08ee214e8351f6dda06`.
 The fixture embeds the canonical 45 semantic verdicts: 30 raw-parser, six
 delivery-digest and nine ACK-binding cases. Both runtimes execute these cases;
 normal Python tests require the embedded corpus, including optimized-mode
@@ -249,26 +249,28 @@ byte limits. Consumer tests exercise these through Python validation and the
 HTTP response boundary. Request identity, pagination binding, and duplicate
 record checks remain separately tested local invariants. These vectors do not
 qualify live authorization, source initialization, delivery, or native wake.
-The `github-pinned-history-read` family pairs the unchanged semantic-fixture
-revision with merged cloud fixes for pinned metadata reads and invalid-counter
-refusal. Its complete seven-file hash map must be authorized on trusted main
-before this consumer rotates. All ten historical families retain their existing
-hashes and archived snapshots.
+The `cloud-guard-baseline-messaging-v2-dispatch` family selects the immutable
+Cloud guard baseline `7b63bee97395a70e05ffb08ee214e8351f6dda06`. Its complete
+seven-file hash map was authorized on trusted main in #162. All eleven historical
+families retain their hashes and archived snapshots; their authorization does not
+establish runtime compatibility with this or later Cloud revisions.
 
-The control manifest pins 37 source paths at
-`49122dd4ac2a358d87e8cd727fd8e817ae183dac`, including the new internal
-`github/pinned-read-contract.ts` helper and its existing host, controller and
-grants boundaries. The helper imports Zod, grants and readback types. The grants
-and readback sources are already hash-pinned; Zod is pinned separately by version
-4.6.5. The exporter does not evaluate the internal reader or Worker runtime
-modules.
+The control manifest pins 39 source paths, including `github/host-storage-version.ts`
+and `messaging/protocol-v2.ts`. The exporter explicitly resolves the messaging DTO's
+Zod, policy and protocol imports after checking every source hash and Zod version
+4.6.5. It does not evaluate the host storage guard, internal reader or Worker
+runtime modules. The selected Cloud dispatch schema preserves manual v1, rejects
+GitHub v1 and accepts messaging v2 only when the envelope and claim node IDs agree.
+The control fixture's unchanged manual-admission vectors do not cover this entire
+acceptance change.
 
 The source chain also covers watch-store, internal watch-control, watch-kernel,
 owner-proof, delegated read authority and deadlines, GitHub client and principal
 allowlist, source-control and watches, manual/native canary boundaries, admin
 API/types, and memory authentication/admin security. The generated control DTO
-fixture and all five event-v1 files remain byte-identical, preserving the same
-45 semantic cases. There is no public watch route or client activation. New
+fixture, event schema, policy and corpus remain byte-identical, preserving the
+same 45 semantic cases. Event protocol.ts now exports its existing JSON decoder,
+and both manifests rotate. This baseline does not attest future Cloud #902. There is no public watch route or client activation. New
 create requires an exact-true flag that is unset in deployment configuration;
 source activation, delivery and native attachment remain disabled by default.
 These are selected offline provenance pins, not an executable dependency bundle or

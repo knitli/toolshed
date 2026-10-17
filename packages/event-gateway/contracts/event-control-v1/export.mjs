@@ -14,6 +14,7 @@ const names = [
   'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts',
   'native-runtime-store.ts', 'native-admission-gate.ts', 'github/readback-contract.ts',
   'read-authority.ts', 'request-deadline.ts', 'github/host.ts', 'github/controller.ts',
+  'github/host-storage-version.ts', 'messaging/protocol-v2.ts',
   'github/client.ts', 'github/pinned-read-contract.ts', 'github/grants.ts', 'github/state.ts', 'github/ingress.ts',
   '../../gatekeeper-memory/src/principals.ts', '../../openapi-operator/src/access.ts',
   '../../gatekeeper-messaging/src/agent-token.ts',
@@ -42,8 +43,13 @@ const dataModule = code => `data:text/javascript;base64,${Buffer.from(stripTypeS
 const policy = dataModule(source['policy.ts']);
 const zod = pathToFileURL(resolve(zodPath)).href;
 const protocol = dataModule(source['protocol.ts'].replace('"zod"', JSON.stringify(zod)).replace('"./policy.js"', JSON.stringify(policy)));
+const messagingProtocol = dataModule(source['messaging/protocol-v2.ts']
+  .replace('"zod"', JSON.stringify(zod)).replace('"../policy.js"', JSON.stringify(policy))
+  .replace('"../protocol.js"', JSON.stringify(protocol)));
 // eslint-disable-next-line no-unsanitized/method -- Execute reviewed local schemas; --check verifies revision, source hashes and Zod version before this import.
-const contracts = await import(dataModule(source['contracts.ts'].replace('"zod"', JSON.stringify(zod)).replace('"./protocol.ts"', JSON.stringify(protocol))));
+const contracts = await import(dataModule(source['contracts.ts'].replace('"zod"', JSON.stringify(zod))
+  .replace('"./protocol.ts"', JSON.stringify(protocol))
+  .replace('"./messaging/protocol-v2.ts"', JSON.stringify(messagingProtocol))));
 // eslint-disable-next-line no-unsanitized/method -- Execute the reviewed pinned native DTO schemas only after the same pre-evaluation source-pin checks.
 const nativeAdmissionSchemas = await import(dataModule(
   source['native-admission-contract.ts'].replace('"zod"', JSON.stringify(zod))));
