@@ -1,0 +1,124 @@
+{
+  "schema": "private-reviewer-docker-sdk-integration:v1",
+  "state": "UNEXECUTED_LISTENER_CORRECTION_AFTER_ATTEMPT_1_PREFLIGHT_FAILURE",
+  "sdkVersion": "0.3.209",
+  "driver": {
+    "repository": "knitli/.github",
+    "revision": "e516ab4803311cd58fc860f57371aedb0fb24f4d",
+    "source": "scripts/reviewer-completion-driver.mjs",
+    "unchanged": true
+  },
+  "files": {
+    "fixture.mjs": "62ff66b8a9d3c2fb6742f11a27914493127bb9ab38d17dd2835691371e815564",
+    "launch.py": "d552c611a6203dce651b7cd94b14bf17bc5beb1e1444ee3e31e93850bb3a359f",
+    "profile.sb": "dc6c4ddbf8c1fd356580842eb5c6df29d1941104b47fbfeb5c3dddc701919f87",
+    "README.md": "04ec289a4e96bfb6af10e784bde7c1402d6fd769bc708fe47bbcc04dc25d386b"
+  },
+  "dependencies": {
+    "/private/tmp/reviewer-sdk-process-protocol-20261017/frozen/sdk.mjs": "7b3577a1078660a3ec43471e6738c730ca1b172070ddcf3f9a9384bcb68bd3ca",
+    "/private/tmp/reviewer-sdk-process-protocol-20261017/frozen/reviewer-completion-driver.mjs": "4ff7c66588d16f33f67ca89670b5efe4540170bf5708d28cea7b19a2d0298eee",
+    "/private/tmp/reviewer-docker-sdk-adapter-20261017/adapter.mjs": "aa8fb8dbb5bec8f8eb7da122a5d891af6277893b47873d00a15e92fe10ec50f4",
+    "/private/tmp/reviewer-docker-sdk-adapter-20261017/fixture/protocol-child.py": "11777085c97fe3ebf8ce95e6bdd1dce91abe544256daad886b9b42b802d9a71c"
+  },
+  "socket": "/Users/adampoulemanos/.docker/run/docker.sock",
+  "cases": [
+    "success",
+    "early-terminal",
+    "eof",
+    "abort"
+  ],
+  "validation": {
+    "javascriptSyntax": "node --check PASS; fixture not executed",
+    "pythonSyntax": "AST parse PASS; launcher not executed",
+    "sandboxSyntax": "Profile accepted in historical attempt 1; real forbidden Unix socket denial unproven",
+    "sdkDockerIntegration": "UNEXECUTED"
+  },
+  "capture": {
+    "seconds": 240,
+    "aggregateBytes": 1048576,
+    "streams": "separate stdout.bin and stderr.bin; bounded prefix on overflow",
+    "scratch": "retained on every outcome",
+    "independentProcessAndDockerCleanup": "root required even on failure; no claimed absence from CLI termination"
+  },
+  "runtimeReadClosure": {
+    "exactSources": true,
+    "systemSubtrees": [
+      "/System/Library",
+      "/usr/lib",
+      "/private/var/db/dyld"
+    ],
+    "dynamicRuntimeClosure": "UNPROVEN; static otool dependencies only"
+  },
+  "excludedClaims": [
+    "native Claude",
+    "provider calls",
+    "hosted qualification",
+    "production activation"
+  ],
+  "node": {
+    "path": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+    "realpath": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+    "sha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+    "staticDependencies": [
+      "\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 3038.1.255)",
+      "\t/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 61439.1.1)",
+      "\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 1800.101.0)",
+      "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)"
+    ]
+  },
+  "docker": {
+    "path": "/usr/local/bin/docker",
+    "realpath": "/Applications/Docker.app/Contents/Resources/bin/docker",
+    "sha256": "75b26e5794924745fc9879c9d5ce92e6389f01aff494a36bca7b44c770ce3894",
+    "staticDependencies": [
+      "\t/usr/lib/libSystem.B.dylib (compatibility version 0.0.0, current version 0.0.0)",
+      "\t/usr/lib/libresolv.9.dylib (compatibility version 0.0.0, current version 0.0.0)",
+      "\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 0.0.0, current version 0.0.0)",
+      "\t/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 0.0.0, current version 0.0.0)"
+    ]
+  },
+  "sandbox": {
+    "path": "/usr/bin/sandbox-exec",
+    "realpath": "/usr/bin/sandbox-exec",
+    "sha256": "58839ef01b4eef8aac0d2aa8f9d1c074ae45aafe3533965b030672450064acc8"
+  },
+  "containmentProbes": {
+    "executed": false,
+    "outsideScratchCanary": "random32bytes; child EPERM/EACCES required; parent unchanged SHA256 and cleanup in finally",
+    "scratchWrite": "positive read/write control",
+    "network": [
+      "IPv4 127.0.0.1:9",
+      "IPv6 [::1]:9",
+      "other Unix path under ROOT"
+    ],
+    "networkDeadlineMsEach": 1000,
+    "acceptedDenialCodes": [
+      "EPERM",
+      "EACCES"
+    ],
+    "socketCleanup": "destroy on every outcome",
+    "profileChanged": false,
+    "forbiddenUnixListener": {
+      "location": "outside SCRATCH under ROOT",
+      "kind": "AF_UNIX SOCK_STREAM listen backlog1, no accept handler",
+      "pathBytes": 101,
+      "maximumPathBytesExclusive": 104,
+      "identity": "physical socket; uid/dev/ino/mode retained and rechecked before unlink",
+      "cleanup": "parent finally closes and identity-checks/unlinks; errors captured without replacing primary failure",
+      "executed": false
+    }
+  },
+  "historicalAttempt1": {
+    "archive": "history-attempt-1",
+    "manifestSha256": "0c7fe5bdbc8654becedc2adfa8e29e843d3ffe84770631bdbaa4e303c19d2ec8",
+    "result": "FAIL before SDK import: absent forbidden Unix path returned ENOENT",
+    "rootReceipt": "history-attempt-1/root-attempt-1.json",
+    "independentRootCleanup": "root receipt confirms unchanged daemon, no reviewer containers, no host processes",
+    "passedProbes": [
+      "canary denial",
+      "scratch write",
+      "IPv4 denial",
+      "IPv6 denial"
+    ]
+  }
+}

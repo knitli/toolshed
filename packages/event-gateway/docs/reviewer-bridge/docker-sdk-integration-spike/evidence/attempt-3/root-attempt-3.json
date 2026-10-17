@@ -1,0 +1,13 @@
+{
+  "startedAt": "2026-10-17T16:56:55.399353+00:00",
+  "manifestSha256": "d4f23dfa5846905d57d61832e560ac69f73bd9c73ea4cd1653d62cc3f63f33d2",
+  "daemonBefore": "804dc7e7-2939-459e-b28d-4e1a35038c92",
+  "baselineContainers": "",
+  "fixtureExitCode": 0,
+  "failure": null,
+  "daemonAfter": "804dc7e7-2939-459e-b28d-4e1a35038c92",
+  "remainingContainers": "",
+  "independentDockerAbsence": true,
+  "remainingHostProcesses": [],
+  "finishedAt": "2026-10-17T16:57:09.718151+00:00"
+}

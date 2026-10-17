@@ -1,0 +1,37 @@
+{
+  "verifiedAt": "2026-10-17T16:57:39.059948+00:00",
+  "daemonBefore": "804dc7e7-2939-459e-b28d-4e1a35038c92",
+  "exactContainers": [
+    {
+      "mode": "success",
+      "containerId": "5770a23f075e150a6ce0a3ad385deb984b030a0f1695e43e6a40604316025c6e",
+      "name": "reviewer-isolation-e51c48e4cff13f899e6f8547a594e3e5",
+      "idListing": "",
+      "nameListing": ""
+    },
+    {
+      "mode": "early-terminal",
+      "containerId": "60fecd93ef992e71d2e9d1822f8e36b7abaf5f67c0171e970600e4b4e60dc08d",
+      "name": "reviewer-isolation-8665e58cb685722252bf98835a017911",
+      "idListing": "",
+      "nameListing": ""
+    },
+    {
+      "mode": "eof",
+      "containerId": "7a3513df8503af11e0a4af3349a3d9d9ad6f37bacc2b07502e61565cec473b58",
+      "name": "reviewer-isolation-4b8245585e14438ee4b596117ff745da",
+      "idListing": "",
+      "nameListing": ""
+    },
+    {
+      "mode": "abort",
+      "containerId": "12c6e815997a88e263650a33138997fa9627d0be40cba0c264cb019bfa629949",
+      "name": "reviewer-isolation-79cf21b502a65b4761739a3ff7f9a1a8",
+      "idListing": "",
+      "nameListing": ""
+    }
+  ],
+  "daemonAfter": "804dc7e7-2939-459e-b28d-4e1a35038c92",
+  "remainingOwnedProcesses": [],
+  "allAbsent": true
+}

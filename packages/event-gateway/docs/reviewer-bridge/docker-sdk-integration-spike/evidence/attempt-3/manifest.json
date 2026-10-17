@@ -1,0 +1,141 @@
+{
+  "schema": "private-reviewer-docker-sdk-integration:v1",
+  "state": "UNEXECUTED_PACKAGING_FIXES_AWAITING_FINAL_ROOT_PROOF",
+  "sdkVersion": "0.3.209",
+  "driver": {
+    "repository": "knitli/.github",
+    "revision": "e516ab4803311cd58fc860f57371aedb0fb24f4d",
+    "source": "scripts/reviewer-completion-driver.mjs",
+    "unchanged": true
+  },
+  "files": {
+    "fixture.mjs": "c767125bbe5b90ef5cc1071f45810cff3d4ce09f86f9fa5f197fff6f7da399d4",
+    "launch.py": "0ba4e29155ea9baf4f6a36b82ff447c87cfdaa193f988711ee87cb509705ddb6",
+    "profile.sb": "dc6c4ddbf8c1fd356580842eb5c6df29d1941104b47fbfeb5c3dddc701919f87",
+    "README.md": "03c24b1a7f67500a35d97b73bac1025faff94a1123ae7c7145c487dba4c1a2f8"
+  },
+  "dependencies": {
+    "/private/tmp/reviewer-sdk-process-protocol-20261017/frozen/sdk.mjs": "7b3577a1078660a3ec43471e6738c730ca1b172070ddcf3f9a9384bcb68bd3ca",
+    "/private/tmp/reviewer-sdk-process-protocol-20261017/frozen/reviewer-completion-driver.mjs": "4ff7c66588d16f33f67ca89670b5efe4540170bf5708d28cea7b19a2d0298eee",
+    "/private/tmp/reviewer-docker-sdk-adapter-20261017/adapter.mjs": "e41429491e43f4a05c3ba9f10a9d09df25779890e1ec166b0449c1a1f079c8af",
+    "/private/tmp/reviewer-docker-sdk-adapter-20261017/fixture/protocol-child.py": "11777085c97fe3ebf8ce95e6bdd1dce91abe544256daad886b9b42b802d9a71c"
+  },
+  "socket": "/Users/adampoulemanos/.docker/run/docker.sock",
+  "cases": [
+    "success",
+    "early-terminal",
+    "eof",
+    "abort"
+  ],
+  "validation": {
+    "javascriptSyntax": "node --check PASS; fixture not executed",
+    "pythonSyntax": "AST PASS; copied-path mocked refusal PASS before resources; mock process cleanup PASS",
+    "sandboxSyntax": "Profile accepted in historical attempt 1; real forbidden Unix socket denial unproven",
+    "sdkDockerIntegration": "CURRENT BYTES UNEXECUTED; historical attempt2 PASS is not current qualification",
+    "pythonLint": "Configured Ruff plus explicit preview E306 and C901 maximum15 PASS",
+    "javascriptLint": "Repository Biome rules with private VCS-disabled config PASS; no formatter"
+  },
+  "capture": {
+    "seconds": 240,
+    "aggregateBytes": 1048576,
+    "streams": "separate stdout.bin and stderr.bin; bounded prefix on overflow",
+    "scratch": "retained on every outcome",
+    "independentProcessAndDockerCleanup": "root required even on failure; no claimed absence from CLI termination"
+  },
+  "runtimeReadClosure": {
+    "exactSources": true,
+    "systemSubtrees": [
+      "/System/Library",
+      "/usr/lib",
+      "/private/var/db/dyld"
+    ],
+    "dynamicRuntimeClosure": "UNPROVEN; static otool dependencies only"
+  },
+  "excludedClaims": [
+    "native Claude",
+    "provider calls",
+    "hosted qualification",
+    "production activation"
+  ],
+  "node": {
+    "path": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+    "realpath": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+    "sha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+    "staticDependencies": [
+      "\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 3038.1.255)",
+      "\t/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 61439.1.1)",
+      "\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 1800.101.0)",
+      "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)"
+    ]
+  },
+  "docker": {
+    "path": "/usr/local/bin/docker",
+    "realpath": "/Applications/Docker.app/Contents/Resources/bin/docker",
+    "sha256": "75b26e5794924745fc9879c9d5ce92e6389f01aff494a36bca7b44c770ce3894",
+    "staticDependencies": [
+      "\t/usr/lib/libSystem.B.dylib (compatibility version 0.0.0, current version 0.0.0)",
+      "\t/usr/lib/libresolv.9.dylib (compatibility version 0.0.0, current version 0.0.0)",
+      "\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 0.0.0, current version 0.0.0)",
+      "\t/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 0.0.0, current version 0.0.0)"
+    ]
+  },
+  "sandbox": {
+    "path": "/usr/bin/sandbox-exec",
+    "realpath": "/usr/bin/sandbox-exec",
+    "sha256": "58839ef01b4eef8aac0d2aa8f9d1c074ae45aafe3533965b030672450064acc8"
+  },
+  "containmentProbes": {
+    "executed": false,
+    "outsideScratchCanary": "random32bytes; child EPERM/EACCES required; parent unchanged SHA256 and cleanup in finally",
+    "scratchWrite": "positive read/write control",
+    "network": [
+      "IPv4 127.0.0.1:9",
+      "IPv6 [::1]:9",
+      "other Unix path under ROOT"
+    ],
+    "networkDeadlineMsEach": 1000,
+    "acceptedDenialCodes": [
+      "EPERM",
+      "EACCES"
+    ],
+    "socketCleanup": "destroy on every outcome",
+    "profileChanged": false,
+    "forbiddenUnixListener": {
+      "location": "outside SCRATCH under ROOT",
+      "kind": "AF_UNIX SOCK_STREAM listen backlog1, no accept handler",
+      "pathBytes": 101,
+      "maximumPathBytesExclusive": 104,
+      "identity": "physical socket; uid/dev/ino/mode retained and rechecked before unlink",
+      "cleanup": "parent finally closes and identity-checks/unlinks; errors captured without replacing primary failure",
+      "executed": false
+    }
+  },
+  "historicalAttempt1": {
+    "archive": "history-attempt-1",
+    "manifestSha256": "0c7fe5bdbc8654becedc2adfa8e29e843d3ffe84770631bdbaa4e303c19d2ec8",
+    "result": "FAIL before SDK import: absent forbidden Unix path returned ENOENT",
+    "rootReceipt": "history-attempt-1/root-attempt-1.json",
+    "independentRootCleanup": "root receipt confirms unchanged daemon, no reviewer containers, no host processes",
+    "passedProbes": [
+      "canary denial",
+      "scratch write",
+      "IPv4 denial",
+      "IPv6 denial"
+    ]
+  },
+  "historicalAttempt2": {
+    "archive": "history-attempt-2",
+    "archiveInventorySha256": "f30bd46bdc5065849517e35acb3e3254b3206372a9e6f0b8577e2ea6dbf2177c",
+    "manifestSha256": "d422a903077f40a00c94f836e7bb93839f2d57fc177d1dd25a6e2b41c11a6c98",
+    "result": "PASS all four cases at historical hashes only",
+    "rootReceipt": "history-attempt-2/root-attempt-2.json",
+    "independentExactAbsence": "history-attempt-2/root-attempt-2-exact-absence.json"
+  },
+  "changesSinceAttempt2": [
+    "Early copied-path refusal before resources",
+    "Scoped subprocess annotations and explicit shell=False",
+    "Launcher process/cleanup helper extraction for C901 <=15",
+    "Fixture two template literals and one optional chain; no formatter",
+    "Adapter unused constant/state and catch-rethrow removal plus indentation"
+  ]
+}
