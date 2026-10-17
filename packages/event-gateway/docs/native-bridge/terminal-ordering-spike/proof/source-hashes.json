@@ -1,0 +1,15 @@
+{
+  "core/src/tasks/mod_tests.rs": "ff4c7022fcd59b864ddc2a7986cc63596b10009932a6b4cd73081be31ee49071",
+  "core/src/session/tests.rs": "8dc356e09f92ff38671f0a733c3916416502087be9cbd65dfd95b3949ee449ef",
+  "app-server/src/thread_state.rs": "4e2d653d7d4d45d43ea06a97a7c49875754b6ea1a015c4184385ce9753d1654c",
+  "app-server/src/request_processors/thread_lifecycle.rs": "1085651378a824ede984a052e859548b0e4ce73af16f2cbaf5d9758be02d3e33",
+  "app-server/src/request_processors/native_selection_processor.rs": "83abc347288fcba241d5fd536f74c6802fba17c6a93f351e692480cd279bafb6",
+  "app-server/src/request_processors/native_selection_processor_tests.rs": "99b554b9d8a6b10841c8f3ef030b101a777279371155ad0198c379fcf92b9845",
+  "state/src/lib.rs": "e74a5b0e6a86a40da276b2834d06e383b16b676cb9371c3faa5c1df941435ed3",
+  "state/src/runtime.rs": "3ae1f29ebcfedc29b55c933ade4bd0b97cbace1c833e69aecd87625d6d98293b",
+  "state/src/runtime/native_receipts.rs": "27b8dcb07f316cfaaeec037b1f2c5512f9bbbb8edae8943df96626cba0b28ba4",
+  "state/src/runtime/native_receipts_tests.rs": "5fb07a4501fc1a02f1d3d81dda3b0b55a1d92644a79b296e4675b3fa0a8b72a2",
+  "state/migrations/0061_native_turn_terminal_receipts.sql": "47e080e2d57919e48beb0ae6d1ff61d059e05b13cb9d65db8b57ae168349fe5e",
+  "state/migrations/0062_native_turn_terminal_candidates.sql": "f57542109636d701f92b6e52bfc0e3fb04c50d2b3980a6cea7603345370d2e30",
+  "app-server/src/request_processors/native_terminal_ordering_tests.rs": "c073a756d3eb58185b8ba00282f60ff6559b6edfcf780367542d3cb1f55499e1"
+}

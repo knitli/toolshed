@@ -1,0 +1,118 @@
+[
+  {
+    "name": "state-orders_with_start_and_input_across_restart",
+    "test": "native_terminal_candidate_orders_with_start_and_input_across_restart",
+    "mutation": "omit start/input promotion",
+    "assertionExcerpt": "panicked at state/src/runtime/native_receipts_tests.rs:758:13:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n    <false\n    >true",
+    "exitCode": 100,
+    "logSha256": "c01393acc9417e06f344d17d14c3b69a42fec5d4659af510f776f99d1219ef71",
+    "restored": true,
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-state",
+      "--lib",
+      "native_terminal_candidate_orders_with_start_and_input_across_restart",
+      "--retries",
+      "0"
+    ]
+  },
+  {
+    "name": "state-conflict_survives_restart_and_cannot_be_promoted",
+    "test": "native_terminal_candidate_conflict_survives_restart_and_cannot_be_promoted",
+    "mutation": "replace durable conflict sentinel with newest status",
+    "assertionExcerpt": "panicked at state/src/runtime/native_receipts_tests.rs:787:5:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n    <Some(\n    <    NativeTurnTerminalProof {\n    <        turn_id: \"00000000-0000-7000-8000-000000000033\",\n    <        receipt_id: \"a255b1bb-2d99-41cc-83d8-39f2b30e049e\",\n    <        status: Completed,\n    <    },\n    <)\n    >None",
+    "exitCode": 100,
+    "logSha256": "592e8f4ce6c4518ee907f370532491f1e0755c019be4805d27ecae97c3921940",
+    "restored": true,
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-state",
+      "--lib",
+      "native_terminal_candidate_conflict_survives_restart_and_cannot_be_promoted",
+      "--retries",
+      "0"
+    ]
+  },
+  {
+    "name": "state-requires_full_original_identity",
+    "test": "native_terminal_candidate_requires_full_original_identity",
+    "mutation": "remove both full-v3 validation guards",
+    "assertionExcerpt": "panicked at state/src/runtime/native_receipts_tests.rs:798:5:\n    assertion failed: db.observe_native_turn_terminal(&request.thread_id,\n                &request.client_user_message_id,\n                NativeTurnTerminalStatus::Completed).await.is_err()",
+    "exitCode": 100,
+    "logSha256": "98d678083fb6d719c7002d4bacac2937afd013a42544937e8940bcdb707268c5",
+    "restored": true,
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-state",
+      "--lib",
+      "native_terminal_candidate_requires_full_original_identity",
+      "--retries",
+      "0"
+    ]
+  },
+  {
+    "name": "state-promotion_failure_rolls_back_start_and_input",
+    "test": "native_terminal_candidate_promotion_failure_rolls_back_start_and_input",
+    "mutation": "commit start before promotion",
+    "assertionExcerpt": "panicked at state/src/runtime/native_receipts_tests.rs:851:9:\n    assertion failed: `(left == right)`\n\n    Diff < left / right > :\n     Some(\n    <    Started {\n    <        turn_id: \"00000000-0000-7000-8000-000000000037\",\n    <    },\n    >    Pending,\n     )",
+    "exitCode": 100,
+    "logSha256": "2821efc44e5732f25c6e03d1cbc7b9856db7f2e25573bd1755048511eedb6978",
+    "restored": true,
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-state",
+      "--lib",
+      "native_terminal_candidate_promotion_failure_rolls_back_start_and_input",
+      "--retries",
+      "0"
+    ]
+  },
+  {
+    "name": "listener",
+    "test": "actual_guarded_cancel_listener",
+    "mutation": "omit start/input promotion",
+    "assertionExcerpt": "panicked at app-server/src/request_processors/native_terminal_ordering_tests.rs:218:73:\n    pending terminal promoted after Started",
+    "exitCode": 100,
+    "logSha256": "8c874c384024ae626f88f204f7a4cf771ecbdfec2ce6df1a1e137ccd042793ee",
+    "restored": true,
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "actual_guarded_cancel_listener",
+      "--retries",
+      "0"
+    ]
+  },
+  {
+    "name": "fixture",
+    "test": "native_terminal_core_fixture_to_durable_observer",
+    "mutation": "omit start/input promotion",
+    "assertionExcerpt": "panicked at app-server/src/request_processors/native_selection_processor_tests.rs:1001:14:\n    durable proof",
+    "exitCode": 100,
+    "logSha256": "63589ebfd8b7a71f3b6e0b8885ac883e9b9afcb7994a3b06c82b338e9e1a09fb",
+    "restored": true,
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ]
+  }
+]

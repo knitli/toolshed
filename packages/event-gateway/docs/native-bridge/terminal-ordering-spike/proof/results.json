@@ -1,0 +1,463 @@
+[
+  {
+    "name": "state-regressions",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-state",
+      "--lib",
+      "native_",
+      "--retries",
+      "0"
+    ],
+    "env": {},
+    "exitCode": 0,
+    "log": "state-regressions.log",
+    "logSha256": "e179e5fa8663a7cf3619046257c0a790c8b597c5270ac9ac37a8ac2ba5ef1162"
+  },
+  {
+    "name": "observer-regressions",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_selection_processor",
+      "--retries",
+      "0"
+    ],
+    "env": {},
+    "exitCode": 0,
+    "log": "observer-regressions.log",
+    "logSha256": "d9758ec2e283740210d80cacaff00798e6965e446aef330fb57eee39af365225"
+  },
+  {
+    "name": "core-normal",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-core",
+      "--lib",
+      "export_native_terminal_core_fixture",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-normal.json"
+    },
+    "exitCode": 0,
+    "log": "core-normal.log",
+    "logSha256": "3fef9067de6c4d28ecee6703f9ebf7f9ed2be4fc07069242df752b1dac9ddbe1"
+  },
+  {
+    "name": "core-rollout-failure",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-core",
+      "--lib",
+      "export_native_terminal_core_fixture",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-rollout-failure.json",
+      "EVENT_TERMINAL_ROLLOUT_FAILURE": "1"
+    },
+    "exitCode": 0,
+    "log": "core-rollout-failure.log",
+    "logSha256": "4c82b7df87575995c67b063c991e993f608447f196827cbac7413dac59845c39"
+  },
+  {
+    "name": "normal-normal",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-normal.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "f5c031e64fdc6c5b6ae521d87c8611d29b9e5dc3483f8f712d080a58e48a844a",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/normal-normal",
+      "EVENT_TERMINAL_PHASE": "normal"
+    },
+    "exitCode": 0,
+    "log": "normal-normal.log",
+    "logSha256": "12a2a1f79cdc89e9a0bfc09e39d14b407d09e0f7efc58d3cdcf1755435e736e2"
+  },
+  {
+    "name": "normal-write_failure",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-normal.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "f5c031e64fdc6c5b6ae521d87c8611d29b9e5dc3483f8f712d080a58e48a844a",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/normal-write_failure",
+      "EVENT_TERMINAL_PHASE": "write_failure"
+    },
+    "exitCode": 0,
+    "log": "normal-write_failure.log",
+    "logSha256": "b46ec189e35d7ebd3be28be20a4ccd3c29d0d0148bc7d480507476aa8b538e6a"
+  },
+  {
+    "name": "normal-before",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-normal.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "f5c031e64fdc6c5b6ae521d87c8611d29b9e5dc3483f8f712d080a58e48a844a",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/normal-before",
+      "EVENT_TERMINAL_PHASE": "before"
+    },
+    "exitCode": 100,
+    "log": "normal-before.log",
+    "logSha256": "571c173cf085e9a305de5b860e586083963d03b2e4c5450612cdbd3b68b13fcc"
+  },
+  {
+    "name": "normal-recover_before",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-normal.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "f5c031e64fdc6c5b6ae521d87c8611d29b9e5dc3483f8f712d080a58e48a844a",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/normal-before",
+      "EVENT_TERMINAL_PHASE": "recover_before"
+    },
+    "exitCode": 0,
+    "log": "normal-recover_before.log",
+    "logSha256": "09231c3a665ea746ac032ae224a18c4cf4031d452368d8f706d74173956662b8"
+  },
+  {
+    "name": "normal-candidate",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-normal.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "f5c031e64fdc6c5b6ae521d87c8611d29b9e5dc3483f8f712d080a58e48a844a",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/normal-candidate",
+      "EVENT_TERMINAL_PHASE": "candidate"
+    },
+    "exitCode": 100,
+    "log": "normal-candidate.log",
+    "logSha256": "52fa28aa18d95ab496bd63673705a3cfa9be193d99faed24f6c3c61ae5e5dd24"
+  },
+  {
+    "name": "normal-recover_candidate",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-normal.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "f5c031e64fdc6c5b6ae521d87c8611d29b9e5dc3483f8f712d080a58e48a844a",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/normal-candidate",
+      "EVENT_TERMINAL_PHASE": "recover_candidate"
+    },
+    "exitCode": 0,
+    "log": "normal-recover_candidate.log",
+    "logSha256": "4f5d960eedf5921ab6e89c953f0147afda5f923de86b631aa8b25e61a8ef6798"
+  },
+  {
+    "name": "normal-after",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-normal.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "f5c031e64fdc6c5b6ae521d87c8611d29b9e5dc3483f8f712d080a58e48a844a",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/normal-after",
+      "EVENT_TERMINAL_PHASE": "after"
+    },
+    "exitCode": 100,
+    "log": "normal-after.log",
+    "logSha256": "f5947fe39fbab6a30cfb3445d02aa20779d21d01481ad26d82874b503969dc89"
+  },
+  {
+    "name": "normal-recover_after",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-normal.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "f5c031e64fdc6c5b6ae521d87c8611d29b9e5dc3483f8f712d080a58e48a844a",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/normal-after",
+      "EVENT_TERMINAL_PHASE": "recover_after"
+    },
+    "exitCode": 0,
+    "log": "normal-recover_after.log",
+    "logSha256": "899943f20effd0d1d7c6b57849e00a78783445a2040348c7afe066b4e020d24d"
+  },
+  {
+    "name": "rollout-failure-normal",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-rollout-failure.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "9092710b21055c561412ef9dbb92901c9ad638295a3105a760d9928d47f6281f",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/rollout-failure-normal",
+      "EVENT_TERMINAL_PHASE": "normal"
+    },
+    "exitCode": 0,
+    "log": "rollout-failure-normal.log",
+    "logSha256": "db0ce31d6423fb812b83dbc7293662087bfc477ae657b4603e17aeb5111f0425"
+  },
+  {
+    "name": "rollout-failure-write_failure",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-rollout-failure.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "9092710b21055c561412ef9dbb92901c9ad638295a3105a760d9928d47f6281f",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/rollout-failure-write_failure",
+      "EVENT_TERMINAL_PHASE": "write_failure"
+    },
+    "exitCode": 0,
+    "log": "rollout-failure-write_failure.log",
+    "logSha256": "e6bbed3daf5c929c7a714f7a3392044836ad7d1ce9af25180551fd98eed62ac5"
+  },
+  {
+    "name": "rollout-failure-before",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-rollout-failure.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "9092710b21055c561412ef9dbb92901c9ad638295a3105a760d9928d47f6281f",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/rollout-failure-before",
+      "EVENT_TERMINAL_PHASE": "before"
+    },
+    "exitCode": 100,
+    "log": "rollout-failure-before.log",
+    "logSha256": "b2e1503fef858be183c7ec2e7d359d2a50d453b831007ab0ee80b09961cd40de"
+  },
+  {
+    "name": "rollout-failure-recover_before",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-rollout-failure.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "9092710b21055c561412ef9dbb92901c9ad638295a3105a760d9928d47f6281f",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/rollout-failure-before",
+      "EVENT_TERMINAL_PHASE": "recover_before"
+    },
+    "exitCode": 0,
+    "log": "rollout-failure-recover_before.log",
+    "logSha256": "2c18c4d73c631633d30ecc8796f9792054c1533f31ccffe922b39db1eb1de5d9"
+  },
+  {
+    "name": "rollout-failure-candidate",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-rollout-failure.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "9092710b21055c561412ef9dbb92901c9ad638295a3105a760d9928d47f6281f",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/rollout-failure-candidate",
+      "EVENT_TERMINAL_PHASE": "candidate"
+    },
+    "exitCode": 100,
+    "log": "rollout-failure-candidate.log",
+    "logSha256": "7bef3e6cbdb6d18e49cbec4355acde7911fe9bb9e2b1cc65506e0fa3856aa1a7"
+  },
+  {
+    "name": "rollout-failure-recover_candidate",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-rollout-failure.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "9092710b21055c561412ef9dbb92901c9ad638295a3105a760d9928d47f6281f",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/rollout-failure-candidate",
+      "EVENT_TERMINAL_PHASE": "recover_candidate"
+    },
+    "exitCode": 0,
+    "log": "rollout-failure-recover_candidate.log",
+    "logSha256": "cd342e5ed598a398de728d7073e372154df7336efb5c01cf0766e5e1a9bfce68"
+  },
+  {
+    "name": "rollout-failure-after",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-rollout-failure.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "9092710b21055c561412ef9dbb92901c9ad638295a3105a760d9928d47f6281f",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/rollout-failure-after",
+      "EVENT_TERMINAL_PHASE": "after"
+    },
+    "exitCode": 100,
+    "log": "rollout-failure-after.log",
+    "logSha256": "11e1f07ae31f81495ff2467483ff815bc1161042a20f5dc9518ec79a8cfbf3fa"
+  },
+  {
+    "name": "rollout-failure-recover_after",
+    "command": [
+      "just",
+      "test",
+      "-p",
+      "codex-app-server",
+      "--lib",
+      "native_terminal_core_fixture_to_durable_observer",
+      "--retries",
+      "0",
+      "--run-ignored",
+      "only"
+    ],
+    "env": {
+      "EVENT_TERMINAL_CORE_FIXTURE": "$PROOF_DIR/core-rollout-failure.json",
+      "EVENT_TERMINAL_CORE_FIXTURE_SHA256": "9092710b21055c561412ef9dbb92901c9ad638295a3105a760d9928d47f6281f",
+      "EVENT_TERMINAL_DB_HOME": "$PROOF_DIR/rollout-failure-after",
+      "EVENT_TERMINAL_PHASE": "recover_after"
+    },
+    "exitCode": 0,
+    "log": "rollout-failure-recover_after.log",
+    "logSha256": "a35d4a5f3faa21b27a54805e0ad56e46695634ebea713cc00c8521e8932d36d3"
+  }
+]
