@@ -10,15 +10,17 @@ The rollout-failure producer attaches real persistence, shuts down its writer, a
 
 ## Evidence
 
-- Upstream base: `a956835d020762cb2b570053af06f643a11c0ecc`.
+- Recorded upstream base: `a956835d020762cb2b570053af06f643a11c0ecc`.
 - Cumulative Toolshed overlay: `99d00ba8b1b19f9fde66b1c0605e7f670b4a41a4`. All 57 historical source-manifest entries remained unchanged in the original generation and replay trees.
 - `terminal-completion.patch` applies to that cumulative tree, not bare upstream. SHA-256: `4e6054b7ca9ab0e4d447102a421b99945e6bb8adab8d9877e6dd6c3e893b3481`.
 - `manifest.json` records tested and final hashes for all 11 changed files. `proof/source-hashes.json` records matrix sources. `tested-to-formatted.diff` preserves their formatting delta. All 11 final files equal exact Rust 1.95 rustfmt output of the tested sources.
 - 29 scoped State/native-selection regression tests passed. The 14-phase matrix includes 10 passing runs and four expected abrupt child exits: 71 before commit, 72 after commit (nextest wrapper exit 100). Reopen checks preserve committed receipt IDs and report no positive result before commit. Closed-database writes produce no positive receipt for all three outcomes.
 - A deliberate producer mutation from fatal failure to success failed the expected error assertion. It was reverted before the passing matrix.
-- Required `just fix` passed with baseline warnings. Required `just fmt` completed Rust formatting, but the aggregate command failed because dotslash and uv were missing. Unrelated auto-fixes and Cargo.lock normalization were restored. No tests ran after fix/fmt. The full workspace suite was not run.
+- Required `just fix` passed with baseline warnings. Required `just fmt` completed Rust formatting, but the aggregate command failed because dotslash and uv were missing. Unrelated auto-fixes and Cargo.lock normalization were restored. No Rust tests ran after fix/fmt. The full workspace suite was not run.
 
-Sanitized evidence retains exact fixture bytes, phase commands, exit codes, source and raw-log hashes, and synthetic receipt rows. Raw logs, databases, WAL files, caches, and binaries are excluded. Log hashes identify locally audited evidence and cannot be reverified from this bundle alone. The reproduction runner parameterizes the original paths, requires a new output directory, and rejects any source-hash mismatch against the sibling manifest before launching a test process. Its single Python artifact test uses 11 dummy sources and a fake tool marker: removing the preflight fails because the tool runs; restoring it passes with no tool execution. Ruff formatting and lint pass. The native matrix has not been rerun.
+Sanitized evidence retains exact fixture bytes, phase commands, exit codes, source and raw-log hashes, and synthetic receipt rows. Raw logs, databases, WAL files, caches, and binaries are excluded. Log hashes identify locally audited evidence and cannot be reverified from this bundle alone. The reproduction runner checks the complete 57-entry historical source manifest with the final 11-file manifest overlaid before launching tests, then rechecks that selected source closure after each phase. Overlapping paths must match the final spike bytes. This verifies selected source hashes, not Git HEAD or the complete upstream tree: the original disposable source checkout has an unborn Git HEAD. Recorded commit IDs describe provenance and are not newly verified by this runner. Existing matrix evidence remains unchanged; newly generated source-hash output includes the entire combined closure.
+
+Four Python artifact tests cover a qualified-source positive control followed by final-file and historical-only mutations, path-redacted result serialization, SQLite recovery under `?`/`#` paths, and rejection of a non-executable tool. Deliberately dropping historical checks, leaking the command path, and removing URI escaping each produced a failing test before restoration. Ruff formatting and lint pass. The native matrix has not been rerun.
 
 ## Production limitation
 
@@ -30,7 +32,7 @@ Before promotion, qualify live ordering and recovery for terminal-before-anchor,
 
 ## Reproduction
 
-Use a disposable checkout with the upstream base and historical cumulative overlay, then apply this patch. Supply Rust 1.95.0, just 1.58.0, cargo-nextest, and a populated offline dependency cache. The runner uses repository `just test`, disables retries, and disables core dumps.
+Use a disposable checkout with the upstream base and historical cumulative overlay, then apply this patch. Supply Rust 1.95.0, just 1.58.0, cargo-nextest, and a populated offline dependency cache. The runner uses repository `just test`, disables retries, and disables core dumps. Keep the sibling final manifest and parent historical manifest alongside the runner. `JUST_BIN` must name an absolute existing executable explicitly selected and trusted by the owner; executable permission and path shape do not establish its trust. The checkout must likewise be owner-selected and trusted, since its `just` recipes execute code.
 
 ```sh
 export CODEX_SPIKE_ROOT=/absolute/path/to/disposable-codex
