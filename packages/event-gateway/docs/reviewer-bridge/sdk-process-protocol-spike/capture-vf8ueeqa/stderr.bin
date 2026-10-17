@@ -1,0 +1,32 @@
+{"fixtureDiagnostic":true,"event":"phase","phase":"guards-and-containment"}
+{"fixtureDiagnostic":true,"event":"phase","phase":"sdk-import"}
+{"fixtureDiagnostic":true,"event":"phase","phase":"driver-import"}
+{"fixtureDiagnostic":true,"event":"phase","phase":"case:success"}
+{"fixtureDiagnostic":true,"event":"custom-spawn","phase":"case:success","mode":"success"}
+{"fixtureDiagnostic":true,"event":"fake-process","phase":"case:success","mode":"success","name":"stdin-eof"}
+{"fixtureDiagnostic":true,"event":"fake-process","phase":"case:success","mode":"success","name":"exit"}
+(node:38001) [CLAUDE_SDK_CAN_USE_TOOL_SHADOWED] Warning: canUseTool will not be invoked for: mcp__frozen__read_next. Bare allowedTools entries auto-approve the whole tool before the callback is consulted. To gate every tool call, use a PreToolUse hook; or remove the bare names from allowedTools so they fall through to canUseTool. Allow rules from settings files can also shadow the callback but are not visible here.
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"fixtureDiagnostic":true,"event":"case-passed","phase":"case:success","mode":"success"}
+{"fixtureDiagnostic":true,"event":"phase","phase":"case:early-terminal"}
+{"fixtureDiagnostic":true,"event":"custom-spawn","phase":"case:early-terminal","mode":"early-terminal"}
+{"fixtureDiagnostic":true,"event":"fake-process","phase":"case:early-terminal","mode":"early-terminal","name":"stdin-eof"}
+{"fixtureDiagnostic":true,"event":"fake-process","phase":"case:early-terminal","mode":"early-terminal","name":"exit"}
+{"fixtureDiagnostic":true,"event":"case-passed","phase":"case:early-terminal","mode":"early-terminal"}
+{"fixtureDiagnostic":true,"event":"phase","phase":"case:eof"}
+{"fixtureDiagnostic":true,"event":"custom-spawn","phase":"case:eof","mode":"eof"}
+{"fixtureDiagnostic":true,"event":"fake-process","phase":"case:eof","mode":"eof","name":"exit"}
+(node:38001) [CLAUDE_SDK_CAN_USE_TOOL_SHADOWED] Warning: canUseTool will not be invoked for: mcp__frozen__read_next. Bare allowedTools entries auto-approve the whole tool before the callback is consulted. To gate every tool call, use a PreToolUse hook; or remove the bare names from allowedTools so they fall through to canUseTool. Allow rules from settings files can also shadow the callback but are not visible here.
+(node:38001) [CLAUDE_SDK_CAN_USE_TOOL_SHADOWED] Warning: canUseTool will not be invoked for: mcp__frozen__read_next. Bare allowedTools entries auto-approve the whole tool before the callback is consulted. To gate every tool call, use a PreToolUse hook; or remove the bare names from allowedTools so they fall through to canUseTool. Allow rules from settings files can also shadow the callback but are not visible here.
+{"fixtureDiagnostic":true,"event":"fake-process","phase":"case:eof","mode":"eof","name":"stdin-eof"}
+{"fixtureDiagnostic":true,"event":"case-passed","phase":"case:eof","mode":"eof"}
+{"fixtureDiagnostic":true,"event":"phase","phase":"case:abort"}
+{"fixtureDiagnostic":true,"event":"custom-spawn","phase":"case:abort","mode":"abort"}
+(node:38001) [CLAUDE_SDK_CAN_USE_TOOL_SHADOWED] Warning: canUseTool will not be invoked for: mcp__frozen__read_next. Bare allowedTools entries auto-approve the whole tool before the callback is consulted. To gate every tool call, use a PreToolUse hook; or remove the bare names from allowedTools so they fall through to canUseTool. Allow rules from settings files can also shadow the callback but are not visible here.
+{"fixtureDiagnostic":true,"event":"fake-process","phase":"case:abort","mode":"abort","name":"stdin-eof"}
+{"fixtureDiagnostic":true,"event":"fake-process","phase":"case:abort","mode":"abort","name":"kill:SIGTERM"}
+{"fixtureDiagnostic":true,"event":"fake-process","phase":"case:abort","mode":"abort","name":"exit"}
+{"fixtureDiagnostic":true,"event":"fake-process","phase":"case:abort","mode":"abort","name":"forwarded-abort"}
+{"fixtureDiagnostic":true,"event":"fake-process","phase":"case:abort","mode":"abort","name":"kill:SIGTERM"}
+{"fixtureDiagnostic":true,"event":"case-passed","phase":"case:abort","mode":"abort"}
+{"fixtureDiagnostic":true,"event":"phase","phase":"complete"}

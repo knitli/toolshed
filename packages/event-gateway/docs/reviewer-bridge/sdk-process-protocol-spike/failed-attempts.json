@@ -1,0 +1,23 @@
+{
+  "schema": "sdk-process-protocol-prior-attempts:v1",
+  "scope": "Minimal historical record; full startup probes remain private and are not packaged",
+  "attempts": [
+    {
+      "attempt": 1,
+      "outcome": "macOS dyld startup SIGABRT (-6), no SDK assertions",
+      "correction": "Literal root directory file-read-data rule; no descendant read grant"
+    },
+    {
+      "attempt": 2,
+      "outcome": "Child code 0, empty output, launcher JSON decode failure; cause unproven",
+      "correction": "Fixture-only bounded 15-second keepalive and phase/error diagnostics",
+      "privateLogSha256": "91394b75d961d8ee2277998ef20eed9e37bd52a9a7a8480484596b831000a61c"
+    },
+    {
+      "attempt": 3,
+      "outcome": "Child code 0, merged-stream parser rejected SDK permission-shadow warning; no preserved protocol result",
+      "correction": "Separate stdout/stderr capture, aggregate 64KiB bound, persistent failure evidence",
+      "privateLogSha256": "44485c03b7322aec6bfc09d83de4fcab2c03ab354fccd20aeef0163c540805fd"
+    }
+  ]
+}

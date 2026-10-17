@@ -1,0 +1,94 @@
+{
+  "capture": {
+    "aggregateLimitBytes": 65536,
+    "failureEvidence": "capture-*/stdout.bin stderr.bin capture.json",
+    "stderrWarnings": "retained; never acceptance",
+    "stdoutAcceptance": "exactly one PASS JSON document",
+    "streams": "separate stdout/stderr; bounded fair selector reads"
+  },
+  "claimsExcluded": [
+    "Docker adapter compatibility",
+    "native runtime qualification",
+    "provider completion",
+    "hosted qualification",
+    "owner credential access"
+  ],
+  "driver": {
+    "path": "scripts/reviewer-completion-driver.mjs",
+    "productionBytesUnchanged": true,
+    "repository": "knitli/.github",
+    "revision": "e516ab4803311cd58fc860f57371aedb0fb24f4d"
+  },
+  "dynamicFixtureExecution": "Attempt 4 passed at prior launcher hash; verification helper extracted unchanged and scoped B404/B603 annotations added; this revision awaits run 5.",
+  "files": {
+    "fixture.mjs": "cbbe8afa6d001e78b05e1686fd4ddbcc94fe665cdc81ced862c0468c2d13d7b9",
+    "frozen/reviewer-completion-driver.mjs": "4ff7c66588d16f33f67ca89670b5efe4540170bf5708d28cea7b19a2d0298eee",
+    "frozen/sdk.mjs": "7b3577a1078660a3ec43471e6738c730ca1b172070ddcf3f9a9384bcb68bd3ca",
+    "launch.py": "cba4372d4b2588548797b200298bd6eb94424dd36af8a6b1694c031d361b1d3e",
+    "profile.sb": "be649085fd8dcf1436deea4bbe091f7e0b1b04a4637310122cfbc7ad584c27c9"
+  },
+  "fixtureDiagnostics": {
+    "deadlineMs": 15000,
+    "maximumRecords": 100,
+    "productionSourcesModified": false,
+    "rawProtocolContentLogged": false
+  },
+  "node": {
+    "path": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+    "realpath": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+    "sha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+    "versionFromSelectedPath": "24.21.0"
+  },
+  "plainNodeProbesExecuted": true,
+  "readClosure": {
+    "ancestorMetadataOnly": [
+      "/",
+      "/Users",
+      "/Users/adampoulemanos",
+      "/Users/adampoulemanos/.local",
+      "/Users/adampoulemanos/.local/share",
+      "/Users/adampoulemanos/.local/share/mise",
+      "/Users/adampoulemanos/.local/share/mise/installs",
+      "/Users/adampoulemanos/.local/share/mise/installs/node",
+      "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0",
+      "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin",
+      "/private",
+      "/private/tmp",
+      "/private/tmp/reviewer-sdk-process-protocol-20261017",
+      "/private/tmp/reviewer-sdk-process-protocol-20261017/frozen"
+    ],
+    "deviceReads": [
+      "/dev/urandom",
+      "/dev/random",
+      "/dev/null"
+    ],
+    "exactSourceFiles": [
+      "/private/tmp/reviewer-sdk-process-protocol-20261017/fixture.mjs",
+      "/private/tmp/reviewer-sdk-process-protocol-20261017/frozen/sdk.mjs",
+      "/private/tmp/reviewer-sdk-process-protocol-20261017/frozen/reviewer-completion-driver.mjs",
+      "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node"
+    ],
+    "literalRuntimeDirectoryRead": [
+      "/"
+    ],
+    "readWrite": "Fresh owned SCRATCH only",
+    "systemRuntimeSubtrees": [
+      "/System/Library",
+      "/usr/lib",
+      "/private/var/db/dyld"
+    ]
+  },
+  "runtimePolicyEvidence": {
+    "boundaryCheck": "startup-diagnostics/boundary-probe-result.json",
+    "causalProfiles": "startup-diagnostics/probe-results.json and probe-results-round2.json",
+    "expandedDyldCacheRuleRetained": false,
+    "initialFailure": "startup-diagnostics/initial-failed-launch.json",
+    "minimalChange": "(allow file-read-data (literal \"/\"))"
+  },
+  "schema": "private-sdk-process-protocol-fixture:v1",
+  "sdk": {
+    "sha256": "7b3577a1078660a3ec43471e6738c730ca1b172070ddcf3f9a9384bcb68bd3ca",
+    "version": "0.3.209"
+  },
+  "state": "VERIFICATION_HELPER_EXTRACTED_FROZEN_AWAITING_RUN_5"
+}
