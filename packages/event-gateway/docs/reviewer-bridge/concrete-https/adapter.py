@@ -1,0 +1,177 @@
+"""Dormant API-only process adapter. No CLI, activation, or credential discovery."""
+
+import json
+import os
+from pathlib import Path
+import selectors
+import signal
+import struct
+import subprocess  # nosec B404 - fixed pinned child, private bounded pipes
+import tempfile
+import time
+
+from transport import Response
+
+# Nominal protocol types reject bool-as-int and subclasses at this boundary.
+# pylint: disable=unidiomatic-typecheck
+
+HEADER_LIMIT = 32768
+CLEANUP_RESERVE = 1.0
+
+
+class Refused(ValueError):
+    """Fixed failure text, never child stderr or request data."""
+
+
+def _need(condition, code):
+    if not condition:
+        raise Refused(code)
+
+
+def _stop(process, deadline):
+    # Never poll/wait/reap before this sole signal. An unreaped leader reserves
+    # its PID even after exit, preventing a recycled process-group identity.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        if os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+            raise Refused('https_cleanup') from None
+    try:
+        return process.wait(timeout=max(0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        raise Refused('https_cleanup') from None
+
+
+def _pump(selector, process, payload, maximum, work_until):
+    output = bytearray()
+    error_bytes = 0
+    position = 0
+    while selector.get_map():
+        remaining = work_until - time.monotonic()
+        _need(remaining > 0, 'https_deadline')
+        for key, _ in selector.select(min(remaining, 0.05)):
+            pipe = key.fileobj
+            if pipe is process.stdin:
+                try:
+                    position += os.write(pipe.fileno(), payload[position:position + 4096])
+                except BrokenPipeError:
+                    raise Refused('https_child') from None
+                if position == len(payload):
+                    selector.unregister(pipe)
+                    pipe.close()
+            else:
+                chunk = os.read(pipe.fileno(), 4096)
+                if not chunk:
+                    selector.unregister(pipe)
+                    pipe.close()
+                elif pipe is process.stderr:
+                    error_bytes += len(chunk)
+                    _need(error_bytes <= 4096, 'https_stderr_limit')
+                else:
+                    _need(len(output) + len(chunk) <= 4 + HEADER_LIMIT + maximum, 'https_output_limit')
+                    output.extend(chunk)
+                    if len(output) >= 4:
+                        length = struct.unpack('!I', output[:4])[0]
+                        _need(0 < length <= HEADER_LIMIT, 'https_metadata_limit')
+                        _need(len(output) <= 4 + length + maximum, 'https_body_limit')
+    return output, error_bytes
+
+
+def _run(command, payload, maximum, deadline):
+    """Private trusted-fixture supervisor; never reachable from public requests."""
+    work_until = deadline - CLEANUP_RESERVE
+    _need(time.monotonic() < work_until, 'https_deadline')
+    _need(len(payload) <= 16384, 'https_input')
+    output = bytearray()
+    error_bytes = 0
+    process = None
+    status = None
+    failure = None
+    with tempfile.TemporaryDirectory(prefix='reviewer-https-') as directory:
+        directory = str(Path(directory).resolve(strict=True))
+        try:
+            with selectors.DefaultSelector() as selector:
+                process = subprocess.Popen(  # nosec B603 - private trusted fixtures only; public requests always refuse
+                    command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, cwd=directory,
+                    env={'HOME': directory, 'LANG': 'C', 'LC_ALL': 'C'},
+                    start_new_session=True, close_fds=True,
+                )
+                for pipe, events in ((process.stdin, selectors.EVENT_WRITE),
+                                     (process.stdout, selectors.EVENT_READ),
+                                     (process.stderr, selectors.EVENT_READ)):
+                    os.set_blocking(pipe.fileno(), False)
+                    selector.register(pipe, events)
+                output, error_bytes = _pump(selector, process, payload, maximum, work_until)
+                # Pipe EOF is not process exit. Observe without reaping and keep
+                # the leader reserved until cleanup has signalled its group.
+                while True:
+                    _need(time.monotonic() < work_until, 'https_deadline')
+                    if os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
+                        break
+                    time.sleep(min(0.01, max(0, work_until - time.monotonic())))
+        except BaseException as exc:
+            failure = exc
+        finally:
+            if process is not None:
+                try:
+                    status = _stop(process, deadline)
+                except (OSError, Refused):
+                    if failure is None:
+                        failure = Refused('https_cleanup')
+                    elif isinstance(failure, (KeyboardInterrupt, SystemExit, Refused)):
+                        failure.add_note('https_cleanup_failed')
+                    else:
+                        failure = Refused('https_child')
+                        failure.add_note('https_cleanup_failed')
+                finally:
+                    for pipe in (process.stdin, process.stdout, process.stderr):
+                        if pipe is not None:
+                            pipe.close()
+        if failure is not None:
+            if isinstance(failure, (KeyboardInterrupt, SystemExit, Refused)):
+                raise failure
+            raise Refused('https_child') from None
+    _need(time.monotonic() <= deadline, 'https_deadline')
+    _need(status == 0 and error_bytes == 0, 'https_child')
+    return bytes(output)
+
+
+def _decode(raw, url, maximum):
+    _need(len(raw) >= 4, 'https_frame')
+    length = struct.unpack('!I', raw[:4])[0]
+    _need(0 < length <= HEADER_LIMIT and len(raw) >= 4 + length, 'https_frame')
+
+    def pairs(items):
+        result = {}
+        for name, value in items:
+            _need(name not in result, 'https_frame')
+            result[name] = value
+        return result
+
+    try:
+        metadata = json.loads(raw[4:4 + length], object_pairs_hook=pairs)
+    except (ValueError, UnicodeError, RecursionError):
+        raise Refused('https_frame') from None
+    _need(type(metadata) is dict and set(metadata) == {'status', 'headers'}, 'https_frame')
+    _need(type(metadata['status']) is int and 200 <= metadata['status'] <= 599, 'https_frame')
+    headers = metadata['headers']
+    _need(type(headers) is dict and len(headers) <= 64, 'https_frame')
+    _need(all(type(k) is str and type(v) is str and len(k) <= 256 and len(v) <= 8192 for k, v in headers.items()), 'https_frame')
+    body = raw[4 + length:]
+    _need(len(body) <= maximum, 'https_body_limit')
+    return Response(url, metadata['status'], headers, body)
+
+
+def bind(node_path):
+    """Refuse binding until independently trusted runtime authority exists."""
+    del node_path
+    raise Refused('https_runtime_authority_unavailable')
+
+
+def _request(node, url, headers, maximum, deadline):
+    """Refuse direct calls too, before credential serialization or any launch."""
+    del node, url, headers, maximum, deadline
+    raise Refused('https_runtime_authority_unavailable')
