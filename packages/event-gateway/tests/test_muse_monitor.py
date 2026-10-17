@@ -32,6 +32,44 @@ class MuseMonitorTests(unittest.TestCase):
         self.assertEqual(actual['command'], 'poll')
         self.assertNotIn('receipt', actual)
 
+    def test_numeric_bounds_match_owner_contract(self):
+        contract = json.loads((Path(__file__).resolve().parents[1]
+                               / 'docs/muse-ingress/owner-monitor-contract.json').read_text())
+        base = {'description': 'Offline contract fixture', 'command': 'poll'}
+        for key, minimum_key in (('timeout_ms', 'minimum'), ('wake_delay_ms', 'nonzeroMinimum')):
+            rule = contract['properties'][key]
+            minimum, maximum = rule[minimum_key], rule['maximum']
+            for value, accepted in ((minimum, True), (maximum, True),
+                                    (minimum - 1, False), (maximum + 1, False)):
+                with self.subTest(key=key, value=value):
+                    self.assert_contract_acceptance({**base, key: value}, accepted)
+        self.assert_contract_acceptance(
+            {**base, 'wake_delay_ms': 0}, contract['properties']['wake_delay_ms']['allowedZero'])
+
+    def test_cross_field_constraints_match_owner_contract(self):
+        contract = json.loads((Path(__file__).resolve().parents[1]
+                               / 'docs/muse-ingress/owner-monitor-contract.json').read_text())
+        timeout = contract['properties']['timeout_ms']
+        self.assert_contract_acceptance(
+            {'description': 'Offline contract fixture', 'command': 'poll', 'persistent': True,
+             'timeout_ms': timeout['minimum']}, not timeout['persistentForbidden'])
+        protocols = contract['properties']['ws_subprotocols']
+        for source in ({'ws': 'wss://example.test/events'}, {'command': 'poll'}):
+            with self.subTest(source=source):
+                self.assert_contract_acceptance(
+                    {'description': 'Offline contract fixture', **source, 'ws_subprotocols': ['fixture']},
+                    'ws' in source or not protocols['wsOnly'])
+
+    def assert_contract_acceptance(self, value, expected):
+        try:
+            result = normalize_monitor(value)
+        except MuseMonitorError:
+            self.assertFalse(expected, 'normalizer rejected a contract-permitted input')
+        else:
+            self.assertTrue(expected, 'normalizer accepted a contract-forbidden input')
+            for key, item in value.items():
+                self.assertEqual(result[key], item)
+
     def test_exactly_one_source_and_required_description(self):
         for value in ({}, {'command': 'poll'}, {'description': 'x'},
                       {'description': 'x', 'command': 'poll', 'ws': 'wss://example.test'},
