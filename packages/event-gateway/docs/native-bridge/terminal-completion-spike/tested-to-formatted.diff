@@ -1,0 +1,233 @@
+--- tested/codex-rs/app-server/src/thread_state.rs
++++ formatted/codex-rs/app-server/src/thread_state.rs
+@@ -378,7 +378,10 @@
+     }
+ 
+     pub(crate) async fn observe_core_item_completed(&self, thread_id: ThreadId, event: &EventMsg) {
+-        if !matches!(event, EventMsg::ItemCompleted(_) | EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_)) {
++        if !matches!(
++            event,
++            EventMsg::ItemCompleted(_) | EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_)
++        ) {
+             return;
+         }
+         let observer = self
+--- tested/codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs
++++ formatted/codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs
+@@ -909,15 +909,24 @@
+ #[tokio::test]
+ #[ignore = "requires the actual Core fixture and an isolated database directory"]
+ async fn native_terminal_core_fixture_to_durable_observer() -> anyhow::Result<()> {
+-    use codex_state::{NativeTurnTerminalStatus as Status, SqliteConfig, StateRuntime};
++    use codex_state::NativeTurnTerminalStatus as Status;
++    use codex_state::SqliteConfig;
++    use codex_state::StateRuntime;
+     use codex_utils_absolute_path::test_support::PathExt;
+     #[derive(serde::Deserialize)]
+     #[serde(rename_all = "camelCase", deny_unknown_fields)]
+-    struct Fixture { thread_id: String, turn_id: String, status: String, event: EventMsg }
++    struct Fixture {
++        thread_id: String,
++        turn_id: String,
++        status: String,
++        event: EventMsg,
++    }
+     use sha2::Digest;
+     let bytes = std::fs::read(std::env::var("EVENT_TERMINAL_CORE_FIXTURE")?)?;
+-    assert_eq!(format!("{:x}", sha2::Sha256::digest(&bytes)),
+-        std::env::var("EVENT_TERMINAL_CORE_FIXTURE_SHA256")?);
++    assert_eq!(
++        format!("{:x}", sha2::Sha256::digest(&bytes)),
++        std::env::var("EVENT_TERMINAL_CORE_FIXTURE_SHA256")?
++    );
+     let fixtures: Vec<Fixture> = serde_json::from_slice(&bytes)?;
+     assert_eq!(fixtures.len(), 3);
+     let home = std::path::PathBuf::from(std::env::var("EVENT_TERMINAL_DB_HOME")?);
+@@ -929,8 +938,10 @@
+     install_native_receipt_observer(&manager, &receipts, Some(db.clone()));
+     for (index, fixture) in fixtures.iter().enumerate() {
+         let status = match fixture.status.as_str() {
+-            "completed" => Status::Completed, "failed" => Status::Failed,
+-            "canceled" => Status::Canceled, _ => panic!("invalid status"),
++            "completed" => Status::Completed,
++            "failed" => Status::Failed,
++            "canceled" => Status::Canceled,
++            _ => panic!("invalid status"),
+         };
+         assert_eq!(fixture.status, ["completed", "failed", "canceled"][index]);
+         let mut params = request_params();
+@@ -944,37 +955,69 @@
+         let identity = identity_from_params(&params);
+         if mode.starts_with("recover") {
+             let proof = db.get_native_turn_terminal_proof(&identity).await?;
+-            if mode == "recover_before" { assert_eq!(proof, None); }
+-            else { assert_eq!(proof.expect("committed proof").status, status); }
++            if mode == "recover_before" {
++                assert_eq!(proof, None);
++            } else {
++                assert_eq!(proof.expect("committed proof").status, status);
++            }
+             continue;
+         }
+         db.begin_native_turn_start(&identity, &[]).await?;
+-        db.record_native_turn_started(&identity, &fixture.turn_id).await?;
++        db.record_native_turn_started(&identity, &fixture.turn_id)
++            .await?;
+         let thread = ThreadId::from_string(&fixture.thread_id)?;
+-        manager.observe_core_item_completed(thread, &fixture.event).await;
+-        assert_eq!(db.get_native_turn_terminal_proof(&identity).await?, None,
+-            "missing registered turn cannot create terminal authority");
++        manager
++            .observe_core_item_completed(thread, &fixture.event)
++            .await;
++        assert_eq!(
++            db.get_native_turn_terminal_proof(&identity).await?,
++            None,
++            "missing registered turn cannot create terminal authority"
++        );
+         insert_committed_receipt(&receipts, &params, receipt_for(&params));
+-        manager.observe_core_item_completed(ThreadId::new(), &fixture.event).await;
++        manager
++            .observe_core_item_completed(ThreadId::new(), &fixture.event)
++            .await;
+         assert_eq!(db.get_native_turn_terminal_proof(&identity).await?, None);
+-        if mode == "before" { continue; }
+-        if mode == "write_failure" { db.close().await; }
+-        manager.observe_core_item_completed(thread, &fixture.event).await;
++        if mode == "before" {
++            continue;
++        }
++        if mode == "write_failure" {
++            db.close().await;
++        }
++        manager
++            .observe_core_item_completed(thread, &fixture.event)
++            .await;
+         if mode == "write_failure" {
+             let reopened = StateRuntime::init(sqlite.clone(), "test-provider".into()).await?;
+-            assert_eq!(reopened.get_native_turn_terminal_proof(&identity).await?, None);
++            assert_eq!(
++                reopened.get_native_turn_terminal_proof(&identity).await?,
++                None
++            );
+             db = reopened;
+             install_native_receipt_observer(&manager, &receipts, Some(db.clone()));
+             continue;
+         }
+-        let proof = db.get_native_turn_terminal_proof(&identity).await?.expect("durable proof");
++        let proof = db
++            .get_native_turn_terminal_proof(&identity)
++            .await?
++            .expect("durable proof");
+         assert_eq!(proof.status, status);
+         assert_eq!(proof.turn_id, fixture.turn_id);
+-        manager.observe_core_item_completed(thread, &fixture.event).await;
+-        assert_eq!(db.get_native_turn_terminal_proof(&identity).await?, Some(proof));
+-    }
+-    if mode == "before" { std::process::exit(71); }
+-    if mode == "after" { std::process::exit(72); }
++        manager
++            .observe_core_item_completed(thread, &fixture.event)
++            .await;
++        assert_eq!(
++            db.get_native_turn_terminal_proof(&identity).await?,
++            Some(proof)
++        );
++    }
++    if mode == "before" {
++        std::process::exit(71);
++    }
++    if mode == "after" {
++        std::process::exit(72);
++    }
+     db.close().await;
+     let reopened = StateRuntime::init(sqlite, "test-provider".into()).await?;
+     reopened.close().await;
+--- tested/codex-rs/app-server/src/request_processors/native_selection_processor.rs
++++ formatted/codex-rs/app-server/src/request_processors/native_selection_processor.rs
+@@ -790,23 +790,40 @@
+ ) {
+     use codex_state::NativeTurnTerminalStatus as Status;
+     let (turn_id, status) = match event {
+-        EventMsg::TurnComplete(event) => (&event.turn_id, if event.error.is_some() { Status::Failed } else { Status::Completed }),
++        EventMsg::TurnComplete(event) => (
++            &event.turn_id,
++            if event.error.is_some() {
++                Status::Failed
++            } else {
++                Status::Completed
++            },
++        ),
+         EventMsg::TurnAborted(event) => {
+-            let Some(turn_id) = event.turn_id.as_ref() else { return };
++            let Some(turn_id) = event.turn_id.as_ref() else {
++                return;
++            };
+             (turn_id, Status::Canceled)
+         }
+         _ => return,
+     };
+     let identity = {
+         let receipts = lock(receipts);
+-        let Some(delivery) = receipts.by_client_user_message_id.get(turn_id) else { return };
+-        let Some(receipt) = receipts.by_delivery.get(delivery) else { return };
+-        if receipt.thread_id != thread_id.to_string() || receipt.turn_id != *turn_id { return }
++        let Some(delivery) = receipts.by_client_user_message_id.get(turn_id) else {
++            return;
++        };
++        let Some(receipt) = receipts.by_delivery.get(delivery) else {
++            return;
++        };
++        if receipt.thread_id != thread_id.to_string() || receipt.turn_id != *turn_id {
++            return;
++        }
+         identity_from_receipt(receipt)
+     };
+     if let Some(state_db) = state_db {
+         // Only the committed database row is terminal authority; notification loss stays unknown.
+-        let _ = state_db.record_native_turn_terminal(&identity, turn_id, status).await;
++        let _ = state_db
++            .record_native_turn_terminal(&identity, turn_id, status)
++            .await;
+     }
+ }
+ 
+--- tested/codex-rs/core/src/tasks/mod_tests.rs
++++ formatted/codex-rs/core/src/tasks/mod_tests.rs
+@@ -72,7 +72,8 @@
+     let mut fixtures = Vec::new();
+     for outcome in ["completed", "failed", "canceled"] {
+         let (mut session, mut turn, receiver) = make_session_and_context_with_rx().await;
+-        Arc::get_mut(&mut turn).expect("unique fixture turn").sub_id = uuid::Uuid::new_v4().to_string();
++        Arc::get_mut(&mut turn).expect("unique fixture turn").sub_id =
++            uuid::Uuid::new_v4().to_string();
+         if rollout_failure {
+             crate::session::tests::attach_thread_persistence(
+                 Arc::get_mut(&mut session).expect("unique fixture session"),
+@@ -94,7 +95,10 @@
+         let mut event = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+             loop {
+                 let event = receiver.recv().await.expect("Core event channel open");
+-                if matches!(event.msg, EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_)) {
++                if matches!(
++                    event.msg,
++                    EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_)
++                ) {
+                     break event.msg;
+                 }
+             }
+@@ -116,9 +120,11 @@
+         }
+         if rollout_failure {
+             assert!(session.flush_rollout().await.is_err());
+-            assert!(!session
+-                .persist_rollout_items(&[codex_history::RolloutItem::EventMsg(event.clone())])
+-                .await);
++            assert!(
++                !session
++                    .persist_rollout_items(&[codex_history::RolloutItem::EventMsg(event.clone())])
++                    .await
++            );
+         }
+         if let EventMsg::TurnComplete(terminal) = &mut event
+             && let Some(error) = &mut terminal.error

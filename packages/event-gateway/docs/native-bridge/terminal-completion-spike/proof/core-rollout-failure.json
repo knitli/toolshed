@@ -1,0 +1,45 @@
+[
+  {
+    "event": {
+      "completed_at": 1792226341,
+      "duration_ms": 2,
+      "last_agent_message": null,
+      "started_at": 1792226341,
+      "turn_id": "b0527c85-b8c5-49ba-8370-805f17cc8770",
+      "type": "task_complete"
+    },
+    "status": "completed",
+    "threadId": "01a14903-b336-7b10-b491-cdb4d9f76c25",
+    "turnId": "b0527c85-b8c5-49ba-8370-805f17cc8770"
+  },
+  {
+    "event": {
+      "completed_at": 1792226341,
+      "duration_ms": 0,
+      "error": {
+        "codex_error_info": "other",
+        "message": "[fixture error redacted]"
+      },
+      "last_agent_message": null,
+      "started_at": 1792226341,
+      "turn_id": "a63aa7e1-b51e-4c83-a89a-a07d9bebb5bd",
+      "type": "task_complete"
+    },
+    "status": "failed",
+    "threadId": "01a14903-b38f-7d20-8c9b-0308c06064eb",
+    "turnId": "a63aa7e1-b51e-4c83-a89a-a07d9bebb5bd"
+  },
+  {
+    "event": {
+      "completed_at": 1792226341,
+      "duration_ms": 103,
+      "reason": "interrupted",
+      "started_at": 1792226341,
+      "turn_id": "a11519f0-a46a-41af-a791-0f16f45cf2d5",
+      "type": "turn_aborted"
+    },
+    "status": "canceled",
+    "threadId": "01a14903-b3c9-7d73-ad2c-1f677ca43e6c",
+    "turnId": "a11519f0-a46a-41af-a791-0f16f45cf2d5"
+  }
+]

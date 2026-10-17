@@ -1,0 +1,20 @@
+[
+  [
+    "terminal-attempt-0",
+    "b0527c85-b8c5-49ba-8370-805f17cc8770",
+    "completed",
+    "efc6cd6b-8c54-4cc9-a675-9505413b9fc6"
+  ],
+  [
+    "terminal-attempt-1",
+    "a63aa7e1-b51e-4c83-a89a-a07d9bebb5bd",
+    "failed",
+    "d9c94ad7-75cc-4e70-8e1f-b890ae2c222b"
+  ],
+  [
+    "terminal-attempt-2",
+    "a11519f0-a46a-41af-a791-0f16f45cf2d5",
+    "canceled",
+    "3d506e65-fe79-4dc3-b308-31957a6afa50"
+  ]
+]

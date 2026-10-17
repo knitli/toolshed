@@ -1,0 +1,63 @@
+{
+  "baseCommit": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "overlayCommit": "99d00ba8b1b19f9fde66b1c0605e7f670b4a41a4",
+  "original57StillMatch": {
+    "generation": true,
+    "replay": true
+  },
+  "fileSha256": {
+    "codex-rs/app-server/src/thread_state.rs": "4e2d653d7d4d45d43ea06a97a7c49875754b6ea1a015c4184385ce9753d1654c",
+    "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs": "02071160d617fb85630d56ffa321e0ab234277064622c4a5e985c51aa9b0ee67",
+    "codex-rs/app-server/src/request_processors/native_selection_processor.rs": "4fb3c4ae8124689809a112ee848316ba70e100d2ad856b36a555692b2492edf2",
+    "codex-rs/app-server/src/request_processors/thread_lifecycle.rs": "1085651378a824ede984a052e859548b0e4ce73af16f2cbaf5d9758be02d3e33",
+    "codex-rs/state/src/runtime.rs": "3ae1f29ebcfedc29b55c933ade4bd0b97cbace1c833e69aecd87625d6d98293b",
+    "codex-rs/state/src/lib.rs": "e74a5b0e6a86a40da276b2834d06e383b16b676cb9371c3faa5c1df941435ed3",
+    "codex-rs/state/src/runtime/native_receipts.rs": "c9cee131804bc466ee1a4e31a1c5927515672d16f31421134c693a5693307b28",
+    "codex-rs/state/src/runtime/native_receipts_tests.rs": "d4dafb7ccb111fb8764013a214b982457491feacb0d0f32b0ca6dc8b9be0ba64",
+    "codex-rs/core/src/tasks/mod_tests.rs": "ff4c7022fcd59b864ddc2a7986cc63596b10009932a6b4cd73081be31ee49071",
+    "codex-rs/core/src/session/tests.rs": "8dc356e09f92ff38671f0a733c3916416502087be9cbd65dfd95b3949ee449ef",
+    "codex-rs/state/migrations/0061_native_turn_terminal_receipts.sql": "47e080e2d57919e48beb0ae6d1ff61d059e05b13cb9d65db8b57ae168349fe5e"
+  },
+  "testedSha256": {
+    "codex-rs/app-server/src/thread_state.rs": "1e860d59ecee235ebd9d0c3e06c11c94e6f272a4563a7003ae77a8727718d36a",
+    "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs": "267ade6b07e64c0422958cdb9282bc5422cb4b20045bb92e052cb9f9c202c9d8",
+    "codex-rs/app-server/src/request_processors/native_selection_processor.rs": "d804e1feba3743bdf65e5da52e8c7d9590ad8c558d6d73e9d27a807ecda333e8",
+    "codex-rs/app-server/src/request_processors/thread_lifecycle.rs": "1085651378a824ede984a052e859548b0e4ce73af16f2cbaf5d9758be02d3e33",
+    "codex-rs/state/src/runtime.rs": "3ae1f29ebcfedc29b55c933ade4bd0b97cbace1c833e69aecd87625d6d98293b",
+    "codex-rs/state/src/lib.rs": "e74a5b0e6a86a40da276b2834d06e383b16b676cb9371c3faa5c1df941435ed3",
+    "codex-rs/state/src/runtime/native_receipts.rs": "c9cee131804bc466ee1a4e31a1c5927515672d16f31421134c693a5693307b28",
+    "codex-rs/state/src/runtime/native_receipts_tests.rs": "d4dafb7ccb111fb8764013a214b982457491feacb0d0f32b0ca6dc8b9be0ba64",
+    "codex-rs/core/src/tasks/mod_tests.rs": "316eebd0d2e1711d1f86860547a4f3250c497c625a455f6530713b80894e4aaf",
+    "codex-rs/core/src/session/tests.rs": "8dc356e09f92ff38671f0a733c3916416502087be9cbd65dfd95b3949ee449ef",
+    "codex-rs/state/migrations/0061_native_turn_terminal_receipts.sql": "47e080e2d57919e48beb0ae6d1ff61d059e05b13cb9d65db8b57ae168349fe5e"
+  },
+  "equalsExactRustfmtOfTestedSource": {
+    "codex-rs/app-server/src/thread_state.rs": true,
+    "codex-rs/app-server/src/request_processors/native_selection_processor_tests.rs": true,
+    "codex-rs/app-server/src/request_processors/native_selection_processor.rs": true,
+    "codex-rs/app-server/src/request_processors/thread_lifecycle.rs": true,
+    "codex-rs/state/src/runtime.rs": true,
+    "codex-rs/state/src/lib.rs": true,
+    "codex-rs/state/src/runtime/native_receipts.rs": true,
+    "codex-rs/state/src/runtime/native_receipts_tests.rs": true,
+    "codex-rs/core/src/tasks/mod_tests.rs": true,
+    "codex-rs/core/src/session/tests.rs": true,
+    "codex-rs/state/migrations/0061_native_turn_terminal_receipts.sql": true
+  },
+  "restoredUnrelatedFormatting": [
+    "codex-rs/Cargo.lock"
+  ],
+  "patchSha256": "4e6054b7ca9ab0e4d447102a421b99945e6bb8adab8d9877e6dd6c3e893b3481",
+  "validation": {
+    "scopedRegressionPassed": 29,
+    "matrixPhases": 14,
+    "matrixSuccessfulRuns": 10,
+    "expectedChildExits": [
+      71,
+      72
+    ],
+    "justFix": "passed with baseline warnings",
+    "justFmt": "Rust succeeded; aggregate failed missing dotslash and uv",
+    "testsAfterFixFmt": false
+  }
+}
