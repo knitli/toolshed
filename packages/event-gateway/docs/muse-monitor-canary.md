@@ -30,7 +30,14 @@ that would contaminate the later wake observation.
 No command copies credentials, discovers a session, starts a provider, or installs
 anything. The caller must trust the selected Python interpreter and checkout.
 Private filesystem permissions isolate other users, not hostile code running as
-the same operating-system user. Do not edit or reuse the generated records.
+the same operating-system user. Each record first claims a persistent exclusive
+reservation, then writes and fsyncs a private temporary file in the same directory.
+After rejecting any existing final path (including symlinks), rename publishes
+complete bytes at once without a transient extra hard link. Reservations exclude
+competing writers using this fixture and remain after failure or crash. This is a
+cooperative-writer boundary: the absence-check/rename pair cannot prevent a
+hostile same-UID actor from inserting a final path between those operations.
+Do not edit or reuse the generated records or reservations.
 
 ## Owner-run idle phase
 
@@ -95,7 +102,10 @@ cleanup or deletion of owner state.
 `test_muse_monitor_canary.py` covers private preparation, exact command quoting,
 no output before readiness/trigger, one line after a matching trigger, deadline,
 wrong/premature triggers, symlink refusal, stop/crash replay refusal, and a real
-Python subprocess. These tests execute only the fixture, never Muse. They cannot
+Python subprocess. A separate publisher process is paused after writing half a
+record: readers see no final record until publication, a competing writer is
+refused, and killing the publisher retains its reservation. Tests also preserve
+preexisting final files and symlinks. These tests execute only the fixture, never Muse. They cannot
 prove monitor installation, idle wake, busy handling, restart fencing, native
 receipts, gateway attachment, durable ACK, or production acceptance. A future
 session-owned pull service still requires independent session binding, explicit

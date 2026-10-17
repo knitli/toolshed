@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import selectors
 import subprocess  # nosec B404 -- Runs only the fixed Python fixture below, never a native client.
 import sys
 import tempfile
@@ -149,6 +150,102 @@ class MuseMonitorCanaryTests(unittest.TestCase):
             canary.wait(self.directory, pause=pause, output=output)
         self.assertEqual(external.read_text(), 'preserve')
         self.assertEqual(output.getvalue(), '')
+
+    def test_preexisting_final_and_symlink_are_never_replaced(self):
+        fd = canary._directory(self.directory)
+        self.addCleanup(os.close, fd)
+        existing = self.directory / 'existing.json'
+        existing.write_text('preserve')
+        existing.chmod(0o600)
+        link = self.directory / 'linked.json'
+        link.symlink_to(existing)
+        for name in ('existing.json', 'linked.json'):
+            with self.assertRaises(FileExistsError):
+                canary._write(fd, name, {'value': 'replacement'})
+            self.assertTrue((self.directory / ('.' + name + '.reserved')).exists())
+        self.assertEqual(existing.read_text(), 'preserve')
+        self.assertTrue(link.is_symlink())
+
+    def test_failed_publication_retains_reservation(self):
+        fd = canary._directory(self.directory)
+        self.addCleanup(os.close, fd)
+        with patch.object(canary.os, 'rename', side_effect=OSError('synthetic publication failure')):
+            with self.assertRaises(OSError):
+                canary._write(fd, 'failure.json', {'value': 1})
+        self.assertFalse((self.directory / 'failure.json').exists())
+        self.assertTrue((self.directory / '.failure.json.reserved').exists())
+        self.assertEqual(list(self.directory.glob('.failure.json.*.tmp')), [])
+        with self.assertRaises(FileExistsError):
+            canary._write(fd, 'failure.json', {'value': 2})
+
+    def paused_writer(self):
+        # Fixed reviewed helper code pauses the actual file write after half its bytes.
+        code = r"""
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location('fixture', sys.argv[1])
+canary = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(canary)
+fdopen = canary.os.fdopen
+class Partial:
+    def __init__(self, stream): self.stream = stream
+    def __enter__(self): return self
+    def __exit__(self, *args): return self.stream.__exit__(*args)
+    def flush(self): self.stream.flush()
+    def fileno(self): return self.stream.fileno()
+    def write(self, raw):
+        middle = len(raw) // 2
+        self.stream.write(raw[:middle]); self.stream.flush()
+        sys.stderr.write('partial\n'); sys.stderr.flush()
+        if sys.stdin.readline() != 'release\n': raise RuntimeError('test release missing')
+        self.stream.write(raw[middle:])
+canary.os.fdopen = lambda *args, **kwargs: Partial(fdopen(*args, **kwargs))
+fd = canary._directory(sys.argv[2])
+try: canary._write(fd, 'trigger.json', {'runId': 'test-complete-record'})
+finally: os.close(fd)
+"""
+        # No shell/native client: fixed Python source and explicit private fixture paths.
+        process = subprocess.Popen(  # nosec B603 -- Fixed fixture-only child and private arguments.
+            [sys.executable, '-c', code, str(SCRIPT), str(self.directory)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, shell=False)
+        self.addCleanup(self.stop_writer, process)
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stderr, selectors.EVENT_READ)
+            self.assertTrue(selector.select(timeout=3), 'publisher did not reach partial write')
+        self.assertEqual(process.stderr.readline(), 'partial\n')
+        return process
+
+    @staticmethod
+    def stop_writer(process):
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=3)
+
+    def test_actual_partial_writer_is_invisible_to_reader_and_competing_writer(self):
+        process = self.paused_writer()
+        fd = canary._directory(self.directory)
+        self.addCleanup(os.close, fd)
+        # Reader runs while the other process is deterministically paused mid-write.
+        with self.assertRaises(FileNotFoundError):
+            canary._read(fd, 'trigger.json')
+        with self.assertRaises(FileExistsError):
+            canary._write(fd, 'trigger.json', {'runId': 'competitor'})
+        self.assertFalse((self.directory / 'trigger.json').exists())
+        output, errors = process.communicate('release\n', timeout=3)
+        self.assertEqual((process.returncode, output, errors), (0, '', ''))
+        self.assertEqual(canary._read(fd, 'trigger.json'), {'runId': 'test-complete-record'})
+        self.assertEqual((self.directory / 'trigger.json').stat().st_nlink, 1)
+
+    def test_actual_crash_mid_publication_retains_reservation_without_final(self):
+        process = self.paused_writer()
+        process.kill()
+        process.communicate(timeout=3)
+        self.assertFalse((self.directory / 'trigger.json').exists())
+        self.assertTrue((self.directory / '.trigger.json.reserved').exists())
+        fd = canary._directory(self.directory)
+        self.addCleanup(os.close, fd)
+        with self.assertRaises(FileExistsError):
+            canary._write(fd, 'trigger.json', {'runId': 'restart'})
 
     def test_cli_real_stdout_line_without_native_client(self):
         # Fixed interpreter/script argv and private fixture directory; no shell or native client.

@@ -35,14 +35,41 @@ def _directory(path):
 
 
 def _write(fd, name, value):
-    """Create one private record exclusively; existing records are never replaced."""
+    """Reserve once, then publish complete bytes atomically for cooperative writers."""
     raw = json.dumps(value, separators=(',', ':')).encode()
-    out = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
-    with os.fdopen(out, 'wb') as stream:
-        stream.write(raw)
-        stream.flush()
-        os.fsync(stream.fileno())
+    reservation = os.open('.' + name + '.reserved',
+                          os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                          0o600, dir_fd=fd)
+    try:
+        os.fsync(reservation)
+    finally:
+        os.close(reservation)
     os.fsync(fd)
+    temporary = '.' + name + '.' + secrets.token_hex(16) + '.tmp'
+    owned = False
+    try:
+        out = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                      0o600, dir_fd=fd)
+        owned = True
+        with os.fdopen(out, 'wb') as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.stat(name, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise FileExistsError('record_exists')
+        # The persistent reservation excludes other cooperating writers. A hostile
+        # same-UID actor can still race this check/rename; that is outside this fixture.
+        os.rename(temporary, name, src_dir_fd=fd, dst_dir_fd=fd)
+        owned = False
+        os.fsync(fd)
+    finally:
+        if owned:
+            os.unlink(temporary, dir_fd=fd)
+        # Never release the reservation, including after a failed or crashed write.
 
 
 def _read(fd, name):
