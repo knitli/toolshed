@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 import shlex
-import subprocess
+import subprocess  # nosec B404 -- Runs only the fixed Python fixture below, never a native client.
 import sys
 import tempfile
 import time
@@ -46,6 +46,7 @@ class MuseMonitorCanaryTests(unittest.TestCase):
 
     def test_no_output_before_trigger_then_exactly_one_line(self):
         output = io.StringIO()
+
         def pause(_seconds):
             self.assertEqual(output.getvalue(), '')
             self.assertTrue((self.directory / 'ready.json').exists())
@@ -67,6 +68,7 @@ class MuseMonitorCanaryTests(unittest.TestCase):
         for premature in (True, False):
             directory = Path(canary.prepare(self.parent)['directory'])
             output = io.StringIO()
+
             def write_wrong(_seconds=0):
                 fd = canary._directory(directory)
                 try:
@@ -82,6 +84,7 @@ class MuseMonitorCanaryTests(unittest.TestCase):
     def test_deadline_no_output_and_no_restart_after_timeout(self):
         now = [0.0]
         output = io.StringIO()
+
         def pause(seconds):
             self.assertGreater(seconds, 0)
             now[0] += 30
@@ -102,6 +105,7 @@ class MuseMonitorCanaryTests(unittest.TestCase):
 
     def test_crash_before_ready_consumes_run_without_replay(self):
         write = canary._write
+
         def fail_ready(fd, name, value):
             if name == 'ready.json':
                 raise OSError('synthetic readiness failure')
@@ -138,6 +142,7 @@ class MuseMonitorCanaryTests(unittest.TestCase):
         external = self.parent / 'external'
         external.write_text('preserve')
         output = io.StringIO()
+
         def pause(_seconds):
             (self.directory / 'trigger.json').symlink_to(external)
         with self.assertRaises(OSError):
@@ -146,8 +151,10 @@ class MuseMonitorCanaryTests(unittest.TestCase):
         self.assertEqual(output.getvalue(), '')
 
     def test_cli_real_stdout_line_without_native_client(self):
-        process = subprocess.Popen([sys.executable, str(SCRIPT), 'wait', '--directory', str(self.directory)],
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Fixed interpreter/script argv and private fixture directory; no shell or native client.
+        process = subprocess.Popen(  # nosec B603 -- Trusted fixture-only argument list, shell=False.
+            [sys.executable, str(SCRIPT), 'wait', '--directory', str(self.directory)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False)
         try:
             deadline = time.monotonic() + 3
             while not (self.directory / 'ready.json').exists() and process.poll() is None:
