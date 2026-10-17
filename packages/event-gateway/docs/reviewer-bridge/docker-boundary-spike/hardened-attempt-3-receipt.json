@@ -1,0 +1,69 @@
+{
+  "schema": "private-reviewer-docker-boundary-attempt:v1",
+  "attempt": "hardened-attempt-3",
+  "executor": "root agent",
+  "exitCode": 0,
+  "executionEvidence": "Root-reported staged execution exit 0; captured exact stdout",
+  "stagedRoot": "/private/tmp/reviewer-docker-hardened-m6v1uarm",
+  "sourceSha256": {
+    "fixture/child.py": "0d53fe1df5c4253bd8770e931fb9c29176a3773513def15dd4f7ef776d4c8647",
+    "supervisor.py": "8e3bdae9189a8798cdab8d9b0748f882525bceed47b10da4f91577761c4ab1ed",
+    "test_supervisor.py": "7e98feedcc811416ea2ae050ff8be493d20eab5cddb84c639658ce6f86a4c868"
+  },
+  "stagingManifest": "hardened-staging-manifest.json",
+  "log": "hardened-attempt-3.log",
+  "logSha256": "7e2f1a6399494c82ca997fa425043e4737e8ac0b4c7c85220990ea55ba0f5834",
+  "result": {
+    "checks": {
+      "checks": {
+        "caps_zero": true,
+        "credential_env_absent": true,
+        "descendant_parent": true,
+        "descendant_same_namespace": true,
+        "docker_socket_absent": true,
+        "fixture_write_denied": true,
+        "groups": true,
+        "host_canary_unreadable": true,
+        "no_new_privileges": true,
+        "private_init": true,
+        "root_write_denied": true,
+        "uid_gid": true,
+        "work_write": true
+      },
+      "descendant_pid": 7,
+      "init_pid": 1
+    },
+    "container_id": "e1bff78be1fda4b1d0965272a4582c8dc06d8dbe05e2426a218f3f474ef01541",
+    "container_name": "reviewer-isolation-f939dc4541ee4fdabee6278fdc6d895f",
+    "daemon": {
+      "endpoint": "/Users/adampoulemanos/.docker/run/docker.sock",
+      "idAfter": "804dc7e7-2939-459e-b28d-4e1a35038c92",
+      "idBefore": "804dc7e7-2939-459e-b28d-4e1a35038c92"
+    },
+    "failures": [],
+    "image": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d",
+    "scope": "Docker boundary only; no SDK/provider/hosted-handoff qualification",
+    "status": "PASS"
+  },
+  "cleanup": {
+    "supervisorResult": "PASS requires owned-container stopped with State.Pid=0, removal and empty exact-ID list readback",
+    "independentAbsenceReadback": {
+      "evidence": "Operator-supplied evidence from root agent; raw readback transcripts not included",
+      "endpoint": "/Users/adampoulemanos/.docker/run/docker.sock",
+      "exactContainerId": "e1bff78be1fda4b1d0965272a4582c8dc06d8dbe05e2426a218f3f474ef01541",
+      "exactContainerName": "reviewer-isolation-f939dc4541ee4fdabee6278fdc6d895f",
+      "idReadback": {
+        "exitCode": 0,
+        "output": ""
+      },
+      "nameReadback": {
+        "exitCode": 0,
+        "output": ""
+      },
+      "absentByExactIdAndName": true
+    }
+  },
+  "scope": "Local staged Docker boundary only; failed earlier attempts remain separate evidence",
+  "stagingManifestEvidence": "Historical creation-time snapshot; dockerExecuted:false predates attempt 3 and remains unchanged",
+  "stagingManifestSha256": "974a34b2f95c2cc5804002a37739a1938aa48826d719f44098902232e2ddb459"
+}

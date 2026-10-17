@@ -1,0 +1,22 @@
+{
+  "dockerExecuted": false,
+  "files": {
+    "fixture/child.py": {
+      "bytes": 1849,
+      "sha256": "0d53fe1df5c4253bd8770e931fb9c29176a3773513def15dd4f7ef776d4c8647"
+    },
+    "supervisor.py": {
+      "bytes": 16498,
+      "sha256": "8e3bdae9189a8798cdab8d9b0748f882525bceed47b10da4f91577761c4ab1ed"
+    },
+    "test_supervisor.py": {
+      "bytes": 18944,
+      "sha256": "7e98feedcc811416ea2ae050ff8be493d20eab5cddb84c639658ce6f86a4c868"
+    }
+  },
+  "reason": "Daemon rejected repository bind path; stage reviewed source in shared temporary location without global settings changes",
+  "schema": "reviewer-docker-staged-source:v1",
+  "sourceBytesUnchanged": true,
+  "sourceRoot": "/opt/coder/toolshed/.worktrees/reviewer-docker-boundary-spike-20261017/packages/event-gateway/docs/reviewer-bridge/docker-boundary-spike",
+  "stagedRoot": "/private/tmp/reviewer-docker-hardened-m6v1uarm"
+}

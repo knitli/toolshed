@@ -29,7 +29,9 @@
       "image": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d",
       "scope": "Docker boundary only; no SDK/provider/hosted-handoff qualification",
       "status": "PASS"
-    }
+    },
+    "sourceCommit": "dc8c028e0cc09f45e85879ade6c59a0ff6551fa6",
+    "evidenceScope": "Historical run 1 of original source; does not establish execution of the current modified candidate"
   },
   "additionalDockerExecutionDuringPackaging": false,
   "cleanup": {
@@ -103,7 +105,8 @@
       "config": "packages/event-gateway/pyproject.toml",
       "status": "PASS"
     },
-    "sourceFileCount": 3
+    "sourceFileCount": 3,
+    "evidenceScope": "Historical original packaging at dc8c028e0cc09f45e85879ade6c59a0ff6551fa6; invariants and checks do not apply to the current modified candidate"
   },
   "schema": "private-reviewer-docker-boundary-proof:v1",
   "scope": "Local Docker boundary only",
@@ -112,5 +115,53 @@
     "fixture/child.py": "0d53fe1df5c4253bd8770e931fb9c29176a3773513def15dd4f7ef776d4c8647",
     "supervisor.py": "9b97e86cfb497b33c422fa5151e4d6f9acf76ffbccb710164811c957269ce838",
     "test_supervisor.py": "627e9f781d6be515df8f32170ec791a7087c655686c6fddc7caa35c0ad0fb020"
+  },
+  "currentCandidate": {
+    "execution": "Current hardened source executed from frozen temporary staging in attempt 3: PASS",
+    "qualification": "Local staged Docker boundary passed; SDK/provider/hosted integration remains unqualified",
+    "boundary": {
+      "endpoint": "~/.docker/run/docker.sock",
+      "socketChecks": "lstat type and current-user ownership; identity rechecked before each command",
+      "client": "Explicit --host=unix://<socket> and fresh owned configuration for every Docker command; no ambient DOCKER_* environment",
+      "commands": "Supported operations and arguments validated",
+      "daemonIdentity": "Docker info ID recorded before and after run in candidate receipt"
+    },
+    "historicalHashes": "Top-level sha256 values identify original run 1 source and log only",
+    "priorHardenedAttempt": {
+      "receipt": "hardened-attempt-1-receipt.json",
+      "status": "FAIL",
+      "exitCode": 1,
+      "cleanupReadback": "Root independent exact-name absence confirmed: exit0/empty; CID unknown and no prior stopped-PID transition proven; supervisor failure retained"
+    },
+    "diagnostics": "Bounded Docker error output captured explicit bind source path rejection in attempt 2",
+    "dockerExecuted": true,
+    "status": "PASS",
+    "latestAttempt": {
+      "receipt": "hardened-attempt-3-receipt.json",
+      "exitCode": 0,
+      "cleanupReadback": "Operator supplied exact-ID and exact-name readbacks: exit 0, empty output"
+    },
+    "stagedExecution": {
+      "manifest": "hardened-staging-manifest.json",
+      "status": "PASS",
+      "dockerExecuted": true,
+      "sourceBytesUnchanged": true,
+      "receipt": "hardened-attempt-3-receipt.json"
+    },
+    "failedDiagnosticAttempt": {
+      "receipt": "hardened-attempt-2-receipt.json",
+      "exitCode": 1,
+      "cleanupReadback": "Root independent exact-name absence confirmed: exit0/empty; CID unknown and no prior stopped-PID transition proven; supervisor failure retained"
+    },
+    "validation": {
+      "mockTests": {
+        "passed": 20,
+        "failed": 0,
+        "dockerInvoked": false
+      },
+      "ruff": "PASS with event-gateway configuration",
+      "C901": "PASS, maximum complexity 15",
+      "evidence": "Observed diagnostic-source checks before staging; source bytes unchanged through attempt 3"
+    }
   }
 }
