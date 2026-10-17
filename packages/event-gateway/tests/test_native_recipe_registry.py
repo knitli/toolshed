@@ -1,4 +1,4 @@
-"""Registry and verifier-only adoption checks; no build or native execution."""
+"""Registry and phased adoption checks; no build or native execution."""
 
 import ast
 from dataclasses import FrozenInstanceError, asdict, replace
@@ -139,16 +139,20 @@ class NativeRecipeRegistryTests(unittest.TestCase):
                     mixed = {**asdict(first), name: getattr(second, name)}
                     self.assertFalse(R.matches_historical_inputs(R.DEFAULT_FAMILY, 1, mixed))
 
-    def test_legacy_tuple_matches_reviewed_checked_in_inputs(self):
-        paths = {
-            "builderSha256": PACKAGE / "scripts/package_native_client.py",
-            "producerSha256": PACKAGE / "scripts/produce_native_ci_artifact.py",
-            "workflowSha256": PACKAGE.parents[1] / ".github/workflows/event-native-build.yml",
-            "sourceManifestSha256": self.root / R.recipe().manifest.path,
-            "patchSha256": self.root / R.recipe().ordered_patches[0].path,
+    def test_legacy_tuple_retains_reviewed_build_inputs_after_builder_adoption(self):
+        # Build 38681762403 attempt 1 is immutable history, not today's builder.
+        inputs = {
+            "builderSha256": "ce2d3e5cb826726904c99fa41d2e709888d155005928cc15e47de24e349ca7a4",
+            "producerSha256": "d1d47b4beea2e23969a447ff805baeea119655aed490ff3764ae1ac0ea330763",
+            "workflowSha256": "6af28bc91ce449c32cd15d3d0a194c92f17092e16af5622dad4c613efd84400e",
+            "sourceManifestSha256": "8c6f136f215deb4dca30b4d230eede5eaf8e65c1850635b199b62457a7759924",
+            "patchSha256": "ef74b28f308d4eb16556771cbfc47f3db00d83165e332f546edd9b65b6b302db",
         }
-        inputs = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in paths.items()}
+        self.assertEqual(asdict(R.HISTORICAL_INPUTS[R.DEFAULT_FAMILY, 1][0]), inputs)
         self.assertTrue(R.matches_historical_inputs(R.DEFAULT_FAMILY, 1, inputs))
+        for name, asset in (("sourceManifestSha256", R.recipe().manifest),
+                            ("patchSha256", R.recipe().ordered_patches[0])):
+            self.assertEqual(hashlib.sha256((self.root / asset.path).read_bytes()).hexdigest(), inputs[name])
 
     def test_missing_size_changed_and_same_size_corrupted_assets_reject(self):
         for family in (R.DEFAULT_FAMILY, TERMINAL):
@@ -272,7 +276,7 @@ class NativeRecipeRegistryTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     R.validate_recipe()
 
-    def test_only_trusted_verifier_adopts_registry_without_runtime_actions(self):
+    def test_only_verifier_and_builder_may_adopt_registry_without_runtime_actions(self):
         consumers = set()
         for directory in (PACKAGE / "src", PACKAGE / "scripts"):
             for path in directory.rglob("*.py"):
@@ -280,7 +284,10 @@ class NativeRecipeRegistryTests(unittest.TestCase):
                     continue
                 if "native_recipe_registry" in path.read_text():
                     consumers.add(path.relative_to(PACKAGE).as_posix())
-        self.assertEqual(consumers, {"scripts/verify_native_ci_provenance.py"})
+        # Verifier policy lands first; builder adoption follows in a separate change.
+        self.assertIn("scripts/verify_native_ci_provenance.py", consumers)
+        self.assertLessEqual(consumers, {"scripts/verify_native_ci_provenance.py",
+                                        "scripts/package_native_client.py"})
         tree = ast.parse(SCRIPT.read_text())
         imports = {item.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import)
                    for item in node.names}

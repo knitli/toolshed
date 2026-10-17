@@ -57,6 +57,12 @@ INPUTS = {
     "sourceManifestSha256": "packages/event-gateway/docs/native-bridge/native-core-idle-v1-source-manifest.json",
     "patchSha256": "packages/event-gateway/docs/native-bridge/native-core-idle-v1-implementation.patch",
 }
+DOCS_PREFIX = "packages/event-gateway/docs/native-bridge/"
+RECIPE_ASSET_PATHS = tuple(sorted({
+    DOCS_PREFIX + asset.path
+    for registered in R.RECIPES.values()
+    for asset in (registered.manifest, *registered.parents, *registered.ordered_patches)
+}))
 CONTEXT = "Event Gateway / native provenance"
 LIMIT = 2 * 1024 * 1024
 ARCHIVE_LIMIT = 600 * 1024 * 1024
@@ -128,15 +134,29 @@ def launcher_code(source):
     return ast.dump(tree, include_attributes=False)
 
 
+def selected_recipe(value):
+    """Resolve an exact identity using only the protected registry."""
+    require(isinstance(value, dict) and set(value) == {"family", "revision", "manifestSha256"})
+    require(type(value["family"]) is str and type(value["revision"]) is int
+            and sha(value["manifestSha256"]))
+    registered = R.recipe(value["family"], value["revision"])
+    require(value["manifestSha256"] == registered.manifest.sha256)
+    return registered
+
+
 def selection(value):
     keys = {"schemaVersion", "repositoryId", "runId", "runAttempt", "headSha",
             "artifactId", "artifactSha256", "binarySha256", "codeModeHostSha256"}
-    require(isinstance(value, dict) and set(value) == keys)
-    require(type(value["schemaVersion"]) is int and value["schemaVersion"] == 1
-            and type(value["repositoryId"]) is int and value["repositoryId"] == REPOSITORY_ID)
+    require(isinstance(value, dict))
+    version = value.get("schemaVersion")
+    require(type(version) is int and version in (1, 2))
+    require(set(value) == keys | ({"recipe"} if version == 2 else set()))
+    require(type(value["repositoryId"]) is int and value["repositoryId"] == REPOSITORY_ID)
     require(all(positive(value[key]) for key in ("runId", "runAttempt", "artifactId")))
     require(sha(value["headSha"], 40) and all(sha(value[key]) for key in
             ("artifactSha256", "binarySha256", "codeModeHostSha256")))
+    if version == 2:
+        selected_recipe(value["recipe"])
     return value
 
 
@@ -159,6 +179,39 @@ def verify_metadata(selected, workflow, run, artifact):
     require(origin.get("id") == selected["runId"] and origin.get("repository_id") == REPOSITORY_ID
             and origin.get("head_repository_id") == REPOSITORY_ID and origin.get("head_sha") == selected["headSha"]
             and origin.get("head_branch") == "main")
+
+
+def source_inventory_sha256(file_sha256):
+    """Bind the complete trusted map, not merely two matching observations."""
+    inventory = hashlib.sha256()
+    for path in sorted(file_sha256, key=lambda value: value.encode("utf-8")):
+        inventory.update(path.encode("utf-8"))
+        inventory.update(b"\0")
+        inventory.update(bytes.fromhex(file_sha256[path]))
+    return inventory.hexdigest()
+
+
+def verify_v2_build(receipt, selected, inputs, evidence):
+    registered = selected_recipe(selected["recipe"])
+    require(selected_recipe(receipt.get("recipe")) == registered
+            and receipt["recipe"] == selected["recipe"] and evidence.recipe == registered)
+    build = receipt["build"]
+    require(selected_recipe(build.get("recipe")) == registered
+            and build["recipe"] == selected["recipe"])
+    require(inputs["sourceManifestSha256"] == registered.manifest.sha256
+            and build.get("sourceManifestSha256") == registered.manifest.sha256
+            and build.get("upstreamCommit") == registered.upstream_commit
+            and build.get("archiveScope") == {
+                "selection": "git archive of the pinned commit without pathspecs",
+                "extractionFilter": "tarfile.data_filter",
+            }
+            and build.get("appliedPatches") == [R._asset_record(asset) for asset in registered.ordered_patches]
+            and type(build.get("patchedFileCount")) is int
+            and build["patchedFileCount"] == registered.file_count
+            and build.get("patchedFileSha256") == dict(evidence.file_sha256))
+    expected = source_inventory_sha256(evidence.file_sha256)
+    require(build.get("patchedSourceInventoryBeforeBuildSha256") == expected
+            and build.get("patchedSourceInventoryAfterBuildSha256") == expected)
 
 
 def verify_archive(path, selected, inputs, manifest):
@@ -185,19 +238,22 @@ def verify_archive(path, selected, inputs, manifest):
     require(hashes["codex"] == selected["binarySha256"]
             and hashes["codex-code-mode-host"] == selected["codeModeHostSha256"])
     require(isinstance(receipt, dict) and type(receipt.get("schemaVersion")) is int
-            and receipt["schemaVersion"] == 1
+            and receipt["schemaVersion"] == selected["schemaVersion"]
             and receipt.get("kind") == "native-client-ci-build" and receipt.get("repositoryId") == REPOSITORY_ID
             and receipt.get("runId") == selected["runId"] and receipt.get("runAttempt") == selected["runAttempt"]
             and receipt.get("headSha") == selected["headSha"] and receipt.get("artifactName") == artifact_name(selected)
             and receipt.get("inputs") == inputs)
     build = receipt.get("build", {})
     require(isinstance(build, dict) and isinstance(build.get("codeModeHost"), dict))
-    require(build.get("upstreamCommit") == manifest["baseCommit"]
-            and build.get("patchSha256") == inputs["patchSha256"]
-            and build.get("sourceManifestSha256") == inputs["sourceManifestSha256"]
-            and build.get("patchedFileSha256") == manifest["fileSha256"]
-            and build.get("patchedFileCount") == manifest["fileCount"]
-            and build.get("binarySha256") == hashes["codex"]
+    if selected["schemaVersion"] == 1:
+        require(build.get("upstreamCommit") == manifest["baseCommit"]
+                and build.get("patchSha256") == inputs["patchSha256"]
+                and build.get("sourceManifestSha256") == inputs["sourceManifestSha256"]
+                and build.get("patchedFileSha256") == manifest["fileSha256"]
+                and build.get("patchedFileCount") == manifest["fileCount"])
+    else:
+        verify_v2_build(receipt, selected, inputs, manifest)
+    require(build.get("binarySha256") == hashes["codex"]
             and build.get("codeModeHost", {}).get("executableSha256") == hashes["codex-code-mode-host"]
             and build.get("host") == "aarch64-apple-darwin"
             and sha(build.get("normalizedCargoLockSha256")))
@@ -304,6 +360,28 @@ def resolve_legacy_build_inputs(api, head, build, main):
     return inputs, json.loads(build_blobs["sourceManifestSha256"])
 
 
+def resolve_v2_build_inputs(api, head, build, main, identity):
+    """Authenticate the complete current recipe; v2 has no historical fallback."""
+    registered = selected_recipe(identity)
+    evidence = R.validate_recipe(registered.family, registered.revision)
+    paths = {name: INPUTS[name] for name in ("builderSha256", "producerSha256", "workflowSha256")}
+    paths.update(registrySha256=REGISTRY, sourceManifestSha256=DOCS_PREFIX + registered.manifest.path)
+    inputs = {}
+    for name, path in paths.items():
+        trusted = api.blob(path, main)
+        require(api.blob(path, head) == trusted and api.blob(path, build) == trusted)
+        inputs[name] = digest(trusted)
+    # Parent manifests bind the upstream prerequisite descriptor; the authenticated
+    # builder checks that file in the fresh pinned upstream archive before patches.
+    for asset in (registered.manifest, *registered.parents, *registered.ordered_patches):
+        path = DOCS_PREFIX + asset.path
+        for revision in (main, head, build):
+            contents = api.blob(path, revision)
+            require(len(contents) == asset.bytes and digest(contents) == asset.sha256)
+    require(inputs["sourceManifestSha256"] == registered.manifest.sha256)
+    return inputs, evidence
+
+
 def verify_candidate(api, head, main):
     require(sha(head, 40) and sha(main, 40))
     tree = api.request(f"git/trees/{head}?recursive=1")
@@ -332,7 +410,10 @@ def verify_candidate(api, head, main):
     artifact = api.request(f"actions/artifacts/{selected['artifactId']}")
     verify_metadata(selected, workflow, run, artifact)
     require_ancestry(api, selected["headSha"], main)
-    inputs, manifest = resolve_legacy_build_inputs(api, head, selected["headSha"], main)
+    if selected["schemaVersion"] == 1:
+        inputs, manifest = resolve_legacy_build_inputs(api, head, selected["headSha"], main)
+    else:
+        inputs, manifest = resolve_v2_build_inputs(api, head, selected["headSha"], main, selected["recipe"])
     with tempfile.TemporaryDirectory(prefix="native-ci-verification-") as directory:
         archive = Path(directory) / "artifact.zip"
         api.download(selected["artifactId"], archive)
@@ -363,7 +444,8 @@ def open_pulls(api):
 
 def current_policy(api, workflow_sha, main):
     return all(api.blob(path, workflow_sha) == api.blob(path, main)
-               for path in (SCRIPT, VERIFIER_WORKFLOW, REGISTRY, LAUNCHER, *INPUTS.values()))
+               for path in dict.fromkeys((SCRIPT, VERIFIER_WORKFLOW, REGISTRY, LAUNCHER,
+                                         *INPUTS.values(), *RECIPE_ASSET_PATHS)))
 
 
 def publish(api, number, head, state, description, workflow_sha, verified_main=None):

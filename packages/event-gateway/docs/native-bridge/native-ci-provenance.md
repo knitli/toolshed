@@ -23,7 +23,7 @@ to be immutable or identical to the historical local build environment.
 
 The immutable artifact is named `native-client-<runId>-<runAttempt>` and contains
 exactly `codex`, `codex-code-mode-host`, and `build-receipt.json`. Retention is 90
-days. The schema version 1 receipt has kind `native-client-ci-build`, repository,
+days. The legacy schema version 1 receipt has kind `native-client-ci-build`, repository,
 run, attempt, and head identity; hashes for the builder, producer, workflow,
 manifest, and patch; the observed build environment; and the builder evidence
 with independently computed executable hashes. The artifact ID and archive
@@ -50,8 +50,35 @@ of a reviewed legacy artifact after shared builder, producer, or workflow change
 it does not automatically admit later current-main tuples. Registry changes
 trigger provenance refresh and participate in policy freshness checks before
 status publication. The strict nine-field schema version 1 selection remains:
-v2, additional recipe fields, and 71-family inputs are not accepted. Both reviewed
+additional recipe fields and 71-family inputs are not accepted under v1. Both reviewed
 launcher transitions and the unchanged-pin no-artifact path remain available.
+
+Schema version 2 uses the existing selection fields plus exactly
+`recipe: {family, revision, manifestSha256}`. Selection and receipt use integer
+`schemaVersion: 2`; the recipe object and builder evidence do not gain a schema
+field. Selection, receipt, and builder recipe identities must exactly equal the
+protected registered recipe, and its manifest digest must equal
+`inputs.sourceManifestSha256`. Unknown identities, extra fields, boolean revisions,
+and cross-family combinations fail.
+
+The v2 receipt binds exactly five inputs: `builderSha256`, `producerSha256`,
+`workflowSha256`, `registrySha256`, and `sourceManifestSha256`. All five candidate
+and build inputs must equal current main. Selected manifests, parents, and patches
+are authenticated against the protected recipe; ordered `appliedPatches` and the
+complete `patchedFileSha256` map and `patchedFileCount` must match it. Both
+`patchedSourceInventoryBeforeBuildSha256` and
+`patchedSourceInventoryAfterBuildSha256` independently equal the canonical digest
+of that map: SHA-256 over sorted UTF-8 paths followed by NUL and each raw digest.
+The authenticated builder checks upstream prerequisites in a fresh archive of the
+pinned upstream commit before applying patches in order. The verifier does not
+rebuild source or treat an upstream prerequisite as a documentation asset.
+
+This v2 verifier policy precedes builder/producer adoption. Once adopted, every
+new build emits v2, including the default `core-idle-v1` family; legacy artifacts
+retain the separate registered v1 path. V2 has no historical tuple fallback.
+Recipe support does not establish native qualification or authorize dispatch,
+installation, or pin promotion. The failed full-suite result remains a hold;
+six targeted passes do not waive it.
 
 The explicit exception for [PR #89](https://github.com/knitli/toolshed/pull/89)
 authorizes only the raw launcher bytes at
