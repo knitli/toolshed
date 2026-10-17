@@ -1,0 +1,116 @@
+{
+  "actualRun": {
+    "command": "python3 /private/tmp/reviewer-docker-isolation-20261017/supervisor.py --run",
+    "executor": "root agent after approval",
+    "log": "actual-run-1.log",
+    "result": {
+      "checks": {
+        "checks": {
+          "caps_zero": true,
+          "credential_env_absent": true,
+          "descendant_parent": true,
+          "descendant_same_namespace": true,
+          "docker_socket_absent": true,
+          "fixture_write_denied": true,
+          "groups": true,
+          "host_canary_unreadable": true,
+          "no_new_privileges": true,
+          "private_init": true,
+          "root_write_denied": true,
+          "uid_gid": true,
+          "work_write": true
+        },
+        "descendant_pid": 7,
+        "init_pid": 1
+      },
+      "container_id": "c0d7012ef4d2378fd589fc1517556472ffdc6f3f8f5ac4211a71f4f32a3fa6ac",
+      "container_name": "reviewer-isolation-59f55c5eec7a48689bc61766cdac3a7d",
+      "failures": [],
+      "image": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d",
+      "scope": "Docker boundary only; no SDK/provider/hosted-handoff qualification",
+      "status": "PASS"
+    }
+  },
+  "additionalDockerExecutionDuringPackaging": false,
+  "cleanup": {
+    "independentAbsenceReadback": {
+      "absentByExactIdAndName": true,
+      "at": "2026-10-17T15:38:53.580435+00:00",
+      "resultSha256": "481cd1e2073dc31aa58311a263a7ccbe2bbffde9863ed01c111957bfe8640b75",
+      "source": "Root independent observation receipt; no raw inspect transcript",
+      "sourceReceiptSha256": "2489fff918445f422ea1e74f0889e9826ba10a647da378e6f51f2c24e22aae82"
+    },
+    "rootReported": "Owned container killed, stopped with State.Pid=0, removed, and exact-ID/name absence independently confirmed.",
+    "supervisorResult": "PASS requires owned-container stopped with State.Pid=0, removal and empty exact-ID list readback"
+  },
+  "date": "2026-10-17",
+  "environment": {
+    "architecture": "arm64",
+    "containerOS": "linux",
+    "dockerContext": "Configured local Docker Desktop context; name not captured, not explicitly pinned",
+    "engine": "29.7.2",
+    "evidence": "Root-reported host/engine; supervisor verified image OS/architecture",
+    "host": "macOS / Docker Desktop"
+  },
+  "image": {
+    "id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d",
+    "inventoryTag": "official python:3.12-slim",
+    "pullPolicy": "never",
+    "tagUsedForExecution": false
+  },
+  "limits": {
+    "cpuCount": 1,
+    "memoryBytes": 134217728,
+    "memorySwapBytes": 134217728,
+    "pids": 32,
+    "readOutputLimitBytes": 65536,
+    "readTimeoutSeconds": 15,
+    "timeoutScope": "Per bounded read/command, not a 15-second whole-run deadline; CLI exit waits add bounded time",
+    "tmpfsBytes": 16777216
+  },
+  "mockTests": {
+    "command": "cd /private/tmp/reviewer-docker-isolation-20261017 && python3 -m unittest -v test_supervisor.py",
+    "dockerInvoked": false,
+    "evidence": "Observed pre-execution unittest output; not rerun for packaging",
+    "failed": 0,
+    "passed": 7,
+    "rootRepeat": "Root independently repeated the same seven mock-only tests: PASS."
+  },
+  "nextRequired": "Implement and separately qualify a Docker-aware spawn/lifecycle seam. Docker CLI exit/kill alone does not prove container or descendant termination.",
+  "notQualified": [
+    "SDK spawn/ChildProcess compatibility",
+    "native Claude runtime",
+    "provider networking or review completion",
+    "hosted-runner equivalence",
+    "protected hosted digest handoff",
+    "authenticated artifact acquisition",
+    "durable admission ordering",
+    "clean round notification",
+    "kernel or Docker VM isolation against compromise"
+  ],
+  "packaging": {
+    "diffCheck": "PASS, git diff --no-index --check against /dev/null for all six files",
+    "dockerReexecuted": false,
+    "executedSourceBytesUnchanged": true,
+    "mockTests": {
+      "command": "python3 -m unittest -v test_supervisor.py",
+      "failed": 0,
+      "passed": 7
+    },
+    "rawDockerInspectTranscriptsIncluded": false,
+    "ruff": {
+      "C901": "PASS",
+      "config": "packages/event-gateway/pyproject.toml",
+      "status": "PASS"
+    },
+    "sourceFileCount": 3
+  },
+  "schema": "private-reviewer-docker-boundary-proof:v1",
+  "scope": "Local Docker boundary only",
+  "sha256": {
+    "actual-run-1.log": "481cd1e2073dc31aa58311a263a7ccbe2bbffde9863ed01c111957bfe8640b75",
+    "fixture/child.py": "0d53fe1df5c4253bd8770e931fb9c29176a3773513def15dd4f7ef776d4c8647",
+    "supervisor.py": "9b97e86cfb497b33c422fa5151e4d6f9acf76ffbccb710164811c957269ce838",
+    "test_supervisor.py": "627e9f781d6be515df8f32170ec791a7087c655686c6fddc7caa35c0ad0fb020"
+  }
+}
