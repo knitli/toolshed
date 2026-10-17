@@ -7,6 +7,9 @@ import getpass
 import hashlib
 import json
 import os
+import platform
+import re
+import secrets
 from pathlib import Path
 import shutil
 import stat
@@ -46,11 +49,179 @@ def child_command(binary, root, session_id, model, marker):
             'Do not access any source or take any other action.']
 
 
-def child_environment(root, key):
+def child_environment(root, key, local_port=None):
     """Only a deliberately supplied API key enters the fresh client environment."""
-    return {'PATH': '/usr/bin:/bin', 'HOME': str(root / 'home'),
+    result = {'PATH': '/usr/bin:/bin', 'HOME': str(root / 'home'),
             'CLAUDE_CONFIG_DIR': str(root / 'config'), 'TMPDIR': str(root / 'tmp'),
+            'CLAUDE_CODE_TMPDIR': str(root / 'tmp'),
             'TERM': 'dumb', 'LANG': 'en_US.UTF-8', 'ANTHROPIC_API_KEY': key}
+    if local_port is not None:
+        result.update(ANTHROPIC_BASE_URL=f'http://127.0.0.1:{local_port}',
+                      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1', DISABLE_AUTOUPDATER='1')
+    return result
+
+
+
+def sandbox_profile(binary, root, port):
+    """macOS child reads only runtime libraries and disposable state; local model only."""
+    require(sys.platform == 'darwin' and Path('/usr/bin/sandbox-exec').is_file(),
+            'local_provider_requires_macos_sandbox')
+    require(type(port) is int and 1024 <= port < 49152, 'invalid_local_provider_port')
+    def quote(value):
+        return json.dumps(str(value))
+    return '\n'.join([
+        '(version 1)', '(deny default)', '(allow process-fork)',
+        f'(allow process-exec (literal {quote(binary)}))',
+        '(allow process-info*)', '(allow sysctl-read)',
+        '(allow mach-lookup (global-name "com.apple.system.logger"))',
+        '(allow ipc-posix-shm*)', '(allow file-read-metadata)',
+        '(allow file-read* (literal "/"))',
+        '(allow file-read* (subpath "/System") (subpath "/usr/lib") (subpath "/usr/share") '
+        '(subpath "/private/var/db/dyld") (literal "/dev/null") (literal "/dev/urandom") '
+        '(literal "/dev/random") (literal "/private/etc/localtime"))',
+        f'(allow file-read* (literal {quote(binary)}) (subpath {quote(root)}))',
+        f'(allow file-write* (subpath {quote(root)}) (literal "/dev/null"))',
+        '(allow system-socket (socket-domain AF_UNIX))',
+        f'(allow network-outbound (remote tcp "localhost:{port}"))',
+        f'(allow network-bind (local unix-socket (literal {quote(root / "inbox.sock")})))',
+        f'(allow network-inbound (local unix-socket (literal {quote(root / "inbox.sock")})))',
+    ]) + '\n'
+
+
+
+def admit_hosted_vm(environment, repository_id):
+    """Operational guard for reviewed code on a fresh private hosted VM, not attestation."""
+    expected = {'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                'GITHUB_REF': 'refs/heads/main', 'GITHUB_REF_PROTECTED': 'true',
+                'GITHUB_RUN_ATTEMPT': '1', 'RUNNER_ENVIRONMENT': 'github-hosted',
+                'RUNNER_OS': 'macOS', 'RUNNER_ARCH': 'ARM64',
+                'GITHUB_REPOSITORY_ID': repository_id}
+    require(isinstance(repository_id, str) and repository_id.isdigit()
+            and all(environment.get(key) == value for key, value in expected.items()),
+            'hosted_vm_dispatch_required')
+    require(platform.system() == 'Darwin' and platform.machine() == 'arm64', 'hosted_vm_platform_required')
+    require(re.fullmatch(r'[0-9a-f]{40}', environment.get('GITHUB_SHA', ''))
+            and environment.get('GITHUB_RUN_ID', '').isdigit()
+            and environment.get('ImageOS') and environment.get('ImageVersion'),
+            'hosted_vm_identity_required')
+    try:
+        with Path(environment['GITHUB_EVENT_PATH']).open('rb') as stream:
+            data = stream.read(MAX_STREAM_BYTES + 1)
+        require(len(data) <= MAX_STREAM_BYTES, 'hosted_vm_event_invalid')
+        event = json.loads(data)
+        repository = event['repository']
+        require(repository['private'] is True and str(repository['id']) == repository_id
+                and repository['full_name'] == environment.get('GITHUB_REPOSITORY'),
+                'hosted_vm_private_repository_required')
+    except (OSError, KeyError, TypeError, ValueError):
+        raise CanaryError('hosted_vm_event_invalid') from None
+
+
+def hosted_network_profile(root, port, repository_id):
+    """VM is the filesystem/process boundary; Seatbelt limits the trusted child's network."""
+    admit_hosted_vm(os.environ, repository_id)
+    require(Path('/usr/bin/sandbox-exec').is_file(), 'local_provider_requires_macos_sandbox')
+    require(type(port) is int and 1024 <= port < 49152, 'invalid_local_provider_port')
+    socket_path = json.dumps(str(root / 'inbox.sock'))
+    return '\n'.join([
+        '(version 1)', '(allow default)', '(deny network*)',
+        f'(allow network-outbound (remote tcp "localhost:{port}"))',
+        f'(allow network-bind (local unix-socket (literal {socket_path})))',
+        f'(allow network-inbound (local unix-socket (literal {socket_path})))',
+    ]) + '\n'
+
+
+def synthetic_stream(text, model):
+    """Anthropic Messages SSE sequence; text comes only from the client's request."""
+    events = [
+        {'type': 'message_start', 'message': {'id': 'msg_local_fixture', 'type': 'message',
+            'role': 'assistant', 'model': model, 'content': [], 'stop_reason': None,
+            'stop_sequence': None, 'usage': {'input_tokens': 1, 'output_tokens': 0}}},
+        {'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}},
+        {'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': text}},
+        {'type': 'content_block_stop', 'index': 0},
+        {'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None},
+         'usage': {'output_tokens': 1}},
+        {'type': 'message_stop'},
+    ]
+    return ''.join(f"event: {value['type']}\ndata: {json.dumps(value)}\n\n" for value in events).encode()
+
+
+class LocalProvider:
+    """Bounded local protocol fixture with no upstream connection or retained prompts."""
+    def __init__(self, key, model):
+        self.key, self.model = key, model
+        self.turns = 0
+        self.failure = False
+        self.tasks = set()
+
+    def respond(self, value):
+        require(isinstance(value, dict) and value.get('stream') is True
+                and value.get('model') == self.model and value.get('tools', []) == [],
+                'local_provider_request_rejected')
+        messages = value.get('messages')
+        require(isinstance(messages, list) and messages and messages[-1].get('role') == 'user',
+                'local_provider_request_rejected')
+        require(self.turns < 2, 'local_provider_turn_limit')
+        if self.turns == 0:
+            text = json.dumps(value.get('system', []))
+            candidates = re.findall(r'READY_[a-f0-9]{32}', text)
+            require(len(set(candidates)) == 1 and 'WAKE_' not in json.dumps(value),
+                    'local_provider_initial_marker_missing')
+        else:
+            # The nonce is never passed to this server by the canary controller.
+            # It must arrive through the real client's subsequent model request.
+            text = json.dumps(messages[-1].get('content'))
+            candidates = re.findall(r'WAKE_[a-f0-9]{32}', text)
+            require(len(set(candidates)) == 1, 'local_provider_wake_missing')
+        self.turns += 1
+        return synthetic_stream(candidates[0], self.model)
+
+    async def handle(self, reader, writer):
+        task = asyncio.current_task()
+        self.tasks.add(task)
+        try:
+            async with asyncio.timeout(5):
+                header = await reader.readuntil(b'\r\n\r\n')
+                require(len(header) <= 16384, 'local_provider_headers_limit')
+                lines = header.decode('ascii').split('\r\n')
+                require(lines[0] in ('POST /v1/messages HTTP/1.1', 'POST /v1/messages?beta=true HTTP/1.1'),
+                        'local_provider_path_rejected')
+                headers = {}
+                for line in lines[1:-2]:
+                    name, value = line.split(':', 1)
+                    name = name.lower()
+                    require(name not in headers, 'local_provider_duplicate_header')
+                    headers[name] = value.strip()
+                require(headers.get('x-api-key') == self.key and 'authorization' not in headers,
+                        'local_provider_auth_rejected')
+                require(headers.get('content-type', '').split(';')[0] == 'application/json'
+                        and 'transfer-encoding' not in headers and 'content-encoding' not in headers,
+                        'local_provider_encoding_rejected')
+                length = int(headers.get('content-length', '0'))
+                require(0 < length <= 1024 * 1024, 'local_provider_body_limit')
+                value = json.loads(await reader.readexactly(length))
+                body = self.respond(value)
+                writer.write(b'HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n'
+                             b'Cache-Control: no-cache\r\nConnection: close\r\nContent-Length: '
+                             + str(len(body)).encode() + b'\r\n\r\n' + body)
+                await writer.drain()
+        except (Exception, asyncio.CancelledError):
+            self.failure = True
+        finally:
+            writer.close()
+            try:
+                await asyncio.wait_for(writer.wait_closed(), 1)
+            except (Exception, asyncio.CancelledError):
+                writer.transport.abort()
+            self.tasks.discard(task)
+
+    async def close(self):
+        tasks = tuple(self.tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def completed_turn(reader, session_id, expected, state):
@@ -107,17 +278,31 @@ async def stop_child(child):
             await asyncio.wait_for(child.wait(), 5)
 
 
-async def canary(binary, root, key, model):
+async def canary(binary, root, key, model, local_port=None, hosted_repository_id=None):
     """Run exactly two synthetic turns; every success criterion is observed."""
+    if hosted_repository_id is not None:
+        require(local_port is not None, 'hosted_vm_requires_local_provider')
+        admit_hosted_vm(os.environ, hosted_repository_id)
     session_id, marker = str(uuid4()), uuid4().hex
     child = None
+    server = provider = None
     for name in ('home', 'config', 'tmp', 'work'):
         (root / name).mkdir(mode=0o700)
     try:
         async with asyncio.timeout(RUN_SECONDS):
+            command = child_command(binary, root, session_id, model, marker)
+            if local_port is not None:
+                profile = root / 'child.sb'
+                profile.write_text(hosted_network_profile(root, local_port, hosted_repository_id)
+                                   if hosted_repository_id is not None
+                                   else sandbox_profile(binary, root, local_port))
+                provider = LocalProvider(key, model)
+                server = await asyncio.start_server(provider.handle, '127.0.0.1', local_port,
+                                                    limit=16384, reuse_address=False)
+                command = ['/usr/bin/sandbox-exec', '-f', str(profile), *command]
             child = await asyncio.create_subprocess_exec(
-                *child_command(binary, root, session_id, model, marker),
-                env=child_environment(root, key), cwd=root / 'work',
+                *command,
+                env=child_environment(root, key, local_port), cwd=root / 'work',
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL, close_fds=True, limit=65536)
             state = {'bytes': 0, 'initialized': False}
@@ -143,16 +328,40 @@ async def canary(binary, root, key, model):
             outcome = await transport.send(metadata)
             require(outcome['reason'] == 'claude_write_unacknowledged', 'socket_write_unconfirmed')
             await completed_turn(child.stdout, session_id, wake_marker, state)
-            return {'schemaVersion': 1, 'scope': 'disposable-headless-idle-wake',
+            require(provider is None or provider.turns == 2 and not provider.failure,
+                    'local_provider_incomplete')
+            proof = {'schemaVersion': 1,
+                    'modelProvider': 'local-synthetic' if provider else 'dedicated-remote-key',
+                    'localProviderRequests': provider.turns if provider else None,
+                    'containment': ('trusted-hosted-vm-network-only' if hosted_repository_id is not None
+                                    else 'local-restrictive-seatbelt' if provider else 'dedicated-remote-key'),
+                    'hostileSameUidIsolationProven': False,
+                    'vmDisposalObserved': False,
+                    'completeDescendantTerminationProven': False,
+                    'scratchRetainedForVmDisposal': hosted_repository_id is not None,
+                    'offHostNetworkDenied': provider is not None, 'scope': 'disposable-headless-idle-wake',
                     'clientSha256': CLIENT_SHA256, 'clientVersion': SUPPORTED_VERSION,
                     'readyTurnObserved': True, 'idleIntervalObserved': True,
                     'socketWriteClosedGracefully': True, 'matchingWakeTurnObserved': True,
                     'stdinWakeWritten': False, 'productionQualified': False,
                     'nativeReceiptV3Proven': False}
     finally:
-        if child is not None:
-            await stop_child(child)
-        shutil.rmtree(root)
+        try:
+            if child is not None:
+                await stop_child(child)
+        finally:
+            if server is not None:
+                server.close()
+                await server.wait_closed()
+            if provider is not None:
+                await provider.close()
+        if hosted_repository_id is None:
+            shutil.rmtree(root)
+    # Pending requests can fail while the child/server/provider are shutting down.
+    # Only settled provider state may authorize returning the selected proof.
+    require(provider is None or provider.turns == 2 and not provider.failure,
+            'local_provider_incomplete')
+    return proof
 
 
 def publish_proof(path, proof):
@@ -180,21 +389,34 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--model', required=True)
+    parser.add_argument('--local-provider', action='store_true', help='Synthetic local SSE; no credential or spend')
+    parser.add_argument('--local-port', type=int, default=43231)
+    parser.add_argument('--trusted-hosted-vm', action='store_true',
+                        help='Reviewed client on a fresh private GitHub-hosted macOS VM only')
+    parser.add_argument('--hosted-repository-id')
     parser.add_argument('--private-output', type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        require(sys.stdin.isatty(), 'interactive_dedicated_key_required')
+        require(args.trusted_hosted_vm == (args.hosted_repository_id is not None),
+                'hosted_vm_repository_id_required')
+        if args.trusted_hosted_vm:
+            require(args.local_provider, 'hosted_vm_requires_local_provider')
+            admit_hosted_vm(os.environ, args.hosted_repository_id)
+        require(args.local_provider or sys.stdin.isatty(), 'interactive_dedicated_key_required')
         binary = args.binary.resolve(strict=True)
         require(binary.is_file() and hashlib.sha256(binary.read_bytes()).hexdigest() == CLIENT_SHA256,
                 'client_digest_mismatch')
         output = args.private_output.absolute()
         ensure_private_directory(output.parent)
         require(not os.path.lexists(output), 'proof_already_exists')
-        key = getpass.getpass('Dedicated canary API key (up to $0.10 client budget; hidden): ')
+        key = ('local-fixture-' + secrets.token_hex(24)) if args.local_provider else getpass.getpass(
+            'Dedicated canary API key (up to $0.10 client budget; hidden): ')
         require(bool(key) and not any(char.isspace() for char in key), 'invalid_dedicated_key')
         temp_root = '/private/tmp' if Path('/private/tmp').is_dir() else '/tmp'  # nosec B108
         root = Path(tempfile.mkdtemp(prefix='cq-', dir=temp_root)).resolve()
-        proof = asyncio.run(canary(binary, root, key, args.model))
+        proof = asyncio.run(canary(binary, root, key, args.model,
+                                  args.local_port if args.local_provider else None,
+                                  args.hosted_repository_id if args.trusted_hosted_vm else None))
         publish_proof(output, proof)
         print(json.dumps({'canary': 'observed', 'productionQualified': False}))
         return 0

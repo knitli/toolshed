@@ -102,7 +102,7 @@ rotation, an actual other-process path-swap-and-restore race with a zero-byte wi
 graceful close/timeout, unsafe permissions, validation and safe CLI errors. They prove our adapter's
 behavior, not Claude's processing or idle wake.
 
-No live Claude/model run was attempted: an isolated authenticated disposable client,
+No successful native idle wake has been observed: an isolated disposable client,
 verified native ingress availability, and a trusted observation of input/turn outcomes
 are still required. Custom channel development bypass is not needed for native UDS,
 but the installed client gates cross-session messaging independently. Do not bypass
@@ -126,7 +126,7 @@ python packages/event-gateway/scripts/qualify_claude_socket.py \
 This invokes two small model turns and uses Claude's `$0.10` client budget guard
 and a 90-second overall deadline. The guard is not an independent billing cap.
 Do not pass a key on the command line, copy an owner token/configuration, or use
-an existing owner session. No model run was made during implementation.
+an existing owner session. No remote-provider model call was made during implementation.
 
 The script pins the inspected executable digest and retains its own child handle.
 It launches `--bare`, a fresh HOME/config/work/tmp, a closed environment, no tools,
@@ -154,3 +154,92 @@ client canary, not hostile-code process-tree containment. A successful headless 
 still does not prove TUI idle wake, busy queuing, receipt-v3, restart recovery,
 production enrollment or release qualification. Unit tests check parsing/refusal and
 isolation without executing Claude or manufacturing a native PASS artifact.
+
+## Local synthetic-provider mode (native qualification incomplete)
+
+A dedicated provider credential is unnecessary for the transport experiment. The
+[official gateway connection contract](https://code.claude.com/docs/en/llm-gateway-connect)
+supports `ANTHROPIC_BASE_URL` with an explicit `ANTHROPIC_API_KEY`. The inspected
+2.1.302 binary constructs its SDK client with that base URL, posts to `/v1/messages`,
+and consumes the standard `message_start`, content-block, `message_delta`, and
+`message_stop` events described by the
+[Messages streaming contract](https://platform.claude.com/docs/en/build-with-claude/streaming).
+This establishes a plausible local protocol path; no actual native success is
+inferred from inspecting code or replaying unit fixtures. Initial contained runs
+ended before initialization because the client tried its shared per-user temporary
+directory. The explicit `CLAUDE_CODE_TMPDIR` correction below is covered by unit
+tests; a successful actual idle wake remains unproven.
+
+After reviewing containment, the disposable macOS-only mode is:
+
+```sh
+python packages/event-gateway/scripts/qualify_claude_socket.py \
+  --local-provider --local-port 43231 \
+  --binary /Users/adampoulemanos/.local/share/claude/versions/2.1.302 \
+  --model claude-local-fixture \
+  --private-output /private/tmp/claude-local-proof/proof.json
+```
+
+The parent binds one fixed IPv4 loopback port, with no fallback on collision. The
+server contains no upstream client or forwarding code. It accepts at most two
+bounded streaming Messages requests authenticated by a fresh dummy key. It echoes
+the initial READY marker from the client's system prompt; it emits WAKE only if a
+new marker arrives in the actual client's subsequent latest user message. The
+controller never passes that late marker to the server. Both native assistant/result
+pairs remain mandatory, and stdin receives only the initial prompt.
+
+The child gets a default-deny Seatbelt profile: its exact pinned executable,
+platform libraries, and disposable scratch are readable; writes stay in scratch;
+network output is limited to the one model port; UDS binding/listening is limited
+to its generated inbox. Other executable paths and direct owner files are denied,
+and keychain service lookup is denied. Bare mode, empty settings/MCP/tools, fresh
+HOME, dummy credentials, and disabled nonessential traffic/updater remain explicit.
+Both `TMPDIR` and `CLAUDE_CODE_TMPDIR` point inside scratch: this pinned client
+otherwise ignores `TMPDIR` for its shared per-user Claude temporary directory.
+The parent server closes after the child stops, including failed runs. Unsupported
+platforms, occupied ports, unexpected provider calls, and malformed HTTP/SSE fail
+closed. The dedicated-key mode above remains a separate opt-in choice.
+
+Local evidence identifies `modelProvider: local-synthetic` and cannot establish
+real-model behavior or production qualification. Native startup, sandbox
+compatibility, the installed messaging gate, and idle wake must still be observed
+in an actual contained run. Unit tests do not execute Claude.
+
+### Reviewed hosted-VM qualification
+
+`--trusted-hosted-vm --hosted-repository-id <immutable-id>` is a separate,
+explicit mode and requires `--local-provider`. Use it only in a dedicated private
+workflow after the client and canary changes have been reviewed and merged. The
+runner must be a fresh GitHub-hosted macOS ARM64 VM, dispatched from protected
+`main`, attempt 1. The guard checks the workflow identity and event's private
+repository ID/name. These checks are operational guards, not remote attestation:
+reviewed workflow code and the hosted VM are trusted.
+
+This mode follows the existing reviewed native runner's network-only Seatbelt
+policy: default filesystem/process access within the disposable VM, denied network
+access except the fixed loopback model TCP port and exact inbox Unix socket. It
+must never run on the owner's machine or a reused/self-hosted runner. The VM must
+contain no production credentials, owner home, or unrelated sensitive data;
+checkout credentials must not persist. Empty settings/MCP/tools, fresh HOME,
+closed child environment, dummy provider key, pinned executable digest, and the
+two real native assistant/result observations remain mandatory. The original
+restrictive local mode is unchanged.
+
+Hosted evidence marks `containment: trusted-hosted-vm-network-only`, with
+`hostileSameUidIsolationProven`, `completeDescendantTerminationProven`, and
+`vmDisposalObserved` all false. Scratch remains for provider-managed VM disposal,
+including failed runs, to avoid deleting state while an unobserved descendant
+might still use it. A successful result proves only the controlled synthetic
+headless idle-wake case; production qualification and receipt-v3 remain false.
+No hosted execution has yet been demonstrated by this change.
+
+The [official 2.1.302 manifest](https://downloads.claude.ai/claude-code-releases/2.1.302/manifest.json)
+records `darwin-arm64` SHA256
+`5262ce9de86243fed0d21edc39b271555d56780d0112e2b194439fe1c6662d37`
+and size 267956720 bytes. The
+[official installer](https://claude.ai/install.sh) establishes the version/platform
+URL pattern; the pinned artifact is
+`https://downloads.claude.ai/claude-code-releases/2.1.302/darwin-arm64/claude`.
+Only installer/manifest text was fetched for this change. A future workflow must
+verify the downloaded bytes against the pinned hash before execution; it must not
+execute an installer or select `latest`.

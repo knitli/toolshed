@@ -31,7 +31,7 @@ class CanaryTests(unittest.IsolatedAsyncioTestCase):
         key = secrets.token_urlsafe(32)
         environment = CANARY.child_environment(root, key)
         self.assertEqual(set(environment), {'PATH', 'HOME', 'CLAUDE_CONFIG_DIR', 'TMPDIR',
-                                           'TERM', 'LANG', 'ANTHROPIC_API_KEY'})
+                                           'TERM', 'LANG', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_TMPDIR'})
         command = CANARY.child_command('/binary', root, 'session', 'model', 'marker')
         self.assertNotIn(key, command)
         self.assertIn('--bare', command)
@@ -132,3 +132,242 @@ class CanaryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(transport.send.call_args.args[0]['canonicalSubject']['subjectId'], wake)
             self.assertEqual(phases[1], wake)
             self.assertTrue(root.is_dir())
+
+
+class LocalProviderTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.key = 'local-fixture-' + secrets.token_hex(24)
+        self.provider = CANARY.LocalProvider(self.key, 'claude-local-fixture')
+        self.ready = 'READY_' + uuid4().hex
+        self.wake = 'WAKE_' + uuid4().hex
+        self.request = {'model': 'claude-local-fixture', 'stream': True, 'tools': [],
+                        'system': [{'type': 'text', 'text': self.ready}],
+                        'messages': [{'role': 'user', 'content': 'Begin synthetic test.'}]}
+
+    def test_real_request_required_for_late_wake_and_only_two_turns(self):
+        first = self.provider.respond(self.request)
+        self.assertIn(self.ready.encode(), first)
+        self.assertNotIn(self.wake.encode(), first)
+        with self.assertRaisesRegex(CANARY.CanaryError, 'wake_missing'):
+            self.provider.respond(self.request)
+        second = self.request | {'messages': [{'role': 'user', 'content': self.wake}]}
+        self.assertIn(self.wake.encode(), self.provider.respond(second))
+        with self.assertRaisesRegex(CANARY.CanaryError, 'turn_limit'):
+            self.provider.respond(second)
+
+    def test_rejects_tools_wrong_model_nonstream_and_early_wake(self):
+        for change in ({'tools': [{'name': 'Bash'}]}, {'model': 'other'}, {'stream': False},
+                       {'messages': [{'role': 'user', 'content': self.wake}]}):
+            with self.subTest(change=change), self.assertRaises(CANARY.CanaryError):
+                self.provider.respond(self.request | change)
+        self.assertEqual(self.provider.turns, 0)
+
+    def test_sse_order_and_text_are_anthropic_protocol(self):
+        data = CANARY.synthetic_stream(self.ready, 'claude-local-fixture').decode()
+        events = [json.loads(line[6:]) for line in data.splitlines() if line.startswith('data: ')]
+        self.assertEqual([event['type'] for event in events], ['message_start', 'content_block_start',
+            'content_block_delta', 'content_block_stop', 'message_delta', 'message_stop'])
+        self.assertEqual(events[2]['delta'], {'type': 'text_delta', 'text': self.ready})
+        self.assertEqual(events[4]['delta']['stop_reason'], 'end_turn')
+
+    def test_closed_local_environment_and_default_deny_profile(self):
+        root = Path('/private/tmp/disposable')
+        inherited_token = secrets.token_urlsafe(32)
+        with patch.dict(os.environ, {'ANTHROPIC_AUTH_TOKEN': inherited_token, 'HTTPS_PROXY': 'http://owner'}):
+            environment = CANARY.child_environment(root, self.key, 43231)
+        self.assertEqual(environment['ANTHROPIC_BASE_URL'], 'http://127.0.0.1:43231')
+        self.assertNotIn('ANTHROPIC_AUTH_TOKEN', environment)
+        self.assertNotIn(inherited_token, environment.values())
+        self.assertNotIn('HTTPS_PROXY', environment)
+        self.assertEqual(environment['CLAUDE_CODE_TMPDIR'], str(root / 'tmp'))
+        self.assertEqual(environment['TMPDIR'], environment['CLAUDE_CODE_TMPDIR'])
+        with patch.object(CANARY.sys, 'platform', 'darwin'), patch.object(CANARY.Path, 'is_file', return_value=True):
+            profile = CANARY.sandbox_profile('/pinned/binary', root, 43231)
+            for port in (0, True, 49152, 65536):
+                with self.assertRaises(CANARY.CanaryError):
+                    CANARY.sandbox_profile('/pinned/binary', root, port)
+        self.assertIn('(deny default)', profile)
+        self.assertIn('(allow file-read* (literal "/"))', profile)
+        self.assertNotIn('(subpath "/")', profile)
+        self.assertNotIn('(allow default)', profile)
+        self.assertIn('(allow system-socket (socket-domain AF_UNIX))', profile)
+        self.assertNotIn('(allow system-socket)', profile)
+        self.assertEqual(profile.count('remote tcp'), 1)
+        self.assertNotIn('remote ip', profile)
+        self.assertIn('localhost:43231', profile)
+        self.assertNotIn('/Users/', profile)
+        self.assertNotIn('(allow process-exec)', profile)
+        self.assertIn('(allow mach-lookup (global-name "com.apple.system.logger"))', profile)
+        self.assertNotIn('(allow mach-lookup)', profile)
+
+    async def wire(self, headers=None, body=None, request_line='POST /v1/messages HTTP/1.1'):
+        body = json.dumps(self.request).encode() if body is None else body
+        supplied = {'Host': '127.0.0.1:43231', 'Content-Type': 'application/json',
+                    'Content-Length': str(len(body)), 'X-Api-Key': self.key}
+        supplied.update(headers or {})
+        reader = asyncio.StreamReader()
+        reader.feed_data((request_line + '\r\n' + ''.join(f'{key}: {value}\r\n' for key, value in supplied.items())
+                          + '\r\n').encode() + body)
+        reader.feed_eof()
+        writer = Mock()
+        writer.drain = AsyncMock()
+        writer.wait_closed = AsyncMock()
+        await self.provider.handle(reader, writer)
+        return writer
+
+    async def test_bounded_http_emits_only_local_sse_and_closes(self):
+        writer = await self.wire()
+        self.assertFalse(self.provider.failure)
+        self.assertIn(b'Content-Type: text/event-stream', writer.write.call_args.args[0])
+        self.assertNotIn(self.key.encode(), writer.write.call_args.args[0])
+        writer.close.assert_called_once()
+        self.assertFalse(self.provider.tasks)
+
+    async def test_http_rejects_auth_paths_encoding_limits_and_duplicate_headers(self):
+        cases = [({'X-Api-Key': 'different'}, None, 'POST /v1/messages HTTP/1.1'),
+                 ({'Authorization': 'Bearer owner'}, None, 'POST /v1/messages HTTP/1.1'),
+                 ({'Content-Encoding': 'gzip'}, None, 'POST /v1/messages HTTP/1.1'),
+                 ({'Transfer-Encoding': 'chunked'}, None, 'POST /v1/messages HTTP/1.1'),
+                 ({'Content-Length': str(1024 * 1024 + 1)}, None, 'POST /v1/messages HTTP/1.1'),
+                 ({'x-api-key': self.key}, None, 'POST /v1/messages HTTP/1.1'),
+                 ({}, None, 'POST https://api.anthropic.com/v1/messages HTTP/1.1'),
+                 ({}, b'bad-json', 'POST /v1/messages HTTP/1.1')]
+        for headers, body, line in cases:
+            self.provider = CANARY.LocalProvider(self.key, 'claude-local-fixture')
+            with self.subTest(headers=headers, line=line):
+                writer = await self.wire(headers, body, line)
+                self.assertTrue(self.provider.failure)
+                self.assertEqual(self.provider.turns, 0)
+                writer.write.assert_not_called()
+
+    async def test_hosted_guard_rejects_before_any_setup_or_child(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'unused'
+            with patch.dict(os.environ, {}, clear=True), \
+                    patch.object(CANARY.asyncio, 'create_subprocess_exec', new=AsyncMock()) as create:
+                with self.assertRaises(CANARY.CanaryError):
+                    await CANARY.canary('/binary', root, self.key, 'fixture', 43231, '123')
+            create.assert_not_called()
+            self.assertFalse(root.exists())
+
+    async def test_hosted_failure_retains_scratch_for_vm_disposal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'canary'
+            root.mkdir(mode=0o700)
+            with patch.object(CANARY, 'admit_hosted_vm'), \
+                    patch.object(CANARY, 'hosted_network_profile', return_value='(deny network*)'), \
+                    patch.object(CANARY.asyncio, 'start_server', new=AsyncMock(side_effect=OSError)), \
+                    patch.object(CANARY.asyncio, 'create_subprocess_exec', new=AsyncMock()) as create:
+                with self.assertRaises(OSError):
+                    await CANARY.canary('/binary', root, self.key, 'fixture', 43231, '123')
+            create.assert_not_called()
+            self.assertTrue((root / 'home').is_dir())
+
+    async def test_late_provider_failure_during_close_refuses_proof_and_retains_hosted_scratch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'canary'
+            root.mkdir(mode=0o700)
+            child = Mock(returncode=None, pid=123)
+            child.stdin.drain = AsyncMock()
+            transport = Mock()
+            transport.send = AsyncMock(return_value={'reason': 'claude_write_unacknowledged'})
+            provider = Mock(turns=2, failure=False)
+            server = Mock()
+            server.wait_closed = AsyncMock()
+
+            async def finish_pending_request():
+                provider.failure = True
+
+            provider.close = AsyncMock(side_effect=finish_pending_request)
+            with patch.object(CANARY, 'admit_hosted_vm'), \
+                    patch.object(CANARY, 'hosted_network_profile', return_value='(deny network*)'), \
+                    patch.object(CANARY, 'LocalProvider', return_value=provider), \
+                    patch.object(CANARY.asyncio, 'start_server', new=AsyncMock(return_value=server)), \
+                    patch.object(CANARY.asyncio, 'create_subprocess_exec', new=AsyncMock(return_value=child)), \
+                    patch.object(CANARY, 'completed_turn', new=AsyncMock()), \
+                    patch.object(CANARY.asyncio, 'sleep', new=AsyncMock()), \
+                    patch.object(CANARY.Path, 'lstat', return_value=SimpleNamespace(st_mode=stat.S_IFSOCK, st_dev=1, st_ino=2)), \
+                    patch.object(CANARY, 'child_peer_token', return_value=secrets.token_urlsafe(32)), \
+                    patch.object(CANARY, 'ClaudeSocketTransport', return_value=transport), \
+                    patch.object(CANARY, 'stop_child', new=AsyncMock()) as stop:
+                with self.assertRaisesRegex(CANARY.CanaryError, '^local_provider_incomplete$'):
+                    await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231, '123')
+            stop.assert_awaited_once_with(child)
+            server.close.assert_called_once()
+            server.wait_closed.assert_awaited_once()
+            provider.close.assert_awaited_once()
+            self.assertTrue(root.is_dir())
+
+    async def test_occupied_port_aborts_before_native_child_without_fallback(self):
+        parent = '/private/tmp' if Path('/private/tmp').is_dir() else '/tmp'  # nosec B108
+        root = Path(tempfile.mkdtemp(dir=parent)).resolve()
+        with patch.object(CANARY, 'sandbox_profile', return_value='(deny default)'), \
+                patch.object(CANARY.asyncio, 'start_server', new=AsyncMock(side_effect=OSError)) as server, \
+                patch.object(CANARY.asyncio, 'create_subprocess_exec', new=AsyncMock()) as create:
+            with self.assertRaises(OSError):
+                await CANARY.canary('/binary', root, self.key, 'claude-local-fixture', 43231)
+        self.assertEqual(server.await_count, 1)
+        self.assertEqual(server.call_args.args[1:], ('127.0.0.1', 43231))
+        create.assert_not_called()
+        self.assertFalse(root.exists())
+
+
+class HostedVmTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.event = Path(self.temporary.name) / 'event.json'
+        self.repository = {'id': 123, 'full_name': 'owner/private-fixture', 'private': True}
+        self.event.write_text(json.dumps({'repository': self.repository}))
+        self.environment = {'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+            'GITHUB_REF': 'refs/heads/main', 'GITHUB_REF_PROTECTED': 'true', 'GITHUB_RUN_ATTEMPT': '1',
+            'RUNNER_ENVIRONMENT': 'github-hosted', 'RUNNER_OS': 'macOS', 'RUNNER_ARCH': 'ARM64',
+            'GITHUB_REPOSITORY_ID': '123', 'GITHUB_REPOSITORY': 'owner/private-fixture',
+            'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '456', 'ImageOS': 'macos15', 'ImageVersion': '1',
+            'GITHUB_EVENT_PATH': str(self.event)}
+        for target, value in (('system', 'Darwin'), ('machine', 'arm64')):
+            patcher = patch.object(CANARY.platform, target, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_guard_rejects_missing_or_wrong_context_before_launch(self):
+        CANARY.admit_hosted_vm(self.environment, '123')
+        for key in self.environment:
+            with self.subTest(missing=key), self.assertRaises(CANARY.CanaryError):
+                CANARY.admit_hosted_vm({k: v for k, v in self.environment.items() if k != key}, '123')
+        for change in ({'GITHUB_RUN_ATTEMPT': '2'}, {'GITHUB_EVENT_NAME': 'pull_request'},
+                       {'RUNNER_ENVIRONMENT': 'self-hosted'}, {'GITHUB_REF_PROTECTED': 'false'},
+                       {'GITHUB_REF': 'refs/heads/unreviewed'}, {'GITHUB_REPOSITORY_ID': '321'}):
+            with self.subTest(change=change), self.assertRaises(CANARY.CanaryError):
+                CANARY.admit_hosted_vm(self.environment | change, '123')
+
+    def test_guard_rejects_public_mismatched_or_malformed_event(self):
+        for change in ({'private': False}, {'private': 'true'}, {'id': 321}, {'full_name': 'other/repo'}):
+            self.event.write_text(json.dumps({'repository': self.repository | change}))
+            with self.subTest(change=change), self.assertRaises(CANARY.CanaryError):
+                CANARY.admit_hosted_vm(self.environment, '123')
+        self.event.write_text('not-json')
+        with self.assertRaises(CANARY.CanaryError):
+            CANARY.admit_hosted_vm(self.environment, '123')
+
+    def test_hosted_profile_is_guarded_and_limited_to_fixture_network(self):
+        with patch.dict(os.environ, self.environment, clear=True), \
+                patch.object(CANARY.Path, 'is_file', return_value=True):
+            profile = CANARY.hosted_network_profile(Path('/private/tmp/fixture'), 43231, '123')
+        self.assertIn('(allow default)', profile)
+        self.assertIn('(deny network*)', profile)
+        self.assertEqual(profile.count('remote tcp'), 1)
+        self.assertIn('localhost:43231', profile)
+        self.assertIn('(literal "/private/tmp/fixture/inbox.sock")', profile)
+        self.assertNotIn('(allow network*)', profile)
+        with patch.dict(os.environ, {}, clear=True), self.assertRaises(CANARY.CanaryError):
+            CANARY.hosted_network_profile(Path('/private/tmp/fixture'), 43231, '123')
+
+    def test_hosted_cli_requires_local_provider_and_explicit_repository(self):
+        base = ['--binary', '/missing', '--model', 'fixture', '--private-output', '/missing/proof.json']
+        for flags in (['--trusted-hosted-vm'], ['--hosted-repository-id', '123'],
+                      ['--trusted-hosted-vm', '--hosted-repository-id', '123']):
+            with self.subTest(flags=flags), patch.object(CANARY.asyncio, 'run') as run, \
+                    patch.object(CANARY.sys, 'stderr'):
+                self.assertEqual(CANARY.main(base + flags), 2)
+                run.assert_not_called()
