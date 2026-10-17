@@ -32,8 +32,9 @@ def _valid_websocket_uri(uri):
         return False
     try:
         parsed = urlsplit(uri)
-        valid = parsed.scheme in ('ws', 'wss') and bool(parsed.hostname) and '#' not in uri
-        authority = parsed.netloc.rsplit('@', 1)[-1]
+        valid = (parsed.scheme in ('ws', 'wss') and bool(parsed.hostname)
+                 and '#' not in uri and '@' not in parsed.netloc)
+        authority = parsed.netloc
         if authority.startswith('['):
             suffix = authority[authority.index(']') + 1:]
             valid = valid and (suffix in ('', ':') or suffix.startswith(':') and suffix[1:].isdigit())

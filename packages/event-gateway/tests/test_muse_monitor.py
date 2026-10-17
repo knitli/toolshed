@@ -168,6 +168,16 @@ class MuseMonitorTests(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertEqual(normalize_monitor({'description': 'Offline URL fixture', 'ws': url})['ws'], url)
 
+    def test_websocket_rejects_userinfo_only_in_authority(self):
+        for authority in ('@example.test', 'user@example.test', 'user:password@example.test',
+                          ':password@example.test', ':@example.test', 'user:@[::1]'):
+            with self.subTest(authority=authority), self.assertRaises(MuseMonitorError):
+                normalize_monitor({'description': 'Offline URL fixture', 'ws': f'wss://{authority}/events'})
+        for suffix in ('/events%40user', '/events?cursor=%40user', '/events@user?cursor=@next'):
+            url = 'wss://example.test' + suffix
+            with self.subTest(url=url):
+                self.assertEqual(normalize_monitor({'description': 'Offline URL fixture', 'ws': url})['ws'], url)
+
     def test_raw_command_rejects_nul_and_preserves_shell_source(self):
         for command in ('\x00poll', 'poll\x00', 'printf "a\x00b"'):
             with self.subTest(command=command), self.assertRaises(MuseMonitorError):
