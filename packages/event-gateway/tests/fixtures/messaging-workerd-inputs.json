@@ -336,7 +336,7 @@
     "dependency/zod@4.6.5/node_modules/zod/v4/locales/yo.js": "88b33f6527c1a2faaf159568330cf727c448dc468eac72142a6fb24f8714ac1e",
     "dependency/zod@4.6.5/node_modules/zod/v4/locales/zh-CN.js": "8fc02f2bd4d92f46b24b8d82da0ee95c962fc80c14dd7dd469500e14de08d320",
     "dependency/zod@4.6.5/node_modules/zod/v4/locales/zh-TW.js": "01d9b119e318d8b9f1a8fa720d06424457429425a61d0730984b750e6a5edf7d",
-    "fixture/messaging-workerd-worker.ts": "369ef15b175af1371ed821891d106565390f2d72b7b6695fda4b25befe4c1415"
+    "fixture/messaging-workerd-worker.ts": "1ae28f422e20805539fd4898ee84777a8770056cd82481f7c0ad7937cbacabbe"
   },
-  "bundleSha256": "4e4ebcff77646cc4e8aaf429dd49db64a8e8293a5fe19edd3422eacf5a595c7b"
+  "bundleSha256": "dee843b7d11d1a9b88dbd361c0aa20ac26737b1ef6cb6b84256d4f06112d7d6b"
 }
