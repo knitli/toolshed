@@ -423,16 +423,16 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         return {'type': 'result', 'session_id': self.session, 'uuid': str(uuid4()),
                 'subtype': 'success', 'is_error': False, 'result': marker}
 
-    def started(self):
-        probe = self.new_probe()
+    def started(self, *, probe=None):
+        probe = self.new_probe() if probe is None else probe
         probe.observe({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'tools': []})
         probe.observe(self.state('running'))
         probe.provider_request(self.ready)
         probe.hold_response()
         return probe
 
-    def released(self, replay=True):
-        probe = self.started()
+    def released(self, replay=True, *, probe=None):
+        probe = self.started(probe=probe)
         probe.prepare(self.frame)
         if replay:
             probe.observe(self.frame | {'isReplay': True})
@@ -460,6 +460,92 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         probe.observe(self.state('idle'))
         self.assertTrue(probe.complete.is_set())
         self.assertIsInstance(probe.proof(), dict)
+
+    def ui_hint(self):
+        return {'type': 'system', 'subtype': 'ui_invalidate', 'event': 'ui.render',
+                'uuid': 'opaque-string', 'session_id': self.session}
+
+    def test_passive_ui_hints_preserve_full_busy_progression(self):
+        for optional in ({}, {'prompts_screened': True}, {'instances': []},
+                         {'prompts_screened': True, 'instances': [
+                             {'surface': 'chat', 'component': 'prompt', 'instance_id': 'one'}]}):
+            with self.subTest(optional=optional):
+                probe = self.new_probe()
+                before = dict(probe.__dict__)
+                probe.observe(self.ui_hint() | optional)
+                self.assertEqual(probe.__dict__, before)
+                self.assertEqual(probe.observations, [])
+                self.assertFalse(probe.ready_to_send.is_set())
+                self.assertFalse(probe.complete.is_set())
+                probe = self.released(probe=probe)
+                probe.observe(self.ui_hint() | optional)
+                self.finish(probe)
+                self.assertIsInstance(probe.proof(), dict)
+
+    def test_passive_ui_hint_rejects_malformed_and_forged_fields(self):
+        hint = self.ui_hint()
+        malformed = [hint | change for change in (
+            {'event': 'ui.other'}, {'event': None}, {'uuid': 17},
+            {'prompts_screened': False}, {'prompts_screened': 1},
+            {'instances': None}, {'instances': {}}, {'instances': [None]},
+            {'instances': [{'surface': 'chat', 'component': 'prompt'}]},
+            {'instances': [{'surface': 'chat', 'component': 'prompt', 'instance_id': 1}]},
+            {'instances': [{'surface': 'chat', 'component': 'prompt', 'instance_id': 'one', 'state': 'running'}]},
+            {'state': 'running'}, {'tools': []}, {'is_error': True},
+            {'error': 'failure'}, {'unexpected': 'value'})]
+        malformed += [{key: value for key, value in hint.items() if key != missing}
+                      for missing in ('event', 'uuid')]
+        for event in malformed:
+            for initialized in (False, True):
+                with self.subTest(event=event, initialized=initialized):
+                    probe = self.new_probe()
+                    probe.initialized = initialized
+                    with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_ui_hint$'):
+                        probe.observe(event)
+                    self.assertFalse(probe.ready_to_send.is_set())
+                    self.assertFalse(probe.complete.is_set())
+        for change in ({'session_id': 'other'}, {'subtype': 'unknown'}, {'type': 'error'}):
+            with self.subTest(change=change), self.assertRaises(CANARY.CanaryError):
+                self.new_probe().observe(hint | change)
+
+    def test_passive_ui_hint_does_not_replace_real_init_or_tools_validation(self):
+        for event in (self.state('running'), self.assistant(self.ready), self.result(self.ready)):
+            probe = self.new_probe()
+            probe.observe(self.ui_hint())
+            with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_missing_init$'):
+                probe.observe(event)
+        for tools in (None, ['Bash'], {}):
+            probe = self.new_probe()
+            probe.observe(self.ui_hint())
+            with self.assertRaisesRegex(CANARY.CanaryError, '^busy_native_init$'):
+                probe.observe({'type': 'system', 'subtype': 'init',
+                               'session_id': self.session, 'tools': tools})
+
+    async def test_repeated_passive_ui_hints_remain_bounded_and_never_ready(self):
+        hint = self.ui_hint()
+        raw = (json.dumps(hint) + '\n').encode()
+        for limit, reason in ((len(raw) * 10, 'busy_native_stream_closed'),
+                              (len(raw) * 2, 'client_output_limit')):
+            probe = self.new_probe()
+            with patch.object(CANARY, 'MAX_STREAM_BYTES', limit), \
+                    self.assertRaisesRegex(CANARY.CanaryError, '^' + reason + '$'):
+                await CANARY.observe_busy_stdout(stream(*([hint] * 10)), probe)
+            self.assertFalse(probe.initialized)
+            self.assertFalse(probe.ready_to_send.is_set())
+            self.assertFalse(probe.complete.is_set())
+            self.assertEqual(probe.observations, [])
+            with self.assertRaises(CANARY.CanaryError):
+                probe.proof()
+        reader = asyncio.StreamReader()
+        reader.feed_data(raw * 10)
+        probe = self.new_probe()
+        with self.assertRaises(TimeoutError):
+            async with asyncio.timeout(0.01):
+                await CANARY.observe_busy_stdout(reader, probe)
+        self.assertFalse(probe.initialized)
+        self.assertFalse(probe.ready_to_send.is_set())
+        self.assertFalse(probe.complete.is_set())
+        self.assertEqual(probe.observations, [])
 
     def test_repeated_init_between_turns_preserves_final_idle_requirement(self):
         probe = self.released()
@@ -708,7 +794,8 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                          'hook_event': secret, 'message': secret, 'stdout': secret,
                          'stderr': secret, 'output': secret, 'exit_code': 17, 'content': secret, 'tasks': [secret],
                          'commands': [secret], 'title': secret, secret: secret}
-                reason = 'busy_native_premature_result' if initialized else 'busy_native_missing_init'
+                reason = ('busy_native_ui_hint' if subtype == 'ui_invalidate' else
+                          'busy_native_premature_result' if initialized else 'busy_native_missing_init')
                 with self.subTest(subtype=subtype, initialized=initialized), \
                         self.assertRaisesRegex(CANARY.CanaryError, '^' + reason + '$') as raised:
                     await CANARY.observe_busy_stdout(stream(event), probe)

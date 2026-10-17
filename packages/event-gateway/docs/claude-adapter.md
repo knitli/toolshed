@@ -215,8 +215,9 @@ System diagnostics recognize all 64 fixed system-schema subtype constants from
 pinned Claude 2.1.302, plus the previously reviewed `init_milestone` constructor.
 The [source manifest](claude-system-subtypes-2.1.302.json) records the binary and
 schema-module hashes and absolute byte offsets for each fixed label. `init` and
-`session_state_changed` retain their existing handling; the other 63 labels change
-diagnostics only. Their diagnostic includes only JSON type/absence labels for ten fixed
+`session_state_changed` retain their existing handling. Except for the narrowly
+validated passive `ui_invalidate` hint below, the other labels change diagnostics
+only. Their diagnostic includes only JSON type/absence labels for ten fixed
 fields: subtype, metadata, status, hook_id, hook_event, message, stdout, stderr,
 output, and exit_code. Field values and arbitrary field names are never retained.
 These labels come from the pinned 2.1.302 executable's static source; they do not
@@ -229,6 +230,25 @@ outside this reviewed schema (except retained `init_milestone`) are not included
 Unknown labels, malformed JSON, and oversized reads retain no raw frame text.
 This diagnostic is failure evidence only; init, native running, held-response,
 identity and completion requirements remain unchanged. It does not prove admission.
+
+Hosted run `39063126919` failed on its first observed stdout frame: an exact-session
+`system/ui_invalidate` before init. The observer stopped at that frame, so the
+failure does not show whether init would have followed. The private artifact kept
+the classified failure and no completion proof; evidence export remained incomplete.
+The pinned schema describes this event as a fire-and-forget UI render invalidation.
+The probe now ignores only its canonical shape: `event: "ui.render"`, string `uuid`,
+the exact session, optional `prompts_screened: true`, and optional `instances` whose
+`surface`, `component`, and `instance_id` are strings. Unlike the source schema's
+object parsing, the fixture also rejects unknown top-level or instance fields.
+The source manifest records the schema and string-alias offsets. The captured
+diagnostic did not retain these additional fields, so it does not itself prove
+that the failed frame meets this validator.
+
+A valid hint changes no initialization, running, ready, replay or completion state.
+Actual `system/init` with no tools remains mandatory, as do all later busy witnesses.
+Repeated hints remain subject to the existing output cap and run deadline; hint-only
+EOF or timeout fails. Unknown, malformed, error and wrong-session events still fail.
+This observer change has offline coverage only; no subsequent native run is claimed.
 
 `--busy-probe` requires `--local-provider` and uses the existing contained,
 disposable launch. It explicitly enables experimental

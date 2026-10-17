@@ -75,5 +75,22 @@
   },
   "retainedConstructorSubtypeOffsets": {
     "init_milestone": 226287964
+  },
+  "passiveUiInvalidation": {
+    "schemaSubtypeOffset": 214359906,
+    "uuidStringAliasOffset": 214183087,
+    "required": {
+      "type": "literal system",
+      "subtype": "literal ui_invalidate",
+      "event": "literal ui.render",
+      "uuid": "string",
+      "session_id": "string"
+    },
+    "optional": {
+      "prompts_screened": "literal true",
+      "instances": "array of objects with string surface, component, instance_id"
+    },
+    "semantics": "Fire-and-forget render invalidation; not initialization, running state, or turn admission.",
+    "fixtureNarrowing": "Exact session required. Unknown top-level and instance fields rejected. No lifecycle state changes."
   }
 }

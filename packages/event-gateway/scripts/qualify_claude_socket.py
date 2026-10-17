@@ -154,6 +154,24 @@ def synthetic_stream(text, model):
     return ''.join(f"event: {value['type']}\ndata: {json.dumps(value)}\n\n" for value in events).encode()
 
 
+def validate_passive_ui_hint(value):
+    """Validate the pinned UI invalidation schema without granting lifecycle evidence."""
+    required = {'type', 'subtype', 'event', 'uuid', 'session_id'}
+    optional = {'prompts_screened', 'instances'}
+    require(required <= value.keys() <= required | optional
+            and value['event'] == 'ui.render' and isinstance(value['uuid'], str),
+            'busy_native_ui_hint')
+    if 'prompts_screened' in value:
+        require(value['prompts_screened'] is True, 'busy_native_ui_hint')
+    if 'instances' in value:
+        require(isinstance(value['instances'], list), 'busy_native_ui_hint')
+        fields = {'surface', 'component', 'instance_id'}
+        for instance in value['instances']:
+            require(isinstance(instance, dict) and instance.keys() == fields
+                    and all(isinstance(item, str) for item in instance.values()),
+                    'busy_native_ui_hint')
+
+
 class BusyProbe:
     """Observe one held-response experiment; never issue an admission receipt."""
 
@@ -219,6 +237,11 @@ class BusyProbe:
         require(isinstance(value, dict) and value.get('session_id') == self.session_id,
                 'busy_native_session_mismatch')
         kind = value.get('type')
+        if kind == 'system' and value.get('subtype') == 'ui_invalidate':
+            # A pinned fire-and-forget render hint may precede init. It cannot
+            # initialize the session, mark it running, or satisfy a busy witness.
+            validate_passive_ui_hint(value)
+            return
         if kind == 'system' and value.get('subtype') == 'init':
             # Headless stream-json can emit init again for each queued turn.
             require(value.get('tools') == [], 'busy_native_init')
