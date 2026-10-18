@@ -88,3 +88,26 @@ qualify that future guarded launcher. Native helper pinning, provisioning,
 loader qualification and actual protected-launch acceptance remain outstanding.
 Functional TLS/parser evidence belongs to explicitly trusted private fixtures
 and cannot establish production launcher or transport readiness.
+
+## In-memory HTTP framing proof
+
+Run the additional fixture with the existing pinned Node executable:
+
+```sh
+"/absolute/physical/path/to/pinned-node" --test test_wire_parser.mjs
+```
+
+The fixture uses Node's real HTTP parser over an in-memory Duplex through the
+existing trusted request seam. It fragments response bytes, retains the child's
+header limits, and checks fixed-length, chunked and close-delimited bodies;
+ambiguous framing, truncation, malformed chunks, excessive headers/body,
+informational responses and redirects. Each case has a timeout and destroys its
+agent/streams on completion or test cleanup. Network socket connection attempts
+throw, and DNS answers are supplied directly by the fixture.
+
+Only HTTP framing is exercised. The fixture deliberately uses an HTTP agent
+instead of HTTPS, with synthetic authorization and peer-address properties.
+It does not establish TLS authentication, DNS, live network behavior, deadline
+supervision, protected launch authority, artifact acquisition or reviewer
+completion. The child, pins, public binding refusal and empty download-host
+policy are unchanged.
