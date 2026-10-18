@@ -25,6 +25,10 @@ synthetic provider; none used a real model provider or owner credentials.
   Evidence archive SHA-256:
   `cd660d6e601ef94b7273e98ccdadd92263aba4313d139f2ad68263df3d990dca`.
 
+The [structured synthetic evidence record](claude-synthetic-evidence.json)
+records both run identities, source revisions, archive/member hashes and recomputed
+observation counts. It contains metadata only; the raw archives remain private.
+
 Each of the two later archives contained five members: one export manifest and
 four exported files. Each archive's four file hashes were independently checked
 against its own manifest. Admission and delivery remain `unknown`; these
@@ -208,7 +212,7 @@ still does not prove TUI idle wake, busy queuing, receipt-v3, restart recovery,
 production enrollment or release qualification. Unit tests check parsing/refusal and
 isolation without executing Claude or manufacturing a native PASS artifact.
 
-## Local synthetic-provider mode
+## Local synthetic-provider mode (native qualification incomplete)
 
 A dedicated provider credential is unnecessary for the transport experiment. The
 [official gateway connection contract](https://code.claude.com/docs/en/llm-gateway-connect)
@@ -471,6 +475,15 @@ Initial preparation fetched only installer/manifest text; the audited hosted run
 subsequently verified and executed the pinned client. Every qualification run must
 verify downloaded bytes against the pinned hash before execution; it must not
 execute an installer or select `latest`.
+
+The subsequent [run `39081660889`](https://github.com/knitli/knitli-site/actions/runs/39081660889),
+attempt 1, passed the two-turn busy witness with 23 ordered observations, closing
+this sequence of failed busy-probe investigations. Its recomputed archive and
+export hashes are recorded in [the structured evidence](claude-synthetic-evidence.json).
+This is bounded synthetic same-session evidence: native admission and delivery
+remain unknown; baseline idle, durable receipts, native-process restart and
+production qualification remain unproven. The separate adapter-replacement
+observation below does not establish native-process restart.
 
 ## Same-live-session adapter recovery
 
