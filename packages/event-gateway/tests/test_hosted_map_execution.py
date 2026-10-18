@@ -34,10 +34,10 @@ class ChildTests(unittest.TestCase):
     def test_site_marker_is_sys_only_and_darwin_only(self):
         original_import = builtins.__import__
 
-        def sys_only(name, globals=None, *args, **kwargs):
-            if globals and globals.get('__name__') == '__main__' and name != 'sys':
+        def sys_only(name, global_ns=None, *args, **kwargs):
+            if global_ns and global_ns.get('__name__') == '__main__' and name != 'sys':
                 raise ImportError('marker must exit before other imports')
-            return original_import(name, globals, *args, **kwargs)
+            return original_import(name, global_ns, *args, **kwargs)
 
         for host, argv, expected in [('darwin', ['--startup-marker'], 'startup:site_startup_marker\n'),
                                      ('linux', ['--startup-marker'], ''),
