@@ -10,6 +10,7 @@ import os
 import platform
 import re
 import secrets
+import signal
 from pathlib import Path
 import shutil
 import stat
@@ -410,6 +411,174 @@ class BusyProbe:
                 'observations': [dict(item) for item in self.observations]}
 
 
+class ReattachProbe:
+    """Keep the original two-turn witness intact, then observe one fresh third turn."""
+
+    def __init__(self, session_id, initial, ready_marker):
+        self.busy = BusyProbe(session_id, initial, ready_marker)
+        self.session_id, self.started_ns = session_id, self.busy.started_ns
+        self.ready_to_send, self.release, self.failed = self.busy.ready_to_send, self.busy.release, self.busy.failed
+        self.first_pair_complete = self.busy.complete
+        self.complete = asyncio.Event()
+        self.fresh = self.initial_busy_proof = None
+        self.fresh_request = self.fresh_assistant = self.fresh_result = False
+        self.fresh_running = self.fresh_idle = self.fresh_write = False
+
+    @property
+    def initialized(self):
+        return self.busy.initialized
+
+    @property
+    def running(self):
+        return self.busy.running if self.fresh is None else self.fresh_running
+
+    @property
+    def held(self):
+        return self.busy.held
+
+    @property
+    def requests(self):
+        return self.busy.requests + int(self.fresh_request)
+
+    def record(self, kind, **fields):
+        self.busy.record(kind, **fields)
+
+    def hold_response(self):
+        self.busy.hold_response()
+
+    def prepare(self, frame):
+        self.busy.prepare(frame)
+
+    def sent(self):
+        self.busy.sent()
+
+    def release_response(self):
+        self.busy.release_response()
+
+    def provider_request(self, marker):
+        if self.busy.requests < 2:
+            self.busy.provider_request(marker)
+            return
+        require(self.fresh is not None and not self.fresh_request and marker == self.fresh['marker'],
+                'reattach_fresh_request_mismatch')
+        self.fresh_request = True
+        self.record('provider_request', turn=3)
+
+    def prepare_fresh(self, frame):
+        require(self.first_pair_complete.is_set() and not self.failed.is_set() and not self.busy.running
+                and self.fresh is None and frame['session_id'] == self.session_id,
+                'reattach_old_turn_incomplete')
+        content = frame['message']['content']
+        markers = re.findall(r'FRESH_[a-f0-9]{32}', content)
+        require(len(set(markers)) == 1 and frame['uuid'] not in self.busy.replayed
+                and frame['uuid'] not in (self.busy.initial.get('uuid'), self.busy.expected['uuid']),
+                'reattach_fresh_input_mismatch')
+        self.fresh = {'uuid': frame['uuid'], 'content': content, 'marker': markers[0]}
+        self.record('fresh_input_prepared', inputUuid=frame['uuid'],
+                    contentSha256=hashlib.sha256(content.encode()).hexdigest())
+
+    def fresh_sent(self):
+        require(self.fresh is not None and not self.fresh_write, 'reattach_fresh_send_order')
+        self.fresh_write = True
+        self.record('fresh_socket_write_closed', delivery='unknown')
+        self._complete()
+
+    def _complete(self):
+        if self.fresh_idle and self.fresh_write:
+            require(self.fresh_request and self.fresh_assistant and self.fresh_result
+                    and self.fresh['uuid'] in self.busy.replayed, 'reattach_fresh_witness_incomplete')
+            self.complete.set()
+
+    def _identity(self, value):
+        identity = value.get('uuid')
+        try:
+            require(isinstance(identity, str) and str(UUID(identity)) == identity, 'busy_native_identity')
+        except ValueError:
+            raise CanaryError('busy_native_identity') from None
+        require(identity not in self.busy.native_ids, 'busy_native_duplicate')
+        self.busy.native_ids.add(identity)
+        return identity
+
+    def observe(self, value):
+        if self.fresh is None:
+            self.busy.observe(value)
+            if self.first_pair_complete.is_set() and self.initial_busy_proof is None:
+                self.initial_busy_proof = self.busy.proof()
+            return
+        require(isinstance(value, dict) and value.get('session_id') == self.session_id,
+                'busy_native_session_mismatch')
+        kind = value.get('type')
+        if kind == 'system' and value.get('subtype') == 'ui_invalidate':
+            validate_passive_ui_hint(value)
+        elif kind == 'system' and value.get('subtype') == 'init':
+            require(value.get('tools') == [], 'busy_native_init')
+            self.record('native_init')
+        elif kind == 'command_lifecycle':
+            if value.get('command_uuid') != self.fresh['uuid']:
+                self.busy.observe(value)
+                return
+            required = {'type', 'command_uuid', 'state', 'uuid', 'session_id'}
+            state = value.get('state')
+            require(required <= value.keys() <= required | {'ran_ahead'}
+                    and state in ('queued', 'started', 'completed')
+                    and ('ran_ahead' not in value or value['ran_ahead'] is True and state == 'queued')
+                    and (state != 'completed' or self.fresh_result), 'reattach_fresh_command_lifecycle')
+            self._identity(value)
+            self.record('native_command_lifecycle', state=state)
+        elif kind == 'system' and value.get('subtype') == 'session_state_changed':
+            identity = self._identity(value)
+            state = value.get('state')
+            require(state in ('running', 'idle') and not self.fresh_idle, 'reattach_fresh_state')
+            if state == 'running':
+                require(not self.fresh_result, 'reattach_fresh_extra_turn')
+                self.fresh_running = True
+            else:
+                require(self.fresh_running and self.fresh_result, 'reattach_fresh_premature_idle')
+                self.fresh_running = False
+                self.fresh_idle = True
+            self.record('native_state', state=state, nativeUuid=identity)
+            self._complete()
+        elif kind == 'user':
+            require(value.get('uuid') == self.fresh['uuid'] and value.get('isReplay') is True
+                    and value.get('parent_tool_use_id') is None
+                    and self.fresh['uuid'] not in self.busy.replayed
+                    and matches_peer_replay(value.get('message'), self.fresh['content']),
+                    'reattach_fresh_replay_mismatch')
+            self.busy.replayed.add(self.fresh['uuid'])
+            self.record('native_user_replay', inputUuid=self.fresh['uuid'],
+                        contentSha256=hashlib.sha256(self.fresh['content'].encode()).hexdigest(),
+                        whileResponseHeld=False, admission='unknown')
+        elif kind == 'assistant':
+            message = value.get('message')
+            parts = message.get('content') if isinstance(message, dict) else None
+            require(self.fresh_running and self.fresh_request and not self.fresh_assistant
+                    and self.fresh['uuid'] in self.busy.replayed and isinstance(parts, list)
+                    and all(isinstance(part, dict) and part.get('type') in ('text', 'thinking')
+                            and isinstance(part.get('text', ''), str) for part in parts)
+                    and ''.join(part.get('text', '') for part in parts if part['type'] == 'text').strip()
+                    == self.fresh['marker'], 'reattach_fresh_assistant_mismatch')
+            self.fresh_assistant = True
+            self.record('native_assistant', turn=3)
+        elif kind == 'result':
+            require(self.fresh_running and self.fresh_assistant and not self.fresh_result
+                    and value.get('subtype') == 'success' and value.get('is_error') is False
+                    and isinstance(value.get('result'), str) and value['result'].strip() == self.fresh['marker'],
+                    'reattach_fresh_result_mismatch')
+            identity = self._identity(value)
+            self.fresh_result = True
+            self.record('native_result', turn=3, nativeUuid=identity)
+        else:
+            raise CanaryError('reattach_fresh_unexpected_message')
+
+    def proof(self):
+        require(self.complete.is_set() and not self.failed.is_set(), 'reattach_fresh_witness_incomplete')
+        return {'sessionId': self.session_id, 'oldInputUuid': self.busy.expected['uuid'],
+                'freshInputUuid': self.fresh['uuid'], 'freshContentSha256': hashlib.sha256(
+                    self.fresh['content'].encode()).hexdigest(), 'admission': 'unknown', 'delivery': 'unknown',
+                'nativeRestartQualified': False, 'timestamps': 'parent-monotonic-observation-nanoseconds',
+                'observations': [dict(item) for item in self.busy.observations]}
+
+
 async def observe_busy_stdout(reader, probe):
     """One bounded reader owns stdout; failures retain only classified envelopes."""
     size = order = 0
@@ -590,6 +759,25 @@ class LocalProvider:
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
+class ReattachProvider(LocalProvider):
+    """A separate three-request fixture; the existing two-turn provider is unchanged."""
+
+    def respond(self, value):
+        if self.turns < 2:
+            return super().respond(value)
+        require(self.turns == 2 and isinstance(value, dict) and value.get('stream') is True
+                and value.get('model') == self.model and value.get('tools', []) == [],
+                'reattach_provider_request_rejected')
+        messages = value.get('messages')
+        require(isinstance(messages, list) and messages and isinstance(messages[-1], dict)
+                and messages[-1].get('role') == 'user', 'reattach_provider_request_rejected')
+        candidates = re.findall(r'FRESH_[a-f0-9]{32}', json.dumps(messages[-1].get('content')))
+        require(len(set(candidates)) == 1, 'reattach_provider_fresh_missing')
+        self.probe.provider_request(candidates[0])
+        self.turns += 1
+        return synthetic_stream(candidates[0], self.model)
+
+
 async def completed_turn(reader, session_id, expected, state):
     """Require native assistant text and a successful result, never an echoed prompt."""
     assistant_seen = False
@@ -642,6 +830,175 @@ async def stop_child(child):
         except TimeoutError:
             child.kill()
             await asyncio.wait_for(child.wait(), 5)
+
+
+def adapter_actor_main():
+    """Private pipe worker: exercise the real adapter journal in a separate process."""
+    request = json.loads(sys.stdin.buffer.readline(16385))
+    require(isinstance(request, dict) and set(request) == {'action', 'options', 'old', 'fresh'},
+            'reattach_actor_request')
+    options = request['options']
+    options['socket_identity'] = tuple(options['socket_identity'])
+    options['journal_dir'] = Path(options['journal_dir'])
+    transport = ClaudeSocketTransport(**options)
+
+    def emit(value):
+        print(json.dumps(value), flush=True)
+
+    if request['action'] in ('reserve', 'write'):
+        reserve = transport._reserve
+
+        def paused_reserve(delivery_id):
+            # The original implementation has fsynced the file AND directory.
+            require(reserve(delivery_id), 'reattach_old_already_reserved')
+            emit({'checkpoint': 'reserved', 'messageUuid': delivery_id})
+            # Parent kills this process without letting send() open a socket.
+            sys.stdin.buffer.read(1)
+            raise CanaryError('reattach_crash_barrier_released')
+
+        if request['action'] == 'reserve':
+            transport._reserve = paused_reserve
+        else:
+            open_connection = asyncio.open_unix_connection
+
+            async def paused_open(*args, **kwargs):
+                reader, writer = await open_connection(*args, **kwargs)
+                wait_closed = writer.wait_closed
+
+                async def paused_close():
+                    # send() has already drained and closed the real writer.
+                    await wait_closed()
+                    emit({'checkpoint': 'write_closed',
+                          'messageUuid': event_frame(options['session_id'], request['old'])['uuid']})
+                    sys.stdin.buffer.read(1)
+                    raise CanaryError('reattach_crash_barrier_released')
+
+                writer.wait_closed = paused_close
+                return reader, writer
+
+            asyncio.open_unix_connection = paused_open
+        asyncio.run(transport.send(request['old']))
+        raise CanaryError('reattach_actor_survived')
+    require(request['action'] == 'recover', 'reattach_actor_action')
+
+    async def recover():
+        reconciliation = await transport.reconcile(request['old']['deliveryId'])
+        require(reconciliation == {'status': 'unknown', 'reason': 'claude_native_receipt_unavailable'},
+                'reattach_reconcile_claimed_delivery')
+        suppressed = await transport.send(request['old'])
+        require(suppressed == {'status': 'unknown', 'reason': 'claude_attempt_already_reserved'},
+                'reattach_old_not_quarantined')
+        emit({'checkpoint': 'old_suppressed', 'reconciliation': reconciliation, 'outcome': suppressed})
+        require(sys.stdin.buffer.read(1) == b'\n', 'reattach_fresh_not_authorized')
+        emit({'checkpoint': 'fresh_sent', 'outcome': await transport.send(request['fresh'])})
+
+    asyncio.run(recover())
+
+
+async def adapter_reattach(options, abandoned, fresh, *, before_fresh=None, record=None,
+                           crash_point='after-reservation-before-connect'):
+    """Kill only a reserved adapter, then recover its journal against the same live peer."""
+    old_frame = event_frame(options['session_id'], abandoned)
+    fresh_frame = event_frame(options['session_id'], fresh)
+    require(old_frame['uuid'] != fresh_frame['uuid'], 'reattach_requires_distinct_delivery')
+    require(crash_point in ('after-reservation-before-connect', 'after-write-close-before-result'),
+            'reattach_crash_point_invalid')
+    post_write = crash_point == 'after-write-close-before-result'
+    old_uuid = old_frame['uuid']
+    journal = Path(options['journal_dir'])
+    marker = journal / hashlib.sha256(f"{options['session_id']}:{old_uuid}".encode()).hexdigest()
+    serialized = dict(options, socket_identity=list(options['socket_identity']), journal_dir=str(journal))
+    actors = []
+
+    def observe(kind, **fields):
+        if record is not None:
+            record(kind, **fields)
+
+    async def start(action):
+        payload = (json.dumps({'action': action, 'options': serialized,
+                              'old': abandoned, 'fresh': fresh}) + '\n').encode()
+        require(len(payload) <= 16384, 'reattach_actor_request_limit')
+        package = Path(__file__).resolve().parent.parent
+        actor = await asyncio.create_subprocess_exec(
+            sys.executable, '-I', '-B', '-c',
+            'import runpy,sys; from pathlib import Path; p=Path(sys.argv[1]); '
+            'sys.path.insert(0,str(p/"src")); '
+            'runpy.run_path(str(p/"scripts/qualify_claude_socket.py"))["adapter_actor_main"]()',
+            str(package), env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'},
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL, close_fds=True, limit=4096)
+        actors.append(actor)
+        actor.stdin.write(payload)
+        await actor.stdin.drain()
+        return actor
+
+    async def checkpoint(actor):
+        raw = await asyncio.wait_for(actor.stdout.readline(), 5)
+        require(0 < len(raw) <= 4096, 'reattach_actor_checkpoint_missing')
+        try:
+            value = json.loads(raw)
+        except (ValueError, UnicodeError):
+            raise CanaryError('reattach_actor_checkpoint_invalid') from None
+        return value
+
+    try:
+        async with asyncio.timeout(20):
+            first = await start('write' if post_write else 'reserve')
+            require(await checkpoint(first) == {'checkpoint': 'write_closed' if post_write else 'reserved',
+                                                'messageUuid': old_uuid},
+                    'reattach_reservation_not_observed')
+            info = marker.lstat()
+            require(stat.S_ISREG(info.st_mode) and info.st_mode & 0o777 == 0o600
+                    and info.st_uid == os.getuid() and info.st_size == 0,
+                    'reattach_journal_marker_invalid')
+            marker_identity = (info.st_dev, info.st_ino)
+            observe('adapter_write_closed' if post_write else 'adapter_reservation_observed', inputUuid=old_uuid)
+            first.kill()
+            require(await asyncio.wait_for(first.wait(), 5) == -signal.SIGKILL,
+                    'reattach_adapter_not_killed')
+            observe('adapter_killed', adapterPid=first.pid)
+            second = await start('recover')
+            require(second.pid != first.pid, 'reattach_adapter_not_replaced')
+            expected_suppressed = {'checkpoint': 'old_suppressed',
+                'reconciliation': {'status': 'unknown', 'reason': 'claude_native_receipt_unavailable'},
+                'outcome': {'status': 'unknown', 'reason': 'claude_attempt_already_reserved'}}
+            require(await checkpoint(second) == expected_suppressed, 'reattach_old_not_quarantined')
+            info = marker.lstat()
+            require((info.st_dev, info.st_ino) == marker_identity and stat.S_ISREG(info.st_mode)
+                    and info.st_size == 0 and info.st_mode & 0o777 == 0o600,
+                    'reattach_journal_marker_changed')
+            observe('adapter_old_suppressed', inputUuid=old_uuid, adapterPid=second.pid)
+            if before_fresh is not None:
+                await before_fresh()
+            second.stdin.write(b'\n')
+            await second.stdin.drain()
+            second.stdin.close()
+            fresh_result = await checkpoint(second)
+            expected_outcome = {'status': 'unknown', 'reason': 'claude_write_unacknowledged'}
+            require(fresh_result == {'checkpoint': 'fresh_sent', 'outcome': expected_outcome},
+                    'reattach_fresh_write_unconfirmed')
+            require(await asyncio.wait_for(second.wait(), 5) == 0
+                    and await second.stdout.read(4097) == b'', 'reattach_actor_not_complete')
+            return expected_outcome, {'crashPoint': crash_point,
+                'adapterKilledAndReaped': True, 'adapterProcessReplaced': True,
+                'oldInputUuid': old_uuid, 'freshInputUuid': fresh_frame['uuid'],
+                'sameJournalMarkerRetained': True, 'oldRetrySuppressed': True,
+                'oldReconciliation': expected_suppressed['reconciliation'],
+                'admission': 'unknown', 'delivery': 'unknown', 'nativeProcessRestarted': False,
+                'nativeRestartQualified': False, 'postWriteAdapterCrashObserved': post_write,
+                'nativePostWriteRecoveryQualified': False}
+    finally:
+        primary_error = sys.exception()
+        cleanup_failed = False
+        for actor in actors:
+            try:
+                await stop_child(actor)
+            except (Exception, asyncio.CancelledError):
+                cleanup_failed = True
+        if cleanup_failed:
+            if primary_error is None:
+                raise CanaryError('reattach_actor_cleanup_failed') from None
+            primary_error.add_note('reattach_actor_cleanup_failed')
 
 
 async def close_local_provider(server, provider):
@@ -698,9 +1055,12 @@ def report_progress(phase, *, probe=None):
     print(json.dumps(progress), file=sys.stderr, flush=True)
 
 
-async def canary(binary, root, key, model, local_port=None, hosted_repository_id=None, *, busy_probe=False):
-    """Run exactly two synthetic turns; every success criterion is observed."""
+async def canary(binary, root, key, model, local_port=None, hosted_repository_id=None, *, busy_probe=False,
+                 adapter_reattach_probe=False):
+    """Run the selected bounded synthetic experiment; every success criterion is observed."""
     require(not busy_probe or local_port is not None, 'busy_probe_requires_local_provider')
+    require(not adapter_reattach_probe or busy_probe and local_port is not None,
+            'reattach_probe_requires_busy_local_provider')
     if hosted_repository_id is not None:
         require(local_port is not None, 'hosted_vm_requires_local_provider')
         admit_hosted_vm(os.environ, hosted_repository_id)
@@ -709,12 +1069,14 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
     server = provider = None
     observer = None
     observer_error = None
+    reattach_proof = None
+    expected_turns = 3 if adapter_reattach_probe else 2
     initial = {'type': 'user', 'session_id': session_id,
                'message': {'role': 'user', 'content': 'Begin the synthetic transport test.'}}
     probe = None
     if busy_probe:
         initial['uuid'] = str(uuid4())
-        probe = BusyProbe(session_id, initial, 'READY_' + marker)
+        probe = (ReattachProbe if adapter_reattach_probe else BusyProbe)(session_id, initial, 'READY_' + marker)
     for name in ('home', 'config', 'tmp', 'work'):
         (root / name).mkdir(mode=0o700)
     report_progress('preparing', probe=probe)
@@ -726,7 +1088,7 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
                 profile.write_text(hosted_network_profile(root, local_port, hosted_repository_id)
                                    if hosted_repository_id is not None
                                    else sandbox_profile(binary, root, local_port))
-                provider = LocalProvider(key, model, probe=probe)
+                provider = (ReattachProvider if adapter_reattach_probe else LocalProvider)(key, model, probe=probe)
                 report_progress('provider_starting', probe=probe)
                 server = await asyncio.start_server(provider.handle, '127.0.0.1', local_port,
                                                     limit=16384, reuse_address=False)
@@ -755,10 +1117,11 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
             socket_path = root / 'inbox.sock'
             info = socket_path.lstat()
             require(stat.S_ISSOCK(info.st_mode), 'child_inbox_unavailable')
-            transport = ClaudeSocketTransport(socket_path=str(socket_path),
+            transport_options = dict(socket_path=str(socket_path),
                 socket_identity=(info.st_dev, info.st_ino), peer_pid=child.pid,
                 session_id=session_id, token=child_peer_token(root, child.pid),
                 version=SUPPORTED_VERSION, journal_dir=root / 'journal')
+            transport = ClaudeSocketTransport(**transport_options)
             metadata = {'eventId': str(uuid4()), 'deliveryId': 'dly_' + hashlib.sha256(wake_marker.encode()).hexdigest(),
                         'source': 'manual', 'sourceStateVersion': 'canary-1',
                         'canonicalSubject': {'kind': 'manual', 'subjectId': wake_marker},
@@ -766,18 +1129,46 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
             if probe:
                 probe.prepare(event_frame(session_id, metadata))
             report_progress('socket_sending', probe=probe)
-            outcome = await transport.send(metadata)
+            if adapter_reattach_probe:
+                fresh_marker = 'FRESH_' + uuid4().hex
+                fresh = metadata | {'eventId': str(uuid4()),
+                    'deliveryId': 'dly_' + hashlib.sha256(fresh_marker.encode()).hexdigest(),
+                    'canonicalSubject': {'kind': 'manual', 'subjectId': fresh_marker},
+                    'eventReference': 'ref_' + str(uuid4())}
+
+                async def prepare_fresh():
+                    require(child.returncode is None, 'client_exited_during_reattach')
+                    # Reuse the retained native process and original socket binding.
+                    transport._check_socket()
+                    await wait_busy_witness(probe.ready_to_send, observer, probe)
+                    probe.sent()
+                    probe.release_response()
+                    await wait_busy_witness(probe.first_pair_complete, observer, probe)
+                    require(child.returncode is None, 'client_exited_during_reattach')
+                    transport._check_socket()
+                    probe.prepare_fresh(event_frame(session_id, fresh))
+
+                outcome, reattach_proof = await adapter_reattach(transport_options, metadata, fresh,
+                    before_fresh=prepare_fresh, record=probe.record,
+                    crash_point='after-write-close-before-result')
+                require(child.returncode is None, 'client_exited_during_reattach')
+                transport._check_socket()
+            else:
+                outcome = await transport.send(metadata)
             report_progress('socket_sent', probe=probe)
             require(outcome['reason'] == 'claude_write_unacknowledged', 'socket_write_unconfirmed')
             if probe:
-                await wait_busy_witness(probe.ready_to_send, observer, probe)
-                probe.sent()
-                probe.release_response()
+                if adapter_reattach_probe:
+                    probe.fresh_sent()
+                else:
+                    await wait_busy_witness(probe.ready_to_send, observer, probe)
+                    probe.sent()
+                    probe.release_response()
                 report_progress('waiting_final_witness', probe=probe)
                 await wait_busy_witness(probe.complete, observer, probe)
             else:
                 await completed_turn(child.stdout, session_id, wake_marker, state)
-            require(provider is None or provider.turns == 2 and not provider.failure,
+            require(provider is None or provider.turns == expected_turns and not provider.failure,
                     'local_provider_incomplete')
             proof = {'schemaVersion': 1,
                     'modelProvider': 'local-synthetic' if provider else 'dedicated-remote-key',
@@ -797,14 +1188,20 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
             if probe:
                 proof.update(scope='disposable-headless-native-witness-busy-probe', idleIntervalObserved=False,
                              matchingWakeTurnObserved=False, matchingBusyTurnObserved=True)
-                proof['busyProbe'] = probe.proof()
+                proof['busyProbe'] = probe.initial_busy_proof if adapter_reattach_probe else probe.proof()
                 proof['busyProbe']['retainedChildPid'] = child.pid
+            if reattach_proof is not None:
+                proof.update(scope='disposable-headless-same-live-session-adapter-reattach',
+                             adapterReattach=reattach_proof, sameLiveSessionAdapterRecoveryObserved=True,
+                             reattachProbe=probe.proof())
     except TimeoutError:
         report_progress('run_timeout', probe=probe)
         raise
     finally:
         primary_error = sys.exception()
-        cleanup_failed = False
+        cleanup_failed = primary_error is not None and (
+            str(primary_error) == 'reattach_actor_cleanup_failed'
+            or 'reattach_actor_cleanup_failed' in getattr(primary_error, '__notes__', ()))
         report_progress('stopping_child', probe=probe)
         try:
             if child is not None:
@@ -840,13 +1237,16 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
             shutil.rmtree(root)
     # Pending requests can fail while the child/server/provider are shutting down.
     # Only settled provider state may authorize returning the selected proof.
-    require(provider is None or provider.turns == 2 and not provider.failure,
+    require(provider is None or provider.turns == expected_turns and not provider.failure,
             'local_provider_incomplete')
     if observer_error is not None:
         raise observer_error
     if probe:
         # Include any final observations drained while the retained child stopped.
-        proof['busyProbe'] = probe.proof() | {'retainedChildPid': child.pid}
+        proof['busyProbe'] = (probe.initial_busy_proof if adapter_reattach_probe else probe.proof()) | {
+            'retainedChildPid': child.pid}
+        if adapter_reattach_probe:
+            proof['reattachProbe'] = probe.proof() | {'retainedChildPid': child.pid}
     return proof
 
 
@@ -878,6 +1278,8 @@ def main(argv=None):
     parser.add_argument('--local-provider', action='store_true', help='Synthetic local SSE; no credential or spend')
     parser.add_argument('--busy-probe', action='store_true',
                         help='Experimental native state/replay observations; local synthetic provider only')
+    parser.add_argument('--adapter-reattach-probe', action='store_true',
+                        help='Kill/restart only the adapter after write close; three synthetic turns')
     parser.add_argument('--local-port', type=int, default=43231)
     parser.add_argument('--trusted-hosted-vm', action='store_true',
                         help='Reviewed client on a fresh private GitHub-hosted macOS VM only')
@@ -886,6 +1288,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         require(not args.busy_probe or args.local_provider, 'busy_probe_requires_local_provider')
+        require(not args.adapter_reattach_probe or args.busy_probe and args.local_provider,
+                'reattach_probe_requires_busy_local_provider')
         require(args.trusted_hosted_vm == (args.hosted_repository_id is not None),
                 'hosted_vm_repository_id_required')
         if args.trusted_hosted_vm:
@@ -906,7 +1310,7 @@ def main(argv=None):
         proof = asyncio.run(canary(binary, root, key, args.model,
                                   args.local_port if args.local_provider else None,
                                   args.hosted_repository_id if args.trusted_hosted_vm else None,
-                                  busy_probe=args.busy_probe))
+                                  busy_probe=args.busy_probe, adapter_reattach_probe=args.adapter_reattach_probe))
         publish_proof(output, proof)
         print(json.dumps({'canary': 'observed', 'productionQualified': False}))
         return 0
