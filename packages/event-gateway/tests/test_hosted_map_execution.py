@@ -7,6 +7,8 @@ import errno
 import json
 import importlib.util
 import io
+import itertools
+import sys
 import runpy
 from pathlib import Path
 import tempfile
@@ -29,6 +31,28 @@ probe = load('probe')
 
 
 class ChildTests(unittest.TestCase):
+    def test_site_marker_is_sys_only_and_darwin_only(self):
+        original_import = builtins.__import__
+
+        def sys_only(name, global_ns=None, *args, **kwargs):
+            if global_ns and global_ns.get('__name__') == '__main__' and name != 'sys':
+                raise ImportError('marker must exit before other imports')
+            return original_import(name, global_ns, *args, **kwargs)
+
+        for host, argv, expected in [('darwin', ['--startup-marker'], 'startup:site_startup_marker\n'),
+                                     ('linux', ['--startup-marker'], ''),
+                                     ('darwin', ['--startup-marker', 'extra'], 'startup:script_entry\n')]:
+            output = io.StringIO()
+            with self.subTest(host=host, argv=argv), patch.object(sys, 'platform', host), \
+                    patch.object(sys, 'argv', ['child', *argv]), contextlib.redirect_stderr(output), \
+                    patch.object(builtins, '__import__', side_effect=sys_only):
+                with self.assertRaises((SystemExit, ImportError)) as stopped:
+                    runpy.run_path(str(BASE / 'hosted_map_execution_child.py'), run_name='__main__')
+            self.assertEqual(output.getvalue(), expected)
+            if host == 'darwin' and argv == ['--startup-marker']:
+                self.assertIsInstance(stopped.exception, SystemExit)
+                self.assertEqual(stopped.exception.code, 0)
+
     def test_read_observer_never_accesses_native_mapping(self):
         libc = Mock()
         with patch.object(child.ctypes, 'CFUNCTYPE') as cfun, patch.object(child.ctypes, 'set_errno') as set_errno:
@@ -225,6 +249,60 @@ class SupervisorTests(unittest.TestCase):
                 self.assertEqual(result['status'], 'INCONCLUSIVE')
                 self.assertFalse(result['qualified'])
                 self.assertTrue(result['fixtureRemoved'])
+
+    def test_site_startup_fixed_cases_and_no_default_widening(self):
+        prefix = [probe.SANDBOX, '-f', str(probe.ROOT / 'control_before.sb'), probe.SAFE_PY, '-I', '-B']
+        self.assertEqual(probe.site_startup_cases(), [
+            ('site_startup:version', prefix + ['--version']),
+            ('site_startup:enabled', prefix + [str(probe.CHILD), '--startup-marker']),
+            ('site_startup:disabled', prefix + ['-S', str(probe.CHILD), '--startup-marker'])])
+        self.assertEqual(len(probe.fixture_cases()), 18)
+        self.assertEqual(len(probe.fixture_cases(True)), 1)
+        with patch.object(probe, 'run', return_value=1) as run:
+            self.assertEqual(probe.main(['--site-startup-only']), 1)
+            run.assert_called_once_with(site_startup_only=True)
+        for argv in (['--site-startup-only', 'extra'], ['--site-startup-only', '--go']):
+            with self.assertRaises(SystemExit):
+                probe.main(argv)
+        with patch.object(probe.subprocess, 'Popen', side_effect=AssertionError('mock launch boundary')) as launch:
+            for _, argv in probe.site_startup_cases():
+                with self.assertRaisesRegex(AssertionError, 'mock launch boundary'):
+                    probe.bounded(argv)
+            self.assertEqual(launch.call_count, 3)
+            for _, argv in probe.site_startup_cases():
+                with self.assertRaisesRegex(ValueError, 'command_not_fixed'):
+                    probe.bounded(argv + ['extra'])
+            self.assertEqual(launch.call_count, 3)
+
+    def test_site_startup_all_outcomes_and_cleanup_stop(self):
+        for codes in itertools.product((0, -6), repeat=3):
+            for unknown_cleanup in (None, 0, 1, 2):
+                with self.subTest(codes=codes, unknown_cleanup=unknown_cleanup), tempfile.TemporaryDirectory() as directory:
+                    env = {key: 'fixed' for key in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'ImageOS', 'ImageVersion')}
+                    env['RUNNER_TEMP'] = str(Path(directory).resolve())
+                    receipts = [dict(self.receipt([]), returncode=code,
+                                     stdout='Python 3.13.14\n' if code == 0 and index == 0 else '',
+                                     stderr='startup:site_startup_marker\n' if code == 0 and index != 0 else '',
+                                     cleanupConfirmed=index != unknown_cleanup) for index, code in enumerate(codes)]
+                    with patch.dict(probe.os.environ, env, clear=True), \
+                            patch.object(probe, 'ROOT', probe.ROOT), patch.object(probe, 'ENV', {}), \
+                            patch.object(probe, 'admit'), patch.object(probe, 'file_record', return_value=self.fixture), \
+                            patch.object(probe, 'tool_ancestry', return_value=[]), \
+                            patch.object(probe, 'bounded', side_effect=receipts) as bounded, \
+                            patch.object(probe, 'classify', side_effect=AssertionError('site mode must not classify matrix')), \
+                            patch.object(probe.subprocess, 'Popen', side_effect=AssertionError('no actual execution')):
+                        self.assertEqual(probe.run(site_startup_only=True), 1)
+                        count = 3 if unknown_cleanup is None else unknown_cleanup + 1
+                        self.assertEqual(bounded.call_count, count)
+                        self.assertEqual([call.args[0] for call in bounded.call_args_list],
+                                         [argv for _, argv in probe.site_startup_cases()][:count])
+                        result = json.loads((probe.ROOT / 'result.json').read_text())
+                        self.assertEqual(list(result['receipts']), [name for name, _ in probe.site_startup_cases()][:count])
+                        self.assertEqual(list(result['receipts'].values()), receipts[:count])
+                        self.assertIsNone(result['error'])
+                        self.assertEqual(result['status'], 'INCONCLUSIVE')
+                        self.assertIs(result['qualified'], False)
+                        self.assertTrue(result['fixtureRemoved'])
 
     def test_positive_controls_and_denial_matrix(self):
         receipts = self.matrix()

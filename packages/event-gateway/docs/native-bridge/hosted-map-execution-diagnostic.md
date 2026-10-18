@@ -115,6 +115,44 @@ admission variables, weaken profiles or retry a failed attempt to force a pass.
 Pre-opened descriptors, aliases, other mapping forms, dynamic loading and actual
 CLT runtime closure are outside this diagnostic's claim.
 
+## Private startup discriminator candidate
+
+The diagnostic-only `--site-startup-only` mode selects a fixed interpreter-version
+control and two marker-only child launches. All three use the same existing
+`control_before` profile and closed environment. The marker launches differ only
+by adding `-S` to `-I -B`; the child emits a fixed marker and exits before its
+extension imports, fixture access or mapping code. No sandbox permissions change.
+
+The fixed case order is `site_startup:version`, `site_startup:enabled`, then
+`site_startup:disabled`. Both marker cases emit exactly
+`startup:site_startup_marker` followed by a newline on stderr. The version case
+uses `-I -B --version` without a script or module.
+
+The version control tests whether the executable reaches its version-reporting
+path. It does not establish full interpreter initialization. The normal marker
+includes automatic site initialization; the `-S` marker omits it. Interpret the
+raw receipts as follows, requiring zero exit status, the exact expected output,
+and confirmed cleanup before treating a control as successful:
+
+| Result | Supported conclusion |
+| --- | --- |
+| Version succeeds, both markers fail | Early interpreter entry works; the shared later initialization/script path remains suspect. |
+| Only the `-S` marker succeeds | The difference involves automatic site initialization or its effects; no specific denied operation is established. |
+| Only the normal marker succeeds | Startup behavior depends on configuration; this does not support blaming site initialization. |
+| Both markers succeed | Both minimal script paths work in this attempt; the prior abort is not reproduced or explained. |
+| Version and both markers fail | Launcher, process-image loading and early interpreter failure remain unresolved. |
+
+No outcome qualifies the runtime or constitutes mapping/execution-matrix evidence.
+The mode always reports `INCONCLUSIVE` with `qualified: false`; raw receipts remain
+the evidence. A failed control does not suppress later controls when cleanup is
+confirmed, but uncertain cleanup stops further launches. Default full-matrix and
+startup-read modes retain their existing behavior.
+
+Adoption requires a separate Cloud integration pinned to the actual reviewed
+Toolshed merge, with a separate closed discriminator receipt set in the exporter.
+The mapped-matrix receipt set and PASS requirements must remain unchanged.
+No candidate preparation, merge or pin update authorizes a hosted execution.
+
 ## Mock verification
 
 The normal Event Gateway workflow discovers `tests/test_hosted_map_execution.py`

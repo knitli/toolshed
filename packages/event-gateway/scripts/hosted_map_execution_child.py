@@ -8,6 +8,12 @@ def startup_phase(name):
     sys.stderr.flush()
 
 
+if __name__ == '__main__' and sys.argv[1:] == ['--startup-marker']:
+    if sys.platform != 'darwin':
+        raise SystemExit('Darwin startup marker only')
+    startup_phase('site_startup_marker')
+    raise SystemExit(0)
+
 if __name__ == '__main__':
     startup_phase('script_entry')
 import ctypes
