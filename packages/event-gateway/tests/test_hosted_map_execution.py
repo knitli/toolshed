@@ -163,7 +163,7 @@ class SupervisorTests(unittest.TestCase):
         self.assertFalse(probe.returned(receipt, 'initial_rx', {'identity': [], 'sha256': 'other'}))
 
     def test_environment_is_closed(self):
-        with patch.dict(probe.os.environ, {'SECRET': 'must-not-leak', 'PYTHONPATH': '/untrusted'}, clear=True):
+        with patch.dict(probe.os.environ, {'CLOSED_ENV_SENTINEL': 'sentinel-value', 'PYTHONPATH': '/untrusted'}, clear=True):
             self.assertEqual(probe.closed_environment(), {
                 'PATH': '/usr/bin:/bin', 'LANG': 'C', 'LC_ALL': 'C',
                 'HOME': str(probe.ROOT), 'TMPDIR': str(probe.ROOT)})
