@@ -21,6 +21,8 @@ const names = [
   'github/material-read.ts',
   'github/reconciliation-internal.ts',
   'github/reconciliation-store.ts',
+  'github/reconciliation-planner.ts',
+  'github/initial-plan-material-read.ts',
   'github/source-reference-contract.ts',
   'github/source-reference-store.ts',
   'quarantine-inventory.ts',
