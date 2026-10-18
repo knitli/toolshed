@@ -194,3 +194,28 @@ closed environment and ownership cleanup without mapping or executing the stub.
 python -I -B -m unittest discover -s packages/event-gateway/tests \
   -p test_hosted_map_execution.py -v
 ```
+
+### Version-pair crash observation
+
+The version-only pair additionally records parent-owned child PID, parent PID, UID,
+and paired UTC/monotonic launch and exit observations. After both children are
+reaped, a best-effort observer waits once for 29 seconds, then examines at most
+four new Python/sandbox-exec `.ips` candidates in the runner user's physical
+`~/Library/Logs/DiagnosticReports` directory, baselined before the pair. The total
+availability deadline is 30 seconds: the final scan has the remaining one-second
+budget after that wait, with deadline checks and no retries. Local regular-file
+reads and JSON parsing are bounded by size but are not hard real-time interruptible.
+
+A match requires the owned PID/parent PID, file owner, exact frozen interpreter or
+sandbox-exec path, and report event times inside the owned UTC interval; the
+report-arrival allowance never widens that identity interval. Clock disagreement,
+missing/private/malformed identity, ambiguous incidents, changed files, symlinks,
+hardlinks, directory/candidate overflow, or unavailable reports yield the fixed
+`unavailable` status. Reads are capped at 1 MiB per candidate and 2 MiB total.
+Only executable class, a closed termination namespace classification and numeric
+code, report SHA-256, and byte count survive parsing. No raw reports, paths,
+frames, symbols, images, exception text, or other free-form crash data are saved.
+
+These observations never change case return codes, cleanup truth, the fixed pair,
+control profile, environment, or qualification. The result remains `INCONCLUSIVE`
+and `qualified: false`; unavailable evidence does not show that no crash occurred.

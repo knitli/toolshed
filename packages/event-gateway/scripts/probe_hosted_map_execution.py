@@ -1,15 +1,18 @@
 """Fixed mapped-code diagnostic for a reviewed hosted protected-main workflow."""
 import errno
+from datetime import datetime
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
+import re
 import selectors
 import stat
 import subprocess
 import sys
 import time
+import uuid
 
 BASE = Path(__file__).resolve().parent
 ROOT = BASE / 'NOT-A-HOSTED-ATTEMPT'
@@ -71,6 +74,189 @@ def tool_ancestry(path):
         records.append({'path': str(parent), 'identity': identity(info)})
     return records
 
+
+CRASH_NAMES = re.compile(r'(?:Python|python3(?:\.13)?|sandbox-exec)-\d{4}-\d{2}-\d{2}-\d{6}\.ips')
+CRASH_CASES = ('version_launch:direct', 'version_launch:sandboxed')
+
+
+def crash_names(descriptor):
+    names = set()
+    with os.scandir(descriptor) as entries:
+        for count, entry in enumerate(entries):
+            if count >= 1024:
+                raise ValueError('directory_limit')
+            names.add(entry.name)
+    return names
+
+
+def crash_baseline(home, uid):
+    descriptor = None
+    try:
+        path = Path(home)
+        if not path.is_absolute() or len(path.parts) == 1 or '..' in path.parts:
+            return None
+        path = path / 'Library/Logs/DiagnosticReports'
+        ancestry = tool_ancestry(path)
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        descriptor = os.open('/', flags)
+        for index, component in enumerate(path.parts[1:], 1):
+            following = os.open(component, flags, dir_fd=descriptor)
+            try:
+                os.close(descriptor)
+            except OSError:
+                os.close(following)
+                raise
+            descriptor = following
+            if index == len(Path(home).parts) - 1 and os.fstat(descriptor).st_uid != uid:
+                raise ValueError('home_owner')
+        info = os.fstat(descriptor)
+        if info.st_uid != uid or identity(info)[:6] != identity(path.lstat())[:6]:
+            raise ValueError('directory_identity')
+        return {'descriptor': descriptor, 'names': crash_names(descriptor), 'ancestry': ancestry,
+                'path': path, 'identity': identity(info)[:6], 'uid': uid}
+    except (OSError, ValueError, TypeError):
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        return None
+
+
+def crash_unique(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('duplicate_key')
+        result[key] = value
+    return result
+
+def crash_invalid_constant(value):
+    raise ValueError('nonfinite')
+
+def crash_exact_int(value):
+    return type(value) is int and 0 <= value <= 2**63 - 1
+
+def crash_timestamp(value):
+    if not isinstance(value, str) or len(value) > 40:
+        raise ValueError('event_time')
+    return datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f %z').timestamp()
+
+
+def crash_match(raw, receipt, uid):
+    if receipt.get('returncode') != -6 or receipt.get('cleanupConfirmed') is not True:
+        return None
+    header, body = raw.decode('utf-8').split('\n', 1)
+    options = {'object_pairs_hook': crash_unique, 'parse_constant': crash_invalid_constant}
+    meta, report = json.loads(header, **options), json.loads(body, **options)
+    if not isinstance(meta, dict) or not isinstance(report, dict) or meta.get('bug_type') != '309':
+        return None
+    incident = meta.get('incident_id')
+    if (not isinstance(incident, str) or len(incident) != 36 or str(uuid.UUID(incident)) != incident.lower()
+            or report.get('incident') != incident):
+        return None
+    owned = receipt['launch']
+    for field, expected in (('pid', owned['pid']), ('parentPid', owned['parentPid'])):
+        if not crash_exact_int(report.get(field)) or report[field] != expected or expected <= 0:
+            return None
+    if 'userID' in report and (not crash_exact_int(report['userID']) or report['userID'] != uid):
+        return None
+    if owned['uid'] != uid:
+        return None
+    paths = {SAFE_PY: ('python', {'Python', 'python3.13', 'python3'}),
+             SANDBOX: ('sandbox-exec', {'sandbox-exec'})}
+    if receipt.get('argv') == version_launch_cases()[0][1]:
+        paths.pop(SANDBOX)
+    elif receipt.get('argv') != version_launch_cases()[1][1]:
+        return None
+    path = report.get('procPath')
+    if not isinstance(path, str) or path not in paths:
+        return None
+    executable, names = paths[path]
+    if not isinstance(report.get('procName'), str) or report['procName'] not in names:
+        return None
+    wall = owned['exitUtc'] - owned['launchUtc']
+    elapsed = owned['exitMonotonic'] - owned['launchMonotonic']
+    if (wall < 0 or elapsed < 0 or abs(wall - elapsed) > 1
+            or not owned['launchUtc'] <= crash_timestamp(report.get('procLaunch'))
+            <= crash_timestamp(report.get('captureTime')) <= owned['exitUtc']):
+        return None
+    termination = report.get('termination')
+    if not isinstance(termination, dict) or not crash_exact_int(termination.get('code')):
+        return None
+    namespace = termination.get('namespace')
+    if not isinstance(namespace, str) or len(namespace) > 64:
+        return None
+    namespace = namespace if namespace in {'SIGNAL', 'DYLD', 'CODESIGNING', 'SANDBOX'} else 'OTHER'
+    return incident, {'status': 'matched', 'executableClass': executable,
+                      'terminationNamespace': namespace, 'terminationCode': termination['code'],
+                      'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)}
+
+
+def crash_add_match(matches, incident, retained):
+    if matches.setdefault(incident, retained) != retained:
+        raise ValueError('inconsistent_incident')
+
+
+def crash_collect(state, receipts):
+    unavailable = {name: {'status': 'unavailable'} for name in CRASH_CASES}
+    if state is None:
+        return unavailable
+    descriptor = state['descriptor']
+    try:
+        if any(receipts.get(name, {}).get('cleanupConfirmed') is not True for name in CRASH_CASES):
+            return unavailable
+        deadline = time.monotonic() + 30
+        time.sleep(29)  # One availability wait after both children are reaped; no retries.
+        if (time.monotonic() >= deadline
+                or not physical_ancestry_matches(tool_ancestry(state['path']), state['ancestry'])
+                or identity(state['path'].lstat())[:6] != state['identity']
+                or identity(os.fstat(descriptor))[:6] != state['identity']):
+            return unavailable
+        names = {name for name in crash_names(descriptor) - state['names'] if CRASH_NAMES.fullmatch(name)}
+        if len(names) > 4:
+            return unavailable
+        total = 0
+        matches = {name: {} for name in CRASH_CASES}
+        for name in sorted(names):
+            if time.monotonic() >= deadline:
+                return unavailable
+            before = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if (not stat.S_ISREG(before.st_mode) or before.st_uid != state['uid'] or before.st_nlink != 1
+                    or before.st_size > 1024 * 1024 or total + before.st_size > 2 * 1024 * 1024):
+                return unavailable
+            report_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=descriptor)
+            try:
+                if identity(os.fstat(report_fd)) != identity(before) or os.fstat(report_fd).st_nlink != 1:
+                    return unavailable
+                raw = os.read(report_fd, before.st_size)
+                total += len(raw)
+                if (len(raw) != before.st_size or identity(os.fstat(report_fd)) != identity(before)
+                        or os.fstat(report_fd).st_nlink != 1
+                        or identity(os.stat(name, dir_fd=descriptor, follow_symlinks=False)) != identity(before)
+                        or os.stat(name, dir_fd=descriptor, follow_symlinks=False).st_nlink != 1
+                        or time.monotonic() >= deadline):
+                    return unavailable
+            finally:
+                os.close(report_fd)
+            for case in CRASH_CASES:
+                matched = crash_match(raw, receipts[case], state['uid'])
+                if matched is not None:
+                    incident, retained = matched
+                    crash_add_match(matches[case], incident, retained)
+        if time.monotonic() >= deadline:
+            return unavailable
+        return {case: next(iter(values.values())) if len(values) == 1 else {'status': 'unavailable'}
+                for case, values in matches.items()}
+    except (OSError, ValueError, TypeError, KeyError, RecursionError, OverflowError):
+        return unavailable
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            return unavailable
+
+
 def unreaped_exit(process):
     if process.returncode is not None:
         raise ValueError('child_already_reaped')
@@ -98,12 +284,20 @@ def cleanup_child(process, deadline):
     if errors:
         raise RuntimeError('; '.join(errors))
 
-def bounded(argv):
+def observe_exit(launch):
+    if launch is not None and 'exitUtc' not in launch:
+        launch.update(exitUtc=time.time(), exitMonotonic=time.monotonic())
+
+
+def bounded(argv, *, observe_launch=False):
     if argv not in [command for _, command in fixture_cases() + site_startup_cases() + version_launch_cases()]:
         raise ValueError('command_not_fixed')
     deadline = time.monotonic() + SECONDS
+    launch = ({'parentPid': os.getpid(), 'uid': os.getuid(), 'launchUtc': time.time(),
+               'launchMonotonic': time.monotonic()} if observe_launch else None)
     process = subprocess.Popen(argv, cwd=ROOT, env=dict(ENV), stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True, close_fds=True)
+    launch = {**launch, 'pid': process.pid} if launch is not None else None
     buffers = {'stdout': bytearray(), 'stderr': bytearray()}
     selector = None
     primary = None
@@ -131,11 +325,13 @@ def bounded(argv):
             if remaining <= 0:
                 raise TimeoutError('child_deadline')
             time.sleep(min(0.01, remaining))
+        observe_exit(launch)
     except BaseException as error:
         primary = error
     finally:
         try:
             cleanup_child(process, deadline)
+            observe_exit(launch)
         except BaseException as error:
             cleanup_failure = type(error).__name__ + ': ' + str(error)
         finally:
@@ -148,7 +344,8 @@ def bounded(argv):
                 except BaseException as error:
                     detail = 'close: ' + type(error).__name__ + ': ' + str(error)
                     cleanup_failure = (cleanup_failure + '; ' if cleanup_failure else '') + detail
-    return {'argv': argv, 'returncode': process.returncode,
+    return {**({'launch': launch} if launch is not None else {}),
+            'argv': argv, 'returncode': process.returncode,
             'error': type(primary).__name__ + ': ' + str(primary) if primary else None,
             'cleanupError': cleanup_failure, 'cleanupConfirmed': cleanup_failure is None,
             **{name: bytes(value).decode('utf-8', errors='replace') for name, value in buffers.items()}}
@@ -322,6 +519,7 @@ def run(*, startup_only=False, site_startup_only=False, version_launch_only=Fals
         raise ValueError('runner_temp_physical')
     ROOT = temp / 'fixed-map-execution-attempt-v1'
     ROOT.mkdir(mode=0o700)  # One attempt; no retries or reuse.
+    actual_home = os.environ.get('HOME', '') if version_launch_only else None
     ENV = closed_environment()
     receipts = {}
     fixture = None
@@ -329,6 +527,8 @@ def run(*, startup_only=False, site_startup_only=False, version_launch_only=Fals
     error = None
     removed = False
     frozen = {}
+    crash_state = None
+    crash_observations = None
     try:
         for path in (Path(__file__).resolve(), CHILD, Path(SAFE_PY), Path(SANDBOX)):
             ancestry = tool_ancestry(path)
@@ -339,12 +539,13 @@ def run(*, startup_only=False, site_startup_only=False, version_launch_only=Fals
         fixture = file_record(ROOT / 'mapping-data')
         for path in (ROOT / 'mapping-data', *(ROOT / (name + '.sb') for name in PROFILES)):
             frozen[str(path)] = (file_record(path), tool_ancestry(path))
+        crash_state = crash_baseline(actual_home, os.getuid()) if version_launch_only else None
         for name, argv in attempt_cases(startup_only, site_startup_only, version_launch_only):
             for raw, (record, ancestry) in frozen.items():
                 if (file_record(Path(raw), 32 * 1024 * 1024) != record
                         or not physical_ancestry_matches(tool_ancestry(Path(raw)), ancestry)):
                     raise ValueError('input_changed')
-            receipts[name] = bounded(argv)
+            receipts[name] = bounded(argv, observe_launch=True) if version_launch_only else bounded(argv)
             for raw, (record, ancestry) in frozen.items():
                 if (file_record(Path(raw), 32 * 1024 * 1024) != record
                         or not physical_ancestry_matches(tool_ancestry(Path(raw)), ancestry)):
@@ -358,19 +559,23 @@ def run(*, startup_only=False, site_startup_only=False, version_launch_only=Fals
         # Do not erase already observed denied execution on a later failure.
         status = 'FAIL_EXECUTION_ALLOWED' if fixture and classify_attempt(receipts, fixture, diagnostic_only) == 'FAIL_EXECUTION_ALLOWED' else 'INCONCLUSIVE'
     finally:
-        data_path = ROOT / 'mapping-data'
         try:
-            if data_path.exists():
-                data_path.unlink()  # Input is never modified by child; no recursive scratch deletion.
-            removed = not os.path.lexists(data_path)
-        except OSError as caught:
-            error = (error or '') + '; fixture cleanup: ' + str(caught)
-        if not removed and status != 'FAIL_EXECUTION_ALLOWED':
-            status = 'INCONCLUSIVE'
+            data_path = ROOT / 'mapping-data'
+            try:
+                if data_path.exists():
+                    data_path.unlink()  # Input is never modified by child; no recursive scratch deletion.
+                removed = not os.path.lexists(data_path)
+            except OSError as caught:
+                error = (error or '') + '; fixture cleanup: ' + str(caught)
+            if not removed and status != 'FAIL_EXECUTION_ALLOWED':
+                status = 'INCONCLUSIVE'
+        finally:
+            crash_observations = crash_collect(crash_state, receipts) if version_launch_only else None
     result = {'status': status, 'qualified': False, 'error': error, 'fixtureRemoved': removed,
               'claim': 'fixed synthetic mapped-code matrix only; CLT runtime remains unqualified',
               'runner': {key: os.environ[key] for key in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'ImageOS', 'ImageVersion')},
               'inputs': frozen, 'fixture': fixture, 'receipts': receipts}
+    result.update({'crashObservations': crash_observations} if version_launch_only else {})
     write_new(ROOT / 'result.json', (json.dumps(result, indent=2) + '\n').encode())
     return 0 if status == 'SYSCALL_AND_CONTROL_MATRIX_PASS' else 1
 
