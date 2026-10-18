@@ -141,7 +141,8 @@ class MaterialReadTests(unittest.IsolatedAsyncioTestCase):
     async def test_cursor_cannot_rebind_page_to_another_requested_range(self):
         self.results = [pages()[1]]
         with self.assertRaisesRegex(CloudError, "^invalid_response$"):
-            await self.client.github_source_material({**REQUEST, "fromVersion": 4, "cursor": material_cursor(len("private 😀 first\n".encode("utf-16-le")) // 2)})
+            await self.client.github_source_material(
+                {**REQUEST, "fromVersion": 4, "cursor": material_cursor(len("private 😀 first\n".encode("utf-16-le")) // 2)})
 
     async def test_closed_response_types_and_echoes(self):
         mutations = [lambda p: p.update(extra="raw"), lambda p: p.update(firstVersion=True),
