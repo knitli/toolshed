@@ -4,6 +4,7 @@ import contextlib
 import ctypes
 import copy
 import errno
+import hashlib
 import json
 import importlib.util
 import io
@@ -12,6 +13,7 @@ import sys
 import runpy
 from pathlib import Path
 import tempfile
+import types
 import unittest
 from unittest.mock import Mock, patch
 
@@ -289,11 +291,18 @@ class SupervisorTests(unittest.TestCase):
                             patch.object(probe, 'admit'), patch.object(probe, 'file_record', return_value=self.fixture), \
                             patch.object(probe, 'tool_ancestry', return_value=[]), \
                             patch.object(probe, 'bounded', side_effect=receipts) as bounded, \
+                            patch.object(probe, 'crash_baseline', return_value=None) as baseline, \
                             patch.object(probe, 'classify', side_effect=AssertionError('diagnostic mode must not classify matrix')), \
                             patch.object(probe.subprocess, 'Popen', side_effect=AssertionError('no actual execution')):
                         self.assertEqual(probe.run(**{mode: True}), 1)
                         count = len(successful_outputs) if unknown_cleanup is None else unknown_cleanup + 1
                         self.assertEqual(bounded.call_count, count)
+                        expected_kwargs = {'observe_launch': True} if mode == 'version_launch_only' else {}
+                        self.assertEqual([call.kwargs for call in bounded.call_args_list], [expected_kwargs] * count)
+                        if mode == 'version_launch_only':
+                            baseline.assert_called_once_with('', probe.os.getuid())
+                        else:
+                            baseline.assert_not_called()
                         self.assertEqual([call.args[0] for call in bounded.call_args_list],
                                          [argv for _, argv in cases()][:count])
                         result = json.loads((probe.ROOT / 'result.json').read_text())
@@ -474,6 +483,282 @@ class SupervisorTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'command_not_fixed'):
                 probe.bounded(['/bin/sh'])
             spawn.assert_not_called()
+
+
+class CrashObservationTests(unittest.TestCase):
+    incident = '12345678-1234-4234-8234-123456789abc'
+    filename = 'Python-2026-10-18-010001.ips'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name).resolve()
+        self.folder = self.home / 'Library/Logs/DiagnosticReports'
+        self.folder.mkdir(parents=True)
+        self.uid = probe.os.getuid()
+        self.receipt = {'returncode': -6, 'cleanupConfirmed': True,
+                        'argv': probe.version_launch_cases()[0][1],
+                        'launch': {'pid': 1234, 'parentPid': 123, 'uid': self.uid,
+                                   'launchUtc': 1792285200.0, 'exitUtc': 1792285202.0,
+                                   'launchMonotonic': 100.0, 'exitMonotonic': 102.0}}
+        self.header = {'bug_type': '309', 'incident_id': self.incident}
+        self.body = {'incident': self.incident, 'pid': 1234, 'parentPid': 123,
+                     'procPath': probe.SAFE_PY, 'procName': 'Python', 'userID': self.uid,
+                     'procLaunch': '2026-10-18 01:00:00.500 +0000',
+                     'captureTime': '2026-10-18 01:00:01.500 +0000',
+                     'termination': {'namespace': 'SIGNAL', 'code': 6},
+                     'threads': [{'secret': 'MUST_NOT_EXPORT'}], 'private': 'MUST_NOT_EXPORT'}
+
+    def raw(self, header=None, body=None):
+        return (json.dumps(self.header if header is None else header) + '\n'
+                + json.dumps(self.body if body is None else body)).encode()
+
+    def assert_rejected(self, raw, receipt=None):
+        try:
+            observed = probe.crash_match(raw, self.receipt if receipt is None else receipt, self.uid)
+        except ValueError:
+            return
+        self.assertIsNone(observed)
+
+    def test_crash_match_exact_sanitized_provenance(self):
+        for path, name, expected in ((probe.SAFE_PY, 'Python', 'python'),
+                                     (probe.SAFE_PY, 'python3.13', 'python'),
+                                     (probe.SANDBOX, 'sandbox-exec', 'sandbox-exec')):
+            raw = self.raw(body={**self.body, 'procPath': path, 'procName': name})
+            receipt = {**self.receipt, 'argv': probe.version_launch_cases()[1 if path == probe.SANDBOX else 0][1]}
+            incident, result = probe.crash_match(raw, receipt, self.uid)
+            self.assertEqual(incident, self.incident)
+            self.assertEqual(result, {'status': 'matched', 'executableClass': expected,
+                                     'terminationNamespace': 'SIGNAL', 'terminationCode': 6,
+                                     'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)})
+            self.assertNotIn('MUST_NOT_EXPORT', json.dumps(result))
+        self.assertIsNotNone(probe.crash_match(self.raw(body={k: v for k, v in self.body.items() if k != 'userID'}),
+                                              self.receipt, self.uid))
+
+    def test_crash_match_direct_cannot_claim_launcher(self):
+        raw = self.raw(body={**self.body, 'procPath': probe.SANDBOX, 'procName': 'sandbox-exec'})
+        self.assert_rejected(raw)
+        for argv in ([], self.receipt['argv'] + ['extra'], [probe.SAFE_PY, '-c', 'pass']):
+            self.assert_rejected(self.raw(), {**self.receipt, 'argv': argv})
+
+    def test_bounded_launch_observation_is_parent_owned(self):
+        process = Mock(pid=1234, returncode=-6)
+        selector = Mock()
+        selector.get_map.return_value = {}
+        with patch.object(probe.subprocess, 'Popen', return_value=process), \
+                patch.object(probe.selectors, 'DefaultSelector', return_value=selector), \
+                patch.object(probe.os, 'set_blocking'), patch.object(probe, 'unreaped_exit', return_value=object()), \
+                patch.object(probe, 'cleanup_child') as cleanup, patch.object(probe.os, 'getpid', return_value=123), \
+                patch.object(probe.os, 'getuid', return_value=501), patch.object(probe.time, 'time', side_effect=[1000, 1002]), \
+                patch.object(probe.time, 'monotonic', side_effect=[100, 101, 103]):
+            receipt = probe.bounded(probe.version_launch_cases()[0][1], observe_launch=True)
+        self.assertEqual(receipt['launch'], {'pid': 1234, 'parentPid': 123, 'uid': 501,
+                                           'launchUtc': 1000, 'exitUtc': 1002,
+                                           'launchMonotonic': 101, 'exitMonotonic': 103})
+        self.assertTrue(receipt['cleanupConfirmed'])
+        cleanup.assert_called_once_with(process, 110)
+
+    def test_crash_match_rejects_identity_schema_and_clock_mismatch(self):
+        changes = [('pid', 999), ('pid', True), ('parentPid', 999), ('parentPid', '123'),
+                   ('procPath', '/untrusted/python'), ('procName', 'unrelated'), ('userID', self.uid + 1),
+                   ('userID', True), ('incident', 'not-a-uuid'),
+                   ('incident', '22345678-1234-4234-8234-123456789abc'),
+                   ('procLaunch', '2026-10-18 00:59:59.999 +0000'),
+                   ('captureTime', '2026-10-18 01:00:02.001 +0000'),
+                   ('captureTime', '2026-10-18 01:00:00.001 +0000'),
+                   ('termination', None), ('termination', {'namespace': 'SIGNAL', 'code': True}),
+                   ('termination', {'namespace': 'SIGNAL', 'code': '6'})]
+        for key, value in changes:
+            with self.subTest(key=key, value=value):
+                self.assert_rejected(self.raw(body={**self.body, key: value}))
+        for header in ({**self.header, 'bug_type': 309}, {**self.header, 'bug_type': '999'},
+                       {**self.header, 'incident_id': 'not-a-uuid'}):
+            self.assert_rejected(self.raw(header=header))
+        for key, value in [('returncode', 0), ('cleanupConfirmed', False)]:
+            self.assert_rejected(self.raw(), {**self.receipt, key: value})
+        for key, value in [('pid', True), ('parentPid', True), ('uid', self.uid + 1),
+                           ('exitMonotonic', 105.0), ('launchUtc', float('nan'))]:
+            self.assert_rejected(self.raw(), {**self.receipt, 'launch': {**self.receipt['launch'], key: value}})
+
+    def test_crash_match_rejects_noncanonical_json(self):
+        raw = self.raw()
+        for malformed in (b'', b'{}', raw + b'\n{}', raw + b' trailing',
+                          raw.replace(b'"pid": 1234', b'"pid": 1234, "pid": 1234'),
+                          raw.replace(b'"private": "MUST_NOT_EXPORT"', b'"private": NaN'),
+                          raw.replace(b'"bug_type": "309"', b'"bug_type": "309", "bug_type": "309"')):
+            with self.subTest(raw=malformed):
+                self.assert_rejected(malformed)
+
+    def collect(self, state, receipts=None):
+        pair = {'version_launch:direct': self.receipt,
+                'version_launch:sandboxed': {**self.receipt, 'returncode': 0}}
+        with patch.object(probe.time, 'sleep') as sleep, patch.object(probe.time, 'monotonic', return_value=100):
+            result = probe.crash_collect(state, pair if receipts is None else receipts)
+        self.assertLessEqual(sleep.call_count, 1)
+        if sleep.called:
+            sleep.assert_called_once_with(29)
+        return result
+
+    def test_crash_collect_new_report_only_and_descriptor_closed(self):
+        (self.folder / 'Python-2026-10-18-010000.ips').write_bytes(self.raw())
+        state = probe.crash_baseline(str(self.home), self.uid)
+        self.assertIsNotNone(state)
+        descriptor = state['descriptor']
+        (self.folder / self.filename).write_bytes(self.raw())
+        result = self.collect(state)
+        self.assertEqual(result['version_launch:direct']['status'], 'matched')
+        self.assertEqual(result['version_launch:sandboxed'], {'status': 'unavailable'})
+        with self.assertRaises(OSError):
+            probe.os.fstat(descriptor)
+
+    def test_crash_collect_caps_aliases_and_ambiguity(self):
+        for case in ('symlink', 'hardlink', 'directory', 'oversize', 'too_many', 'aggregate', 'ambiguous', 'unrelated'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp:
+                home = Path(temp).resolve()
+                folder = home / 'Library/Logs/DiagnosticReports'
+                folder.mkdir(parents=True)
+                state = probe.crash_baseline(str(home), self.uid)
+                path = folder / self.filename
+                if case == 'symlink':
+                    target = home / 'target'
+                    target.write_bytes(self.raw())
+                    path.symlink_to(target)
+                elif case == 'hardlink':
+                    target = home / 'target'
+                    target.write_bytes(self.raw())
+                    probe.os.link(target, path)
+                elif case == 'directory':
+                    path.mkdir()
+                elif case == 'oversize':
+                    path.write_bytes(b'x' * (1024 * 1024 + 1))
+                elif case == 'unrelated':
+                    (folder / 'secret.ips').write_bytes(self.raw())
+                else:
+                    count = 5 if case == 'too_many' else 3 if case == 'aggregate' else 2
+                    for index in range(count):
+                        raw = self.raw(body={**self.body, 'private': 'x' * 800000}) if case == 'aggregate' else self.raw()
+                        if case == 'ambiguous':
+                            incident = f'{index + 1}2345678-1234-4234-8234-123456789abc'
+                            raw = self.raw(header={**self.header, 'incident_id': incident}, body={**self.body, 'incident': incident})
+                        (folder / f'Python-2026-10-18-01000{index}.ips').write_bytes(raw)
+                self.assertEqual(self.collect(state)['version_launch:direct'], {'status': 'unavailable'})
+
+    def test_crash_collect_rechecks_file_identity_and_owner(self):
+        for change in ('owner', 'replaced', 'changed_after_read'):
+            with self.subTest(change=change):
+                path = self.folder / self.filename
+                if path.exists():
+                    path.unlink()
+                state = probe.crash_baseline(str(self.home), self.uid)
+                path.write_bytes(self.raw())
+                real_stat = probe.os.stat
+                real_fstat = probe.os.fstat
+                calls = 0
+
+                def changed_stat(*args, **kwargs):
+                    nonlocal calls
+                    value = real_stat(*args, **kwargs)
+                    if kwargs.get('dir_fd') is not None:
+                        calls += 1
+                        if change == 'owner' or (change == 'replaced' and calls == 2):
+                            fields = {name: getattr(value, name) for name in dir(value) if name.startswith('st_')}
+                            key = 'st_uid' if change == 'owner' else 'st_ino'
+                            fields[key] += 1
+                            return types.SimpleNamespace(**fields)
+                    return value
+
+                def changed_fstat(fd):
+                    nonlocal calls
+                    value = real_fstat(fd)
+                    if fd != state['descriptor']:
+                        calls += 1
+                        if calls >= 3:
+                            fields = {name: getattr(value, name) for name in dir(value) if name.startswith('st_')}
+                            fields['st_size'] += 1
+                            return types.SimpleNamespace(**fields)
+                    return value
+
+                with patch.object(probe.os, 'stat', side_effect=changed_stat), \
+                        patch.object(probe.os, 'fstat', side_effect=changed_fstat if change == 'changed_after_read' else real_fstat):
+                    self.assertEqual(self.collect(state)['version_launch:direct'], {'status': 'unavailable'})
+
+    def test_crash_collect_deadline_and_directory_replacement_reject(self):
+        state = probe.crash_baseline(str(self.home), self.uid)
+        (self.folder / self.filename).write_bytes(self.raw())
+        pair = {key: self.receipt for key in ('version_launch:direct', 'version_launch:sandboxed')}
+        with patch.object(probe.time, 'sleep'), patch.object(probe.time, 'monotonic', side_effect=[100, 130]):
+            self.assertTrue(all(value == {'status': 'unavailable'} for value in probe.crash_collect(state, pair).values()))
+        state = probe.crash_baseline(str(self.home), self.uid)
+        self.folder.rename(self.folder.with_name('replaced'))
+        self.folder.mkdir()
+        (self.folder / self.filename).write_bytes(self.raw())
+        self.assertEqual(self.collect(state)['version_launch:direct'], {'status': 'unavailable'})
+
+    def test_crash_baseline_rejects_symlink_ancestor(self):
+        with patch.object(probe.os, 'open') as opened:
+            self.assertIsNone(probe.crash_baseline('/', self.uid))
+            opened.assert_not_called()
+        alias = self.home / 'alias'
+        alias.symlink_to(self.home, target_is_directory=True)
+        self.assertIsNone(probe.crash_baseline(str(alias), self.uid))
+
+    def test_crash_baseline_rejects_wrong_home_owner(self):
+        real_fstat = probe.os.fstat
+        home_inode = self.home.stat().st_ino
+
+        def wrong_owner(fd):
+            value = real_fstat(fd)
+            if value.st_ino == home_inode:
+                fields = {name: getattr(value, name) for name in dir(value) if name.startswith('st_')}
+                fields['st_uid'] += 1
+                return types.SimpleNamespace(**fields)
+            return value
+
+        with patch.object(probe.os, 'fstat', side_effect=wrong_owner):
+            self.assertIsNone(probe.crash_baseline(str(self.home), self.uid))
+
+    def test_crash_collect_rejects_post_read_entry_link_count(self):
+        state = probe.crash_baseline(str(self.home), self.uid)
+        (self.folder / self.filename).write_bytes(self.raw())
+        real_stat = probe.os.stat
+        calls = 0
+
+        def changed_links(*args, **kwargs):
+            nonlocal calls
+            value = real_stat(*args, **kwargs)
+            if kwargs.get('dir_fd') is not None:
+                calls += 1
+                if calls >= 2:
+                    fields = {name: getattr(value, name) for name in dir(value) if name.startswith('st_')}
+                    fields['st_nlink'] = 2
+                    return types.SimpleNamespace(**fields)
+            return value
+
+        with patch.object(probe.os, 'stat', side_effect=changed_links):
+            self.assertEqual(self.collect(state)['version_launch:direct'], {'status': 'unavailable'})
+
+    def test_crash_collect_close_failure_returns_unavailable(self):
+        state = probe.crash_baseline(str(self.home), self.uid)
+        (self.folder / self.filename).write_bytes(self.raw())
+        real_close = probe.os.close
+
+        def failed_close(fd):
+            real_close(fd)
+            if fd == state['descriptor']:
+                raise OSError('synthetic directory close failure')
+
+        with patch.object(probe.os, 'close', side_effect=failed_close):
+            self.assertEqual(self.collect(state), {key: {'status': 'unavailable'} for key in probe.CRASH_CASES})
+
+    def test_crash_collect_requires_both_cleanups_and_handles_no_baseline(self):
+        self.assertEqual(self.collect(None), {key: {'status': 'unavailable'} for key in
+                                             ('version_launch:direct', 'version_launch:sandboxed')})
+        state = probe.crash_baseline(str(self.home), self.uid)
+        (self.folder / self.filename).write_bytes(self.raw())
+        pair = {'version_launch:direct': self.receipt,
+                'version_launch:sandboxed': {**self.receipt, 'cleanupConfirmed': False}}
+        self.assertEqual(self.collect(state, pair)['version_launch:direct'], {'status': 'unavailable'})
+        self.assertIsNone(probe.crash_baseline(str(self.home / 'missing'), self.uid))
 
 
 if __name__ == '__main__':
