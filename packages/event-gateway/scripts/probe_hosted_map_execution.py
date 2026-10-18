@@ -24,6 +24,8 @@ DATA = STUB + bytes(65536 - len(STUB))
 OPERATIONS = ('read', 'private_r', 'private_rw', 'initial_rx', 'r_to_rx', 'rw_to_rx')
 EXEC_OPERATIONS = OPERATIONS[3:]
 PROFILES = ('control_before', 'denied', 'control_after')
+STARTUP_PHASES = ('script_entry', 'ctypes_imported', 'imports_complete', 'platform_checked',
+                  'limits_set', 'fixture_opened', 'fixture_verified')
 
 def identity(info):
     return [getattr(info, key) for key in ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid',
@@ -185,6 +187,7 @@ def profiles():
     # Default-deny filesystem and network; trusted fresh VM runtime roots only.
     roots = (ROOT, Path(sys.base_prefix).resolve(), Path('/System'), Path('/usr/lib'),
              Path('/usr/share/locale'), Path('/Library/Apple'), Path('/private/etc'))
+
     def q(path):
         return json.dumps(str(path))
     control = '\n'.join([
@@ -200,10 +203,11 @@ def profiles():
                             if name == 'denied' else '') for name in PROFILES}
 
 
-def fixture_cases():
-    return [(profile + ':' + operation,
+def fixture_cases(startup_only=False):
+    cases = [(profile + ':' + operation,
              [SANDBOX, '-f', str(ROOT / (profile + '.sb')), SAFE_PY, '-I', '-B', str(CHILD), '--child', operation])
             for profile in PROFILES for operation in OPERATIONS]
+    return cases[:1] if startup_only else cases
 
 
 def events(receipt, fixture, *, complete_prefix=False):
@@ -233,9 +237,20 @@ def returned(receipt, operation, fixture):
             and type(values[1]['value']) is int)
 
 
+def startup_trace(stderr):
+    if not isinstance(stderr, str) or len(stderr.encode('utf-8')) > LIMIT:
+        return None
+    lines = stderr.splitlines(keepends=True)
+    expected = ['startup:' + phase + '\n' for phase in STARTUP_PHASES]
+    if lines != expected[:len(lines)]:
+        return None
+    return STARTUP_PHASES[:len(lines)]
+
+
 def healthy(receipt):
     return (receipt.get('returncode') == 0 and receipt.get('cleanupConfirmed') is True
-            and receipt.get('error') is None and receipt.get('cleanupError') is None and receipt.get('stderr') == '')
+            and receipt.get('error') is None and receipt.get('cleanupError') is None
+            and startup_trace(receipt.get('stderr')) == STARTUP_PHASES)
 
 
 def classify(receipts, fixture):
@@ -270,7 +285,7 @@ def classify(receipts, fixture):
     return 'SYSCALL_AND_CONTROL_MATRIX_PASS'
 
 
-def run():
+def run(*, startup_only=False):
     global ROOT, ENV
     admit(os.environ)
     temp = Path(os.environ['RUNNER_TEMP'])
@@ -295,7 +310,7 @@ def run():
         fixture = file_record(ROOT / 'mapping-data')
         for path in (ROOT / 'mapping-data', *(ROOT / (name + '.sb') for name in PROFILES)):
             frozen[str(path)] = (file_record(path), tool_ancestry(path))
-        for name, argv in fixture_cases():
+        for name, argv in fixture_cases(startup_only):
             for raw, (record, ancestry) in frozen.items():
                 if (file_record(Path(raw), 32 * 1024 * 1024) != record
                         or not physical_ancestry_matches(tool_ancestry(Path(raw)), ancestry)):
@@ -331,7 +346,11 @@ def run():
     return 0 if status == 'SYSCALL_AND_CONTROL_MATRIX_PASS' else 1
 
 
+def main(argv):
+    if argv not in (['--go'], ['--startup-only']):
+        raise SystemExit('Only separately approved hosted --go or --startup-only is supported')
+    return run(startup_only=argv == ['--startup-only'])
+
+
 if __name__ == '__main__':
-    if sys.argv[1:] != ['--go']:
-        raise SystemExit('Only separately approved hosted --go is supported')
-    raise SystemExit(run())
+    raise SystemExit(main(sys.argv[1:]))

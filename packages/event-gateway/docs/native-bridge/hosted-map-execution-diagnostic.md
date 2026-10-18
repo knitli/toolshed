@@ -37,6 +37,11 @@ receipts. A signal, timeout, failed positive control, unexpected architecture or
 uncertain cleanup remains inconclusive. An accepted mprotect alone is neither
 execution evidence nor evidence that execution is prevented.
 
+The `--startup-only` mode schedules only the existing `control_before:read` case.
+It verifies and reads the same fixture under the existing control profile, without
+loading libc, mapping memory or invoking the fixed callback. Even a healthy read
+remains `INCONCLUSIVE`, with `qualified: false`, because the full matrix is absent.
+
 ## Launch and evidence contract
 
 The parent admits only the fixed private Cloud repository, exact protected-main
@@ -70,13 +75,42 @@ The Cloud job must retain the immutable workflow/Toolshed identities, image,
 hashes and raw receipts. Missing evidence cannot pass. VM disposal is a provider
 lifecycle assumption, not an observed destruction receipt.
 
-The fixed command, after a separately approved Cloud integration, is:
+The child emits these exact newline-terminated stderr markers in order:
+
+```text
+startup:script_entry
+startup:ctypes_imported
+startup:imports_complete
+startup:platform_checked
+startup:limits_set
+startup:fixture_opened
+startup:fixture_verified
+```
+
+Raw stderr is retained. An exact shorter prefix can locate the last completed
+startup phase but is never healthy; reordered, repeated or additional lines are
+invalid. A healthy receipt requires all seven markers, zero exit status,
+confirmed cleanup and no execution or cleanup error. A complete trace alone
+does not establish matrix success.
+
+The full-matrix command, after a separately approved Cloud integration, is:
 
 ```sh
 python -I -B packages/event-gateway/scripts/probe_hosted_map_execution.py --go
 ```
 
-This command intentionally rejects ordinary local environments. Do not change
+The separately approved startup-only command is:
+
+```sh
+python -I -B packages/event-gateway/scripts/probe_hosted_map_execution.py --startup-only
+```
+
+These are source capabilities. The Cloud workflow's fixed invocation and
+reviewed pin are a separate integration change; adding this source mode does not
+change that workflow or authorize execution. Both modes retain the same admission,
+profiles, bounds and cleanup. `--go` continues to select the full matrix.
+
+Both commands intentionally reject ordinary local environments. Do not change
 admission variables, weaken profiles or retry a failed attempt to force a pass.
 Pre-opened descriptors, aliases, other mapping forms, dynamic loading and actual
 CLT runtime closure are outside this diagnostic's claim.

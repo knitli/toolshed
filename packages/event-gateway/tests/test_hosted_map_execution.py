@@ -1,4 +1,5 @@
 """Mock-only diagnostic tests: no subprocess, native mapping, or function execution."""
+import builtins
 import contextlib
 import ctypes
 import copy
@@ -6,7 +7,9 @@ import errno
 import json
 import importlib.util
 import io
+import runpy
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
@@ -26,6 +29,14 @@ probe = load('probe')
 
 
 class ChildTests(unittest.TestCase):
+    def test_read_observer_never_accesses_native_mapping(self):
+        libc = Mock()
+        with patch.object(child.ctypes, 'CFUNCTYPE') as cfun, patch.object(child.ctypes, 'set_errno') as set_errno:
+            self.assertEqual(child.observe(7, 'read', libc), {'stage': 'read', 'status': 0, 'errno': 0})
+        self.assertEqual(libc.mock_calls, [])
+        cfun.assert_not_called()
+        set_errno.assert_not_called()
+
     def test_exact_constant_return_bytes(self):
         self.assertEqual(child.STUB, b'\x40\x05\x80\x52\xc0\x03\x5f\xd6')
         self.assertEqual(child.DATA, child.STUB + bytes(65536 - 8))
@@ -72,6 +83,51 @@ class ChildTests(unittest.TestCase):
                 cfun.assert_not_called()
                 self.assertEqual(libc.munmap.call_count, int(stage == 'mprotect'))
 
+    def test_script_entry_precedes_ctypes_import_failure(self):
+        original_import = builtins.__import__
+
+        def fail_ctypes(name, *args, **kwargs):
+            if name == 'ctypes':
+                raise ImportError('mock ctypes startup failure')
+            return original_import(name, *args, **kwargs)
+
+        output = io.StringIO()
+        with patch.object(builtins, '__import__', side_effect=fail_ctypes), \
+                contextlib.redirect_stderr(output):
+            with self.assertRaisesRegex(ImportError, 'mock ctypes'):
+                runpy.run_path(str(BASE / 'hosted_map_execution_child.py'), run_name='__main__')
+        self.assertEqual(output.getvalue(), 'startup:script_entry\n')
+
+    def test_control_read_never_loads_libc_or_maps_memory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'mapping-data'
+            path.write_bytes(child.DATA)
+            path.chmod(0o600)
+            for entrypoint in ('direct', 'script'):
+                with self.subTest(entrypoint=entrypoint):
+                    output, diagnostics = io.StringIO(), io.StringIO()
+                    with patch.object(child.sys, 'argv', ['child.py', '--child', 'read']), \
+                            patch.object(child.sys, 'platform', 'darwin'), \
+                            patch.object(child.platform, 'machine', return_value='arm64'), \
+                            patch.object(child.resource, 'setrlimit'), \
+                            patch.object(child.Path, 'cwd', return_value=root), \
+                            patch.object(child.ctypes, 'CDLL', side_effect=AssertionError('no native loader')), \
+                            patch.object(child, 'observe', wraps=child.observe) as observer, \
+                            contextlib.redirect_stdout(output), contextlib.redirect_stderr(diagnostics):
+                        if entrypoint == 'direct':
+                            child.main()
+                        else:
+                            runpy.run_path(str(BASE / 'hosted_map_execution_child.py'), run_name='__main__')
+                    if entrypoint == 'direct':
+                        observer.assert_called_once()
+                        self.assertEqual(observer.call_args.args[1:], ('read', None))
+                    phases = probe.STARTUP_PHASES[3:] if entrypoint == 'direct' else probe.STARTUP_PHASES
+                    self.assertEqual(diagnostics.getvalue(), ''.join('startup:' + phase + '\n' for phase in phases))
+                    values = [json.loads(line) for line in output.getvalue().splitlines()]
+                    self.assertEqual(values[-1], {'event': 'result', 'stage': 'read', 'status': 0, 'errno': 0})
+                    self.assertEqual(path.read_bytes(), child.DATA)
+
     def test_child_host_gate_precedes_native_loading(self):
         with patch.object(child.sys, 'argv', ['child.py', '--child', 'initial_rx']), \
                 patch.object(child.sys, 'platform', 'linux'), \
@@ -86,7 +142,7 @@ class SupervisorTests(unittest.TestCase):
 
     def receipt(self, values):
         return {'returncode': 0, 'cleanupConfirmed': True, 'cleanupError': None,
-                'error': None, 'stderr': '', 'stdout': '\n'.join(json.dumps(v) for v in
+                'error': None, 'stderr': ''.join('startup:' + phase + '\n' for phase in probe.STARTUP_PHASES), 'stdout': '\n'.join(json.dumps(v) for v in
                     [{'event': 'input', **self.fixture}, *values])}
 
     def success(self, operation):
@@ -107,6 +163,68 @@ class SupervisorTests(unittest.TestCase):
                                'status': 0, 'errno': 0}]
                 result[profile + ':' + operation] = self.receipt(values)
         return result
+
+    def test_startup_abort_retains_each_exact_prefix_without_passing(self):
+        for count in range(len(probe.STARTUP_PHASES) + 1):
+            with self.subTest(count=count):
+                receipt = self.receipt([])
+                receipt.update(returncode=-6, stdout='', stderr=''.join(
+                    'startup:' + phase + '\n' for phase in probe.STARTUP_PHASES[:count]))
+                self.assertEqual(probe.startup_trace(receipt['stderr']), probe.STARTUP_PHASES[:count])
+                self.assertFalse(probe.healthy(receipt))
+                self.assertEqual(probe.classify({'control_before:read': receipt}, self.fixture), 'INCONCLUSIVE')
+
+    def test_only_complete_exact_startup_trace_can_pass_matrix(self):
+        complete = self.receipt([])['stderr']
+        bad_traces = ['', complete[:-1], complete + 'unknown\n', complete + complete,
+                      'startup:script_entry\n' * 2, 'x' * (probe.LIMIT + 1)]
+        lines = complete.splitlines(keepends=True)
+        bad_traces.extend(''.join(lines[:index] + lines[index + 1:]) for index in range(len(lines)))
+        bad_traces.extend(''.join(lines[:index] + [lines[index + 1], lines[index]] + lines[index + 2:])
+                          for index in range(len(lines) - 1))
+        for stderr in bad_traces:
+            with self.subTest(stderr=stderr[:80]):
+                receipts = self.matrix()
+                receipts['control_before:read']['stderr'] = stderr
+                self.assertFalse(probe.healthy(receipts['control_before:read']))
+                self.assertEqual(probe.classify(receipts, self.fixture), 'INCONCLUSIVE')
+                self.assertEqual(receipts['control_before:read']['stderr'], stderr)
+
+    def test_fixed_startup_flag_schedules_only_existing_control_read(self):
+        self.assertEqual(probe.fixture_cases(True), probe.fixture_cases()[:1])
+        self.assertEqual(probe.fixture_cases(True)[0][0], 'control_before:read')
+        self.assertEqual(probe.fixture_cases(True)[0][1][-2:], ['--child', 'read'])
+        with patch.object(probe, 'run', return_value=1) as run:
+            self.assertEqual(probe.main(['--startup-only']), 1)
+            run.assert_called_once_with(startup_only=True)
+            run.reset_mock()
+            self.assertEqual(probe.main(['--go']), 1)
+            run.assert_called_once_with(startup_only=False)
+            run.reset_mock()
+            for argv in ([], ['--startup-only', '--go'], ['--startup-only', 'read'], ['--startup-only=1']):
+                with self.subTest(argv=argv), self.assertRaises(SystemExit):
+                    probe.main(argv)
+            run.assert_not_called()
+
+    def test_successful_startup_run_never_qualifies_or_schedules_matrix(self):
+        receipt = self.receipt([{'event': 'result', 'stage': 'read', 'status': 0, 'errno': 0}])
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory).resolve()
+            env = {key: 'fixed' for key in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'ImageOS', 'ImageVersion')}
+            env['RUNNER_TEMP'] = str(temp)
+            with patch.dict(probe.os.environ, env, clear=True), \
+                    patch.object(probe, 'ROOT', probe.ROOT), patch.object(probe, 'ENV', {}), \
+                    patch.object(probe, 'admit'), patch.object(probe, 'file_record', return_value=self.fixture), \
+                    patch.object(probe, 'tool_ancestry', return_value=[]), \
+                    patch.object(probe, 'bounded', return_value=receipt) as bounded, \
+                    patch.object(probe.subprocess, 'Popen', side_effect=AssertionError('no actual execution')):
+                self.assertEqual(probe.run(startup_only=True), 1)
+                bounded.assert_called_once_with(probe.fixture_cases(True)[0][1])
+                result = json.loads((probe.ROOT / 'result.json').read_text())
+                self.assertEqual(set(result['receipts']), {'control_before:read'})
+                self.assertEqual(result['status'], 'INCONCLUSIVE')
+                self.assertFalse(result['qualified'])
+                self.assertTrue(result['fixtureRemoved'])
 
     def test_positive_controls_and_denial_matrix(self):
         receipts = self.matrix()
@@ -134,7 +252,7 @@ class SupervisorTests(unittest.TestCase):
                     values = self.success(operation)
                     values[1]['value'] = value
                     receipt = self.receipt(values)
-                    receipt.update(cleanupConfirmed=False, cleanupError='unreaped', returncode=-9)
+                    receipt.update(cleanupConfirmed=False, cleanupError='unreaped', returncode=-9, stderr='unexpected startup output')
                     self.assertEqual(probe.classify({'denied:' + operation: receipt}, self.fixture),
                                      'FAIL_EXECUTION_ALLOWED')
 
