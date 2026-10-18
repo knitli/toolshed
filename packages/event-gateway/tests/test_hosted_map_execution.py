@@ -7,6 +7,7 @@ import errno
 import json
 import importlib.util
 import io
+import runpy
 from pathlib import Path
 import tempfile
 import unittest
@@ -83,11 +84,10 @@ class ChildTests(unittest.TestCase):
             return original_import(name, *args, **kwargs)
 
         output = io.StringIO()
-        source = (BASE / 'hosted_map_execution_child.py').read_text()
         with patch.object(builtins, '__import__', side_effect=fail_ctypes), \
                 contextlib.redirect_stderr(output):
             with self.assertRaisesRegex(ImportError, 'mock ctypes'):
-                exec(compile(source, str(BASE / 'hosted_map_execution_child.py'), 'exec'), {'__name__': '__main__'})
+                runpy.run_path(str(BASE / 'hosted_map_execution_child.py'), run_name='__main__')
         self.assertEqual(output.getvalue(), 'startup:script_entry\n')
 
     def test_control_read_never_loads_libc_or_observes_mappings(self):
@@ -96,33 +96,26 @@ class ChildTests(unittest.TestCase):
             path = root / 'mapping-data'
             path.write_bytes(child.DATA)
             path.chmod(0o600)
-            output, diagnostics = io.StringIO(), io.StringIO()
-            with patch.object(child.sys, 'argv', ['child.py', '--child', 'read']), \
-                    patch.object(child.sys, 'platform', 'darwin'), \
-                    patch.object(child.platform, 'machine', return_value='arm64'), \
-                    patch.object(child.resource, 'setrlimit'), \
-                    patch.object(child.Path, 'cwd', return_value=root), \
-                    patch.object(child.ctypes, 'CDLL', side_effect=AssertionError('no native loader')), \
-                    patch.object(child, 'observe', side_effect=AssertionError('no mapping observer')), \
-                    contextlib.redirect_stdout(output), contextlib.redirect_stderr(diagnostics):
-                child.main()
-            self.assertEqual(diagnostics.getvalue(), ''.join('startup:' + phase + '\n'
-                             for phase in probe.STARTUP_PHASES[3:]))
-            values = [json.loads(line) for line in output.getvalue().splitlines()]
-            self.assertEqual(values[-1], {'event': 'result', 'stage': 'read', 'status': 0, 'errno': 0})
-            self.assertEqual(path.read_bytes(), child.DATA)
-            # Execute the real entrypoint with the same inert fixture and mocked OS boundary.
-            source = (BASE / 'hosted_map_execution_child.py').read_text()
-            output, diagnostics = io.StringIO(), io.StringIO()
-            with patch.object(child.sys, 'argv', ['child.py', '--child', 'read']), \
-                    patch.object(child.sys, 'platform', 'darwin'), \
-                    patch.object(child.platform, 'machine', return_value='arm64'), \
-                    patch.object(child.resource, 'setrlimit'), \
-                    patch.object(child.Path, 'cwd', return_value=root), \
-                    patch.object(child.ctypes, 'CDLL', side_effect=AssertionError('no native loader')), \
-                    contextlib.redirect_stdout(output), contextlib.redirect_stderr(diagnostics):
-                exec(compile(source, str(BASE / 'hosted_map_execution_child.py'), 'exec'), {'__name__': '__main__'})
-            self.assertEqual(probe.startup_trace(diagnostics.getvalue()), probe.STARTUP_PHASES)
+            for entrypoint in ('direct', 'script'):
+                with self.subTest(entrypoint=entrypoint):
+                    output, diagnostics = io.StringIO(), io.StringIO()
+                    with patch.object(child.sys, 'argv', ['child.py', '--child', 'read']), \
+                            patch.object(child.sys, 'platform', 'darwin'), \
+                            patch.object(child.platform, 'machine', return_value='arm64'), \
+                            patch.object(child.resource, 'setrlimit'), \
+                            patch.object(child.Path, 'cwd', return_value=root), \
+                            patch.object(child.ctypes, 'CDLL', side_effect=AssertionError('no native loader')), \
+                            patch.object(child, 'observe', side_effect=AssertionError('no mapping observer')), \
+                            contextlib.redirect_stdout(output), contextlib.redirect_stderr(diagnostics):
+                        if entrypoint == 'direct':
+                            child.main()
+                        else:
+                            runpy.run_path(str(BASE / 'hosted_map_execution_child.py'), run_name='__main__')
+                    phases = probe.STARTUP_PHASES[3:] if entrypoint == 'direct' else probe.STARTUP_PHASES
+                    self.assertEqual(diagnostics.getvalue(), ''.join('startup:' + phase + '\n' for phase in phases))
+                    values = [json.loads(line) for line in output.getvalue().splitlines()]
+                    self.assertEqual(values[-1], {'event': 'result', 'stage': 'read', 'status': 0, 'errno': 0})
+                    self.assertEqual(path.read_bytes(), child.DATA)
 
     def test_child_host_gate_precedes_native_loading(self):
         with patch.object(child.sys, 'argv', ['child.py', '--child', 'initial_rx']), \
