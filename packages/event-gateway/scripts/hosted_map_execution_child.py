@@ -1,5 +1,18 @@
 """Fixed arm64 constant-return diagnostic; only the hosted parent may launch it."""
+# ruff: noqa: E402 -- Startup markers must precede extension-module imports.
+import sys
+
+
+def startup_phase(name):
+    sys.stderr.write('startup:' + name + '\n')
+    sys.stderr.flush()
+
+
+if __name__ == '__main__':
+    startup_phase('script_entry')
 import ctypes
+if __name__ == '__main__':
+    startup_phase('ctypes_imported')
 import hashlib
 import json
 import os
@@ -7,7 +20,9 @@ from pathlib import Path
 import platform
 import resource
 import stat
-import sys
+
+if __name__ == '__main__':
+    startup_phase('imports_complete')
 
 STUB = bytes.fromhex('40058052c0035fd6')  # mov w0, #42; ret (little endian arm64)
 SIZE = 65536
@@ -60,8 +75,10 @@ def main():
     if (len(sys.argv) != 3 or sys.argv[1] != '--child' or sys.argv[2] not in OPERATIONS
             or sys.platform != 'darwin' or platform.machine() != 'arm64'):
         raise ValueError('fixed_arm64_child_only')
+    startup_phase('platform_checked')
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     resource.setrlimit(resource.RLIMIT_FSIZE, (65536, 65536))
+    startup_phase('limits_set')
     path = Path.cwd() / 'mapping-data'
     before = path.lstat()
     if not stat.S_ISREG(before.st_mode) or stat.S_IMODE(before.st_mode) != 0o600 or before.st_uid != os.getuid():
@@ -70,6 +87,7 @@ def main():
     try:
         if identity(os.fstat(fd)) != identity(before):
             raise ValueError('fixture_changed')
+        startup_phase('fixture_opened')
         data = bytearray()
         while len(data) <= SIZE:
             piece = os.read(fd, min(8192, SIZE + 1 - len(data)))
@@ -78,15 +96,19 @@ def main():
             data.extend(piece)
         if bytes(data) != DATA:
             raise ValueError('fixture_bytes')
+        startup_phase('fixture_verified')
         emit({'event': 'input', 'identity': identity(before), 'sha256': hashlib.sha256(data).hexdigest()})
-        libc = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
-        libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_longlong]
-        libc.mmap.restype = ctypes.c_void_p
-        libc.mprotect.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
-        libc.mprotect.restype = ctypes.c_int
-        libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
-        libc.munmap.restype = ctypes.c_int
-        result = observe(fd, sys.argv[2], libc)
+        if sys.argv[2] == 'read':
+            result = {'stage': 'read', 'status': 0, 'errno': 0}
+        else:
+            libc = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
+            libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_longlong]
+            libc.mmap.restype = ctypes.c_void_p
+            libc.mprotect.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
+            libc.mprotect.restype = ctypes.c_int
+            libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+            libc.munmap.restype = ctypes.c_int
+            result = observe(fd, sys.argv[2], libc)
         if identity(os.fstat(fd)) != identity(before) or identity(path.lstat()) != identity(before):
             raise ValueError('fixture_changed')
         emit({'event': 'result', **result})
