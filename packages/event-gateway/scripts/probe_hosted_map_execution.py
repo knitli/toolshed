@@ -395,7 +395,10 @@ def profiles():
         ' (literal ' + q(CHILD) + ') (literal "/dev/null") (literal "/dev/urandom"))',
         '(allow file-map-executable)',
         '(allow process-exec (literal ' + q(SAFE_PY) + '))',
-        '(allow sysctl-read (sysctl-name "hw.machine") (sysctl-name "hw.ncpu") '
+        # CPython ctypes checks os.uname().release during Darwin startup.
+        '(allow sysctl-read (sysctl-name "kern.ostype") (sysctl-name "kern.hostname") '
+        '(sysctl-name "kern.osrelease") (sysctl-name "kern.version") '
+        '(sysctl-name "hw.machine") (sysctl-name "hw.ncpu") '
         '(sysctl-name "hw.activecpu") (sysctl-name "hw.logicalcpu") (sysctl-name "hw.physicalcpu"))',
     ]) + '\n'
     return {name: control + ('(deny file-map-executable (literal ' + q(ROOT / 'mapping-data') + '))\n'
