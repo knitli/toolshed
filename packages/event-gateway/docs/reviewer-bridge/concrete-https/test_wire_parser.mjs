@@ -70,13 +70,13 @@ const refused = {
   'chunked body over ceiling': 'Transfer-Encoding: chunked\r\n\r\n9\r\n123456789\r\n0\r\n\r\n',
   'close-delimited body over ceiling': 'Connection: close\r\n\r\n123456789',
   'duplicate ordinary headers': 'X-Test: a\r\nx-test: b\r\nContent-Length: 2\r\n\r\nok',
-  'too many header fields': Array.from({ length: 65 }, (_, i) => `X-${i}: a\r\n`).join('') + '\r\nok',
-  'parser header byte ceiling': 'X-Test: ' + 'a'.repeat(32768) + '\r\n\r\nok',
+  'too many header fields': `${Array.from({ length: 65 }, (_, i) => `X-${i}: a\r\n`).join('')}\r\nok`,
+  'parser header byte ceiling': `X-Test: ${'a'.repeat(32768)}\r\n\r\nok`,
   'partial headers': 'Content-Length: 2\r\n',
 };
 for (const [name, response] of Object.entries(refused)) {
   test(`real parser refuses ${name}`, { timeout: 2000 }, async t => {
-    await assert.rejects(wire(t, 'HTTP/1.1 200 OK\r\n' + response), { message: 'https_refused' });
+    await assert.rejects(wire(t, `HTTP/1.1 200 OK\r\n${response}`), { message: 'https_refused' });
   });
 }
 
