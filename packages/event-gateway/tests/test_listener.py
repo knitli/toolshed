@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from unittest.mock import AsyncMock, Mock, patch
 
 from event_gateway.listener import Listener
 from event_gateway.security import SecurityError
@@ -49,14 +50,37 @@ class ListenerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.accepted, 1)
 
     async def test_header_deadline_is_absolute_despite_progress(self):
-        reader, writer = await self.connect()
-        writer.write(b'POST /v1/deliver HTTP/1.1\r\nX: ')
-        await writer.drain()
-        await asyncio.sleep(0.06)
-        writer.write(b'a')
-        await writer.drain()
-        self.assertIn(b'408 Result', await asyncio.wait_for(reader.read(), 0.08))
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        reader = asyncio.StreamReader()
+        writer = Mock(drain=AsyncMock(), wait_closed=AsyncMock())
+
+        async def settle():
+            # Run ready tasks and timers without depending on wall-clock scheduling.
+            for _ in range(10):
+                await asyncio.sleep(0)
+
+        with patch.object(loop, "time", side_effect=lambda: now):
+            task = asyncio.create_task(self.listener.handle(reader, writer))
+            try:
+                reader.feed_data(b'POST /v1/deliver HTTP/1.1\r\nX: ')
+                await settle()
+                self.assertFalse(task.done())
+                now += 0.06
+                reader.feed_data(b'a')
+                await settle()
+                self.assertFalse(task.done())
+                now += 0.05
+                await settle()
+                self.assertTrue(task.done(), "header progress must not restart the deadline")
+                await task
+            finally:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        self.assertIn(b'408 Result', b''.join(call.args[0] for call in writer.write.call_args_list))
         self.assertEqual(self.accepted, 0)
+        self.assertEqual(self.listener.active, 0)
 
     async def test_body_deadline_and_concurrency(self):
         reader, writer = await self.connect()
