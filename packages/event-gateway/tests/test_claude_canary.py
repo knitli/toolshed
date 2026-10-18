@@ -1387,6 +1387,42 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
     async def test_busy_canary_returns_ordered_observations_only_after_shutdown(self):
         await self.run_busy_canary('success')
 
+    async def test_adapter_reattach_preserves_busy_witness_and_same_child(self):
+        await self.run_busy_canary('success', reattach=True)
+
+    async def test_adapter_reattach_late_failures_invalidate_third_turn(self):
+        for scenario in ('late_failure', 'late_native_failure', 'late_malformed_frame'):
+            with self.subTest(scenario=scenario):
+                await self.run_busy_canary(scenario, reattach=True)
+
+    async def test_adapter_reattach_native_exit_and_socket_change_refuse_fresh_send(self):
+        for scenario in ('reattach_native_exit', 'reattach_socket_changed'):
+            with self.subTest(scenario=scenario):
+                await self.run_busy_canary(scenario, reattach=True)
+
+    async def test_adapter_cleanup_failure_retains_scratch_without_proof(self):
+        for scenario in ('reattach_cleanup_failure', 'reattach_cleanup_with_primary'):
+            with self.subTest(scenario=scenario):
+                await self.run_busy_canary(scenario, reattach=True)
+
+    async def test_adapter_timeout_cleanup_note_retains_scratch(self):
+        with patch.object(CANARY, 'report_progress', wraps=CANARY.report_progress) as progress:
+            await self.run_busy_canary('reattach_timeout_cleanup', reattach=True)
+        self.assertNotIn('cleanup_complete', [call.args[0] for call in progress.call_args_list])
+
+    async def test_adapter_timeout_without_cleanup_note_removes_scratch(self):
+        with patch.object(CANARY, 'report_progress', wraps=CANARY.report_progress) as progress:
+            await self.run_busy_canary('reattach_timeout_clean', reattach=True)
+        self.assertIn('cleanup_complete', [call.args[0] for call in progress.call_args_list])
+
+    async def test_adapter_reattach_refuses_without_busy_synthetic_mode(self):
+        with patch.object(CANARY.asyncio, 'create_subprocess_exec', new=AsyncMock()) as launch:
+            for busy, port in ((False, None), (False, 43231)):
+                with self.assertRaisesRegex(CANARY.CanaryError, 'reattach_probe_requires_busy_local_provider'):
+                    await CANARY.canary('/never-executed', Path('/unused'), self.key, 'fixture', port,
+                                        busy_probe=busy, adapter_reattach_probe=True)
+            launch.assert_not_awaited()
+
     async def test_busy_canary_timeout_cleans_stalled_native_session(self):
         await self.run_busy_canary('timeout')
 
@@ -1417,7 +1453,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(self, 'initialize_busy_provider', side_effect=slow_startup):
                 await self.run_busy_canary('held_timeout')
 
-    async def run_busy_canary(self, scenario):
+    async def run_busy_canary(self, scenario, *, reattach=False):
         parent = '/private/tmp' if Path('/private/tmp').is_dir() else '/tmp'  # nosec B108
         root = Path(tempfile.mkdtemp(dir=parent)).resolve()
         reader = asyncio.StreamReader()
@@ -1444,7 +1480,7 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         def make_provider(_key, _model, *, probe):
             provider.probe = probe
             self.session = probe.session_id
-            self.ready = probe.ready_marker
+            self.ready = probe.busy.ready_marker if reattach else probe.ready_marker
             return provider
 
         def feed(*messages):
@@ -1459,6 +1495,13 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(provider.probe.release.is_set())
             pending.append(asyncio.create_task(self.finish_busy_native(provider, feed, CANARY.event_frame(self.session, metadata))))
             return {'reason': 'claude_write_unacknowledged'}
+
+        async def finish_fresh(frame):
+            provider.probe.provider_request(provider.probe.fresh['marker'])
+            provider.turns = 3
+            feed(self.state('running'), self.replay(frame),
+                 self.assistant(provider.probe.fresh['marker']), self.result(provider.probe.fresh['marker']),
+                 self.state('idle'))
 
         async def stop(_child):
             nonlocal stopped
@@ -1478,32 +1521,109 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         child.stdin.drain = AsyncMock(side_effect=partial(self.initialize_busy_provider, scenario, feed, provider))
         provider.close = AsyncMock(side_effect=late_failure if scenario == 'late_failure' else None)
         transport = Mock(send=AsyncMock(side_effect=send))
+        fixture = SimpleNamespace(scenario=scenario, child=child, provider=provider, transport=transport,
+                                  pending=pending, feed=feed, finish_fresh=finish_fresh, held_timeout=held_timeout)
+        controlled_timeouts = ('held_timeout', 'reattach_timeout_cleanup', 'reattach_timeout_clean')
+        run_seconds = None if scenario in controlled_timeouts else 0.01 if scenario == 'timeout' else 1
         try:
             with patch.object(CANARY, 'uuid4', side_effect=generate_uuid), \
-                    patch.object(CANARY, 'RUN_SECONDS', None if scenario == 'held_timeout' else 0.01 if scenario == 'timeout' else 1), \
+                    patch.object(CANARY, 'RUN_SECONDS', run_seconds), \
                     patch.object(CANARY.asyncio, 'timeout', side_effect=lambda delay: held_timeout if delay is None else real_timeout(delay)), \
                     patch.object(CANARY, 'sandbox_profile', return_value='(deny default)'), \
                     patch.object(CANARY, 'LocalProvider', side_effect=make_provider), \
+                    patch.object(CANARY, 'ReattachProvider', side_effect=make_provider), \
                     patch.object(CANARY.asyncio, 'start_server', new=AsyncMock(return_value=server)), \
                     patch.object(CANARY.asyncio, 'create_subprocess_exec', new=AsyncMock(return_value=child)), \
                     patch.object(CANARY.Path, 'lstat', return_value=SimpleNamespace(st_mode=stat.S_IFSOCK, st_dev=1, st_ino=2)), \
                     patch.object(CANARY, 'child_peer_token', return_value=secrets.token_urlsafe(32)), \
                     patch.object(CANARY, 'ClaudeSocketTransport', return_value=transport), \
+                    patch.object(CANARY, 'adapter_reattach', new=AsyncMock(side_effect=partial(
+                        self.recover_busy_adapter, fixture))) as recovery, \
                     patch.object(CANARY, 'stop_child', new=AsyncMock(side_effect=stop)) as shutdown:
                 async with real_timeout(5):
-                    proof = await self.busy_scenario_outcome(scenario, root)
-                if scenario == 'success':
-                    self.assertTrue(stopped)
-                    provider.close.assert_awaited_once()
-                    self.assert_busy_proof(proof, child.pid)
+                    proof = await self.busy_scenario_outcome(scenario, root, reattach=reattach)
+                self.assert_busy_scenario_success(fixture, proof, stopped, reattach, recovery)
             shutdown.assert_awaited_once_with(child)
             server.close.assert_called_once()
             server.wait_closed.assert_awaited_once()
             provider.close.assert_awaited_once()
-            self.assert_busy_send_state(scenario, transport, provider.probe, generated)
-            self.assertFalse(root.exists())
+            if reattach:
+                transport.send.assert_not_awaited()
+                self.assertEqual(generated, 9)
+            else:
+                self.assert_busy_send_state(scenario, transport, provider.probe, generated)
+            self.assertEqual(root.exists(), scenario in ('reattach_cleanup_failure', 'reattach_cleanup_with_primary',
+                                                        'reattach_timeout_cleanup'))
         finally:
-            await asyncio.gather(*pending)
+            await self.cleanup_busy_fixture(pending, root)
+
+    async def cleanup_busy_fixture(self, pending, root):
+        for task in pending:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        if root.exists():
+            CANARY.shutil.rmtree(root)
+
+    def assert_busy_scenario_success(self, fixture, proof, stopped, reattach, recovery):
+        scenario, provider, child, transport = fixture.scenario, fixture.provider, fixture.child, fixture.transport
+        if scenario == 'success':
+            self.assertTrue(stopped)
+            provider.close.assert_awaited_once()
+            self.assert_busy_proof(proof, child.pid)
+            if reattach:
+                recovery.assert_awaited_once()
+                self.assertTrue(proof['adapterReattach']['oldRetrySuppressed'])
+                self.assertFalse(proof['adapterReattach']['nativeProcessRestarted'])
+                self.assertFalse(proof['adapterReattach']['nativeRestartQualified'])
+                self.assertEqual(proof['scope'], 'disposable-headless-same-live-session-adapter-reattach')
+                self.assertEqual(transport._check_socket.call_count, 3)
+                self.assertEqual(proof['localProviderRequests'], 3)
+                self.assertEqual([o['turn'] for o in proof['reattachProbe']['observations']
+                                  if o['kind'] == 'native_result'], [1, 2, 3])
+            else:
+                recovery.assert_not_awaited()
+
+    async def recover_busy_adapter(self, fixture, options, old, fresh, *, before_fresh, record, crash_point):
+        scenario, child, provider = fixture.scenario, fixture.child, fixture.provider
+        transport, pending, feed = fixture.transport, fixture.pending, fixture.feed
+        finish_fresh, held_timeout = fixture.finish_fresh, fixture.held_timeout
+        self.assertEqual(options['peer_pid'], child.pid)
+        self.assertEqual(options['session_id'], self.session)
+        self.assertEqual(options['socket_identity'], (1, 2))
+        self.assertEqual(crash_point, 'after-write-close-before-result')
+        self.assertEqual(provider.probe.busy.expected['uuid'], CANARY.event_frame(self.session, old)['uuid'])
+        self.assertNotEqual(old['deliveryId'], fresh['deliveryId'])
+        if scenario in ('reattach_timeout_cleanup', 'reattach_timeout_clean'):
+            held_timeout.reschedule(asyncio.get_running_loop().time())
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError as error:
+                if scenario == 'reattach_timeout_cleanup':
+                    error.add_note('reattach_actor_cleanup_failed')
+                raise
+        if scenario in ('reattach_cleanup_failure', 'reattach_cleanup_with_primary'):
+            error = CANARY.CanaryError('reattach_actor_cleanup_failed' if scenario == 'reattach_cleanup_failure'
+                                      else 'synthetic_primary')
+            if scenario == 'reattach_cleanup_with_primary':
+                error.add_note('reattach_actor_cleanup_failed')
+            raise error
+        old_uuid = CANARY.event_frame(self.session, old)['uuid']
+        pending.append(asyncio.create_task(self.finish_busy_native(provider, feed,
+            CANARY.event_frame(self.session, old))))
+        record('adapter_write_closed', inputUuid=old_uuid)
+        record('adapter_killed', adapterPid=456)
+        record('adapter_old_suppressed', inputUuid=old_uuid, adapterPid=789)
+        if scenario == 'reattach_native_exit':
+            child.returncode = 1
+        if scenario == 'reattach_socket_changed':
+            transport._check_socket.side_effect = OSError('synthetic_socket_changed')
+        await before_fresh()
+        self.assertEqual(provider.probe.fresh['uuid'], CANARY.event_frame(self.session, fresh)['uuid'])
+        pending.append(asyncio.create_task(finish_fresh(CANARY.event_frame(self.session, fresh))))
+        return {'reason': 'claude_write_unacknowledged'}, {
+                         'oldRetrySuppressed': True, 'admission': 'unknown', 'delivery': 'unknown',
+                         'nativeProcessRestarted': False, 'nativeRestartQualified': False}
 
     async def initialize_busy_provider(self, scenario, feed, provider):
         if scenario == 'timeout':
@@ -1517,21 +1637,23 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
     async def finish_busy_native(self, provider, feed, frame):
         await provider.probe.release.wait()
         feed(self.replay(frame), self.assistant(self.ready), self.result(self.ready))
-        self.busy = provider.probe.expected['marker']
+        observed = provider.probe.busy if isinstance(provider.probe, CANARY.ReattachProbe) else provider.probe
+        self.busy = observed.expected['marker']
         provider.probe.provider_request(self.busy)
         provider.turns = 2
         feed(self.assistant(self.busy), self.result(self.busy), self.state('idle'))
 
-    async def busy_scenario_outcome(self, scenario, root):
+    async def busy_scenario_outcome(self, scenario, root, *, reattach=False):
         if scenario == 'success':
             return await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
-                                       busy_probe=True)
+                                       busy_probe=True, adapter_reattach_probe=reattach)
         if scenario in ('late_native_failure', 'late_malformed_frame'):
-            code = ('busy_native_result_mismatch' if scenario == 'late_native_failure'
+            code = (('reattach_fresh_result_mismatch' if reattach else 'busy_native_result_mismatch')
+                    if scenario == 'late_native_failure'
                     else 'invalid_client_output')
             with self.assertRaisesRegex(CANARY.CanaryError, '^' + code + '$') as raised:
                 await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
-                                    busy_probe=True)
+                                    busy_probe=True, adapter_reattach_probe=reattach)
             diagnostic = raised.exception.diagnostic
             self.assertEqual(len(diagnostic), 8)
             last = diagnostic[-1]
@@ -1542,14 +1664,23 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(last['sessionId'],
                              self.session if scenario == 'late_native_failure' else None)
             self.assertNotIn(self.key, str(raised.exception) + json.dumps(diagnostic))
-        elif scenario in ('timeout', 'held_timeout'):
+        elif scenario in ('timeout', 'held_timeout', 'reattach_timeout_cleanup', 'reattach_timeout_clean'):
             with self.assertRaises(TimeoutError):
                 await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
-                                    busy_probe=True)
+                                    busy_probe=True, adapter_reattach_probe=reattach)
+        elif scenario.startswith('reattach_'):
+            code = {'reattach_native_exit': 'client_exited_during_reattach',
+                    'reattach_socket_changed': 'synthetic_socket_changed',
+                    'reattach_cleanup_failure': 'reattach_actor_cleanup_failed',
+                    'reattach_cleanup_with_primary': 'synthetic_primary'}[scenario]
+            error_type = OSError if scenario == 'reattach_socket_changed' else CANARY.CanaryError
+            with self.assertRaisesRegex(error_type, '^' + code + '$'):
+                await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
+                                    busy_probe=True, adapter_reattach_probe=True)
         else:
             with self.assertRaisesRegex(CANARY.CanaryError, '^local_provider_incomplete$'):
                 await CANARY.canary('/never-executed', root, self.key, 'fixture', 43231,
-                                    busy_probe=True)
+                                    busy_probe=True, adapter_reattach_probe=reattach)
         return None
 
     def assert_busy_proof(self, proof, child_pid):

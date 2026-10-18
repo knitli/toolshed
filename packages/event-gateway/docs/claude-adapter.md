@@ -418,3 +418,64 @@ Initial preparation fetched only installer/manifest text; the audited hosted run
 subsequently verified and executed the pinned client. Every qualification run must
 verify downloaded bytes against the pinned hash before execution; it must not
 execute an installer or select `latest`.
+
+## Same-live-session adapter recovery candidate (offline only)
+
+`--adapter-reattach-probe` is a separate three-turn experiment and requires both
+`--busy-probe` and `--local-provider`. It restarts Python adapter processes while
+retaining the original native process handle, session UUID, socket device/inode,
+peer PID, token and journal. The native command still uses
+`--no-session-persistence`; this is not native-process restart or resume.
+
+The private subprocess channel carries binding data through stdin, never argv or
+logs. Actors use a closed environment and the same Python runtime. The existing
+`ClaudeSocketTransport.send`, durable `_reserve`, kernel peer checks and
+`reconcile` methods do the work; qualification-only barriers observe two cuts:
+
+1. **After reservation, before connect:** the real marker file and directory have
+   been fsynced. Kill/reap the paused actor. A new actor must preserve that marker,
+   report unknown reconciliation and suppress the old attempt without connecting.
+   A distinct delivery ID produces the sole fresh wire frame. This is the offline
+   conservative-loss control, not proof of recovery after a write.
+2. **After real write drain/close, before result delivery:** a wrapper awaits the
+   real writer's `wait_closed`, signals the parent, and blocks before `send`
+   returns. Kill/reap that actor. A new actor reports unknown reconciliation and
+   suppresses the original delivery using the same journal. The offline socket
+   fixture observes exactly one old frame and one fresh frame, with no old resend.
+
+The proposed native scenario uses the second cut:
+
+1. Observe exact-session init/running and hold the first synthetic response.
+2. Prepare the old BUSY input, write it with the first adapter, then kill/reap only
+   that adapter at the post-close barrier. Keep the native process alive.
+3. Recreate the adapter against the retained binding and journal. Require
+   `claude_native_receipt_unavailable` and `claude_attempt_already_reserved`.
+4. Release the initial response. Require the existing unchanged two-turn busy
+   witness: READY and old BUSY provider requests, exact replay, successful native
+   assistant/results, and idle. Snapshot this witness before the third turn.
+5. Prepare one distinct FRESH input and allow the restarted adapter to send it.
+   Require a third synthetic provider request, exact UUID/content peer replay,
+   native running, matching assistant and successful result, then final idle.
+   Confirm the actor's write closure and exit before returning proof.
+
+A separate `ReattachProbe`/`ReattachProvider` pair handles the third turn; existing
+`BusyProbe` and `LocalProvider` behavior is unchanged. Fourth provider requests,
+old/duplicate replay, missing witnesses, malformed identity and late failures
+invalidate the result. Cleanup failure prevents proof; unconfirmed adapter
+termination retains scratch even in local mode.
+
+Both cuts keep admission and delivery `unknown`. The journal is a conservative
+attempt quarantine, not a native receipt or the production Gateway ledger.
+`ClaudeSocketTransport.check()` still returns unavailable and `reconcile()` never
+claims consumption. Even an eventual successful native run would not establish
+TUI-selected identity, durable admission, native restart, receipt-v3, complete
+process-tree termination, VM disposal or production qualification.
+
+Offline validation covers real Python actors and synthetic Unix sockets, plus
+three-turn observer/provider and controller fixtures. No native client or model
+was executed for this candidate. The Cloud workflow proposal is a new fixed
+`adapter-reattach-live-session` choice mapping only to
+`--busy-probe --adapter-reattach-probe`, with existing choices unchanged. It needs
+a separately reviewed actual source squash pin, source hashes, scenario allowlist
+and shell tests, fresh protected-main preflight, and an explicit single-run GO.
+No workflow change or dispatch is included here.
