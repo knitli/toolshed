@@ -111,3 +111,33 @@ It does not establish TLS authentication, DNS, live network behavior, deadline
 supervision, protected launch authority, artifact acquisition or reviewer
 completion. The child, pins, public binding refusal and empty download-host
 policy are unchanged.
+
+## Bounded anonymous HTTPS observation
+
+On 2026-10-18, a separately approved trusted fixture used the unchanged
+`child.mjs` and private `adapter.py::_run` from Toolshed `0cafb025` with the
+existing pinned Node executable and bundled CA roots. One anonymous
+`GET https://api.github.com/zen` returned HTTP 200, 19 bytes, in 0.267 seconds.
+The body SHA-256 was
+`e926db51cb9dd0b0c7d548b7e9d2fd34534ac1b44066db30450d9cd9295bca7a`.
+The fixture retained only status, length, digest and fixed diagnostic fields;
+it discarded raw response body and headers. Owned-child cleanup was confirmed,
+with no cleanup failure observed.
+
+An earlier separately approved request returned HTTP 415; its cause remains
+unknown and its evidence is preserved. The second experiment changed only its
+private location and the literal headers from `Accept: text/plain` and
+`X-GitHub-Api-Version: 2026-03-10` to `Accept: application/vnd.github+json` and
+`X-GitHub-Api-Version: 2022-11-28`, matching the existing artifact transport's API
+profile. Two requests were authorized individually; neither experiment retried.
+Both used a 256-byte body ceiling, an 18-second child timer and a 20-second
+parent budget from entry, including preflight and cleanup reserve. There were
+no credentials, redirect following or application-level address fallback.
+
+This records one successful trusted-fixture DNS/TLS/read path. It does not
+qualify protected launch, independent runtime authority, credentialed requests,
+artifact acquisition, production transport or reviewer completion. Pathname
+replacement races and hard real-time bounds remain outside the proof; cleanup
+confirmation covers the owned child, not all possible descendants. Public
+`bind()` and `_request()` still refuse unconditionally, and the download-host
+allowlist remains empty.
