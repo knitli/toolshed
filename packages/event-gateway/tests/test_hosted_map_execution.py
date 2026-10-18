@@ -476,8 +476,17 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(set(profiles), set(probe.PROFILES))
         self.assertEqual(profiles['control_before'], profiles['control_after'])
         root_read = '(allow file-read-data (literal "/"))'
+        uname_sysctls = ('(allow sysctl-read (sysctl-name "kern.ostype") (sysctl-name "kern.hostname") '
+                         '(sysctl-name "kern.osrelease") (sysctl-name "kern.version") '
+                         '(sysctl-name "hw.machine") (sysctl-name "hw.ncpu") '
+                         '(sysctl-name "hw.activecpu") (sysctl-name "hw.logicalcpu") '
+                         '(sysctl-name "hw.physicalcpu"))')
         for content in profiles.values():
             self.assertEqual(content.splitlines().count(root_read), 1)
+            self.assertEqual(content.splitlines().count(uname_sysctls), 1)
+            self.assertEqual(content.count('(allow sysctl-read'), 1)
+            self.assertNotIn('(allow sysctl-read)', content)
+            self.assertNotIn('(allow sysctl-read ', content.replace(uname_sysctls, ''))
             self.assertNotIn('(allow file-read-data (subpath "/"))', content)
             self.assertNotIn('(allow file-read* (literal "/"))', content)
             self.assertNotIn('(allow file-read* (subpath "/"))', content)
