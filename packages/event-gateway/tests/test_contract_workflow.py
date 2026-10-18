@@ -89,6 +89,7 @@ class ContractWorkflowTests(unittest.TestCase):
             "native-admission", "native-runtime-status", "github-source-readback", "github-source-control",
             "github-watch-control", "github-watch-owner-rpc", "github-pinned-history-read",
             "cloud-guard-baseline-messaging-v2-dispatch", "github-initial-custody",
+            "github-initial-plan-material",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         for expected in metadata["families"]:
@@ -99,6 +100,75 @@ class ContractWorkflowTests(unittest.TestCase):
                 self.assertEqual(self.verify(), expected["name"])
                 self.assertCountEqual(self.reads, [SNAPSHOT + path for path in PATHS])
                 self.assertEqual(self.api_reads, [f"git/trees/{HEAD}?recursive=1"])
+
+    def test_initial_plan_material_requires_complete_authorization(self):
+        name = "github-initial-plan-material"
+        self.blobs = self.approved_snapshot(name)
+        self.assertEqual(self.verify(), name)
+        previous = tuple(entry for entry in POLICY["FAMILIES"] if entry["name"] != name)
+        with self.assertRaisesRegex(ValueError, "contract family not authorized"):
+            self.verify(previous)
+
+    def test_initial_plan_material_snapshot_mutation_or_omission_rejected(self):
+        self.assert_mutation_or_omission_rejected("github-initial-plan-material")
+
+    def test_initial_plan_material_all_source_hashes_required(self):
+        self.assert_source_hash_mutation_or_omission_rejected("github-initial-plan-material")
+
+    def test_initial_plan_material_exact_source_provenance_and_retained_bytes(self):
+        name = "github-initial-plan-material"
+        revision = "5d3c326677bab6cb8ac3115dcbc65e7956676ba9"
+        blobs = self.approved_snapshot(name)
+        previous = self.approved_snapshot("github-initial-custody")
+        control = json.loads(blobs[SNAPSHOT + "event-control-v1/manifest.json"])
+        baseline = json.loads(previous[SNAPSHOT + "event-control-v1/manifest.json"])
+        additional = {"apps/os/packages/event-runtime/src/github/" + path for path in
+                      ("reconciliation-planner.ts", "initial-plan-material-read.ts")}
+        self.assertEqual(len(control["sources"]), 57)
+        self.assertEqual(set(control["sources"]), set(baseline["sources"]) | additional)
+        self.assertEqual(control["revision"], revision)
+        self.assertEqual(control["zodVersion"], "4.6.5")
+        for path in PATHS:
+            if path != "event-control-v1/manifest.json":
+                self.assertEqual(blobs[SNAPSHOT + path], previous[SNAPSHOT + path])
+        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+            self.assertEqual(metadata["sources"][revision], control["sources"])
+            self.assertEqual(metadata["snapshots"][name], "prepared-export:" + revision)
+            sources = {path: archive.read(f"sources/{revision}/{path}") for path in control["sources"]}
+        self.assertEqual({path: hashlib.sha256(data).hexdigest() for path, data in sources.items()},
+                         control["sources"])
+        # Bind changed new source bytes to the manifest before testing trusted policy rejection.
+        for path in additional:
+            with self.subTest(source=path):
+                candidate = json.loads(blobs[SNAPSHOT + "event-control-v1/manifest.json"])
+                candidate["sources"][path] = hashlib.sha256(sources[path] + b"\n").hexdigest()
+                self.blobs = blobs.copy()
+                self.blobs[SNAPSHOT + "event-control-v1/manifest.json"] = (json.dumps(candidate, indent=2) + "\n").encode()
+                with self.assertRaisesRegex(ValueError, "contract family not authorized"):
+                    self.verify()
+
+    def test_initial_plan_material_preserves_all_thirteen_historical_families(self):
+        name = "github-initial-plan-material"
+        revision = "5d3c326677bab6cb8ac3115dcbc65e7956676ba9"
+        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
+            names = archive.namelist()
+            self.assertEqual(len(names), 442)
+            self.assertEqual(len(set(names)), len(names))
+            previous = {path: hashlib.sha256(archive.read(path)).hexdigest() for path in names
+                        if path != "metadata.json" and not path.startswith(f"snapshots/{name}/")
+                        and not path.startswith(f"sources/{revision}/")}
+            self.assertEqual(len(previous), 377)
+            digest = hashlib.sha256(json.dumps(previous, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            self.assertEqual(digest, "89f1ee386be8e8fd67dfe44726f98d6c16d93359dc81e5cfd18144da58b6aa20")
+            metadata = json.loads(archive.read("metadata.json"))
+        self.assertEqual(metadata["families"][-1]["name"], name)
+        metadata["families"] = metadata["families"][:-1]
+        del metadata["snapshots"][name]
+        del metadata["sources"][revision]
+        self.assertEqual(len(metadata["families"]), 13)
+        digest = hashlib.sha256(json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.assertEqual(digest, "a615fb4ff1840b533773b9a3ae9e5ddd5ff7edf65352bdd87030a59a1d9da24e")
 
     def test_initial_custody_requires_complete_authorization(self):
         name = "github-initial-custody"
@@ -176,6 +246,9 @@ class ContractWorkflowTests(unittest.TestCase):
         revision = "3ad64222999bc2aaa60f50623120e302edc5f8bd"
         with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
             names = archive.namelist()
+            names = [path for path in names
+                     if not path.startswith("snapshots/github-initial-plan-material/")
+                     and not path.startswith("sources/5d3c326677bab6cb8ac3115dcbc65e7956676ba9/")]
             self.assertEqual(len(names), 378)
             self.assertEqual(len(set(names)), len(names))
             previous = {path: hashlib.sha256(archive.read(path)).hexdigest() for path in names
@@ -185,6 +258,10 @@ class ContractWorkflowTests(unittest.TestCase):
             digest = hashlib.sha256(json.dumps(previous, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
             self.assertEqual(digest, "519d70205b0741bf8e8db2b97bba0f2f1b88f3acc0b491a596208e6f7b0dd1e4")
             metadata = json.loads(archive.read("metadata.json"))
+        metadata["families"] = [entry for entry in metadata["families"]
+                                if entry["name"] != "github-initial-plan-material"]
+        del metadata["snapshots"]["github-initial-plan-material"]
+        del metadata["sources"]["5d3c326677bab6cb8ac3115dcbc65e7956676ba9"]
         self.assertEqual(metadata["families"][-1]["name"], name)
         metadata["families"] = metadata["families"][:-1]
         del metadata["snapshots"][name]
