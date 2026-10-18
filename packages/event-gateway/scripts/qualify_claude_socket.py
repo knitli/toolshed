@@ -1055,6 +1055,23 @@ def report_progress(phase, *, probe=None):
     print(json.dumps(progress), file=sys.stderr, flush=True)
 
 
+def has_adapter_cleanup_failure(error):
+    """Retain scratch when timeout conversion wraps an unconfirmed actor cleanup."""
+    pending, seen = [error] if error is not None else [], set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        if len(seen) == 16:
+            return True  # Unusually deep causal state cannot justify deleting scratch.
+        seen.add(id(current))
+        if (str(current) == 'reattach_actor_cleanup_failed'
+                or 'reattach_actor_cleanup_failed' in getattr(current, '__notes__', ())):
+            return True
+        pending.extend(link for link in (current.__cause__, current.__context__) if link is not None)
+    return False
+
+
 async def canary(binary, root, key, model, local_port=None, hosted_repository_id=None, *, busy_probe=False,
                  adapter_reattach_probe=False):
     """Run the selected bounded synthetic experiment; every success criterion is observed."""
@@ -1199,9 +1216,7 @@ async def canary(binary, root, key, model, local_port=None, hosted_repository_id
         raise
     finally:
         primary_error = sys.exception()
-        cleanup_failed = primary_error is not None and (
-            str(primary_error) == 'reattach_actor_cleanup_failed'
-            or 'reattach_actor_cleanup_failed' in getattr(primary_error, '__notes__', ()))
+        cleanup_failed = has_adapter_cleanup_failure(primary_error)
         report_progress('stopping_child', probe=probe)
         try:
             if child is not None:

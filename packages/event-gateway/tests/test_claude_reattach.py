@@ -256,6 +256,50 @@ class ReattachTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('reattach_actor_cleanup_failed', caught.exception.__notes__)
         self.assertEqual(self.connections, 0)
 
+    async def test_outer_timeout_preserves_real_actor_cleanup_failure(self):
+        stop = CANARY.stop_child
+        cleaned = []
+        deadline = asyncio.timeout(None)
+
+        async def block_before_fresh():
+            deadline.reschedule(asyncio.get_running_loop().time())
+            await asyncio.Event().wait()
+
+        async def fail_after_stop(actor):
+            await stop(actor)
+            cleaned.append(actor)
+            raise OSError('fixture_cleanup')
+
+        with patch.object(CANARY, 'stop_child', side_effect=fail_after_stop):
+            with self.assertRaises(TimeoutError) as caught:
+                async with deadline:
+                    await CANARY.adapter_reattach(self.options, self.old, self.fresh,
+                                                  before_fresh=block_before_fresh)
+        self.assertEqual(len(cleaned), 2)
+        self.assertNotEqual(cleaned[0].pid, cleaned[1].pid)
+        self.assertTrue(all(actor.returncode is not None for actor in cleaned))
+        self.assertIsInstance(caught.exception.__cause__, asyncio.CancelledError)
+        self.assertIn('reattach_actor_cleanup_failed', caught.exception.__cause__.__notes__)
+        self.assertTrue(CANARY.has_adapter_cleanup_failure(caught.exception))
+        self.assertEqual(self.connections, 0)
+        self.assertFalse(self.marker(self.fresh).exists())
+
+    def test_cleanup_failure_walker_handles_cycles_and_shared_edges(self):
+        root, child = TimeoutError(), asyncio.CancelledError()
+        root.__cause__ = root.__context__ = child
+        child.__context__ = root
+        self.assertFalse(CANARY.has_adapter_cleanup_failure(root))
+        child.add_note('reattach_actor_cleanup_failed')
+        self.assertTrue(CANARY.has_adapter_cleanup_failure(root))
+        self.assertFalse(CANARY.has_adapter_cleanup_failure(None))
+
+    def test_cleanup_failure_walker_retains_on_depth_limit(self):
+        root = tail = TimeoutError()
+        for _ in range(20):
+            tail.__cause__ = RuntimeError()
+            tail = tail.__cause__
+        self.assertTrue(CANARY.has_adapter_cleanup_failure(root))
+
     async def test_same_derived_uuid_is_refused(self):
         with self.assertRaises(CANARY.CanaryError):
             await CANARY.adapter_reattach(self.options, self.old, dict(self.old, eventId=str(uuid4())))
