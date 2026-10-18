@@ -1013,20 +1013,21 @@ class NativeBridgeTests(unittest.TestCase):
 
     def test_remaining_sample_lease_is_not_restarted_after_socket_delay(self):
         row = witness(leaseMs=120)
+        issued = 100.0
+        now = issued
 
-        def handler(channel):
-            receive(channel)
-            time.sleep(0.025)
-            send(channel, row)
-            self.assertIsNone(receive(channel))
+        def delayed_exchange(*_args):
+            nonlocal now
+            now += 0.025
+            return row
 
-        before = time.monotonic()
-        with peer(handler) as client:
+        # Replace only this module's clock; socket/thread setup is outside the lease.
+        client = native.NativeBridge(Mock(family=socket.AF_UNIX, type=socket.SOCK_STREAM))
+        with (patch.object(native_reader, "time", SimpleNamespace(monotonic=lambda: now)),
+              patch.object(client, "exchange", side_effect=delayed_exchange)):
             self.assertEqual(client.challenge(), row)
-            self.assertLessEqual(
-                client.valid_until, before + 0.121,
-                "a remaining lease is not restarted when the challenge response arrives",
-            )
+        self.assertEqual(now, issued + 0.025)
+        self.assertEqual(client.valid_until, issued + 0.120)
 
     def test_loopback_mock_returns_synthetic_sse(self):
         import http.client
