@@ -475,6 +475,12 @@ class SupervisorTests(unittest.TestCase):
         profiles = probe.profiles()
         self.assertEqual(set(profiles), set(probe.PROFILES))
         self.assertEqual(profiles['control_before'], profiles['control_after'])
+        root_read = '(allow file-read-data (literal "/"))'
+        for content in profiles.values():
+            self.assertEqual(content.splitlines().count(root_read), 1)
+            self.assertNotIn('(allow file-read-data (subpath "/"))', content)
+            self.assertNotIn('(allow file-read* (literal "/"))', content)
+            self.assertNotIn('(allow file-read* (subpath "/"))', content)
         delta = '(deny file-map-executable (literal ' + json.dumps(str(probe.ROOT / 'mapping-data')) + '))\n'
         self.assertEqual(profiles['denied'], profiles['control_before'] + delta)
 

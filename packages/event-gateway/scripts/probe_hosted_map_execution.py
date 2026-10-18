@@ -389,6 +389,8 @@ def profiles():
         return json.dumps(str(path))
     control = '\n'.join([
         '(version 1)', '(deny default)', '(allow file-read-metadata)',
+        # dyld opens the root directory during interpreter startup.
+        '(allow file-read-data (literal "/"))',
         '(allow file-read* ' + ' '.join('(subpath ' + q(p) + ')' for p in roots) +
         ' (literal ' + q(CHILD) + ') (literal "/dev/null") (literal "/dev/urandom"))',
         '(allow file-map-executable)',
