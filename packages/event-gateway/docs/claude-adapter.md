@@ -25,15 +25,17 @@ synthetic provider; none used a real model provider or owner credentials.
   Evidence archive SHA-256:
   `cd660d6e601ef94b7273e98ccdadd92263aba4313d139f2ad68263df3d990dca`.
 
-The two later archives each contained five members; all four exported-file
-manifest hashes were verified. Admission and delivery remain `unknown`; these
+Each of the two later archives contained five members: one export manifest and
+four exported files. Each archive's four file hashes were independently checked
+against its own manifest. Admission and delivery remain `unknown`; these
 observations establish neither a durable native receipt nor native-process
 restart, selected-TUI identity, receipt-v3 or production qualification. Complete
 process-tree termination and VM disposal remain unproven. `cleanup_complete`
 records the canary's bounded cleanup, not those broader guarantees.
 
 Historical investigation notes below describe the evidence available at each
-stage. Their earlier "unproven" statements do not supersede this current summary.
+stage. Read them with the current summary and limitations; baseline native idle
+qualification remains unproven.
 The executed recovery workflow remains pinned to the immutable Toolshed
 `27487449f2268568c33701bff391b261308b2869` source; this documentation update does
 not change that pin or its recorded source hashes.
@@ -153,9 +155,9 @@ rotation, an actual other-process path-swap-and-restore race with a zero-byte wi
 graceful close/timeout, unsafe permissions, validation and safe CLI errors. They prove our adapter's
 behavior, not Claude's processing or idle wake.
 
-At this initial stage, no successful native idle wake had been observed: an
-isolated disposable client, verified native ingress availability, and a trusted
-observation of input/turn outcomes were still required. Custom channel development bypass is not needed for native UDS,
+Controlled same-session socket wake has been observed, but wake from an
+independently established baseline native idle state remains unproven.
+Custom channel development bypass is not needed for native UDS,
 but the installed client gates cross-session messaging independently. Do not bypass
 that gate or borrow owner credentials. Production closure needs exact-session native
 binding, observed idle/busy behavior, lost-write/restart reconciliation, and a durable
