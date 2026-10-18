@@ -153,6 +153,36 @@ Toolshed merge, with a separate closed discriminator receipt set in the exporter
 The mapped-matrix receipt set and PASS requirements must remain unchanged.
 No candidate preparation, merge or pin update authorizes a hosted execution.
 
+## Fixed version launch comparison
+
+The diagnostic-only `--version-launch-only` mode compares exactly two launches:
+
+1. `version_launch:direct`: the exact frozen interpreter with `-I -B --version`.
+2. `version_launch:sandboxed`: the unchanged sandboxed version command, using
+   `sandbox-exec -f control_before.sb` followed by that same interpreter and flags.
+
+Both launches use the same closed environment, working directory, null stdin,
+captured output pipes, new session, closed inherited descriptors, time/output
+bounds and owned-child cleanup. The direct control is outside the sandbox, but
+its only admitted command prints the interpreter version and exits: no script,
+module, variable code, fixture read, mapping or callback is selected. The sandbox
+profile remains unchanged. Each fixed command is attempted at most once; uncertain
+cleanup stops the remaining case. Every outcome is `INCONCLUSIVE` with
+`qualified: false`, including two successful version outputs.
+
+| Result | Supported conclusion |
+| --- | --- |
+| Direct succeeds, sandboxed fails | The added launcher/profile path accounts for the observed difference; this does not identify a denied operation or failing executable image. |
+| Both fail | The shared launch context remains suspect; sandbox policy is not established as the cause. |
+| Both succeed | The earlier abort is not reproduced in this attempt; no runtime qualification follows. |
+| Direct fails, sandboxed succeeds | The contrast does not support the proposed sandbox-specific failure; retain the raw evidence without attributing a cause. |
+
+Success here requires zero exit status, the expected version output and confirmed
+cleanup. Parent/helper success under their ordinary launch environment is not a
+substitute for this direct control. Cloud receipt validation, an actual reviewed
+merge pin and separate execution approval remain required before a hosted run.
+Existing full-matrix, startup-read and site-startup modes keep their behavior.
+
 ## Mock verification
 
 The normal Event Gateway workflow discovers `tests/test_hosted_map_execution.py`
