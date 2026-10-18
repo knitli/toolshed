@@ -29,6 +29,14 @@ probe = load('probe')
 
 
 class ChildTests(unittest.TestCase):
+    def test_read_observer_never_accesses_native_mapping(self):
+        libc = Mock()
+        with patch.object(child.ctypes, 'CFUNCTYPE') as cfun, patch.object(child.ctypes, 'set_errno') as set_errno:
+            self.assertEqual(child.observe(7, 'read', libc), {'stage': 'read', 'status': 0, 'errno': 0})
+        self.assertEqual(libc.mock_calls, [])
+        cfun.assert_not_called()
+        set_errno.assert_not_called()
+
     def test_exact_constant_return_bytes(self):
         self.assertEqual(child.STUB, b'\x40\x05\x80\x52\xc0\x03\x5f\xd6')
         self.assertEqual(child.DATA, child.STUB + bytes(65536 - 8))
@@ -90,7 +98,7 @@ class ChildTests(unittest.TestCase):
                 runpy.run_path(str(BASE / 'hosted_map_execution_child.py'), run_name='__main__')
         self.assertEqual(output.getvalue(), 'startup:script_entry\n')
 
-    def test_control_read_never_loads_libc_or_observes_mappings(self):
+    def test_control_read_never_loads_libc_or_maps_memory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = root / 'mapping-data'
@@ -105,12 +113,15 @@ class ChildTests(unittest.TestCase):
                             patch.object(child.resource, 'setrlimit'), \
                             patch.object(child.Path, 'cwd', return_value=root), \
                             patch.object(child.ctypes, 'CDLL', side_effect=AssertionError('no native loader')), \
-                            patch.object(child, 'observe', side_effect=AssertionError('no mapping observer')), \
+                            patch.object(child, 'observe', wraps=child.observe) as observer, \
                             contextlib.redirect_stdout(output), contextlib.redirect_stderr(diagnostics):
                         if entrypoint == 'direct':
                             child.main()
                         else:
                             runpy.run_path(str(BASE / 'hosted_map_execution_child.py'), run_name='__main__')
+                    if entrypoint == 'direct':
+                        observer.assert_called_once()
+                        self.assertEqual(observer.call_args.args[1:], ('read', None))
                     phases = probe.STARTUP_PHASES[3:] if entrypoint == 'direct' else probe.STARTUP_PHASES
                     self.assertEqual(diagnostics.getvalue(), ''.join('startup:' + phase + '\n' for phase in phases))
                     values = [json.loads(line) for line in output.getvalue().splitlines()]

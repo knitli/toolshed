@@ -98,9 +98,8 @@ def main():
             raise ValueError('fixture_bytes')
         startup_phase('fixture_verified')
         emit({'event': 'input', 'identity': identity(before), 'sha256': hashlib.sha256(data).hexdigest()})
-        if sys.argv[2] == 'read':
-            result = {'stage': 'read', 'status': 0, 'errno': 0}
-        else:
+        libc = None
+        if sys.argv[2] != 'read':
             libc = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
             libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_longlong]
             libc.mmap.restype = ctypes.c_void_p
@@ -108,7 +107,7 @@ def main():
             libc.mprotect.restype = ctypes.c_int
             libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
             libc.munmap.restype = ctypes.c_int
-            result = observe(fd, sys.argv[2], libc)
+        result = observe(fd, sys.argv[2], libc)
         if identity(os.fstat(fd)) != identity(before) or identity(path.lstat()) != identity(before):
             raise ValueError('fixture_changed')
         emit({'event': 'result', **result})
