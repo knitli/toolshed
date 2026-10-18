@@ -528,6 +528,7 @@ def run(*, startup_only=False, site_startup_only=False, version_launch_only=Fals
     removed = False
     frozen = {}
     crash_state = None
+    crash_observations = None
     try:
         for path in (Path(__file__).resolve(), CHILD, Path(SAFE_PY), Path(SANDBOX)):
             ancestry = tool_ancestry(path)
@@ -558,20 +559,23 @@ def run(*, startup_only=False, site_startup_only=False, version_launch_only=Fals
         # Do not erase already observed denied execution on a later failure.
         status = 'FAIL_EXECUTION_ALLOWED' if fixture and classify_attempt(receipts, fixture, diagnostic_only) == 'FAIL_EXECUTION_ALLOWED' else 'INCONCLUSIVE'
     finally:
-        data_path = ROOT / 'mapping-data'
         try:
-            if data_path.exists():
-                data_path.unlink()  # Input is never modified by child; no recursive scratch deletion.
-            removed = not os.path.lexists(data_path)
-        except OSError as caught:
-            error = (error or '') + '; fixture cleanup: ' + str(caught)
-        if not removed and status != 'FAIL_EXECUTION_ALLOWED':
-            status = 'INCONCLUSIVE'
+            data_path = ROOT / 'mapping-data'
+            try:
+                if data_path.exists():
+                    data_path.unlink()  # Input is never modified by child; no recursive scratch deletion.
+                removed = not os.path.lexists(data_path)
+            except OSError as caught:
+                error = (error or '') + '; fixture cleanup: ' + str(caught)
+            if not removed and status != 'FAIL_EXECUTION_ALLOWED':
+                status = 'INCONCLUSIVE'
+        finally:
+            crash_observations = crash_collect(crash_state, receipts) if version_launch_only else None
     result = {'status': status, 'qualified': False, 'error': error, 'fixtureRemoved': removed,
               'claim': 'fixed synthetic mapped-code matrix only; CLT runtime remains unqualified',
               'runner': {key: os.environ[key] for key in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'ImageOS', 'ImageVersion')},
               'inputs': frozen, 'fixture': fixture, 'receipts': receipts}
-    result.update({'crashObservations': crash_collect(crash_state, receipts)} if version_launch_only else {})
+    result.update({'crashObservations': crash_observations} if version_launch_only else {})
     write_new(ROOT / 'result.json', (json.dumps(result, indent=2) + '\n').encode())
     return 0 if status == 'SYSCALL_AND_CONTROL_MATRIX_PASS' else 1
 

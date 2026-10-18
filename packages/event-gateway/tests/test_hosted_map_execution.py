@@ -490,6 +490,17 @@ class CrashObservationTests(unittest.TestCase):
     filename = 'Python-2026-10-18-010001.ips'
 
     def setUp(self):
+        self.production_identity = probe.identity
+
+        def fixture_identity(info):
+            if not hasattr(info, 'st_flags'):
+                fields = {name: getattr(info, name) for name in dir(info) if name.startswith('st_')}
+                info = types.SimpleNamespace(**fields, st_flags=0)
+            return self.production_identity(info)
+
+        identity_patch = patch.object(probe, 'identity', side_effect=fixture_identity)
+        identity_patch.start()
+        self.addCleanup(identity_patch.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name).resolve()
@@ -507,7 +518,22 @@ class CrashObservationTests(unittest.TestCase):
                      'procLaunch': '2026-10-18 01:00:00.500 +0000',
                      'captureTime': '2026-10-18 01:00:01.500 +0000',
                      'termination': {'namespace': 'SIGNAL', 'code': 6},
-                     'threads': [{'secret': 'MUST_NOT_EXPORT'}], 'private': 'MUST_NOT_EXPORT'}
+                     'threads': [{'redactionSentinel': 'MUST_NOT_EXPORT'}], 'private': 'MUST_NOT_EXPORT'}
+
+    def test_stat_fixture_preserves_flags_and_normalizes_only_absent_flags(self):
+        fields = {'st_dev': 1, 'st_ino': 2, 'st_mode': 33152, 'st_uid': 501, 'st_gid': 20,
+                  'st_size': 64, 'st_mtime_ns': 100, 'st_ctime_ns': 101}
+        missing_flags = types.SimpleNamespace(**fields)
+        with self.assertRaises(AttributeError):
+            self.production_identity(missing_flags)
+        self.assertEqual(probe.identity(missing_flags), [1, 2, 33152, 501, 20, 0, 64, 100, 101])
+        for flags in (0, 64):
+            info = types.SimpleNamespace(**fields, st_flags=flags)
+            self.assertEqual(probe.identity(info), self.production_identity(info))
+            self.assertEqual(probe.identity(info)[5], flags)
+        del fields['st_ino']
+        with self.assertRaises(AttributeError):
+            probe.identity(types.SimpleNamespace(**fields))
 
     def raw(self, header=None, body=None):
         return (json.dumps(self.header if header is None else header) + '\n'
@@ -749,6 +775,73 @@ class CrashObservationTests(unittest.TestCase):
 
         with patch.object(probe.os, 'close', side_effect=failed_close):
             self.assertEqual(self.collect(state), {key: {'status': 'unavailable'} for key in probe.CRASH_CASES})
+
+    def test_run_failure_paths_close_held_crash_descriptor(self):
+        for failure in ('source_verification', 'spawn', 'fixture_cleanup', 'unexpected_cleanup', 'cancelled_cleanup'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                temp = Path(directory).resolve()
+                state = probe.crash_baseline(str(self.home), self.uid)
+                descriptor = state['descriptor']
+                env = {key: 'fixed' for key in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'ImageOS', 'ImageVersion')}
+                env.update(RUNNER_TEMP=str(temp), HOME=str(self.home))
+                record = {'identity': [1, 2, 3], 'sha256': 'synthetic'}
+                real_unlink = Path.unlink
+                unexpected = (ValueError('synthetic unexpected cleanup') if failure == 'unexpected_cleanup'
+                              else KeyboardInterrupt('synthetic cancellation') if failure == 'cancelled_cleanup' else None)
+
+                def unlink(path, *args, **kwargs):
+                    if unexpected is not None and path.name == 'mapping-data':
+                        raise unexpected
+                    if failure == 'fixture_cleanup' and path.name == 'mapping-data':
+                        raise OSError('synthetic fixture cleanup failure')
+                    return real_unlink(path, *args, **kwargs)
+
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(patch.dict(probe.os.environ, env, clear=True))
+                    stack.enter_context(patch.object(probe, 'ROOT', probe.ROOT))
+                    stack.enter_context(patch.object(probe, 'ENV', {}))
+                    stack.enter_context(patch.object(probe, 'admit'))
+                    baseline = stack.enter_context(patch.object(probe, 'crash_baseline', return_value=state))
+
+                    def file_record(*args, **kwargs):
+                        if failure == 'source_verification' and baseline.called:
+                            raise ValueError('synthetic source verification failure')
+                        return record
+
+                    stack.enter_context(patch.object(probe, 'file_record', side_effect=file_record))
+                    stack.enter_context(patch.object(probe, 'tool_ancestry', return_value=[]))
+                    stack.enter_context(patch.object(Path, 'unlink', unlink))
+                    stack.enter_context(patch.object(probe.time, 'sleep'))
+                    spawn = stack.enter_context(patch.object(probe.subprocess, 'Popen', side_effect=OSError('synthetic spawn failure')))
+                    if failure != 'spawn':
+                        stack.enter_context(patch.object(probe, 'bounded', return_value=self.receipt))
+                    collect = stack.enter_context(patch.object(probe, 'crash_collect', wraps=probe.crash_collect))
+                    if unexpected is None:
+                        self.assertEqual(probe.run(version_launch_only=True), 1)
+                    else:
+                        with self.assertRaises(type(unexpected)) as raised:
+                            probe.run(version_launch_only=True)
+                        self.assertIs(raised.exception, unexpected)
+                        self.assertFalse((probe.ROOT / 'result.json').exists())
+                    collect.assert_called_once()
+                    self.assertIs(collect.call_args.args[0], state)
+                    baseline.assert_called_once_with(str(self.home), self.uid)
+                    if failure == 'spawn':
+                        spawn.assert_called_once()
+                    else:
+                        spawn.assert_not_called()
+                    result = json.loads((probe.ROOT / 'result.json').read_text()) if unexpected is None else None
+                with self.assertRaises(OSError):
+                    probe.os.fstat(descriptor)
+                if unexpected is not None:
+                    continue
+                self.assertEqual(result['status'], 'INCONCLUSIVE')
+                self.assertIs(result['qualified'], False)
+                self.assertIn({'source_verification': 'synthetic source verification failure',
+                               'spawn': 'synthetic spawn failure',
+                               'fixture_cleanup': 'synthetic fixture cleanup failure'}[failure], result['error'])
+                self.assertEqual(result['fixtureRemoved'], failure != 'fixture_cleanup')
+                self.assertEqual(result['crashObservations'], {key: {'status': 'unavailable'} for key in probe.CRASH_CASES})
 
     def test_crash_collect_requires_both_cleanups_and_handles_no_baseline(self):
         self.assertEqual(self.collect(None), {key: {'status': 'unavailable'} for key in
