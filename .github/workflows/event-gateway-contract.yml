@@ -200,7 +200,17 @@ jobs:
                       'event-v1/protocol-v1.json': '2f1fba8d3945c820a1d0ef429738c9d55f671b00cc7efcdf8f32f4ad8f2d8566',
                       'event-v1/manifest.json': 'd4eb830cc8451bc10bb607627b3196dab9e0920152ec06eaa31ff4851872660d',
                       'event-control-v1/fixtures.json': 'a337d1d2dbdf44a72bc41607e04bc5744886c130bafc6a9282438b81570e68bb',
-                      'event-control-v1/manifest.json': '13e700d4e0ad766a01a9fbe4595feb9a7546b406e4cf79769659d2aa00994dbe'}})
+                      'event-control-v1/manifest.json': '13e700d4e0ad766a01a9fbe4595feb9a7546b406e4cf79769659d2aa00994dbe'}},
+          {'name': 'github-material-page-parity',
+           'eventRevision': '7b63bee97395a70e05ffb08ee214e8351f6dda06',
+           'controlRevision': '5d3c326677bab6cb8ac3115dcbc65e7956676ba9',
+           'hashes': {'event-v1/protocol.schema.json': '583ef82033e40bf159b2b2651d4986441673d286f1289b5fd73b872d4f8c5b38',
+                      'event-v1/protocol.ts': 'ed1946cbe16e38d01d67bf40413a844d37c050f434337ff4a967c557793e530b',
+                      'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+                      'event-v1/protocol-v1.json': '2f1fba8d3945c820a1d0ef429738c9d55f671b00cc7efcdf8f32f4ad8f2d8566',
+                      'event-v1/manifest.json': 'd4eb830cc8451bc10bb607627b3196dab9e0920152ec06eaa31ff4851872660d',
+                      'event-control-v1/fixtures.json': '3d0510da3be4dce06319ebafe750ea6669c9fd6629c63cac3637bcb492e59f78',
+                      'event-control-v1/manifest.json': '4989cbad8f30d24e5b287adb64202ff485cba42b474e44ad72301ae0524314f2'}})
 
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
