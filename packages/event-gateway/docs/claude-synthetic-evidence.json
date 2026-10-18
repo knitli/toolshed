@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "description": "Sanitized metadata recomputed from retained synthetic-run archives and run records; raw evidence remains private.",
+  "derivation": "Archive and member hashes are SHA-256 of original bytes; four file hashes match export-status.json; counts use each named observationField.",
+  "limits": [
+    "Admission and delivery remain unknown.",
+    "No baseline idle, native-process restart, durable receipt-v3, selected-TUI identity or production qualification.",
+    "Bounded cleanup does not prove complete descendant termination or VM disposal."
+  ],
+  "runs": [
+    {
+      "runId": 39081660889,
+      "attempt": 1,
+      "cloudCommit": "ff5a9b53796e49bf1c6a84c221fa78eb72be43f7",
+      "toolshedCommit": "e0d1b1b830edd3e5a652483d717463132670b5fd",
+      "archiveSha256": "647e75e9b24aaa4c4f32afec044bb8adb0439e7d75f99d177caf763b39eabef1",
+      "archiveMemberCount": 5,
+      "members": {
+        "acquisition.json": {
+          "bytes": 325,
+          "sha256": "4be6dcab539bf402a7ad6730bb3c05416a852c940634f6094d473d4b4afa96eb"
+        },
+        "export-status.json": {
+          "bytes": 926,
+          "sha256": "b4e2d735ea06683e776a7341855a85df4c82275a6dc5569d37d2b35292c78a75"
+        },
+        "fixture.log": {
+          "bytes": 2128,
+          "sha256": "b8d5418eca1570189224e85eba2f16b7859ef8ae8e39438e13712be1890d22c9"
+        },
+        "proof.json": {
+          "bytes": 4598,
+          "sha256": "035b2dca8ddf1be12247ad963387a10adb8d9b8ac47b89e51fff391f874d5f84"
+        },
+        "status.json": {
+          "bytes": 103,
+          "sha256": "c9b7d273291e712eb5a1d5717b22a201ce2b830e829f4153ccc80b8530026c54"
+        }
+      },
+      "exportManifestFileCount": 4,
+      "exportManifestHashesVerified": true,
+      "observationField": "busyProbe.observations",
+      "observationCount": 23,
+      "productionQualified": false,
+      "nativeReceiptV3Proven": false,
+      "runUrl": "https://github.com/knitli/knitli-site/actions/runs/39081660889",
+      "scenario": "busy-native-witness",
+      "boundedObservation": "OBSERVED",
+      "syntheticProviderRequests": 2
+    },
+    {
+      "runId": 39085560953,
+      "attempt": 1,
+      "cloudCommit": "8af17b7bb6589d7071367f6c7474bd34d6960acd",
+      "toolshedCommit": "27487449f2268568c33701bff391b261308b2869",
+      "archiveSha256": "cd660d6e601ef94b7273e98ccdadd92263aba4313d139f2ad68263df3d990dca",
+      "archiveMemberCount": 5,
+      "members": {
+        "acquisition.json": {
+          "bytes": 325,
+          "sha256": "8d2c2453d9894d3d2cc1ee6366fe97db6b6f10e60fe3420ee7b076c73f3d7246"
+        },
+        "export-status.json": {
+          "bytes": 927,
+          "sha256": "1decb69a100b8ade829d675c8175e76be6204d5dbaee2a400cc55de74552bff0"
+        },
+        "fixture.log": {
+          "bytes": 2128,
+          "sha256": "ff1d760f8c8931f5ad74709d7d145c4ce0c48295502a3afd489f4823e2078577"
+        },
+        "proof.json": {
+          "bytes": 11191,
+          "sha256": "3f4abc1d23aa4b590e84daeb4063fe34f414257f437476d9b70b89b367ae7218"
+        },
+        "status.json": {
+          "bytes": 113,
+          "sha256": "9b33e0eeef322e9874484a93a50b8530b86b26a10cefb8ec1a7ee3f0e782c061"
+        }
+      },
+      "exportManifestFileCount": 4,
+      "exportManifestHashesVerified": true,
+      "observationField": "reattachProbe.observations",
+      "observationCount": 35,
+      "productionQualified": false,
+      "nativeReceiptV3Proven": false,
+      "runUrl": "https://github.com/knitli/knitli-site/actions/runs/39085560953",
+      "scenario": "adapter-reattach-live-session",
+      "boundedObservation": "OBSERVED",
+      "syntheticProviderRequests": 3
+    }
+  ]
+}

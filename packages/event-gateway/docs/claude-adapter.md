@@ -4,6 +4,63 @@ Status: implemented standalone transport, **not production-qualified and not reg
 with cloud dispatch**. No owner session, configuration, credential store, or installation
 was accessed or changed. The installed executable's static source was inspected.
 
+## Current bounded evidence (2026-10-18)
+
+All three observations used a disposable headless Claude process and a local
+synthetic provider; none used a real model provider or owner credentials.
+
+- [Run `39037031558`](https://github.com/knitli/knitli-site/actions/runs/39037031558)
+  observed a controlled same-session socket wake. A completed first turn and a
+  one-second wait did not independently establish baseline native idle state.
+- [Run `39081660889`](https://github.com/knitli/knitli-site/actions/runs/39081660889),
+  attempt 1, passed the two-turn busy witness with 23 ordered observations.
+  Evidence archive SHA-256:
+  `647e75e9b24aaa4c4f32afec044bb8adb0439e7d75f99d177caf763b39eabef1`.
+- [Run `39085560953`](https://github.com/knitli/knitli-site/actions/runs/39085560953),
+  attempt 1, passed same-live-session adapter recovery: the adapter was killed
+  after write closure and replaced, the retained journal suppressed the old
+  retry, and a distinct fresh UUID completed the third turn. The native process
+  and session remained the same. Evidence contained exactly three synthetic
+  provider requests, 35 ordered observations and a `cleanup_complete` event.
+  Evidence archive SHA-256:
+  `cd660d6e601ef94b7273e98ccdadd92263aba4313d139f2ad68263df3d990dca`.
+
+The [structured synthetic evidence record](claude-synthetic-evidence.json)
+records both run identities, source revisions, archive/member hashes and recomputed
+observation counts. It contains metadata only; the raw archives remain private.
+
+Each of the two later archives contained five members: one export manifest and
+four exported files. Each archive's four file hashes were independently checked
+against its own manifest. Admission and delivery remain `unknown`; these
+observations establish neither a durable native receipt nor native-process
+restart, selected-TUI identity, receipt-v3 or production qualification. Complete
+process-tree termination and VM disposal remain unproven. `cleanup_complete`
+records the canary's bounded cleanup, not those broader guarantees.
+
+Historical investigation notes below describe the evidence available at each
+stage. Read them with the current summary and limitations; baseline native idle
+qualification remains unproven.
+The executed recovery workflow remains pinned to the immutable Toolshed
+`27487449f2268568c33701bff391b261308b2869` source; this documentation update does
+not change that pin or its recorded source hashes.
+
+## Missing native authority contract
+
+The inspected pinned UDS ingress has no qualified durable exact-input receipt
+query. Peer-status notices, stdout replay/results, transcript membership and the
+adapter's attempt journal cannot supply that authority. The shared receipt
+validators do not create a native issuer.
+
+The missing native-supported producer must durably bind the full canonical input
+to its exact attempt, session, delivery and attachment/server generation before
+issuing an input-recorded anchor. Completion, failure or cancellation evidence
+must bind to that same anchor. Definitive no-start needs its own durable receipt
+bound to the original attempt.
+Read-only lookup must recover the exact evidence after response loss or restart;
+missing, unreadable or conflicting evidence remains `unknown` and cannot permit
+retry. Delivery to an owner-selected TUI additionally requires authenticated
+native selection and revocation fencing before a stale selection can accept work.
+
 ## Verified support
 
 The installed Claude Code **2.1.302** executable contains a native cross-session UDS
@@ -94,7 +151,7 @@ await buffer flushing within the send deadline; failure or timeout aborts.
 Retain the journal: deleting it removes the no-replay boundary. Markers have no payload
 or secret. This manual qualification journal is intentionally not auto-pruned.
 
-## Evidence and remaining qualification
+## Historical initial evidence and remaining qualification
 
 Protocol fixtures exercise real disposable Unix sockets: auth/wire shape, stable
 session targeting, concurrent reservation, restart/no-replay, pre/post-connect socket
@@ -102,15 +159,15 @@ rotation, an actual other-process path-swap-and-restore race with a zero-byte wi
 graceful close/timeout, unsafe permissions, validation and safe CLI errors. They prove our adapter's
 behavior, not Claude's processing or idle wake.
 
-No successful native idle wake has been observed: an isolated disposable client,
-verified native ingress availability, and a trusted observation of input/turn outcomes
-are still required. Custom channel development bypass is not needed for native UDS,
+Controlled same-session socket wake has been observed, but wake from an
+independently established baseline native idle state remains unproven.
+Custom channel development bypass is not needed for native UDS,
 but the installed client gates cross-session messaging independently. Do not bypass
 that gate or borrow owner credentials. Production closure needs exact-session native
 binding, observed idle/busy behavior, lost-write/restart reconciliation, and a durable
 receipt contract that distinguishes input recorded, turn started, and terminal no-start.
 
-## Dedicated-key idle-wake canary (not yet executed)
+## Dedicated-key idle-wake canary (historical preparation)
 
 `qualify_claude_socket.py` is a separate opt-in run. In a terminal, with the gateway
 installed in the selected Python environment, run this one command and enter a
@@ -205,7 +262,7 @@ real-model behavior or production qualification. Native startup, sandbox
 compatibility, the installed messaging gate, and idle wake must still be observed
 in an actual contained run. Unit tests do not execute Claude.
 
-### Offline busy probe (experimental)
+### Busy probe and historical investigation
 
 Busy observation failures retain at most eight classified stdout envelopes in the
 existing bounded `fixture.log`: event type/subtype from fixed allowlists, exact
@@ -419,7 +476,16 @@ subsequently verified and executed the pinned client. Every qualification run mu
 verify downloaded bytes against the pinned hash before execution; it must not
 execute an installer or select `latest`.
 
-## Same-live-session adapter recovery candidate (offline only)
+The subsequent [run `39081660889`](https://github.com/knitli/knitli-site/actions/runs/39081660889),
+attempt 1, passed the two-turn busy witness with 23 ordered observations, closing
+this sequence of failed busy-probe investigations. Its recomputed archive and
+export hashes are recorded in [the structured evidence](claude-synthetic-evidence.json).
+This is bounded synthetic same-session evidence: native admission and delivery
+remain unknown; baseline idle, durable receipts, native-process restart and
+production qualification remain unproven. The separate adapter-replacement
+observation below does not establish native-process restart.
+
+## Same-live-session adapter recovery
 
 `--adapter-reattach-probe` is a separate three-turn experiment and requires both
 `--busy-probe` and `--local-provider`. It restarts Python adapter processes while
@@ -443,7 +509,7 @@ logs. Actors use a closed environment and the same Python runtime. The existing
    suppresses the original delivery using the same journal. The offline socket
    fixture observes exactly one old frame and one fresh frame, with no old resend.
 
-The proposed native scenario uses the second cut:
+The executed native scenario in run `39085560953` used the second cut:
 
 1. Observe exact-session init/running and hold the first synthetic response.
 2. Prepare the old BUSY input, write it with the first adapter, then kill/reap only
@@ -467,15 +533,17 @@ termination retains scratch even in local mode.
 Both cuts keep admission and delivery `unknown`. The journal is a conservative
 attempt quarantine, not a native receipt or the production Gateway ledger.
 `ClaudeSocketTransport.check()` still returns unavailable and `reconcile()` never
-claims consumption. Even an eventual successful native run would not establish
+claims consumption. The successful same-live-session run does not establish
 TUI-selected identity, durable admission, native restart, receipt-v3, complete
 process-tree termination, VM disposal or production qualification.
 
 Offline validation covers real Python actors and synthetic Unix sockets, plus
-three-turn observer/provider and controller fixtures. No native client or model
-was executed for this candidate. The Cloud workflow proposal is a new fixed
-`adapter-reattach-live-session` choice mapping only to
-`--busy-probe --adapter-reattach-probe`, with existing choices unchanged. It needs
-a separately reviewed actual source squash pin, source hashes, scenario allowlist
-and shell tests, fresh protected-main preflight, and an explicit single-run GO.
-No workflow change or dispatch is included here.
+three-turn observer/provider and controller fixtures. The implementation's offline
+checks did not execute a native client or model. Subsequently, the reviewed Cloud
+`adapter-reattach-live-session` choice, mapping only to
+`--busy-probe --adapter-reattach-probe`, ran once as `39085560953` after the actual
+source squash pin, source hashes, scenario allowlist and shell tests, fresh
+protected-main preflight, and explicit single-run authorization were verified.
+That run used the native client with a synthetic provider and established only
+the bounded recovery observation summarized above. This documentation update
+performs no workflow dispatch or activation.
