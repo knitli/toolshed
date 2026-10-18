@@ -19,7 +19,8 @@ def validate_terminal_receipt(request, receipt):
         raise NativeError("invalid_native_request")
     try:
         validate_start(
-            {key: value for key, value in request.items() if key != "receiptVersion"}
+            {key: value for key, value in request.items() if key != "receiptVersion"},
+            receipt_version=3,
         )
     except (ValueError, TypeError, KeyError):
         raise NativeError("invalid_native_request") from None

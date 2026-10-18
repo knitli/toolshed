@@ -75,7 +75,7 @@ def unique(pairs):
     return result
 
 
-def validate_start(start):
+def validate_start(start, *, receipt_version=2):
     require(
         isinstance(start, dict)
         and set(start) == set(IDENTITY) | {"generation", "event"}
@@ -96,6 +96,15 @@ def validate_start(start):
         isinstance(start["permitId"], str) and IDENTIFIER.fullmatch(start["permitId"])
     )
     event = start["event"]
+    if isinstance(event, dict) and ("schemaVersion" in event or event.get("source") == "messaging"):
+        from .native_messaging import canonical_metadata
+
+        require(type(receipt_version) is int and receipt_version == 3)
+        try:
+            canonical_metadata(event, start["attemptId"], start["deliveryId"], strict_wire=True)
+        except (ValueError, TypeError, KeyError):
+            raise BridgeError("invalid bridge frame or state") from None
+        return
     require(
         isinstance(event, dict)
         and set(event)
@@ -313,7 +322,7 @@ class NativeBridge:
         return dict(row)
 
     def start(self, request):
-        validate_start(request)
+        validate_start(request, receipt_version=self.receipt_version)
         require(
             not self.closed
             and self.witness is not None
@@ -360,7 +369,7 @@ class NativeBridge:
 
     def restore_attempt(self, request):
         """Restore durable identity for read-only recovery, consuming start-once IDs."""
-        validate_start(request)
+        validate_start(request, receipt_version=self.receipt_version)
         require(not self.closed)
         previous = self.attempts.get(request["attemptId"])
         if previous is not None:
@@ -374,7 +383,7 @@ class NativeBridge:
 
     def receipt(self, request):
         """Read-only exact receipt recovery; never sends an event or renews a witness."""
-        validate_start(request)
+        validate_start(request, receipt_version=self.receipt_version)
         require(not self.closed and request == self.attempts.get(request["attemptId"]))
         return self._receipt_exchange("receipt", request)
 
@@ -382,7 +391,7 @@ class NativeBridge:
         """Read exact durable terminal evidence without selection or Start eligibility."""
         from .native_terminal_evidence import validate_terminal_receipt
 
-        validate_start(request)
+        validate_start(request, receipt_version=self.receipt_version)
         require(self.receipt_version == 3 and not self.closed
                 and request == self.attempts.get(request["attemptId"]))
         try:

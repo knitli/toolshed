@@ -83,12 +83,22 @@ def validate_request(request, admission):
         raise NativeError("invalid_native_request")
     try:
         envelope = admission["envelope"]
+        event = {key: envelope[key] for key in EVENT_FIELDS}
+        if envelope.get("schemaVersion") == 2 or envelope.get("source") == "messaging":
+            from .native_messaging import FIELDS, canonical_metadata
+
+            if _receipt_version(request) != 3:
+                raise NativeError("invalid_native_request")
+            event = canonical_metadata({key: envelope[key] for key in FIELDS},
+                                       envelope["attemptId"], envelope["deliveryId"])
+            request["event"] = canonical_metadata(request["event"],
+                                                   request["attemptId"], request["deliveryId"])
         expected = {
             "attemptId": envelope["attemptId"], "deliveryId": envelope["deliveryId"],
             "permitId": admission["permitId"],
             "permitIssuedAt": _timestamp(admission["permitIssuedAt"]),
             "permitExpiresAt": _timestamp(admission["permitExpiresAt"]),
-            "event": {key: envelope[key] for key in EVENT_FIELDS},
+            "event": event,
         }
         if any(request[key] != value for key, value in expected.items()):
             raise NativeError("invalid_native_request")
