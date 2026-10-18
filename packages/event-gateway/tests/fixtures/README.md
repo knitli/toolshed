@@ -1,13 +1,13 @@
 # Trusted contract fixtures
 
-`trusted-contract-families.zip` contains immutable Git blob bytes for all thirteen
+`trusted-contract-families.zip` contains immutable Git blob bytes for all fifteen
 contract families. Tests read members with `ZipFile.read`; nothing is
 extracted or executed, and tests require neither network access nor Git history.
 
 `metadata.json` freezes the policy entries, including revision labels and all
-seven snapshot hashes. It records these `knitli/toolshed` snapshot commits:
+seven snapshot hashes. It records these snapshot commits or prepared-export identifiers:
 
-| Family | Snapshot commit |
+| Family | Snapshot commit or prepared export |
 | --- | --- |
 | legacy | bd46ecbc6d65e64f075be1ed2b9f8dde325f03f9 |
 | no-start | 4d4418231d1c5c3492c52b173b118476d9b780fb |
@@ -16,9 +16,18 @@ seven snapshot hashes. It records these `knitli/toolshed` snapshot commits:
 | native-admission | 3baeb6d5e8fa0fddceacc0c8c7151cdae4fe59c4 |
 | native-runtime-status | d979c715aec6ad00d3d40f622249e9a46bdc179f |
 | github-source-readback | 7c1c27ce5dbbdfc1af786a9f261da9cc7e22d43c |
+| github-source-control | prepared-export:c25ade9233013d97d56ed0fdfddf75453071066b |
+| github-watch-control | prepared-export:ccdb861eb9126ccd8319d50da5cd6689f91435dd |
+| github-watch-owner-rpc | prepared-export:59940bde10db5584247c8648c985f246f546226f |
+| github-pinned-history-read | prepared-export:49122dd4ac2a358d87e8cd727fd8e817ae183dac |
+| cloud-guard-baseline-messaging-v2-dispatch | prepared-export:7b63bee97395a70e05ffb08ee214e8351f6dda06 |
+| github-initial-custody | prepared-export:3ad64222999bc2aaa60f50623120e302edc5f8bd |
+| github-initial-plan-material | prepared-export:5d3c326677bab6cb8ac3115dcbc65e7956676ba9 |
+| github-material-page-parity | prepared-export:5d3c326677bab6cb8ac3115dcbc65e7956676ba9 |
 
-Snapshots were copied from `packages/event-gateway/contracts/` with `git show`
-and matched against every approved raw SHA-256 before inclusion. Source members
+Every snapshot matched all seven authorized raw SHA-256 values before inclusion.
+The identifiers distinguish committed Toolshed snapshots from prepared exports.
+Source members
 were copied from `knitli/knitli-site` at the native family's event revision
 `ed23882eac491e26e070e3ef26cf8c0e9e702b38` (four sources) and control revision
 `038716741534afe804fb75b9eab15dba6ddbee11` (nine sources). Every source was matched
@@ -109,3 +118,19 @@ watch custody, reconciliation, material access, source references, and
 quarantine inventory. This is selected GitHub/initial-custody provenance, not
 whole-runtime dependency closure. It does not adopt the consumer snapshot or
 exporter, deploy services, activate delivery, or release acknowledgments.
+
+
+The `github-initial-plan-material` family pins control revision
+`5d3c326677bab6cb8ac3115dcbc65e7956676ba9` with 57 sources. It adds
+`github/reconciliation-planner.ts` and `github/initial-plan-material-read.ts`
+to the initial-custody inventory. The control fixture corpus and all five event
+files remain unchanged, including the 45 semantic verdicts.
+
+The `github-material-page-parity` family retains that control revision and all
+57 source hashes. It adds only the `githubMaterialRead` fixture corpus: 11 request,
+15 result, and seven page-binding verdicts, plus the canonical signed-path proof.
+The control manifest records the new fixture digest; all other control manifest
+fields, previous fixture entries, event files, and historical archive members
+remain unchanged. No new source revision or source hash is introduced. These
+vectors check producer/consumer DTO and page-binding compatibility; native model
+consumption, delivery, and production qualification require separate evidence.

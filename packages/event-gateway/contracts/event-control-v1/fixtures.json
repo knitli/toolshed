@@ -1956,6 +1956,785 @@
       }
     ]
   },
+  "githubMaterialRead": {
+    "request": {
+      "subject": {
+        "installationId": 1,
+        "repositoryId": 2,
+        "prNumber": 3
+      },
+      "sourceId": "comment:7",
+      "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "fromVersion": 2,
+      "toVersion": 3
+    },
+    "requests": [
+      {
+        "name": "first-page",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "accepted": true
+      },
+      {
+        "name": "continuation",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3,
+          "cursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30"
+        },
+        "accepted": true
+      },
+      {
+        "name": "boolean-identity",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": true,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "accepted": false
+      },
+      {
+        "name": "unsafe-range",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 9007199254740992
+        },
+        "accepted": false
+      },
+      {
+        "name": "reversed-range",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 4,
+          "toVersion": 3
+        },
+        "accepted": false
+      },
+      {
+        "name": "missing-range",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "accepted": false
+      },
+      {
+        "name": "unknown-field",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3,
+          "body": "untrusted"
+        },
+        "accepted": false
+      },
+      {
+        "name": "invalid-source",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "arbitrary",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "accepted": false
+      },
+      {
+        "name": "invalid-digest",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "accepted": false
+      },
+      {
+        "name": "invalid-cursor",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3,
+          "cursor": "not a cursor"
+        },
+        "accepted": false
+      },
+      {
+        "name": "request-byte-limit",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "thread-comment:éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "accepted": false
+      }
+    ],
+    "results": [
+      {
+        "name": "unicode-first-page",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false
+        },
+        "accepted": true
+      },
+      {
+        "name": "unicode-complete-page",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀z",
+          "nextCursor": null,
+          "complete": true
+        },
+        "accepted": true
+      },
+      {
+        "name": "empty-complete-page",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "offset": 0,
+          "totalLength": 0,
+          "body": "",
+          "nextCursor": null,
+          "complete": true
+        },
+        "accepted": true
+      },
+      {
+        "name": "unavailable",
+        "value": {
+          "status": "unavailable"
+        },
+        "accepted": true
+      },
+      {
+        "name": "deleted",
+        "value": {
+          "status": "deleted"
+        },
+        "accepted": true
+      },
+      {
+        "name": "conflict",
+        "value": {
+          "status": "conflict"
+        },
+        "accepted": true
+      },
+      {
+        "name": "unknown-result-field",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false,
+          "providerBody": "private"
+        },
+        "accepted": false
+      },
+      {
+        "name": "empty-nonterminal",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "empty-terminal-nonempty-material",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 4,
+          "totalLength": 4,
+          "body": "",
+          "nextCursor": null,
+          "complete": true
+        },
+        "accepted": false
+      },
+      {
+        "name": "completion-cursor-conflict",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": true
+        },
+        "accepted": false
+      },
+      {
+        "name": "offset-overrun",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 2,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "first-version-outside-range",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 4,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "boolean-offset",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": false,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "body-limit",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 2050,
+          "body": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "response-byte-limit",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 2049,
+          "body": "\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001\u0001",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false
+        },
+        "accepted": false
+      }
+    ],
+    "bindings": [
+      {
+        "name": "first-page",
+        "request": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "result": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false
+        },
+        "accepted": true
+      },
+      {
+        "name": "continuation",
+        "request": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3,
+          "cursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30"
+        },
+        "result": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 3,
+          "totalLength": 4,
+          "body": "z",
+          "nextCursor": null,
+          "complete": true
+        },
+        "accepted": true
+      },
+      {
+        "name": "wrong-source",
+        "request": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "result": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:8",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "wrong-range",
+        "request": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "result": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 1,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "wrong-offset",
+        "request": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "result": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 1,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "wrong-next-offset",
+        "request": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "result": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6Mn0",
+          "complete": false
+        },
+        "accepted": false
+      },
+      {
+        "name": "continuation-binding-switch",
+        "request": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3,
+          "cursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30"
+        },
+        "result": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 3,
+          "totalLength": 5,
+          "body": "z",
+          "nextCursor": "eyJiaW5kaW5nIjoiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYiIsIm9mZnNldCI6NH0",
+          "complete": false
+        },
+        "accepted": false
+      }
+    ],
+    "nodeProof": {
+      "principal": "adam@knitli.com",
+      "agent": "pilot-agent",
+      "binding": {
+        "audience": "https://events.example.com",
+        "method": "POST",
+        "path": "/v1/github/source/material",
+        "bodySha256": "d050fcb3a5a727a080698260b9f91298662b5679cc6898b3060f7f54d17f4937"
+      },
+      "body": "{\"subject\":{\"installationId\":1,\"repositoryId\":2,\"prNumber\":3},\"sourceId\":\"comment:7\",\"fingerprint\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"fromVersion\":2,\"toVersion\":3}",
+      "proof": {
+        "nodeId": "00000000-0000-4000-8000-000000000001",
+        "nodeGeneration": 1,
+        "issuedAt": "2026-10-09T12:00:58.100Z",
+        "nonce": "00000000-0000-4000-8000-000000000013"
+      },
+      "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/github/source/material\",\"d050fcb3a5a727a080698260b9f91298662b5679cc6898b3060f7f54d17f4937\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-09T12:00:58.100Z\",\"00000000-0000-4000-8000-000000000013\"]"
+    }
+  },
   "noStartNodeProof": {
     "principal": "adam@knitli.com",
     "binding": {

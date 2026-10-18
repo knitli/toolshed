@@ -61,5 +61,5 @@
     "apps/os/packages/gatekeeper-memory/src/auth.ts": "894de75ce48027b03b3bed7f81337e57cb471369d7e6c8ad6cd6404f7eaa32ea",
     "apps/os/packages/gatekeeper-memory/src/admin-security.ts": "6df5f34ea173249a5fabc8f01b971cc8138f3e033d62cdb5df86774d780a69fb"
   },
-  "fixturesSha256": "a337d1d2dbdf44a72bc41607e04bc5744886c130bafc6a9282438b81570e68bb"
+  "fixturesSha256": "3d0510da3be4dce06319ebafe750ea6669c9fd6629c63cac3637bcb492e59f78"
 }

@@ -25,6 +25,11 @@ REQUEST = {"subject": SUBJECT, "sourceId": "comment:7", "fingerprint": "f" * 64,
 BODY = "private 😀 first\nsecond é page"
 
 
+def material_cursor(offset, binding="a" * 64, **extra):
+    value = {"binding": binding, "offset": offset, **extra}
+    return base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
+
+
 def pages(chunks=None):
     chunks = chunks or ["private 😀 first\n", "second é page"]
     body = "".join(chunks)
@@ -36,7 +41,7 @@ def pages(chunks=None):
         result.append({"status": "ok", **{key: copy.deepcopy(REQUEST[key]) for key in ("subject", "sourceId", "fingerprint")},
                        "requestedRange": {"fromVersion": 3, "toVersion": 5}, "firstVersion": 4,
                        "bodyDigest": digest, "offset": offset, "totalLength": total,
-                       "body": chunk, "nextCursor": None if last else f"cursor_{index}",
+                       "body": chunk, "nextCursor": None if last else material_cursor(offset + len(chunk.encode("utf-16-le")) // 2),
                        "complete": last})
         offset += len(chunk.encode("utf-16-le")) // 2
     return result
@@ -79,7 +84,7 @@ class MaterialReadTests(unittest.IsolatedAsyncioTestCase):
         for wire in self.requests:
             self.assertEqual(json.loads(wire["body"])["fromVersion"], 3)
             self.assertEqual(json.loads(wire["body"])["toVersion"], 5)
-        self.assertEqual(json.loads(self.requests[1]["body"])["cursor"], "cursor_0")
+        self.assertEqual(json.loads(self.requests[1]["body"])["cursor"], material_cursor(len("private 😀 first\n".encode("utf-16-le")) // 2))
         for request in self.requests:
             self.assertEqual(request["url"], "https://events.example.com/v1/github/source/material")
             self.assertEqual(request["max_response_bytes"], 8192)
@@ -136,7 +141,8 @@ class MaterialReadTests(unittest.IsolatedAsyncioTestCase):
     async def test_cursor_cannot_rebind_page_to_another_requested_range(self):
         self.results = [pages()[1]]
         with self.assertRaisesRegex(CloudError, "^invalid_response$"):
-            await self.client.github_source_material({**REQUEST, "fromVersion": 4, "cursor": "cursor_0"})
+            await self.client.github_source_material(
+                {**REQUEST, "fromVersion": 4, "cursor": material_cursor(len("private 😀 first\n".encode("utf-16-le")) // 2)})
 
     async def test_closed_response_types_and_echoes(self):
         mutations = [lambda p: p.update(extra="raw"), lambda p: p.update(firstVersion=True),
@@ -209,6 +215,53 @@ class MaterialReadTests(unittest.IsolatedAsyncioTestCase):
         self.results = [page]
         with self.assertRaisesRegex(CloudError, "^invalid_response$"):
             await self.client.github_source_material({**REQUEST, "cursor": "continuation"})
+
+    async def test_single_page_rejects_wrong_next_offset(self):
+        self.results = pages()
+        self.results[0]["nextCursor"] = material_cursor(1)
+        with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+            await self.client.github_source_material(REQUEST)
+
+    async def test_single_page_rejects_continuation_binding_switch(self):
+        sequence = pages(["a", "b", "c"])
+        self.results = [sequence[1]]
+        self.results[0]["nextCursor"] = material_cursor(2, "b" * 64)
+        with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+            await self.client.github_source_material({**REQUEST, "cursor": sequence[0]["nextCursor"]})
+
+    async def test_cursor_structure_and_json_number_semantics(self):
+        malformed = ["a", "bad_cursor", material_cursor(True), material_cursor(1.5),
+                     material_cursor(-1), material_cursor(1048577), material_cursor(1, extra=1),
+                     material_cursor(1, "A" * 64)]
+        for cursor in malformed:
+            with self.subTest(cursor=cursor):
+                self.results = [pages(["a", "b"])[1]]
+                with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+                    await self.client.github_source_material({**REQUEST, "cursor": cursor})
+        for offset in (1, 1.0):
+            self.results = [pages(["a", "b"])[1]]
+            self.assertEqual((await self.client.github_source_material(
+                {**REQUEST, "cursor": material_cursor(offset)}))["body"], "b")
+        binding_json = json.dumps("a" * 64)
+        for literal, accepted in (("1e0", True), ("-0", True),
+                                  ("1e999", False), ("NaN", False), ("Infinity", False),
+                                  ("NaN, \"offset\": 1", False),
+                                  ("2, \"offset\": 1", True)):
+            cursor_json = '{"binding":' + binding_json + ',"offset":' + literal + '}'
+            cursor = base64.urlsafe_b64encode(cursor_json.encode()).rstrip(b"=").decode()
+            page = pages(["a", "b"])[1]
+            if literal == "-0":
+                page = pages(["a"])[0]
+            self.results = [page]
+            with self.subTest(literal=literal):
+                if accepted:
+                    await self.client.github_source_material({**REQUEST, "cursor": cursor})
+                else:
+                    with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+                        await self.client.github_source_material({**REQUEST, "cursor": cursor})
+        self.results = [{"status": "unavailable"}]
+        self.assertEqual(await self.client.github_source_material({**REQUEST, "cursor": "opaque"}),
+                         {"status": "unavailable"})
 
     async def test_empty_material_digest_is_verified(self):
         self.results = pages([""])

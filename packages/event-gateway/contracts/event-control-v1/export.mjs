@@ -391,6 +391,71 @@ for (const vector of githubResults) {
     throw Error(`GitHub result vector disagrees with source: ${vector.name}`);
 }
 const githubSourceRead = { request: githubRequest, requests: githubRequests, results: githubResults };
+// Material vectors execute only the reviewed DTO module, never retention/provider code.
+// eslint-disable-next-line no-unsanitized/method -- Execute only the reviewed material DTO module after source-pin verification.
+const materialContract = await import(dataModule(source['github/material-read-contract.ts'].replace("'zod'", JSON.stringify(zod))));
+const materialRequest = { subject: githubRequest.subject, sourceId: 'comment:7', fingerprint: 'f'.repeat(64), fromVersion: 2, toVersion: 3 };
+const materialCursor = materialContract.encodeMaterialCursor({ binding: 'a'.repeat(64), offset: 3 });
+const materialResult = { status: 'ok', subject: materialRequest.subject, sourceId: materialRequest.sourceId,
+  fingerprint: materialRequest.fingerprint, requestedRange: { fromVersion: 2, toVersion: 3 }, firstVersion: 2,
+  bodyDigest: createHash('sha256').update('é😀z').digest('hex'), offset: 0, totalLength: 4,
+  body: 'é😀', nextCursor: materialCursor, complete: false };
+const materialRequests = [
+  { name: 'first-page', value: materialRequest, accepted: true },
+  { name: 'continuation', value: { ...materialRequest, cursor: materialCursor }, accepted: true },
+  { name: 'boolean-identity', value: { ...materialRequest, subject: { ...materialRequest.subject, repositoryId: true } }, accepted: false },
+  { name: 'unsafe-range', value: { ...materialRequest, toVersion: Number.MAX_SAFE_INTEGER + 1 }, accepted: false },
+  { name: 'reversed-range', value: { ...materialRequest, fromVersion: 4 }, accepted: false },
+  { name: 'missing-range', value: { subject: materialRequest.subject, sourceId: materialRequest.sourceId, fingerprint: materialRequest.fingerprint }, accepted: false },
+  { name: 'unknown-field', value: { ...materialRequest, body: 'untrusted' }, accepted: false },
+  { name: 'invalid-source', value: { ...materialRequest, sourceId: 'arbitrary' }, accepted: false },
+  { name: 'invalid-digest', value: { ...materialRequest, fingerprint: 'F'.repeat(64) }, accepted: false },
+  { name: 'invalid-cursor', value: { ...materialRequest, cursor: 'not a cursor' }, accepted: false },
+  { name: 'request-byte-limit', value: { ...materialRequest, sourceId: 'thread-comment:' + 'é'.repeat(2048) }, accepted: false },
+];
+const materialResults = [
+  { name: 'unicode-first-page', value: materialResult, accepted: true },
+  { name: 'unicode-complete-page', value: { ...materialResult, body: 'é😀z', nextCursor: null, complete: true }, accepted: true },
+  { name: 'empty-complete-page', value: { ...materialResult, body: '', totalLength: 0, bodyDigest: createHash('sha256').update('').digest('hex'), nextCursor: null, complete: true }, accepted: true },
+  ...['unavailable', 'deleted', 'conflict'].map(status => ({ name: status, value: { status }, accepted: true })),
+  { name: 'unknown-result-field', value: { ...materialResult, providerBody: 'private' }, accepted: false },
+  { name: 'empty-nonterminal', value: { ...materialResult, body: '' }, accepted: false },
+  { name: 'empty-terminal-nonempty-material', value: { ...materialResult, body: '', offset: 4, nextCursor: null, complete: true }, accepted: false },
+  { name: 'completion-cursor-conflict', value: { ...materialResult, complete: true }, accepted: false },
+  { name: 'offset-overrun', value: { ...materialResult, offset: 2 }, accepted: false },
+  { name: 'first-version-outside-range', value: { ...materialResult, firstVersion: 4 }, accepted: false },
+  { name: 'boolean-offset', value: { ...materialResult, offset: false }, accepted: false },
+  { name: 'body-limit', value: { ...materialResult, body: 'x'.repeat(2049), totalLength: 2050 }, accepted: false },
+  { name: 'response-byte-limit', value: { ...materialResult, body: String.fromCharCode(1).repeat(2048), totalLength: 2049 }, accepted: false },
+];
+for (const vector of materialRequests) {
+  if (materialContract.GitHubMaterialReadRequestSchema.safeParse(vector.value).success !== vector.accepted)
+    throw Error(`Material request vector disagrees with source: ${vector.name}`);
+}
+for (const vector of materialResults) {
+  if (materialContract.GitHubMaterialReadResultSchema.safeParse(vector.value).success !== vector.accepted)
+    throw Error(`Material result vector disagrees with source: ${vector.name}`);
+}
+const materialBindings = [
+  { name: 'first-page', request: materialRequest, result: materialResult, accepted: true },
+  { name: 'continuation', request: { ...materialRequest, cursor: materialCursor }, result: { ...materialResult, offset: 3, body: 'z', nextCursor: null, complete: true }, accepted: true },
+  { name: 'wrong-source', request: materialRequest, result: { ...materialResult, sourceId: 'comment:8' }, accepted: false },
+  { name: 'wrong-range', request: materialRequest, result: { ...materialResult, requestedRange: { fromVersion: 1, toVersion: 3 } }, accepted: false },
+  { name: 'wrong-offset', request: materialRequest, result: { ...materialResult, offset: 1 }, accepted: false },
+  { name: 'wrong-next-offset', request: materialRequest, result: { ...materialResult, nextCursor: materialContract.encodeMaterialCursor({ binding: 'a'.repeat(64), offset: 2 }) }, accepted: false },
+  { name: 'continuation-binding-switch', request: { ...materialRequest, cursor: materialCursor },
+    result: { ...materialResult, offset: 3, body: 'z', totalLength: 5,
+      nextCursor: materialContract.encodeMaterialCursor({ binding: 'b'.repeat(64), offset: 4 }) }, accepted: false },
+];
+const switchedBinding = materialBindings.find(vector => vector.name === 'continuation-binding-switch');
+materialContract.GitHubMaterialReadRequestSchema.parse(switchedBinding.request);
+materialContract.GitHubMaterialReadResultSchema.parse(switchedBinding.result);
+for (const vector of materialBindings) {
+  if (materialContract.materialPageMatches(vector.request, vector.result) !== vector.accepted)
+    throw Error(`Material binding vector disagrees with source: ${vector.name}`);
+}
+const githubMaterialRead = { request: materialRequest, requests: materialRequests, results: materialResults,
+  bindings: materialBindings, nodeProof: nativeProof(materialContract.GITHUB_MATERIAL_READ_PATH, materialRequest, nativeIds.challengeProofAttach) };
 const fixture = { original, admitted, overBudget, claim,
   nativeAck,
   nativeAckNodeProof: { principal: nativeAck.principal, binding: nativeAckBinding, body: nativeAckBody, proof,
@@ -402,7 +467,7 @@ const fixture = { original, admitted, overBudget, claim,
   nodeProof: { principal: original.principal, binding, body, proof, canonical: canonicalNodeProof(original.principal, proof, binding) },
   noStart, localNoStart, noStartResult, localNoStartResult,
   nativeAdmission: nativeAdmissionFixture,
-  githubSourceRead,
+  githubSourceRead, githubMaterialRead,
   noStartNodeProof: { principal: original.principal, binding: noStartBinding, body: noStartBody, proof,
     canonical: canonicalNodeProof(original.principal, proof, noStartBinding) } };
 const json = value => JSON.stringify(value, null, 2) + '\n';
