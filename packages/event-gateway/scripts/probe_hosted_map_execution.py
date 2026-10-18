@@ -99,7 +99,7 @@ def cleanup_child(process, deadline):
         raise RuntimeError('; '.join(errors))
 
 def bounded(argv):
-    if argv not in [command for _, command in fixture_cases() + site_startup_cases()]:
+    if argv not in [command for _, command in fixture_cases() + site_startup_cases() + version_launch_cases()]:
         raise ValueError('command_not_fixed')
     deadline = time.monotonic() + SECONDS
     process = subprocess.Popen(argv, cwd=ROOT, env=dict(ENV), stdin=subprocess.DEVNULL,
@@ -217,6 +217,17 @@ def site_startup_cases():
             ('site_startup:disabled', prefix + ['-S', str(CHILD), '--startup-marker'])]
 
 
+def version_launch_cases():
+    return [('version_launch:direct', [SAFE_PY, '-I', '-B', '--version']),
+            ('version_launch:sandboxed', site_startup_cases()[0][1])]
+
+
+def attempt_cases(startup_only, site_startup_only, version_launch_only):
+    if version_launch_only:
+        return version_launch_cases()
+    return site_startup_cases() if site_startup_only else fixture_cases(startup_only)
+
+
 def events(receipt, fixture, *, complete_prefix=False):
     try:
         values = []
@@ -292,18 +303,19 @@ def classify(receipts, fixture):
     return 'SYSCALL_AND_CONTROL_MATRIX_PASS'
 
 
-def classify_attempt(receipts, fixture, site_startup_only):
-    return 'INCONCLUSIVE' if site_startup_only else classify(receipts, fixture)
+def classify_attempt(receipts, fixture, diagnostic_only):
+    return 'INCONCLUSIVE' if diagnostic_only else classify(receipts, fixture)
 
 
-def stop_after_case(receipt, status, site_startup_only):
-    if site_startup_only:
+def stop_after_case(receipt, status, diagnostic_only):
+    if diagnostic_only:
         return receipt['cleanupConfirmed'] is not True
     return status == 'FAIL_EXECUTION_ALLOWED' or not healthy(receipt)
 
 
-def run(*, startup_only=False, site_startup_only=False):
+def run(*, startup_only=False, site_startup_only=False, version_launch_only=False):
     global ROOT, ENV
+    diagnostic_only = site_startup_only or version_launch_only
     admit(os.environ)
     temp = Path(os.environ['RUNNER_TEMP'])
     if not temp.is_absolute() or temp.resolve() != temp or any(p.is_symlink() for p in (temp, *temp.parents)):
@@ -327,7 +339,7 @@ def run(*, startup_only=False, site_startup_only=False):
         fixture = file_record(ROOT / 'mapping-data')
         for path in (ROOT / 'mapping-data', *(ROOT / (name + '.sb') for name in PROFILES)):
             frozen[str(path)] = (file_record(path), tool_ancestry(path))
-        for name, argv in (site_startup_cases() if site_startup_only else fixture_cases(startup_only)):
+        for name, argv in attempt_cases(startup_only, site_startup_only, version_launch_only):
             for raw, (record, ancestry) in frozen.items():
                 if (file_record(Path(raw), 32 * 1024 * 1024) != record
                         or not physical_ancestry_matches(tool_ancestry(Path(raw)), ancestry)):
@@ -337,14 +349,14 @@ def run(*, startup_only=False, site_startup_only=False):
                 if (file_record(Path(raw), 32 * 1024 * 1024) != record
                         or not physical_ancestry_matches(tool_ancestry(Path(raw)), ancestry)):
                     raise ValueError('input_changed')
-            status = classify_attempt(receipts, fixture, site_startup_only)
-            if stop_after_case(receipts[name], status, site_startup_only):
+            status = classify_attempt(receipts, fixture, diagnostic_only)
+            if stop_after_case(receipts[name], status, diagnostic_only):
                 break
-        status = classify_attempt(receipts, fixture, site_startup_only)
+        status = classify_attempt(receipts, fixture, diagnostic_only)
     except BaseException as caught:
         error = type(caught).__name__ + ': ' + str(caught)
         # Do not erase already observed denied execution on a later failure.
-        status = 'FAIL_EXECUTION_ALLOWED' if fixture and classify_attempt(receipts, fixture, site_startup_only) == 'FAIL_EXECUTION_ALLOWED' else 'INCONCLUSIVE'
+        status = 'FAIL_EXECUTION_ALLOWED' if fixture and classify_attempt(receipts, fixture, diagnostic_only) == 'FAIL_EXECUTION_ALLOWED' else 'INCONCLUSIVE'
     finally:
         data_path = ROOT / 'mapping-data'
         try:
@@ -364,10 +376,12 @@ def run(*, startup_only=False, site_startup_only=False):
 
 
 def main(argv):
+    if argv == ['--version-launch-only']:
+        return run(version_launch_only=True)
     if argv == ['--site-startup-only']:
         return run(site_startup_only=True)
     if argv not in (['--go'], ['--startup-only']):
-        raise SystemExit('Only separately approved hosted --go, --startup-only or --site-startup-only is supported')
+        raise SystemExit('Only separately approved hosted --go, --startup-only, --site-startup-only or --version-launch-only is supported')
     return run(startup_only=argv == ['--startup-only'])
 
 
