@@ -313,6 +313,11 @@ class SupervisorTests(unittest.TestCase):
         self.assert_diagnostic_outcomes_and_cleanup('version_launch_only', probe.version_launch_cases,
                                                    [('Python 3.13.14\n', ''), ('Python 3.13.14\n', '')])
 
+    def test_version_launch_malformed_output_never_promotes_success(self):
+        self.assert_diagnostic_outcomes_and_cleanup('version_launch_only', probe.version_launch_cases,
+                                                   [('SYSCALL_AND_CONTROL_MATRIX_PASS\n', 'unexpected stderr\n'),
+                                                    ('wrong interpreter version\n', 'PASS\n')])
+
     def test_version_launch_fixed_boundary(self):
         cases = probe.version_launch_cases()
         self.assertEqual(cases, [
