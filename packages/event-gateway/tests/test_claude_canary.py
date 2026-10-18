@@ -1521,9 +1521,13 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         child.stdin.drain = AsyncMock(side_effect=partial(self.initialize_busy_provider, scenario, feed, provider))
         provider.close = AsyncMock(side_effect=late_failure if scenario == 'late_failure' else None)
         transport = Mock(send=AsyncMock(side_effect=send))
+        fixture = SimpleNamespace(scenario=scenario, child=child, provider=provider, transport=transport,
+                                  pending=pending, feed=feed, finish_fresh=finish_fresh, held_timeout=held_timeout)
+        controlled_timeouts = ('held_timeout', 'reattach_timeout_cleanup', 'reattach_timeout_clean')
+        run_seconds = None if scenario in controlled_timeouts else 0.01 if scenario == 'timeout' else 1
         try:
             with patch.object(CANARY, 'uuid4', side_effect=generate_uuid), \
-                    patch.object(CANARY, 'RUN_SECONDS', None if scenario in ('held_timeout', 'reattach_timeout_cleanup', 'reattach_timeout_clean') else 0.01 if scenario == 'timeout' else 1), \
+                    patch.object(CANARY, 'RUN_SECONDS', run_seconds), \
                     patch.object(CANARY.asyncio, 'timeout', side_effect=lambda delay: held_timeout if delay is None else real_timeout(delay)), \
                     patch.object(CANARY, 'sandbox_profile', return_value='(deny default)'), \
                     patch.object(CANARY, 'LocalProvider', side_effect=make_provider), \
@@ -1534,12 +1538,11 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(CANARY, 'child_peer_token', return_value=secrets.token_urlsafe(32)), \
                     patch.object(CANARY, 'ClaudeSocketTransport', return_value=transport), \
                     patch.object(CANARY, 'adapter_reattach', new=AsyncMock(side_effect=partial(
-                        self.recover_busy_adapter, scenario, child, provider, transport, pending, feed, finish_fresh, held_timeout))) as recovery, \
+                        self.recover_busy_adapter, fixture))) as recovery, \
                     patch.object(CANARY, 'stop_child', new=AsyncMock(side_effect=stop)) as shutdown:
                 async with real_timeout(5):
                     proof = await self.busy_scenario_outcome(scenario, root, reattach=reattach)
-                self.assert_busy_scenario_success(scenario, proof, stopped, provider, child,
-                                                  reattach, recovery, transport)
+                self.assert_busy_scenario_success(fixture, proof, stopped, reattach, recovery)
             shutdown.assert_awaited_once_with(child)
             server.close.assert_called_once()
             server.wait_closed.assert_awaited_once()
@@ -1562,7 +1565,8 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
         if root.exists():
             CANARY.shutil.rmtree(root)
 
-    def assert_busy_scenario_success(self, scenario, proof, stopped, provider, child, reattach, recovery, transport):
+    def assert_busy_scenario_success(self, fixture, proof, stopped, reattach, recovery):
+        scenario, provider, child, transport = fixture.scenario, fixture.provider, fixture.child, fixture.transport
         if scenario == 'success':
             self.assertTrue(stopped)
             provider.close.assert_awaited_once()
@@ -1580,8 +1584,10 @@ class BusyProbeTests(unittest.IsolatedAsyncioTestCase):
             else:
                 recovery.assert_not_awaited()
 
-    async def recover_busy_adapter(self, scenario, child, provider, transport, pending, feed, finish_fresh, held_timeout,
-                                   options, old, fresh, *, before_fresh, record, crash_point):
+    async def recover_busy_adapter(self, fixture, options, old, fresh, *, before_fresh, record, crash_point):
+        scenario, child, provider = fixture.scenario, fixture.child, fixture.provider
+        transport, pending, feed = fixture.transport, fixture.pending, fixture.feed
+        finish_fresh, held_timeout = fixture.finish_fresh, fixture.held_timeout
         self.assertEqual(options['peer_pid'], child.pid)
         self.assertEqual(options['session_id'], self.session)
         self.assertEqual(options['socket_identity'], (1, 2))
