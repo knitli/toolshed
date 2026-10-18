@@ -1,4 +1,4 @@
-"""Bind the live consumer snapshot to the authorized initial-plan archive family."""
+"""Bind the live consumer snapshot to the authorized material-parity archive family."""
 import contextlib
 import hashlib
 import io
@@ -10,7 +10,7 @@ import zipfile
 
 
 PACKAGE = Path(__file__).resolve().parents[1]
-FAMILY = 'github-initial-plan-material'
+FAMILY = 'github-material-page-parity'
 REVISION = '5d3c326677bab6cb8ac3115dcbc65e7956676ba9'
 
 
@@ -35,6 +35,11 @@ class InitialPlanContractAdoptionTests(unittest.TestCase):
         self.assertEqual(control['zodVersion'], '4.6.5')
         self.assertEqual(len(control['sources']), 57)
         with zipfile.ZipFile(PACKAGE / 'tests/fixtures/trusted-contract-families.zip') as archive:
+            initial_plan = json.loads(archive.read('snapshots/github-initial-plan-material/event-control-v1/manifest.json'))
+            self.assertEqual({key: value for key, value in control.items() if key != 'fixturesSha256'},
+                             {key: value for key, value in initial_plan.items() if key != 'fixturesSha256'})
+            self.assertEqual(control['fixturesSha256'], hashlib.sha256(
+                (PACKAGE / 'contracts/event-control-v1/fixtures.json').read_bytes()).hexdigest())
             previous = json.loads(archive.read('snapshots/github-initial-custody/event-control-v1/manifest.json'))
             additions = {f'apps/os/packages/event-runtime/src/github/{name}' for name in (
                 'reconciliation-planner.ts', 'initial-plan-material-read.ts')}
@@ -43,12 +48,17 @@ class InitialPlanContractAdoptionTests(unittest.TestCase):
                 with self.subTest(source=path):
                     self.assertEqual(hashlib.sha256(archive.read(f'sources/{REVISION}/{path}')).hexdigest(), expected)
 
-    def test_adoption_preserves_fixture_bytes_and_executes_45_semantic_verdicts(self):
+    def test_adoption_only_adds_material_vectors_and_executes_45_semantic_verdicts(self):
         with zipfile.ZipFile(PACKAGE / 'tests/fixtures/trusted-contract-families.zip') as archive:
-            for path in ('event-control-v1/fixtures.json', 'event-v1/protocol-v1.json'):
-                with self.subTest(fixture=path):
-                    self.assertEqual((PACKAGE / 'contracts' / path).read_bytes(),
-                                     archive.read(f'snapshots/github-initial-custody/{path}'))
+            path = 'event-v1/protocol-v1.json'
+            self.assertEqual((PACKAGE / 'contracts' / path).read_bytes(),
+                             archive.read(f'snapshots/github-initial-custody/{path}'))
+            previous = json.loads(archive.read('snapshots/github-initial-plan-material/event-control-v1/fixtures.json'))
+            current = json.loads((PACKAGE / 'contracts/event-control-v1/fixtures.json').read_bytes())
+            material = current.pop('githubMaterialRead')
+            self.assertEqual(current, previous)
+            self.assertEqual(tuple(len(material[key]) for key in ('requests', 'results', 'bindings')),
+                             (11, 15, 7))
         corpus = PACKAGE / 'contracts/event-v1/protocol-v1.json'
         vectors = json.loads(corpus.read_bytes())['semanticVectors']
         self.assertEqual(sum(len(vectors[key]) for key in ('rawCases', 'digestCases', 'bindingCases')), 45)

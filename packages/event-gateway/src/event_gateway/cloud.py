@@ -227,6 +227,29 @@ def _github_material_request(value):
     return json.loads(encoded)
 
 
+def _github_material_cursor(value):
+    def reject_constant(_value):
+        raise ValueError("invalid JSON constant")
+
+    try:
+        if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,256}", value) is None:
+            raise ValueError("invalid cursor")
+        # Producer atob returns Latin-1; JSON.parse permits integral numeric forms and last duplicate keys.
+        cursor = json.loads(base64.b64decode(value + "=" * (-len(value) % 4),
+                                            altchars=b"-_", validate=True).decode("latin-1"),
+                            parse_constant=reject_constant)
+        if (not isinstance(cursor, dict) or set(cursor) != {"binding", "offset"}
+                or not isinstance(cursor["binding"], str)
+                or re.fullmatch(r"[a-f0-9]{64}", cursor["binding"]) is None
+                or type(cursor["offset"]) not in (int, float)
+                or not 0 <= cursor["offset"] <= 1048576
+                or cursor["offset"] != int(cursor["offset"])):
+            raise ValueError("invalid cursor")
+        return cursor
+    except (ValueError, UnicodeError, RecursionError):
+        raise CloudError("invalid_response") from None
+
+
 def _github_material_response(value, request):
     if isinstance(value, dict) and value.get("status") in ("unavailable", "deleted", "conflict"):
         _closed(value, ("status",))
@@ -255,6 +278,14 @@ def _github_material_response(value, request):
             or (length == 0 and value["totalLength"] != 0)
             or ("cursor" not in request and value["offset"] != 0)):
         raise CloudError("invalid_response")
+    previous = _github_material_cursor(request["cursor"]) if "cursor" in request else None
+    if value["offset"] != (previous["offset"] if previous is not None else 0):
+        raise CloudError("invalid_response")
+    if value["nextCursor"] is not None:
+        following = _github_material_cursor(value["nextCursor"])
+        if (following["offset"] != value["offset"] + length
+                or (previous is not None and following["binding"] != previous["binding"])):
+            raise CloudError("invalid_response")
     return value
 
 
