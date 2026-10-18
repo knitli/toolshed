@@ -89,7 +89,7 @@ class ContractWorkflowTests(unittest.TestCase):
             "native-admission", "native-runtime-status", "github-source-readback", "github-source-control",
             "github-watch-control", "github-watch-owner-rpc", "github-pinned-history-read",
             "cloud-guard-baseline-messaging-v2-dispatch", "github-initial-custody",
-            "github-initial-plan-material",
+            "github-initial-plan-material", "github-material-page-parity",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         for expected in metadata["families"]:
@@ -100,6 +100,67 @@ class ContractWorkflowTests(unittest.TestCase):
                 self.assertEqual(self.verify(), expected["name"])
                 self.assertCountEqual(self.reads, [SNAPSHOT + path for path in PATHS])
                 self.assertEqual(self.api_reads, [f"git/trees/{HEAD}?recursive=1"])
+
+    def test_material_page_parity_requires_complete_authorization(self):
+        name = "github-material-page-parity"
+        self.blobs = self.approved_snapshot(name)
+        self.assertEqual(self.verify(), name)
+        previous = tuple(entry for entry in POLICY["FAMILIES"] if entry["name"] != name)
+        with self.assertRaisesRegex(ValueError, "contract family not authorized"):
+            self.verify(previous)
+
+    def test_material_page_parity_snapshot_mutation_or_omission_rejected(self):
+        self.assert_mutation_or_omission_rejected("github-material-page-parity")
+
+    def test_material_page_parity_all_source_hashes_required(self):
+        self.assert_source_hash_mutation_or_omission_rejected("github-material-page-parity")
+
+    def test_material_page_parity_changes_only_fixture_and_manifest_bytes(self):
+        name = "github-material-page-parity"
+        revision = "5d3c326677bab6cb8ac3115dcbc65e7956676ba9"
+        blobs = self.approved_snapshot(name)
+        previous = self.approved_snapshot("github-initial-plan-material")
+        control = json.loads(blobs[SNAPSHOT + "event-control-v1/manifest.json"])
+        baseline = json.loads(previous[SNAPSHOT + "event-control-v1/manifest.json"])
+        self.assertEqual(control["revision"], revision)
+        self.assertEqual(control["sources"], baseline["sources"])
+        self.assertEqual(len(control["sources"]), 57)
+        self.assertEqual({key: value for key, value in control.items() if key != "fixturesSha256"},
+                         {key: value for key, value in baseline.items() if key != "fixturesSha256"})
+        event = json.loads(blobs[SNAPSHOT + "event-v1/manifest.json"])
+        self.assertEqual(event["commit"], "7b63bee97395a70e05ffb08ee214e8351f6dda06")
+        for path in PATHS:
+            with self.subTest(path=path):
+                if path.startswith("event-v1/"):
+                    self.assertEqual(blobs[SNAPSHOT + path], previous[SNAPSHOT + path])
+                else:
+                    self.assertNotEqual(blobs[SNAPSHOT + path], previous[SNAPSHOT + path])
+        self.assertEqual(hashlib.sha256(blobs[SNAPSHOT + "event-control-v1/fixtures.json"]).hexdigest(),
+                         control["fixturesSha256"])
+        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+            self.assertEqual(metadata["sources"][revision], control["sources"])
+            for path, expected in control["sources"].items():
+                self.assertEqual(hashlib.sha256(archive.read(f"sources/{revision}/{path}")).hexdigest(), expected)
+
+    def test_material_page_parity_preserves_all_fourteen_historical_families(self):
+        name = "github-material-page-parity"
+        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
+            names = archive.namelist()
+            self.assertEqual(len(names), 449)
+            self.assertEqual(len(set(names)), len(names))
+            previous = {path: hashlib.sha256(archive.read(path)).hexdigest() for path in names
+                        if path != "metadata.json" and not path.startswith(f"snapshots/{name}/")}
+            self.assertEqual(len(previous), 441)
+            digest = hashlib.sha256(json.dumps(previous, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            self.assertEqual(digest, "7050913e01c9ee22535c7155d794f36ddfc427103fda5a808508dcfbb9afcf8e")
+            metadata = json.loads(archive.read("metadata.json"))
+        self.assertEqual(metadata["families"][-1]["name"], name)
+        metadata["families"] = metadata["families"][:-1]
+        del metadata["snapshots"][name]
+        self.assertEqual(len(metadata["families"]), 14)
+        digest = hashlib.sha256(json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.assertEqual(digest, "40cc24844994321d83bd284854c8ca1829d8714f27c57b5b0e507b75a17a2221")
 
     def test_initial_plan_material_requires_complete_authorization(self):
         name = "github-initial-plan-material"
@@ -152,7 +213,8 @@ class ContractWorkflowTests(unittest.TestCase):
         name = "github-initial-plan-material"
         revision = "5d3c326677bab6cb8ac3115dcbc65e7956676ba9"
         with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
-            names = archive.namelist()
+            names = [path for path in archive.namelist()
+                     if not path.startswith("snapshots/github-material-page-parity/")]
             self.assertEqual(len(names), 442)
             self.assertEqual(len(set(names)), len(names))
             previous = {path: hashlib.sha256(archive.read(path)).hexdigest() for path in names
@@ -162,6 +224,9 @@ class ContractWorkflowTests(unittest.TestCase):
             digest = hashlib.sha256(json.dumps(previous, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
             self.assertEqual(digest, "89f1ee386be8e8fd67dfe44726f98d6c16d93359dc81e5cfd18144da58b6aa20")
             metadata = json.loads(archive.read("metadata.json"))
+        metadata["families"] = [entry for entry in metadata["families"]
+                                if entry["name"] != "github-material-page-parity"]
+        metadata["snapshots"].pop("github-material-page-parity", None)
         self.assertEqual(metadata["families"][-1]["name"], name)
         metadata["families"] = metadata["families"][:-1]
         del metadata["snapshots"][name]
@@ -245,7 +310,8 @@ class ContractWorkflowTests(unittest.TestCase):
         name = "github-initial-custody"
         revision = "3ad64222999bc2aaa60f50623120e302edc5f8bd"
         with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
-            names = archive.namelist()
+            names = [path for path in archive.namelist()
+                     if not path.startswith("snapshots/github-material-page-parity/")]
             names = [path for path in names
                      if not path.startswith("snapshots/github-initial-plan-material/")
                      and not path.startswith("sources/5d3c326677bab6cb8ac3115dcbc65e7956676ba9/")]
@@ -258,6 +324,9 @@ class ContractWorkflowTests(unittest.TestCase):
             digest = hashlib.sha256(json.dumps(previous, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
             self.assertEqual(digest, "519d70205b0741bf8e8db2b97bba0f2f1b88f3acc0b491a596208e6f7b0dd1e4")
             metadata = json.loads(archive.read("metadata.json"))
+        metadata["families"] = [entry for entry in metadata["families"]
+                                if entry["name"] != "github-material-page-parity"]
+        metadata["snapshots"].pop("github-material-page-parity", None)
         metadata["families"] = [entry for entry in metadata["families"]
                                 if entry["name"] != "github-initial-plan-material"]
         del metadata["snapshots"]["github-initial-plan-material"]
