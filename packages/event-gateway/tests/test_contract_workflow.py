@@ -101,13 +101,15 @@ class ContractWorkflowTests(unittest.TestCase):
                 self.assertCountEqual(self.reads, [SNAPSHOT + path for path in PATHS])
                 self.assertEqual(self.api_reads, [f"git/trees/{HEAD}?recursive=1"])
 
-    def test_material_page_parity_requires_complete_authorization(self):
-        name = "github-material-page-parity"
+    def assert_complete_family_authorization(self, name):
         self.blobs = self.approved_snapshot(name)
         self.assertEqual(self.verify(), name)
         previous = tuple(entry for entry in POLICY["FAMILIES"] if entry["name"] != name)
         with self.assertRaisesRegex(ValueError, "contract family not authorized"):
             self.verify(previous)
+
+    def test_material_page_parity_requires_complete_authorization(self):
+        self.assert_complete_family_authorization("github-material-page-parity")
 
     def test_material_page_parity_snapshot_mutation_or_omission_rejected(self):
         self.assert_mutation_or_omission_rejected("github-material-page-parity")
@@ -163,12 +165,7 @@ class ContractWorkflowTests(unittest.TestCase):
         self.assertEqual(digest, "40cc24844994321d83bd284854c8ca1829d8714f27c57b5b0e507b75a17a2221")
 
     def test_initial_plan_material_requires_complete_authorization(self):
-        name = "github-initial-plan-material"
-        self.blobs = self.approved_snapshot(name)
-        self.assertEqual(self.verify(), name)
-        previous = tuple(entry for entry in POLICY["FAMILIES"] if entry["name"] != name)
-        with self.assertRaisesRegex(ValueError, "contract family not authorized"):
-            self.verify(previous)
+        self.assert_complete_family_authorization("github-initial-plan-material")
 
     def test_initial_plan_material_snapshot_mutation_or_omission_rejected(self):
         self.assert_mutation_or_omission_rejected("github-initial-plan-material")
