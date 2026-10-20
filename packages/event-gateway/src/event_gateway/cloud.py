@@ -17,8 +17,9 @@ import uuid
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from .protocol import (
-    ProtocolError, _SCHEMA, _depth, _pairs, _timestamp, acknowledgment_matches_delivery,
+    ProtocolError, _depth, _pairs, _timestamp, acknowledgment_matches_delivery,
     matches_delivery_id, parse_acknowledgment, parse_envelope,
+    shared_envelope_property,
 )
 
 
@@ -651,7 +652,7 @@ def _native_transfer_response(value, request, client):
     return json.loads(_json(value))
 
 
-_PRINCIPAL_SCHEMA = _SCHEMA["anyOf"][0]["anyOf"][0]["properties"]["principal"]
+_PRINCIPAL_SCHEMA = shared_envelope_property("principal")
 
 
 def _principal(value):

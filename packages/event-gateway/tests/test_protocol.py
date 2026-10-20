@@ -5,13 +5,23 @@ import unittest
 
 from event_gateway.protocol import (ProtocolError, parse_envelope, parse_acknowledgment,
     derive_delivery_id, matches_delivery_id, acknowledgment_matches_delivery,
-    acknowledgment_advances_current_watermark, validate_runtime_profile)
+    acknowledgment_advances_current_watermark, validate_runtime_profile,
+    ENVELOPE_SCHEMAS, shared_envelope_property)
 
 FIXTURES = json.loads((Path(__file__).resolve().parents[1] / 'contracts/event-v1/protocol-v1.json').read_text())
 NOW = 1791201630000  # 2026-10-05T12:00:30Z
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_nested_envelope_variants_share_delivery_identity_schemas(self):
+        self.assertGreater(len(ENVELOPE_SCHEMAS), 2)
+        for field in ('eventId', 'runtimeId', 'nodeGeneration', 'runtimeGeneration',
+                      'attachmentGeneration', 'principal'):
+            with self.subTest(field=field):
+                self.assertEqual(shared_envelope_property(field), ENVELOPE_SCHEMAS[0]['properties'][field])
+        for value in FIXTURES['validEnvelopes']:
+            self.assertTrue(matches_delivery_id(value))
+
     def test_shared_vectors(self):
         for key, parser in [('Envelopes', parse_envelope), ('Acknowledgments', parse_acknowledgment)]:
             for value in FIXTURES['valid' + key]:

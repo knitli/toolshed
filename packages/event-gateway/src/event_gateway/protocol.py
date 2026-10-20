@@ -98,6 +98,31 @@ _SCHEMA = _schema()
 _VALIDATORS = [Draft202012Validator(branch, format_checker=_FORMATS) for branch in _SCHEMA['anyOf']]
 
 
+def _object_variants(schema):
+    """Return every object leaf below an envelope anyOf, independent of nesting."""
+    if isinstance(schema, dict) and schema.get('type') == 'object' and isinstance(schema.get('properties'), dict):
+        return (schema,)
+    branches = schema.get('anyOf') if isinstance(schema, dict) else None
+    if not isinstance(branches, list) or not branches:
+        raise RuntimeError('invalid_event_envelope_schema')
+    return tuple(variant for branch in branches for variant in _object_variants(branch))
+
+
+# The first top-level protocol branch is the envelope union. Keep its leaves
+# central so generated union nesting can change without breaking consumers.
+ENVELOPE_SCHEMAS = _object_variants(_SCHEMA['anyOf'][0])
+
+
+def shared_envelope_property(name, *, required=True):
+    """Get a property schema shared by envelope variants, rejecting drift."""
+    schemas = [variant['properties'][name] for variant in ENVELOPE_SCHEMAS
+               if name in variant['properties']]
+    if (not schemas or (required and len(schemas) != len(ENVELOPE_SCHEMAS))
+            or any(schema != schemas[0] for schema in schemas[1:])):
+        raise RuntimeError('inconsistent_event_envelope_schema')
+    return schemas[0]
+
+
 def validate_runtime_profile(value):
     """Validate an explicit existing stock-client conversation assignment."""
     if (not isinstance(value, dict)
@@ -150,7 +175,6 @@ def parse_acknowledgment(body, now_ms=None):
 
 
 def derive_delivery_id(identity):
-    props = _SCHEMA['anyOf'][0]['anyOf'][0]['properties']
     keys = ('eventId', 'runtimeId', 'nodeGeneration', 'runtimeGeneration', 'attachmentGeneration')
     selected = {}
     try:
@@ -158,7 +182,8 @@ def derive_delivery_id(identity):
             if key == 'consumerGeneration' and key not in identity:
                 continue
             value = identity[key]
-            if not Draft202012Validator(props[key]).is_valid(value):
+            if not Draft202012Validator(shared_envelope_property(
+                    key, required=key != 'consumerGeneration')).is_valid(value):
                 raise ValueError()
             selected[key] = int(value) if key.endswith('Generation') else value
     except (KeyError, TypeError, ValueError):
