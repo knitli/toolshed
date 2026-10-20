@@ -68,6 +68,25 @@ class StoreTests(unittest.TestCase):
         with self.assertRaisesRegex(StoreError, "^invalid_attachment$"):
             validate_native_route(dict(self.mapping, nativeThreadId=str(uuid.uuid4())))
 
+    def test_stock_profile_is_explicit_and_generation_fenced(self):
+        profile = {"profile": "assigned_stock_client", "client": "codex",
+                   "conversationId": "abcdefab-cdef-4abc-8def-abcdefabcdef"}
+        mapping = {**self.mapping, "runtimeId": str(uuid.uuid4()), "runtimeGeneration": 2,
+                   "attachmentGeneration": 2, "consumerGeneration": 2,
+                   "runtimeProfile": profile}
+        mapping.pop("nativeSessionId", None)
+        mapping.pop("socketPath", None)
+        stored = self.store.put_attachment(mapping)
+        self.assertEqual(stored["runtimeProfile"], profile)
+        with self.assertRaises(StoreError) as caught:
+            self.store.put_attachment({**mapping, "runtimeProfile": {
+                **profile, "conversationId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}})
+        self.assertEqual(caught.exception.code, "conflict")
+        renewed = {**mapping, "runtimeGeneration": 3, "attachmentGeneration": 3,
+                   "consumerGeneration": 3,
+                   "runtimeProfile": {**profile, "conversationId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}}
+        self.assertEqual(self.store.put_attachment(renewed)["runtimeProfile"], renewed["runtimeProfile"])
+
     def test_native_route_rejects_incomplete_or_inconsistent_bindings(self):
         mapping = self.native_mapping()
         changes = [

@@ -5,7 +5,7 @@ import unittest
 
 from event_gateway.protocol import (ProtocolError, parse_envelope, parse_acknowledgment,
     derive_delivery_id, matches_delivery_id, acknowledgment_matches_delivery,
-    acknowledgment_advances_current_watermark)
+    acknowledgment_advances_current_watermark, validate_runtime_profile)
 
 FIXTURES = json.loads((Path(__file__).resolve().parents[1] / 'contracts/event-v1/protocol-v1.json').read_text())
 NOW = 1791201630000  # 2026-10-05T12:00:30Z
@@ -24,10 +24,33 @@ class ProtocolTests(unittest.TestCase):
             envelope = envelopes[ack['deliveryId']]
             self.assertTrue(matches_delivery_id(envelope))
             self.assertTrue(acknowledgment_matches_delivery(envelope, ack))
-            self.assertEqual(acknowledgment_advances_current_watermark(envelope, ack, envelope['sourceStateVersion']), ack['status'] == 'observed')
+            self.assertEqual(acknowledgment_advances_current_watermark(envelope, ack, envelope['sourceStateVersion']), ack['status'] in ('observed', 'command_accepted'))
             for field in ['attemptId', 'runtimeGeneration', 'deliveredSourceStateVersion', 'consumerGeneration']:
                 changed = dict(ack, **{field: 'different'})
                 self.assertFalse(acknowledgment_matches_delivery(envelope, changed))
+
+    def test_stock_assignment_is_closed_and_bound_to_ack(self):
+        profile = {'profile': 'assigned_stock_client', 'client': 'codex',
+                   'conversationId': '12345678-1234-4234-8234-123456789abc'}
+        self.assertEqual(validate_runtime_profile(profile), profile)
+        for changes in ({'client': 'other'}, {'conversationId': 'latest'},
+                        {'conversationId': profile['conversationId'].upper()}, {'extra': True}):
+            with self.subTest(changes=changes), self.assertRaises(ProtocolError):
+                validate_runtime_profile(dict(profile, **changes))
+        original = FIXTURES['validEnvelopes'][0]
+        envelope = dict(original, runtimeProfile=profile)
+        ack = {key: envelope[key] for key in ('schemaVersion', 'eventId', 'deliveryId', 'attemptId',
+               'principal', 'agent', 'runtimeId', 'nodeGeneration', 'runtimeGeneration',
+               'attachmentGeneration')}
+        ack.update(status='command_accepted', runtimeProfile=profile,
+                   deliveredSourceStateVersion=envelope['sourceStateVersion'],
+                   acknowledgedAt='2026-10-05T12:00:30.000Z')
+        self.assertTrue(acknowledgment_advances_current_watermark(envelope, ack, envelope['sourceStateVersion']))
+        self.assertFalse(acknowledgment_advances_current_watermark(envelope, ack, 'replacement'))
+        self.assertFalse(acknowledgment_matches_delivery(original, ack))
+        changed = dict(ack, runtimeProfile=dict(profile, conversationId='22345678-1234-4234-8234-123456789abc'))
+        self.assertFalse(acknowledgment_matches_delivery(envelope, changed))
+        self.assertFalse(acknowledgment_advances_current_watermark(envelope, dict(ack, status='observed'), envelope['sourceStateVersion']))
 
     def test_malformed_and_closed_schema(self):
         for body, code in [(b'{', 'invalid_json'), (b'{"a":1,"\\u0061":2}', 'duplicate_json_key'),

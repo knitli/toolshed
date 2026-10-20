@@ -74,6 +74,13 @@ def main(argv=None):
     runtime_status = commands.add_parser("runtime-status", help="Read stored cloud runtime authority")
     runtime_status.add_argument("--runtime-id", required=True)
     runtime_status.add_argument("--cloud-config", type=Path, required=True)
+    stock = commands.add_parser("stock-control", help="Assign an existing Codex conversation to a stock runtime")
+    stock.add_argument("operation", choices=("attach", "renew"))
+    stock.add_argument("--runtime-id", required=True)
+    stock.add_argument("--conversation-id", required=True, help="Canonical Codex conversation UUID")
+    stock.add_argument("--cloud-config", type=Path, required=True)
+    stock.add_argument("--expected-runtime-generation", type=int)
+    stock.add_argument("--expected-attachment-generation", type=int)
     source_read = commands.add_parser("github-source-read", help="Read one retained GitHub source page")
     source_read.add_argument("--cloud-config", type=Path, required=True)
     for flag in ("installation-id", "repository-id", "pr-number", "from-version", "to-version"):
@@ -146,6 +153,8 @@ def _execute_command(args, state_dir, parser):
             return 2
         print(json.dumps(result))
         return 0
+    if args.command == "stock-control":
+        return _execute_stock_control(args, state_dir)
     if args.command == "reconcile":
         result = _reconcile_native(args, state_dir)
         print(json.dumps(result))
@@ -255,6 +264,59 @@ def _execute_native_lifecycle(args, state_dir, operation):
     result = _native_lifecycle(args, state_dir, operation)
     print(json.dumps(result))
     return 0 if result.get("localStatus") == "current" else 2
+
+
+def _execute_stock_control(args, state_dir):
+    request_value = {
+        "operation": args.operation, "runtimeId": args.runtime_id,
+        "conversationId": args.conversation_id,
+        "expectedRuntimeGeneration": args.expected_runtime_generation,
+        "expectedAttachmentGeneration": args.expected_attachment_generation,
+    }
+    try:
+        cloud = load_cloud_client(args.cloud_config, state_dir)
+        response = asyncio.run(cloud.assigned_stock(request_value))
+    except CloudError as error:
+        result = {"assignment": None, "reason": error.code}
+        if error.ambiguous:
+            if args.operation == "attach":
+                generation_pair = (
+                    (1, 1) if args.expected_runtime_generation is None else
+                    (args.expected_runtime_generation + 1, args.expected_attachment_generation + 1)
+                )
+            else:
+                generation_pair = (args.expected_runtime_generation, args.expected_attachment_generation)
+            result.update(outcome="unknown", recovery={
+                "operation": "renew", "runtimeId": args.runtime_id,
+                "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                                   "conversationId": args.conversation_id},
+                "expectedRuntimeGeneration": generation_pair[0],
+                "expectedAttachmentGeneration": generation_pair[1],
+            })
+        print(json.dumps(result))
+        return 2
+    mapping = {
+        "runtimeId": response["runtimeId"], "principal": cloud.principal,
+        "agent": cloud.agent, "nodeId": response["nodeId"],
+        "nodeGeneration": response["nodeGeneration"],
+        "runtimeGeneration": response["runtimeGeneration"],
+        "attachmentGeneration": response["attachmentGeneration"],
+        "consumerGeneration": response["attachmentGeneration"],
+        "leaseExpiresAt": _timestamp(response["leaseUntil"]) / 1000,
+        "runtimeProfile": response["runtimeProfile"],
+    }
+    stored, error_code = _store_native_mapping(state_dir, args.operation, mapping, None)
+    if not stored:
+        print(json.dumps({"assignment": "cloud_committed_local_mapping_failed",
+                          "runtimeId": response["runtimeId"],
+                          "runtimeProfile": response["runtimeProfile"],
+                          "runtimeGeneration": response["runtimeGeneration"],
+                          "attachmentGeneration": response["attachmentGeneration"],
+                          "reason": error_code}))
+        return 2
+    print(json.dumps({"assignment": response["status"], "runtimeId": response["runtimeId"],
+                      "runtimeProfile": response["runtimeProfile"], "localMapping": "stored"}))
+    return 0
 
 
 def _execute_enrollment(args, state_dir, parser):

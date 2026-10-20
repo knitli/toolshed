@@ -274,6 +274,13 @@ class Store:
         ):
             raise StoreError("invalid_attachment")
         validate_native_route(mapping, allow_legacy=True)
+        if "runtimeProfile" in mapping:
+            from .protocol import ProtocolError, validate_runtime_profile
+
+            try:
+                mapping["runtimeProfile"] = validate_runtime_profile(mapping["runtimeProfile"])
+            except ProtocolError as exc:
+                raise StoreError("invalid_attachment") from exc
         if transfer is not None and (
             not isinstance(transfer, dict)
             or set(transfer) != {
@@ -415,7 +422,8 @@ class Store:
             if target_error is None:
                 if old and any(
                     old.get(k) != mapping.get(k)
-                    for k in (*IDENTITY, "consumerGeneration", "nodeId", *MESSAGING_METADATA)
+                    for k in (*IDENTITY, "consumerGeneration", "nodeId", *MESSAGING_METADATA,
+                              "runtimeProfile")
                 ):
                     self._fence(mapping["runtimeId"])
                 self.db.execute(
@@ -544,6 +552,16 @@ class Store:
             )
         ):
             raise StoreError("stale", "attachment_fenced")
+        profile = envelope.get("runtimeProfile")
+        if profile is not None or "runtimeProfile" in mapping:
+            from .protocol import ProtocolError, validate_runtime_profile
+
+            try:
+                if (profile is None or "runtimeProfile" not in mapping
+                        or validate_runtime_profile(profile) != mapping["runtimeProfile"]):
+                    raise StoreError("stale", "attachment_fenced")
+            except ProtocolError:
+                raise StoreError("stale", "attachment_fenced") from None
         return mapping
 
     def accept(self, envelope):
@@ -819,6 +837,79 @@ class Store:
             )
         return json.loads(encoded)
 
+    def begin_stock_submit(self, delivery_id, attempt_id):
+        """Durably fence the assigned stock CLI invocation before process launch."""
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+            attempt = self._attempt(delivery_id, attempt_id)
+            if (delivery is None or attempt is None or delivery["state"] != "admitted"
+                    or attempt["state"] != "admitted" or attempt["admission"] is None
+                    or attempt["claim_uncertain"] or attempt["fenced"]):
+                raise StoreError("invalid_transition")
+            envelope = json.loads(delivery["envelope"])
+            if (envelope.get("schemaVersion") != 1
+                    or not isinstance(envelope.get("runtimeProfile"), dict)
+                    or envelope["runtimeProfile"].get("profile") != "assigned_stock_client"):
+                raise StoreError("invalid_transition")
+            self._matches(envelope)
+            self.db.execute("UPDATE attempts SET state='submitting',updated=? WHERE delivery_id=? AND attempt_id=?",
+                            (self.clock(), delivery_id, attempt_id))
+            self.db.execute("UPDATE deliveries SET state='submitting',updated=? WHERE id=?",
+                            (self.clock(), delivery_id))
+        return True
+
+    def record_stock_command_accepted(self, delivery_id, attempt_id, acknowledgment):
+        """Persist CLI acceptance and its exact cloud ACK before sending the ACK."""
+        from .protocol import ProtocolError, acknowledgment_matches_delivery, parse_acknowledgment
+
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+            attempt = self._attempt(delivery_id, attempt_id)
+            if delivery is None or attempt is None:
+                raise StoreError("invalid_transition")
+            envelope = json.loads(delivery["envelope"])
+            try:
+                normalized = parse_acknowledgment(_json(acknowledgment), now_ms=self.clock() * 1000)
+                valid = (acknowledgment_matches_delivery(envelope, normalized)
+                         and normalized.get("status") == "command_accepted")
+            except (ProtocolError, TypeError, ValueError):
+                valid = False
+            if not valid:
+                raise StoreError("invalid_acknowledgment")
+            encoded = _json(normalized)
+            if delivery["state"] == "command_accepted" and attempt["native_ack"] == encoded:
+                return json.loads(encoded)
+            if delivery["state"] != "submitting" or attempt["state"] != "submitting":
+                raise StoreError("invalid_transition")
+            self._spend(attempt, len(encoded.encode()))
+            self.db.execute("UPDATE attempts SET state='command_accepted',native_ack=?,reason=NULL,updated=? "
+                            "WHERE delivery_id=? AND attempt_id=?",
+                            (encoded, self.clock(), delivery_id, attempt_id))
+            self.db.execute("UPDATE deliveries SET state='command_accepted',ack_state=NULL,reason=NULL,updated=? "
+                            "WHERE id=?", (self.clock(), delivery_id))
+        return json.loads(encoded)
+
+    def complete_stock_acknowledgment(self, delivery_id, attempt_id, acknowledgment):
+        """Mark the persisted stock ACK complete without implying client receipt."""
+        encoded = _json(acknowledgment)
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            attempt = self._attempt(delivery_id, attempt_id)
+            delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+            if (attempt is None or delivery is None or delivery["state"] != "command_accepted"
+                    or attempt["state"] != "command_accepted" or attempt["native_ack"] != encoded):
+                return False
+            if delivery["ack_state"] == "command_accepted":
+                return True
+            self._spend(attempt)
+            self.db.execute("UPDATE deliveries SET ack_state='command_accepted',updated=? WHERE id=?",
+                            (self.clock(), delivery_id))
+            self.db.execute("UPDATE attempts SET reserved_bytes=0,updated=? WHERE delivery_id=? AND attempt_id=?",
+                            (self.clock(), delivery_id, attempt_id))
+        return True
+
     def record_admission(self, delivery_id, admission):
         from .cloud import CloudError, validate_admission
 
@@ -840,7 +931,7 @@ class Store:
                 raise StoreError("invalid_transition")
             self._spend(row, len(encoded.encode()))
             self.db.execute(
-                "UPDATE attempts SET state='admitted', admission=?, reason=NULL, updated=? WHERE delivery_id=? AND attempt_id=?",
+                "UPDATE attempts SET state='admitted', admission=?, claim_uncertain=0, reason=NULL, updated=? WHERE delivery_id=? AND attempt_id=?",
                 (encoded, self.clock(), delivery_id, row["attempt_id"]),
             )
             self.db.execute("UPDATE deliveries SET state='admitted', envelope=?, reason=NULL, updated=? WHERE id=?",
@@ -1259,6 +1350,8 @@ class Store:
                     bool(row["native_started"]) and not row["native_acknowledged"]) or (
                     row["state"] in ("submitted", "observed")
                     and row["ack_state"] != row["state"]
+                ) or (
+                    row["state"] == "command_accepted" and row["ack_state"] != "command_accepted"
                 ),
             }
             if row
@@ -1308,7 +1401,8 @@ class Store:
             for row in self.db.execute(
                 "SELECT * FROM deliveries WHERE (state IN "
                 "('claiming','admitted','settlement_pending','submitted','ambiguous') "
-                "OR (state='observed' AND ack_state IS NOT state)) "
+                "OR (state='observed' AND ack_state IS NOT state) "
+                "OR (state='command_accepted' AND ack_state IS NOT state)) "
                 "ORDER BY created,id"
             )
             if json.loads(row["envelope"]).get("schemaVersion") == 1
@@ -1327,7 +1421,8 @@ class Store:
         pending = {row[0] for row in self.db.execute(
             "SELECT id FROM deliveries WHERE state IN "
             "('held','queued','claiming','admitted','settlement_pending','submitting','submitted','ambiguous') "
-            "OR (state='observed' AND ack_state IS NOT state)"
+            "OR (state='observed' AND ack_state IS NOT state) "
+            "OR (state='command_accepted' AND ack_state IS NOT state)"
         )}
         return len(pending | self._messaging_obligations())
 
@@ -1343,7 +1438,8 @@ class Store:
                 ((row[0], row[1]) for row in settled if row[0] not in protected),
             )
             expired = self.db.execute(
-                "SELECT id FROM deliveries WHERE (state='stale' OR (state='observed' AND ack_state=state)) "
+                "SELECT id FROM deliveries WHERE (state='stale' OR (state='observed' AND ack_state=state) "
+                "OR (state='command_accepted' AND ack_state=state)) "
                 "AND retain_until<? AND updated<?", (self.clock(), self.clock() - RETENTION),
             ).fetchall()
             removable = [(row[0],) for row in expired if row[0] not in protected]

@@ -85,8 +85,9 @@ def load_dispatch_config(path, state_dir):
     """Load explicit private listener trust, without creating keys or grants."""
     config, path = _private_json(path, 8192, "invalid_dispatch_config")
     try:
+        base_fields = {"version", "cloudConfig", "listenHost", "listenPort", "transportKeys"}
         if (not isinstance(config, dict)
-                or set(config) != {"version", "cloudConfig", "listenHost", "listenPort", "transportKeys"}
+                or set(config) not in (base_fields, base_fields | {"stockCodexBinary"})
                 or not isinstance(config["version"], int) or isinstance(config["version"], bool)
                 or config["version"] != 1
                 or not isinstance(config["cloudConfig"], str)
@@ -98,6 +99,15 @@ def load_dispatch_config(path, state_dir):
                 or not 1 <= config["listenPort"] <= 65535
                 or not isinstance(config["transportKeys"], dict)
                 or not 1 <= len(config["transportKeys"]) <= 16):
+            raise ValueError
+        if "stockCodexBinary" in config and (
+                not isinstance(config["stockCodexBinary"], str)
+                or not Path(config["stockCodexBinary"]).is_absolute()
+                or "\0" in config["stockCodexBinary"]):
+            raise ValueError
+        if "stockCodexBinary" in config and (
+                not Path(config["stockCodexBinary"]).is_file()
+                or not os.access(config["stockCodexBinary"], os.X_OK)):
             raise ValueError
         address = ipaddress.ip_address(config["listenHost"])
         if not any(address in network for network in _LISTEN_NETWORKS):
@@ -228,6 +238,7 @@ async def serve(state_dir, *, dispatch_config=None):
                     store, cloud,
                     lambda mapping: NativeBridgeAdapter(mapping, SessionNativeBridge(state_dir, mapping)),
                     audience=cloud.node_id, keys=config["transportKeys"],
+                    stock_codex_binary=config.get("stockCodexBinary"),
                 )
                 listener = Listener(gateway)
                 await listener.start(config["listenHost"], config["listenPort"])

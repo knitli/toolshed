@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import time
 
-from .cloud import CloudError, _iso
+from .cloud import CloudError, _iso, _timestamp
 from .codex import CodexError
 from .native import NativeError, validate_request, validate_receipt
 from .protocol import parse_envelope, matches_delivery_id
@@ -56,11 +56,13 @@ class _RuntimeLock:
 
 
 class Gateway:
-    def __init__(self, store, authority, adapter_factory, *, audience, keys, clock=time.time):
+    def __init__(self, store, authority, adapter_factory, *, audience, keys, clock=time.time,
+                 stock_codex_binary=None):
         """Bind durable storage to explicitly injected authority and native providers."""
         self.store, self.authority = store, authority
         self.adapter_factory, self.clock = adapter_factory, clock
         self.audience, self.keys = audience, dict(keys)
+        self.stock_codex_binary = stock_codex_binary
         self._locks = {}  # runtimeId -> _RuntimeLock, only while in flight
 
     def accept(self, body, *, signature, audience, key_id):
@@ -349,6 +351,8 @@ class Gateway:
     async def _dispatch_locked(self, delivery_id):
         """Run the admitted-submission pipeline under the runtime lock."""
         envelope = self._require_envelope(delivery_id)
+        if envelope.get("runtimeProfile") is not None:
+            return await self._dispatch_stock_locked(delivery_id, envelope)
         if envelope.get("schemaVersion") != 1:
             return self._row(delivery_id, "messaging_v2_disabled")
         row = self._row(delivery_id)
@@ -370,6 +374,117 @@ class Gateway:
             return await self._retire_local(delivery_id, retire.reason)
         attempt = self.store.current_attempt(delivery_id)
         return await self._submit_native(delivery_id, adapter, attempt, request)
+
+    def _stock_acknowledgment(self, envelope):
+        acknowledgment = {
+            "schemaVersion": 1,
+            **{key: envelope[key] for key in (
+                "eventId", "deliveryId", "attemptId", "principal", "agent", "runtimeId",
+                "nodeGeneration", "runtimeGeneration", "attachmentGeneration",
+            )},
+            "deliveredSourceStateVersion": envelope["sourceStateVersion"],
+            "acknowledgedAt": _iso(self.clock()),
+            "status": "command_accepted",
+            "runtimeProfile": envelope["runtimeProfile"],
+        }
+        if "consumerGeneration" in envelope:
+            acknowledgment["consumerGeneration"] = envelope["consumerGeneration"]
+        return acknowledgment
+
+    async def _send_stock_acknowledgment(self, delivery_id, attempt):
+        acknowledgment = attempt.get("native_ack")
+        admission = attempt.get("admission")
+        if not acknowledgment or not admission:
+            return self._row(delivery_id, "command_outcome_unknown")
+        envelope = admission["envelope"]
+        try:
+            result = await asyncio.wait_for(self.authority.acknowledge(envelope, acknowledgment), 8)
+            if not isinstance(result, dict) or result.get("status") != "command_accepted":
+                raise Refused("invalid_acknowledgment")
+            if not self.store.complete_stock_acknowledgment(
+                    delivery_id, attempt["attempt_id"], acknowledgment):
+                raise StoreError("acknowledgment_conflict")
+        except Exception:
+            return self._row(delivery_id, "stock_ack_pending")
+        return self._row(delivery_id)
+
+    async def _dispatch_stock_locked(self, delivery_id, envelope):
+        """Claim and queue one opaque reference through the assigned stock CLI."""
+        from .stock_codex import StockCodexAdapter
+        from .protocol import ProtocolError, validate_runtime_profile
+
+        row = self._row(delivery_id)
+        if row["status"] not in ("queued", "claiming", "admitted"):
+            return row
+        try:
+            profile = validate_runtime_profile(envelope.get("runtimeProfile"))
+            self.store._matches(envelope)
+        except (ProtocolError, StoreError):
+            return self._row(delivery_id, "stock_assignment_unavailable")
+        if profile["client"] != "codex":
+            return self._row(delivery_id, "unsupported_stock_client")
+        if not self.stock_codex_binary:
+            return self._row(delivery_id, "stock_client_disabled")
+        attempt = self.store.current_attempt(delivery_id)
+        if attempt is None:
+            early = self._begin_claim_or_row(delivery_id)
+            if early is not None:
+                return early
+            admission, early = await self._admission_or_row(delivery_id)
+            if early is not None:
+                return early
+        elif attempt["state"] == "claiming":
+            admission, early = await self._admission_or_row(delivery_id)
+            if early is not None:
+                return early
+        elif attempt["state"] == "admitted" and attempt["admission"] is not None:
+            admission = attempt["admission"]
+        else:
+            return self._row(delivery_id)
+
+        if _timestamp(admission["permitExpiresAt"]) <= self.clock() * 1000:
+            return await self._retire_local(delivery_id, "admission_expired")
+        try:
+            self.store._matches(admission["envelope"])
+        except StoreError:
+            return await self._retire_local(delivery_id, "admission_fenced")
+        try:
+            # This durable transition precedes every await that can launch the client.
+            self.store.begin_stock_submit(delivery_id, envelope["attemptId"])
+        except StoreError:
+            return self._row(delivery_id, "stock_submission_not_started")
+        adapter = StockCodexAdapter(profile["conversationId"], self.stock_codex_binary)
+        try:
+            await adapter.submit(envelope["eventReference"])
+        except asyncio.CancelledError:
+            try:
+                self.store.finish(delivery_id, "ambiguous", reason="client_outcome_unknown",
+                                  attempt_id=envelope["attemptId"])
+            except StoreError:
+                pass
+            raise
+        except Exception:
+            try:
+                return self.store.finish(delivery_id, "ambiguous", reason="client_outcome_unknown",
+                                         attempt_id=envelope["attemptId"])
+            except StoreError:
+                return self._row(delivery_id, "client_outcome_unknown")
+        try:
+            acknowledgment = self.store.record_stock_command_accepted(
+                delivery_id, envelope["attemptId"],
+                self._stock_acknowledgment(admission["envelope"]),
+            )
+        except Exception:
+            # CLI launch may have succeeded; an unwritten result must never be replayed.
+            try:
+                self.store.finish(delivery_id, "ambiguous", reason="client_outcome_unknown",
+                                  attempt_id=envelope["attemptId"])
+            except StoreError:
+                pass
+            return self._row(delivery_id, "client_outcome_unknown")
+        attempt = self.store.current_attempt(delivery_id)
+        attempt["native_ack"] = acknowledgment
+        return await self._send_stock_acknowledgment(delivery_id, attempt)
 
     @contextlib.asynccontextmanager
     async def _runtime_guard(self, runtime_id):
@@ -402,6 +517,16 @@ class Gateway:
         envelope = self.store.delivery_envelope(delivery_id)
         if envelope is None:
             return None
+        if envelope.get("runtimeProfile") is not None:
+            async with self._runtime_guard(envelope["runtimeId"]):
+                attempt = self.store.current_attempt(delivery_id)
+                if (attempt and attempt["state"] == "command_accepted"
+                        and attempt.get("native_ack")):
+                    return await self._send_stock_acknowledgment(delivery_id, attempt)
+                if (not attempt or attempt["state"] in ("claiming", "admitted")
+                        and self._row(delivery_id)["status"] in ("queued", "claiming", "admitted")):
+                    return await self._dispatch_stock_locked(delivery_id, envelope)
+                return self._row(delivery_id)
         if envelope.get("schemaVersion") != 1:
             return self._row(delivery_id, "messaging_v2_disabled")
         async with self._runtime_guard(envelope["runtimeId"]):

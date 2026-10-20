@@ -69,6 +69,98 @@
     "deliveryId": "dly_ce57623adb0ea239fad27c0a3b693c6b4b89019a56452fa844c3abe4afbeb217",
     "attemptId": "018e2c70-7c6a-7a03-8000-000000000001"
   },
+  "assignedStock": {
+    "request": {
+      "operation": "attach",
+      "runtimeId": "00000000-0000-4000-8000-000000000003",
+      "conversationId": "00000000-0000-4000-8000-000000000011",
+      "expectedRuntimeGeneration": null,
+      "expectedAttachmentGeneration": null
+    },
+    "requests": [
+      {
+        "name": "attach",
+        "value": {
+          "operation": "attach",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "conversationId": "00000000-0000-4000-8000-000000000011",
+          "expectedRuntimeGeneration": null,
+          "expectedAttachmentGeneration": null
+        },
+        "accepted": true
+      },
+      {
+        "name": "renew",
+        "value": {
+          "operation": "renew",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "conversationId": "00000000-0000-4000-8000-000000000011",
+          "expectedRuntimeGeneration": 1,
+          "expectedAttachmentGeneration": 1
+        },
+        "accepted": true
+      },
+      {
+        "name": "mixed-generations",
+        "value": {
+          "operation": "attach",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "conversationId": "00000000-0000-4000-8000-000000000011",
+          "expectedRuntimeGeneration": 1,
+          "expectedAttachmentGeneration": null
+        },
+        "accepted": false
+      },
+      {
+        "name": "renew-without-generations",
+        "value": {
+          "operation": "renew",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "conversationId": "00000000-0000-4000-8000-000000000011",
+          "expectedRuntimeGeneration": null,
+          "expectedAttachmentGeneration": null
+        },
+        "accepted": false
+      },
+      {
+        "name": "implicit-conversation",
+        "value": {
+          "operation": "attach",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "conversationId": "latest",
+          "expectedRuntimeGeneration": null,
+          "expectedAttachmentGeneration": null
+        },
+        "accepted": false
+      },
+      {
+        "name": "unknown-field",
+        "value": {
+          "operation": "attach",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "conversationId": "00000000-0000-4000-8000-000000000011",
+          "expectedRuntimeGeneration": null,
+          "expectedAttachmentGeneration": null,
+          "enabled": true
+        },
+        "accepted": false
+      }
+    ],
+    "response": {
+      "status": "attached",
+      "runtimeId": "00000000-0000-4000-8000-000000000003",
+      "runtimeProfile": {
+        "profile": "assigned_stock_client",
+        "client": "codex",
+        "conversationId": "00000000-0000-4000-8000-000000000011"
+      },
+      "runtimeGeneration": 1,
+      "nodeId": "00000000-0000-4000-8000-000000000001",
+      "nodeGeneration": 1,
+      "attachmentGeneration": 1,
+      "leaseUntil": "2026-10-09T12:02:28.100Z"
+    }
+  },
   "nativeAck": {
     "schemaVersion": 1,
     "eventId": "018e2c70-7c6a-7a01-8000-000000000001",

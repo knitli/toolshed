@@ -106,6 +106,29 @@
               "minimum": 1,
               "maximum": 9007199254740991
             },
+            "runtimeProfile": {
+              "type": "object",
+              "properties": {
+                "profile": {
+                  "type": "string",
+                  "const": "assigned_stock_client"
+                },
+                "client": {
+                  "type": "string",
+                  "const": "codex"
+                },
+                "conversationId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              },
+              "required": [
+                "profile",
+                "client",
+                "conversationId"
+              ],
+              "additionalProperties": false
+            },
             "source": {
               "type": "string",
               "const": "manual"
@@ -251,6 +274,29 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 9007199254740991
+            },
+            "runtimeProfile": {
+              "type": "object",
+              "properties": {
+                "profile": {
+                  "type": "string",
+                  "const": "assigned_stock_client"
+                },
+                "client": {
+                  "type": "string",
+                  "const": "codex"
+                },
+                "conversationId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              },
+              "required": [
+                "profile",
+                "client",
+                "conversationId"
+              ],
+              "additionalProperties": false
             },
             "source": {
               "type": "string",
@@ -402,6 +448,29 @@
               "minimum": 1,
               "maximum": 9007199254740991
             },
+            "runtimeProfile": {
+              "type": "object",
+              "properties": {
+                "profile": {
+                  "type": "string",
+                  "const": "assigned_stock_client"
+                },
+                "client": {
+                  "type": "string",
+                  "const": "codex"
+                },
+                "conversationId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              },
+              "required": [
+                "profile",
+                "client",
+                "conversationId"
+              ],
+              "additionalProperties": false
+            },
             "source": {
               "type": "string",
               "const": "github"
@@ -551,6 +620,29 @@
               "minimum": 1,
               "maximum": 9007199254740991
             },
+            "runtimeProfile": {
+              "type": "object",
+              "properties": {
+                "profile": {
+                  "type": "string",
+                  "const": "assigned_stock_client"
+                },
+                "client": {
+                  "type": "string",
+                  "const": "codex"
+                },
+                "conversationId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              },
+              "required": [
+                "profile",
+                "client",
+                "conversationId"
+              ],
+              "additionalProperties": false
+            },
             "source": {
               "type": "string",
               "const": "github"
@@ -699,6 +791,29 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 9007199254740991
+            },
+            "runtimeProfile": {
+              "type": "object",
+              "properties": {
+                "profile": {
+                  "type": "string",
+                  "const": "assigned_stock_client"
+                },
+                "client": {
+                  "type": "string",
+                  "const": "codex"
+                },
+                "conversationId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              },
+              "required": [
+                "profile",
+                "client",
+                "conversationId"
+              ],
+              "additionalProperties": false
             },
             "source": {
               "type": "string",
@@ -1011,6 +1126,113 @@
             "acknowledgedAt",
             "status",
             "nativeCorrelation"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "eventId": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "deliveryId": {
+              "type": "string",
+              "pattern": "^dly_[0-9a-f]{64}$"
+            },
+            "attemptId": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "principal": {
+              "type": "string",
+              "maxLength": 254,
+              "pattern": "^(?=[^@]{1,64}@)[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$"
+            },
+            "agent": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,32}$"
+            },
+            "runtimeId": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "nodeGeneration": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "runtimeGeneration": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "attachmentGeneration": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "consumerGeneration": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "deliveredSourceStateVersion": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "acknowledgedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            "runtimeProfile": {
+              "type": "object",
+              "properties": {
+                "profile": {
+                  "type": "string",
+                  "const": "assigned_stock_client"
+                },
+                "client": {
+                  "type": "string",
+                  "const": "codex"
+                },
+                "conversationId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              },
+              "required": [
+                "profile",
+                "client",
+                "conversationId"
+              ],
+              "additionalProperties": false
+            },
+            "status": {
+              "type": "string",
+              "const": "command_accepted"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "eventId",
+            "deliveryId",
+            "attemptId",
+            "principal",
+            "agent",
+            "runtimeId",
+            "nodeGeneration",
+            "runtimeGeneration",
+            "attachmentGeneration",
+            "deliveredSourceStateVersion",
+            "acknowledgedAt",
+            "runtimeProfile",
+            "status"
           ],
           "additionalProperties": false
         }

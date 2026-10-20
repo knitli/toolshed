@@ -30,7 +30,7 @@ const names = [
   'quarantine-inventory-validation.ts',
 
   'contracts.ts', 'api.ts', 'registry.ts', 'coordinator.ts', 'coordinator-admission.ts',
-  'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts',
+  'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts', 'assigned-stock-contract.ts',
   'native-runtime-store.ts', 'native-admission-gate.ts', 'github/readback-contract.ts',
   'read-authority.ts', 'request-deadline.ts', 'github/host.ts', 'github/controller.ts',
   'github/host-storage-version.ts', 'messaging/protocol-v2.ts',
@@ -61,17 +61,23 @@ if (check) {
 const dataModule = code => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(code, { mode: 'transform' })).toString('base64')}`;
 const policy = dataModule(source['policy.ts']);
 const zod = pathToFileURL(resolve(zodPath)).href;
-const protocol = dataModule(source['protocol.ts'].replace('"zod"', JSON.stringify(zod)).replace('"./policy.js"', JSON.stringify(policy)));
+const assignedStock = dataModule(source['assigned-stock-contract.ts'].replace('"zod"', JSON.stringify(zod)));
+const protocol = dataModule(source['protocol.ts'].replace('"zod"', JSON.stringify(zod))
+  .replace('"./policy.js"', JSON.stringify(policy))
+  .replace('"./assigned-stock-contract.js"', JSON.stringify(assignedStock)));
 const messagingProtocol = dataModule(source['messaging/protocol-v2.ts']
   .replace('"zod"', JSON.stringify(zod)).replace('"../policy.js"', JSON.stringify(policy))
   .replace('"../protocol.js"', JSON.stringify(protocol)));
 // eslint-disable-next-line no-unsanitized/method -- Execute reviewed local schemas; --check verifies revision, source hashes and Zod version before this import.
 const contracts = await import(dataModule(source['contracts.ts'].replace('"zod"', JSON.stringify(zod))
+  .replace('"./assigned-stock-contract.js"', JSON.stringify(assignedStock))
   .replace('"./protocol.ts"', JSON.stringify(protocol))
   .replace('"./messaging/protocol-v2.ts"', JSON.stringify(messagingProtocol))));
 // eslint-disable-next-line no-unsanitized/method -- Execute the reviewed pinned native DTO schemas only after the same pre-evaluation source-pin checks.
 const nativeAdmissionSchemas = await import(dataModule(
   source['native-admission-contract.ts'].replace('"zod"', JSON.stringify(zod))));
+// eslint-disable-next-line no-unsanitized/method -- Import the same reviewed, pinned assignment DTO source.
+const stockSchemas = await import(assignedStock);
 const canonicalSource = source['registry.ts'].match(/export function canonicalNodeProof\([\s\S]*?\n\}/)[0];
 // eslint-disable-next-line no-unsanitized/method -- Execute the reviewed pinned proof function after the same pre-evaluation checks; regeneration explicitly trusts local source.
 const { canonicalNodeProof } = await import(dataModule(canonicalSource));
@@ -456,7 +462,26 @@ for (const vector of materialBindings) {
 }
 const githubMaterialRead = { request: materialRequest, requests: materialRequests, results: materialResults,
   bindings: materialBindings, nodeProof: nativeProof(materialContract.GITHUB_MATERIAL_READ_PATH, materialRequest, nativeIds.challengeProofAttach) };
+const stockRequest = { operation: 'attach', runtimeId: nativeIds.runtime,
+  conversationId: nativeIds.thread, expectedRuntimeGeneration: null, expectedAttachmentGeneration: null };
+const stockResponse = { status: 'attached', runtimeId: nativeIds.runtime,
+  runtimeProfile: { profile: 'assigned_stock_client', client: 'codex', conversationId: nativeIds.thread },
+  runtimeGeneration: 1, nodeId, nodeGeneration: 1, attachmentGeneration: 1, leaseUntil: nativeLeaseUntil };
+const stockRequests = [
+  { name: 'attach', value: stockRequest, accepted: true },
+  { name: 'renew', value: { ...stockRequest, operation: 'renew', expectedRuntimeGeneration: 1, expectedAttachmentGeneration: 1 }, accepted: true },
+  { name: 'mixed-generations', value: { ...stockRequest, expectedRuntimeGeneration: 1 }, accepted: false },
+  { name: 'renew-without-generations', value: { ...stockRequest, operation: 'renew' }, accepted: false },
+  { name: 'implicit-conversation', value: { ...stockRequest, conversationId: 'latest' }, accepted: false },
+  { name: 'unknown-field', value: { ...stockRequest, enabled: true }, accepted: false },
+];
+for (const vector of stockRequests) {
+  if (stockSchemas.AssignedStockRuntimeRequestSchema.safeParse(vector.value).success !== vector.accepted)
+    throw Error(`Stock assignment vector disagrees with source: ${vector.name}`);
+}
+stockSchemas.AssignedStockRuntimeResponseSchema.parse(stockResponse);
 const fixture = { original, admitted, overBudget, claim,
+  assignedStock: { request: stockRequest, requests: stockRequests, response: stockResponse },
   nativeAck,
   nativeAckNodeProof: { principal: nativeAck.principal, binding: nativeAckBinding, body: nativeAckBody, proof,
     canonical: canonicalNodeProof(nativeAck.principal, proof, nativeAckBinding) },

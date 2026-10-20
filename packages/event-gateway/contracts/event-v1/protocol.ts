@@ -46,6 +46,12 @@ const githubSubjectSchema = z.strictObject({
   pullRequestNumber: generationSchema,
 });
 
+export const AssignedStockRuntimeProfileSchema = z.strictObject({
+  profile: z.literal("assigned_stock_client"),
+  client: z.literal("codex"),
+  conversationId: uuidV4OrV7Schema,
+});
+
 const commonEnvelopeShape = {
   schemaVersion: z.literal(EVENT_PROTOCOL_VERSION),
   eventId: uuidV4OrV7Schema,
@@ -66,6 +72,7 @@ const commonEnvelopeShape = {
   expiresAt: timestampSchema,
   candidateGeneration: generationSchema.optional(),
   consumerGeneration: generationSchema.optional(),
+  runtimeProfile: AssignedStockRuntimeProfileSchema.optional(),
 };
 
 const manualEnvelopeSchema = z.strictObject({
@@ -125,7 +132,9 @@ export const EventEnvelopeSchema = z.union([
   githubCiEnvelopeSchema,
   githubTerminalEnvelopeSchema,
   githubCompletionEnvelopeSchema,
-]);
+]).refine(value => !value.runtimeProfile || value.consumerGeneration === value.attachmentGeneration, {
+  message: "assigned stock profile requires consumerGeneration to match attachmentGeneration",
+});
 
 const commonAcknowledgmentShape = {
   schemaVersion: z.literal(EVENT_PROTOCOL_VERSION),
@@ -181,6 +190,12 @@ const observedAcknowledgmentSchema = z.strictObject({
   ]),
 });
 
+const commandAcceptedAcknowledgmentSchema = z.strictObject({
+  ...commonAcknowledgmentShape,
+  runtimeProfile: AssignedStockRuntimeProfileSchema,
+  status: z.literal("command_accepted"),
+});
+
 /**
  * A queue receipt or direct native-turn registration is `submitted`; it does
  * not prove input observation. `observed` is either a queue-correlated turn or
@@ -190,7 +205,10 @@ const observedAcknowledgmentSchema = z.strictObject({
 export const EventObservationAckSchema = z.union([
   submittedAcknowledgmentSchema,
   observedAcknowledgmentSchema,
-]);
+  commandAcceptedAcknowledgmentSchema,
+]).refine(value => !("runtimeProfile" in value) || value.consumerGeneration === value.attachmentGeneration, {
+  message: "assigned stock profile requires consumerGeneration to match attachmentGeneration",
+});
 
 export const EventProtocolMessageSchema = z.union([
   EventEnvelopeSchema,
@@ -544,6 +562,12 @@ export function acknowledgmentMatchesDelivery(
     acknowledgment.runtimeGeneration === envelope.runtimeGeneration &&
     acknowledgment.attachmentGeneration === envelope.attachmentGeneration &&
     acknowledgment.consumerGeneration === envelope.consumerGeneration &&
+    (envelope.runtimeProfile === undefined
+      ? !Object.hasOwn(acknowledgment, "runtimeProfile")
+      : acknowledgment.status === "command_accepted" && "runtimeProfile" in acknowledgment
+        && acknowledgment.runtimeProfile.profile === envelope.runtimeProfile.profile
+        && acknowledgment.runtimeProfile.client === envelope.runtimeProfile.client
+        && acknowledgment.runtimeProfile.conversationId === envelope.runtimeProfile.conversationId) &&
     acknowledgment.deliveredSourceStateVersion ===
       envelope.sourceStateVersion
   );
@@ -565,7 +589,9 @@ export function acknowledgmentAdvancesCurrentWatermark(
       currentDestinationEnvelope,
       acknowledgment,
     ) &&
-    acknowledgment.status === "observed" &&
+    (currentDestinationEnvelope.runtimeProfile
+      ? acknowledgment.status === "command_accepted"
+      : acknowledgment.status === "observed") &&
     acknowledgment.deliveredSourceStateVersion === currentSourceStateVersion
   );
 }

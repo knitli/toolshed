@@ -162,6 +162,55 @@ not enable automatic renewal, wake, or dispatch. The server controls whether
 native admission is enabled; while its production gate is disabled, requests
 are refused with `native_binding_unqualified`.
 
+### Explicit assigned-stock conversation
+
+This is a default-off development path for the existing v1 manual canary.
+GitHub publication does not yet materialize local deliveries, and Messaging v2
+delivery remains disabled. Before activation, the shared authority settlement
+must be completed: the current generic reservation leaves a permanent native
+unsettled marker that blocks a later Messaging v2 route for the same agent.
+
+The stock Codex path is opt-in and names an existing canonical conversation UUID;
+it never discovers or selects a latest thread. Reuse the private cloud config and
+node key below. First assignment creates generation 1:
+
+```sh
+knitli-event-gateway stock-control attach \
+  --runtime-id RUNTIME-UUID --conversation-id CODEX-CONVERSATION-UUID \
+  --cloud-config /private/path/cloud-config.json
+```
+
+Renew with the exact returned generation pair:
+
+```sh
+knitli-event-gateway stock-control renew \
+  --runtime-id RUNTIME-UUID --conversation-id CODEX-CONVERSATION-UUID \
+  --expected-runtime-generation 1 --expected-attachment-generation 1 \
+  --cloud-config /private/path/cloud-config.json
+```
+
+A replacement attach also requires the current generation pair and advances
+both generations. If the request outcome is unknown, renew the exact profile
+using the generation pair printed by the command; do not send new client input
+to resolve uncertainty. Reassignment fences future submissions; it does not
+cancel input already accepted by the old conversation.
+
+To enable the local adapter, the private dispatch config must also name
+`"stockCodexBinary": "/absolute/path/to/codex"`. Omitting it disables stock
+dispatch. The cloud profile has its own explicit principal/agent canary gate;
+the native binding gate remains separate. The existing runtime lease lasts
+90 seconds and currently requires explicit renewal; assignment does not install
+automatic renewal or change global client configuration.
+
+A stock ACK with status `command_accepted` records a successful CLI exit in the
+Gateway journal. It is not an independently verified durable client receipt or
+proof that a turn started or completed. Lost cloud ACKs replay that stored ACK;
+uncertain client submissions remain ambiguous and are never automatically sent
+again. A running stock daemon may continue the same assigned conversation after
+the TUI closes. Fully stopped-runtime behavior remains unqualified; the
+[0.163.0 upstream command](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/tui/src/session_archive_commands.rs)
+can choose an embedded server when no shared daemon is available.
+
 Create `cloud-config.json` and its sibling `cloud-credentials.json` in a private
 directory. The configuration stores immutable identity and only the credential
 filename; credentials are reread for each request:
