@@ -36,6 +36,13 @@ to its manifest SHA-256. The runtime-status family adds control revision
 `native-runtime-store.ts` and `native-admission-gate.ts`), retaining the same four event sources. Member paths
 retain the repository paths and revision.
 
+The separate `assigned-stock-control` archive pins cloud commit
+`e12da5feb121eecba3c0b3b578e0e4341cb2a2dc`: 58 control sources and four event
+wire sources form 60 unique source paths. Each archived file is the exact Git
+blob for its recorded path and revision, checked against the manifest SHA-256.
+The stock archive freezes its complete member list and archive digest; the
+historical family archive remains a separate byte-for-byte unchanged fixture.
+
 Source provenance tests are separate from runtime authorization: the trusted
 verifier authorizes exact snapshot bytes, not source code evaluated from a PR.
 When deliberately authorizing another family, retain existing fixtures and

@@ -30,6 +30,7 @@ PATHS = (
 HISTORICAL_ARCHIVE = PACKAGE / "tests/fixtures/trusted-contract-families.zip"
 STOCK_ARCHIVE = PACKAGE / "tests/fixtures/assigned-stock-contract-family.zip"
 HISTORICAL_ARCHIVE_SHA256 = "ad1e41e5add910d6bbf56960717fff9bdf6aae1ddd1f7a87bea2f5af3582b879"
+STOCK_ARCHIVE_SHA256 = "b3ae0d6f1b53738d14d5494781cc6360e3830b934e3e61822c935cc2549dd6ec"
 
 
 def family(name, blobs):
@@ -137,6 +138,21 @@ class ContractWorkflowTests(unittest.TestCase):
 
     def test_assigned_stock_all_source_hashes_required(self):
         self.assert_source_hash_mutation_or_omission_rejected("assigned-stock-control")
+
+    def test_assigned_stock_archive_is_closed_and_byte_pinned(self):
+        self.assertEqual(hashlib.sha256(STOCK_ARCHIVE.read_bytes()).hexdigest(), STOCK_ARCHIVE_SHA256)
+        revision = "e12da5feb121eecba3c0b3b578e0e4341cb2a2dc"
+        with zipfile.ZipFile(STOCK_ARCHIVE) as archive:
+            names = archive.namelist()
+            metadata = json.loads(archive.read("metadata.json"))
+            self.assertEqual(len(names), len(set(names)))
+            sources = metadata["sources"][revision]
+            self.assertEqual(len(sources), 60)
+            expected = {"metadata.json"}
+            expected.update(f"snapshots/assigned-stock-control/{path}" for path in PATHS)
+            expected.update(f"sources/{revision}/{path}" for path in sources)
+            self.assertEqual(len(expected), 68)
+            self.assertEqual(set(names), expected)
 
     def test_assigned_stock_exact_source_provenance(self):
         name = "assigned-stock-control"
@@ -450,7 +466,6 @@ class ContractWorkflowTests(unittest.TestCase):
                 self.assertEqual(expected[path], entry["sha256"])
             expected[path] = entry["sha256"]
         with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
-            metadata = json.loads(archive.read("metadata.json"))
             self.assert_archived_sources(archive, revision, expected)
             for entry in event["files"]:
                 self.assertEqual(blobs[SNAPSHOT + "event-v1/" + entry["file"]],
