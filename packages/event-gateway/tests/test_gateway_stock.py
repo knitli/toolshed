@@ -113,6 +113,28 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         submit.assert_awaited_once()
         self.assertEqual(self.authority.acks, [stored_ack, stored_ack])
 
+    async def test_github_stock_event_lost_ack_recovery_launches_once(self):
+        github = next(event for event in FIXTURES["validEnvelopes"] if event["source"] == "github")
+        self.event = copy.deepcopy(github)
+        self.event["runtimeProfile"] = copy.deepcopy(EVENT["runtimeProfile"])
+        self.event["consumerGeneration"] = self.event["attachmentGeneration"]
+        self.event["deliveryId"] = derive_delivery_id(self.event)
+        self.mapping = {key: self.event[key] for key in IDENTITY}
+        self.mapping.update(consumerGeneration=self.event["consumerGeneration"],
+                            runtimeProfile=self.event["runtimeProfile"],
+                            leaseExpiresAt=self.now + 3600)
+        self.store.put_attachment(self.mapping)
+        delivery = self.accept()
+        self.authority.drop_ack = True
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=AsyncMock(return_value={"status": "command_accepted"})) as submit:
+            self.assertEqual((await self.gateway.dispatch(delivery))["reason"], "stock_ack_pending")
+            stored_ack = self.store.current_attempt(delivery)["native_ack"]
+            self.restart()
+            self.assertEqual((await self.gateway.reconcile(delivery))["status"], "command_accepted")
+        submit.assert_awaited_once_with(self.event["eventReference"])
+        self.assertEqual(self.authority.acks, [stored_ack, stored_ack])
+
     async def test_timeout_after_launch_is_ambiguous_and_never_replayed_after_restart(self):
         delivery = self.accept()
         with patch("event_gateway.stock_codex.StockCodexAdapter.submit",

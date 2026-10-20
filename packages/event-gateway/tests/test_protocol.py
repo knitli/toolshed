@@ -52,6 +52,27 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(acknowledgment_matches_delivery(envelope, changed))
         self.assertFalse(acknowledgment_advances_current_watermark(envelope, dict(ack, status='observed'), envelope['sourceStateVersion']))
 
+    def test_assigned_stock_accepts_supported_github_events_but_not_completion(self):
+        github = next(event for event in FIXTURES['validEnvelopes'] if event['source'] == 'github')
+        profile = next(event['runtimeProfile'] for event in FIXTURES['validEnvelopes'] if 'runtimeProfile' in event)
+        for event_kind, reason in (('attention', 'review_comment'), ('ci', 'check_failed'),
+                                   ('terminal', 'pull_request_merged')):
+            with self.subTest(event_kind=event_kind):
+                event = copy.deepcopy(github)
+                event.update(eventKind=event_kind, reasonCode=reason,
+                             runtimeProfile=copy.deepcopy(profile),
+                             consumerGeneration=event['attachmentGeneration'])
+                event['deliveryId'] = derive_delivery_id(event)
+                self.assertEqual(parse_envelope(json.dumps(event).encode(), NOW), event)
+
+        completion = copy.deepcopy(github)
+        completion.update(eventKind='completion', reasonCode='round_complete',
+                          runtimeProfile=copy.deepcopy(profile),
+                          consumerGeneration=completion['attachmentGeneration'])
+        completion['deliveryId'] = derive_delivery_id(completion)
+        with self.assertRaises(ProtocolError):
+            parse_envelope(json.dumps(completion).encode(), NOW)
+
     def test_malformed_and_closed_schema(self):
         for body, code in [(b'{', 'invalid_json'), (b'{"a":1,"\\u0061":2}', 'duplicate_json_key'),
                            (b'{"nested":{"a":1,"a":2}}', 'duplicate_json_key'),
