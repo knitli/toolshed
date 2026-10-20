@@ -95,6 +95,12 @@ class ContractWorkflowTests(unittest.TestCase):
         with zipfile.ZipFile(path) as archive:
             return json.loads(archive.read("metadata.json"))
 
+    def assert_archived_sources(self, archive, revision, hashes):
+        metadata = json.loads(archive.read("metadata.json"))
+        self.assertEqual(metadata["sources"][revision], hashes)
+        for path, digest in hashes.items():
+            self.assertEqual(hashlib.sha256(archive.read(f"sources/{revision}/{path}")).hexdigest(), digest)
+
     def test_actual_approved_families_and_frozen_policy(self):
         historical = self.archive_metadata(HISTORICAL_ARCHIVE)
         stock = self.archive_metadata(STOCK_ARCHIVE)
@@ -152,10 +158,7 @@ class ContractWorkflowTests(unittest.TestCase):
         with zipfile.ZipFile(STOCK_ARCHIVE) as archive:
             metadata = json.loads(archive.read("metadata.json"))
             self.assertEqual(metadata["snapshots"][name], "prepared-export:" + revision)
-            self.assertEqual(metadata["sources"][revision], expected_sources)
-            for path, digest in expected_sources.items():
-                data = archive.read(f"sources/{revision}/{path}")
-                self.assertEqual(hashlib.sha256(data).hexdigest(), digest)
+            self.assert_archived_sources(archive, revision, expected_sources)
             for entry in event["files"]:
                 self.assertEqual(blobs[SNAPSHOT + "event-v1/" + entry["file"]],
                                  archive.read(f"sources/{revision}/{entry['originalPath']}"))
@@ -448,10 +451,7 @@ class ContractWorkflowTests(unittest.TestCase):
             expected[path] = entry["sha256"]
         with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
             metadata = json.loads(archive.read("metadata.json"))
-            self.assertEqual(metadata["sources"][revision], expected)
-            for path, digest in expected.items():
-                source = archive.read(f"sources/{revision}/{path}")
-                self.assertEqual(hashlib.sha256(source).hexdigest(), digest)
+            self.assert_archived_sources(archive, revision, expected)
             for entry in event["files"]:
                 self.assertEqual(blobs[SNAPSHOT + "event-v1/" + entry["file"]],
                                  archive.read(f"sources/{revision}/{entry['originalPath']}"))
