@@ -366,6 +366,17 @@ must pass before release. The prior bounded spike is historical evidence only.
 
 ### Retained GitHub source readback
 
+The queued `ref_*` value can be resolved through the protected metadata reader:
+
+```sh
+knitli-event-gateway --state-dir /private/state github-event-read \
+  --cloud-config /private/cloud.json --event-reference ref_00000000-0000-4000-8000-000000000001
+```
+
+It returns the PR subject, source version and event reason after checking current
+read authority. Use that subject and version with `github-source-read` for retained
+review or CI details. Provider text is never included in the queued message.
+
 `github-source-read` requests exactly one authorized page using the private cloud
 configuration and enrolled node key already used by `runtime-status`:
 

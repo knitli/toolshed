@@ -172,6 +172,34 @@ def _github_text(value, limit):
     return isinstance(value, str) and len(value) <= limit
 
 
+def _github_event_request(value):
+    _closed(value, ("eventReference",), code="invalid_request")
+    if (not isinstance(value["eventReference"], str)
+            or re.fullmatch(r"ref_[0-9a-f-]{36}", value["eventReference"]) is None):
+        raise CloudError("invalid_request")
+    return value
+
+
+def _github_event_response(value):
+    if not isinstance(value, dict) or value.get("status") not in ("ok", "unavailable", "conflict"):
+        raise CloudError("invalid_response")
+    if value["status"] != "ok":
+        _closed(value, ("status",))
+        return value
+    _closed(value, ("status", "subject", "sourceVersion", "eventKind", "reasonCode",
+                    "candidateGeneration", "observedAt"))
+    _closed(value["subject"], ("installationId", "repositoryId", "prNumber"))
+    if (any(not _generation(number) for number in value["subject"].values())
+            or any(not _generation(value[key]) for key in (
+                "sourceVersion", "candidateGeneration", "observedAt"))
+            or value["eventKind"] not in ("attention", "ci", "terminal")
+            or value["reasonCode"] not in (
+                "review_requested", "review_submitted", "review_comment", "check_failed",
+                "status_failed", "pull_request_closed", "pull_request_merged")):
+        raise CloudError("invalid_response")
+    return value
+
+
 def _github_cursor(value, request, *, code):
     _closed(value, ("subjectKey", "fromVersion", "toVersion", "anchorVersion", "anchorEpoch",
                     "observationEpoch", "revision", "policyRevision", "offset"), code=code)
@@ -1003,6 +1031,11 @@ class CloudClient:
     def node_public_key(self):
         """Public key identity for a retained local reconciliation link."""
         return base64.urlsafe_b64encode(self._key.public_key().public_bytes_raw()).rstrip(b"=").decode()
+
+    async def github_event_read(self, request):
+        """Resolve an opaque event reference through current cloud read authority."""
+        request = _github_event_request(request)
+        return _github_event_response(await self._post("/v1/github/event/read", request))
 
     async def github_source_read(self, request):
         """Read one bounded page of authorized retained GitHub source projections."""

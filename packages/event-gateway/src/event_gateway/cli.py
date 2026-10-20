@@ -81,6 +81,9 @@ def main(argv=None):
     stock.add_argument("--cloud-config", type=Path, required=True)
     stock.add_argument("--expected-runtime-generation", type=int)
     stock.add_argument("--expected-attachment-generation", type=int)
+    event_read = commands.add_parser("github-event-read", help="Resolve a queued GitHub event reference")
+    event_read.add_argument("--cloud-config", type=Path, required=True)
+    event_read.add_argument("--event-reference", required=True)
     source_read = commands.add_parser("github-source-read", help="Read one retained GitHub source page")
     source_read.add_argument("--cloud-config", type=Path, required=True)
     for flag in ("installation-id", "repository-id", "pr-number", "from-version", "to-version"):
@@ -142,6 +145,8 @@ def _execute_command(args, state_dir, parser):
         return 0
     if args.command == "github-source-material":
         return _execute_github_source_material(args, state_dir)
+    if args.command == "github-event-read":
+        return _execute_github_event_read(args, state_dir)
     if args.command == "github-source-read":
         return _execute_github_source_read(args, state_dir)
     if args.command == "runtime-status":
@@ -235,6 +240,17 @@ def _execute_github_source_material(args, state_dir):
         return 0
     finally:
         os.close(directory)
+
+
+def _execute_github_event_read(args, state_dir):
+    try:
+        cloud = load_cloud_client(args.cloud_config, state_dir)
+        result = asyncio.run(cloud.github_event_read({"eventReference": args.event_reference}))
+    except CloudError as error:
+        print(json.dumps({"eventRead": None, "reason": error.code}))
+        return 2
+    print(json.dumps(result))
+    return 0 if result["status"] == "ok" else 2
 
 
 def _execute_github_source_read(args, state_dir):

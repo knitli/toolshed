@@ -31,7 +31,7 @@ const names = [
 
   'contracts.ts', 'api.ts', 'registry.ts', 'coordinator.ts', 'coordinator-admission.ts',
   'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts', 'assigned-stock-contract.ts',
-  'native-runtime-store.ts', 'native-admission-gate.ts', 'github/readback-contract.ts',
+  'native-runtime-store.ts', 'native-admission-gate.ts', 'github/readback-contract.ts', 'github/event-read-contract.ts',
   'read-authority.ts', 'request-deadline.ts', 'github/host.ts', 'github/controller.ts',
   'github/host-storage-version.ts', 'messaging/protocol-v2.ts',
   'github/client.ts', 'github/pinned-read-contract.ts', 'github/grants.ts', 'github/state.ts', 'github/ingress.ts',
@@ -397,6 +397,34 @@ for (const vector of githubResults) {
     throw Error(`GitHub result vector disagrees with source: ${vector.name}`);
 }
 const githubSourceRead = { request: githubRequest, requests: githubRequests, results: githubResults };
+// eslint-disable-next-line no-unsanitized/method -- Execute only the reviewed metadata DTO after source-pin verification.
+const eventReadContract = await import(dataModule(source['github/event-read-contract.ts'].replace("'zod'", JSON.stringify(zod))));
+const eventReadRequest = { eventReference: original.eventReference };
+const eventReadResult = { status: 'ok', subject: githubRequest.subject, sourceVersion: 4,
+  eventKind: 'ci', reasonCode: 'check_failed', candidateGeneration: 1, observedAt: 1000 };
+const eventReadRequests = [
+  { name: 'opaque-reference', value: eventReadRequest, accepted: true },
+  { name: 'unknown-field', value: { ...eventReadRequest, subject: githubRequest.subject }, accepted: false },
+  { name: 'invalid-reference', value: { eventReference: 'latest' }, accepted: false },
+  { name: 'boolean-reference', value: { eventReference: true }, accepted: false },
+];
+const eventReadResults = [
+  { name: 'metadata', value: eventReadResult, accepted: true },
+  { name: 'unavailable', value: { status: 'unavailable' }, accepted: true },
+  { name: 'conflict', value: { status: 'conflict' }, accepted: true },
+  { name: 'provider-text', value: { ...eventReadResult, body: 'private' }, accepted: false },
+  { name: 'existence-leak', value: { status: 'unavailable', subject: githubRequest.subject }, accepted: false },
+  { name: 'boolean-identity', value: { ...eventReadResult, subject: { ...githubRequest.subject, prNumber: true } }, accepted: false },
+  { name: 'unsafe-generation', value: { ...eventReadResult, sourceVersion: Number.MAX_SAFE_INTEGER + 1 }, accepted: false },
+  { name: 'unknown-kind', value: { ...eventReadResult, eventKind: 'message' }, accepted: false },
+];
+for (const [schema, vectors] of [[eventReadContract.GitHubEventReadRequestSchema, eventReadRequests],
+  [eventReadContract.GitHubEventReadResultSchema, eventReadResults]]) {
+  for (const vector of vectors) {
+    if (schema.safeParse(vector.value).success !== vector.accepted) throw Error(`GitHub event read vector disagrees: ${vector.name}`);
+  }
+}
+const githubEventRead = { request: eventReadRequest, requests: eventReadRequests, results: eventReadResults };
 // Material vectors execute only the reviewed DTO module, never retention/provider code.
 // eslint-disable-next-line no-unsanitized/method -- Execute only the reviewed material DTO module after source-pin verification.
 const materialContract = await import(dataModule(source['github/material-read-contract.ts'].replace("'zod'", JSON.stringify(zod))));
@@ -492,7 +520,7 @@ const fixture = { original, admitted, overBudget, claim,
   nodeProof: { principal: original.principal, binding, body, proof, canonical: canonicalNodeProof(original.principal, proof, binding) },
   noStart, localNoStart, noStartResult, localNoStartResult,
   nativeAdmission: nativeAdmissionFixture,
-  githubSourceRead, githubMaterialRead,
+  githubSourceRead, githubMaterialRead, githubEventRead,
   noStartNodeProof: { principal: original.principal, binding: noStartBinding, body: noStartBody, proof,
     canonical: canonicalNodeProof(original.principal, proof, noStartBinding) } };
 const json = value => JSON.stringify(value, null, 2) + '\n';
