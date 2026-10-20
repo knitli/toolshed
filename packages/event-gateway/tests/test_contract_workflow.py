@@ -27,6 +27,9 @@ PATHS = (
     "event-v1/policy.ts", "event-v1/protocol-v1.json", "event-v1/manifest.json",
     "event-control-v1/fixtures.json", "event-control-v1/manifest.json",
 )
+HISTORICAL_ARCHIVE = PACKAGE / "tests/fixtures/trusted-contract-families.zip"
+STOCK_ARCHIVE = PACKAGE / "tests/fixtures/assigned-stock-contract-family.zip"
+HISTORICAL_ARCHIVE_SHA256 = "ad1e41e5add910d6bbf56960717fff9bdf6aae1ddd1f7a87bea2f5af3582b879"
 
 
 def family(name, blobs):
@@ -77,20 +80,35 @@ class ContractWorkflowTests(unittest.TestCase):
 
     def approved_snapshot(self, name):
         # Read immutable data only: no extraction, source evaluation, or Git/network dependency.
-        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
-            return {SNAPSHOT + path: archive.read(f"snapshots/{name}/{path}") for path in PATHS}
+        for path in (HISTORICAL_ARCHIVE, STOCK_ARCHIVE):
+            if not path.exists():
+                continue
+            with zipfile.ZipFile(path) as archive:
+                try:
+                    return {SNAPSHOT + item: archive.read(f"snapshots/{name}/{item}")
+                            for item in PATHS}
+                except KeyError:
+                    pass
+        raise KeyError(f"unknown approved contract family: {name}")
+
+    def archive_metadata(self, path):
+        with zipfile.ZipFile(path) as archive:
+            return json.loads(archive.read("metadata.json"))
 
     def test_actual_approved_families_and_frozen_policy(self):
-        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
-            metadata = json.loads(archive.read("metadata.json"))
+        historical = self.archive_metadata(HISTORICAL_ARCHIVE)
+        stock = self.archive_metadata(STOCK_ARCHIVE)
+        metadata = {"families": historical["families"] + stock["families"],
+                    "snapshots": {**historical["snapshots"], **stock["snapshots"]}}
         self.assertEqual(list(POLICY["FAMILIES"]), metadata["families"])
-        self.assertEqual(set(metadata["snapshots"]), {
+        self.assertEqual(set(historical["snapshots"]), {
             "legacy", "no-start", "native-start", "native-input-recorded",
             "native-admission", "native-runtime-status", "github-source-readback", "github-source-control",
             "github-watch-control", "github-watch-owner-rpc", "github-pinned-history-read",
             "cloud-guard-baseline-messaging-v2-dispatch", "github-initial-custody",
             "github-initial-plan-material", "github-material-page-parity",
         })
+        self.assertEqual(set(stock["snapshots"]), {"assigned-stock-control"})
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         for expected in metadata["families"]:
             with self.subTest(family=expected["name"]):
@@ -100,6 +118,49 @@ class ContractWorkflowTests(unittest.TestCase):
                 self.assertEqual(self.verify(), expected["name"])
                 self.assertCountEqual(self.reads, [SNAPSHOT + path for path in PATHS])
                 self.assertEqual(self.api_reads, [f"git/trees/{HEAD}?recursive=1"])
+
+    def test_historical_family_archive_remains_byte_for_byte_unchanged(self):
+        self.assertEqual(hashlib.sha256(HISTORICAL_ARCHIVE.read_bytes()).hexdigest(),
+                         HISTORICAL_ARCHIVE_SHA256)
+
+    def test_assigned_stock_requires_complete_authorization(self):
+        self.assert_complete_family_authorization("assigned-stock-control")
+
+    def test_assigned_stock_snapshot_mutation_or_omission_rejected(self):
+        self.assert_mutation_or_omission_rejected("assigned-stock-control")
+
+    def test_assigned_stock_all_source_hashes_required(self):
+        self.assert_source_hash_mutation_or_omission_rejected("assigned-stock-control")
+
+    def test_assigned_stock_exact_source_provenance(self):
+        name = "assigned-stock-control"
+        revision = "e12da5feb121eecba3c0b3b578e0e4341cb2a2dc"
+        blobs = self.approved_snapshot(name)
+        control = json.loads(blobs[SNAPSHOT + "event-control-v1/manifest.json"])
+        event = json.loads(blobs[SNAPSHOT + "event-v1/manifest.json"])
+        self.assertEqual(control["revision"], revision)
+        self.assertEqual(event["commit"], revision)
+        self.assertEqual(len(control["sources"]), 58)
+        self.assertEqual(len(event["files"]), 4)
+        expected_sources = dict(control["sources"])
+        for entry in event["files"]:
+            path = entry["originalPath"]
+            if path in expected_sources:
+                self.assertEqual(expected_sources[path], entry["sha256"])
+            expected_sources[path] = entry["sha256"]
+        self.assertEqual(len(expected_sources), 60)
+        with zipfile.ZipFile(STOCK_ARCHIVE) as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+            self.assertEqual(metadata["snapshots"][name], "prepared-export:" + revision)
+            self.assertEqual(metadata["sources"][revision], expected_sources)
+            for path, digest in expected_sources.items():
+                data = archive.read(f"sources/{revision}/{path}")
+                self.assertEqual(hashlib.sha256(data).hexdigest(), digest)
+            for entry in event["files"]:
+                self.assertEqual(blobs[SNAPSHOT + "event-v1/" + entry["file"]],
+                                 archive.read(f"sources/{revision}/{entry['originalPath']}"))
+        self.assertEqual(hashlib.sha256(blobs[SNAPSHOT + "event-control-v1/fixtures.json"]).hexdigest(),
+                         control["fixturesSha256"])
 
     def assert_complete_family_authorization(self, name):
         self.blobs = self.approved_snapshot(name)
