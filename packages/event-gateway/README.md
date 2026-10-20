@@ -164,11 +164,14 @@ are refused with `native_binding_unqualified`.
 
 ### Explicit assigned-stock conversation
 
-This is a default-off development path for the existing v1 manual canary.
-GitHub publication does not yet materialize local deliveries, and Messaging v2
-delivery remains disabled. Before activation, the shared authority settlement
-must be completed: the current generic reservation leaves a permanent native
-unsettled marker that blocks a later Messaging v2 route for the same agent.
+GitHub watch publication can materialize local deliveries, but automatic wake
+and dispatch remain default-off until explicitly configured and qualified. A
+delivery carries an opaque `ref_*` event reference, not provider text; the
+protected metadata reader resolves it under current authority. Messaging v2
+delivery and live pilot activation remain disabled/unqualified. The assigned-stock
+path durably records command acceptance. The shared Messaging authority settles
+that receipt or a proven no-start before allowing a fresh wake; uncertain
+outcomes stay ambiguous and are never blindly resent.
 
 The stock Codex path is opt-in and names an existing canonical conversation UUID;
 it never discovers or selects a latest thread. Reuse the private cloud config and

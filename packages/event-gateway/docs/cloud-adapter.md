@@ -4,10 +4,12 @@ For the private config format and explicit attach invocation, see the
 [README quick start](../README.md#explicit-cloud-attachment-lifecycle).
 
 `src/event_gateway/cloud.py` supplies an injected, asynchronous HTTP client for
-the existing Event API. It has no default HTTP transport, credential discovery,
-CLI wiring, listener activation, native submission, or attachment qualification.
-The shipped gateway still uses its existing unavailable authority. Cloud claims
-are returned as the exact validated cloud DTO, not the older local `Permit`.
+the existing Event API. It has no default HTTP transport or credential
+discovery. The CLI wires selected GitHub event/source readers and assigned-stock
+control to this client; a private dispatch configuration can pass it to the
+listener and dispatcher. These opt-in integrations do not qualify native
+admission or live delivery. Cloud claims are returned as the exact validated
+cloud DTO, not the older local `Permit`.
 
 ## Ports and boundaries
 
@@ -99,8 +101,10 @@ replacement request. On a confirmed
 commit, the CLI rechecks the live native binding and writes the local attachment
 mapping. When the daemon is running, it remains the single SQLite writer for
 that mapping and an atomic transfer fence; otherwise the foreground CLI writes
-the store directly. No command renews leases automatically or enables wake or
-dispatch.
+the store directly. These foreground native lifecycle commands do not renew
+leases automatically or enable wake or dispatch. Separately, a running daemon
+renews assigned-stock mappings only when its private dispatch configuration
+includes `stockCodexBinary`; see the [README assigned-stock flow](../README.md#explicit-assigned-stock-conversation).
 
 General claim, settlement, and acknowledgment calls have no automatic retry
 loop. A native attachment commit gets at most one bounded retry after an
