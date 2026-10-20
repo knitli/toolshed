@@ -137,6 +137,50 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(daemon._stock_renewal_worker(FakeStore(), cloud, stop), 1)
         self.assertEqual(cloud.calls, 1)
 
+    async def test_stock_renewal_prunes_suspension_after_mapping_disappears(self):
+        mapping = {
+            "runtimeId": str(uuid.uuid4()), "principal": "owner@example.com", "agent": "codex",
+            "nodeId": str(uuid.uuid4()), "nodeGeneration": 2, "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": time.time() + 90,
+            "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                               "conversationId": str(uuid.uuid4())},
+        }
+        stop = asyncio.Event()
+        reads = 0
+
+        class FakeStore:
+            @staticmethod
+            def clock():
+                return time.time()
+
+            def list_attachments(self):
+                nonlocal reads
+                reads += 1
+                return [] if reads == 2 else [mapping]
+
+            @staticmethod
+            def renew_stock_attachment(_expected, _lease):
+                stop.set()
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = mapping["nodeId"], mapping["nodeGeneration"]
+
+            def __init__(self):
+                self.requests = []
+
+            async def assigned_stock(self, request):
+                self.requests.append(dict(request))
+                if len(self.requests) == 1:
+                    raise CloudError("assigned_stock_disabled")
+                return {"leaseUntil": _iso(time.time() + 90)}
+
+        cloud = FakeCloud()
+        with patch.object(daemon, "STOCK_RENEW_INTERVAL", 0.001):
+            await asyncio.wait_for(daemon._stock_renewal_worker(FakeStore(), cloud, stop), 1)
+        self.assertEqual(len(cloud.requests), 2)
+        self.assertEqual(cloud.requests[0], cloud.requests[1])
+
     async def test_stock_renewal_retries_same_request_after_unknown_transport(self):
         mapping = {
             "runtimeId": str(uuid.uuid4()), "principal": "owner@example.com", "agent": "codex",

@@ -165,7 +165,14 @@ async def _stock_renewal_worker(store, cloud, stop):
     """Renew only live assigned-stock mappings already present in the local ledger."""
     suspended = set()
     while not stop.is_set():
-        for mapping in store.list_attachments():
+        attachments = store.list_attachments()
+        suspended.intersection_update(
+            json.dumps(mapping, sort_keys=True, separators=(",", ":"))
+            for mapping in attachments
+            if isinstance(mapping.get("runtimeProfile"), dict)
+            and mapping["runtimeProfile"].get("profile") == "assigned_stock_client"
+        )
+        for mapping in attachments:
             profile = mapping.get("runtimeProfile")
             if not isinstance(profile, dict) or profile.get("profile") != "assigned_stock_client":
                 continue
