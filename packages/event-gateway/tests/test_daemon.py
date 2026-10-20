@@ -12,7 +12,7 @@ import uuid
 from unittest.mock import patch
 
 from event_gateway import cli, daemon
-from event_gateway.cloud import _iso
+from event_gateway.cloud import CloudError, _iso
 from event_gateway.store import Store, StoreError
 
 
@@ -47,6 +47,157 @@ async def running_daemon(state_dir):
 
 
 class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stock_renewal_uses_only_current_assigned_mapping_and_stops(self):
+        mapping = {
+            "runtimeId": str(uuid.uuid4()), "principal": "owner@example.com", "agent": "codex",
+            "nodeId": str(uuid.uuid4()), "nodeGeneration": 2, "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": time.time() + 90,
+            "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                               "conversationId": str(uuid.uuid4())},
+        }
+        stop = asyncio.Event()
+
+        class FakeStore:
+            def __init__(self):
+                self.renewed = []
+
+            @staticmethod
+            def clock():
+                return time.time()
+
+            @staticmethod
+            def list_attachments():
+                return [mapping, {**mapping, "principal": "other@example.com"},
+                        {**mapping, "runtimeId": str(uuid.uuid4()),
+                         "runtimeProfile": {"profile": "native"}}]
+
+            def renew_stock_attachment(self, expected, lease):
+                self.renewed.append((expected, lease))
+                stop.set()
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = mapping["nodeId"], mapping["nodeGeneration"]
+
+            def __init__(self):
+                self.requests = []
+
+            async def assigned_stock(self, request):
+                self.requests.append(request)
+                return {"leaseUntil": _iso(time.time() + 90)}
+
+        store, cloud = FakeStore(), FakeCloud()
+        with patch.object(daemon, "STOCK_RENEW_INTERVAL", 0.01):
+            await asyncio.wait_for(daemon._stock_renewal_worker(store, cloud, stop), 1)
+        self.assertEqual(cloud.requests, [{
+            "operation": "renew", "runtimeId": mapping["runtimeId"],
+            "conversationId": mapping["runtimeProfile"]["conversationId"],
+            "expectedRuntimeGeneration": 4, "expectedAttachmentGeneration": 7,
+        }])
+        self.assertEqual(store.renewed[0][0], mapping)
+
+    async def test_stock_renewal_suspends_definitive_refusal_for_mapping(self):
+        mapping = {
+            "runtimeId": str(uuid.uuid4()), "principal": "owner@example.com", "agent": "codex",
+            "nodeId": str(uuid.uuid4()), "nodeGeneration": 2, "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": time.time() + 90,
+            "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                               "conversationId": str(uuid.uuid4())},
+        }
+        stop = asyncio.Event()
+        reads = 0
+
+        class FakeStore:
+            @staticmethod
+            def clock():
+                return time.time()
+
+            def list_attachments(self):
+                nonlocal reads
+                reads += 1
+                if reads >= 3:
+                    stop.set()
+                return [mapping]
+
+            @staticmethod
+            def renew_stock_attachment(*_args):
+                raise AssertionError("refused renewal changed local lease")
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = mapping["nodeId"], mapping["nodeGeneration"]
+            calls = 0
+
+            async def assigned_stock(self, _request):
+                self.calls += 1
+                raise CloudError("assigned_stock_disabled")
+
+        cloud = FakeCloud()
+        with patch.object(daemon, "STOCK_RENEW_INTERVAL", 0.001):
+            await asyncio.wait_for(daemon._stock_renewal_worker(FakeStore(), cloud, stop), 1)
+        self.assertEqual(cloud.calls, 1)
+
+    async def test_stock_renewal_retries_same_request_after_unknown_transport(self):
+        mapping = {
+            "runtimeId": str(uuid.uuid4()), "principal": "owner@example.com", "agent": "codex",
+            "nodeId": str(uuid.uuid4()), "nodeGeneration": 2, "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": time.time() + 90,
+            "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                               "conversationId": str(uuid.uuid4())},
+        }
+        stop = asyncio.Event()
+
+        class FakeStore:
+            @staticmethod
+            def clock():
+                return time.time()
+
+            @staticmethod
+            def list_attachments():
+                return [mapping]
+
+            @staticmethod
+            def renew_stock_attachment(_expected, _lease):
+                stop.set()
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = mapping["nodeId"], mapping["nodeGeneration"]
+
+            def __init__(self):
+                self.requests = []
+
+            async def assigned_stock(self, request):
+                self.requests.append(dict(request))
+                if len(self.requests) == 1:
+                    raise CloudError("request_timeout", ambiguous=True)
+                return {"leaseUntil": _iso(time.time() + 90)}
+
+        cloud = FakeCloud()
+        real_wait_for = asyncio.wait_for
+
+        async def fast_retry_wait(awaitable, timeout):
+            return await real_wait_for(awaitable, 0.001 if timeout <= 2 else timeout)
+
+        with patch.object(daemon.asyncio, "wait_for", side_effect=fast_retry_wait), \
+                patch.object(daemon, "STOCK_RENEW_INTERVAL", 0.01):
+            await real_wait_for(daemon._stock_renewal_worker(FakeStore(), cloud, stop), 1)
+        self.assertEqual(cloud.requests[0], cloud.requests[1])
+
+    async def test_unexpected_stock_worker_exit_fences_dispatch_and_stops_daemon(self):
+        dispatch = {"listenerReady": True, "workerRunning": True}
+        stop = asyncio.Event()
+
+        async def failed_renewal():
+            raise RuntimeError("unexpected renewal failure")
+
+        task = asyncio.create_task(failed_renewal())
+        task.add_done_callback(lambda _task: daemon._stop_dispatch(dispatch, None, stop))
+        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.sleep(0)
+        self.assertEqual(dispatch, {"listenerReady": False, "workerRunning": False})
+        self.assertTrue(stop.is_set())
+
     async def test_readiness_waits_for_private_socket_permissions(self):
         start_server = asyncio.start_unix_server
         created, release = asyncio.Event(), asyncio.Event()

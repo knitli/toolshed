@@ -199,8 +199,13 @@ To enable the local adapter, the private dispatch config must also name
 `"stockCodexBinary": "/absolute/path/to/codex"`. Omitting it disables stock
 dispatch. The cloud profile has its own explicit principal/agent canary gate;
 the native binding gate remains separate. The existing runtime lease lasts
-90 seconds and currently requires explicit renewal; assignment does not install
-automatic renewal or change global client configuration.
+90 seconds. A running daemon with `stockCodexBinary` configured renews an
+existing assigned-stock mapping every 30 seconds using its exact conversation
+and generation pair; it does not start, inspect, or reassign client sessions.
+Renewal stops for that exact mapping after a definitive refusal or mismatched
+response. An ambiguous transport result retries the same renewal with bounded
+backoff while the local lease remains live. This does not change global client
+configuration.
 
 A stock ACK with status `command_accepted` records a successful CLI exit in the
 Gateway journal. It is not an independently verified durable client receipt or

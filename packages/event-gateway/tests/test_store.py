@@ -87,6 +87,23 @@ class StoreTests(unittest.TestCase):
                    "runtimeProfile": {**profile, "conversationId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}}
         self.assertEqual(self.store.put_attachment(renewed)["runtimeProfile"], renewed["runtimeProfile"])
 
+    def test_stock_lease_renewal_is_exact_live_mapping_cas(self):
+        profile = {"profile": "assigned_stock_client", "client": "codex",
+                   "conversationId": "abcdefab-cdef-4abc-8def-abcdefabcdef"}
+        mapping = {**self.mapping, "runtimeId": str(uuid.uuid4()), "runtimeGeneration": 2,
+                   "attachmentGeneration": 2, "consumerGeneration": 2,
+                   "runtimeProfile": profile, "leaseExpiresAt": NOW + 90}
+        mapping.pop("nativeSessionId", None)
+        mapping.pop("socketPath", None)
+        stored = self.store.put_attachment(mapping)
+        self.assertTrue(self.store.renew_stock_attachment(stored, NOW + 180))
+        renewed = self.store.get_attachment(stored["runtimeId"])
+        self.assertEqual(renewed["leaseExpiresAt"], NOW + 180)
+        self.assertFalse(self.store.renew_stock_attachment(stored, NOW + 120))
+        self.now = NOW + 181
+        self.assertFalse(self.store.renew_stock_attachment(renewed, NOW + 300))
+        self.assertEqual(self.store.get_attachment(stored["runtimeId"]), renewed)
+
     def test_native_route_rejects_incomplete_or_inconsistent_bindings(self):
         mapping = self.native_mapping()
         changes = [

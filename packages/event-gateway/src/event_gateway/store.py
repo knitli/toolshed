@@ -268,6 +268,28 @@ class Store:
             if (value := json.loads(row[0]))["leaseExpiresAt"] > self.clock()
         ]
 
+    def renew_stock_attachment(self, expected, lease_expires_at):
+        """Extend only the exact live assigned-stock mapping observed by the caller."""
+        if (not isinstance(expected, dict)
+                or not isinstance(expected.get("runtimeProfile"), dict)
+                or expected["runtimeProfile"].get("profile") != "assigned_stock_client"
+                or not isinstance(expected.get("leaseExpiresAt"), (int, float))
+                or isinstance(expected.get("leaseExpiresAt"), bool)
+                or not math.isfinite(expected["leaseExpiresAt"])
+                or expected["leaseExpiresAt"] <= self.clock()
+                or not isinstance(lease_expires_at, (int, float))
+                or isinstance(lease_expires_at, bool)
+                or not math.isfinite(lease_expires_at)
+                or lease_expires_at <= max(self.clock(), expected["leaseExpiresAt"])):
+            return False
+        renewed = dict(expected, leaseExpiresAt=lease_expires_at)
+        with self.db:
+            cursor = self.db.execute(
+                "UPDATE attachments SET data=? WHERE runtime=? AND data=?",
+                (_json(renewed), expected["runtimeId"], _json(expected)),
+            )
+            return cursor.rowcount == 1
+
     def _validate_attachment(self, mapping, transfer):
         if not isinstance(mapping, dict) or any(
             k not in mapping for k in (*IDENTITY, "leaseExpiresAt")

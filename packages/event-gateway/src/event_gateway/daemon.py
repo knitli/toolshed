@@ -10,7 +10,7 @@ import signal
 import stat
 
 from .client_runtime import _private_json, load_cloud_client
-from .cloud import _uuid
+from .cloud import CloudError, _timestamp, _uuid
 from .gateway import Gateway
 from .listener import Listener
 from .native import NativeBridgeAdapter, SessionNativeBridge
@@ -79,6 +79,7 @@ _LISTEN_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
 WORKER_INTERVAL = 0.5
 WORKER_CONCURRENCY = 4
 WORKER_TIMEOUT = 45
+STOCK_RENEW_INTERVAL = 30
 
 
 def load_dispatch_config(path, state_dir):
@@ -160,6 +161,61 @@ async def _dispatch_worker(gateway, stop):
             pass
 
 
+async def _stock_renewal_worker(store, cloud, stop):
+    """Renew only live assigned-stock mappings already present in the local ledger."""
+    suspended = set()
+    while not stop.is_set():
+        for mapping in store.list_attachments():
+            profile = mapping.get("runtimeProfile")
+            if not isinstance(profile, dict) or profile.get("profile") != "assigned_stock_client":
+                continue
+            if any(mapping.get(key) != getattr(cloud, client_key) for key, client_key in (
+                    ("principal", "principal"), ("agent", "agent"),
+                    ("nodeId", "node_id"), ("nodeGeneration", "node_generation"))):
+                continue
+            fingerprint = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
+            if fingerprint in suspended:
+                continue
+            request = {
+                "operation": "renew", "runtimeId": mapping["runtimeId"],
+                "conversationId": profile["conversationId"],
+                "expectedRuntimeGeneration": mapping["runtimeGeneration"],
+                "expectedAttachmentGeneration": mapping["attachmentGeneration"],
+            }
+            for attempt in range(3):
+                if stop.is_set() or mapping["leaseExpiresAt"] <= store.clock():
+                    break
+                try:
+                    async with asyncio.timeout(min(5, max(0.01, mapping["leaseExpiresAt"] - store.clock()))):
+                        response = await cloud.assigned_stock(request)
+                    store.renew_stock_attachment(mapping, _timestamp(response["leaseUntil"]) / 1000)
+                    break
+                except (CloudError, TimeoutError) as error:
+                    if isinstance(error, CloudError) and (
+                            error.code == "invalid_response" or error.definitive_refusal
+                            or not error.ambiguous):
+                        suspended.add(fingerprint)
+                        break
+                    if attempt == 2:
+                        break
+                except (KeyError, TypeError, ValueError):
+                    suspended.add(fingerprint)
+                    break
+                delay = (1, 2)[attempt]
+                remaining = mapping["leaseExpiresAt"] - store.clock()
+                if remaining <= 0:
+                    break
+                try:
+                    await asyncio.wait_for(stop.wait(), min(delay, remaining))
+                    break
+                except TimeoutError:
+                    pass
+        try:
+            await asyncio.wait_for(stop.wait(), STOCK_RENEW_INTERVAL)
+        except TimeoutError:
+            pass
+
+
 def _stop_dispatch(dispatch, listener, stop):
     """Fence readiness and admission before waiting for any shutdown work."""
     if dispatch is not None:
@@ -217,7 +273,7 @@ async def serve(state_dir, *, dispatch_config=None):
             path.unlink()
         control_tasks = set()
         closing = False
-        listener = server = worker = None
+        listener = server = worker = stock_worker = None
         dispatch = None
         stop = asyncio.Event()
         signals = []
@@ -244,6 +300,11 @@ async def serve(state_dir, *, dispatch_config=None):
                 await listener.start(config["listenHost"], config["listenPort"])
                 worker = asyncio.create_task(_dispatch_worker(gateway, stop))
                 worker.add_done_callback(lambda _task: _stop_dispatch(dispatch, listener, stop))
+                if config.get("stockCodexBinary"):
+                    stock_worker = asyncio.create_task(_stock_renewal_worker(store, cloud, stop))
+                    stock_worker.add_done_callback(
+                        lambda _task: _stop_dispatch(dispatch, listener, stop),
+                    )
                 dispatch = {"listenerReady": True, "workerRunning": True,
                             "authorityConfigured": True, "liveWakeVerified": False}
             control = _control_handler(store, dispatch)
@@ -255,6 +316,8 @@ async def serve(state_dir, *, dispatch_config=None):
             await stop.wait()
             if worker is not None and worker.done():
                 await worker
+            if stock_worker is not None and stock_worker.done():
+                await stock_worker
         finally:
             closing = True
             _stop_dispatch(dispatch, listener, stop)
@@ -263,6 +326,9 @@ async def serve(state_dir, *, dispatch_config=None):
             if worker is not None:
                 worker.cancel()
                 await asyncio.gather(worker, return_exceptions=True)
+            if stock_worker is not None:
+                stock_worker.cancel()
+                await asyncio.gather(stock_worker, return_exceptions=True)
             if listener is not None:
                 await listener.close()
             if control_tasks:
