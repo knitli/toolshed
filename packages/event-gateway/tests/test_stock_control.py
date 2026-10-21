@@ -267,6 +267,7 @@ class StockControlTests(unittest.IsolatedAsyncioTestCase):
             "cloud_config": Path("cloud.json"),
         })()
         cloud = type("Cloud", (), {"principal": "owner@example.com", "agent": "codex"})()
+
         async def assign(_):
             return response()
         cloud.assigned_stock = assign

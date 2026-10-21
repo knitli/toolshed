@@ -34,8 +34,8 @@ class StockCodexAdapter:
 
     def __init__(self, conversation_id, binary):
         """Bind the adapter to one conversation and CLI binary."""
-        if (not _canonical_uuid(conversation_id) or type(binary) is not str
-                or not Path(binary).is_absolute()):  # pylint: disable=unidiomatic-typecheck
+        if (not _canonical_uuid(conversation_id) or type(binary) is not str  # pylint: disable=unidiomatic-typecheck
+                or not Path(binary).is_absolute()):
             raise StockCodexError("invalid_assignment")
         self.conversation_id, self.binary = conversation_id, binary
 

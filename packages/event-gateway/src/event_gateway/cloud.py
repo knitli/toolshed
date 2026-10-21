@@ -275,12 +275,12 @@ def _github_screening_report(value):
     # Exact built-in types keep JSON DTOs from accepting bool/int subclasses.
     if (type(value["version"]) is not int  # pylint: disable=unidiomatic-typecheck
             or value["version"] != 1
-            or any(type(removed[key]) is not int or not 0 <= removed[key] <= 1048576
-                   for key in ("ansi", "control", "invisible", "surrogate"))  # pylint: disable=unidiomatic-typecheck
-            or any(type(value[key]) is not int or not 0 <= value[key] <= 1048576
-                   for key in ("kept", "visible"))  # pylint: disable=unidiomatic-typecheck
-            or any(type(value[key]) is not bool
-                   for key in ("dense", "trimmed", "shortened", "normalized", "changed", "withheld"))  # pylint: disable=unidiomatic-typecheck
+            or any(type(removed[key]) is not int or not 0 <= removed[key] <= 1048576  # pylint: disable=unidiomatic-typecheck
+                   for key in ("ansi", "control", "invisible", "surrogate"))
+            or any(type(value[key]) is not int or not 0 <= value[key] <= 1048576  # pylint: disable=unidiomatic-typecheck
+                   for key in ("kept", "visible"))
+            or any(type(value[key]) is not bool  # pylint: disable=unidiomatic-typecheck
+                   for key in ("dense", "trimmed", "shortened", "normalized", "changed", "withheld"))
             or not isinstance(phrases, list)
             or any(not isinstance(phrase, str) or phrase not in phrase_ids for phrase in phrases)
             or len(set(phrases)) != len(phrases)):
