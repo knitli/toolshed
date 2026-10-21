@@ -31,6 +31,14 @@ def _canonical_uuid(value):
         return False
 
 
+def _binary_is_executable(binary_path):
+    try:
+        binary = os.stat(binary_path)
+        return stat.S_ISREG(binary.st_mode) and os.access(binary_path, os.X_OK)
+    except OSError:
+        return False
+
+
 class StockCodexAdapter:
     """Queue one opaque event reference in one explicitly assigned conversation."""
 
@@ -44,11 +52,7 @@ class StockCodexAdapter:
     async def submit(self, event_reference):
         if type(event_reference) is not str or not _REFERENCE.fullmatch(event_reference):  # pylint: disable=unidiomatic-typecheck
             raise StockCodexError("invalid_event_reference")
-        try:
-            binary = os.stat(self.binary)
-            executable = stat.S_ISREG(binary.st_mode) and os.access(self.binary, os.X_OK)
-        except OSError:
-            executable = False
+        executable = await asyncio.to_thread(_binary_is_executable, self.binary)
         if not executable:
             raise StockCodexError("client_not_started")
         try:

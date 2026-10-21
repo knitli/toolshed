@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 import tempfile
+from threading import Event
 import unittest
 from unittest.mock import AsyncMock, patch
 import uuid
@@ -61,6 +62,39 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
                     await StockCodexAdapter(THREAD, str(binary)).submit(REFERENCE)
             self.assertEqual(caught.exception.code, "client_not_started")
             spawn.assert_not_awaited()
+
+    async def test_blocked_binary_preflight_does_not_stall_event_loop(self):
+        loop = asyncio.get_running_loop()
+        preflight_started = asyncio.Event()
+        release_preflight = Event()
+        loop_progressed = asyncio.Event()
+
+        def blocked_preflight(_binary):
+            loop.call_soon_threadsafe(preflight_started.set)
+            if not release_preflight.wait(timeout=3):
+                raise AssertionError("test did not release binary preflight")
+            return True
+
+        process = type("Process", (), {"wait": AsyncMock(return_value=0)})()
+        with patch("event_gateway.stock_codex._binary_is_executable",
+                   side_effect=blocked_preflight), \
+                patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as spawn:
+            submit = asyncio.create_task(
+                StockCodexAdapter(THREAD, str(self.binary)).submit(REFERENCE))
+
+            async def mark_loop_progress():
+                loop_progressed.set()
+
+            try:
+                await asyncio.wait_for(preflight_started.wait(), timeout=1)
+                asyncio.create_task(mark_loop_progress())
+                await asyncio.wait_for(loop_progressed.wait(), timeout=1)
+                spawn.assert_not_awaited()
+            finally:
+                release_preflight.set()
+                result = await submit
+            self.assertEqual(result, {"status": "command_accepted"})
+            spawn.assert_awaited_once()
 
     async def test_oserror_from_process_creation_is_ambiguous(self):
         error = OSError(2, "No such file or directory", "/secret/path/codex")
