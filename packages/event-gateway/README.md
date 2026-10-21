@@ -211,10 +211,17 @@ backoff while the local lease remains live. This does not change global client
 configuration.
 Independent mappings renew concurrently. A request begun before lease expiry
 can finish within its five-second response bound after that old deadline.
+After a validated renewal, transient local storage failures retry the exact
+local mapping without another cloud renewal, including after the old local
+lease expires. A changed/detached mapping or expired renewed lease ends that
+retry. Pending responses are held by the running daemon; a restart before
+persistence can require explicit renewal if the old local lease has expired.
 
 Recovery resolves persisted claims and admissions even after detach, expiry,
-or disabling stock dispatch. A failed or cancelled binary preflight can settle
-as no-start because no launch was attempted. Preflight cancellation persists
+or disabling stock dispatch. Executable preflight finishes before the final
+durable submission fence, so detach or reassignment during the check prevents
+launch. A failed or cancelled preflight can settle from the admitted state as
+no-start because no launch was attempted. Preflight cancellation persists
 that settlement intent without a cloud wait, then propagates cancellation;
 reconciliation completes settlement later. Errors or cancellation after entering
 process creation remain ambiguous: the child may already have started.

@@ -53,7 +53,8 @@ class StockCodexAdapter:
             raise StockCodexError("invalid_assignment")
         self.conversation_id, self.binary = conversation_id, binary
 
-    async def submit(self, event_reference):
+    async def submit(self, event_reference, *, before_start=None):
+        """Preflight, synchronously fence, and then queue one opaque reference."""
         if type(event_reference) is not str or not _REFERENCE.fullmatch(event_reference):  # pylint: disable=unidiomatic-typecheck
             raise StockCodexError("invalid_event_reference")
         try:
@@ -62,6 +63,8 @@ class StockCodexAdapter:
             raise StockCodexPreflightCancelled() from None
         if not executable:
             raise StockCodexError("client_not_started")
+        if before_start is not None:
+            before_start()
         try:
             process = await asyncio.create_subprocess_exec(
                 self.binary, "queue", "--thread", self.conversation_id,

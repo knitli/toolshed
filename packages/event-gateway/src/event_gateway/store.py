@@ -1169,11 +1169,9 @@ class Store:
         return True
 
     # Keep the stock pre-exec proof and native receipt exclusions in the same transaction.
-    def begin_settlement(self, delivery_id, attempt_id, evidence, *, receipt=None, reason=None,  # noqa: MC0001
-                         stock_not_started=False):
+    def begin_settlement(self, delivery_id, attempt_id, evidence, *, receipt=None, reason=None):
         from .cloud import CloudError, _no_start_evidence
         from .native import NativeError, validate_receipt
-        from .protocol import ProtocolError, validate_runtime_profile
 
         try:
             _no_start_evidence(evidence, code="invalid_evidence")
@@ -1186,27 +1184,13 @@ class Store:
             row = self._attempt(delivery_id, attempt_id)
             if row is None or row["admission"] is None:
                 raise StoreError("invalid_transition")
-            if stock_not_started is not False:
-                envelope = json.loads(row["envelope"])
-                try:
-                    profile = validate_runtime_profile(envelope.get("runtimeProfile"))
-                except ProtocolError:
-                    raise StoreError("invalid_transition") from None
-                if (stock_not_started is not True or envelope.get("schemaVersion") != 1
-                        or row["state"] != "submitting" or receipt is not None
-                        or evidence != {"type": "local_not_submitted"}
-                        or json.loads(row["admission"])["envelope"].get("runtimeProfile") != profile
-                        or any(row[key] is not None for key in (
-                            "native_request", "native_ack", "native_observed_ack", "receipt",
-                            "started_receipt", "input_recorded_receipt"))):
-                    raise StoreError("invalid_transition")
             positive = self.native_receipt(delivery_id)
             if positive["submission_id"] is not None or positive["turn_id"] is not None:
                 raise StoreError("receipt_conflict")
             encoded_evidence = _json(evidence)
             encoded_receipt = None
             if evidence["type"] == "local_not_submitted":
-                allowed_states = ("submitting",) if stock_not_started else ("admitted", "settlement_pending")
+                allowed_states = ("admitted", "settlement_pending")
                 if row["native_request"] is not None or receipt is not None or row["state"] not in allowed_states:
                     raise StoreError("invalid_transition")
             else:

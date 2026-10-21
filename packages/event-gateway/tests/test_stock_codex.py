@@ -34,9 +34,22 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_uses_stock_cli_exact_thread_and_returns_only_command_acceptance(self):
         process = type("Process", (), {"wait": AsyncMock(return_value=0)})()
+        order = []
+
+        def before_start():
+            order.append("fenced")
+
+        async def create_process(*args, **kwargs):
+            order.append("spawn")
+            return process
+
         with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as spawn:
-            result = await StockCodexAdapter(THREAD, str(self.binary)).submit(REFERENCE)
+            spawn.side_effect = create_process
+            result = await StockCodexAdapter(THREAD, str(self.binary)).submit(
+                REFERENCE, before_start=before_start)
         self.assertEqual(result, {"status": "command_accepted"})
+        self.assertEqual(order, ["fenced", "spawn"])
+        self.assertEqual(spawn.await_count, 1)
         self.assertEqual(spawn.call_args.args,
                          (str(self.binary), "queue", "--thread", THREAD,
                           "--message", REFERENCE))
@@ -47,11 +60,14 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_binary_is_a_safe_no_start_without_spawn_attempt(self):
         with tempfile.TemporaryDirectory() as directory:
             binary = str(Path(directory) / "missing-codex")
+            before_start = unittest.mock.Mock()
             with patch("asyncio.create_subprocess_exec", new=AsyncMock()) as spawn:
                 with self.assertRaisesRegex(StockCodexError, "client_not_started") as caught:
-                    await StockCodexAdapter(THREAD, binary).submit(REFERENCE)
+                    await StockCodexAdapter(THREAD, binary).submit(
+                        REFERENCE, before_start=before_start)
             self.assertEqual(caught.exception.code, "client_not_started")
             self.assertEqual(str(caught.exception), "client_not_started")
+            before_start.assert_not_called()
             spawn.assert_not_awaited()
 
     async def test_non_executable_binary_is_a_safe_no_start_without_spawn_attempt(self):

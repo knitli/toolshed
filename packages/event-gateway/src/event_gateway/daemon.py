@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import sqlite3
 import stat
 
 from .client_runtime import _private_json, load_cloud_client
@@ -80,6 +81,12 @@ WORKER_INTERVAL = 0.5
 WORKER_CONCURRENCY = 4
 WORKER_TIMEOUT = 45
 STOCK_RENEW_INTERVAL = 30
+STOCK_RENEW_PENDING_LIMIT = 8
+STOCK_RENEW_BATCH_LIMIT = 3
+STOCK_RENEW_RETRY_INITIAL = 1
+STOCK_RENEW_RETRY_MAX = 30
+# shortcut: Pending responses are process-local; journal them if restart recovery is required.
+# The cap mirrors contract policy maxRuntimesPerAgent (8).
 
 
 def load_dispatch_config(path, state_dir):
@@ -188,8 +195,14 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
             async with asyncio.timeout(5):
                 response = await cloud.assigned_stock(request)
             # shortcut: Keep the thread-bound Store on its owner loop until DB access is serialized.
-            if not store.renew_stock_attachment(
-                    mapping, _timestamp(response["leaseUntil"]) / 1000):
+            lease_expires_at = _timestamp(response["leaseUntil"]) / 1000
+            try:
+                renewed = store.renew_stock_attachment(mapping, lease_expires_at)
+            except StoreError as error:
+                if error.code in ("capacity", "storage_unavailable"):
+                    return lease_expires_at
+                raise
+            if not renewed:
                 suspended.add(fingerprint)
             break
         except (CloudError, TimeoutError) as error:
@@ -217,32 +230,93 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
 async def _stock_renewal_worker(store, cloud, stop):
     """Renew only live assigned-stock mappings already present in the local ledger."""
     suspended = set()
+    pending = {}
+    loop = asyncio.get_running_loop()
+    next_cloud_poll = loop.time()
     while not stop.is_set():
-        attachments = store.list_attachments()
-        suspended.intersection_update(
-            json.dumps(mapping, sort_keys=True, separators=(",", ":"))
-            for mapping in attachments
-            if isinstance(mapping.get("runtimeProfile"), dict)
-            and mapping["runtimeProfile"].get("profile") == "assigned_stock_client"
-        )
-        renewals = []
-        for mapping in attachments:
-            profile = mapping.get("runtimeProfile")
-            if not isinstance(profile, dict) or profile.get("profile") != "assigned_stock_client":
+        persisted_runtime_ids = set()
+        now = store.clock()
+        for fingerprint, item in list(pending.items()):
+            if item["leaseExpiresAt"] <= now:
+                del pending[fingerprint]
                 continue
-            if any(mapping.get(key) != getattr(cloud, client_key) for key, client_key in (
-                    ("principal", "principal"), ("agent", "agent"),
-                    ("nodeId", "node_id"), ("nodeGeneration", "node_generation"))):
+            try:
+                current = store.get_attachment(item["mapping"]["runtimeId"])
+            except sqlite3.Error:
+                delay = item["retryDelay"]
+                item["retryAt"] = loop.time() + delay
+                item["retryDelay"] = min(delay * 2, STOCK_RENEW_RETRY_MAX)
                 continue
-            fingerprint = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
-            if fingerprint not in suspended:
-                renewals.append(mapping)
-        # Store capacity bounds live mappings to three per agent.
-        async with asyncio.TaskGroup() as tasks:
-            for mapping in renewals:
-                tasks.create_task(_renew_stock_mapping(store, cloud, stop, mapping, suspended))
+            if current != item["mapping"]:
+                del pending[fingerprint]
+                continue
+            if item["retryAt"] > loop.time():
+                continue
+            try:
+                renewed = store.renew_stock_attachment(
+                    item["mapping"], item["leaseExpiresAt"])
+            except StoreError as error:
+                if error.code not in ("capacity", "storage_unavailable"):
+                    raise
+                delay = item["retryDelay"]
+                item["retryAt"] = loop.time() + delay
+                item["retryDelay"] = min(delay * 2, STOCK_RENEW_RETRY_MAX)
+                continue
+            del pending[fingerprint]
+            if renewed:
+                persisted_runtime_ids.add(item["mapping"]["runtimeId"])
+
+        if loop.time() >= next_cloud_poll:
+            attachments = store.list_attachments()
+            suspended.intersection_update(
+                json.dumps(mapping, sort_keys=True, separators=(",", ":"))
+                for mapping in attachments
+                if isinstance(mapping.get("runtimeProfile"), dict)
+                and mapping["runtimeProfile"].get("profile") == "assigned_stock_client"
+            )
+            renewals = []
+            pending_runtime_ids = {
+                item["mapping"]["runtimeId"] for item in pending.values()
+            }
+            for mapping in attachments:
+                profile = mapping.get("runtimeProfile")
+                if not isinstance(profile, dict) or profile.get("profile") != "assigned_stock_client":
+                    continue
+                if any(mapping.get(key) != getattr(cloud, client_key) for key, client_key in (
+                        ("principal", "principal"), ("agent", "agent"),
+                        ("nodeId", "node_id"), ("nodeGeneration", "node_generation"))):
+                    continue
+                fingerprint = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
+                if (fingerprint not in suspended
+                        and mapping["runtimeId"] not in pending_runtime_ids
+                        and mapping["runtimeId"] not in persisted_runtime_ids):
+                    renewals.append(mapping)
+            available_slots = max(0, STOCK_RENEW_PENDING_LIMIT - len(pending))
+            renewals = renewals[:min(STOCK_RENEW_BATCH_LIMIT, available_slots)]
+            async with asyncio.TaskGroup() as tasks:
+                task_mappings = [
+                    (mapping, tasks.create_task(
+                        _renew_stock_mapping(store, cloud, stop, mapping, suspended)))
+                    for mapping in renewals
+                ]
+            for mapping, task in task_mappings:
+                lease_expires_at = task.result()
+                if lease_expires_at is not None:
+                    fingerprint = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
+                    pending[fingerprint] = {
+                        "mapping": mapping,
+                        "leaseExpiresAt": lease_expires_at,
+                        "retryAt": loop.time() + STOCK_RENEW_RETRY_INITIAL,
+                        "retryDelay": min(STOCK_RENEW_RETRY_INITIAL * 2, STOCK_RENEW_RETRY_MAX),
+                    }
+            next_cloud_poll = loop.time() + STOCK_RENEW_INTERVAL
+        wait_for = max(0.001, next_cloud_poll - loop.time())
+        if pending:
+            wait_for = min(wait_for, min(
+                max(0.001, item["retryAt"] - loop.time())
+                for item in pending.values()))
         try:
-            await asyncio.wait_for(stop.wait(), STOCK_RENEW_INTERVAL)
+            await asyncio.wait_for(stop.wait(), wait_for)
         except TimeoutError:
             pass
 

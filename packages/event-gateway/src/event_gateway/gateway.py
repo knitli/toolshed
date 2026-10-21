@@ -454,32 +454,29 @@ class Gateway:
             return await self._retire_local(delivery_id, "stock_client_disabled")
         if _timestamp(admission["permitExpiresAt"]) <= self.clock() * 1000:
             return await self._retire_local(delivery_id, "admission_expired")
-        try:
-            self.store._matches(admission["envelope"])
-        except StoreError:
-            return await self._retire_local(delivery_id, "admission_fenced")
-        try:
-            # This durable transition precedes every await that can launch the client.
-            self.store.begin_stock_submit(delivery_id, envelope["attemptId"])
-        except StoreError:
-            return self._row(delivery_id, "stock_submission_not_started")
         adapter = StockCodexAdapter(profile["conversationId"], self.stock_codex_binary)
+
+        def fence_stock_submission():
+            if _timestamp(admission["permitExpiresAt"]) <= self.clock() * 1000:
+                raise _Retire("admission_expired")
+            self.store.begin_stock_submit(delivery_id, envelope["attemptId"])
+
         try:
-            await adapter.submit(envelope["eventReference"])
+            await adapter.submit(envelope["eventReference"], before_start=fence_stock_submission)
         except StockCodexPreflightCancelled:
             try:
                 self.store.begin_settlement(
                     delivery_id, envelope["attemptId"],
                     {"type": "local_not_submitted"},
-                    reason="client_not_started", stock_not_started=True,
+                    reason="client_not_started",
                 )
             except StoreError:
-                try:
-                    self.store.finish(delivery_id, "ambiguous", reason="client_outcome_unknown",
-                                      attempt_id=envelope["attemptId"])
-                except StoreError:
-                    pass
+                pass
             raise
+        except _Retire as retire:
+            return await self._retire_local(delivery_id, retire.reason)
+        except StoreError:
+            return await self._retire_local(delivery_id, "admission_fenced")
         except asyncio.CancelledError:
             try:
                 self.store.finish(delivery_id, "ambiguous", reason="client_outcome_unknown",
@@ -489,15 +486,7 @@ class Gateway:
             raise
         except Exception as exc:
             if isinstance(exc, StockCodexError) and exc.code == "client_not_started":
-                try:
-                    self.store.begin_settlement(
-                        delivery_id, envelope["attemptId"],
-                        {"type": "local_not_submitted"},
-                        reason="client_not_started", stock_not_started=True,
-                    )
-                except StoreError:
-                    return self._row(delivery_id, "local_retirement_pending")
-                return await self._settle(delivery_id)
+                return await self._retire_local(delivery_id, "client_not_started")
             try:
                 return self.store.finish(delivery_id, "ambiguous", reason="client_outcome_unknown",
                                          attempt_id=envelope["attemptId"])

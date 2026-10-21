@@ -3,6 +3,7 @@ import copy
 import json
 from pathlib import Path
 import tempfile
+from threading import Event
 import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
@@ -78,6 +79,9 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.close_store)
         self.store.put_attachment(self.mapping)
         self.authority = Authority(self)
+        self.executable_check = patch("event_gateway.stock_codex._binary_is_executable", return_value=True)
+        self.executable_check.start()
+        self.addCleanup(self.executable_check.stop)
         self.gateway = Gateway(self.store, self.authority, lambda _mapping: self,
                                audience="test", keys={"test": Ed25519PrivateKey.generate().public_key()},
                                clock=lambda: self.now, stock_codex_binary="/opt/test/codex")
@@ -119,17 +123,36 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
             self.mapping = expired
             self.now += 2
 
+    def stock_submit_mock(self, *, result=None, error=None):
+        """Model a successful preflight, then run the gateway's synchronous fence."""
+        async def submit(event_reference, *, before_start=None):
+            if isinstance(error, (StockCodexPreflightCancelled,)) or (
+                    isinstance(error, StockCodexError) and error.code == "client_not_started"):
+                raise error
+            if before_start is not None:
+                before_start()
+            if error is not None:
+                raise error
+            return result
+
+        return AsyncMock(side_effect=submit)
+
+    def assert_stock_submit_once(self, submit):
+        self.assertEqual(submit.await_count, 1)
+        self.assertEqual(submit.await_args.args, (self.event["eventReference"],))
+        self.assertIn("before_start", submit.await_args.kwargs)
+
     async def test_duplicate_and_command_acceptance_never_relaunch(self):
         delivery = self.accept()
         duplicate = self.store.accept(copy.deepcopy(self.event))
         self.assertTrue(duplicate["duplicate"])
         with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                   new=AsyncMock(return_value={"status": "command_accepted"})) as submit:
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})) as submit:
             result = await self.gateway.dispatch(delivery)
             again = await self.gateway.dispatch(delivery)
         self.assertEqual(result["status"], "command_accepted")
         self.assertEqual(again["status"], "command_accepted")
-        submit.assert_awaited_once_with(self.event["eventReference"])
+        self.assert_stock_submit_once(submit)
         attempt = self.store.current_attempt(delivery)
         self.assertEqual(attempt["state"], "command_accepted")
         self.assertEqual(attempt["native_ack"]["status"], "command_accepted")
@@ -140,7 +163,7 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         delivery = self.accept()
         self.authority.drop_ack = True
         with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                   new=AsyncMock(return_value={"status": "command_accepted"})) as submit:
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})) as submit:
             self.assertEqual((await self.gateway.dispatch(delivery))["reason"], "stock_ack_pending")
             stored_ack = self.store.current_attempt(delivery)["native_ack"]
             self.restart()
@@ -151,10 +174,10 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_reconcile_does_not_resend_completed_stock_ack(self):
         delivery = self.accept()
         with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                   new=AsyncMock(return_value={"status": "command_accepted"})) as submit:
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})) as submit:
             self.assertEqual((await self.gateway.dispatch(delivery))["status"], "command_accepted")
             self.assertEqual((await self.gateway.reconcile(delivery))["status"], "command_accepted")
-        submit.assert_awaited_once_with(self.event["eventReference"])
+        self.assert_stock_submit_once(submit)
         self.assertEqual(len(self.authority.acks), 1)
 
     async def test_github_stock_event_lost_ack_recovery_launches_once(self):
@@ -171,18 +194,18 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         delivery = self.accept()
         self.authority.drop_ack = True
         with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                   new=AsyncMock(return_value={"status": "command_accepted"})) as submit:
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})) as submit:
             self.assertEqual((await self.gateway.dispatch(delivery))["reason"], "stock_ack_pending")
             stored_ack = self.store.current_attempt(delivery)["native_ack"]
             self.restart()
             self.assertEqual((await self.gateway.reconcile(delivery))["status"], "command_accepted")
-        submit.assert_awaited_once_with(self.event["eventReference"])
+        self.assert_stock_submit_once(submit)
         self.assertEqual(self.authority.acks, [stored_ack, stored_ack])
 
     async def test_timeout_after_launch_is_ambiguous_and_never_replayed_after_restart(self):
         delivery = self.accept()
         with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                   new=AsyncMock(side_effect=TimeoutError("lost CLI response"))) as submit:
+                   new=self.stock_submit_mock(error=TimeoutError("lost CLI response"))) as submit:
             self.assertEqual((await self.gateway.dispatch(delivery))["status"], "ambiguous")
             self.restart()
             self.assertEqual((await self.gateway.reconcile(delivery))["status"], "ambiguous")
@@ -210,7 +233,9 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
                 delivery = self.accept()
                 calls = []
 
-                async def crash(_adapter, _reference):
+                async def crash(_adapter, _reference, *, before_start=None):
+                    if before_start is not None:
+                        before_start()
                     if launched:
                         calls.append("sent")
                     raise Crash()
@@ -222,7 +247,7 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
                 self.restart()
                 self.assertEqual(self.store.get(delivery)["status"], "ambiguous")
                 with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                           new=AsyncMock(return_value={"status": "command_accepted"})) as submit:
+                           new=self.stock_submit_mock(result={"status": "command_accepted"})) as submit:
                     await self.gateway.reconcile(delivery)
                 submit.assert_not_awaited()
                 self.assertEqual(calls, ["sent"] if launched else [])
@@ -239,9 +264,57 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
             self.store.put_attachment(changed)
 
         self.authority.on_claim = rotate_assignment
-        with patch("event_gateway.stock_codex.StockCodexAdapter.submit", new=AsyncMock()) as submit:
-            await self.gateway.dispatch(delivery)
-        submit.assert_not_awaited()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock()) as submit:
+            result = await self.gateway.dispatch(delivery)
+        self.assertEqual(result["status"], "stale")
+        self.assertEqual(submit.await_count, 1)
+
+    async def test_assignment_change_while_preflight_blocked_prevents_spawn(self):
+        for loss in ("detach", "reassign"):
+            with self.subTest(loss=loss):
+                delivery = self.new_delivery()
+                preflight_started, release_preflight = Event(), Event()
+
+                def blocked_preflight(_binary):
+                    preflight_started.set()
+                    if not release_preflight.wait(timeout=3):
+                        raise AssertionError("test did not release binary preflight")
+                    return True
+
+                process = type("Process", (), {"wait": AsyncMock(return_value=0)})()
+                with patch("event_gateway.stock_codex._binary_is_executable",
+                           side_effect=blocked_preflight), \
+                        patch("asyncio.create_subprocess_exec",
+                              new=AsyncMock(return_value=process)) as spawn:
+                    dispatch = asyncio.create_task(self.gateway.dispatch(delivery))
+                    try:
+                        for _ in range(100):
+                            if preflight_started.is_set():
+                                break
+                            await asyncio.sleep(0.01)
+                        self.assertTrue(preflight_started.is_set())
+                        if loss == "detach":
+                            self.store.detach(self.event["runtimeId"])
+                        else:
+                            changed = dict(
+                                self.mapping,
+                                runtimeGeneration=self.mapping["runtimeGeneration"] + 1,
+                                attachmentGeneration=self.mapping["attachmentGeneration"] + 1,
+                                consumerGeneration=self.mapping["consumerGeneration"] + 1,
+                                runtimeProfile={**self.mapping["runtimeProfile"],
+                                                "conversationId": str(uuid.uuid4())},
+                            )
+                            self.store.put_attachment(changed)
+                            self.mapping = changed
+                    finally:
+                        release_preflight.set()
+                    result = await dispatch
+                spawn.assert_not_awaited()
+                self.assertEqual(result["status"], "stale")
+                attempt = self.store.current_attempt(delivery)
+                self.assertEqual(attempt["state"], "settled")
+                self.assertEqual(attempt["settlement"]["status"], "not_started")
 
     async def test_expired_or_detached_persisted_claim_is_resolved_before_mapping_check(self):
         for loss in ("expired", "detach"):
@@ -253,9 +326,9 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
                 claim_count = len(self.authority.claims)
                 settlement_count = len(self.authority.settlements)
                 with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                           new=AsyncMock()) as submit:
+                           new=self.stock_submit_mock()) as submit:
                     result = await self.gateway.reconcile(delivery)
-                submit.assert_not_awaited()
+                self.assertEqual(submit.await_count, 1)
                 self.assertEqual(len(self.authority.claims), claim_count + 1)
                 self.assertEqual(len(self.authority.settlements), settlement_count + 1)
                 self.assertEqual(self.authority.settlements[-1][1], {"type": "local_not_submitted"})
@@ -278,9 +351,9 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
                 settlement_count = len(self.authority.settlements)
                 self.lose_assignment(loss)
                 with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                           new=AsyncMock()) as submit:
+                           new=self.stock_submit_mock()) as submit:
                     result = await self.gateway.reconcile(delivery)
-                submit.assert_not_awaited()
+                self.assertEqual(submit.await_count, 1)
                 self.assertEqual(len(self.authority.claims), claim_count)
                 self.assertEqual(len(self.authority.settlements), settlement_count + 1)
                 self.assertEqual(self.authority.settlements[-1][1], {"type": "local_not_submitted"})
@@ -295,7 +368,7 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         delivery = self.accept()
         self.authority.fail_settlement_once = True
         with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                   new=AsyncMock(side_effect=StockCodexError("client_not_started"))) as submit:
+                   new=self.stock_submit_mock(error=StockCodexError("client_not_started"))) as submit:
             result = await self.gateway.dispatch(delivery)
             self.assertEqual(result["status"], "settlement_pending")
             attempt = self.store.current_attempt(delivery)
@@ -306,7 +379,7 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
             self.restart()
             recovered = await self.gateway.reconcile(delivery)
         self.assertEqual(recovered["status"], "queued")
-        submit.assert_awaited_once_with(self.event["eventReference"])
+        self.assert_stock_submit_once(submit)
         self.assertEqual([evidence for _, evidence in self.authority.settlements],
                          [{"type": "local_not_submitted"}] * 2)
         self.assertIsNone(self.store.current_attempt(delivery))
@@ -315,7 +388,7 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_preflight_cancellation_persists_no_start_without_cloud_wait_and_recovers(self):
         delivery = self.accept()
         with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                   new=AsyncMock(side_effect=StockCodexPreflightCancelled)) as submit:
+                   new=self.stock_submit_mock(error=StockCodexPreflightCancelled())) as submit:
             task = asyncio.create_task(self.gateway.dispatch(delivery))
             with self.assertRaises(StockCodexPreflightCancelled):
                 await task
@@ -329,37 +402,36 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
             pending = await self.gateway.reconcile(delivery)
             self.assertEqual(pending["status"], "settlement_pending")
             settled = await self.gateway.reconcile(delivery)
-        submit.assert_awaited_once_with(self.event["eventReference"])
+        self.assert_stock_submit_once(submit)
         self.assertEqual(settled["status"], "queued")
         self.assertEqual(len(self.authority.settlements), 2)
         self.assertTrue(all(evidence == {"type": "local_not_submitted"}
                             for _, evidence in self.authority.settlements))
         self.assertIsNone(self.store.current_attempt(delivery))
 
-    async def test_preflight_cancellation_store_error_fails_closed_as_ambiguous(self):
+    async def test_preflight_cancellation_store_error_leaves_admitted_for_recovery(self):
         delivery = self.accept()
         with patch.object(self.store, "begin_settlement", side_effect=StoreError("store failure")) as begin:
             with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                       new=AsyncMock(side_effect=StockCodexPreflightCancelled)) as submit:
+                       new=self.stock_submit_mock(error=StockCodexPreflightCancelled())) as submit:
                 task = asyncio.create_task(self.gateway.dispatch(delivery))
                 with self.assertRaises(StockCodexPreflightCancelled):
                     await task
         self.assertTrue(task.cancelled())
         begin.assert_called_once()
-        submit.assert_awaited_once_with(self.event["eventReference"])
+        self.assert_stock_submit_once(submit)
         attempt = self.store.current_attempt(delivery)
-        self.assertEqual(attempt["state"], "ambiguous")
-        self.assertEqual(attempt["reason"], "client_outcome_unknown")
+        self.assertEqual(attempt["state"], "admitted")
         self.assertIsNone(attempt["evidence"])
         self.assertEqual(self.authority.settlements, [])
 
     async def test_generic_stock_cancellation_remains_ambiguous(self):
         delivery = self.accept()
         with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                   new=AsyncMock(side_effect=asyncio.CancelledError)) as submit:
+                   new=self.stock_submit_mock(error=asyncio.CancelledError())) as submit:
             with self.assertRaises(asyncio.CancelledError):
                 await self.gateway.dispatch(delivery)
-        submit.assert_awaited_once_with(self.event["eventReference"])
+        self.assert_stock_submit_once(submit)
         self.assertEqual(self.store.current_attempt(delivery)["state"], "ambiguous")
         self.assertEqual(self.authority.settlements, [])
 
@@ -375,7 +447,7 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
                 claim_count = len(self.authority.claims)
                 settlement_count = len(self.authority.settlements)
                 with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                           new=AsyncMock()) as submit:
+                           new=self.stock_submit_mock()) as submit:
                     result = await self.gateway.reconcile(delivery)
                 submit.assert_not_awaited()
                 self.assertEqual(result["status"], "queued")
@@ -412,8 +484,11 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
             return result
 
         with patch.object(self.gateway, "_claim", expire_after_claim), \
-                patch("event_gateway.stock_codex.StockCodexAdapter.submit", new=AsyncMock()) as submit:
-            await self.gateway.dispatch(delivery)
+                patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                      new=self.stock_submit_mock()) as submit:
+            result = await self.gateway.dispatch(delivery)
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(self.authority.settlements[-1][1], {"type": "local_not_submitted"})
         submit.assert_not_awaited()
 
     async def test_accepted_result_write_failure_becomes_ambiguous(self):
@@ -421,7 +496,7 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.store.db.execute("CREATE TRIGGER fail_stock_result BEFORE UPDATE ON deliveries "
                               "WHEN NEW.state='command_accepted' BEGIN SELECT RAISE(ABORT,'disk fault'); END")
         with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                   new=AsyncMock(return_value={"status": "command_accepted"})) as submit:
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})) as submit:
             await self.gateway.dispatch(delivery)
             self.restart()
         submit.assert_awaited_once()
