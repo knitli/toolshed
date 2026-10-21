@@ -209,6 +209,13 @@ Renewal stops for that exact mapping after a definitive refusal or mismatched
 response. An ambiguous transport result retries the same renewal with bounded
 backoff while the local lease remains live. This does not change global client
 configuration.
+Independent mappings renew concurrently. A request begun before lease expiry
+can finish within its five-second response bound after that old deadline.
+
+Recovery resolves persisted claims and admissions even after detach, expiry,
+or disabling stock dispatch. A failed binary preflight can settle as no-start
+because no launch was attempted. Errors after entering process creation remain
+ambiguous: an error can arrive after the child has started.
 
 A stock ACK with status `command_accepted` records a successful CLI exit in the
 Gateway journal. It is not an independently verified durable client receipt or

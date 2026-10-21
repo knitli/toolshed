@@ -268,6 +268,37 @@ class StoreTests(unittest.TestCase):
         self.assertTrue(self.store.begin_stock_submit(ident, attempt))
         self.assertEqual(self.store.current_attempt(ident)["state"], "submitting")
 
+    def test_stock_prelaunch_failure_requires_explicit_proof_and_survives_restart(self):
+        ident, attempt = self.stock_admitted()
+        evidence = {"type": "local_not_submitted"}
+        self.store.begin_stock_submit(ident, attempt)
+        with self.assertRaisesRegex(StoreError, "invalid_transition"):
+            self.store.begin_settlement(ident, attempt, evidence)
+        with self.assertRaisesRegex(StoreError, "invalid_transition"):
+            self.store.begin_settlement(ident, attempt, evidence, stock_not_started="yes")
+        with self.assertRaisesRegex(StoreError, "invalid_transition"):
+            self.store.begin_settlement(ident, attempt, evidence, stock_not_started=True, receipt={})
+        with self.store.db:
+            self.store.db.execute("UPDATE attempts SET native_ack='{}' WHERE delivery_id=?", (ident,))
+        with self.assertRaisesRegex(StoreError, "invalid_transition"):
+            self.store.begin_settlement(ident, attempt, evidence, stock_not_started=True)
+        with self.store.db:
+            self.store.db.execute("UPDATE attempts SET native_ack=NULL WHERE delivery_id=?", (ident,))
+        self.assertTrue(self.store.begin_settlement(ident, attempt, evidence, stock_not_started=True))
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertEqual(self.store.current_attempt(ident)["state"], "settlement_pending")
+        self.assertEqual(self.store.current_attempt(ident)["evidence"], evidence)
+        self.assertTrue(self.store.begin_settlement(ident, attempt, evidence))
+
+    def test_stock_prelaunch_proof_cannot_release_native_submissions(self):
+        ident, admission = self.admitted()
+        self.store.begin_native(ident, self.event["attemptId"], self.request(admission))
+        with self.assertRaisesRegex(StoreError, "invalid_transition"):
+            self.store.begin_settlement(ident, self.event["attemptId"],
+                                        {"type": "local_not_submitted"}, stock_not_started=True)
+        self.assertEqual(self.store.current_attempt(ident)["state"], "submitting")
+
     def test_expired_stock_submit_permit_cannot_advance_to_submitting(self):
         ident, attempt = self.stock_admitted()
         self.now += 5

@@ -1,4 +1,6 @@
 import asyncio
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 import uuid
@@ -11,6 +13,13 @@ REFERENCE = "ref_22222222-2222-4222-8222-222222222222"
 
 
 class StockCodexTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.binary = Path(self.tmp.name) / "codex"
+        self.binary.write_text("#!/bin/sh\nexit 0\n")
+        self.binary.chmod(0o700)
+
     def test_assignment_and_reference_are_canonical_and_bounded(self):
         for value in (None, "not-a-uuid", THREAD.upper()):
             with self.subTest(value=value), self.assertRaisesRegex(StockCodexError, "invalid_assignment"):
@@ -23,20 +32,50 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
     async def test_uses_stock_cli_exact_thread_and_returns_only_command_acceptance(self):
         process = type("Process", (), {"wait": AsyncMock(return_value=0)})()
         with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as spawn:
-            result = await StockCodexAdapter(THREAD, "/opt/bin/codex").submit(REFERENCE)
+            result = await StockCodexAdapter(THREAD, str(self.binary)).submit(REFERENCE)
         self.assertEqual(result, {"status": "command_accepted"})
         self.assertEqual(spawn.call_args.args,
-                         ("/opt/bin/codex", "queue", "--thread", THREAD,
+                         (str(self.binary), "queue", "--thread", THREAD,
                           "--message", REFERENCE))
         self.assertEqual(spawn.call_args.kwargs["stdin"], asyncio.subprocess.DEVNULL)
         self.assertEqual(spawn.call_args.kwargs["stdout"], asyncio.subprocess.DEVNULL)
         self.assertEqual(spawn.call_args.kwargs["stderr"], asyncio.subprocess.DEVNULL)
 
+    async def test_missing_binary_is_a_safe_no_start_without_spawn_attempt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = str(Path(directory) / "missing-codex")
+            with patch("asyncio.create_subprocess_exec", new=AsyncMock()) as spawn:
+                with self.assertRaisesRegex(StockCodexError, "client_not_started") as caught:
+                    await StockCodexAdapter(THREAD, binary).submit(REFERENCE)
+            self.assertEqual(caught.exception.code, "client_not_started")
+            self.assertEqual(str(caught.exception), "client_not_started")
+            spawn.assert_not_awaited()
+
+    async def test_non_executable_binary_is_a_safe_no_start_without_spawn_attempt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "codex"
+            binary.write_text("not executable")
+            binary.chmod(0o600)
+            with patch("asyncio.create_subprocess_exec", new=AsyncMock()) as spawn:
+                with self.assertRaisesRegex(StockCodexError, "client_not_started") as caught:
+                    await StockCodexAdapter(THREAD, str(binary)).submit(REFERENCE)
+            self.assertEqual(caught.exception.code, "client_not_started")
+            spawn.assert_not_awaited()
+
+    async def test_oserror_from_process_creation_is_ambiguous(self):
+        error = OSError(2, "No such file or directory", "/secret/path/codex")
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=error)):
+            with self.assertRaisesRegex(StockCodexError, "command_outcome_unknown") as caught:
+                await StockCodexAdapter(THREAD, str(self.binary)).submit(REFERENCE)
+        self.assertEqual(caught.exception.code, "command_outcome_unknown")
+        self.assertEqual(str(caught.exception), "command_outcome_unknown")
+        self.assertIsNone(caught.exception.__cause__)
+
     async def test_nonzero_exit_is_unknown_and_never_claims_acceptance(self):
         process = type("Process", (), {"wait": AsyncMock(return_value=1)})()
         with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)):
             with self.assertRaisesRegex(StockCodexError, "command_outcome_unknown"):
-                await StockCodexAdapter(THREAD, "/usr/bin/codex").submit(REFERENCE)
+                await StockCodexAdapter(THREAD, str(self.binary)).submit(REFERENCE)
 
     async def test_timeout_kills_process_and_preserves_unknown_outcome(self):
         process = type("Process", (), {
@@ -45,7 +84,7 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
         with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)), \
                 patch("event_gateway.stock_codex.COMMAND_TIMEOUT", 0.001):
             with self.assertRaisesRegex(StockCodexError, "command_outcome_unknown"):
-                await StockCodexAdapter(THREAD, "/usr/bin/codex").submit(REFERENCE)
+                await StockCodexAdapter(THREAD, str(self.binary)).submit(REFERENCE)
         process.kill.assert_called_once_with()
 
     async def test_cancel_after_launch_kills_and_reaps_without_claiming_outcome(self):
@@ -62,7 +101,7 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
 
         process = type("Process", (), {"wait": wait, "kill": unittest.mock.Mock()})()
         with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)):
-            task = asyncio.create_task(StockCodexAdapter(THREAD, "/usr/bin/codex").submit(REFERENCE))
+            task = asyncio.create_task(StockCodexAdapter(THREAD, str(self.binary)).submit(REFERENCE))
             await started.wait()
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):

@@ -179,7 +179,9 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
         if mapping["leaseExpiresAt"] <= request_started_at:
             break
         try:
-            async with asyncio.timeout(min(5, max(0.01, mapping["leaseExpiresAt"] - request_started_at))):
+            # Expiry gates when a request may start, not how long its response
+            # may take: cloud renewal can commit before expiry and reply after it.
+            async with asyncio.timeout(5):
                 response = await cloud.assigned_stock(request)
             if not store.renew_stock_attachment(
                     mapping, _timestamp(response["leaseUntil"]) / 1000):

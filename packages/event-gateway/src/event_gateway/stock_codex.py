@@ -1,8 +1,10 @@
 """Supported stock Codex CLI queue adapter."""
 
 import asyncio
+import os
 import re
 from pathlib import Path
+import stat
 
 
 class StockCodexError(ValueError):
@@ -42,13 +44,23 @@ class StockCodexAdapter:
     async def submit(self, event_reference):
         if type(event_reference) is not str or not _REFERENCE.fullmatch(event_reference):  # pylint: disable=unidiomatic-typecheck
             raise StockCodexError("invalid_event_reference")
-        process = await asyncio.create_subprocess_exec(
-            self.binary, "queue", "--thread", self.conversation_id,
-            "--message", event_reference,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        try:
+            binary = os.stat(self.binary)
+            executable = stat.S_ISREG(binary.st_mode) and os.access(self.binary, os.X_OK)
+        except OSError:
+            executable = False
+        if not executable:
+            raise StockCodexError("client_not_started")
+        try:
+            process = await asyncio.create_subprocess_exec(
+                self.binary, "queue", "--thread", self.conversation_id,
+                "--message", event_reference,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except OSError:
+            raise StockCodexError("command_outcome_unknown") from None
         try:
             async with asyncio.timeout(COMMAND_TIMEOUT):
                 code = await process.wait()

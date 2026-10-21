@@ -411,7 +411,7 @@ class Gateway:
     # Keep the durable fence, launch and ambiguous-outcome handling in one reviewed sequence.
     async def _dispatch_stock_locked(self, delivery_id, envelope):  # noqa: MC0001
         """Claim and queue one opaque reference through the assigned stock CLI."""
-        from .stock_codex import StockCodexAdapter
+        from .stock_codex import StockCodexAdapter, StockCodexError
         from .protocol import ProtocolError, validate_runtime_profile
 
         row = self._row(delivery_id)
@@ -419,15 +419,14 @@ class Gateway:
             return row
         try:
             profile = validate_runtime_profile(envelope.get("runtimeProfile"))
-            self.store._matches(envelope)
-        except (ProtocolError, StoreError):
+        except ProtocolError:
             return self._row(delivery_id, "stock_assignment_unavailable")
-        if profile["client"] != "codex":
-            return self._row(delivery_id, "unsupported_stock_client")
-        if not self.stock_codex_binary:
-            return self._row(delivery_id, "stock_client_disabled")
         attempt = self.store.current_attempt(delivery_id)
         if attempt is None:
+            if profile["client"] != "codex":
+                return self._row(delivery_id, "unsupported_stock_client")
+            if not self.stock_codex_binary:
+                return self._row(delivery_id, "stock_client_disabled")
             early = self._begin_claim_or_row(delivery_id)
             if early is not None:
                 return early
@@ -443,6 +442,10 @@ class Gateway:
         else:
             return self._row(delivery_id)
 
+        if profile["client"] != "codex":
+            return await self._retire_local(delivery_id, "unsupported_stock_client")
+        if not self.stock_codex_binary:
+            return await self._retire_local(delivery_id, "stock_client_disabled")
         if _timestamp(admission["permitExpiresAt"]) <= self.clock() * 1000:
             return await self._retire_local(delivery_id, "admission_expired")
         try:
@@ -464,7 +467,17 @@ class Gateway:
             except StoreError:
                 pass
             raise
-        except Exception:
+        except Exception as exc:
+            if isinstance(exc, StockCodexError) and exc.code == "client_not_started":
+                try:
+                    self.store.begin_settlement(
+                        delivery_id, envelope["attemptId"],
+                        {"type": "local_not_submitted"},
+                        reason="client_not_started", stock_not_started=True,
+                    )
+                except StoreError:
+                    return self._row(delivery_id, "local_retirement_pending")
+                return await self._settle(delivery_id)
             try:
                 return self.store.finish(delivery_id, "ambiguous", reason="client_outcome_unknown",
                                          attempt_id=envelope["attemptId"])
@@ -521,6 +534,8 @@ class Gateway:
         if envelope.get("runtimeProfile") is not None:
             async with self._runtime_guard(envelope["runtimeId"]):
                 attempt = self.store.current_attempt(delivery_id)
+                if attempt and attempt["state"] == "settlement_pending":
+                    return await self._settle(delivery_id)
                 if (attempt and attempt["state"] == "command_accepted"
                         and attempt.get("native_ack")):
                     return await self._send_stock_acknowledgment(delivery_id, attempt)

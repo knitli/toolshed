@@ -12,6 +12,7 @@ from event_gateway.cloud import _iso
 from event_gateway.gateway import Gateway
 from event_gateway.protocol import derive_delivery_id
 from event_gateway.store import IDENTITY, Store
+from event_gateway.stock_codex import StockCodexError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,8 +27,10 @@ class Authority:
         self.test = test
         self.claims = []
         self.acks = []
+        self.settlements = []
         self.on_claim = None
         self.drop_ack = False
+        self.fail_settlement_once = False
 
     async def claim(self, envelope):
         self.claims.append(copy.deepcopy(envelope))
@@ -48,6 +51,10 @@ class Authority:
         return {"status": acknowledgment["status"], "current": False}
 
     async def settle_no_start(self, admission, evidence):
+        self.settlements.append((copy.deepcopy(admission), copy.deepcopy(evidence)))
+        if self.fail_settlement_once:
+            self.fail_settlement_once = False
+            raise TimeoutError("lost settlement response")
         return {"deliveryId": admission["envelope"]["deliveryId"],
                 "attemptId": admission["envelope"]["attemptId"],
                 "nodeGeneration": admission["envelope"]["nodeGeneration"],
@@ -84,6 +91,32 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.store.close()
         self.store = Store(self.path, clock=lambda: self.now)
         self.gateway.store = self.store
+
+    def new_delivery(self):
+        """Accept a fresh stock envelope with a new assignment generation."""
+        self.event = copy.deepcopy(EVENT)
+        self.event["eventId"] = str(uuid.uuid4())
+        self.event["attemptId"] = str(uuid.uuid4())
+        self.event["runtimeGeneration"] = self.mapping["runtimeGeneration"] + 1
+        self.event["attachmentGeneration"] = self.mapping["attachmentGeneration"] + 1
+        self.event["consumerGeneration"] = self.mapping["consumerGeneration"] + 1
+        self.event["runtimeProfile"]["conversationId"] = str(uuid.uuid4())
+        self.event["deliveryId"] = derive_delivery_id(self.event)
+        self.mapping = {key: self.event[key] for key in IDENTITY}
+        self.mapping.update(consumerGeneration=self.event["consumerGeneration"],
+                            runtimeProfile=self.event["runtimeProfile"],
+                            leaseExpiresAt=self.now + 3600)
+        self.store.put_attachment(self.mapping)
+        return self.accept()
+
+    def lose_assignment(self, kind):
+        if kind == "detach":
+            self.store.detach(self.event["runtimeId"])
+        else:
+            expired = dict(self.mapping, leaseExpiresAt=self.now + 1)
+            self.store.put_attachment(expired)
+            self.mapping = expired
+            self.now += 2
 
     async def test_duplicate_and_command_acceptance_never_relaunch(self):
         delivery = self.accept()
@@ -199,6 +232,106 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         with patch("event_gateway.stock_codex.StockCodexAdapter.submit", new=AsyncMock()) as submit:
             await self.gateway.dispatch(delivery)
         submit.assert_not_awaited()
+
+    async def test_expired_or_detached_persisted_claim_is_resolved_before_mapping_check(self):
+        for loss in ("expired", "detach"):
+            with self.subTest(loss=loss):
+                delivery = self.new_delivery()
+                self.assertTrue(self.store.begin_claim(delivery))
+                self.restart()
+                self.lose_assignment(loss)
+                claim_count = len(self.authority.claims)
+                settlement_count = len(self.authority.settlements)
+                with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                           new=AsyncMock()) as submit:
+                    result = await self.gateway.reconcile(delivery)
+                submit.assert_not_awaited()
+                self.assertEqual(len(self.authority.claims), claim_count + 1)
+                self.assertEqual(len(self.authority.settlements), settlement_count + 1)
+                self.assertEqual(self.authority.settlements[-1][1], {"type": "local_not_submitted"})
+                attempt = self.store.current_attempt(delivery)
+                self.assertEqual(attempt["state"], "settled")
+                self.assertEqual(attempt["settlement"]["status"], "not_started")
+                self.assertEqual(result["status"], "stale")
+                self.assertFalse(any(row["deliveryId"] == delivery for row in self.store.list_reconcilable()))
+                self.now = NOW
+
+    async def test_expired_or_detached_persisted_admission_settles_before_mapping_check(self):
+        for loss in ("expired", "detach"):
+            with self.subTest(loss=loss):
+                delivery = self.new_delivery()
+                self.assertTrue(self.store.begin_claim(delivery))
+                admission = await self.authority.claim(self.event)
+                self.store.record_admission(delivery, admission)
+                self.restart()
+                claim_count = len(self.authority.claims)
+                settlement_count = len(self.authority.settlements)
+                self.lose_assignment(loss)
+                with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                           new=AsyncMock()) as submit:
+                    result = await self.gateway.reconcile(delivery)
+                submit.assert_not_awaited()
+                self.assertEqual(len(self.authority.claims), claim_count)
+                self.assertEqual(len(self.authority.settlements), settlement_count + 1)
+                self.assertEqual(self.authority.settlements[-1][1], {"type": "local_not_submitted"})
+                attempt = self.store.current_attempt(delivery)
+                self.assertEqual(attempt["state"], "settled")
+                self.assertEqual(attempt["settlement"]["status"], "not_started")
+                self.assertEqual(result["status"], "stale")
+                self.assertFalse(any(row["deliveryId"] == delivery for row in self.store.list_reconcilable()))
+                self.now = NOW
+
+    async def test_definite_prelaunch_failure_uses_no_start_settlement_and_never_relaunches_pending_attempt(self):
+        delivery = self.accept()
+        self.authority.fail_settlement_once = True
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=AsyncMock(side_effect=StockCodexError("client_not_started"))) as submit:
+            result = await self.gateway.dispatch(delivery)
+            self.assertEqual(result["status"], "settlement_pending")
+            attempt = self.store.current_attempt(delivery)
+            self.assertEqual(attempt["state"], "settlement_pending")
+            self.assertEqual(attempt["evidence"], {"type": "local_not_submitted"})
+            self.assertIsNone(attempt["native_request"])
+            self.assertIsNone(attempt["native_ack"])
+            self.restart()
+            recovered = await self.gateway.reconcile(delivery)
+        self.assertEqual(recovered["status"], "queued")
+        submit.assert_awaited_once_with(self.event["eventReference"])
+        self.assertEqual([evidence for _, evidence in self.authority.settlements],
+                         [{"type": "local_not_submitted"}] * 2)
+        self.assertIsNone(self.store.current_attempt(delivery))
+        self.assertEqual(self.gateway._row(delivery)["status"], "queued")
+
+    async def test_disabled_stock_recovery_resolves_and_retires_persisted_attempts(self):
+        for state in ("claiming", "admitted"):
+            with self.subTest(state=state):
+                delivery = self.new_delivery()
+                self.assertTrue(self.store.begin_claim(delivery))
+                if state == "admitted":
+                    self.store.record_admission(delivery, await self.authority.claim(self.event))
+                self.restart()
+                self.gateway.stock_codex_binary = None
+                claim_count = len(self.authority.claims)
+                settlement_count = len(self.authority.settlements)
+                with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                           new=AsyncMock()) as submit:
+                    result = await self.gateway.reconcile(delivery)
+                submit.assert_not_awaited()
+                self.assertEqual(result["status"], "queued")
+                self.assertEqual(len(self.authority.settlements), settlement_count + 1)
+                self.assertEqual(self.authority.settlements[-1][1], {"type": "local_not_submitted"})
+                self.assertEqual(len(self.authority.claims), claim_count + (state == "claiming"))
+                self.assertIsNone(self.store.current_attempt(delivery))
+                self.gateway.stock_codex_binary = "/opt/test/codex"
+
+    async def test_disabled_stock_does_not_claim_fresh_delivery(self):
+        delivery = self.accept()
+        self.gateway.stock_codex_binary = None
+        result = await self.gateway.dispatch(delivery)
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(result["reason"], "stock_client_disabled")
+        self.assertEqual(self.authority.claims, [])
+        self.assertIsNone(self.store.current_attempt(delivery))
 
     async def test_expired_admission_prevents_launch(self):
         delivery = self.accept()

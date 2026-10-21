@@ -47,6 +47,62 @@ async def running_daemon(state_dir):
 
 
 class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stock_renewal_started_live_can_commit_response_after_old_deadline(self):
+        mapping = {
+            "runtimeId": str(uuid.uuid4()), "principal": "owner@example.com", "agent": "codex",
+            "nodeId": str(uuid.uuid4()), "nodeGeneration": 2, "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": 100.5,
+            "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                               "conversationId": str(uuid.uuid4())},
+        }
+        stop = asyncio.Event()
+        timeout_values = []
+
+        class FakeStore:
+            now = 100
+
+            @staticmethod
+            def clock():
+                return FakeStore.now
+
+            @staticmethod
+            def list_attachments():
+                return [mapping]
+
+            def renew_stock_attachment(self, _expected, lease):
+                self.renewed = lease
+                return True
+
+        class FakeTimeout:
+            def __init__(self, seconds):
+                timeout_values.append(seconds)
+                self.seconds = seconds
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, _type, _value, _traceback):
+                # Model expiry-driven cancellation without waiting for wall time.
+                if self.seconds < 1 and store.clock() >= mapping["leaseExpiresAt"]:
+                    raise TimeoutError
+                return False
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = mapping["nodeId"], mapping["nodeGeneration"]
+
+            async def assigned_stock(self, _request):
+                store.now = 101  # The RPC began before expiry; only its response is late.
+                stop.set()
+                return {"leaseUntil": _iso(200)}
+
+        store = FakeStore()
+        with patch.object(daemon.asyncio, "timeout", FakeTimeout):
+            await daemon._stock_renewal_worker(store, FakeCloud(), stop)
+
+        self.assertEqual(timeout_values, [5])
+        self.assertEqual(store.renewed, 200)
+
     async def test_stock_renewals_do_not_wait_for_earlier_mapping_before_deadline(self):
         first = {
             "runtimeId": "00000000-0000-4000-8000-000000000001",
