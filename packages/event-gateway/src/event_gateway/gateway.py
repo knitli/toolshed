@@ -417,7 +417,7 @@ class Gateway:
     # Keep the durable fence, launch and ambiguous-outcome handling in one reviewed sequence.
     async def _dispatch_stock_locked(self, delivery_id, envelope):  # noqa: MC0001
         """Claim and queue one opaque reference through the assigned stock CLI."""
-        from .stock_codex import StockCodexAdapter, StockCodexError
+        from .stock_codex import StockCodexAdapter, StockCodexError, StockCodexPreflightCancelled
         from .protocol import ProtocolError, validate_runtime_profile
 
         row = self._row(delivery_id)
@@ -466,6 +466,20 @@ class Gateway:
         adapter = StockCodexAdapter(profile["conversationId"], self.stock_codex_binary)
         try:
             await adapter.submit(envelope["eventReference"])
+        except StockCodexPreflightCancelled:
+            try:
+                self.store.begin_settlement(
+                    delivery_id, envelope["attemptId"],
+                    {"type": "local_not_submitted"},
+                    reason="client_not_started", stock_not_started=True,
+                )
+            except StoreError:
+                try:
+                    self.store.finish(delivery_id, "ambiguous", reason="client_outcome_unknown",
+                                      attempt_id=envelope["attemptId"])
+                except StoreError:
+                    pass
+            raise
         except asyncio.CancelledError:
             try:
                 self.store.finish(delivery_id, "ambiguous", reason="client_outcome_unknown",

@@ -213,9 +213,11 @@ Independent mappings renew concurrently. A request begun before lease expiry
 can finish within its five-second response bound after that old deadline.
 
 Recovery resolves persisted claims and admissions even after detach, expiry,
-or disabling stock dispatch. A failed binary preflight can settle as no-start
-because no launch was attempted. Errors after entering process creation remain
-ambiguous: an error can arrive after the child has started.
+or disabling stock dispatch. A failed or cancelled binary preflight can settle
+as no-start because no launch was attempted. Preflight cancellation persists
+that settlement intent without a cloud wait, then propagates cancellation;
+reconciliation completes settlement later. Errors or cancellation after entering
+process creation remain ambiguous: the child may already have started.
 
 A stock ACK with status `command_accepted` records a successful CLI exit in the
 Gateway journal. It is not an independently verified durable client receipt or

@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import json
 from pathlib import Path
@@ -11,8 +12,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from event_gateway.cloud import _iso
 from event_gateway.gateway import Gateway
 from event_gateway.protocol import derive_delivery_id
-from event_gateway.store import IDENTITY, Store
-from event_gateway.stock_codex import StockCodexError
+from event_gateway.store import IDENTITY, Store, StoreError
+from event_gateway.stock_codex import StockCodexError, StockCodexPreflightCancelled
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -310,6 +311,57 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
                          [{"type": "local_not_submitted"}] * 2)
         self.assertIsNone(self.store.current_attempt(delivery))
         self.assertEqual(self.gateway._row(delivery)["status"], "queued")
+
+    async def test_preflight_cancellation_persists_no_start_without_cloud_wait_and_recovers(self):
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=AsyncMock(side_effect=StockCodexPreflightCancelled)) as submit:
+            task = asyncio.create_task(self.gateway.dispatch(delivery))
+            with self.assertRaises(StockCodexPreflightCancelled):
+                await task
+            self.assertTrue(task.cancelled())
+            attempt = self.store.current_attempt(delivery)
+            self.assertEqual(attempt["state"], "settlement_pending")
+            self.assertEqual(attempt["evidence"], {"type": "local_not_submitted"})
+            self.assertEqual(self.authority.settlements, [])
+            self.restart()
+            self.authority.fail_settlement_once = True
+            pending = await self.gateway.reconcile(delivery)
+            self.assertEqual(pending["status"], "settlement_pending")
+            settled = await self.gateway.reconcile(delivery)
+        submit.assert_awaited_once_with(self.event["eventReference"])
+        self.assertEqual(settled["status"], "queued")
+        self.assertEqual(len(self.authority.settlements), 2)
+        self.assertTrue(all(evidence == {"type": "local_not_submitted"}
+                            for _, evidence in self.authority.settlements))
+        self.assertIsNone(self.store.current_attempt(delivery))
+
+    async def test_preflight_cancellation_store_error_fails_closed_as_ambiguous(self):
+        delivery = self.accept()
+        with patch.object(self.store, "begin_settlement", side_effect=StoreError("store failure")) as begin:
+            with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                       new=AsyncMock(side_effect=StockCodexPreflightCancelled)) as submit:
+                task = asyncio.create_task(self.gateway.dispatch(delivery))
+                with self.assertRaises(StockCodexPreflightCancelled):
+                    await task
+        self.assertTrue(task.cancelled())
+        begin.assert_called_once()
+        submit.assert_awaited_once_with(self.event["eventReference"])
+        attempt = self.store.current_attempt(delivery)
+        self.assertEqual(attempt["state"], "ambiguous")
+        self.assertEqual(attempt["reason"], "client_outcome_unknown")
+        self.assertIsNone(attempt["evidence"])
+        self.assertEqual(self.authority.settlements, [])
+
+    async def test_generic_stock_cancellation_remains_ambiguous(self):
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=AsyncMock(side_effect=asyncio.CancelledError)) as submit:
+            with self.assertRaises(asyncio.CancelledError):
+                await self.gateway.dispatch(delivery)
+        submit.assert_awaited_once_with(self.event["eventReference"])
+        self.assertEqual(self.store.current_attempt(delivery)["state"], "ambiguous")
+        self.assertEqual(self.authority.settlements, [])
 
     async def test_disabled_stock_recovery_resolves_and_retires_persisted_attempts(self):
         for state in ("claiming", "admitted"):

@@ -16,6 +16,10 @@ class StockCodexError(ValueError):
         super().__init__(code)
 
 
+class StockCodexPreflightCancelled(asyncio.CancelledError):
+    """Cancellation before process creation, so submission is known not to have started."""
+
+
 _REFERENCE = re.compile(r"ref_[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 COMMAND_TIMEOUT = 10
 
@@ -52,7 +56,10 @@ class StockCodexAdapter:
     async def submit(self, event_reference):
         if type(event_reference) is not str or not _REFERENCE.fullmatch(event_reference):  # pylint: disable=unidiomatic-typecheck
             raise StockCodexError("invalid_event_reference")
-        executable = await asyncio.to_thread(_binary_is_executable, self.binary)
+        try:
+            executable = await asyncio.to_thread(_binary_is_executable, self.binary)
+        except asyncio.CancelledError:
+            raise StockCodexPreflightCancelled() from None
         if not executable:
             raise StockCodexError("client_not_started")
         try:

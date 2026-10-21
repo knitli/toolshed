@@ -6,7 +6,9 @@ import unittest
 from unittest.mock import AsyncMock, patch
 import uuid
 
-from event_gateway.stock_codex import StockCodexAdapter, StockCodexError
+from event_gateway.stock_codex import (
+    StockCodexAdapter, StockCodexError, StockCodexPreflightCancelled,
+)
 
 
 THREAD = "abcdefab-cdef-4abc-8def-abcdefabcdef"
@@ -95,6 +97,33 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
                 result = await submit
             self.assertEqual(result, {"status": "command_accepted"})
             spawn.assert_awaited_once()
+
+    async def test_cancelled_binary_preflight_is_known_no_start(self):
+        loop = asyncio.get_running_loop()
+        preflight_started = asyncio.Event()
+        release_preflight = Event()
+        preflight_finished = Event()
+
+        def blocked_preflight(_binary):
+            loop.call_soon_threadsafe(preflight_started.set)
+            release_preflight.wait(timeout=3)
+            preflight_finished.set()
+            return True
+
+        with patch("event_gateway.stock_codex._binary_is_executable",
+                   side_effect=blocked_preflight), \
+                patch("asyncio.create_subprocess_exec", new=AsyncMock()) as spawn:
+            submit = asyncio.create_task(
+                StockCodexAdapter(THREAD, str(self.binary)).submit(REFERENCE))
+            try:
+                await asyncio.wait_for(preflight_started.wait(), timeout=1)
+                submit.cancel()
+                with self.assertRaises(StockCodexPreflightCancelled):
+                    await submit
+            finally:
+                release_preflight.set()
+                self.assertTrue(await asyncio.to_thread(preflight_finished.wait, 1))
+            spawn.assert_not_awaited()
 
     async def test_oserror_from_process_creation_is_ambiguous(self):
         error = OSError(2, "No such file or directory", "/secret/path/codex")
