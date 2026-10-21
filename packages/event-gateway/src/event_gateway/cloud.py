@@ -272,13 +272,15 @@ def _github_screening_report(value):
         raise CloudError("invalid_response")
     _closed(removed, ("ansi", "control", "invisible", "surrogate"), code="invalid_response")
     phrases = value["phrases"]
-    if (type(value["version"]) is not int or value["version"] != 1
+    # Exact built-in types keep JSON DTOs from accepting bool/int subclasses.
+    if (type(value["version"]) is not int  # pylint: disable=unidiomatic-typecheck
+            or value["version"] != 1
             or any(type(removed[key]) is not int or not 0 <= removed[key] <= 1048576
-                   for key in ("ansi", "control", "invisible", "surrogate"))
+                   for key in ("ansi", "control", "invisible", "surrogate"))  # pylint: disable=unidiomatic-typecheck
             or any(type(value[key]) is not int or not 0 <= value[key] <= 1048576
-                   for key in ("kept", "visible"))
+                   for key in ("kept", "visible"))  # pylint: disable=unidiomatic-typecheck
             or any(type(value[key]) is not bool
-                   for key in ("dense", "trimmed", "shortened", "normalized", "changed", "withheld"))
+                   for key in ("dense", "trimmed", "shortened", "normalized", "changed", "withheld"))  # pylint: disable=unidiomatic-typecheck
             or not isinstance(phrases, list)
             or any(not isinstance(phrase, str) or phrase not in phrase_ids for phrase in phrases)
             or len(set(phrases)) != len(phrases)):

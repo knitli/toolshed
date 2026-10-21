@@ -34,7 +34,10 @@ class ProtocolTests(unittest.TestCase):
             envelope = envelopes[ack['deliveryId']]
             self.assertTrue(matches_delivery_id(envelope))
             self.assertTrue(acknowledgment_matches_delivery(envelope, ack))
-            self.assertEqual(acknowledgment_advances_current_watermark(envelope, ack, envelope['sourceStateVersion']), ack['status'] in ('observed', 'command_accepted'))
+            self.assertEqual(
+                acknowledgment_advances_current_watermark(
+                    envelope, ack, envelope['sourceStateVersion']),
+                ack['status'] in ('observed', 'command_accepted'))
             for field in ['attemptId', 'runtimeGeneration', 'deliveredSourceStateVersion', 'consumerGeneration']:
                 changed = dict(ack, **{field: 'different'})
                 self.assertFalse(acknowledgment_matches_delivery(envelope, changed))

@@ -161,7 +161,8 @@ async def _dispatch_worker(gateway, stop):
             pass
 
 
-async def _stock_renewal_worker(store, cloud, stop):
+# Keep bounded retry and suspension decisions beside the exact-mapping renewal fence.
+async def _stock_renewal_worker(store, cloud, stop):  # noqa: MC0001
     """Renew only live assigned-stock mappings already present in the local ledger."""
     suspended = set()
     while not stop.is_set():

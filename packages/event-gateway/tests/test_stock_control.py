@@ -245,6 +245,7 @@ class StockControlTests(unittest.IsolatedAsyncioTestCase):
             "principal": "owner@example.com", "agent": "codex",
             "assigned_stock": None,
         })()
+
         async def assign(_):
             return response()
         cloud.assigned_stock = assign

@@ -9,6 +9,7 @@ class StockCodexError(ValueError):
     """A safe stock CLI failure code."""
 
     def __init__(self, code):
+        """Initialize with a safe failure code."""
         self.code = code
         super().__init__(code)
 
@@ -32,13 +33,14 @@ class StockCodexAdapter:
     """Queue one opaque event reference in one explicitly assigned conversation."""
 
     def __init__(self, conversation_id, binary):
+        """Bind the adapter to one conversation and CLI binary."""
         if (not _canonical_uuid(conversation_id) or type(binary) is not str
-                or not Path(binary).is_absolute()):
+                or not Path(binary).is_absolute()):  # pylint: disable=unidiomatic-typecheck
             raise StockCodexError("invalid_assignment")
         self.conversation_id, self.binary = conversation_id, binary
 
     async def submit(self, event_reference):
-        if type(event_reference) is not str or not _REFERENCE.fullmatch(event_reference):
+        if type(event_reference) is not str or not _REFERENCE.fullmatch(event_reference):  # pylint: disable=unidiomatic-typecheck
             raise StockCodexError("invalid_event_reference")
         process = await asyncio.create_subprocess_exec(
             self.binary, "queue", "--thread", self.conversation_id,

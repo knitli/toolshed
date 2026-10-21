@@ -408,7 +408,8 @@ class Gateway:
             return self._row(delivery_id, "stock_ack_pending")
         return self._row(delivery_id)
 
-    async def _dispatch_stock_locked(self, delivery_id, envelope):
+    # Keep the durable fence, launch and ambiguous-outcome handling in one reviewed sequence.
+    async def _dispatch_stock_locked(self, delivery_id, envelope):  # noqa: MC0001
         """Claim and queue one opaque reference through the assigned stock CLI."""
         from .stock_codex import StockCodexAdapter
         from .protocol import ProtocolError, validate_runtime_profile

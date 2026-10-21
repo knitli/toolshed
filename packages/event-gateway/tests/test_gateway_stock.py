@@ -22,6 +22,7 @@ NOW = 1791201630
 
 class Authority:
     def __init__(self, test):
+        """Collect authority calls for gateway tests."""
         self.test = test
         self.claims = []
         self.acks = []
