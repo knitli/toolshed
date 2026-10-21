@@ -392,6 +392,12 @@ class Gateway:
         return acknowledgment
 
     async def _send_stock_acknowledgment(self, delivery_id, attempt):
+        current = self.store.current_attempt(delivery_id)
+        if not current or current["attempt_id"] != attempt.get("attempt_id"):
+            return self._row(delivery_id)
+        if current.get("ack_state") == "command_accepted":
+            return self._row(delivery_id)
+        attempt = current
         acknowledgment = attempt.get("native_ack")
         admission = attempt.get("admission")
         if not acknowledgment or not admission:

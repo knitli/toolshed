@@ -147,6 +147,15 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         submit.assert_awaited_once()
         self.assertEqual(self.authority.acks, [stored_ack, stored_ack])
 
+    async def test_reconcile_does_not_resend_completed_stock_ack(self):
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=AsyncMock(return_value={"status": "command_accepted"})) as submit:
+            self.assertEqual((await self.gateway.dispatch(delivery))["status"], "command_accepted")
+            self.assertEqual((await self.gateway.reconcile(delivery))["status"], "command_accepted")
+        submit.assert_awaited_once_with(self.event["eventReference"])
+        self.assertEqual(len(self.authority.acks), 1)
+
     async def test_github_stock_event_lost_ack_recovery_launches_once(self):
         github = next(event for event in FIXTURES["validEnvelopes"] if event["source"] == "github")
         self.event = copy.deepcopy(github)

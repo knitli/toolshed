@@ -173,6 +173,13 @@ def _github_text(value, limit):
     return isinstance(value, str) and len(value) <= limit
 
 
+_GITHUB_EVENT_REASON_CODES = {
+    "attention": ("review_requested", "review_submitted", "review_comment"),
+    "ci": ("check_failed", "status_failed"),
+    "terminal": ("pull_request_closed", "pull_request_merged"),
+}
+
+
 def _github_event_request(value):
     _closed(value, ("eventReference",), code="invalid_request")
     if (not isinstance(value["eventReference"], str)
@@ -194,10 +201,9 @@ def _github_event_response(value):
     if (any(not _generation(number) for number in value["subject"].values())
             or any(not _generation(value[key]) for key in (
                 "sourceVersion", "candidateGeneration", "observedAt"))
-            or value["eventKind"] not in ("attention", "ci", "terminal")
-            or value["reasonCode"] not in (
-                "review_requested", "review_submitted", "review_comment", "check_failed",
-                "status_failed", "pull_request_closed", "pull_request_merged")):
+            or not isinstance(value["eventKind"], str)
+            or value["eventKind"] not in _GITHUB_EVENT_REASON_CODES
+            or value["reasonCode"] not in _GITHUB_EVENT_REASON_CODES[value["eventKind"]]):
         raise CloudError("invalid_response")
     return value
 

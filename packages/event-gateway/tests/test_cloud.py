@@ -229,6 +229,31 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
                                      canonical_node_proof(self.client.principal, self.client.origin,
                                                           "/v1/dispatch/claim", request["body"], proof))
 
+    async def test_github_event_response_binds_kind_to_reason_code(self):
+        request = {"eventReference": "ref_22222222-2222-4222-8222-222222222222"}
+        result = {
+            "status": "ok", "subject": {"installationId": 1, "repositoryId": 2, "prNumber": 3},
+            "sourceVersion": 4, "candidateGeneration": 5, "observedAt": 6,
+        }
+        cases = (
+            ("attention", "review_comment", True),
+            ("attention", "check_failed", False),
+            ("ci", "status_failed", True),
+            ("ci", "review_requested", False),
+            ("terminal", "pull_request_closed", True),
+            ("terminal", "review_submitted", False),
+            ([], "review_comment", False),
+            ("attention", [], False),
+        )
+        for event_kind, reason_code, valid in cases:
+            with self.subTest(event_kind=event_kind, reason_code=reason_code):
+                self.result = {**result, "eventKind": event_kind, "reasonCode": reason_code}
+                if valid:
+                    self.assertEqual(await self.client.github_event_read(request), self.result)
+                else:
+                    with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+                        await self.client.github_event_read(request)
+
     async def test_native_ack_wire_and_node_proof_match_external_vector(self):
         vector_ack = FIXTURE["nativeAck"]
         vector = FIXTURE["nativeAckNodeProof"]
