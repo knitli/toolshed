@@ -134,3 +134,13 @@ fields, previous fixture entries, event files, and historical archive members
 remain unchanged. No new source revision or source hash is introduced. These
 vectors check producer/consumer DTO and page-binding compatibility; native model
 consumption, delivery, and production qualification require separate evidence.
+
+The `assigned-stock-github-delivery` family pins merged cloud `9503b8e2a99fbe099a4b90cb576a17dcf4b786aa` with the seven event/control
+snapshot blobs in `PATHS`. Its control source inventory is fixed by the reviewed
+Gateway exporter allowlist; event-wire source hashes are merged only when their
+overlaps match. The separate `assigned-stock-contract-family.zip` archive contains exactly those
+snapshots and unique source blobs, with whole-archive SHA-256
+`eb8836acab853d0f05cdb6be375d1f6459ae9ee48db62e2f1d0048a2656bbe37`. The prepared-export identifier and source map preserve byte
+provenance only; this does not authorize runtime execution, deployment, delivery,
+or production qualification. The historical fifteen-family archive remains
+byte-for-byte pinned at `ad1e41e5add910d6bbf56960717fff9bdf6aae1ddd1f7a87bea2f5af3582b879`.

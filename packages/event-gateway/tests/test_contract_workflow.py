@@ -27,6 +27,22 @@ PATHS = (
     "event-v1/policy.ts", "event-v1/protocol-v1.json", "event-v1/manifest.json",
     "event-control-v1/fixtures.json", "event-control-v1/manifest.json",
 )
+STOCK_NAME = 'assigned-stock-github-delivery'
+STOCK_REVISION = '9503b8e2a99fbe099a4b90cb576a17dcf4b786aa'
+STOCK_ARCHIVE = 'tests/fixtures/assigned-stock-contract-family.zip'
+STOCK_ARCHIVE_SHA256 = 'eb8836acab853d0f05cdb6be375d1f6459ae9ee48db62e2f1d0048a2656bbe37'
+STOCK_FAMILY = {'name': 'assigned-stock-github-delivery',
+ 'eventRevision': '9503b8e2a99fbe099a4b90cb576a17dcf4b786aa',
+ 'controlRevision': '9503b8e2a99fbe099a4b90cb576a17dcf4b786aa',
+ 'hashes': {'event-v1/protocol.schema.json': '4f52187100e98eef2dadbfbe319e41fc0af6aa82ee1c185ec152171d20cbfb23',
+            'event-v1/protocol.ts': 'b9927658cd80cfb52222bcc20ffe748acbea0c16da06f0f283b55c6046b9284d',
+            'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+            'event-v1/protocol-v1.json': '3f34e88d5cf1fb42318ba76435e77668551877250e00e8ca430ae697a6a271dd',
+            'event-v1/manifest.json': 'd20cb06b70b0144a4b3266efd02cd6054ebed7db0708e4385c5594039d8fdfca',
+            'event-control-v1/fixtures.json': 'f17a12d3b67094c60f56280258cf43835302e8797a925ca21626f1a95f7e96c1',
+            'event-control-v1/manifest.json': '84a90e9ff7b2b6586bf73cc4c23419044d32fb5751201a2baaf65c5cc2eb4bfa'}}
+HISTORICAL_ARCHIVE_SHA256 = "ad1e41e5add910d6bbf56960717fff9bdf6aae1ddd1f7a87bea2f5af3582b879"
+
 
 
 def family(name, blobs):
@@ -77,14 +93,28 @@ class ContractWorkflowTests(unittest.TestCase):
 
     def approved_snapshot(self, name):
         # Read immutable data only: no extraction, source evaluation, or Git/network dependency.
-        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
+        archive_path = PACKAGE / (STOCK_ARCHIVE if name == STOCK_NAME else "tests/fixtures/trusted-contract-families.zip")
+        with zipfile.ZipFile(archive_path) as archive:
             return {SNAPSHOT + path: archive.read(f"snapshots/{name}/{path}") for path in PATHS}
 
+
+    def assert_archived_sources(self, archive, revision, hashes):
+        metadata = json.loads(archive.read("metadata.json"))
+        self.assertEqual(metadata["sources"][revision], hashes)
+        for path, digest in hashes.items():
+            self.assertEqual(hashlib.sha256(archive.read(f"sources/{revision}/{path}")).hexdigest(), digest)
+
     def test_actual_approved_families_and_frozen_policy(self):
-        with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
-            metadata = json.loads(archive.read("metadata.json"))
-        self.assertEqual(list(POLICY["FAMILIES"]), metadata["families"])
-        self.assertEqual(set(metadata["snapshots"]), {
+        historical_path = PACKAGE / "tests/fixtures/trusted-contract-families.zip"
+        self.assertEqual(hashlib.sha256(historical_path.read_bytes()).hexdigest(), HISTORICAL_ARCHIVE_SHA256)
+        with zipfile.ZipFile(historical_path) as archive:
+            historical = json.loads(archive.read("metadata.json"))
+        with zipfile.ZipFile(PACKAGE / STOCK_ARCHIVE) as archive:
+            stock = json.loads(archive.read("metadata.json"))
+        self.assertEqual(stock["families"], [STOCK_FAMILY])
+        self.assertEqual(list(POLICY["FAMILIES"]), historical["families"] + [STOCK_FAMILY])
+        self.assertEqual(len(historical["families"]), 15)
+        self.assertEqual(set(historical["snapshots"]), {
             "legacy", "no-start", "native-start", "native-input-recorded",
             "native-admission", "native-runtime-status", "github-source-readback", "github-source-control",
             "github-watch-control", "github-watch-owner-rpc", "github-pinned-history-read",
@@ -92,7 +122,7 @@ class ContractWorkflowTests(unittest.TestCase):
             "github-initial-plan-material", "github-material-page-parity",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
-        for expected in metadata["families"]:
+        for expected in historical["families"] + [STOCK_FAMILY]:
             with self.subTest(family=expected["name"]):
                 self.blobs = self.approved_snapshot(expected["name"])
                 self.reads.clear()
@@ -191,11 +221,9 @@ class ContractWorkflowTests(unittest.TestCase):
                 self.assertEqual(blobs[SNAPSHOT + path], previous[SNAPSHOT + path])
         with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
             metadata = json.loads(archive.read("metadata.json"))
-            self.assertEqual(metadata["sources"][revision], control["sources"])
             self.assertEqual(metadata["snapshots"][name], "prepared-export:" + revision)
             sources = {path: archive.read(f"sources/{revision}/{path}") for path in control["sources"]}
-        self.assertEqual({path: hashlib.sha256(data).hexdigest() for path, data in sources.items()},
-                         control["sources"])
+            self.assert_archived_sources(archive, revision, control["sources"])
         # Bind changed new source bytes to the manifest before testing trusted policy rejection.
         for path in additional:
             with self.subTest(source=path):
@@ -287,9 +315,7 @@ class ContractWorkflowTests(unittest.TestCase):
         with zipfile.ZipFile(PACKAGE / "tests/fixtures/trusted-contract-families.zip") as archive:
             metadata = json.loads(archive.read("metadata.json"))
             self.assertEqual(metadata["snapshots"][name], "prepared-export:" + revision)
-            self.assertEqual(metadata["sources"][revision], control["sources"])
-            for path, digest in control["sources"].items():
-                self.assertEqual(hashlib.sha256(archive.read(f"sources/{revision}/{path}")).hexdigest(), digest)
+            self.assert_archived_sources(archive, revision, control["sources"])
             # This historical revision is a 41-source union; retain it and verify
             # the four event entries as a subset, not as a replacement source map.
             self.assertEqual(len(metadata["sources"][event_revision]), 41)
@@ -666,6 +692,91 @@ class ContractWorkflowTests(unittest.TestCase):
                 self.assertEqual(blobs[SNAPSHOT + "event-v1/" + entry["file"]], source)
         self.assertEqual(hashlib.sha256(blobs[SNAPSHOT + "event-control-v1/fixtures.json"]).hexdigest(),
                          control["fixturesSha256"])
+
+    def test_stock_family_requires_complete_authorization(self):
+        self.assert_complete_family_authorization(STOCK_NAME)
+
+    def test_stock_family_every_snapshot_mutation_or_omission_is_rejected(self):
+        self.assert_mutation_or_omission_rejected(STOCK_NAME)
+
+    def _stock_source_maps(self, blobs):
+        event = json.loads(blobs[SNAPSHOT + "event-v1/manifest.json"])
+        control = json.loads(blobs[SNAPSHOT + "event-control-v1/manifest.json"])
+        event_entries = {entry["originalPath"]: entry for entry in event["files"]}
+        control_sources = control["sources"]
+        self.assertEqual(event["commit"], STOCK_REVISION)
+        self.assertEqual(control["revision"], STOCK_REVISION)
+        self.assertEqual(len(event_entries), 4)
+        overlap = set(event_entries) & set(control_sources)
+        self.assertEqual(len(overlap), 2)
+        merged = dict(control_sources)
+        for path, entry in event_entries.items():
+            if path in merged:
+                self.assertEqual(merged[path], entry["sha256"], path)
+            merged[path] = entry["sha256"]
+        return event, control, event_entries, control_sources, merged
+
+    def test_stock_family_all_source_hash_mutations_and_omissions_are_rejected(self):
+        original = self.approved_snapshot(STOCK_NAME)
+        _event, _control, event_entries, control_sources, merged = self._stock_source_maps(original)
+        event_path = SNAPSHOT + "event-v1/manifest.json"
+        control_path = SNAPSHOT + "event-control-v1/manifest.json"
+        for path, expected_hash in merged.items():
+            for missing in (False, True):
+                with self.subTest(source=path, missing=missing):
+                    event = json.loads(original[event_path])
+                    control = json.loads(original[control_path])
+                    if path in control_sources:
+                        if missing:
+                            del control["sources"][path]
+                        else:
+                            control["sources"][path] = "0" * 64 if expected_hash != "0" * 64 else "1" * 64
+                    if path in event_entries:
+                        if missing:
+                            event["files"] = [entry for entry in event["files"]
+                                              if entry["originalPath"] != path]
+                        else:
+                            for entry in event["files"]:
+                                if entry["originalPath"] == path:
+                                    entry["sha256"] = "0" * 64 if expected_hash != "0" * 64 else "1" * 64
+                    self.blobs = original.copy()
+                    self.blobs[event_path] = (json.dumps(event, indent=2) + "\n").encode()
+                    self.blobs[control_path] = (json.dumps(control, indent=2) + "\n").encode()
+                    with self.assertRaises(ValueError):
+                        self.verify()
+
+    def test_stock_family_exact_revisions_overlap_and_archived_source_bytes(self):
+        blobs = self.approved_snapshot(STOCK_NAME)
+        event, control, event_entries, _control_sources, merged = self._stock_source_maps(blobs)
+        self.assertEqual(STOCK_FAMILY["eventRevision"], STOCK_REVISION)
+        self.assertEqual(STOCK_FAMILY["controlRevision"], STOCK_REVISION)
+        self.assertEqual(event["commit"], control["revision"])
+        with zipfile.ZipFile(PACKAGE / STOCK_ARCHIVE) as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+            self.assertEqual(metadata["families"], [STOCK_FAMILY])
+            self.assertEqual(metadata["snapshots"], {STOCK_NAME: "prepared-export:" + STOCK_REVISION})
+            self.assert_archived_sources(archive, STOCK_REVISION, merged)
+            for path, entry in event_entries.items():
+                self.assertEqual(archive.read(f"sources/{STOCK_REVISION}/{path}"),
+                                 blobs[SNAPSHOT + "event-v1/" + entry["file"]])
+                self.assertEqual(hashlib.sha256(archive.read(f"sources/{STOCK_REVISION}/{path}")).hexdigest(),
+                                 entry["sha256"])
+
+    def test_stock_family_archive_sha_and_closed_member_inventory(self):
+        blobs = self.approved_snapshot(STOCK_NAME)
+        _event, _control, _event_entries, _control_sources, merged = self._stock_source_maps(blobs)
+        archive_path = PACKAGE / STOCK_ARCHIVE
+        self.assertEqual(hashlib.sha256(archive_path.read_bytes()).hexdigest(), STOCK_ARCHIVE_SHA256)
+        expected = (["metadata.json"]
+                    + [f"snapshots/{STOCK_NAME}/{path}" for path in PATHS]
+                    + [f"sources/{STOCK_REVISION}/{path}" for path in sorted(merged)])
+        with zipfile.ZipFile(archive_path) as archive:
+            names = archive.namelist()
+            self.assertEqual(len(names), len(expected))
+            self.assertEqual(len(set(names)), len(expected))
+            self.assertEqual(names, expected)
+            for info in archive.infolist():
+                self.assertEqual(info.date_time, (2026, 10, 20, 0, 0, 0))
 
     def test_checked_in_snapshot_and_fixed_paths(self):
         accepted = self.verify()
