@@ -227,7 +227,8 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
             pass
 
 
-async def _stock_renewal_worker(store, cloud, stop):
+# Keep pending-response recovery and cloud-poll scheduling in one owner-loop sequence.
+async def _stock_renewal_worker(store, cloud, stop):  # noqa: MC0001
     """Renew only live assigned-stock mappings already present in the local ledger."""
     suspended = set()
     pending = {}

@@ -53,7 +53,8 @@ class StockCodexAdapter:
             raise StockCodexError("invalid_assignment")
         self.conversation_id, self.binary = conversation_id, binary
 
-    async def submit(self, event_reference, *, before_start=None):
+    # Keep final fencing, process creation and ambiguous-outcome cleanup in one sequence.
+    async def submit(self, event_reference, *, before_start=None):  # noqa: MC0001
         """Preflight, synchronously fence, and then queue one opaque reference."""
         if type(event_reference) is not str or not _REFERENCE.fullmatch(event_reference):  # pylint: disable=unidiomatic-typecheck
             raise StockCodexError("invalid_event_reference")
