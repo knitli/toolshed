@@ -79,6 +79,17 @@ recorded in the [final qualification receipt](messaging-v2-source-admission-9503
 That receipt records all six profile results, commands, runtime and executable
 source hashes, prior failed attempts and cleanup evidence.
 
+`gatewayBaseCommit` is the runtime base, not a clean-checkout claim for the test
+tree. The local fixture/helper changes used for that run are preserved in commit
+`b47bd610d45b184867cb3a76efe530b20783c67d`: all 13 `executableSourceFreeze`
+entries and `inputManifestSha256` match its bytes. To reconstruct the historical
+run in a disposable checkout, start at Gateway base `37abd161` and take those
+listed helper/fixture files and the input manifest from `b47bd610`, then verify
+the receipt hashes before running the profiles. The later companion-list
+refactor in `78605393737ea210648f05d0b82a6208816146b5` intentionally changes
+the two test-module hashes; those current files are not the source of the six
+historical result claims. The recorded hashes and results remain unchanged.
+
 The initial and corrected compile-preparation receipts remain unchanged and
 describe preparation only; the corrected record is
 [messaging-v2-source-admission-9503-reduced-env-preparation.json](messaging-v2-source-admission-9503-reduced-env-preparation.json).
