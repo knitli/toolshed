@@ -20,6 +20,14 @@ class StockCodexPreflightCancelled(asyncio.CancelledError):
     """Cancellation before process creation, so submission is known not to have started."""
 
 
+class StockCodexStartFenceError(Exception):
+    """The synchronous pre-launch state fence failed before process creation."""
+
+    def __init__(self, cause):
+        self.cause = cause
+        super().__init__("start_fence_failed")
+
+
 _REFERENCE = re.compile(r"ref_[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 COMMAND_TIMEOUT = 10
 
@@ -65,7 +73,10 @@ class StockCodexAdapter:
         if not executable:
             raise StockCodexError("client_not_started")
         if before_start is not None:
-            before_start()
+            try:
+                before_start()
+            except Exception as exc:
+                raise StockCodexStartFenceError(exc) from None
         try:
             process = await asyncio.create_subprocess_exec(
                 self.binary, "queue", "--thread", self.conversation_id,

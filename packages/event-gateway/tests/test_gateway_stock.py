@@ -2,6 +2,7 @@ import asyncio
 import copy
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 from threading import Event
 import unittest
@@ -315,6 +316,78 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
                 attempt = self.store.current_attempt(delivery)
                 self.assertEqual(attempt["state"], "settled")
                 self.assertEqual(attempt["settlement"]["status"], "not_started")
+
+    async def test_sqlite_start_fence_failure_settles_admitted_without_spawning(self):
+        delivery = self.accept()
+        with patch.object(self.store, "begin_stock_submit",
+                          side_effect=sqlite3.OperationalError("database is locked")), \
+                patch("asyncio.create_subprocess_exec", new=AsyncMock()) as spawn:
+            result = await self.gateway.dispatch(delivery)
+        spawn.assert_not_awaited()
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(self.authority.settlements[-1][1], {"type": "local_not_submitted"})
+        self.assertIsNone(self.store.current_attempt(delivery))
+
+    async def test_sqlite_start_fence_commit_uncertainty_never_settles_submitting(self):
+        delivery = self.accept()
+        begin_stock_submit = self.store.begin_stock_submit
+
+        def commit_then_fail(delivery_id, attempt_id):
+            begin_stock_submit(delivery_id, attempt_id)
+            raise sqlite3.OperationalError("commit result unknown")
+
+        with patch.object(self.store, "begin_stock_submit", side_effect=commit_then_fail), \
+                patch("asyncio.create_subprocess_exec", new=AsyncMock()) as spawn:
+            result = await self.gateway.dispatch(delivery)
+            reconciled = await self.gateway.reconcile(delivery)
+        spawn.assert_not_awaited()
+        self.assertEqual(result["reason"], "client_start_fence_uncertain")
+        self.assertEqual(reconciled["status"], "submitting")
+        self.assertEqual(self.store.current_attempt(delivery)["state"], "submitting")
+        self.assertEqual(self.authority.settlements, [])
+
+    async def test_start_fence_store_error_after_commit_cannot_settle_submitting(self):
+        delivery = self.accept()
+        begin_stock_submit = self.store.begin_stock_submit
+
+        def commit_then_store_error(delivery_id, attempt_id):
+            begin_stock_submit(delivery_id, attempt_id)
+            raise StoreError("transition result unknown")
+
+        with patch.object(self.store, "begin_stock_submit", side_effect=commit_then_store_error), \
+                patch("asyncio.create_subprocess_exec", new=AsyncMock()) as spawn:
+            result = await self.gateway.dispatch(delivery)
+        spawn.assert_not_awaited()
+        self.assertEqual(result["reason"], "local_retirement_pending")
+        self.assertEqual(self.store.current_attempt(delivery)["state"], "submitting")
+        self.assertEqual(self.authority.settlements, [])
+
+    async def test_sqlite_start_fence_reread_failure_returns_recoverable_diagnostic(self):
+        delivery = self.accept()
+        begin_stock_submit = self.store.begin_stock_submit
+        current_attempt = self.store.current_attempt
+        fail_reread = False
+
+        def commit_then_fail(delivery_id, attempt_id):
+            nonlocal fail_reread
+            begin_stock_submit(delivery_id, attempt_id)
+            fail_reread = True
+            raise sqlite3.OperationalError("commit result unknown")
+
+        def current_attempt_or_fail(delivery_id):
+            if fail_reread:
+                raise sqlite3.OperationalError("database is locked")
+            return current_attempt(delivery_id)
+
+        with patch.object(self.store, "begin_stock_submit", side_effect=commit_then_fail), \
+                patch.object(self.store, "current_attempt", side_effect=current_attempt_or_fail), \
+                patch("asyncio.create_subprocess_exec", new=AsyncMock()) as spawn:
+            result = await self.gateway.dispatch(delivery)
+        spawn.assert_not_awaited()
+        self.assertEqual(result, {"deliveryId": delivery, "status": "unknown",
+                                  "reason": "client_start_fence_uncertain"})
+        self.assertEqual(self.store.current_attempt(delivery)["state"], "submitting")
+        self.assertEqual(self.authority.settlements, [])
 
     async def test_expired_or_detached_persisted_claim_is_resolved_before_mapping_check(self):
         for loss in ("expired", "detach"):

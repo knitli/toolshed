@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+import sqlite3
 import tempfile
 from threading import Event
 import unittest
@@ -7,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import uuid
 
 from event_gateway.stock_codex import (
-    StockCodexAdapter, StockCodexError, StockCodexPreflightCancelled,
+    StockCodexAdapter, StockCodexError, StockCodexPreflightCancelled, StockCodexStartFenceError,
 )
 
 
@@ -69,6 +70,19 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(str(caught.exception), "client_not_started")
             before_start.assert_not_called()
             spawn.assert_not_awaited()
+
+    async def test_start_fence_exception_is_known_prelaunch_and_never_spawns(self):
+        failure = sqlite3.OperationalError("database is locked")
+
+        def before_start():
+            raise failure
+
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock()) as spawn:
+            with self.assertRaises(StockCodexStartFenceError) as caught:
+                await StockCodexAdapter(THREAD, str(self.binary)).submit(
+                    REFERENCE, before_start=before_start)
+        self.assertIs(caught.exception.cause, failure)
+        spawn.assert_not_awaited()
 
     async def test_non_executable_binary_is_a_safe_no_start_without_spawn_attempt(self):
         with tempfile.TemporaryDirectory() as directory:

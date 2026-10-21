@@ -295,6 +295,16 @@ def _execute_stock_control(args, state_dir):
     }
     try:
         cloud = load_cloud_client(args.cloud_config, state_dir)
+        expected_mapping = None
+        if args.operation == "renew":
+            try:
+                expected_mapping = _read_native_mapping(state_dir, args.runtime_id)
+            except CloudError as error:
+                print(json.dumps({"assignment": None, "reason": error.code}))
+                return 2
+            if not _stock_renew_mapping_matches(expected_mapping, args, cloud):
+                print(json.dumps({"assignment": None, "reason": "stale"}))
+                return 2
         response = asyncio.run(cloud.assigned_stock(request_value))
     except CloudError as error:
         result = {"assignment": None, "reason": error.code}
@@ -325,7 +335,19 @@ def _execute_stock_control(args, state_dir):
         "leaseExpiresAt": _timestamp(response["leaseUntil"]) / 1000,
         "runtimeProfile": response["runtimeProfile"],
     }
-    stored, error_code = _store_native_mapping(state_dir, args.operation, mapping, None)
+    if args.operation == "renew":
+        if any(mapping.get(key) != expected_mapping.get(key) for key in (
+                "runtimeId", "principal", "agent", "nodeId", "nodeGeneration",
+                "runtimeGeneration", "attachmentGeneration", "consumerGeneration",
+                "runtimeProfile")):
+            print(json.dumps({"assignment": "cloud_committed_local_mapping_failed",
+                              "runtimeId": response["runtimeId"], "reason": "invalid_response"}))
+            return 2
+        stored, error_code = _renew_stock_attachment(
+            state_dir, expected_mapping, mapping["leaseExpiresAt"],
+        )
+    else:
+        stored, error_code = _store_native_mapping(state_dir, args.operation, mapping, None)
     if not stored:
         print(json.dumps({"assignment": "cloud_committed_local_mapping_failed",
                           "runtimeId": response["runtimeId"],
@@ -337,6 +359,57 @@ def _execute_stock_control(args, state_dir):
     print(json.dumps({"assignment": response["status"], "runtimeId": response["runtimeId"],
                       "runtimeProfile": response["runtimeProfile"], "localMapping": "stored"}))
     return 0
+
+
+def _stock_renew_mapping_matches(mapping, args, cloud):
+    """Require a live-ledger identity fence before asking Cloud to renew stock."""
+    return (
+        isinstance(mapping, dict)
+        and mapping.get("runtimeId") == args.runtime_id
+        and mapping.get("principal") == cloud.principal
+        and mapping.get("agent") == cloud.agent
+        and mapping.get("nodeId") == cloud.node_id
+        and mapping.get("nodeGeneration") == cloud.node_generation
+        and mapping.get("runtimeGeneration") == args.expected_runtime_generation
+        and mapping.get("attachmentGeneration") == args.expected_attachment_generation
+        and mapping.get("consumerGeneration") == args.expected_attachment_generation
+        and mapping.get("runtimeProfile") == {
+            "profile": "assigned_stock_client", "client": "codex",
+            "conversationId": args.conversation_id,
+        }
+    )
+
+
+def _renew_stock_attachment(state_dir, expected_mapping, lease_expires_at):
+    """Persist one exact stock renewal through the existing single writer."""
+    command = {
+        "command": "renew-stock-attachment", "expectedMapping": expected_mapping,
+        "leaseExpiresAt": lease_expires_at,
+    }
+
+    def renew_directly():
+        with Store(state_dir) as store:
+            renewed = store.renew_stock_attachment(expected_mapping, lease_expires_at)
+        return {"renewed": renewed}
+
+    socket_path = state_dir / "control.sock"
+    try:
+        if not (socket_path.exists() or socket_path.is_symlink()):
+            result = renew_directly()
+        else:
+            try:
+                result = asyncio.run(request(state_dir, command))
+            except (ConnectionRefusedError, FileNotFoundError):
+                result = renew_directly()
+    except StoreError as error:
+        return False, error.code
+    except (OSError, ValueError, TimeoutError):
+        return False, "local_operation_unavailable"
+    if result == {"renewed": True}:
+        return True, None
+    if result == {"renewed": False}:
+        return False, "stale"
+    return False, _store_response_error(result)
 
 
 def _execute_enrollment(args, state_dir, parser):

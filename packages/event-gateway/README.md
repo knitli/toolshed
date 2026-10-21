@@ -285,7 +285,7 @@ presence/authority seams are implemented.
 ## Contract and validation
 
 `contracts/event-v1/manifest.json` pins the canonical OS schema, semantic
-reference, and fixture bytes at `7b63bee97395a70e05ffb08ee214e8351f6dda06`.
+reference, and fixture bytes at `9503b8e2a99fbe099a4b90cb576a17dcf4b786aa`.
 The fixture embeds the canonical 45 semantic verdicts: 30 raw-parser, six
 delivery-digest and nine ACK-binding cases. Both runtimes execute these cases;
 normal Python tests require the embedded corpus, including optimized-mode

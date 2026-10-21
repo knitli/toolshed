@@ -417,7 +417,10 @@ class Gateway:
     # Keep the durable fence, launch and ambiguous-outcome handling in one reviewed sequence.
     async def _dispatch_stock_locked(self, delivery_id, envelope):  # noqa: MC0001
         """Claim and queue one opaque reference through the assigned stock CLI."""
-        from .stock_codex import StockCodexAdapter, StockCodexError, StockCodexPreflightCancelled
+        from .stock_codex import (
+            StockCodexAdapter, StockCodexError, StockCodexPreflightCancelled,
+            StockCodexStartFenceError,
+        )
         from .protocol import ProtocolError, validate_runtime_profile
 
         row = self._row(delivery_id)
@@ -473,6 +476,26 @@ class Gateway:
             except StoreError:
                 pass
             raise
+        except StockCodexStartFenceError as exc:
+            if isinstance(exc.cause, _Retire):
+                return await self._retire_local(delivery_id, exc.cause.reason)
+            if isinstance(exc.cause, StoreError):
+                return await self._retire_local(delivery_id, "admission_fenced")
+            try:
+                attempt = self.store.current_attempt(delivery_id)
+            except Exception:
+                return {"deliveryId": delivery_id, "status": "unknown",
+                        "reason": "client_start_fence_uncertain"}
+            if attempt and attempt["state"] == "admitted":
+                return await self._retire_local(delivery_id, "client_start_fence_failed")
+            # The SQLite commit may have succeeded before reporting an error. Keep
+            # submitting fenced because local no-start settlement is only valid
+            # from admitted, and never launch after a failed fence.
+            try:
+                return self._row(delivery_id, "client_start_fence_uncertain")
+            except Exception:
+                return {"deliveryId": delivery_id, "status": "unknown",
+                        "reason": "client_start_fence_uncertain"}
         except _Retire as retire:
             return await self._retire_local(delivery_id, retire.reason)
         except StoreError:

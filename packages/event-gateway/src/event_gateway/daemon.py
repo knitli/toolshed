@@ -60,6 +60,13 @@ def _execute_control_command(store, request_value, dispatch=None):
         stored = store.put_attachment(request_value["mapping"])
         return {"stored": True, "runtimeId": stored["runtimeId"]}
     if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "expectedMapping", "leaseExpiresAt"}
+            and request_value["command"] == "renew-stock-attachment"):
+        renewed = store.renew_stock_attachment(
+            request_value["expectedMapping"], request_value["leaseExpiresAt"],
+        )
+        return {"renewed": renewed}
+    if (isinstance(request_value, dict)
             and set(request_value) == {"command", "mapping", "transfer"}
             and request_value["command"] == "transfer-attachment"):
         stored = store.put_attachment(request_value["mapping"], transfer=request_value["transfer"])

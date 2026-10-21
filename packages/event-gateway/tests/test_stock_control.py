@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import uuid
@@ -12,9 +13,10 @@ from contextlib import redirect_stdout
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from event_gateway import cli
-from event_gateway.cloud import CloudClient, CloudError, Credentials
+from event_gateway import cli, daemon
+from event_gateway.cloud import CloudClient, CloudError, Credentials, _iso
 from event_gateway.protocol import derive_delivery_id
+from event_gateway.store import Store
 
 
 RUNTIME = "12345678-1234-4234-8234-123456789abc"
@@ -35,6 +37,159 @@ def response(status="attached", **changes):
 
 
 class StockControlTests(unittest.IsolatedAsyncioTestCase):
+    def test_expired_exact_stock_mapping_renews_via_direct_and_daemon_store(self):
+        for daemon_mode in (False, True):
+            with self.subTest(daemon_mode=daemon_mode), tempfile.TemporaryDirectory() as temp:
+                state = Path(temp).resolve() / "state"
+                clock = [time.time()]
+                expected = {
+                    "runtimeId": RUNTIME, "principal": "owner@example.com", "agent": "codex",
+                    "nodeId": NODE, "nodeGeneration": 2, "runtimeGeneration": 1,
+                    "attachmentGeneration": 1, "consumerGeneration": 1,
+                    "leaseExpiresAt": clock[0] + 5, "runtimeProfile": PROFILE,
+                }
+                owner_store = Store(state, clock=lambda: clock[0])
+                owner_store.put_attachment(expected)
+                clock[0] += 6
+                if not daemon_mode:
+                    owner_store.close()
+
+                class FakeCloud:
+                    principal, agent = "owner@example.com", "codex"
+                    node_id, node_generation = NODE, 2
+
+                    async def assigned_stock(self, request):
+                        self.request = request
+                        return response("renewed", leaseUntil=_iso(clock[0] + 120))
+
+                cloud = FakeCloud()
+                if daemon_mode:
+                    # The mocked control transport invokes the actual single-writer handler.
+                    daemon_store = owner_store
+                    (state / "control.sock").touch()
+
+                    async def control(_state, value):
+                        return daemon._execute_control_command(daemon_store, value)
+
+                    request_patch = patch.object(cli, "request", side_effect=control)
+                else:
+                    request_patch = patch.object(cli, "request")
+
+                args = type("Args", (), {
+                    "operation": "renew", "runtime_id": RUNTIME,
+                    "conversation_id": CONVERSATION, "cloud_config": Path("cloud.json"),
+                    "expected_runtime_generation": 1, "expected_attachment_generation": 1,
+                })()
+                output = io.StringIO()
+                try:
+                    with patch.object(cli, "load_cloud_client", return_value=cloud), \
+                            patch.object(cli, "Store", side_effect=lambda path: Store(
+                                path, clock=lambda: clock[0])), request_patch, \
+                            redirect_stdout(output):
+                        self.assertEqual(cli._execute_stock_control(args, state), 0)
+                    if daemon_mode:
+                        stored = owner_store.get_attachment(RUNTIME)
+                    else:
+                        with Store(state, clock=lambda: clock[0]) as store:
+                            stored = store.get_attachment(RUNTIME)
+                    self.assertEqual(
+                        {key: value for key, value in stored.items() if key != "leaseExpiresAt"},
+                        {key: value for key, value in expected.items() if key != "leaseExpiresAt"},
+                    )
+                    self.assertGreater(stored["leaseExpiresAt"], clock[0])
+                    self.assertEqual(cloud.request["expectedRuntimeGeneration"], 1)
+                    self.assertEqual(json.loads(output.getvalue())["localMapping"], "stored")
+                finally:
+                    if owner_store.db is not None:
+                        owner_store.close()
+
+    def test_stock_renewal_mismatch_and_missing_mapping_fail_before_cloud(self):
+        changes = (
+            {"runtimeProfile": {**PROFILE, "conversationId": RUNTIME}},
+            {"runtimeGeneration": 2}, {"attachmentGeneration": 2, "consumerGeneration": 2},
+            {"nodeId": "42345678-1234-4234-8234-123456789abc"},
+            {"nodeGeneration": 3}, {"principal": "other@example.com"}, {"agent": "other"},
+        )
+        for change in (*changes, None):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temp:
+                state = Path(temp).resolve() / "state"
+                now = [time.time()]
+                cloud_calls = []
+                mapping = {
+                    "runtimeId": RUNTIME, "principal": "owner@example.com", "agent": "codex",
+                    "nodeId": NODE, "nodeGeneration": 2, "runtimeGeneration": 1,
+                    "attachmentGeneration": 1, "consumerGeneration": 1,
+                    "leaseExpiresAt": now[0] + 100, "runtimeProfile": PROFILE,
+                }
+                if change is not None:
+                    with Store(state, clock=lambda: now[0]) as store:
+                        store.put_attachment({**mapping, **change})
+
+                class FakeCloud:
+                    principal, agent = "owner@example.com", "codex"
+                    node_id, node_generation = NODE, 2
+
+                    async def assigned_stock(self, _request):
+                        cloud_calls.append(True)
+                        return response("renewed", leaseUntil=_iso(now[0] + 200))
+
+                args = type("Args", (), {
+                    "operation": "renew", "runtime_id": RUNTIME,
+                    "conversation_id": CONVERSATION, "cloud_config": Path("cloud.json"),
+                    "expected_runtime_generation": 1, "expected_attachment_generation": 1,
+                })()
+                output = io.StringIO()
+                with patch.object(cli, "load_cloud_client", return_value=FakeCloud()), \
+                        patch.object(cli, "Store", side_effect=lambda path: Store(
+                            path, clock=lambda: now[0])), redirect_stdout(output):
+                    self.assertEqual(cli._execute_stock_control(args, state), 2)
+                self.assertEqual(cloud_calls, [])
+                self.assertEqual(json.loads(output.getvalue())["reason"], "stale")
+
+    def test_stock_renewal_cas_preserves_concurrent_reassignment(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+            now = [time.time()]
+            expected = {
+                "runtimeId": RUNTIME, "principal": "owner@example.com", "agent": "codex",
+                "nodeId": NODE, "nodeGeneration": 2, "runtimeGeneration": 1,
+                "attachmentGeneration": 1, "consumerGeneration": 1,
+                "leaseExpiresAt": now[0] + 100, "runtimeProfile": PROFILE,
+            }
+            replacement = {
+                **expected, "runtimeGeneration": 2, "attachmentGeneration": 2,
+                "consumerGeneration": 2,
+                "runtimeProfile": {**PROFILE, "conversationId": "42345678-1234-4234-8234-123456789abc"},
+            }
+            with Store(state, clock=lambda: now[0]) as store:
+                store.put_attachment(expected)
+
+            class FakeCloud:
+                principal, agent = "owner@example.com", "codex"
+                node_id, node_generation = NODE, 2
+
+                async def assigned_stock(self, _request):
+                    with Store(state, clock=lambda: now[0]) as store:
+                        store.put_attachment(replacement)
+                    return response("renewed", leaseUntil=_iso(now[0] + 200))
+
+            args = type("Args", (), {
+                "operation": "renew", "runtime_id": RUNTIME,
+                "conversation_id": CONVERSATION, "cloud_config": Path("cloud.json"),
+                "expected_runtime_generation": 1, "expected_attachment_generation": 1,
+            })()
+            output = io.StringIO()
+            with patch.object(cli, "load_cloud_client", return_value=FakeCloud()), \
+                    patch.object(cli, "Store", side_effect=lambda path: Store(
+                        path, clock=lambda: now[0])), redirect_stdout(output):
+                self.assertEqual(cli._execute_stock_control(args, state), 2)
+
+            with Store(state, clock=lambda: now[0]) as store:
+                self.assertEqual(store.get_attachment(RUNTIME), replacement)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["assignment"], "cloud_committed_local_mapping_failed")
+            self.assertEqual(result["reason"], "stale")
+
     async def test_assignment_matches_shared_contract_vectors(self):
         fixture_path = Path(__file__).resolve().parents[1] / "contracts/event-control-v1/fixtures.json"
         vectors = json.loads(fixture_path.read_text())["assignedStock"]

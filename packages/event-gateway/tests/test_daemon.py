@@ -48,6 +48,34 @@ async def running_daemon(state_dir):
 
 
 class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stock_renew_control_uses_exact_cas_for_expired_local_record(self):
+        now = [100]
+        mapping = {
+            "runtimeId": str(uuid.uuid4()), "principal": "owner@example.com", "agent": "codex",
+            "nodeId": str(uuid.uuid4()), "nodeGeneration": 2, "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "consumerGeneration": 7,
+            "leaseExpiresAt": 101,
+            "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                               "conversationId": str(uuid.uuid4())},
+        }
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory:
+            store = Store(directory, clock=lambda: now[0])
+            try:
+                store.put_attachment(mapping)
+                now[0] = 102
+                command = {
+                    "command": "renew-stock-attachment", "expectedMapping": mapping,
+                    "leaseExpiresAt": 110,
+                }
+                self.assertEqual(daemon._execute_control_command(store, command), {"renewed": True})
+                renewed = store.get_attachment(mapping["runtimeId"])
+                self.assertEqual(renewed, {**mapping, "leaseExpiresAt": 110})
+                self.assertEqual(daemon._execute_control_command(
+                    store, {**command, "leaseExpiresAt": 120}), {"renewed": False})
+                self.assertEqual(store.get_attachment(mapping["runtimeId"]), renewed)
+            finally:
+                store.close()
+
     async def test_stock_renewal_started_live_can_commit_response_after_old_deadline(self):
         mapping = {
             "runtimeId": str(uuid.uuid4()), "principal": "owner@example.com", "agent": "codex",
