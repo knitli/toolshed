@@ -41,9 +41,11 @@ workspace packages to the supplied checkout's source. Supply explicit local
 paths; no dependency install or provider access is performed by the test.
 
 `tests/fixtures/messaging-workerd-inputs.json` pins the exact approved input set and
-SHA-256 hashes from cloud `99655360630ca0e3f222d1e73d841aaf456378a7` with upstream
-`949ee3cfa79121919cb8dced13971c6bec857df0`. Paths are relative to the cloud source,
-fixture directory or dependency `.pnpm` directory, allowing checkout relocation.
+SHA-256 hashes from merged Cloud source commit
+`9503b8e2a99fbe099a4b90cb576a17dcf4b786aa` with the
+`apps/os/cloudflare-os` gitlink at `22daf8d01f701da90d3d68f686883288802ad420`.
+Paths are relative to the cloud source, fixture directory or dependency `.pnpm`
+directory, allowing checkout relocation.
 A pinned whitespace-minified bundle digest additionally binds the bytes actually
 executed, including RPC validation plugin output, closing the source-reread race.
 Both checks run before Miniflare construction. Updating source, dependencies or
@@ -63,6 +65,26 @@ PYTHONPATH=packages/event-gateway/src \
 
 The tests skip unless all three paths are explicitly configured. A skipped default
 suite is not evidence for this interoperability gate. No CI activation is added.
+
+## Source-admission 9503 qualification
+
+The final source-bound qualification ran on Gateway base
+`37abd1616a98b811757025f09a1d87902b2fabab` against Cloud source
+`9503b8e2a99fbe099a4b90cb576a17dcf4b786aa` and `cloudflare-os` gitlink
+`22daf8d01f701da90d3d68f686883288802ad420`. The workerd profile passed all 11
+tests in 17.601 seconds with no skips. The exact 353-input manifest (134 Cloud,
+218 dependencies, one fixture worker) and compiled bundle SHA-256
+`ae2780852f959675a19a53d04f8b6a05cbf9915a8fa97b2e359c7f39524b81d4` are
+recorded in the [final qualification receipt](messaging-v2-source-admission-9503-final-qualification.json).
+That receipt records all six profile results, commands, runtime and executable
+source hashes, prior failed attempts and cleanup evidence.
+
+The initial and corrected compile-preparation receipts remain unchanged and
+describe preparation only; the corrected record is
+[messaging-v2-source-admission-9503-reduced-env-preparation.json](messaging-v2-source-admission-9503-reduced-env-preparation.json).
+The Oct 17 crash and alarm receipts remain historical evidence for their earlier
+Cloud freeze. This local qualification does not claim later Gateway heads or
+production runtime behavior.
 
 ## Qualification boundary
 

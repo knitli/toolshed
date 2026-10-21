@@ -17,6 +17,15 @@ assertions and successful execution result. Temporary fixture directories were
 cleaned; raw per-case PID and storage-identity values were asserted during the
 run but were not retained as separate artifacts. No provider or native client ran.
 
+The final source-bound abrupt-crash profile passed on Gateway base
+`37abd1616a98b811757025f09a1d87902b2fabab` against Cloud source
+`9503b8e2a99fbe099a4b90cb576a17dcf4b786aa`: 7 tests, including 12 crash-matrix
+subcases, in 28.273 seconds with no skips. The
+[final qualification receipt](messaging-v2-source-admission-9503-final-qualification.json)
+records its exact input, bundle and executable-source hashes, command, log and
+cleanup evidence. Earlier crash receipts above remain historical evidence for
+their recorded source freeze.
+
 The [existing restart proof](messaging-v2-process-restart.md) remains orderly
 Miniflare teardown/recreation, including Miniflare's internal SIGKILL. This new
 fixture exercised unexpected in-flight workerd death and automatic replacement;

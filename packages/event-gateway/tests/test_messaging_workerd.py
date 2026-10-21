@@ -470,6 +470,7 @@ class FixtureMutationTests(unittest.IsolatedAsyncioTestCase):
                 'const ed25519 = async () => {',
                 "throw new Error('worker execution reached');\nconst ed25519 = async () => {")
             shutil.copy(BROKER.with_name('messaging-workerd-worker.ts'), scratch)
+            shutil.copy(BROKER.with_name('messaging-autonomous-observer.mjs'), scratch)
             manifest_path = broker.with_name('messaging-workerd-inputs.json')
             manifest = json.loads(BROKER.with_name('messaging-workerd-inputs.json').read_text())
             cloud = scratch / 'cloud'

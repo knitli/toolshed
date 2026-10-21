@@ -1,0 +1,372 @@
+{
+  "status": "FINAL_QUALIFICATION_PASS",
+  "qualificationDate": "2026-10-21",
+  "gatewayBaseCommit": "37abd1616a98b811757025f09a1d87902b2fabab",
+  "gatewayBaseCommitMeaning": "Gateway repository base for this qualification, plus the recorded local fixture/helper changes. It does not qualify any later Gateway commit or production/runtime revision.",
+  "cloudSource": {
+    "repositoryCommit": "9503b8e2a99fbe099a4b90cb576a17dcf4b786aa",
+    "repositoryPath": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021",
+    "cloudSourcePath": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os",
+    "cloudflareOsGitlink": "22daf8d01f701da90d3d68f686883288802ad420",
+    "cloudflareOsPath": "apps/os/cloudflare-os",
+    "inputManifest": "packages/event-gateway/tests/fixtures/messaging-workerd-inputs.json",
+    "inputManifestSha256": "04a6d134f4c26851900e61bcf0bc698fab2af6b948924d368c2c78851845a83c",
+    "inputCount": 353,
+    "inputCountsByPrefix": {
+      "cloud": 134,
+      "dependency": 218,
+      "fixture": 1
+    },
+    "compiledBundleSha256": "ae2780852f959675a19a53d04f8b6a05cbf9915a8fa97b2e359c7f39524b81d4"
+  },
+  "runtime": {
+    "nodeVersion": "24.21.0",
+    "nodePath": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+    "esbuildVersion": "0.28.1",
+    "rpcValidationPlugin": "capnweb-validate 0.3.0, using cloudflare-os patch from gitlink above",
+    "miniflareVersion": "5.20261001.0-alpha",
+    "miniflareEntry": "/opt/coder/knitli-site/apps/os/node_modules/.pnpm/miniflare@5.20261001.0-alpha_@types+node@26.1.0/node_modules/miniflare/dist/src/index.js",
+    "miniflareEntrySha256": "d6c68c92bc33371e4baa88a1c6da0042b4fbf8c872a297b84e729556f49f9632",
+    "workerdVersion": "1.20261001.1",
+    "workerdBinary": "/opt/coder/knitli-site/apps/os/node_modules/.pnpm/@cloudflare+workerd-darwin-arm64@1.20261001.1/node_modules/@cloudflare/workerd-darwin-arm64/bin/workerd",
+    "workerdSha256": "3fd4b350cebf887265a20222fc530b21d843791266476199d16968600fa01922",
+    "dependencyCache": "Temporary per-workspace node_modules symlinks to /opt/coder/knitli-site/apps/os were present for the six profiles and the compile preparation, then the 18 recorded symlinks were removed after final qualification; no installers or package installs ran.",
+    "nodeBinarySha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+    "capnwebValidatePatchSha256": "4bb77ca1f93b152c4f276dd5769c693a64917ed61743b9d4943358fe6a8f7536"
+  },
+  "executableSourceFreeze": {
+    "packages/event-gateway/tests/test_messaging_workerd.py": "887e0a4b56c72a41cc134ad4616faa4e51808566d9af493870f135211543ffe6",
+    "packages/event-gateway/tests/test_messaging_process_restart.py": "d1f89344a34681ed4c4c298fa0b7ef26539cbb624da98f82e5ae21a4cf2033d3",
+    "packages/event-gateway/tests/test_messaging_abrupt_cloud_crash.py": "d82a901181b8bfebb1d6796683e1bb7fb5ba7c860921a14e89dbf6a2f63214d4",
+    "packages/event-gateway/tests/test_messaging_autonomous_alarm.py": "ecf9e7d724d9f5039d65d081ec34e5b1bb8bf2b6654ffa83e3ab1fc3202283d8",
+    "packages/event-gateway/tests/fixtures/messaging_process_child.py": "9d4394717ddaa7f340a06c465b4f487abc681ac7717fed7c82d3fe4eee8e2eb5",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-broker.mjs": "a4ce61a829b0685804862859992e26b9d01f550e8af29aea3572076e4bb3690d",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-worker.ts": "2920aac75e7fc192cc557debd42c404ca228c41affb910f52e65d9cc4eb9681a",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-crash.mjs": "e803adf37ad2fdbba8e2857e816acde94fd54ce15a3c210af45f88b8dad02d41",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-crash.test.mjs": "215f447baf2a0e1b411d4af7e120defcd0fcc34af33a58f224fdb27f87226914",
+    "packages/event-gateway/tests/fixtures/messaging-autonomous-observer.mjs": "cd98791a63608ca42554e8c4db7e44bf6614cd91350cce14890c597242bf74ca",
+    "packages/event-gateway/tests/fixtures/messaging-autonomous-observer.test.mjs": "e87c25c86c12a5efbd18ccde1f6ce1c0de41aac0a5ef1ea08d049361bebc184e",
+    "packages/event-gateway/tests/fixtures/messaging-autonomous-binding.test.mjs": "fd86ef532dd15650951bb81d7359318b2719477caaa3cdcfebb68f2543c0a4a8",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-runtime.json": "d8a69221828d38a5c7140fbbc68ee3d837fb046eff86c80290ecc81857c776ac"
+  },
+  "profileCommandBase": {
+    "environment": "env -i with only pinned FIXTURE_NODE, FIXTURE_CLOUD_SOURCE, FIXTURE_MINIFLARE, profile gate(s) where applicable, PYTHONDONTWRITEBYTECODE=1, PYTHONPATH=packages/event-gateway/src:packages/event-gateway/tests, PATH=/usr/bin:/bin, and a unique HOME under /private/tmp",
+    "python": "/opt/coder/toolshed/packages/event-gateway/.venv/bin/python",
+    "commandSuffix": "-m unittest discover -s packages/event-gateway/tests -p <test module> -v",
+    "stdoutPolicy": "stdout and stderr redirected to the profile-specific path; shell exit code captured as profile result",
+    "nodePath": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+    "cloudSourcePath": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os",
+    "miniflarePath": "/opt/coder/knitli-site/apps/os/node_modules/.pnpm/miniflare@5.20261001.0-alpha_@types+node@26.1.0/node_modules/miniflare"
+  },
+  "profiles": [
+    {
+      "profile": "workerd",
+      "status": "PASS",
+      "exitCode": 0,
+      "testsRun": 11,
+      "skipped": 0,
+      "durationSeconds": 17.601,
+      "testPattern": "packages/event-gateway/tests/test_messaging_workerd.py",
+      "executionGates": [],
+      "command": "/opt/coder/toolshed/packages/event-gateway/.venv/bin/python -m unittest discover -s packages/event-gateway/tests -p test_messaging_workerd.py -v",
+      "stdout": "/private/tmp/event-9503-final37abd-workerd.stdout",
+      "stdoutSha256": "2ffa68a27bfce0f70bbfe7729bd88fcd2c4240c349a592b35ec099aedc9790db",
+      "executedCommand": "env -i FIXTURE_NODE=/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node FIXTURE_CLOUD_SOURCE=/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os FIXTURE_MINIFLARE=/opt/coder/knitli-site/apps/os/node_modules/.pnpm/miniflare@5.20261001.0-alpha_@types+node@26.1.0/node_modules/miniflare PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/event-gateway/src:packages/event-gateway/tests PATH=/usr/bin:/bin HOME=<unique /private/tmp temporary directory> /opt/coder/toolshed/packages/event-gateway/.venv/bin/python -m unittest discover -s packages/event-gateway/tests -p test_messaging_workerd.py -v"
+    },
+    {
+      "profile": "process-restart",
+      "status": "PASS",
+      "exitCode": 0,
+      "testsRun": 8,
+      "skipped": 0,
+      "durationSeconds": 19.42,
+      "testPattern": "packages/event-gateway/tests/test_messaging_process_restart.py",
+      "executionGates": [],
+      "command": "/opt/coder/toolshed/packages/event-gateway/.venv/bin/python -m unittest discover -s packages/event-gateway/tests -p test_messaging_process_restart.py -v",
+      "stdout": "/private/tmp/event-9503-final37abd-process-restart.stdout",
+      "stdoutSha256": "8a6a465df52172ee1da5549a6a1f95d928190954f3f88a64f88ce5e3b4a59180",
+      "executedCommand": "env -i FIXTURE_NODE=/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node FIXTURE_CLOUD_SOURCE=/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os FIXTURE_MINIFLARE=/opt/coder/knitli-site/apps/os/node_modules/.pnpm/miniflare@5.20261001.0-alpha_@types+node@26.1.0/node_modules/miniflare PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/event-gateway/src:packages/event-gateway/tests PATH=/usr/bin:/bin HOME=<unique /private/tmp temporary directory> /opt/coder/toolshed/packages/event-gateway/.venv/bin/python -m unittest discover -s packages/event-gateway/tests -p test_messaging_process_restart.py -v"
+    },
+    {
+      "profile": "abrupt-crash",
+      "status": "PASS",
+      "exitCode": 0,
+      "testsRun": 7,
+      "skipped": 0,
+      "durationSeconds": 28.273,
+      "testPattern": "packages/event-gateway/tests/test_messaging_abrupt_cloud_crash.py",
+      "executionGates": [
+        "FIXTURE_ABRUPT_CLOUD_CRASH=reviewed"
+      ],
+      "command": "/opt/coder/toolshed/packages/event-gateway/.venv/bin/python -m unittest discover -s packages/event-gateway/tests -p test_messaging_abrupt_cloud_crash.py -v",
+      "stdout": "/private/tmp/event-9503-final37abd-abrupt-crash.stdout",
+      "stdoutSha256": "0297759500e1df5232a15cfa369f580ff6fa357af56fcc12bcff15a0c056155b",
+      "matrixSubcases": 12,
+      "executedCommand": "env -i FIXTURE_NODE=/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node FIXTURE_CLOUD_SOURCE=/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os FIXTURE_MINIFLARE=/opt/coder/knitli-site/apps/os/node_modules/.pnpm/miniflare@5.20261001.0-alpha_@types+node@26.1.0/node_modules/miniflare FIXTURE_ABRUPT_CLOUD_CRASH=reviewed PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/event-gateway/src:packages/event-gateway/tests PATH=/usr/bin:/bin HOME=<unique /private/tmp temporary directory> /opt/coder/toolshed/packages/event-gateway/.venv/bin/python -m unittest discover -s packages/event-gateway/tests -p test_messaging_abrupt_cloud_crash.py -v"
+    },
+    {
+      "profile": "autonomous-alarm-positive",
+      "status": "PASS",
+      "exitCode": 0,
+      "testsRun": 6,
+      "skipped": 0,
+      "durationSeconds": 11.936,
+      "testPattern": "packages/event-gateway/tests/test_messaging_autonomous_alarm.py",
+      "executionGates": [
+        "FIXTURE_ABRUPT_CLOUD_CRASH=reviewed",
+        "FIXTURE_AUTONOMOUS_ALARM=positive"
+      ],
+      "command": "/opt/coder/toolshed/packages/event-gateway/.venv/bin/python -m unittest discover -s packages/event-gateway/tests -p test_messaging_autonomous_alarm.py -v",
+      "stdout": "/private/tmp/event-9503-final37abd-autonomous-alarm-positive.stdout",
+      "stdoutSha256": "284e095603b697254c1873f61dbc06eac877f4dc348f5ee7ec0f013962d9d8d0",
+      "executedCommand": "env -i FIXTURE_NODE=/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node FIXTURE_CLOUD_SOURCE=/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os FIXTURE_MINIFLARE=/opt/coder/knitli-site/apps/os/node_modules/.pnpm/miniflare@5.20261001.0-alpha_@types+node@26.1.0/node_modules/miniflare FIXTURE_ABRUPT_CLOUD_CRASH=reviewed FIXTURE_AUTONOMOUS_ALARM=positive PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/event-gateway/src:packages/event-gateway/tests PATH=/usr/bin:/bin HOME=<unique /private/tmp temporary directory> /opt/coder/toolshed/packages/event-gateway/.venv/bin/python -m unittest discover -s packages/event-gateway/tests -p test_messaging_autonomous_alarm.py -v"
+    },
+    {
+      "profile": "autonomous-alarm-no-super",
+      "status": "PASS",
+      "exitCode": 0,
+      "testsRun": 6,
+      "skipped": 0,
+      "durationSeconds": 11.716,
+      "testPattern": "packages/event-gateway/tests/test_messaging_autonomous_alarm.py",
+      "executionGates": [
+        "FIXTURE_ABRUPT_CLOUD_CRASH=reviewed",
+        "FIXTURE_AUTONOMOUS_ALARM=no-super"
+      ],
+      "command": "/opt/coder/toolshed/packages/event-gateway/.venv/bin/python -m unittest discover -s packages/event-gateway/tests -p test_messaging_autonomous_alarm.py -v",
+      "stdout": "/private/tmp/event-9503-final37abd-autonomous-alarm-no-super.stdout",
+      "stdoutSha256": "122c52708b5a0c37bd9712dcd846a9503a2a2b9af65f30a1ff5fdcf042cce5de",
+      "executedCommand": "env -i FIXTURE_NODE=/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node FIXTURE_CLOUD_SOURCE=/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os FIXTURE_MINIFLARE=/opt/coder/knitli-site/apps/os/node_modules/.pnpm/miniflare@5.20261001.0-alpha_@types+node@26.1.0/node_modules/miniflare FIXTURE_ABRUPT_CLOUD_CRASH=reviewed FIXTURE_AUTONOMOUS_ALARM=no-super PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/event-gateway/src:packages/event-gateway/tests PATH=/usr/bin:/bin HOME=<unique /private/tmp temporary directory> /opt/coder/toolshed/packages/event-gateway/.venv/bin/python -m unittest discover -s packages/event-gateway/tests -p test_messaging_autonomous_alarm.py -v"
+    },
+    {
+      "profile": "autonomous-alarm-delete-alarm",
+      "status": "PASS",
+      "exitCode": 0,
+      "testsRun": 6,
+      "skipped": 0,
+      "durationSeconds": 26.614,
+      "testPattern": "packages/event-gateway/tests/test_messaging_autonomous_alarm.py",
+      "executionGates": [
+        "FIXTURE_ABRUPT_CLOUD_CRASH=reviewed",
+        "FIXTURE_AUTONOMOUS_ALARM=delete-alarm"
+      ],
+      "command": "/opt/coder/toolshed/packages/event-gateway/.venv/bin/python -m unittest discover -s packages/event-gateway/tests -p test_messaging_autonomous_alarm.py -v",
+      "stdout": "/private/tmp/event-9503-final37abd-autonomous-alarm-delete-alarm.stdout",
+      "stdoutSha256": "521d0539d2741f3b7107aa8fa1838744892e8270a6a449bac5b727dc002d5834",
+      "executedCommand": "env -i FIXTURE_NODE=/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node FIXTURE_CLOUD_SOURCE=/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os FIXTURE_MINIFLARE=/opt/coder/knitli-site/apps/os/node_modules/.pnpm/miniflare@5.20261001.0-alpha_@types+node@26.1.0/node_modules/miniflare FIXTURE_ABRUPT_CLOUD_CRASH=reviewed FIXTURE_AUTONOMOUS_ALARM=delete-alarm PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/event-gateway/src:packages/event-gateway/tests PATH=/usr/bin:/bin HOME=<unique /private/tmp temporary directory> /opt/coder/toolshed/packages/event-gateway/.venv/bin/python -m unittest discover -s packages/event-gateway/tests -p test_messaging_autonomous_alarm.py -v"
+    }
+  ],
+  "executionBoundary": {
+    "network": "fixture binds loopback only; these six local profiles used no real clients, providers, deployment or production messaging",
+    "outboundProviderCalls": 0,
+    "productionChanges": "none; fixture helpers only copy the already-manifested observer module into isolated mutation workspaces",
+    "activation": "no production activation or CI wiring",
+    "cleanup": "all profile commands exited 0; post-run process listing found no matching broker/workerd/test processes; temporary HOME directories were removed"
+  },
+  "cacheProvenance": {
+    "cacheRoot": "/opt/coder/knitli-site/apps/os",
+    "installersRun": false,
+    "cacheLockSha256": "4ff3fc3bc082b931147ac1c2ec1e4f278798678e05286b61ce82743a7099a5a9",
+    "sourceLockSha256": "f02a9c5876545a538445f8740fb69df6473bf8f356ef30ebedf6e098455df981",
+    "cacheDifference": "Only three added lines in the source lockfile: packages/event-runtime gains authority with specifier workspace:* and version link:../authority. The matching cached event-runtime package.json is missing that new workspace dependency; all other workspace package.json files and the root package.json/pnpm-workspace.yaml match byte-for-byte.",
+    "temporaryWorkspaceSymlinks": [
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/admin-ui/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/admin-ui/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/agent-client/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/agent-client/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/ai-inference/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/ai-inference/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/authority/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/authority/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/catalog-agent/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/catalog-agent/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/custom-gatekeeper/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/custom-gatekeeper/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/error-reporter/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/error-reporter/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/event-runtime/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/event-runtime/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/execution-runtime/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/execution-runtime/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/gatekeeper-execution/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/gatekeeper-execution/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/gatekeeper-memory/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/gatekeeper-memory/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/gatekeeper-messaging/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/gatekeeper-messaging/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/gatekeeper-messaging-egress/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/gatekeeper-messaging-egress/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/gatekeeper-openapi/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/gatekeeper-openapi/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/openapi-operator/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/openapi-operator/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/presence-ui/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/presence-ui/node_modules",
+        "removedAfterFinalProfiles": true
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/setup/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/setup/node_modules",
+        "removedAfterFinalProfiles": true
+      }
+    ],
+    "removedCount": 18,
+    "verification": "Each of the 18 paths was verified as a symlink resolving to its exact recorded cache target before unlink. Afterwards all 18 paths were absent and `git status --short --untracked-files=all` in the Cloud source worktree was empty."
+  },
+  "failureHistory": {
+    "redAttempts": [
+      {
+        "attempt": "initial-workerd",
+        "gatewayBaseCommit": "7bf0fd362b483120844e6852eaef2dab64d99e10",
+        "stdout": "/private/tmp/event-9503-workerd-profile.stdout",
+        "stdoutSha256": "1c6a255c13581d6910097e3f2c87e066afffd12dbac3fcc0e1a55d4895687654",
+        "testsRun": 11,
+        "durationSeconds": 8.442,
+        "result": "FAILED (failures=12)",
+        "causeAndCorrection": "Node/esbuild could not resolve zod from source workspace because temporary package-cache workspace links were absent; cleanup also logged PermissionError for owned fixture groups. Corrected dependency-link provenance, then reran."
+      },
+      {
+        "attempt": "workerd-helper-red",
+        "gatewayBaseCommit": "7bf0fd362b483120844e6852eaef2dab64d99e10",
+        "stdout": "/private/tmp/event-9503-workerd-profile-qualified.stdout",
+        "stdoutSha256": "7e61ba145d7df6cb8504610c71420c356574db508c9539c0b166e12f60c202ac",
+        "testsRun": 11,
+        "durationSeconds": 11.653,
+        "result": "FAILED (failures=5)",
+        "causeAndCorrection": "Mutation helper copied broker and worker but omitted adjacent messaging-autonomous-observer.mjs, causing module-not-found and masking intended assertions. Added only the existing observer copy; rerun passed."
+      },
+      {
+        "attempt": "process-restart-helper-red",
+        "gatewayBaseCommit": "7bf0fd362b483120844e6852eaef2dab64d99e10",
+        "stdout": "/private/tmp/event-9503-process-restart-profile-qualified-v2.stdout",
+        "stdoutSha256": "d72d469664b1a6c5d6c23a7aa674f0eb0c6c4fc42008a3ceb7ed5833b0176c4e",
+        "testsRun": 8,
+        "durationSeconds": 16.629,
+        "result": "FAILED (failures=2)",
+        "causeAndCorrection": "Restart mutation helper omitted adjacent messaging-autonomous-observer.mjs, causing module-not-found; cleanup logged PermissionError. Added only the existing observer copy; rerun passed."
+      }
+    ],
+    "priorBaseSuccessfulRuns": [
+      {
+        "profile": "workerd",
+        "gatewayBaseCommit": "7bf0fd362b483120844e6852eaef2dab64d99e10",
+        "status": "PASS; prior-base historical evidence, not final qualification",
+        "testsRun": 11,
+        "skipped": 0,
+        "durationSeconds": 17.892,
+        "stdout": "/private/tmp/event-9503-workerd-profile-qualified-v2.stdout",
+        "stdoutSha256": "6886baccd0999b03ffa3720edf834c039f0d064dc3479938f3317d1de2d2323c"
+      },
+      {
+        "profile": "process-restart",
+        "gatewayBaseCommit": "7bf0fd362b483120844e6852eaef2dab64d99e10",
+        "status": "PASS; prior-base historical evidence, not final qualification",
+        "testsRun": 8,
+        "skipped": 0,
+        "durationSeconds": 19.131,
+        "stdout": "/private/tmp/event-9503-process-restart-profile-qualified-v3.stdout",
+        "stdoutSha256": "96e4a374f0890ca93e4ae40fa95bd25752a52d8a78aa2bc4583c672ce19bc7cb"
+      },
+      {
+        "profile": "abrupt-crash",
+        "gatewayBaseCommit": "7bf0fd362b483120844e6852eaef2dab64d99e10",
+        "status": "PASS; prior-base historical evidence, not final qualification",
+        "testsRun": 7,
+        "skipped": 0,
+        "durationSeconds": 25.642,
+        "stdout": "/private/tmp/event-9503-abrupt-crash-profile-qualified.stdout",
+        "stdoutSha256": "cd1e29bdfcc410313b768967e4394b8046935beb1026cf5b7fe4c84d43e65812"
+      },
+      {
+        "profile": "autonomous-alarm-positive",
+        "gatewayBaseCommit": "7bf0fd362b483120844e6852eaef2dab64d99e10",
+        "status": "PASS; prior-base historical evidence, not final qualification",
+        "testsRun": 6,
+        "skipped": 0,
+        "durationSeconds": 11.769,
+        "stdout": "/private/tmp/event-9503-autonomous-alarm-positive-qualified.stdout",
+        "stdoutSha256": "45e601dbc9c2ae97722b816d863d16088154214b88d3526667a254485a2beaf0"
+      },
+      {
+        "profile": "autonomous-alarm-no-super",
+        "gatewayBaseCommit": "7bf0fd362b483120844e6852eaef2dab64d99e10",
+        "status": "PASS; prior-base historical evidence, not final qualification",
+        "testsRun": 6,
+        "skipped": 0,
+        "durationSeconds": 12.728,
+        "stdout": "/private/tmp/event-9503-autonomous-alarm-no-super-qualified.stdout",
+        "stdoutSha256": "a8ba73a6b9129aa77fe461ad0a80980b60a2b3148da1360ff9e6b0197f02971d"
+      },
+      {
+        "profile": "autonomous-alarm-delete-alarm",
+        "gatewayBaseCommit": "7bf0fd362b483120844e6852eaef2dab64d99e10",
+        "status": "PASS; prior-base historical evidence, not final qualification",
+        "testsRun": 6,
+        "skipped": 0,
+        "durationSeconds": 27.378,
+        "stdout": "/private/tmp/event-9503-autonomous-alarm-delete-alarm-qualified.stdout",
+        "stdoutSha256": "6ea87a5008da95e429456ab511d647b2ae786ebe0cf82aa4f1c1755b3940b950"
+      }
+    ],
+    "historicalPreparationRecords": [
+      "messaging-v2-source-admission-9503-preparation.json",
+      "messaging-v2-source-admission-9503-reduced-env-preparation.json"
+    ],
+    "note": "Both preparation records remain unchanged and describe compile-only preparation. Prior-base successful profile results and red attempts are retained as history, not as the final 37abd qualification."
+  },
+  "qualificationLimits": [
+    "This is a source-bound local fixture qualification against Cloud source 9503 and the exact listed input/bundle/executable source hashes, run with Gateway base 37abd plus the recorded local fixture/helper changes.",
+    "It does not qualify a later Gateway head, production deployment, real client/provider, TLS, external egress, native execution/receipts, owner approval, active keys, settlement, ACKs, machine power-loss behavior, or runtime behavior outside these profiles."
+  ]
+}

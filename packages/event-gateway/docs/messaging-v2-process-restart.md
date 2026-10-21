@@ -6,6 +6,14 @@ against the same SQLite ledger. The original three barriers keep the reviewed Me
 across the two gateway processes. Additional cases also replace the workerd
 process against retained Durable Object storage before the Python restart.
 
+The final source-bound qualification ran on Gateway base
+`37abd1616a98b811757025f09a1d87902b2fabab` against Cloud source
+`9503b8e2a99fbe099a4b90cb576a17dcf4b786aa`; all 8 tests passed in 19.420
+seconds with no skips. The [final qualification receipt](messaging-v2-source-admission-9503-final-qualification.json)
+binds that run to the 353-input manifest, compiled bundle and executable source
+hashes. Earlier 335-input results remain historical evidence for the source
+revision recorded in their result artifact.
+
 The three deterministic barriers stop the child:
 
 - After its claim-intent transaction commits, before HTTP: restart retains the
