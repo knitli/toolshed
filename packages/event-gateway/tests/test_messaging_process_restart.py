@@ -286,7 +286,7 @@ class MessagingProcessRestartTests(unittest.TestCase):
                     source = source.replace(original, '')
                     expected = '/fixture/read returned 500:.*no such table'
                 broker.write_text(source)
-                for name in ('messaging-workerd-worker.ts', 'messaging-autonomous-observer.mjs',
+                for name in (*workerd_fixture.BROKER_COMPANION_FILES,
                              'messaging-workerd-inputs.json'):
                     shutil.copy(workerd_fixture.BROKER.with_name(name), broker.with_name(name))
                 with (patch.object(workerd_fixture, 'BROKER', broker),

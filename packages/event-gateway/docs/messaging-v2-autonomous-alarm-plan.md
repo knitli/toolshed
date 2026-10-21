@@ -1,10 +1,7 @@
 # Autonomous alarm proof: prepared execution plan
 
-Status: this document remains the execution plan; results are recorded in the
+Status: method and controls only; point-in-time results are recorded in the
 [final 9503 qualification receipt](messaging-v2-source-admission-9503-final-qualification.json).
-On Gateway base `37abd1616a98b811757025f09a1d87902b2fabab` and Cloud source
-`9503b8e2a99fbe099a4b90cb576a17dcf4b786aa`, positive, no-super and delete-alarm
-each passed all 6 tests with no skips in 11.936, 11.716 and 26.614 seconds.
 Scope: private local fixture, one after-reserve SIGKILL per fresh fixture, actual
 persisted workerd alarm, production coordinator alarm implementation. No native
 client, provider, deployment, production attachment, or external messaging.
