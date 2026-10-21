@@ -204,6 +204,7 @@ def acknowledgment_matches_delivery(envelope, acknowledgment):
             'nodeGeneration', 'runtimeGeneration', 'attachmentGeneration', 'consumerGeneration')
     return (
         all(acknowledgment.get(key) == envelope.get(key) for key in keys)
+        and ('runtimeProfile' not in envelope or acknowledgment.get('status') == 'command_accepted')
         and acknowledgment.get('runtimeProfile') == envelope.get('runtimeProfile')
         and acknowledgment.get('deliveredSourceStateVersion') == envelope.get('sourceStateVersion')
     )

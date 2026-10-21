@@ -47,6 +47,80 @@ async def running_daemon(state_dir):
 
 
 class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stock_renewals_do_not_wait_for_earlier_mapping_before_deadline(self):
+        first = {
+            "runtimeId": "00000000-0000-4000-8000-000000000001",
+            "principal": "owner@example.com", "agent": "codex",
+            "nodeId": str(uuid.uuid4()), "nodeGeneration": 2, "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": 200,
+            "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                               "conversationId": str(uuid.uuid4())},
+        }
+        second = {
+            **first,
+            "runtimeId": "00000000-0000-4000-8000-000000000002",
+            "leaseExpiresAt": 120,
+            "runtimeProfile": {**first["runtimeProfile"], "conversationId": str(uuid.uuid4())},
+        }
+        stop = asyncio.Event()
+        first_started, second_started = asyncio.Event(), asyncio.Event()
+        release_first, release_second = asyncio.Event(), asyncio.Event()
+
+        class FakeStore:
+            now = 100
+
+            def __init__(self):
+                self.renewed = []
+
+            def clock(self):
+                return self.now
+
+            @staticmethod
+            def list_attachments():
+                return [first, second]
+
+            def renew_stock_attachment(self, expected, lease):
+                self.renewed.append(expected["runtimeId"])
+                if len(self.renewed) == 2:
+                    stop.set()
+                return True
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = first["nodeId"], first["nodeGeneration"]
+
+            async def assigned_stock(self, request):
+                if request["runtimeId"] == first["runtimeId"]:
+                    first_started.set()
+                    await release_first.wait()
+                else:
+                    second_started.set()
+                    await release_second.wait()
+                return {"leaseUntil": _iso(store.clock() + 100)}
+
+        store = FakeStore()
+        worker = asyncio.create_task(daemon._stock_renewal_worker(store, FakeCloud(), stop))
+        try:
+            await asyncio.wait_for(first_started.wait(), 1)
+            try:
+                await asyncio.wait_for(second_started.wait(), 1)
+            except TimeoutError:
+                store.now = 121  # The later mapping expires behind the first RPC.
+                release_first.set()
+                self.fail("later mapping was delayed behind the first renewal")
+            store.now = 121  # Its RPC began live; allow its response to arrive after expiry.
+            release_second.set()
+            release_first.set()
+            await asyncio.wait_for(stop.wait(), 1)
+            await asyncio.wait_for(worker, 1)
+        finally:
+            release_first.set()
+            release_second.set()
+            stop.set()
+            await asyncio.gather(worker, return_exceptions=True)
+
+        self.assertEqual(set(store.renewed), {first["runtimeId"], second["runtimeId"]})
+
     async def test_stock_renewal_uses_only_current_assigned_mapping_and_stops(self):
         mapping = {
             "runtimeId": str(uuid.uuid4()), "principal": "owner@example.com", "agent": "codex",

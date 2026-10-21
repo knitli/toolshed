@@ -61,6 +61,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(acknowledgment_advances_current_watermark(envelope, ack, envelope['sourceStateVersion']))
         self.assertFalse(acknowledgment_advances_current_watermark(envelope, ack, 'replacement'))
         self.assertFalse(acknowledgment_matches_delivery(original, ack))
+        self.assertFalse(acknowledgment_matches_delivery(envelope, dict(ack, status='observed')))
         changed = dict(ack, runtimeProfile=dict(profile, conversationId='22345678-1234-4234-8234-123456789abc'))
         self.assertFalse(acknowledgment_matches_delivery(envelope, changed))
         self.assertFalse(acknowledgment_advances_current_watermark(envelope, dict(ack, status='observed'), envelope['sourceStateVersion']))

@@ -94,6 +94,42 @@ class StockControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("x-event-node-proof", sent[0]["headers"])
         self.assertEqual(json.loads(sent[0]["body"])["conversationId"], CONVERSATION)
 
+    async def test_assignment_preflights_attach_generation_ceiling_but_allows_renew(self):
+        safe = 9007199254740991
+        sent = []
+
+        async def send(**request):
+            sent.append(request)
+            submitted = json.loads(request["body"])
+            if submitted["operation"] == "renew":
+                body = response("renewed", runtimeGeneration=safe, attachmentGeneration=safe)
+            else:
+                body = response()
+            return 200, {"content-type": "application/json"}, json.dumps(body).encode()
+
+        client = CloudClient(
+            origin="https://events.example.com", principal="owner@example.com", agent="codex",
+            node_id=NODE, node_generation=2, private_key=Ed25519PrivateKey.generate(),
+            credentials=lambda: asyncio.sleep(0, result=Credentials("access", "agent")),
+            send=send, clock=lambda: NOW,
+        )
+        for field in ("expectedRuntimeGeneration", "expectedAttachmentGeneration"):
+            request = {
+                "operation": "attach", "runtimeId": RUNTIME, "conversationId": CONVERSATION,
+                "expectedRuntimeGeneration": 1, "expectedAttachmentGeneration": 1,
+            }
+            request[field] = safe
+            with self.subTest(field=field), self.assertRaisesRegex(CloudError, "invalid_request"):
+                await client.assigned_stock(request)
+            self.assertEqual(sent, [])
+
+        renewed = await client.assigned_stock({
+            "operation": "renew", "runtimeId": RUNTIME, "conversationId": CONVERSATION,
+            "expectedRuntimeGeneration": safe, "expectedAttachmentGeneration": safe,
+        })
+        self.assertEqual(renewed["runtimeGeneration"], safe)
+        self.assertEqual(len(sent), 1)
+
     async def test_assignment_rejects_noncanonical_uuid_and_mismatched_response(self):
         async def send(**_):
             return 200, {"content-type": "application/json"}, json.dumps(

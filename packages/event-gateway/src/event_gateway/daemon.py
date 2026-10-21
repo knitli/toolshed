@@ -161,8 +161,53 @@ async def _dispatch_worker(gateway, stop):
             pass
 
 
-# Keep bounded retry and suspension decisions beside the exact-mapping renewal fence.
-async def _stock_renewal_worker(store, cloud, stop):  # noqa: MC0001
+# Keep retries, deadlines and suspension beside the exact-mapping renewal fence.
+async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa: MC0001
+    """Renew one exact live assigned-stock mapping with bounded retries."""
+    profile = mapping["runtimeProfile"]
+    fingerprint = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
+    request = {
+        "operation": "renew", "runtimeId": mapping["runtimeId"],
+        "conversationId": profile["conversationId"],
+        "expectedRuntimeGeneration": mapping["runtimeGeneration"],
+        "expectedAttachmentGeneration": mapping["attachmentGeneration"],
+    }
+    for attempt in range(3):
+        if stop.is_set():
+            break
+        request_started_at = store.clock()
+        if mapping["leaseExpiresAt"] <= request_started_at:
+            break
+        try:
+            async with asyncio.timeout(min(5, max(0.01, mapping["leaseExpiresAt"] - request_started_at))):
+                response = await cloud.assigned_stock(request)
+            if not store.renew_stock_attachment(
+                    mapping, _timestamp(response["leaseUntil"]) / 1000):
+                suspended.add(fingerprint)
+            break
+        except (CloudError, TimeoutError) as error:
+            if isinstance(error, CloudError) and (
+                    error.code == "invalid_response" or error.definitive_refusal
+                    or not error.ambiguous):
+                suspended.add(fingerprint)
+                break
+            if attempt == 2:
+                break
+        except (KeyError, TypeError, ValueError):
+            suspended.add(fingerprint)
+            break
+        delay = (1, 2)[attempt]
+        remaining = mapping["leaseExpiresAt"] - store.clock()
+        if remaining <= 0:
+            break
+        try:
+            await asyncio.wait_for(stop.wait(), min(delay, remaining))
+            break
+        except TimeoutError:
+            pass
+
+
+async def _stock_renewal_worker(store, cloud, stop):
     """Renew only live assigned-stock mappings already present in the local ledger."""
     suspended = set()
     while not stop.is_set():
@@ -173,6 +218,7 @@ async def _stock_renewal_worker(store, cloud, stop):  # noqa: MC0001
             if isinstance(mapping.get("runtimeProfile"), dict)
             and mapping["runtimeProfile"].get("profile") == "assigned_stock_client"
         )
+        renewals = []
         for mapping in attachments:
             profile = mapping.get("runtimeProfile")
             if not isinstance(profile, dict) or profile.get("profile") != "assigned_stock_client":
@@ -182,47 +228,12 @@ async def _stock_renewal_worker(store, cloud, stop):  # noqa: MC0001
                     ("nodeId", "node_id"), ("nodeGeneration", "node_generation"))):
                 continue
             fingerprint = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
-            if fingerprint in suspended:
-                continue
-            request = {
-                "operation": "renew", "runtimeId": mapping["runtimeId"],
-                "conversationId": profile["conversationId"],
-                "expectedRuntimeGeneration": mapping["runtimeGeneration"],
-                "expectedAttachmentGeneration": mapping["attachmentGeneration"],
-            }
-            for attempt in range(3):
-                if stop.is_set():
-                    break
-                request_started_at = store.clock()
-                if mapping["leaseExpiresAt"] <= request_started_at:
-                    break
-                try:
-                    async with asyncio.timeout(min(5, max(0.01, mapping["leaseExpiresAt"] - request_started_at))):
-                        response = await cloud.assigned_stock(request)
-                    if not store.renew_stock_attachment(
-                            mapping, _timestamp(response["leaseUntil"]) / 1000):
-                        suspended.add(fingerprint)
-                    break
-                except (CloudError, TimeoutError) as error:
-                    if isinstance(error, CloudError) and (
-                            error.code == "invalid_response" or error.definitive_refusal
-                            or not error.ambiguous):
-                        suspended.add(fingerprint)
-                        break
-                    if attempt == 2:
-                        break
-                except (KeyError, TypeError, ValueError):
-                    suspended.add(fingerprint)
-                    break
-                delay = (1, 2)[attempt]
-                remaining = mapping["leaseExpiresAt"] - store.clock()
-                if remaining <= 0:
-                    break
-                try:
-                    await asyncio.wait_for(stop.wait(), min(delay, remaining))
-                    break
-                except TimeoutError:
-                    pass
+            if fingerprint not in suspended:
+                renewals.append(mapping)
+        # Store capacity bounds live mappings to three per agent.
+        async with asyncio.TaskGroup() as tasks:
+            for mapping in renewals:
+                tasks.create_task(_renew_stock_mapping(store, cloud, stop, mapping, suspended))
         try:
             await asyncio.wait_for(stop.wait(), STOCK_RENEW_INTERVAL)
         except TimeoutError:

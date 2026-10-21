@@ -803,7 +803,9 @@ def _stock_assignment_request(value):
     attachment_generation = value["expectedAttachmentGeneration"]
     if value["operation"] == "attach":
         if not ((runtime_generation is None and attachment_generation is None)
-                or (_generation(runtime_generation) and _generation(attachment_generation))):
+                or (_generation(runtime_generation) and _generation(attachment_generation)
+                    and runtime_generation < _SAFE_INTEGER
+                    and attachment_generation < _SAFE_INTEGER)):
             raise CloudError("invalid_request")
     elif not (_generation(runtime_generation) and _generation(attachment_generation)):
         raise CloudError("invalid_request")
