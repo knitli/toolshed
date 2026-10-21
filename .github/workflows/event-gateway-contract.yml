@@ -210,7 +210,18 @@ jobs:
                       'event-v1/protocol-v1.json': '2f1fba8d3945c820a1d0ef429738c9d55f671b00cc7efcdf8f32f4ad8f2d8566',
                       'event-v1/manifest.json': 'd4eb830cc8451bc10bb607627b3196dab9e0920152ec06eaa31ff4851872660d',
                       'event-control-v1/fixtures.json': '3d0510da3be4dce06319ebafe750ea6669c9fd6629c63cac3637bcb492e59f78',
-                      'event-control-v1/manifest.json': '4989cbad8f30d24e5b287adb64202ff485cba42b474e44ad72301ae0524314f2'}})
+                      'event-control-v1/manifest.json': '4989cbad8f30d24e5b287adb64202ff485cba42b474e44ad72301ae0524314f2'}},
+           {'name': 'assigned-stock-github-delivery',
+            'eventRevision': '9503b8e2a99fbe099a4b90cb576a17dcf4b786aa',
+            'controlRevision': '9503b8e2a99fbe099a4b90cb576a17dcf4b786aa',
+            'hashes': {'event-v1/protocol.schema.json': '4f52187100e98eef2dadbfbe319e41fc0af6aa82ee1c185ec152171d20cbfb23',
+                       'event-v1/protocol.ts': 'b9927658cd80cfb52222bcc20ffe748acbea0c16da06f0f283b55c6046b9284d',
+                       'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+                       'event-v1/protocol-v1.json': '3f34e88d5cf1fb42318ba76435e77668551877250e00e8ca430ae697a6a271dd',
+                       'event-v1/manifest.json': 'd20cb06b70b0144a4b3266efd02cd6054ebed7db0708e4385c5594039d8fdfca',
+                       'event-control-v1/fixtures.json': 'f17a12d3b67094c60f56280258cf43835302e8797a925ca21626f1a95f7e96c1',
+                       'event-control-v1/manifest.json': '84a90e9ff7b2b6586bf73cc4c23419044d32fb5751201a2baaf65c5cc2eb4bfa'}}
+          )
 
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
