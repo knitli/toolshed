@@ -176,7 +176,8 @@ def _github_text(value, limit):
 def _github_event_request(value):
     _closed(value, ("eventReference",), code="invalid_request")
     if (not isinstance(value["eventReference"], str)
-            or re.fullmatch(r"ref_[0-9a-f-]{36}", value["eventReference"]) is None):
+            or re.fullmatch(r"ref_[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+                            value["eventReference"]) is None):
         raise CloudError("invalid_request")
     return value
 

@@ -233,6 +233,9 @@ def _execute_github_source_material(args, state_dir):
         if result["status"] != "ok":
             print(json.dumps({"materialRead": None, "reason": result["status"]}))
             return 2
+        if result["screening"]["withheld"]:
+            print(json.dumps({"materialRead": None, "reason": "withheld"}))
+            return 2
         info = os.fstat(directory)
         if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
             raise SecurityError("unsafe_material_output")

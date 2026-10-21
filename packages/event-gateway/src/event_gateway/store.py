@@ -269,14 +269,13 @@ class Store:
         ]
 
     def renew_stock_attachment(self, expected, lease_expires_at):
-        """Extend only the exact live assigned-stock mapping observed by the caller."""
+        """Extend only the exact assigned-stock mapping observed by the caller."""
         if (not isinstance(expected, dict)
                 or not isinstance(expected.get("runtimeProfile"), dict)
                 or expected["runtimeProfile"].get("profile") != "assigned_stock_client"
                 or not isinstance(expected.get("leaseExpiresAt"), (int, float))
                 or isinstance(expected.get("leaseExpiresAt"), bool)
                 or not math.isfinite(expected["leaseExpiresAt"])
-                or expected["leaseExpiresAt"] <= self.clock()
                 or not isinstance(lease_expires_at, (int, float))
                 or isinstance(lease_expires_at, bool)
                 or not math.isfinite(lease_expires_at)
@@ -409,7 +408,11 @@ class Store:
                 raise StoreError("capacity", "session_capacity")
             if old:
                 if "nativeBinding" in old and "nativeBinding" not in mapping:
-                    raise StoreError("invalid_attachment")
+                    profile = mapping.get("runtimeProfile")
+                    if (not isinstance(profile, dict)
+                            or profile.get("profile") != "assigned_stock_client"
+                            or mapping["attachmentGeneration"] <= old["attachmentGeneration"]):
+                        raise StoreError("invalid_attachment")
                 if (("nativeBinding" in old or "nativeBinding" in mapping)
                         and mapping["attachmentGeneration"] == old["attachmentGeneration"]
                         and any(mapping.get(key) != old.get(key)
@@ -861,6 +864,8 @@ class Store:
 
     def begin_stock_submit(self, delivery_id, attempt_id):
         """Durably fence the assigned stock CLI invocation before process launch."""
+        from .protocol import ProtocolError, _timestamp
+
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
@@ -873,6 +878,15 @@ class Store:
             if (envelope.get("schemaVersion") != 1
                     or not isinstance(envelope.get("runtimeProfile"), dict)
                     or envelope["runtimeProfile"].get("profile") != "assigned_stock_client"):
+                raise StoreError("invalid_transition")
+            admission = json.loads(attempt["admission"])
+            try:
+                permit_issued_at = _timestamp(admission["permitIssuedAt"])
+                permit_expires_at = _timestamp(admission["permitExpiresAt"])
+            except (KeyError, ProtocolError, TypeError, ValueError):
+                raise StoreError("invalid_transition") from None
+            now_ms = self.clock() * 1000
+            if not permit_issued_at <= now_ms < permit_expires_at:
                 raise StoreError("invalid_transition")
             self._matches(envelope)
             self.db.execute("UPDATE attempts SET state='submitting',updated=? WHERE delivery_id=? AND attempt_id=?",

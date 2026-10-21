@@ -190,12 +190,17 @@ async def _stock_renewal_worker(store, cloud, stop):
                 "expectedAttachmentGeneration": mapping["attachmentGeneration"],
             }
             for attempt in range(3):
-                if stop.is_set() or mapping["leaseExpiresAt"] <= store.clock():
+                if stop.is_set():
+                    break
+                request_started_at = store.clock()
+                if mapping["leaseExpiresAt"] <= request_started_at:
                     break
                 try:
-                    async with asyncio.timeout(min(5, max(0.01, mapping["leaseExpiresAt"] - store.clock()))):
+                    async with asyncio.timeout(min(5, max(0.01, mapping["leaseExpiresAt"] - request_started_at))):
                         response = await cloud.assigned_stock(request)
-                    store.renew_stock_attachment(mapping, _timestamp(response["leaseUntil"]) / 1000)
+                    if not store.renew_stock_attachment(
+                            mapping, _timestamp(response["leaseUntil"]) / 1000):
+                        suspended.add(fingerprint)
                     break
                 except (CloudError, TimeoutError) as error:
                     if isinstance(error, CloudError) and (

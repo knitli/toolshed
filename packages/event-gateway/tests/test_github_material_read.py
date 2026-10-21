@@ -367,6 +367,18 @@ class MaterialCliTests(unittest.TestCase):
         self.assertEqual(self.invoke()[0], 2)  # Existing output is never overwritten.
         self.assertEqual(self.output.read_text(), BODY)
 
+    def test_withheld_material_is_not_published(self):
+        screening = dict(SCREENING, withheld=True)
+        self.client.github_source_material_all.return_value = {
+            **screened_pages()[-1], "body": BODY, "offset": 0, "screening": screening,
+        }
+
+        status, stdout, _ = self.invoke()
+
+        self.assertEqual(status, 2)
+        self.assertEqual(json.loads(stdout), {"materialRead": None, "reason": "withheld"})
+        self.assertFalse(self.output.exists())
+
     def test_cli_requires_both_range_bounds_before_loading_credentials(self):
         for flag in ("--from-version", "--to-version"):
             index = self.args.index(flag)

@@ -101,8 +101,23 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(renewed["leaseExpiresAt"], NOW + 180)
         self.assertFalse(self.store.renew_stock_attachment(stored, NOW + 120))
         self.now = NOW + 181
-        self.assertFalse(self.store.renew_stock_attachment(renewed, NOW + 300))
+        self.assertFalse(self.store.renew_stock_attachment(renewed, NOW + 180.5))
         self.assertEqual(self.store.get_attachment(stored["runtimeId"]), renewed)
+
+    def test_stock_lease_renewal_persists_success_arriving_after_old_deadline(self):
+        profile = {"profile": "assigned_stock_client", "client": "codex",
+                   "conversationId": "abcdefab-cdef-4abc-8def-abcdefabcdef"}
+        mapping = {**self.mapping, "runtimeId": str(uuid.uuid4()), "runtimeGeneration": 2,
+                   "attachmentGeneration": 2, "consumerGeneration": 2,
+                   "runtimeProfile": profile, "leaseExpiresAt": NOW + 90}
+        mapping.pop("nativeSessionId", None)
+        mapping.pop("socketPath", None)
+        stored = self.store.put_attachment(mapping)
+
+        self.now = NOW + 91  # The request began live; its successful response arrived late.
+        self.assertTrue(self.store.renew_stock_attachment(stored, NOW + 180))
+        renewed = self.store.get_attachment(stored["runtimeId"])
+        self.assertEqual(renewed["leaseExpiresAt"], NOW + 180)
 
     def test_native_route_rejects_incomplete_or_inconsistent_bindings(self):
         mapping = self.native_mapping()
@@ -151,6 +166,39 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.get(event["deliveryId"])["status"], "stale")
         self.assertEqual(self.store.get_attachment(mapping["runtimeId"]), changed)
 
+    def test_native_route_can_transition_to_stock_with_attachment_generation_advance(self):
+        native = self.native_mapping()
+        native["runtimeId"] = str(uuid.uuid4())
+        self.store.put_attachment(native)
+        stock = {key: native[key] for key in IDENTITY}
+        attachment_generation = native["attachmentGeneration"]
+        stock.update(
+            consumerGeneration=native.get("consumerGeneration", 0) + 1,
+            runtimeProfile={"profile": "assigned_stock_client", "client": "codex",
+                            "conversationId": str(uuid.uuid4())},
+            runtimeGeneration=native["runtimeGeneration"] + 1,
+            attachmentGeneration=attachment_generation + 1,
+            leaseExpiresAt=NOW + 3600,
+        )
+        self.assertEqual(self.store.put_attachment(stock), stock)
+        self.assertEqual(self.store.get_attachment(native["runtimeId"]), stock)
+
+    def test_native_route_cannot_transition_to_stock_without_attachment_generation_advance(self):
+        native = self.native_mapping()
+        native["runtimeId"] = str(uuid.uuid4())
+        self.store.put_attachment(native)
+        stock = {key: native[key] for key in IDENTITY}
+        stock.update(
+            runtimeGeneration=native["runtimeGeneration"] + 1,
+            consumerGeneration=native.get("consumerGeneration", 0) + 1,
+            runtimeProfile={"profile": "assigned_stock_client", "client": "codex",
+                            "conversationId": str(uuid.uuid4())},
+            leaseExpiresAt=NOW + 3600,
+        )
+        with self.assertRaisesRegex(StoreError, "invalid_attachment"):
+            self.store.put_attachment(stock)
+        self.assertEqual(self.store.get_attachment(native["runtimeId"]), native)
+
     def test_native_transfer_replay_preserves_both_routes(self):
         source, target = self.native_mapping(), self.native_mapping()
         self.store.put_attachment(source)
@@ -197,6 +245,36 @@ class StoreTests(unittest.TestCase):
         admission = self.admission()
         self.store.record_admission(ident, admission)
         return ident, admission
+
+    def stock_admitted(self):
+        envelope = copy.deepcopy(next(
+            event for event in FIXTURES["validEnvelopes"] if "runtimeProfile" in event
+        ))
+        envelope["runtimeId"] = str(uuid.uuid4())
+        envelope["deliveryId"] = derive_delivery_id(envelope)
+        mapping = {key: envelope[key] for key in IDENTITY}
+        mapping.update(consumerGeneration=envelope["consumerGeneration"],
+                       runtimeProfile=envelope["runtimeProfile"],
+                       leaseExpiresAt=self.now + 3600)
+        self.store.put_attachment(mapping)
+        ident = self.store.accept(envelope)["deliveryId"]
+        self.store.begin_claim(ident)
+        admission = self.admission(envelope)
+        self.store.record_admission(ident, admission)
+        return ident, envelope["attemptId"]
+
+    def test_stock_submit_is_fenced_by_live_permit_inside_store_transition(self):
+        ident, attempt = self.stock_admitted()
+        self.assertTrue(self.store.begin_stock_submit(ident, attempt))
+        self.assertEqual(self.store.current_attempt(ident)["state"], "submitting")
+
+    def test_expired_stock_submit_permit_cannot_advance_to_submitting(self):
+        ident, attempt = self.stock_admitted()
+        self.now += 5
+        with self.assertRaisesRegex(StoreError, "invalid_transition"):
+            self.store.begin_stock_submit(ident, attempt)
+        self.assertEqual(self.store.current_attempt(ident)["state"], "admitted")
+        self.assertEqual(self.store.get(ident)["status"], "admitted")
 
     def request(self, admission):
         from event_gateway.native import EVENT_FIELDS

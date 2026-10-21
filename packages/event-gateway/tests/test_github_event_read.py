@@ -46,7 +46,11 @@ class GitHubEventReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_reference_never_acquires_credentials_or_sends(self):
         for request in ({}, {**REQUEST, "subject": {}}, {"eventReference": "latest"},
-                        {"eventReference": True}, {"eventReference": "ref_" + "a" * 37}):
+                        {"eventReference": True}, {"eventReference": "ref_" + "a" * 37},
+                        {"eventReference": "ref_------------------------------------"},
+                        {"eventReference": "ref_12345678123441238123123456789012"},
+                        {"eventReference": "ref_12345678-1234-3123-8123-123456789012"},
+                        {"eventReference": "ref_12345678-1234-4123-7123-123456789012"}):
             with self.subTest(request=request), self.assertRaisesRegex(CloudError, "^invalid_request$"):
                 await self.client.github_event_read(request)
         self.credentials.assert_not_called()
