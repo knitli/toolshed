@@ -264,6 +264,126 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(daemon._stock_renewal_worker(FakeStore(), cloud, stop), 1)
         self.assertEqual(cloud.calls, 1)
 
+    async def test_stock_renewal_storage_failure_suspends_mapping_and_peer_continues(self):
+        first = {
+            "runtimeId": "00000000-0000-4000-8000-000000000001",
+            "principal": "owner@example.com", "agent": "codex",
+            "nodeId": str(uuid.uuid4()), "nodeGeneration": 2, "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": time.time() + 90,
+            "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                               "conversationId": str(uuid.uuid4())},
+        }
+        second = {
+            **first,
+            "runtimeId": "00000000-0000-4000-8000-000000000002",
+            "runtimeProfile": {**first["runtimeProfile"], "conversationId": str(uuid.uuid4())},
+        }
+        stop = asyncio.Event()
+
+        class FakeStore:
+            def __init__(self):
+                self.failed_mapping_calls = 0
+                self.renewed_mapping_calls = 0
+
+            @staticmethod
+            def clock():
+                return time.time()
+
+            @staticmethod
+            def list_attachments():
+                return [first, second]
+
+            def renew_stock_attachment(self, expected, _lease):
+                if expected["runtimeId"] == first["runtimeId"]:
+                    self.failed_mapping_calls += 1
+                    raise StoreError("storage_unavailable")
+                self.renewed_mapping_calls += 1
+                if self.renewed_mapping_calls == 2:
+                    stop.set()
+                return True
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = first["nodeId"], first["nodeGeneration"]
+
+            def __init__(self):
+                self.calls = {first["runtimeId"]: 0, second["runtimeId"]: 0}
+
+            async def assigned_stock(self, request):
+                runtime_id = request["runtimeId"]
+                self.calls[runtime_id] += 1
+                return {"leaseUntil": _iso(time.time() + 180)}
+
+        store, cloud = FakeStore(), FakeCloud()
+        with patch.object(daemon, "STOCK_RENEW_INTERVAL", 0.001):
+            await asyncio.wait_for(
+                daemon._stock_renewal_worker(store, cloud, stop), timeout=1)
+
+        self.assertEqual(store.failed_mapping_calls, 1)
+        self.assertEqual(store.renewed_mapping_calls, 2)
+        self.assertEqual(cloud.calls, {first["runtimeId"]: 1, second["runtimeId"]: 2})
+
+    async def test_stock_renewal_skips_malformed_mapping_and_continues_peer(self):
+        base = {
+            "runtimeId": "00000000-0000-4000-8000-000000000010",
+            "principal": "owner@example.com", "agent": "codex",
+            "nodeId": str(uuid.uuid4()), "nodeGeneration": 2, "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": time.time() + 90,
+            "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                               "conversationId": str(uuid.uuid4())},
+        }
+        missing_conversation = {
+            **base,
+            "runtimeId": "00000000-0000-4000-8000-000000000011",
+            "runtimeProfile": dict(base["runtimeProfile"]),
+        }
+        missing_conversation["runtimeProfile"].pop("conversationId")
+        missing_generation = {
+            **base,
+            "runtimeId": "00000000-0000-4000-8000-000000000012",
+        }
+        missing_generation.pop("runtimeGeneration")
+        peer = {**base, "runtimeId": "00000000-0000-4000-8000-000000000013"}
+        mappings = [missing_conversation, missing_generation, peer]
+        stop = asyncio.Event()
+
+        class FakeStore:
+            def __init__(self):
+                self.renewed = []
+
+            @staticmethod
+            def clock():
+                return time.time()
+
+            @staticmethod
+            def list_attachments():
+                return mappings
+
+            def renew_stock_attachment(self, expected, _lease):
+                self.renewed.append(expected["runtimeId"])
+                if len(self.renewed) == 2:
+                    stop.set()
+                return True
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = base["nodeId"], base["nodeGeneration"]
+
+            def __init__(self):
+                self.requests = []
+
+            async def assigned_stock(self, request):
+                self.requests.append(request["runtimeId"])
+                return {"leaseUntil": _iso(time.time() + 180)}
+
+        store, cloud = FakeStore(), FakeCloud()
+        with patch.object(daemon, "STOCK_RENEW_INTERVAL", 0.001):
+            await asyncio.wait_for(
+                daemon._stock_renewal_worker(store, cloud, stop), timeout=1)
+
+        self.assertEqual(cloud.requests, [peer["runtimeId"], peer["runtimeId"]])
+        self.assertEqual(store.renewed, [peer["runtimeId"], peer["runtimeId"]])
+
     async def test_stock_renewal_suspends_definitive_refusal_for_mapping(self):
         mapping = {
             "runtimeId": str(uuid.uuid4()), "principal": "owner@example.com", "agent": "codex",

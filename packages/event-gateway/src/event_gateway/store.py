@@ -282,12 +282,17 @@ class Store:
                 or lease_expires_at <= max(self.clock(), expected["leaseExpiresAt"])):
             return False
         renewed = dict(expected, leaseExpiresAt=lease_expires_at)
-        with self.db:
-            cursor = self.db.execute(
-                "UPDATE attachments SET data=? WHERE runtime=? AND data=?",
-                (_json(renewed), expected["runtimeId"], _json(expected)),
-            )
-            return cursor.rowcount == 1
+        encoded = _json(renewed)
+        try:
+            self._capacity(32768 + len(encoded.encode()) * 3)
+            with self.db:
+                cursor = self.db.execute(
+                    "UPDATE attachments SET data=? WHERE runtime=? AND data=?",
+                    (encoded, expected["runtimeId"], _json(expected)),
+                )
+                return cursor.rowcount == 1
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
 
     def _validate_attachment(self, mapping, transfer):
         if not isinstance(mapping, dict) or any(

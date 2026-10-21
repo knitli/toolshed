@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 import uuid
+from unittest.mock import patch
 
 from event_gateway.protocol import derive_delivery_id, ProtocolError
 from event_gateway.store import Store, StoreError, IDENTITY, RETENTION, validate_native_route
@@ -118,6 +119,41 @@ class StoreTests(unittest.TestCase):
         self.assertTrue(self.store.renew_stock_attachment(stored, NOW + 180))
         renewed = self.store.get_attachment(stored["runtimeId"])
         self.assertEqual(renewed["leaseExpiresAt"], NOW + 180)
+
+    def test_stock_lease_renewal_translates_sqlite_errors(self):
+        profile = {"profile": "assigned_stock_client", "client": "codex",
+                   "conversationId": "abcdefab-cdef-4abc-8def-abcdefabcdef"}
+        mapping = {**self.mapping, "runtimeId": str(uuid.uuid4()), "runtimeGeneration": 2,
+                   "attachmentGeneration": 2, "consumerGeneration": 2,
+                   "runtimeProfile": profile, "leaseExpiresAt": NOW + 90}
+        mapping.pop("nativeSessionId", None)
+        mapping.pop("socketPath", None)
+        stored = self.store.put_attachment(mapping)
+        self.store.db.execute(
+            "CREATE TRIGGER fail_stock_renewal BEFORE UPDATE ON attachments "
+            f"WHEN OLD.runtime='{stored['runtimeId']}' "
+            "BEGIN SELECT RAISE(ABORT, 'disk fault'); END"
+        )
+        with self.assertRaises(StoreError) as caught:
+            self.store.renew_stock_attachment(stored, NOW + 180)
+        self.assertEqual(caught.exception.code, "storage_unavailable")
+        self.assertEqual(self.store.get_attachment(stored["runtimeId"]), stored)
+
+    def test_stock_lease_renewal_obeys_capacity_reservation(self):
+        profile = {"profile": "assigned_stock_client", "client": "codex",
+                   "conversationId": "abcdefab-cdef-4abc-8def-abcdefabcdef"}
+        mapping = {**self.mapping, "runtimeId": str(uuid.uuid4()), "runtimeGeneration": 2,
+                   "attachmentGeneration": 2, "consumerGeneration": 2,
+                   "runtimeProfile": profile, "leaseExpiresAt": NOW + 90}
+        mapping.pop("nativeSessionId", None)
+        mapping.pop("socketPath", None)
+        stored = self.store.put_attachment(mapping)
+        with patch.object(self.store, "_capacity", side_effect=StoreError("capacity")) as capacity:
+            with self.assertRaises(StoreError) as caught:
+                self.store.renew_stock_attachment(stored, NOW + 180)
+        self.assertEqual(caught.exception.code, "capacity")
+        capacity.assert_called_once()
+        self.assertEqual(self.store.get_attachment(stored["runtimeId"]), stored)
 
     def test_native_route_rejects_incomplete_or_inconsistent_bindings(self):
         mapping = self.native_mapping()

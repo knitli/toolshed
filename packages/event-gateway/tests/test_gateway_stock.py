@@ -394,6 +394,14 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.authority.claims, [])
         self.assertIsNone(self.store.current_attempt(delivery))
 
+    async def test_reconcile_does_not_dispatch_terminal_stock_row_without_attempt(self):
+        delivery = self.accept()
+        self.store.finish(delivery, "stale")
+        with patch.object(self.gateway, "_dispatch_stock_locked", new=AsyncMock()) as dispatch:
+            result = await self.gateway.reconcile(delivery)
+        self.assertEqual(result["status"], "stale")
+        dispatch.assert_not_awaited()
+
     async def test_expired_admission_prevents_launch(self):
         delivery = self.accept()
         claim = self.gateway._claim

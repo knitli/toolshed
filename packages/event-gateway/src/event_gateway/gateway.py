@@ -559,7 +559,7 @@ class Gateway:
                 if (attempt and attempt["state"] == "command_accepted"
                         and attempt.get("native_ack")):
                     return await self._send_stock_acknowledgment(delivery_id, attempt)
-                if (not attempt or attempt["state"] in ("claiming", "admitted")
+                if ((not attempt or attempt["state"] in ("claiming", "admitted"))
                         and self._row(delivery_id)["status"] in ("queued", "claiming", "admitted")):
                     return await self._dispatch_stock_locked(delivery_id, envelope)
                 return self._row(delivery_id)

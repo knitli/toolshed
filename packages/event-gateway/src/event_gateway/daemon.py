@@ -164,14 +164,18 @@ async def _dispatch_worker(gateway, stop):
 # Keep retries, deadlines and suspension beside the exact-mapping renewal fence.
 async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa: MC0001
     """Renew one exact live assigned-stock mapping with bounded retries."""
-    profile = mapping["runtimeProfile"]
     fingerprint = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
-    request = {
-        "operation": "renew", "runtimeId": mapping["runtimeId"],
-        "conversationId": profile["conversationId"],
-        "expectedRuntimeGeneration": mapping["runtimeGeneration"],
-        "expectedAttachmentGeneration": mapping["attachmentGeneration"],
-    }
+    try:
+        profile = mapping["runtimeProfile"]
+        request = {
+            "operation": "renew", "runtimeId": mapping["runtimeId"],
+            "conversationId": profile["conversationId"],
+            "expectedRuntimeGeneration": mapping["runtimeGeneration"],
+            "expectedAttachmentGeneration": mapping["attachmentGeneration"],
+        }
+    except (KeyError, TypeError, ValueError):
+        suspended.add(fingerprint)
+        return
     for attempt in range(3):
         if stop.is_set():
             break
@@ -183,6 +187,7 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
             # may take: cloud renewal can commit before expiry and reply after it.
             async with asyncio.timeout(5):
                 response = await cloud.assigned_stock(request)
+            # shortcut: Keep the thread-bound Store on its owner loop until DB access is serialized.
             if not store.renew_stock_attachment(
                     mapping, _timestamp(response["leaseUntil"]) / 1000):
                 suspended.add(fingerprint)
