@@ -225,6 +225,7 @@ def _execute_github_source_material(args, state_dir):
                             "prNumber": args.pr_number},
                 "sourceId": args.source_id, "fingerprint": args.fingerprint,
                 "fromVersion": args.from_version, "toVersion": args.to_version,
+                "representation": "screened-v1",
             }))
         except CloudError as error:
             print(json.dumps({"materialRead": None, "reason": error.code}))
@@ -236,7 +237,7 @@ def _execute_github_source_material(args, state_dir):
         if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
             raise SecurityError("unsafe_material_output")
         _publish_material(directory, filename, result["body"])
-        print(json.dumps({"materialRead": "written", "complete": True}))
+        print(json.dumps({"materialRead": "written", "complete": True, "screening": result["screening"]}))
         return 0
     finally:
         os.close(directory)

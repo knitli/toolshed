@@ -18,6 +18,7 @@ const names = [
   'github/material-cache.ts',
   'github/material-delete.ts',
   'github/material-read-contract.ts',
+  'github/actor-policy.ts',
   'github/material-read.ts',
   'github/reconciliation-internal.ts',
   'github/reconciliation-store.ts',
@@ -34,13 +35,59 @@ const names = [
   'native-runtime-store.ts', 'native-admission-gate.ts', 'github/readback-contract.ts', 'github/event-read-contract.ts',
   'read-authority.ts', 'request-deadline.ts', 'github/host.ts', 'github/controller.ts',
   'github/host-storage-version.ts', 'messaging/protocol-v2.ts',
+  'messaging/preparation.ts', 'messaging/delivery-authority.ts',
+  'messaging/materialization.ts', 'messaging/consumer-authority.ts',
   'github/client.ts', 'github/pinned-read-contract.ts', 'github/grants.ts', 'github/state.ts', 'github/ingress.ts',
   '../../gatekeeper-memory/src/principals.ts', '../../openapi-operator/src/access.ts',
   '../../gatekeeper-messaging/src/agent-token.ts',
+  '../../gatekeeper-messaging/src/mailbox.ts',
+  '../../gatekeeper-messaging/src/event-bridge.ts',
+  '../../gatekeeper-messaging/src/message-preparation.ts',
+  '../../gatekeeper-messaging/src/event-authority-contract.ts',
+  '../../gatekeeper-messaging/src/event-authority.ts',
+  '../../gatekeeper-messaging/src/source-preparation.ts',
+  '../../gatekeeper-messaging/src/event-wake-budget.ts',
+  '../../gatekeeper-messaging/src/message-consumer-admission.ts',
+  '../../gatekeeper-messaging/src/message-route-control.ts',
+  '../../gatekeeper-messaging/src/message-route-control-contract.ts',
+  '../../gatekeeper-messaging/src/message-route-owner-proof.ts',
+  '../../gatekeeper-messaging/src/message-attempt-settlement.ts',
+  '../../gatekeeper-messaging/src/activation.ts',
+  '../../gatekeeper-messaging/src/orders.ts',
+  '../../gatekeeper-messaging/src/registry.ts',
+  '../../gatekeeper-messaging/src/tasks.ts',
+  '../../gatekeeper-messaging/src/model.ts',
+  '../../gatekeeper-messaging/src/receipts.ts',
+  '../../gatekeeper-messaging/src/credentials.ts',
+  '../../gatekeeper-messaging/src/presence.ts',
+  '../../gatekeeper-messaging/src/access-audiences.ts',
+  '../../gatekeeper-messaging/src/order-acts.ts',
+  '../../gatekeeper-messaging/src/grant-acts.ts',
+  '../../gatekeeper-messaging/src/acts.ts',
+  '../../gatekeeper-messaging/src/presence-host.ts',
+  '../../gatekeeper-messaging/src/core-acts.ts',
+  '../../gatekeeper-messaging/src/scopes.ts',
+  '../../gatekeeper-messaging/src/authority-contract.ts',
+  '../../gatekeeper-messaging/src/enforcement.ts',
+  '../../gatekeeper-messaging/src/auth.ts',
   'github/source-control.ts', 'github/watches.ts',
   'github/watch-store.ts', 'github/watch-control-internal.ts', 'github/watch-kernel.ts', 'github/watch-owner-proof.ts', 'manual-canary.ts',
   'manual-canary-scope.ts', 'native-admission-canary.ts', 'admin-api.ts', 'admin-types.ts',
   '../../gatekeeper-memory/src/auth.ts', '../../gatekeeper-memory/src/admin-security.ts',
+  '../../authority/src/text.ts',
+  '../../../scripts/deploy.ts',
+  '../../authority/src/act.ts',
+  '../../authority/src/canonical.ts',
+  '../../authority/src/scope.ts',
+  '../../authority/src/task.ts',
+  '../../authority/src/contract-kit.ts',
+  '../../authority/src/snapshot.ts',
+  '../../authority/src/credential-chain.ts',
+  '../../authority/src/human-proof.ts',
+  '../../authority/src/floor.ts',
+  '../../authority/src/webauthn.ts',
+  '../../authority/src/contracts.ts',
+  '../../authority/src/render.ts',
 ];
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- Fixed source filenames under the operator-supplied local checkout.
 const source = Object.fromEntries(names.map(name => [name, readFileSync(resolve(base, name), 'utf8')]));
@@ -488,8 +535,47 @@ for (const vector of materialBindings) {
   if (materialContract.materialPageMatches(vector.request, vector.result) !== vector.accepted)
     throw Error(`Material binding vector disagrees with source: ${vector.name}`);
 }
+const screenedRequest = { ...materialRequest, representation: 'screened-v1' };
+const screening = { version: 1, removed: { ansi: 0, control: 1, invisible: 0, surrogate: 0 },
+  kept: 0, visible: 3, dense: false, trimmed: false, shortened: false, normalized: false, phrases: [], changed: true, withheld: false };
+const screenedResult = { ...materialResult, representation: 'screened-v1', sourceBodyDigest: createHash('sha256').update('\u0000é😀z').digest('hex'), screening };
+const screenedRequests = [
+  { name: 'screened-first-page', value: screenedRequest, accepted: true },
+  { name: 'screened-continuation', value: { ...screenedRequest, cursor: materialCursor }, accepted: true },
+  { name: 'unsupported-representation', value: { ...materialRequest, representation: 'raw-v1' }, accepted: false },
+  { name: 'screened-request-byte-limit', value: { ...screenedRequest, sourceId: 'thread-comment:' + 'é'.repeat(2048) }, accepted: false },
+];
+const screenedResults = [
+  { name: 'screened-unicode-first-page', value: screenedResult, accepted: true },
+  { name: 'screened-complete-page', value: { ...screenedResult, body: 'é😀z', nextCursor: null, complete: true }, accepted: true },
+  { name: 'missing-screening-metadata', value: { ...materialResult, representation: 'screened-v1' }, accepted: false },
+  { name: 'raw-page-with-screening-metadata', value: { ...materialResult, sourceBodyDigest: 'a'.repeat(64), screening }, accepted: false },
+  { name: 'unknown-screening-field', value: { ...screenedResult, screening: { ...screening, private: true } }, accepted: false },
+  { name: 'unsupported-screen-version', value: { ...screenedResult, screening: { ...screening, version: 2 } }, accepted: false },
+  { name: 'withheld-not-boolean', value: { ...screenedResult, screening: { ...screening, withheld: 1 } }, accepted: false },
+  { name: 'duplicate-screening-phrase', value: { ...screenedResult, screening: { ...screening, phrases: ['jailbreak', 'jailbreak'] } }, accepted: false },
+];
+for (const vector of screenedRequests) {
+  if (materialContract.GitHubMaterialReadRequestSchema.safeParse(vector.value).success !== vector.accepted)
+    throw Error(`Screened material request vector disagrees with source: ${vector.name}`);
+}
+for (const vector of screenedResults) {
+  if (materialContract.GitHubMaterialReadResultSchema.safeParse(vector.value).success !== vector.accepted)
+    throw Error(`Screened material result vector disagrees with source: ${vector.name}`);
+}
+const screenedBindings = [
+  { name: 'screened-first-page', request: screenedRequest, result: screenedResult, accepted: true },
+  { name: 'screened-request-result-mode-mismatch', request: materialRequest, result: screenedResult, accepted: false },
+  { name: 'screened-identity-mismatch', request: screenedRequest,
+    result: { ...screenedResult, sourceId: 'comment:8' }, accepted: false },
+];
+for (const vector of screenedBindings) {
+  if (materialContract.materialPageMatches(vector.request, vector.result) !== vector.accepted)
+    throw Error(`Screened material binding vector disagrees with source: ${vector.name}`);
+}
 const githubMaterialRead = { request: materialRequest, requests: materialRequests, results: materialResults,
-  bindings: materialBindings, nodeProof: nativeProof(materialContract.GITHUB_MATERIAL_READ_PATH, materialRequest, nativeIds.challengeProofAttach) };
+  bindings: materialBindings, screenedRequest, screenedRequests, screenedResults, screenedBindings,
+  nodeProof: nativeProof(materialContract.GITHUB_MATERIAL_READ_PATH, materialRequest, nativeIds.challengeProofAttach) };
 const stockRequest = { operation: 'attach', runtimeId: nativeIds.runtime,
   conversationId: nativeIds.thread, expectedRuntimeGeneration: null, expectedAttachmentGeneration: null };
 const stockResponse = { status: 'attached', runtimeId: nativeIds.runtime,

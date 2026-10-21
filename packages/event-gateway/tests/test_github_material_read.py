@@ -22,6 +22,10 @@ from event_gateway.cloud import CloudClient, CloudError, Credentials, canonical_
 SUBJECT = {"installationId": 1, "repositoryId": 2, "prNumber": 3}
 REQUEST = {"subject": SUBJECT, "sourceId": "comment:7", "fingerprint": "f" * 64,
            "fromVersion": 3, "toVersion": 5}
+SCREENING = {"version": 1, "removed": {"ansi": 0, "control": 0, "invisible": 0, "surrogate": 0},
+             "kept": 0, "visible": len("private 😀 first\nsecond é page"), "dense": False,
+             "trimmed": False, "shortened": False, "normalized": False, "phrases": [], "changed": False,
+             "withheld": False}
 BODY = "private 😀 first\nsecond é page"
 
 
@@ -44,6 +48,15 @@ def pages(chunks=None):
                        "body": chunk, "nextCursor": None if last else material_cursor(offset + len(chunk.encode("utf-16-le")) // 2),
                        "complete": last})
         offset += len(chunk.encode("utf-16-le")) // 2
+    return result
+
+
+def screened_pages(chunks=None):
+    result = pages(chunks)
+    for page in result:
+        page["representation"] = "screened-v1"
+        page["sourceBodyDigest"] = "a" * 64
+        page["screening"] = copy.deepcopy(SCREENING)
     return result
 
 
@@ -102,6 +115,7 @@ class MaterialReadTests(unittest.IsolatedAsyncioTestCase):
                    {**REQUEST, "sourceId": "arbitrary"}, {**REQUEST, "fingerprint": "F" * 64},
                    {**REQUEST, "cursor": None}, {**REQUEST, "cursor": "bad cursor"},
                    {**REQUEST, "sourceId": "thread-comment:" + "x" * 4096}]
+        invalid.append({**REQUEST, "representation": "raw-v1"})
         for request in invalid:
             with self.subTest(request=request), self.assertRaisesRegex(CloudError, "^invalid_request$"):
                 await self.client.github_source_material(request)
@@ -109,6 +123,58 @@ class MaterialReadTests(unittest.IsolatedAsyncioTestCase):
             await self.client.github_source_material_all({**REQUEST, "cursor": "start"})
         self.credentials.assert_not_called()
         self.assertEqual(self.requests, [])
+
+    async def test_screened_v1_is_strict_and_keeps_report_and_source_binding_across_pages(self):
+        request = {**REQUEST, "representation": "screened-v1"}
+        self.results = screened_pages()
+        result = await self.client.github_source_material_all(request)
+        self.assertEqual(result["body"], BODY)
+        self.assertEqual(result["sourceBodyDigest"], "a" * 64)
+        self.assertEqual(result["screening"], SCREENING)
+        self.assertEqual(json.loads(self.requests[0]["body"])["representation"], "screened-v1")
+        self.assertEqual(json.loads(self.requests[1]["body"])["representation"], "screened-v1")
+
+        self.results = screened_pages()
+        for page in self.results:
+            page["screening"]["withheld"] = True
+        result = await self.client.github_source_material_all(request)
+        self.assertTrue(result["screening"]["withheld"])
+
+        mutations = [
+            lambda page: page.update(extra=True),
+            lambda page: page.pop("representation"),
+            lambda page: page.update(representation="raw-v1"),
+            lambda page: page.update(sourceBodyDigest="z" * 64),
+            lambda page: page["screening"].update(version=True),
+            lambda page: page["screening"].update(extra=True),
+            lambda page: page["screening"]["removed"].update(surrogate=-1),
+            lambda page: page["screening"].update(phrases=["unknown"]),
+            lambda page: page["screening"].update(phrases=["jailbreak", "jailbreak"]),
+            lambda page: page["screening"].pop("withheld"),
+            lambda page: page["screening"].update(withheld=1),
+        ]
+        for mutation in mutations:
+            self.results = screened_pages()
+            mutation(self.results[0])
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(CloudError, "^invalid_response$"):
+                await self.client.github_source_material(request)
+
+        self.results = screened_pages()
+        self.results[1]["screening"]["changed"] = True
+        with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+            await self.client.github_source_material_all(request)
+
+        self.results = screened_pages()
+        self.results[1]["sourceBodyDigest"] = "b" * 64
+        with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+            await self.client.github_source_material_all(request)
+
+    async def test_screened_v1_digest_verifies_the_delivered_body(self):
+        self.results = screened_pages()
+        for page in self.results:
+            page["bodyDigest"] = "b" * 64
+        with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+            await self.client.github_source_material_all({**REQUEST, "representation": "screened-v1"})
 
     async def test_range_required_ordered_and_safe_before_credentials(self):
         invalid = [{key: value for key, value in REQUEST.items() if key != removed}
@@ -279,7 +345,7 @@ class MaterialCliTests(unittest.TestCase):
                      "--source-id", "comment:7", "--fingerprint", "f" * 64,
                      "--private-output", str(self.output)]
         self.client = AsyncMock()
-        self.client.github_source_material_all.return_value = {**pages()[-1], "body": BODY}
+        self.client.github_source_material_all.return_value = {**screened_pages()[-1], "body": BODY, "offset": 0}
 
     def tearDown(self):
         self.temp.cleanup()
@@ -294,9 +360,9 @@ class MaterialCliTests(unittest.TestCase):
     def test_private_output_only_no_text_or_identity_on_terminal(self):
         status, stdout, _ = self.invoke()
         self.assertEqual(status, 0)
-        self.assertEqual(json.loads(stdout), {"materialRead": "written", "complete": True})
+        self.assertEqual(json.loads(stdout), {"materialRead": "written", "complete": True, "screening": SCREENING})
         self.assertEqual(self.output.read_text(), BODY)
-        self.client.github_source_material_all.assert_awaited_once_with(REQUEST)
+        self.client.github_source_material_all.assert_awaited_once_with({**REQUEST, "representation": "screened-v1"})
         self.assertEqual(stat.S_IMODE(self.output.stat().st_mode), 0o600)
         self.assertEqual(self.invoke()[0], 2)  # Existing output is never overwritten.
         self.assertEqual(self.output.read_text(), BODY)
@@ -347,7 +413,7 @@ class MaterialCliTests(unittest.TestCase):
 
         async def changed_permission(_):
             self.root.chmod(0o755)
-            return {**pages()[-1], "body": BODY}
+            return {**screened_pages()[-1], "body": BODY, "offset": 0}
 
         self.client.github_source_material_all.side_effect = changed_permission
         self.assertEqual(self.invoke()[0], 2)

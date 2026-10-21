@@ -124,6 +124,17 @@ Zod version and fixture SHA-256. Both runtimes execute the same 30 raw-parser,
 six digest and nine ACK-binding cases. Authorization of the complete family on
 trusted main precedes the consumer rotation; all ten older families stay intact.
 
+The current `assigned-stock-github-delivery` family pins both event and control
+contracts to merged cloud `9503b8e2a99fbe099a4b90cb576a17dcf4b786aa`. Its
+108 control sources cover canonical Messaging source admission, signed-order
+and wake authority, retained charge recovery, stock settlement, owner actor
+filtering, and shared text screening. The immutable family archive holds seven
+snapshots and 110 unique source blobs; the trusted policy authorizes their exact
+hashes before this consumer rotation. All fifteen historical families remain
+available. These are offline provenance and compatibility checks; client
+attachment, live wake behavior, deployment, and runtime activation require
+separate qualification.
+
 The selected sources now include `github/pinned-read-contract.ts` and retain
 its host, controller and grants boundaries. The helper's grants and readback
 imports are already hash-pinned; Zod is pinned separately by version 4.6.5. The
@@ -228,12 +239,17 @@ user with mode `0700`, and no path component may be a symlink. Only after all
 pages verify does the command write a private sibling temporary file, sync it,
 and atomically publish the complete file with mode `0600`. It never replaces
 an existing file or prints finding text, source identity, or opaque cursors.
-The terminal reports only `materialRead: written` and `complete: true`, or a safe
-failure code.
+The terminal reports `materialRead: written`, `complete: true`, and the strict
+screening report, or a safe failure code. The command requests `screened-v1`; each
+successful page must echo that exact representation. It publishes only the screened
+body and never retries a rejected screened request
+as raw text. Requests that omit `representation` retain the raw-v1 API shape for
+internal callers.
 
 The client validates closed request/response shapes, subject/source/fingerprint
 binding, exact `requestedRange` echoes on every page, covered first version,
-contiguous UTF-16 offsets, stable first version/body digest/total length,
+contiguous UTF-16 offsets, stable first version/body digest/total length and,
+for screened-v1, source digest and report,
 opaque cursor cycles, and the SHA-256 digest of the assembled UTF-8 text. It
 bounds requests to 4096 bytes, responses to 8192 bytes, material to 1 Mi UTF-16
 units, and a traversal to 4096 pages. Unavailable, deleted, conflict, malformed,

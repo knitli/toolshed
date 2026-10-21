@@ -238,6 +238,7 @@ def _github_material_request(value):
     if not isinstance(value, dict):
         raise CloudError(code)
     _closed(value, {"subject", "sourceId", "fingerprint", "fromVersion", "toVersion"}
+            | ({"representation"} if "representation" in value else set())
             | ({"cursor"} if "cursor" in value else set()), code=code)
     _closed(value["subject"], ("installationId", "repositoryId", "prNumber"), code=code)
     if (any(not _generation(number) for number in value["subject"].values())
@@ -247,6 +248,7 @@ def _github_material_request(value):
             or re.fullmatch(r"(?:review:[1-9][0-9]*|comment:[1-9][0-9]*|thread-comment:.+)", value["sourceId"], re.DOTALL) is None
             or not isinstance(value["fingerprint"], str)
             or re.fullmatch(r"[a-f0-9]{64}", value["fingerprint"]) is None
+            or ("representation" in value and value["representation"] != "screened-v1")
             or ("cursor" in value and (not isinstance(value["cursor"], str)
                 or re.fullmatch(r"[A-Za-z0-9_-]{1,256}", value["cursor"]) is None))):
         raise CloudError(code)
@@ -254,6 +256,32 @@ def _github_material_request(value):
     if len(encoded) > 4096:
         raise CloudError(code)
     return json.loads(encoded)
+
+
+def _github_screening_report(value):
+    fields = {"version", "removed", "kept", "visible", "dense", "trimmed", "shortened",
+              "normalized", "phrases", "changed", "withheld"}
+    phrase_ids = {"ignore-previous", "system-prompt", "jailbreak", "chat-template",
+                  "begin-system", "new-instructions"}
+    if not isinstance(value, dict):
+        raise CloudError("invalid_response")
+    _closed(value, fields, code="invalid_response")
+    removed = value["removed"]
+    if not isinstance(removed, dict):
+        raise CloudError("invalid_response")
+    _closed(removed, ("ansi", "control", "invisible", "surrogate"), code="invalid_response")
+    phrases = value["phrases"]
+    if (type(value["version"]) is not int or value["version"] != 1
+            or any(type(removed[key]) is not int or not 0 <= removed[key] <= 1048576
+                   for key in ("ansi", "control", "invisible", "surrogate"))
+            or any(type(value[key]) is not int or not 0 <= value[key] <= 1048576
+                   for key in ("kept", "visible"))
+            or any(type(value[key]) is not bool
+                   for key in ("dense", "trimmed", "shortened", "normalized", "changed", "withheld"))
+            or not isinstance(phrases, list)
+            or any(not isinstance(phrase, str) or phrase not in phrase_ids for phrase in phrases)
+            or len(set(phrases)) != len(phrases)):
+        raise CloudError("invalid_response")
 
 
 def _github_material_cursor(value):
@@ -283,8 +311,16 @@ def _github_material_response(value, request):
     if isinstance(value, dict) and value.get("status") in ("unavailable", "deleted", "conflict"):
         _closed(value, ("status",))
         return value
-    _closed(value, ("status", "subject", "sourceId", "fingerprint", "requestedRange", "firstVersion", "bodyDigest",
-                    "offset", "totalLength", "body", "nextCursor", "complete"))
+    screened = request.get("representation") == "screened-v1"
+    fields = {"status", "subject", "sourceId", "fingerprint", "requestedRange", "firstVersion", "bodyDigest",
+              "offset", "totalLength", "body", "nextCursor", "complete"}
+    if screened:
+        fields |= {"representation", "sourceBodyDigest", "screening"}
+    _closed(value, fields)
+    if screened:
+        if value["representation"] != "screened-v1":
+            raise CloudError("invalid_response")
+        _github_screening_report(value["screening"])
     if (value["status"] != "ok"
             or any(not _same_json_value(value[key], request[key]) for key in ("subject", "sourceId", "fingerprint"))
             or not _same_json_value(value["requestedRange"], {key: request[key] for key in ("fromVersion", "toVersion")})
@@ -292,6 +328,8 @@ def _github_material_response(value, request):
             or not request["fromVersion"] <= value["firstVersion"] <= request["toVersion"]
             or not isinstance(value["bodyDigest"], str)
             or re.fullmatch(r"[a-f0-9]{64}", value["bodyDigest"]) is None
+            or (screened and (not isinstance(value["sourceBodyDigest"], str)
+                or re.fullmatch(r"[a-f0-9]{64}", value["sourceBodyDigest"]) is None))
             or any(not _safe_uint(value[key]) or value[key] > 1048576 for key in ("offset", "totalLength"))
             or not isinstance(value["body"], str) or not isinstance(value["complete"], bool)
             or (value["nextCursor"] is not None and (not isinstance(value["nextCursor"], str)
@@ -1063,6 +1101,8 @@ class CloudClient:
             if page["status"] != "ok":
                 return page
             identity = tuple(page[key] for key in ("firstVersion", "bodyDigest", "totalLength"))
+            if request.get("representation") == "screened-v1":
+                identity += (page["sourceBodyDigest"], page["screening"])
             if page["offset"] != offset or (anchor is not None and identity != anchor):
                 raise CloudError("invalid_response")
             anchor = identity

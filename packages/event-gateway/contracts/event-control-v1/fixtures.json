@@ -2808,6 +2808,603 @@
         "accepted": false
       }
     ],
+    "screenedRequest": {
+      "subject": {
+        "installationId": 1,
+        "repositoryId": 2,
+        "prNumber": 3
+      },
+      "sourceId": "comment:7",
+      "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "fromVersion": 2,
+      "toVersion": 3,
+      "representation": "screened-v1"
+    },
+    "screenedRequests": [
+      {
+        "name": "screened-first-page",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3,
+          "representation": "screened-v1"
+        },
+        "accepted": true
+      },
+      {
+        "name": "screened-continuation",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3,
+          "representation": "screened-v1",
+          "cursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30"
+        },
+        "accepted": true
+      },
+      {
+        "name": "unsupported-representation",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3,
+          "representation": "raw-v1"
+        },
+        "accepted": false
+      },
+      {
+        "name": "screened-request-byte-limit",
+        "value": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "thread-comment:éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3,
+          "representation": "screened-v1"
+        },
+        "accepted": false
+      }
+    ],
+    "screenedResults": [
+      {
+        "name": "screened-unicode-first-page",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false,
+          "representation": "screened-v1",
+          "sourceBodyDigest": "727d01c1b841d0f23bb546b44f396383c32a7432b364b6a7be43c455f443dd5a",
+          "screening": {
+            "version": 1,
+            "removed": {
+              "ansi": 0,
+              "control": 1,
+              "invisible": 0,
+              "surrogate": 0
+            },
+            "kept": 0,
+            "visible": 3,
+            "dense": false,
+            "trimmed": false,
+            "shortened": false,
+            "normalized": false,
+            "phrases": [],
+            "changed": true,
+            "withheld": false
+          }
+        },
+        "accepted": true
+      },
+      {
+        "name": "screened-complete-page",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀z",
+          "nextCursor": null,
+          "complete": true,
+          "representation": "screened-v1",
+          "sourceBodyDigest": "727d01c1b841d0f23bb546b44f396383c32a7432b364b6a7be43c455f443dd5a",
+          "screening": {
+            "version": 1,
+            "removed": {
+              "ansi": 0,
+              "control": 1,
+              "invisible": 0,
+              "surrogate": 0
+            },
+            "kept": 0,
+            "visible": 3,
+            "dense": false,
+            "trimmed": false,
+            "shortened": false,
+            "normalized": false,
+            "phrases": [],
+            "changed": true,
+            "withheld": false
+          }
+        },
+        "accepted": true
+      },
+      {
+        "name": "missing-screening-metadata",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false,
+          "representation": "screened-v1"
+        },
+        "accepted": false
+      },
+      {
+        "name": "raw-page-with-screening-metadata",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false,
+          "sourceBodyDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "screening": {
+            "version": 1,
+            "removed": {
+              "ansi": 0,
+              "control": 1,
+              "invisible": 0,
+              "surrogate": 0
+            },
+            "kept": 0,
+            "visible": 3,
+            "dense": false,
+            "trimmed": false,
+            "shortened": false,
+            "normalized": false,
+            "phrases": [],
+            "changed": true,
+            "withheld": false
+          }
+        },
+        "accepted": false
+      },
+      {
+        "name": "unknown-screening-field",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false,
+          "representation": "screened-v1",
+          "sourceBodyDigest": "727d01c1b841d0f23bb546b44f396383c32a7432b364b6a7be43c455f443dd5a",
+          "screening": {
+            "version": 1,
+            "removed": {
+              "ansi": 0,
+              "control": 1,
+              "invisible": 0,
+              "surrogate": 0
+            },
+            "kept": 0,
+            "visible": 3,
+            "dense": false,
+            "trimmed": false,
+            "shortened": false,
+            "normalized": false,
+            "phrases": [],
+            "changed": true,
+            "withheld": false,
+            "private": true
+          }
+        },
+        "accepted": false
+      },
+      {
+        "name": "unsupported-screen-version",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false,
+          "representation": "screened-v1",
+          "sourceBodyDigest": "727d01c1b841d0f23bb546b44f396383c32a7432b364b6a7be43c455f443dd5a",
+          "screening": {
+            "version": 2,
+            "removed": {
+              "ansi": 0,
+              "control": 1,
+              "invisible": 0,
+              "surrogate": 0
+            },
+            "kept": 0,
+            "visible": 3,
+            "dense": false,
+            "trimmed": false,
+            "shortened": false,
+            "normalized": false,
+            "phrases": [],
+            "changed": true,
+            "withheld": false
+          }
+        },
+        "accepted": false
+      },
+      {
+        "name": "withheld-not-boolean",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false,
+          "representation": "screened-v1",
+          "sourceBodyDigest": "727d01c1b841d0f23bb546b44f396383c32a7432b364b6a7be43c455f443dd5a",
+          "screening": {
+            "version": 1,
+            "removed": {
+              "ansi": 0,
+              "control": 1,
+              "invisible": 0,
+              "surrogate": 0
+            },
+            "kept": 0,
+            "visible": 3,
+            "dense": false,
+            "trimmed": false,
+            "shortened": false,
+            "normalized": false,
+            "phrases": [],
+            "changed": true,
+            "withheld": 1
+          }
+        },
+        "accepted": false
+      },
+      {
+        "name": "duplicate-screening-phrase",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false,
+          "representation": "screened-v1",
+          "sourceBodyDigest": "727d01c1b841d0f23bb546b44f396383c32a7432b364b6a7be43c455f443dd5a",
+          "screening": {
+            "version": 1,
+            "removed": {
+              "ansi": 0,
+              "control": 1,
+              "invisible": 0,
+              "surrogate": 0
+            },
+            "kept": 0,
+            "visible": 3,
+            "dense": false,
+            "trimmed": false,
+            "shortened": false,
+            "normalized": false,
+            "phrases": [
+              "jailbreak",
+              "jailbreak"
+            ],
+            "changed": true,
+            "withheld": false
+          }
+        },
+        "accepted": false
+      }
+    ],
+    "screenedBindings": [
+      {
+        "name": "screened-first-page",
+        "request": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3,
+          "representation": "screened-v1"
+        },
+        "result": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false,
+          "representation": "screened-v1",
+          "sourceBodyDigest": "727d01c1b841d0f23bb546b44f396383c32a7432b364b6a7be43c455f443dd5a",
+          "screening": {
+            "version": 1,
+            "removed": {
+              "ansi": 0,
+              "control": 1,
+              "invisible": 0,
+              "surrogate": 0
+            },
+            "kept": 0,
+            "visible": 3,
+            "dense": false,
+            "trimmed": false,
+            "shortened": false,
+            "normalized": false,
+            "phrases": [],
+            "changed": true,
+            "withheld": false
+          }
+        },
+        "accepted": true
+      },
+      {
+        "name": "screened-request-result-mode-mismatch",
+        "request": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3
+        },
+        "result": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false,
+          "representation": "screened-v1",
+          "sourceBodyDigest": "727d01c1b841d0f23bb546b44f396383c32a7432b364b6a7be43c455f443dd5a",
+          "screening": {
+            "version": 1,
+            "removed": {
+              "ansi": 0,
+              "control": 1,
+              "invisible": 0,
+              "surrogate": 0
+            },
+            "kept": 0,
+            "visible": 3,
+            "dense": false,
+            "trimmed": false,
+            "shortened": false,
+            "normalized": false,
+            "phrases": [],
+            "changed": true,
+            "withheld": false
+          }
+        },
+        "accepted": false
+      },
+      {
+        "name": "screened-identity-mismatch",
+        "request": {
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:7",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "fromVersion": 2,
+          "toVersion": 3,
+          "representation": "screened-v1"
+        },
+        "result": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceId": "comment:8",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "requestedRange": {
+            "fromVersion": 2,
+            "toVersion": 3
+          },
+          "firstVersion": 2,
+          "bodyDigest": "51279926c27c77996046343efb6e2527254f85f9a85e52ea50fbf6d9d8bee927",
+          "offset": 0,
+          "totalLength": 4,
+          "body": "é😀",
+          "nextCursor": "eyJiaW5kaW5nIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm9mZnNldCI6M30",
+          "complete": false,
+          "representation": "screened-v1",
+          "sourceBodyDigest": "727d01c1b841d0f23bb546b44f396383c32a7432b364b6a7be43c455f443dd5a",
+          "screening": {
+            "version": 1,
+            "removed": {
+              "ansi": 0,
+              "control": 1,
+              "invisible": 0,
+              "surrogate": 0
+            },
+            "kept": 0,
+            "visible": 3,
+            "dense": false,
+            "trimmed": false,
+            "shortened": false,
+            "normalized": false,
+            "phrases": [],
+            "changed": true,
+            "withheld": false
+          }
+        },
+        "accepted": false
+      }
+    ],
     "nodeProof": {
       "principal": "adam@knitli.com",
       "agent": "pilot-agent",
@@ -2826,6 +3423,160 @@
       },
       "canonical": "[\"event-node-proof-v1\",\"adam@knitli.com\",\"https://events.example.com\",\"POST\",\"/v1/github/source/material\",\"d050fcb3a5a727a080698260b9f91298662b5679cc6898b3060f7f54d17f4937\",\"00000000-0000-4000-8000-000000000001\",1,\"2026-10-09T12:00:58.100Z\",\"00000000-0000-4000-8000-000000000013\"]"
     }
+  },
+  "githubEventRead": {
+    "request": {
+      "eventReference": "ref_018e2c70-7c6a-7a04-8000-000000000001"
+    },
+    "requests": [
+      {
+        "name": "opaque-reference",
+        "value": {
+          "eventReference": "ref_018e2c70-7c6a-7a04-8000-000000000001"
+        },
+        "accepted": true
+      },
+      {
+        "name": "unknown-field",
+        "value": {
+          "eventReference": "ref_018e2c70-7c6a-7a04-8000-000000000001",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          }
+        },
+        "accepted": false
+      },
+      {
+        "name": "invalid-reference",
+        "value": {
+          "eventReference": "latest"
+        },
+        "accepted": false
+      },
+      {
+        "name": "boolean-reference",
+        "value": {
+          "eventReference": true
+        },
+        "accepted": false
+      }
+    ],
+    "results": [
+      {
+        "name": "metadata",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceVersion": 4,
+          "eventKind": "ci",
+          "reasonCode": "check_failed",
+          "candidateGeneration": 1,
+          "observedAt": 1000
+        },
+        "accepted": true
+      },
+      {
+        "name": "unavailable",
+        "value": {
+          "status": "unavailable"
+        },
+        "accepted": true
+      },
+      {
+        "name": "conflict",
+        "value": {
+          "status": "conflict"
+        },
+        "accepted": true
+      },
+      {
+        "name": "provider-text",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceVersion": 4,
+          "eventKind": "ci",
+          "reasonCode": "check_failed",
+          "candidateGeneration": 1,
+          "observedAt": 1000,
+          "body": "private"
+        },
+        "accepted": false
+      },
+      {
+        "name": "existence-leak",
+        "value": {
+          "status": "unavailable",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          }
+        },
+        "accepted": false
+      },
+      {
+        "name": "boolean-identity",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": true
+          },
+          "sourceVersion": 4,
+          "eventKind": "ci",
+          "reasonCode": "check_failed",
+          "candidateGeneration": 1,
+          "observedAt": 1000
+        },
+        "accepted": false
+      },
+      {
+        "name": "unsafe-generation",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceVersion": 9007199254740992,
+          "eventKind": "ci",
+          "reasonCode": "check_failed",
+          "candidateGeneration": 1,
+          "observedAt": 1000
+        },
+        "accepted": false
+      },
+      {
+        "name": "unknown-kind",
+        "value": {
+          "status": "ok",
+          "subject": {
+            "installationId": 1,
+            "repositoryId": 2,
+            "prNumber": 3
+          },
+          "sourceVersion": 4,
+          "eventKind": "message",
+          "reasonCode": "check_failed",
+          "candidateGeneration": 1,
+          "observedAt": 1000
+        },
+        "accepted": false
+      }
+    ]
   },
   "noStartNodeProof": {
     "principal": "adam@knitli.com",
