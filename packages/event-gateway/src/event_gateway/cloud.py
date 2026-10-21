@@ -17,8 +17,9 @@ import uuid
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from .protocol import (
-    ProtocolError, _SCHEMA, _depth, _pairs, _timestamp, acknowledgment_matches_delivery,
+    ProtocolError, _depth, _pairs, _timestamp, acknowledgment_matches_delivery,
     matches_delivery_id, parse_acknowledgment, parse_envelope,
+    shared_envelope_property,
 )
 
 
@@ -172,6 +173,41 @@ def _github_text(value, limit):
     return isinstance(value, str) and len(value) <= limit
 
 
+_GITHUB_EVENT_REASON_CODES = {
+    "attention": ("review_requested", "review_submitted", "review_comment"),
+    "ci": ("check_failed", "status_failed"),
+    "terminal": ("pull_request_closed", "pull_request_merged"),
+}
+
+
+def _github_event_request(value):
+    _closed(value, ("eventReference",), code="invalid_request")
+    if (not isinstance(value["eventReference"], str)
+            or re.fullmatch(r"ref_[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+                            value["eventReference"]) is None):
+        raise CloudError("invalid_request")
+    return value
+
+
+def _github_event_response(value):
+    if not isinstance(value, dict) or value.get("status") not in ("ok", "unavailable", "conflict"):
+        raise CloudError("invalid_response")
+    if value["status"] != "ok":
+        _closed(value, ("status",))
+        return value
+    _closed(value, ("status", "subject", "sourceVersion", "eventKind", "reasonCode",
+                    "candidateGeneration", "observedAt"))
+    _closed(value["subject"], ("installationId", "repositoryId", "prNumber"))
+    if (any(not _generation(number) for number in value["subject"].values())
+            or any(not _generation(value[key]) for key in (
+                "sourceVersion", "candidateGeneration", "observedAt"))
+            or not isinstance(value["eventKind"], str)
+            or value["eventKind"] not in _GITHUB_EVENT_REASON_CODES
+            or value["reasonCode"] not in _GITHUB_EVENT_REASON_CODES[value["eventKind"]]):
+        raise CloudError("invalid_response")
+    return value
+
+
 def _github_cursor(value, request, *, code):
     _closed(value, ("subjectKey", "fromVersion", "toVersion", "anchorVersion", "anchorEpoch",
                     "observationEpoch", "revision", "policyRevision", "offset"), code=code)
@@ -209,6 +245,7 @@ def _github_material_request(value):
     if not isinstance(value, dict):
         raise CloudError(code)
     _closed(value, {"subject", "sourceId", "fingerprint", "fromVersion", "toVersion"}
+            | ({"representation"} if "representation" in value else set())
             | ({"cursor"} if "cursor" in value else set()), code=code)
     _closed(value["subject"], ("installationId", "repositoryId", "prNumber"), code=code)
     if (any(not _generation(number) for number in value["subject"].values())
@@ -218,6 +255,7 @@ def _github_material_request(value):
             or re.fullmatch(r"(?:review:[1-9][0-9]*|comment:[1-9][0-9]*|thread-comment:.+)", value["sourceId"], re.DOTALL) is None
             or not isinstance(value["fingerprint"], str)
             or re.fullmatch(r"[a-f0-9]{64}", value["fingerprint"]) is None
+            or ("representation" in value and value["representation"] != "screened-v1")
             or ("cursor" in value and (not isinstance(value["cursor"], str)
                 or re.fullmatch(r"[A-Za-z0-9_-]{1,256}", value["cursor"]) is None))):
         raise CloudError(code)
@@ -225,6 +263,34 @@ def _github_material_request(value):
     if len(encoded) > 4096:
         raise CloudError(code)
     return json.loads(encoded)
+
+
+def _github_screening_report(value):
+    fields = {"version", "removed", "kept", "visible", "dense", "trimmed", "shortened",
+              "normalized", "phrases", "changed", "withheld"}
+    phrase_ids = {"ignore-previous", "system-prompt", "jailbreak", "chat-template",
+                  "begin-system", "new-instructions"}
+    if not isinstance(value, dict):
+        raise CloudError("invalid_response")
+    _closed(value, fields, code="invalid_response")
+    removed = value["removed"]
+    if not isinstance(removed, dict):
+        raise CloudError("invalid_response")
+    _closed(removed, ("ansi", "control", "invisible", "surrogate"), code="invalid_response")
+    phrases = value["phrases"]
+    # Exact built-in types keep JSON DTOs from accepting bool/int subclasses.
+    if (type(value["version"]) is not int  # pylint: disable=unidiomatic-typecheck
+            or value["version"] != 1
+            or any(type(removed[key]) is not int or not 0 <= removed[key] <= 1048576  # pylint: disable=unidiomatic-typecheck
+                   for key in ("ansi", "control", "invisible", "surrogate"))
+            or any(type(value[key]) is not int or not 0 <= value[key] <= 1048576  # pylint: disable=unidiomatic-typecheck
+                   for key in ("kept", "visible"))
+            or any(type(value[key]) is not bool  # pylint: disable=unidiomatic-typecheck
+                   for key in ("dense", "trimmed", "shortened", "normalized", "changed", "withheld"))
+            or not isinstance(phrases, list)
+            or any(not isinstance(phrase, str) or phrase not in phrase_ids for phrase in phrases)
+            or len(set(phrases)) != len(phrases)):
+        raise CloudError("invalid_response")
 
 
 def _github_material_cursor(value):
@@ -254,8 +320,16 @@ def _github_material_response(value, request):
     if isinstance(value, dict) and value.get("status") in ("unavailable", "deleted", "conflict"):
         _closed(value, ("status",))
         return value
-    _closed(value, ("status", "subject", "sourceId", "fingerprint", "requestedRange", "firstVersion", "bodyDigest",
-                    "offset", "totalLength", "body", "nextCursor", "complete"))
+    screened = request.get("representation") == "screened-v1"
+    fields = {"status", "subject", "sourceId", "fingerprint", "requestedRange", "firstVersion", "bodyDigest",
+              "offset", "totalLength", "body", "nextCursor", "complete"}
+    if screened:
+        fields |= {"representation", "sourceBodyDigest", "screening"}
+    _closed(value, fields)
+    if screened:
+        if value["representation"] != "screened-v1":
+            raise CloudError("invalid_response")
+        _github_screening_report(value["screening"])
     if (value["status"] != "ok"
             or any(not _same_json_value(value[key], request[key]) for key in ("subject", "sourceId", "fingerprint"))
             or not _same_json_value(value["requestedRange"], {key: request[key] for key in ("fromVersion", "toVersion")})
@@ -263,6 +337,8 @@ def _github_material_response(value, request):
             or not request["fromVersion"] <= value["firstVersion"] <= request["toVersion"]
             or not isinstance(value["bodyDigest"], str)
             or re.fullmatch(r"[a-f0-9]{64}", value["bodyDigest"]) is None
+            or (screened and (not isinstance(value["sourceBodyDigest"], str)
+                or re.fullmatch(r"[a-f0-9]{64}", value["sourceBodyDigest"]) is None))
             or any(not _safe_uint(value[key]) or value[key] > 1048576 for key in ("offset", "totalLength"))
             or not isinstance(value["body"], str) or not isinstance(value["complete"], bool)
             or (value["nextCursor"] is not None and (not isinstance(value["nextCursor"], str)
@@ -623,7 +699,7 @@ def _native_transfer_response(value, request, client):
     return json.loads(_json(value))
 
 
-_PRINCIPAL_SCHEMA = _SCHEMA["anyOf"][0]["anyOf"][0]["properties"]["principal"]
+_PRINCIPAL_SCHEMA = shared_envelope_property("principal")
 
 
 def _principal(value):
@@ -710,13 +786,70 @@ _ERRORS = {
     403: {"denied", "node_proof_required", "node_denied", "acknowledgment_denied"},
     404: {"not_found"}, 405: {"method_not_allowed"},
     408: {"request_timeout"},
-    409: {"invalid", "conflict", "expired", "capacity", "not_found", "native_binding_unqualified", "coordinator_capacity"},
+    409: {"invalid", "conflict", "expired", "capacity", "not_found", "native_binding_unqualified",
+          "coordinator_capacity", "assigned_stock_disabled"},
     413: {"request_too_large"}, 415: {"content_type", "content_encoding"},
     503: {"runtime_disabled", "unavailable", "authority_unavailable", "invalid_dispatch_response", "registry_unavailable"},
 }
 _NATIVE_COMMIT_PATHS = frozenset((
     "/v1/runtimes/attach", "/v1/runtimes/renew", "/v1/runtimes/transfer",
 ))
+_AMBIGUOUS_COMMIT_PATHS = _NATIVE_COMMIT_PATHS | {"/v1/runtimes/assigned-stock"}
+
+
+def _stock_assignment_request(value):
+    """Validate the non-native, owner-directed Codex conversation assignment CAS."""
+    _closed(value, ("operation", "runtimeId", "conversationId",
+                    "expectedRuntimeGeneration", "expectedAttachmentGeneration"),
+            code="invalid_request")
+    if (value["operation"] not in ("attach", "renew")
+            or not _uuid(value["runtimeId"]) or not _uuid(value["conversationId"])):
+        raise CloudError("invalid_request")
+    runtime_generation = value["expectedRuntimeGeneration"]
+    attachment_generation = value["expectedAttachmentGeneration"]
+    if value["operation"] == "attach":
+        if not ((runtime_generation is None and attachment_generation is None)
+                or (_generation(runtime_generation) and _generation(attachment_generation)
+                    and runtime_generation < _SAFE_INTEGER
+                    and attachment_generation < _SAFE_INTEGER)):
+            raise CloudError("invalid_request")
+    elif not (_generation(runtime_generation) and _generation(attachment_generation)):
+        raise CloudError("invalid_request")
+    return dict(value)
+
+
+def _stock_assignment_response(value, request, client):
+    _closed(value, ("status", "runtimeId", "runtimeProfile", "nodeId", "nodeGeneration",
+                    "runtimeGeneration", "attachmentGeneration", "leaseUntil"))
+    expected_profile = {"profile": "assigned_stock_client", "client": "codex",
+                        "conversationId": request["conversationId"]}
+    try:
+        lease_until = _timestamp(value["leaseUntil"])
+    except (ProtocolError, TypeError, ValueError):
+        raise CloudError("invalid_response") from None
+    if (value["status"] != ("attached" if request["operation"] == "attach" else "renewed")
+            or value["runtimeId"] != request["runtimeId"]
+            or not _same_json_value(value["runtimeProfile"], expected_profile)
+            or value["nodeId"] != client.node_id or value["nodeGeneration"] != client.node_generation
+            or not _generation(value["runtimeGeneration"])
+            or not _generation(value["attachmentGeneration"])
+            or lease_until <= client._clock() * 1000):
+        raise CloudError("invalid_response")
+    if request["operation"] == "renew" and (
+            value["runtimeGeneration"] != request["expectedRuntimeGeneration"]
+            or value["attachmentGeneration"] != request["expectedAttachmentGeneration"]):
+        raise CloudError("invalid_response")
+    if request["operation"] == "attach":
+        expected_runtime = request["expectedRuntimeGeneration"]
+        expected_attachment = request["expectedAttachmentGeneration"]
+        if expected_runtime is None:
+            matches = value["runtimeGeneration"] == value["attachmentGeneration"] == 1
+        else:
+            matches = (value["runtimeGeneration"] == expected_runtime + 1
+                       and value["attachmentGeneration"] == expected_attachment + 1)
+        if not matches:
+            raise CloudError("invalid_response")
+    return value
 
 
 class CloudClient:
@@ -797,7 +930,7 @@ class CloudClient:
             if path == "/v1/dispatch/claim":
                 raise CloudError(error.code, ambiguous=not definitive_refusal,
                                  definitive_refusal=definitive_refusal) from None
-            if path in _NATIVE_COMMIT_PATHS and not definitive_refusal:
+            if path in _AMBIGUOUS_COMMIT_PATHS and not definitive_refusal:
                 raise CloudError(error.code, ambiguous=True) from None
             raise
 
@@ -949,6 +1082,11 @@ class CloudClient:
         """Public key identity for a retained local reconciliation link."""
         return base64.urlsafe_b64encode(self._key.public_key().public_bytes_raw()).rstrip(b"=").decode()
 
+    async def github_event_read(self, request):
+        """Resolve an opaque event reference through current cloud read authority."""
+        request = _github_event_request(request)
+        return _github_event_response(await self._post("/v1/github/event/read", request))
+
     async def github_source_read(self, request):
         """Read one bounded page of authorized retained GitHub source projections."""
         request = _github_source_request(request)
@@ -974,6 +1112,8 @@ class CloudClient:
             if page["status"] != "ok":
                 return page
             identity = tuple(page[key] for key in ("firstVersion", "bodyDigest", "totalLength"))
+            if request.get("representation") == "screened-v1":
+                identity += (page["sourceBodyDigest"], page["screening"])
             if page["offset"] != offset or (anchor is not None and identity != anchor):
                 raise CloudError("invalid_response")
             anchor = identity
@@ -997,6 +1137,15 @@ class CloudClient:
             raise CloudError("invalid_request")
         value = await self._post("/v1/runtimes/status", {"runtimeId": runtime_id})
         return _runtime_status_response(value, runtime_id)
+
+    async def assigned_stock(self, request):
+        """Assign one explicit existing Codex conversation without a native witness."""
+        request = _stock_assignment_request(request)
+        result = await self._post("/v1/runtimes/assigned-stock", request)
+        try:
+            return _stock_assignment_response(result, request, self)
+        except CloudError as error:
+            raise CloudError(error.code, ambiguous=True) from None
 
     async def native_challenge(self, request):
         """Record one exact attach, renew, or transfer intent before local sampling."""

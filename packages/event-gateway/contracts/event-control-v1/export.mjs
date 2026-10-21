@@ -18,6 +18,7 @@ const names = [
   'github/material-cache.ts',
   'github/material-delete.ts',
   'github/material-read-contract.ts',
+  'github/actor-policy.ts',
   'github/material-read.ts',
   'github/reconciliation-internal.ts',
   'github/reconciliation-store.ts',
@@ -30,17 +31,63 @@ const names = [
   'quarantine-inventory-validation.ts',
 
   'contracts.ts', 'api.ts', 'registry.ts', 'coordinator.ts', 'coordinator-admission.ts',
-  'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts',
-  'native-runtime-store.ts', 'native-admission-gate.ts', 'github/readback-contract.ts',
+  'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts', 'assigned-stock-contract.ts',
+  'native-runtime-store.ts', 'native-admission-gate.ts', 'github/readback-contract.ts', 'github/event-read-contract.ts',
   'read-authority.ts', 'request-deadline.ts', 'github/host.ts', 'github/controller.ts',
   'github/host-storage-version.ts', 'messaging/protocol-v2.ts',
+  'messaging/preparation.ts', 'messaging/delivery-authority.ts',
+  'messaging/materialization.ts', 'messaging/consumer-authority.ts',
   'github/client.ts', 'github/pinned-read-contract.ts', 'github/grants.ts', 'github/state.ts', 'github/ingress.ts',
   '../../gatekeeper-memory/src/principals.ts', '../../openapi-operator/src/access.ts',
   '../../gatekeeper-messaging/src/agent-token.ts',
+  '../../gatekeeper-messaging/src/mailbox.ts',
+  '../../gatekeeper-messaging/src/event-bridge.ts',
+  '../../gatekeeper-messaging/src/message-preparation.ts',
+  '../../gatekeeper-messaging/src/event-authority-contract.ts',
+  '../../gatekeeper-messaging/src/event-authority.ts',
+  '../../gatekeeper-messaging/src/source-preparation.ts',
+  '../../gatekeeper-messaging/src/event-wake-budget.ts',
+  '../../gatekeeper-messaging/src/message-consumer-admission.ts',
+  '../../gatekeeper-messaging/src/message-route-control.ts',
+  '../../gatekeeper-messaging/src/message-route-control-contract.ts',
+  '../../gatekeeper-messaging/src/message-route-owner-proof.ts',
+  '../../gatekeeper-messaging/src/message-attempt-settlement.ts',
+  '../../gatekeeper-messaging/src/activation.ts',
+  '../../gatekeeper-messaging/src/orders.ts',
+  '../../gatekeeper-messaging/src/registry.ts',
+  '../../gatekeeper-messaging/src/tasks.ts',
+  '../../gatekeeper-messaging/src/model.ts',
+  '../../gatekeeper-messaging/src/receipts.ts',
+  '../../gatekeeper-messaging/src/credentials.ts',
+  '../../gatekeeper-messaging/src/presence.ts',
+  '../../gatekeeper-messaging/src/access-audiences.ts',
+  '../../gatekeeper-messaging/src/order-acts.ts',
+  '../../gatekeeper-messaging/src/grant-acts.ts',
+  '../../gatekeeper-messaging/src/acts.ts',
+  '../../gatekeeper-messaging/src/presence-host.ts',
+  '../../gatekeeper-messaging/src/core-acts.ts',
+  '../../gatekeeper-messaging/src/scopes.ts',
+  '../../gatekeeper-messaging/src/authority-contract.ts',
+  '../../gatekeeper-messaging/src/enforcement.ts',
+  '../../gatekeeper-messaging/src/auth.ts',
   'github/source-control.ts', 'github/watches.ts',
   'github/watch-store.ts', 'github/watch-control-internal.ts', 'github/watch-kernel.ts', 'github/watch-owner-proof.ts', 'manual-canary.ts',
   'manual-canary-scope.ts', 'native-admission-canary.ts', 'admin-api.ts', 'admin-types.ts',
   '../../gatekeeper-memory/src/auth.ts', '../../gatekeeper-memory/src/admin-security.ts',
+  '../../authority/src/text.ts',
+  '../../../scripts/deploy.ts',
+  '../../authority/src/act.ts',
+  '../../authority/src/canonical.ts',
+  '../../authority/src/scope.ts',
+  '../../authority/src/task.ts',
+  '../../authority/src/contract-kit.ts',
+  '../../authority/src/snapshot.ts',
+  '../../authority/src/credential-chain.ts',
+  '../../authority/src/human-proof.ts',
+  '../../authority/src/floor.ts',
+  '../../authority/src/webauthn.ts',
+  '../../authority/src/contracts.ts',
+  '../../authority/src/render.ts',
 ];
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- Fixed source filenames under the operator-supplied local checkout.
 const source = Object.fromEntries(names.map(name => [name, readFileSync(resolve(base, name), 'utf8')]));
@@ -61,17 +108,23 @@ if (check) {
 const dataModule = code => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(code, { mode: 'transform' })).toString('base64')}`;
 const policy = dataModule(source['policy.ts']);
 const zod = pathToFileURL(resolve(zodPath)).href;
-const protocol = dataModule(source['protocol.ts'].replace('"zod"', JSON.stringify(zod)).replace('"./policy.js"', JSON.stringify(policy)));
+const assignedStock = dataModule(source['assigned-stock-contract.ts'].replace('"zod"', JSON.stringify(zod)));
+const protocol = dataModule(source['protocol.ts'].replace('"zod"', JSON.stringify(zod))
+  .replace('"./policy.js"', JSON.stringify(policy))
+  .replace('"./assigned-stock-contract.js"', JSON.stringify(assignedStock)));
 const messagingProtocol = dataModule(source['messaging/protocol-v2.ts']
   .replace('"zod"', JSON.stringify(zod)).replace('"../policy.js"', JSON.stringify(policy))
   .replace('"../protocol.js"', JSON.stringify(protocol)));
 // eslint-disable-next-line no-unsanitized/method -- Execute reviewed local schemas; --check verifies revision, source hashes and Zod version before this import.
 const contracts = await import(dataModule(source['contracts.ts'].replace('"zod"', JSON.stringify(zod))
+  .replace('"./assigned-stock-contract.js"', JSON.stringify(assignedStock))
   .replace('"./protocol.ts"', JSON.stringify(protocol))
   .replace('"./messaging/protocol-v2.ts"', JSON.stringify(messagingProtocol))));
 // eslint-disable-next-line no-unsanitized/method -- Execute the reviewed pinned native DTO schemas only after the same pre-evaluation source-pin checks.
 const nativeAdmissionSchemas = await import(dataModule(
   source['native-admission-contract.ts'].replace('"zod"', JSON.stringify(zod))));
+// eslint-disable-next-line no-unsanitized/method -- Import the same reviewed, pinned assignment DTO source.
+const stockSchemas = await import(assignedStock);
 const canonicalSource = source['registry.ts'].match(/export function canonicalNodeProof\([\s\S]*?\n\}/)[0];
 // eslint-disable-next-line no-unsanitized/method -- Execute the reviewed pinned proof function after the same pre-evaluation checks; regeneration explicitly trusts local source.
 const { canonicalNodeProof } = await import(dataModule(canonicalSource));
@@ -391,6 +444,34 @@ for (const vector of githubResults) {
     throw Error(`GitHub result vector disagrees with source: ${vector.name}`);
 }
 const githubSourceRead = { request: githubRequest, requests: githubRequests, results: githubResults };
+// eslint-disable-next-line no-unsanitized/method -- Execute only the reviewed metadata DTO after source-pin verification.
+const eventReadContract = await import(dataModule(source['github/event-read-contract.ts'].replace("'zod'", JSON.stringify(zod))));
+const eventReadRequest = { eventReference: original.eventReference };
+const eventReadResult = { status: 'ok', subject: githubRequest.subject, sourceVersion: 4,
+  eventKind: 'ci', reasonCode: 'check_failed', candidateGeneration: 1, observedAt: 1000 };
+const eventReadRequests = [
+  { name: 'opaque-reference', value: eventReadRequest, accepted: true },
+  { name: 'unknown-field', value: { ...eventReadRequest, subject: githubRequest.subject }, accepted: false },
+  { name: 'invalid-reference', value: { eventReference: 'latest' }, accepted: false },
+  { name: 'boolean-reference', value: { eventReference: true }, accepted: false },
+];
+const eventReadResults = [
+  { name: 'metadata', value: eventReadResult, accepted: true },
+  { name: 'unavailable', value: { status: 'unavailable' }, accepted: true },
+  { name: 'conflict', value: { status: 'conflict' }, accepted: true },
+  { name: 'provider-text', value: { ...eventReadResult, body: 'private' }, accepted: false },
+  { name: 'existence-leak', value: { status: 'unavailable', subject: githubRequest.subject }, accepted: false },
+  { name: 'boolean-identity', value: { ...eventReadResult, subject: { ...githubRequest.subject, prNumber: true } }, accepted: false },
+  { name: 'unsafe-generation', value: { ...eventReadResult, sourceVersion: Number.MAX_SAFE_INTEGER + 1 }, accepted: false },
+  { name: 'unknown-kind', value: { ...eventReadResult, eventKind: 'message' }, accepted: false },
+];
+for (const [schema, vectors] of [[eventReadContract.GitHubEventReadRequestSchema, eventReadRequests],
+  [eventReadContract.GitHubEventReadResultSchema, eventReadResults]]) {
+  for (const vector of vectors) {
+    if (schema.safeParse(vector.value).success !== vector.accepted) throw Error(`GitHub event read vector disagrees: ${vector.name}`);
+  }
+}
+const githubEventRead = { request: eventReadRequest, requests: eventReadRequests, results: eventReadResults };
 // Material vectors execute only the reviewed DTO module, never retention/provider code.
 // eslint-disable-next-line no-unsanitized/method -- Execute only the reviewed material DTO module after source-pin verification.
 const materialContract = await import(dataModule(source['github/material-read-contract.ts'].replace("'zod'", JSON.stringify(zod))));
@@ -454,9 +535,67 @@ for (const vector of materialBindings) {
   if (materialContract.materialPageMatches(vector.request, vector.result) !== vector.accepted)
     throw Error(`Material binding vector disagrees with source: ${vector.name}`);
 }
+const screenedRequest = { ...materialRequest, representation: 'screened-v1' };
+const screening = { version: 1, removed: { ansi: 0, control: 1, invisible: 0, surrogate: 0 },
+  kept: 0, visible: 3, dense: false, trimmed: false, shortened: false, normalized: false, phrases: [], changed: true, withheld: false };
+const screenedResult = { ...materialResult, representation: 'screened-v1', sourceBodyDigest: createHash('sha256').update('\u0000é😀z').digest('hex'), screening };
+const screenedRequests = [
+  { name: 'screened-first-page', value: screenedRequest, accepted: true },
+  { name: 'screened-continuation', value: { ...screenedRequest, cursor: materialCursor }, accepted: true },
+  { name: 'unsupported-representation', value: { ...materialRequest, representation: 'raw-v1' }, accepted: false },
+  { name: 'screened-request-byte-limit', value: { ...screenedRequest, sourceId: 'thread-comment:' + 'é'.repeat(2048) }, accepted: false },
+];
+const screenedResults = [
+  { name: 'screened-unicode-first-page', value: screenedResult, accepted: true },
+  { name: 'screened-complete-page', value: { ...screenedResult, body: 'é😀z', nextCursor: null, complete: true }, accepted: true },
+  { name: 'missing-screening-metadata', value: { ...materialResult, representation: 'screened-v1' }, accepted: false },
+  { name: 'raw-page-with-screening-metadata', value: { ...materialResult, sourceBodyDigest: 'a'.repeat(64), screening }, accepted: false },
+  { name: 'unknown-screening-field', value: { ...screenedResult, screening: { ...screening, private: true } }, accepted: false },
+  { name: 'unsupported-screen-version', value: { ...screenedResult, screening: { ...screening, version: 2 } }, accepted: false },
+  { name: 'withheld-not-boolean', value: { ...screenedResult, screening: { ...screening, withheld: 1 } }, accepted: false },
+  { name: 'duplicate-screening-phrase', value: { ...screenedResult, screening: { ...screening, phrases: ['jailbreak', 'jailbreak'] } }, accepted: false },
+];
+for (const vector of screenedRequests) {
+  if (materialContract.GitHubMaterialReadRequestSchema.safeParse(vector.value).success !== vector.accepted)
+    throw Error(`Screened material request vector disagrees with source: ${vector.name}`);
+}
+for (const vector of screenedResults) {
+  if (materialContract.GitHubMaterialReadResultSchema.safeParse(vector.value).success !== vector.accepted)
+    throw Error(`Screened material result vector disagrees with source: ${vector.name}`);
+}
+const screenedBindings = [
+  { name: 'screened-first-page', request: screenedRequest, result: screenedResult, accepted: true },
+  { name: 'screened-request-result-mode-mismatch', request: materialRequest, result: screenedResult, accepted: false },
+  { name: 'screened-identity-mismatch', request: screenedRequest,
+    result: { ...screenedResult, sourceId: 'comment:8' }, accepted: false },
+];
+for (const vector of screenedBindings) {
+  if (materialContract.materialPageMatches(vector.request, vector.result) !== vector.accepted)
+    throw Error(`Screened material binding vector disagrees with source: ${vector.name}`);
+}
 const githubMaterialRead = { request: materialRequest, requests: materialRequests, results: materialResults,
-  bindings: materialBindings, nodeProof: nativeProof(materialContract.GITHUB_MATERIAL_READ_PATH, materialRequest, nativeIds.challengeProofAttach) };
+  bindings: materialBindings, screenedRequest, screenedRequests, screenedResults, screenedBindings,
+  nodeProof: nativeProof(materialContract.GITHUB_MATERIAL_READ_PATH, materialRequest, nativeIds.challengeProofAttach) };
+const stockRequest = { operation: 'attach', runtimeId: nativeIds.runtime,
+  conversationId: nativeIds.thread, expectedRuntimeGeneration: null, expectedAttachmentGeneration: null };
+const stockResponse = { status: 'attached', runtimeId: nativeIds.runtime,
+  runtimeProfile: { profile: 'assigned_stock_client', client: 'codex', conversationId: nativeIds.thread },
+  runtimeGeneration: 1, nodeId, nodeGeneration: 1, attachmentGeneration: 1, leaseUntil: nativeLeaseUntil };
+const stockRequests = [
+  { name: 'attach', value: stockRequest, accepted: true },
+  { name: 'renew', value: { ...stockRequest, operation: 'renew', expectedRuntimeGeneration: 1, expectedAttachmentGeneration: 1 }, accepted: true },
+  { name: 'mixed-generations', value: { ...stockRequest, expectedRuntimeGeneration: 1 }, accepted: false },
+  { name: 'renew-without-generations', value: { ...stockRequest, operation: 'renew' }, accepted: false },
+  { name: 'implicit-conversation', value: { ...stockRequest, conversationId: 'latest' }, accepted: false },
+  { name: 'unknown-field', value: { ...stockRequest, enabled: true }, accepted: false },
+];
+for (const vector of stockRequests) {
+  if (stockSchemas.AssignedStockRuntimeRequestSchema.safeParse(vector.value).success !== vector.accepted)
+    throw Error(`Stock assignment vector disagrees with source: ${vector.name}`);
+}
+stockSchemas.AssignedStockRuntimeResponseSchema.parse(stockResponse);
 const fixture = { original, admitted, overBudget, claim,
+  assignedStock: { request: stockRequest, requests: stockRequests, response: stockResponse },
   nativeAck,
   nativeAckNodeProof: { principal: nativeAck.principal, binding: nativeAckBinding, body: nativeAckBody, proof,
     canonical: canonicalNodeProof(nativeAck.principal, proof, nativeAckBinding) },
@@ -467,7 +606,7 @@ const fixture = { original, admitted, overBudget, claim,
   nodeProof: { principal: original.principal, binding, body, proof, canonical: canonicalNodeProof(original.principal, proof, binding) },
   noStart, localNoStart, noStartResult, localNoStartResult,
   nativeAdmission: nativeAdmissionFixture,
-  githubSourceRead, githubMaterialRead,
+  githubSourceRead, githubMaterialRead, githubEventRead,
   noStartNodeProof: { principal: original.principal, binding: noStartBinding, body: noStartBody, proof,
     canonical: canonicalNodeProof(original.principal, proof, noStartBinding) } };
 const json = value => JSON.stringify(value, null, 2) + '\n';

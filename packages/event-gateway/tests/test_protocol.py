@@ -5,13 +5,23 @@ import unittest
 
 from event_gateway.protocol import (ProtocolError, parse_envelope, parse_acknowledgment,
     derive_delivery_id, matches_delivery_id, acknowledgment_matches_delivery,
-    acknowledgment_advances_current_watermark)
+    acknowledgment_advances_current_watermark, validate_runtime_profile,
+    ENVELOPE_SCHEMAS, shared_envelope_property)
 
 FIXTURES = json.loads((Path(__file__).resolve().parents[1] / 'contracts/event-v1/protocol-v1.json').read_text())
 NOW = 1791201630000  # 2026-10-05T12:00:30Z
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_nested_envelope_variants_share_delivery_identity_schemas(self):
+        self.assertGreater(len(ENVELOPE_SCHEMAS), 2)
+        for field in ('eventId', 'runtimeId', 'nodeGeneration', 'runtimeGeneration',
+                      'attachmentGeneration', 'principal'):
+            with self.subTest(field=field):
+                self.assertEqual(shared_envelope_property(field), ENVELOPE_SCHEMAS[0]['properties'][field])
+        for value in FIXTURES['validEnvelopes']:
+            self.assertTrue(matches_delivery_id(value))
+
     def test_shared_vectors(self):
         for key, parser in [('Envelopes', parse_envelope), ('Acknowledgments', parse_acknowledgment)]:
             for value in FIXTURES['valid' + key]:
@@ -24,10 +34,58 @@ class ProtocolTests(unittest.TestCase):
             envelope = envelopes[ack['deliveryId']]
             self.assertTrue(matches_delivery_id(envelope))
             self.assertTrue(acknowledgment_matches_delivery(envelope, ack))
-            self.assertEqual(acknowledgment_advances_current_watermark(envelope, ack, envelope['sourceStateVersion']), ack['status'] == 'observed')
+            self.assertEqual(
+                acknowledgment_advances_current_watermark(
+                    envelope, ack, envelope['sourceStateVersion']),
+                ack['status'] in ('observed', 'command_accepted'))
             for field in ['attemptId', 'runtimeGeneration', 'deliveredSourceStateVersion', 'consumerGeneration']:
                 changed = dict(ack, **{field: 'different'})
                 self.assertFalse(acknowledgment_matches_delivery(envelope, changed))
+
+    def test_stock_assignment_is_closed_and_bound_to_ack(self):
+        profile = {'profile': 'assigned_stock_client', 'client': 'codex',
+                   'conversationId': '12345678-1234-4234-8234-123456789abc'}
+        self.assertEqual(validate_runtime_profile(profile), profile)
+        for changes in ({'client': 'other'}, {'conversationId': 'latest'},
+                        {'conversationId': profile['conversationId'].upper()}, {'extra': True}):
+            with self.subTest(changes=changes), self.assertRaises(ProtocolError):
+                validate_runtime_profile(dict(profile, **changes))
+        original = FIXTURES['validEnvelopes'][0]
+        envelope = dict(original, runtimeProfile=profile)
+        ack = {key: envelope[key] for key in ('schemaVersion', 'eventId', 'deliveryId', 'attemptId',
+               'principal', 'agent', 'runtimeId', 'nodeGeneration', 'runtimeGeneration',
+               'attachmentGeneration')}
+        ack.update(status='command_accepted', runtimeProfile=profile,
+                   deliveredSourceStateVersion=envelope['sourceStateVersion'],
+                   acknowledgedAt='2026-10-05T12:00:30.000Z')
+        self.assertTrue(acknowledgment_advances_current_watermark(envelope, ack, envelope['sourceStateVersion']))
+        self.assertFalse(acknowledgment_advances_current_watermark(envelope, ack, 'replacement'))
+        self.assertFalse(acknowledgment_matches_delivery(original, ack))
+        self.assertFalse(acknowledgment_matches_delivery(envelope, dict(ack, status='observed')))
+        changed = dict(ack, runtimeProfile=dict(profile, conversationId='22345678-1234-4234-8234-123456789abc'))
+        self.assertFalse(acknowledgment_matches_delivery(envelope, changed))
+        self.assertFalse(acknowledgment_advances_current_watermark(envelope, dict(ack, status='observed'), envelope['sourceStateVersion']))
+
+    def test_assigned_stock_accepts_supported_github_events_but_not_completion(self):
+        github = next(event for event in FIXTURES['validEnvelopes'] if event['source'] == 'github')
+        profile = next(event['runtimeProfile'] for event in FIXTURES['validEnvelopes'] if 'runtimeProfile' in event)
+        for event_kind, reason in (('attention', 'review_comment'), ('ci', 'check_failed'),
+                                   ('terminal', 'pull_request_merged')):
+            with self.subTest(event_kind=event_kind):
+                event = copy.deepcopy(github)
+                event.update(eventKind=event_kind, reasonCode=reason,
+                             runtimeProfile=copy.deepcopy(profile),
+                             consumerGeneration=event['attachmentGeneration'])
+                event['deliveryId'] = derive_delivery_id(event)
+                self.assertEqual(parse_envelope(json.dumps(event).encode(), NOW), event)
+
+        completion = copy.deepcopy(github)
+        completion.update(eventKind='completion', reasonCode='round_complete',
+                          runtimeProfile=copy.deepcopy(profile),
+                          consumerGeneration=completion['attachmentGeneration'])
+        completion['deliveryId'] = derive_delivery_id(completion)
+        with self.assertRaises(ProtocolError):
+            parse_envelope(json.dumps(completion).encode(), NOW)
 
     def test_malformed_and_closed_schema(self):
         for body, code in [(b'{', 'invalid_json'), (b'{"a":1,"\\u0061":2}', 'duplicate_json_key'),

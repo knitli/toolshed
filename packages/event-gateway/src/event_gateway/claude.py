@@ -14,7 +14,7 @@ from uuid import UUID, uuid5, NAMESPACE_URL
 
 from .codex import CodexError, _socket_identity
 from .security import ensure_private_directory
-from .protocol import _SCHEMA, _FORMATS
+from .protocol import ENVELOPE_SCHEMAS, _FORMATS
 from jsonschema import Draft202012Validator
 
 SUPPORTED_VERSION = "2.1.302"
@@ -23,9 +23,10 @@ SEND_SECONDS = 5
 METADATA_FIELDS = frozenset(("eventId", "deliveryId", "source", "sourceStateVersion",
                              "canonicalSubject", "eventReference"))
 _METADATA_VALIDATOR = Draft202012Validator({"anyOf": [
-    {"type": "object", "properties": {key: branch["properties"][key] for key in METADATA_FIELDS},
-     "required": sorted(METADATA_FIELDS), "additionalProperties": False}
-    for branch in _SCHEMA["anyOf"][0]["anyOf"]
+    {"type": "object", "properties": {
+        key: branch["properties"][key] for key in METADATA_FIELDS
+    }, "required": sorted(METADATA_FIELDS), "additionalProperties": False}
+    for branch in ENVELOPE_SCHEMAS
 ]}, format_checker=_FORMATS)
 
 

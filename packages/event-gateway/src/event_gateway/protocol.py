@@ -98,17 +98,61 @@ _SCHEMA = _schema()
 _VALIDATORS = [Draft202012Validator(branch, format_checker=_FORMATS) for branch in _SCHEMA['anyOf']]
 
 
+def _object_variants(schema):
+    """Return every object leaf below an envelope anyOf, independent of nesting."""
+    if isinstance(schema, dict) and schema.get('type') == 'object' and isinstance(schema.get('properties'), dict):
+        return (schema,)
+    branches = schema.get('anyOf') if isinstance(schema, dict) else None
+    if not isinstance(branches, list) or not branches:
+        raise RuntimeError('invalid_event_envelope_schema')
+    return tuple(variant for branch in branches for variant in _object_variants(branch))
+
+
+# The first top-level protocol branch is the envelope union. Keep its leaves
+# central so generated union nesting can change without breaking consumers.
+ENVELOPE_SCHEMAS = _object_variants(_SCHEMA['anyOf'][0])
+
+
+def shared_envelope_property(name, *, required=True):
+    """Get a property schema shared by envelope variants, rejecting drift."""
+    schemas = [variant['properties'][name] for variant in ENVELOPE_SCHEMAS
+               if name in variant['properties']]
+    if (not schemas or (required and len(schemas) != len(ENVELOPE_SCHEMAS))
+            or any(schema != schemas[0] for schema in schemas[1:])):
+        raise RuntimeError('inconsistent_event_envelope_schema')
+    return schemas[0]
+
+
+def validate_runtime_profile(value):
+    """Validate an explicit existing stock-client conversation assignment."""
+    if (not isinstance(value, dict)
+            or set(value) != {'profile', 'client', 'conversationId'}
+            or value.get('profile') != 'assigned_stock_client'
+            or value.get('client') != 'codex'
+            or not isinstance(value.get('conversationId'), str)
+            or not re.fullmatch(
+                r'[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',
+                value['conversationId'])):
+        raise ProtocolError('invalid_runtime_profile')
+    return value
+
+
 def _parse(body, acknowledgment, now_ms):
     value = _decode(body)
     if not _VALIDATORS[int(acknowledgment)].is_valid(value):
         raise ProtocolError('invalid_acknowledgment' if acknowledgment else 'invalid_envelope')
+    if 'runtimeProfile' in value:
+        # The upstream Zod refinement compares two fields; JSON Schema cannot express it.
+        if (value.get('consumerGeneration') != value['attachmentGeneration']
+                or (acknowledgment and value['status'] != 'command_accepted')):
+            raise ProtocolError('invalid_acknowledgment' if acknowledgment else 'invalid_envelope')
     now = time.time() * 1000 if now_ms is None else now_ms
     if not isinstance(now, (int, float)) or isinstance(now, bool) or not math.isfinite(now):
         raise ProtocolError('stale_message')
     if acknowledgment:
         # JSON Schema's x-distinct-from annotation documents this cross-field constraint.
-        correlation = value['nativeCorrelation']
-        if (correlation['kind'] == 'native_input_recorded'
+        correlation = value.get('nativeCorrelation', {})
+        if (correlation.get('kind') == 'native_input_recorded'
                 and correlation['itemId'] == correlation['turnId']):
             raise ProtocolError('invalid_acknowledgment')
         fresh = _timestamp(value['acknowledgedAt']) <= now + CLOCK_SKEW_MS
@@ -131,7 +175,6 @@ def parse_acknowledgment(body, now_ms=None):
 
 
 def derive_delivery_id(identity):
-    props = _SCHEMA['anyOf'][0]['anyOf'][0]['properties']
     keys = ('eventId', 'runtimeId', 'nodeGeneration', 'runtimeGeneration', 'attachmentGeneration')
     selected = {}
     try:
@@ -139,7 +182,8 @@ def derive_delivery_id(identity):
             if key == 'consumerGeneration' and key not in identity:
                 continue
             value = identity[key]
-            if not Draft202012Validator(props[key]).is_valid(value):
+            if not Draft202012Validator(shared_envelope_property(
+                    key, required=key != 'consumerGeneration')).is_valid(value):
                 raise ValueError()
             selected[key] = int(value) if key.endswith('Generation') else value
     except (KeyError, TypeError, ValueError):
@@ -160,10 +204,14 @@ def acknowledgment_matches_delivery(envelope, acknowledgment):
             'nodeGeneration', 'runtimeGeneration', 'attachmentGeneration', 'consumerGeneration')
     return (
         all(acknowledgment.get(key) == envelope.get(key) for key in keys)
+        and ('runtimeProfile' not in envelope or acknowledgment.get('status') == 'command_accepted')
+        and acknowledgment.get('runtimeProfile') == envelope.get('runtimeProfile')
         and acknowledgment.get('deliveredSourceStateVersion') == envelope.get('sourceStateVersion')
     )
 
 
 def acknowledgment_advances_current_watermark(envelope, acknowledgment, current_source_state_version):
-    return (acknowledgment_matches_delivery(envelope, acknowledgment) and acknowledgment['status'] == 'observed'
+    settled = (acknowledgment.get('status') == 'command_accepted'
+               if envelope.get('runtimeProfile') else acknowledgment.get('status') == 'observed')
+    return (acknowledgment_matches_delivery(envelope, acknowledgment) and settled
             and acknowledgment['deliveredSourceStateVersion'] == current_source_state_version)

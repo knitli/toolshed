@@ -4,10 +4,12 @@ For the private config format and explicit attach invocation, see the
 [README quick start](../README.md#explicit-cloud-attachment-lifecycle).
 
 `src/event_gateway/cloud.py` supplies an injected, asynchronous HTTP client for
-the existing Event API. It has no default HTTP transport, credential discovery,
-CLI wiring, listener activation, native submission, or attachment qualification.
-The shipped gateway still uses its existing unavailable authority. Cloud claims
-are returned as the exact validated cloud DTO, not the older local `Permit`.
+the existing Event API. It has no default HTTP transport or credential
+discovery. The CLI wires selected GitHub event/source readers and assigned-stock
+control to this client; a private dispatch configuration can pass it to the
+listener and dispatcher. These opt-in integrations do not qualify native
+admission or live delivery. Cloud claims are returned as the exact validated
+cloud DTO, not the older local `Permit`.
 
 ## Ports and boundaries
 
@@ -99,8 +101,10 @@ replacement request. On a confirmed
 commit, the CLI rechecks the live native binding and writes the local attachment
 mapping. When the daemon is running, it remains the single SQLite writer for
 that mapping and an atomic transfer fence; otherwise the foreground CLI writes
-the store directly. No command renews leases automatically or enables wake or
-dispatch.
+the store directly. These foreground native lifecycle commands do not renew
+leases automatically or enable wake or dispatch. Separately, a running daemon
+renews assigned-stock mappings only when its private dispatch configuration
+includes `stockCodexBinary`; see the [README assigned-stock flow](../README.md#explicit-assigned-stock-conversation).
 
 General claim, settlement, and acknowledgment calls have no automatic retry
 loop. A native attachment commit gets at most one bounded retry after an
@@ -119,6 +123,17 @@ The `github-pinned-history-read` family pairs two actual merged cloud revisions:
 Zod version and fixture SHA-256. Both runtimes execute the same 30 raw-parser,
 six digest and nine ACK-binding cases. Authorization of the complete family on
 trusted main precedes the consumer rotation; all ten older families stay intact.
+
+The current `assigned-stock-github-delivery` family pins both event and control
+contracts to merged cloud `9503b8e2a99fbe099a4b90cb576a17dcf4b786aa`. Its
+108 control sources cover canonical Messaging source admission, signed-order
+and wake authority, retained charge recovery, stock settlement, owner actor
+filtering, and shared text screening. The immutable family archive holds seven
+snapshots and 110 unique source blobs; the trusted policy authorizes their exact
+hashes before this consumer rotation. All fifteen historical families remain
+available. These are offline provenance and compatibility checks; client
+attachment, live wake behavior, deployment, and runtime activation require
+separate qualification.
 
 The selected sources now include `github/pinned-read-contract.ts` and retain
 its host, controller and grants boundaries. The helper's grants and readback
@@ -224,12 +239,17 @@ user with mode `0700`, and no path component may be a symlink. Only after all
 pages verify does the command write a private sibling temporary file, sync it,
 and atomically publish the complete file with mode `0600`. It never replaces
 an existing file or prints finding text, source identity, or opaque cursors.
-The terminal reports only `materialRead: written` and `complete: true`, or a safe
-failure code.
+The terminal reports `materialRead: written`, `complete: true`, and the strict
+screening report, or a safe failure code. The command requests `screened-v1`; each
+successful page must echo that exact representation. It publishes only the screened
+body and never retries a rejected screened request
+as raw text. Requests that omit `representation` retain the raw-v1 API shape for
+internal callers.
 
 The client validates closed request/response shapes, subject/source/fingerprint
 binding, exact `requestedRange` echoes on every page, covered first version,
-contiguous UTF-16 offsets, stable first version/body digest/total length,
+contiguous UTF-16 offsets, stable first version/body digest/total length and,
+for screened-v1, source digest and report,
 opaque cursor cycles, and the SHA-256 digest of the assembled UTF-8 text. It
 bounds requests to 4096 bytes, responses to 8192 bytes, material to 1 Mi UTF-16
 units, and a traversal to 4096 pages. Unavailable, deleted, conflict, malformed,

@@ -17,6 +17,38 @@ def run_synthetic_corpus(document):
 
 
 class SemanticVectorScriptTests(unittest.TestCase):
+    def test_synthetic_stock_ack_binding_rejects_observed_status(self):
+        profile = {'profile': 'assigned_stock_client', 'client': 'codex',
+                   'conversationId': '12345678-1234-4234-8234-123456789abc'}
+        envelope = {
+            'eventId': 'event', 'deliveryId': 'delivery', 'attemptId': 'attempt',
+            'principal': 'principal', 'agent': 'agent', 'runtimeId': 'runtime',
+            'nodeGeneration': 1, 'runtimeGeneration': 2, 'attachmentGeneration': 3,
+            'consumerGeneration': 3, 'runtimeProfile': profile, 'sourceStateVersion': 'source',
+        }
+        acknowledgment = {
+            **{key: envelope[key] for key in (
+                'eventId', 'deliveryId', 'attemptId', 'principal', 'agent', 'runtimeId',
+                'nodeGeneration', 'runtimeGeneration', 'attachmentGeneration',
+                'consumerGeneration', 'runtimeProfile',
+            )},
+            'status': 'command_accepted', 'deliveredSourceStateVersion': 'source',
+        }
+        vectors = {
+            'schemaVersion': 1, 'rawCases': [], 'digestCases': [],
+            'bindingCases': [
+                {'case': 'stock-command-accepted', 'envelope': envelope,
+                 'acknowledgment': acknowledgment, 'currentSourceStateVersion': 'source',
+                 'matches': True, 'advances': True},
+                {'case': 'stock-observed-status', 'envelope': envelope,
+                 'acknowledgment': dict(acknowledgment, status='observed'),
+                 'currentSourceStateVersion': 'source', 'matches': False, 'advances': False},
+            ],
+        }
+        result = run_synthetic_corpus(vectors)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'PASS: 2 canonical semantic verdicts')
+
     def test_optimized_driver_rejects_wrong_verdict(self):
         vectors = {'schemaVersion': 1, 'rawCases': [
             {'case': 'invalid-json', 'kind': 'envelope', 'raw': '{', 'nowMs': 0, 'expectedError': None},

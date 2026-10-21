@@ -162,6 +162,79 @@ not enable automatic renewal, wake, or dispatch. The server controls whether
 native admission is enabled; while its production gate is disabled, requests
 are refused with `native_binding_unqualified`.
 
+### Explicit assigned-stock conversation
+
+GitHub watch publication can materialize local deliveries, but automatic wake
+and dispatch remain default-off until explicitly configured and qualified. A
+delivery carries an opaque `ref_*` event reference, not provider text; the
+protected metadata reader resolves it under current authority. Messaging v2
+delivery and live pilot activation remain disabled/unqualified. The assigned-stock
+path durably records command acceptance. The shared Messaging authority settles
+that receipt or a proven no-start before allowing a fresh wake; uncertain
+outcomes stay ambiguous and are never blindly resent.
+
+The stock Codex path is opt-in and names an existing canonical conversation UUID;
+it never discovers or selects a latest thread. Reuse the private cloud config and
+node key below. First assignment creates generation 1:
+
+```sh
+knitli-event-gateway stock-control attach \
+  --runtime-id RUNTIME-UUID --conversation-id CODEX-CONVERSATION-UUID \
+  --cloud-config /private/path/cloud-config.json
+```
+
+Renew with the exact returned generation pair:
+
+```sh
+knitli-event-gateway stock-control renew \
+  --runtime-id RUNTIME-UUID --conversation-id CODEX-CONVERSATION-UUID \
+  --expected-runtime-generation 1 --expected-attachment-generation 1 \
+  --cloud-config /private/path/cloud-config.json
+```
+
+A replacement attach also requires the current generation pair and advances
+both generations. If the request outcome is unknown, renew the exact profile
+using the generation pair printed by the command; do not send new client input
+to resolve uncertainty. Reassignment fences future submissions; it does not
+cancel input already accepted by the old conversation.
+
+To enable the local adapter, the private dispatch config must also name
+`"stockCodexBinary": "/absolute/path/to/codex"`. Omitting it disables stock
+dispatch. The cloud profile has its own explicit principal/agent canary gate;
+the native binding gate remains separate. The existing runtime lease lasts
+90 seconds. A running daemon with `stockCodexBinary` configured renews an
+existing assigned-stock mapping every 30 seconds using its exact conversation
+and generation pair; it does not start, inspect, or reassign client sessions.
+Renewal stops for that exact mapping after a definitive refusal or mismatched
+response. An ambiguous transport result retries the same renewal with bounded
+backoff while the local lease remains live. This does not change global client
+configuration.
+Independent mappings renew concurrently. A request begun before lease expiry
+can finish within its five-second response bound after that old deadline.
+After a validated renewal, transient local storage failures retry the exact
+local mapping without another cloud renewal, including after the old local
+lease expires. A changed/detached mapping or expired renewed lease ends that
+retry. Pending responses are held by the running daemon; a restart before
+persistence can require explicit renewal if the old local lease has expired.
+
+Recovery resolves persisted claims and admissions even after detach, expiry,
+or disabling stock dispatch. Executable preflight finishes before the final
+durable submission fence, so detach or reassignment during the check prevents
+launch. A failed or cancelled preflight can settle from the admitted state as
+no-start because no launch was attempted. Preflight cancellation persists
+that settlement intent without a cloud wait, then propagates cancellation;
+reconciliation completes settlement later. Errors or cancellation after entering
+process creation remain ambiguous: the child may already have started.
+
+A stock ACK with status `command_accepted` records a successful CLI exit in the
+Gateway journal. It is not an independently verified durable client receipt or
+proof that a turn started or completed. Lost cloud ACKs replay that stored ACK;
+uncertain client submissions remain ambiguous and are never automatically sent
+again. A running stock daemon may continue the same assigned conversation after
+the TUI closes. Fully stopped-runtime behavior remains unqualified; the
+[0.163.0 upstream command](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/tui/src/session_archive_commands.rs)
+can choose an embedded server when no shared daemon is available.
+
 Create `cloud-config.json` and its sibling `cloud-credentials.json` in a private
 directory. The configuration stores immutable identity and only the credential
 filename; credentials are reread for each request:
@@ -212,7 +285,7 @@ presence/authority seams are implemented.
 ## Contract and validation
 
 `contracts/event-v1/manifest.json` pins the canonical OS schema, semantic
-reference, and fixture bytes at `7b63bee97395a70e05ffb08ee214e8351f6dda06`.
+reference, and fixture bytes at `9503b8e2a99fbe099a4b90cb576a17dcf4b786aa`.
 The fixture embeds the canonical 45 semantic verdicts: 30 raw-parser, six
 delivery-digest and nine ACK-binding cases. Both runtimes execute these cases;
 normal Python tests require the embedded corpus, including optimized-mode
@@ -311,6 +384,17 @@ installed user-service lifecycle, and cross-repository semantic conformance
 must pass before release. The prior bounded spike is historical evidence only.
 
 ### Retained GitHub source readback
+
+The queued `ref_*` value can be resolved through the protected metadata reader:
+
+```sh
+knitli-event-gateway --state-dir /private/state github-event-read \
+  --cloud-config /private/cloud.json --event-reference ref_00000000-0000-4000-8000-000000000001
+```
+
+It returns the PR subject, source version and event reason after checking current
+read authority. Use that subject and version with `github-source-read` for retained
+review or CI details. Provider text is never included in the queued message.
 
 `github-source-read` requests exactly one authorized page using the private cloud
 configuration and enrolled node key already used by `runtime-status`:

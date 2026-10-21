@@ -348,6 +348,26 @@ class DaemonDispatchTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SecurityError):
             daemon.load_dispatch_config(self.config_path, self.state)
 
+    async def test_stock_codex_binary_is_optional_absolute_executable_and_wired(self):
+        configured, _cloud = daemon.load_dispatch_config(self.config_path, self.state)
+        self.assertNotIn('stockCodexBinary', configured)
+        for value in ('relative/codex', str(self.directory / 'missing-codex')):
+            with self.subTest(value=value):
+                self.write_private('dispatch.json', {**self.config, 'stockCodexBinary': value})
+                with self.assertRaisesRegex(SecurityError, 'invalid_dispatch_config'):
+                    daemon.load_dispatch_config(self.config_path, self.state)
+
+        binary = self.directory / 'codex'
+        binary.write_text('#!/bin/sh\nexit 0\n')
+        binary.chmod(0o700)
+        self.write_private('dispatch.json', {**self.config, 'stockCodexBinary': str(binary)})
+        configured, _cloud = daemon.load_dispatch_config(self.config_path, self.state)
+        self.assertEqual(configured['stockCodexBinary'], str(binary))
+        original_gateway = daemon.Gateway
+        with patch.object(daemon, 'Gateway', wraps=original_gateway) as gateway_factory:
+            async with self.running():
+                self.assertEqual(gateway_factory.call_args.kwargs['stock_codex_binary'], str(binary))
+
     async def test_default_daemon_remains_control_only(self):
         with patch.object(daemon, 'Listener', side_effect=AssertionError('unexpected listener')), \
                 patch.object(daemon, 'load_cloud_client', side_effect=AssertionError('unexpected authority')):

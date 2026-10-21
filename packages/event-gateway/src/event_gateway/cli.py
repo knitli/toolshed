@@ -74,6 +74,16 @@ def main(argv=None):
     runtime_status = commands.add_parser("runtime-status", help="Read stored cloud runtime authority")
     runtime_status.add_argument("--runtime-id", required=True)
     runtime_status.add_argument("--cloud-config", type=Path, required=True)
+    stock = commands.add_parser("stock-control", help="Assign an existing Codex conversation to a stock runtime")
+    stock.add_argument("operation", choices=("attach", "renew"))
+    stock.add_argument("--runtime-id", required=True)
+    stock.add_argument("--conversation-id", required=True, help="Canonical Codex conversation UUID")
+    stock.add_argument("--cloud-config", type=Path, required=True)
+    stock.add_argument("--expected-runtime-generation", type=int)
+    stock.add_argument("--expected-attachment-generation", type=int)
+    event_read = commands.add_parser("github-event-read", help="Resolve a queued GitHub event reference")
+    event_read.add_argument("--cloud-config", type=Path, required=True)
+    event_read.add_argument("--event-reference", required=True)
     source_read = commands.add_parser("github-source-read", help="Read one retained GitHub source page")
     source_read.add_argument("--cloud-config", type=Path, required=True)
     for flag in ("installation-id", "repository-id", "pr-number", "from-version", "to-version"):
@@ -135,6 +145,8 @@ def _execute_command(args, state_dir, parser):
         return 0
     if args.command == "github-source-material":
         return _execute_github_source_material(args, state_dir)
+    if args.command == "github-event-read":
+        return _execute_github_event_read(args, state_dir)
     if args.command == "github-source-read":
         return _execute_github_source_read(args, state_dir)
     if args.command == "runtime-status":
@@ -146,6 +158,8 @@ def _execute_command(args, state_dir, parser):
             return 2
         print(json.dumps(result))
         return 0
+    if args.command == "stock-control":
+        return _execute_stock_control(args, state_dir)
     if args.command == "reconcile":
         result = _reconcile_native(args, state_dir)
         print(json.dumps(result))
@@ -211,6 +225,7 @@ def _execute_github_source_material(args, state_dir):
                             "prNumber": args.pr_number},
                 "sourceId": args.source_id, "fingerprint": args.fingerprint,
                 "fromVersion": args.from_version, "toVersion": args.to_version,
+                "representation": "screened-v1",
             }))
         except CloudError as error:
             print(json.dumps({"materialRead": None, "reason": error.code}))
@@ -218,14 +233,28 @@ def _execute_github_source_material(args, state_dir):
         if result["status"] != "ok":
             print(json.dumps({"materialRead": None, "reason": result["status"]}))
             return 2
+        if result["screening"]["withheld"]:
+            print(json.dumps({"materialRead": None, "reason": "withheld"}))
+            return 2
         info = os.fstat(directory)
         if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
             raise SecurityError("unsafe_material_output")
         _publish_material(directory, filename, result["body"])
-        print(json.dumps({"materialRead": "written", "complete": True}))
+        print(json.dumps({"materialRead": "written", "complete": True, "screening": result["screening"]}))
         return 0
     finally:
         os.close(directory)
+
+
+def _execute_github_event_read(args, state_dir):
+    try:
+        cloud = load_cloud_client(args.cloud_config, state_dir)
+        result = asyncio.run(cloud.github_event_read({"eventReference": args.event_reference}))
+    except CloudError as error:
+        print(json.dumps({"eventRead": None, "reason": error.code}))
+        return 2
+    print(json.dumps(result))
+    return 0 if result["status"] == "ok" else 2
 
 
 def _execute_github_source_read(args, state_dir):
@@ -255,6 +284,132 @@ def _execute_native_lifecycle(args, state_dir, operation):
     result = _native_lifecycle(args, state_dir, operation)
     print(json.dumps(result))
     return 0 if result.get("localStatus") == "current" else 2
+
+
+def _execute_stock_control(args, state_dir):
+    request_value = {
+        "operation": args.operation, "runtimeId": args.runtime_id,
+        "conversationId": args.conversation_id,
+        "expectedRuntimeGeneration": args.expected_runtime_generation,
+        "expectedAttachmentGeneration": args.expected_attachment_generation,
+    }
+    try:
+        cloud = load_cloud_client(args.cloud_config, state_dir)
+        expected_mapping = None
+        if args.operation == "renew":
+            try:
+                expected_mapping = _read_native_mapping(state_dir, args.runtime_id)
+            except CloudError as error:
+                print(json.dumps({"assignment": None, "reason": error.code}))
+                return 2
+            if not _stock_renew_mapping_matches(expected_mapping, args, cloud):
+                print(json.dumps({"assignment": None, "reason": "stale"}))
+                return 2
+        response = asyncio.run(cloud.assigned_stock(request_value))
+    except CloudError as error:
+        result = {"assignment": None, "reason": error.code}
+        if error.ambiguous:
+            if args.operation == "attach":
+                generation_pair = (
+                    (1, 1) if args.expected_runtime_generation is None else
+                    (args.expected_runtime_generation + 1, args.expected_attachment_generation + 1)
+                )
+            else:
+                generation_pair = (args.expected_runtime_generation, args.expected_attachment_generation)
+            result.update(outcome="unknown", recovery={
+                "operation": "renew", "runtimeId": args.runtime_id,
+                "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                                   "conversationId": args.conversation_id},
+                "expectedRuntimeGeneration": generation_pair[0],
+                "expectedAttachmentGeneration": generation_pair[1],
+            })
+        print(json.dumps(result))
+        return 2
+    mapping = {
+        "runtimeId": response["runtimeId"], "principal": cloud.principal,
+        "agent": cloud.agent, "nodeId": response["nodeId"],
+        "nodeGeneration": response["nodeGeneration"],
+        "runtimeGeneration": response["runtimeGeneration"],
+        "attachmentGeneration": response["attachmentGeneration"],
+        "consumerGeneration": response["attachmentGeneration"],
+        "leaseExpiresAt": _timestamp(response["leaseUntil"]) / 1000,
+        "runtimeProfile": response["runtimeProfile"],
+    }
+    if args.operation == "renew":
+        if any(mapping.get(key) != expected_mapping.get(key) for key in (
+                "runtimeId", "principal", "agent", "nodeId", "nodeGeneration",
+                "runtimeGeneration", "attachmentGeneration", "consumerGeneration",
+                "runtimeProfile")):
+            print(json.dumps({"assignment": "cloud_committed_local_mapping_failed",
+                              "runtimeId": response["runtimeId"], "reason": "invalid_response"}))
+            return 2
+        stored, error_code = _renew_stock_attachment(
+            state_dir, expected_mapping, mapping["leaseExpiresAt"],
+        )
+    else:
+        stored, error_code = _store_native_mapping(state_dir, args.operation, mapping, None)
+    if not stored:
+        print(json.dumps({"assignment": "cloud_committed_local_mapping_failed",
+                          "runtimeId": response["runtimeId"],
+                          "runtimeProfile": response["runtimeProfile"],
+                          "runtimeGeneration": response["runtimeGeneration"],
+                          "attachmentGeneration": response["attachmentGeneration"],
+                          "reason": error_code}))
+        return 2
+    print(json.dumps({"assignment": response["status"], "runtimeId": response["runtimeId"],
+                      "runtimeProfile": response["runtimeProfile"], "localMapping": "stored"}))
+    return 0
+
+
+def _stock_renew_mapping_matches(mapping, args, cloud):
+    """Require a live-ledger identity fence before asking Cloud to renew stock."""
+    return (
+        isinstance(mapping, dict)
+        and mapping.get("runtimeId") == args.runtime_id
+        and mapping.get("principal") == cloud.principal
+        and mapping.get("agent") == cloud.agent
+        and mapping.get("nodeId") == cloud.node_id
+        and mapping.get("nodeGeneration") == cloud.node_generation
+        and mapping.get("runtimeGeneration") == args.expected_runtime_generation
+        and mapping.get("attachmentGeneration") == args.expected_attachment_generation
+        and mapping.get("consumerGeneration") == args.expected_attachment_generation
+        and mapping.get("runtimeProfile") == {
+            "profile": "assigned_stock_client", "client": "codex",
+            "conversationId": args.conversation_id,
+        }
+    )
+
+
+def _renew_stock_attachment(state_dir, expected_mapping, lease_expires_at):
+    """Persist one exact stock renewal through the existing single writer."""
+    command = {
+        "command": "renew-stock-attachment", "expectedMapping": expected_mapping,
+        "leaseExpiresAt": lease_expires_at,
+    }
+
+    def renew_directly():
+        with Store(state_dir) as store:
+            renewed = store.renew_stock_attachment(expected_mapping, lease_expires_at)
+        return {"renewed": renewed}
+
+    socket_path = state_dir / "control.sock"
+    try:
+        if not (socket_path.exists() or socket_path.is_symlink()):
+            result = renew_directly()
+        else:
+            try:
+                result = asyncio.run(request(state_dir, command))
+            except (ConnectionRefusedError, FileNotFoundError):
+                result = renew_directly()
+    except StoreError as error:
+        return False, error.code
+    except (OSError, ValueError, TimeoutError):
+        return False, "local_operation_unavailable"
+    if result == {"renewed": True}:
+        return True, None
+    if result == {"renewed": False}:
+        return False, "stale"
+    return False, _store_response_error(result)
 
 
 def _execute_enrollment(args, state_dir, parser):

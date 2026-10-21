@@ -46,6 +46,12 @@ const githubSubjectSchema = z.strictObject({
   pullRequestNumber: generationSchema,
 });
 
+export const AssignedStockRuntimeProfileSchema = z.strictObject({
+  profile: z.literal("assigned_stock_client"),
+  client: z.literal("codex"),
+  conversationId: uuidV4OrV7Schema,
+});
+
 const commonEnvelopeShape = {
   schemaVersion: z.literal(EVENT_PROTOCOL_VERSION),
   eventId: uuidV4OrV7Schema,
@@ -68,13 +74,32 @@ const commonEnvelopeShape = {
   consumerGeneration: generationSchema.optional(),
 };
 
-const manualEnvelopeSchema = z.strictObject({
+const manualNativeEnvelopeSchema = z.strictObject({
   ...commonEnvelopeShape,
   source: z.literal("manual"),
   canonicalSubject: manualSubjectSchema,
   eventKind: z.literal("manual"),
   reasonCode: z.literal("owner_canary"),
 });
+
+const manualStockEnvelopeSchema = z.strictObject({
+  ...commonEnvelopeShape,
+  consumerGeneration: generationSchema,
+  runtimeProfile: AssignedStockRuntimeProfileSchema,
+  source: z.literal("manual"),
+  canonicalSubject: manualSubjectSchema,
+  eventKind: z.literal("manual"),
+  reasonCode: z.literal("owner_canary"),
+}).refine(value => value.consumerGeneration === value.attachmentGeneration, {
+  message: "assigned stock profile requires consumerGeneration to match attachmentGeneration",
+});
+
+// Keep all manual dispatch envelopes in the first EventEnvelopeSchema option;
+// DispatchEnvelopeSchema and the coordinator rely on that option's scope.
+const manualEnvelopeSchema = z.union([
+  manualNativeEnvelopeSchema,
+  manualStockEnvelopeSchema,
+]);
 
 const githubEnvelopeBase = {
   ...commonEnvelopeShape,
@@ -91,15 +116,40 @@ const githubAttentionEnvelopeSchema = z.strictObject({
     "review_comment",
   ]),
 });
+const githubAttentionStockEnvelopeSchema = z.strictObject({
+  ...githubEnvelopeBase,
+  consumerGeneration: generationSchema,
+  runtimeProfile: AssignedStockRuntimeProfileSchema,
+  eventKind: z.literal("attention"),
+  reasonCode: z.enum([
+    "review_requested",
+    "review_submitted",
+    "review_comment",
+  ]),
+});
 
 const githubCiEnvelopeSchema = z.strictObject({
   ...githubEnvelopeBase,
   eventKind: z.literal("ci"),
   reasonCode: z.enum(["check_failed", "status_failed"]),
 });
+const githubCiStockEnvelopeSchema = z.strictObject({
+  ...githubEnvelopeBase,
+  consumerGeneration: generationSchema,
+  runtimeProfile: AssignedStockRuntimeProfileSchema,
+  eventKind: z.literal("ci"),
+  reasonCode: z.enum(["check_failed", "status_failed"]),
+});
 
 const githubTerminalEnvelopeSchema = z.strictObject({
   ...githubEnvelopeBase,
+  eventKind: z.literal("terminal"),
+  reasonCode: z.enum(["pull_request_closed", "pull_request_merged"]),
+});
+const githubTerminalStockEnvelopeSchema = z.strictObject({
+  ...githubEnvelopeBase,
+  consumerGeneration: generationSchema,
+  runtimeProfile: AssignedStockRuntimeProfileSchema,
   eventKind: z.literal("terminal"),
   reasonCode: z.enum(["pull_request_closed", "pull_request_merged"]),
 });
@@ -121,11 +171,18 @@ const githubCompletionEnvelopeSchema = z.strictObject({
  */
 export const EventEnvelopeSchema = z.union([
   manualEnvelopeSchema,
-  githubAttentionEnvelopeSchema,
-  githubCiEnvelopeSchema,
-  githubTerminalEnvelopeSchema,
+  z.union([githubAttentionEnvelopeSchema, githubAttentionStockEnvelopeSchema]),
+  z.union([githubCiEnvelopeSchema, githubCiStockEnvelopeSchema]),
+  z.union([githubTerminalEnvelopeSchema, githubTerminalStockEnvelopeSchema]),
   githubCompletionEnvelopeSchema,
-]);
+]).refine(value => {
+  const runtimeProfile = "runtimeProfile" in value ? value.runtimeProfile : undefined;
+  return !runtimeProfile || (value.source === 'manual'
+    || value.source === 'github' && value.eventKind !== 'completion')
+    && value.consumerGeneration === value.attachmentGeneration;
+}, {
+  message: "assigned stock profile requires consumerGeneration to match attachmentGeneration",
+});
 
 const commonAcknowledgmentShape = {
   schemaVersion: z.literal(EVENT_PROTOCOL_VERSION),
@@ -181,6 +238,13 @@ const observedAcknowledgmentSchema = z.strictObject({
   ]),
 });
 
+const commandAcceptedAcknowledgmentSchema = z.strictObject({
+  ...commonAcknowledgmentShape,
+  consumerGeneration: generationSchema,
+  runtimeProfile: AssignedStockRuntimeProfileSchema,
+  status: z.literal("command_accepted"),
+});
+
 /**
  * A queue receipt or direct native-turn registration is `submitted`; it does
  * not prove input observation. `observed` is either a queue-correlated turn or
@@ -190,7 +254,10 @@ const observedAcknowledgmentSchema = z.strictObject({
 export const EventObservationAckSchema = z.union([
   submittedAcknowledgmentSchema,
   observedAcknowledgmentSchema,
-]);
+  commandAcceptedAcknowledgmentSchema,
+]).refine(value => !("runtimeProfile" in value) || value.consumerGeneration === value.attachmentGeneration, {
+  message: "assigned stock profile requires consumerGeneration to match attachmentGeneration",
+});
 
 export const EventProtocolMessageSchema = z.union([
   EventEnvelopeSchema,
@@ -533,6 +600,7 @@ export function acknowledgmentMatchesDelivery(
   envelope: EventEnvelopeV1,
   acknowledgment: EventObservationAckV1,
 ): boolean {
+  const runtimeProfile = "runtimeProfile" in envelope ? envelope.runtimeProfile : undefined;
   return (
     acknowledgment.eventId === envelope.eventId &&
     acknowledgment.deliveryId === envelope.deliveryId &&
@@ -544,6 +612,12 @@ export function acknowledgmentMatchesDelivery(
     acknowledgment.runtimeGeneration === envelope.runtimeGeneration &&
     acknowledgment.attachmentGeneration === envelope.attachmentGeneration &&
     acknowledgment.consumerGeneration === envelope.consumerGeneration &&
+    (runtimeProfile === undefined
+      ? !Object.hasOwn(acknowledgment, "runtimeProfile")
+      : acknowledgment.status === "command_accepted" && "runtimeProfile" in acknowledgment
+        && acknowledgment.runtimeProfile.profile === runtimeProfile.profile
+        && acknowledgment.runtimeProfile.client === runtimeProfile.client
+        && acknowledgment.runtimeProfile.conversationId === runtimeProfile.conversationId) &&
     acknowledgment.deliveredSourceStateVersion ===
       envelope.sourceStateVersion
   );
@@ -565,7 +639,9 @@ export function acknowledgmentAdvancesCurrentWatermark(
       currentDestinationEnvelope,
       acknowledgment,
     ) &&
-    acknowledgment.status === "observed" &&
+    ("runtimeProfile" in currentDestinationEnvelope && currentDestinationEnvelope.runtimeProfile
+      ? acknowledgment.status === "command_accepted"
+      : acknowledgment.status === "observed") &&
     acknowledgment.deliveredSourceStateVersion === currentSourceStateVersion
   );
 }
