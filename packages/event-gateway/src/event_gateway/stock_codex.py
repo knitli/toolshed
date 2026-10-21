@@ -24,6 +24,7 @@ class StockCodexStartFenceError(Exception):
     """The synchronous pre-launch state fence failed before process creation."""
 
     def __init__(self, cause):
+        """Wrap the failure that prevented process creation."""
         self.cause = cause
         super().__init__("start_fence_failed")
 
