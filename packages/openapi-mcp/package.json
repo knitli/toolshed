@@ -71,7 +71,7 @@
     "check": "bunx biome check ."
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/server": "2.3.1",
     "undici": "8.10.2",
     "yaml": "2.9.0",
     "zod": "4.5.4"
