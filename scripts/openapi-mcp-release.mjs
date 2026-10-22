@@ -353,6 +353,7 @@ export function createReleaseAdapter(dependencies = {}) {
           "--tag",
           "latest",
           "--provenance",
+          "--loglevel=http",
           `--registry=${registry}`,
         ],
         {
