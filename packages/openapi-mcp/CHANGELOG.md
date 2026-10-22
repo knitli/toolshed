@@ -1,3 +1,12 @@
+## [2.0.2](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v2.0.1...@knitli/openapi-mcp-v2.0.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **event-gateway:** complete enrollment and guard npm diagnostics ([#199](https://github.com/knitli/toolshed/issues/199)) ([6f3ccfa](https://github.com/knitli/toolshed/commit/6f3ccfa6d3383a577453842a7f633087245280c9))
+* **openapi-mcp:** expose npm publish OIDC diagnostics ([#198](https://github.com/knitli/toolshed/issues/198)) ([dae557f](https://github.com/knitli/toolshed/commit/dae557f808e6f5541ebde64265e1da811d8348cc))
+* **openapi-mcp:** install audited npm in release workflow ([#200](https://github.com/knitli/toolshed/issues/200)) ([705dfc8](https://github.com/knitli/toolshed/commit/705dfc84a960506c0d359d167b57139126ec9f01))
+
 ## [2.0.1](https://github.com/knitli/toolshed/compare/@knitli/openapi-mcp-v2.0.0...@knitli/openapi-mcp-v2.0.1) (2026-10-22)
 
 
