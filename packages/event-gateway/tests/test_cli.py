@@ -2,6 +2,7 @@
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 import base64
 from concurrent.futures import ThreadPoolExecutor
+import fcntl
 import io
 import json
 import os
@@ -955,6 +956,8 @@ class CliTests(unittest.TestCase):
                 self.call = (supplied, mesh_ip, mesh_port, agents)
                 if self.calls == 1:
                     raise CloudError("transport_unavailable", ambiguous=True)
+                if self.calls == 2:
+                    raise CloudError("invalid_challenge")
                 return {"nodeId": self.node_id, "generation": self.node_generation}
 
         cloud = FakeCloud()
@@ -974,6 +977,12 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.main(args), 2)
         self.assertEqual(json.loads(errors.getvalue()), {"reason": "enrollment_attempt_mismatch"})
         self.assertEqual(cloud.calls, 1)
+        challenge_path.write_text(json.dumps(challenge))
+        output = io.StringIO()
+        with patch.object(cli, "load_cloud_client", return_value=cloud), redirect_stdout(output):
+            self.assertEqual(cli.main(args), 2)
+        self.assertEqual(json.loads(output.getvalue()), {"enrolled": None, "reason": "enrollment_outcome_unknown"})
+        self.assertTrue((self.state / "enrollment-attempt.json").exists())
         challenge_path.write_text(json.dumps(challenge))
 
         output = io.StringIO()
@@ -1103,6 +1112,161 @@ class CliTests(unittest.TestCase):
         with patch.object(cli, "load_cloud_client", return_value=cloud), redirect_stdout(output):
             self.assertEqual(cli.main(args), 0)
         self.assertEqual(json.loads(output.getvalue()), {"enrolled": True, "nodeId": cloud.node_id, "generation": 1})
+        self.assertFalse((self.state / "enrollment-attempt.json").exists())
+
+    def test_enrollment_post_send_validation_errors_keep_attempt_fenced(self):
+        for code in ("invalid_response", "identity_mismatch"):
+            with self.subTest(code=code):
+                state = self.state.parent / code
+                challenge_path = self.state.parent / f"{code}.json"
+                challenge = {"challengeId": str(uuid.uuid4()), "nodeId": str(uuid.uuid4()),
+                             "expiresAt": "2030-01-01T00:00:00.000Z", "signingPayload": "approved"}
+                challenge_path.write_text(json.dumps(challenge))
+                challenge_path.chmod(0o600)
+
+                class FakeCloud:
+                    origin, principal, agent = "https://events.example.com", "owner@example.com", "codex"
+                    node_id, node_generation = challenge["nodeId"], 1
+                    calls = 0
+
+                    async def complete_enrollment(self, *_args, **_kwargs):
+                        self.calls += 1
+                        if self.calls == 1:
+                            raise CloudError(code)
+                        return {"nodeId": self.node_id, "generation": self.node_generation}
+
+                cloud, output = FakeCloud(), io.StringIO()
+                args = ["--state-dir", str(state), "enroll", "--challenge-file", str(challenge_path),
+                        "--cloud-config", str(self.state.parent / "config.json"), "--mesh-ip", "100.96.0.1",
+                        "--mesh-port", "8789", "--agent", "codex"]
+                with patch.object(cli, "load_cloud_client", return_value=cloud), redirect_stdout(output):
+                    self.assertEqual(cli.main(args), 2)
+                self.assertEqual(json.loads(output.getvalue()), {
+                    "enrolled": None, "reason": "enrollment_outcome_unknown",
+                })
+                self.assertTrue((state / "enrollment-attempt.json").exists())
+                output = io.StringIO()
+                with patch.object(cli, "load_cloud_client", return_value=cloud), redirect_stdout(output):
+                    self.assertEqual(cli.main(args), 0)
+                self.assertFalse((state / "enrollment-attempt.json").exists())
+
+    def test_enrollment_maximum_agent_binding_retries_from_private_record(self):
+        challenge_path = self.state.parent / "owner-challenge.json"
+        challenge = {"challengeId": str(uuid.uuid4()), "nodeId": str(uuid.uuid4()),
+                     "expiresAt": "2030-01-01T00:00:00.000Z", "signingPayload": "approved"}
+        challenge_path.write_text(json.dumps(challenge))
+        challenge_path.chmod(0o600)
+        agents = ["a" * 29 + f"{index:03d}" for index in range(128)]
+
+        class FakeCloud:
+            origin, principal, agent = "https://events.example.com", "owner@example.com", agents[0]
+            node_id, node_generation = challenge["nodeId"], 1
+            calls = 0
+
+            async def complete_enrollment(self, _challenge, *, agents, **_kwargs):
+                self.calls += 1
+                self.asserted_agents = agents
+                if self.calls == 1:
+                    raise CloudError("transport_unavailable", ambiguous=True)
+                return {"nodeId": self.node_id, "generation": self.node_generation}
+
+        cloud = FakeCloud()
+        args = ["--state-dir", str(self.state), "enroll", "--challenge-file", str(challenge_path),
+                "--cloud-config", str(self.state.parent / "config.json"), "--mesh-ip", "100.96.0.1",
+                "--mesh-port", "8789"] + [item for agent in agents for item in ("--agent", agent)]
+        output = io.StringIO()
+        with patch.object(cli, "load_cloud_client", return_value=cloud), redirect_stdout(output):
+            self.assertEqual(cli.main(args), 2)
+        self.assertGreater((self.state / "enrollment-attempt.json").stat().st_size, 4096)
+        with patch.object(cli, "load_cloud_client", return_value=cloud), redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(args), 0)
+        self.assertEqual(cloud.asserted_agents, agents)
+
+    def test_enrollment_cloud_config_errors_use_enrolled_result_key(self):
+        challenge_path = self.state.parent / "owner-challenge.json"
+        challenge_path.write_text("{}")
+        challenge_path.chmod(0o600)
+        output = io.StringIO()
+        with patch.object(cli, "load_cloud_client", side_effect=CloudError("invalid_configuration")), redirect_stdout(output):
+            code = cli.main(["--state-dir", str(self.state), "enroll", "--challenge-file", str(challenge_path),
+                             "--cloud-config", "/unused", "--mesh-ip", "100.96.0.1",
+                             "--mesh-port", "8789", "--agent", "codex"])
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(output.getvalue()), {"enrolled": False, "reason": "invalid_configuration"})
+        self.assertFalse((self.state / "enrollment-attempt.json").exists())
+
+    def test_enrollment_cleanup_precedes_terminal_success_output(self):
+        challenge_path = self.state.parent / "owner-challenge.json"
+        challenge = {"challengeId": str(uuid.uuid4()), "nodeId": str(uuid.uuid4()),
+                     "expiresAt": "2030-01-01T00:00:00.000Z", "signingPayload": "approved"}
+        challenge_path.write_text(json.dumps(challenge))
+        challenge_path.chmod(0o600)
+
+        class FakeCloud:
+            origin, principal, agent = "https://events.example.com", "owner@example.com", "codex"
+            node_id, node_generation = challenge["nodeId"], 1
+
+            async def complete_enrollment(self, *_args, **_kwargs):
+                return {"nodeId": self.node_id, "generation": self.node_generation}
+
+        real_fsync = os.fsync
+        calls = 0
+
+        def fail_cleanup_fsync(fd):
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                raise OSError("simulated directory sync failure")
+            return real_fsync(fd)
+
+        output, errors = io.StringIO(), io.StringIO()
+        with (patch.object(cli, "load_cloud_client", return_value=FakeCloud()),
+              patch.object(cli.os, "fsync", side_effect=fail_cleanup_fsync),
+              redirect_stdout(output), redirect_stderr(errors)):
+            code = cli.main(["--state-dir", str(self.state), "enroll", "--challenge-file", str(challenge_path),
+                             "--cloud-config", str(self.state.parent / "config.json"), "--mesh-ip", "100.96.0.1",
+                             "--mesh-port", "8789", "--agent", "codex"])
+        self.assertEqual(code, 2)
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(json.loads(errors.getvalue()), {"reason": "local_operation_unavailable"})
+        lock_fd = os.open(self.state, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        finally:
+            os.close(lock_fd)
+
+    def test_enrollment_partial_attempt_write_is_removed_before_network(self):
+        challenge_path = self.state.parent / "owner-challenge.json"
+        challenge = {"challengeId": str(uuid.uuid4()), "nodeId": str(uuid.uuid4()),
+                     "expiresAt": "2030-01-01T00:00:00.000Z", "signingPayload": "approved"}
+        challenge_path.write_text(json.dumps(challenge))
+        challenge_path.chmod(0o600)
+
+        class FakeCloud:
+            origin, principal, agent = "https://events.example.com", "owner@example.com", "codex"
+            node_id, node_generation = challenge["nodeId"], 1
+
+            async def complete_enrollment(self, *_args, **_kwargs):
+                raise AssertionError("persistence failure must precede the network")
+
+        real_fsync = os.fsync
+        calls = 0
+
+        def fail_first_fsync(fd):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError("simulated attempt write sync failure")
+            return real_fsync(fd)
+
+        errors = io.StringIO()
+        with (patch.object(cli, "load_cloud_client", return_value=FakeCloud()),
+              patch.object(cli.os, "fsync", side_effect=fail_first_fsync), redirect_stderr(errors)):
+            code = cli.main(["--state-dir", str(self.state), "enroll", "--challenge-file", str(challenge_path),
+                             "--cloud-config", str(self.state.parent / "config.json"), "--mesh-ip", "100.96.0.1",
+                             "--mesh-port", "8789", "--agent", "codex"])
+        self.assertEqual(code, 2)
         self.assertFalse((self.state / "enrollment-attempt.json").exists())
 
     def test_enrollment_uncertain_response_is_not_reported_as_success(self):

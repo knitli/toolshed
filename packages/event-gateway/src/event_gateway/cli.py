@@ -124,7 +124,8 @@ def main(argv=None):
         print(json.dumps({"reason": "interrupted"}), file=sys.stderr)
         return 130
     except CloudError as error:
-        result_key = {"attach": "attached", "renew": "renewed", "transfer": "transferred"}.get(
+        result_key = {"attach": "attached", "renew": "renewed", "transfer": "transferred",
+                      "enroll": "enrolled"}.get(
             getattr(args, "command", None), "attached",
         )
         if error.ambiguous:
@@ -451,46 +452,59 @@ def _complete_enrollment(args, state_dir):
                "agents": sorted(args.agent)}
     encoded = json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
     directory_fd = os.open(state_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    existing_attempt = False
     clean_attempt = False
     retain_attempt = True
+    terminal = None
     try:
         fcntl.flock(directory_fd, fcntl.LOCK_EX)
         if attempt.exists() or attempt.is_symlink():
-            saved, _ = _private_json(attempt, 4096, "unsafe_enrollment_attempt")
+            saved, _ = _private_json(attempt, 8192, "unsafe_enrollment_attempt")
             if saved != binding:
                 raise SecurityError("enrollment_attempt_mismatch")
+            existing_attempt = True
             clean_attempt = True
         else:
             fd = os.open(attempt, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            with os.fdopen(fd, "wb") as stream:
-                os.fchmod(stream.fileno(), 0o600)
-                stream.write(encoded)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.fsync(directory_fd)
-            clean_attempt = True
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    os.fchmod(stream.fileno(), 0o600)
+                    stream.write(encoded)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.fsync(directory_fd)
+                clean_attempt = True
+            except BaseException:
+                attempt.unlink(missing_ok=True)
+                os.fsync(directory_fd)
+                raise
         try:
             result = asyncio.run(cloud.complete_enrollment(
                 challenge, mesh_ip=args.mesh_ip, mesh_port=args.mesh_port, agents=args.agent,
             ))
         except CloudError as error:
-            retain_attempt = error.ambiguous
-            print(json.dumps({"enrolled": None if error.ambiguous else False,
-                              "reason": "enrollment_outcome_unknown" if error.ambiguous else error.code}))
-            return 2
+            unresolved = (existing_attempt or error.ambiguous
+                          or error.code in ("invalid_response", "identity_mismatch"))
+            retain_attempt = unresolved
+            terminal = (json.dumps({"enrolled": None if unresolved else False,
+                                    "reason": "enrollment_outcome_unknown" if unresolved else error.code}), 2)
         except SecurityError:
             # Credential/schema reads fail before transport, so this attempt is safe to replace.
-            retain_attempt = False
+            retain_attempt = existing_attempt
             raise
-        retain_attempt = False
-        print(json.dumps({"enrolled": True, "nodeId": result["nodeId"],
-                          "generation": result["generation"]}))
-        return 0
+        else:
+            retain_attempt = False
+            terminal = (json.dumps({"enrolled": True, "nodeId": result["nodeId"],
+                                    "generation": result["generation"]}), 0)
     finally:
-        if clean_attempt and not retain_attempt:
-            attempt.unlink(missing_ok=True)
-            os.fsync(directory_fd)
-        os.close(directory_fd)
+        try:
+            if clean_attempt and not retain_attempt:
+                attempt.unlink(missing_ok=True)
+                os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    print(terminal[0])
+    return terminal[1]
 
 
 def _execute_status_or_detach(args, state_dir):
