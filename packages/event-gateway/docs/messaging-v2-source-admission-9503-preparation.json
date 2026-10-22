@@ -1,0 +1,59 @@
+{
+  "status": "PREPARED_NOT_EXECUTED",
+  "scope": "Compile-only source-bound messaging fixture freeze for merged event source admission 9503; no fixture profile executed.",
+  "source": {
+    "repositoryCommit": "9503b8e2a99fbe099a4b90cb576a17dcf4b786aa",
+    "repositoryPath": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021",
+    "cloudSourcePath": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os",
+    "cloudflareOsGitlink": "22daf8d01f701da90d3d68f686883288802ad420",
+    "cloudflareOsPath": "apps/os/cloudflare-os",
+    "workspaceAliases": "esbuild aliases each Cloud workspace package to the exact apps/os source tree above; input names in the freeze are relative to that tree."
+  },
+  "runtime": {
+    "nodeVersion": "24.21.0",
+    "nodePath": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+    "esbuildVersion": "0.28.1",
+    "rpcValidationPlugin": "capnweb-validate 0.3.0, using cloudflare-os patch from gitlink above",
+    "miniflareVersion": "5.20261001.0-alpha",
+    "miniflareEntry": "/opt/coder/knitli-site/apps/os/node_modules/.pnpm/miniflare@5.20261001.0-alpha_@types+node@26.1.0/node_modules/miniflare/dist/src/index.js",
+    "miniflareEntrySha256": "d6c68c92bc33371e4baa88a1c6da0042b4fbf8c872a297b84e729556f49f9632",
+    "workerdVersion": "1.20261001.1",
+    "workerdBinary": "/opt/coder/knitli-site/apps/os/node_modules/.pnpm/@cloudflare+workerd-darwin-arm64@1.20261001.1/node_modules/@cloudflare/workerd-darwin-arm64/bin/workerd",
+    "workerdSha256": "3fd4b350cebf887265a20222fc530b21d843791266476199d16968600fa01922",
+    "dependencyCache": "Existing cached package trees were linked temporarily (not committed) from /opt/coder/knitli-site/apps/os only for the compile-only build, then removed; no installs occurred.",
+    "nodeBinarySha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+    "capnwebValidatePatchSha256": "4bb77ca1f93b152c4f276dd5769c693a64917ed61743b9d4943358fe6a8f7536"
+  },
+  "compileOnly": {
+    "command": "FIXTURE_NODE=/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node FIXTURE_CLOUD_SOURCE=/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os FIXTURE_DIRECTORY=/opt/coder/toolshed/.worktrees/event-current-source-messaging-proof-20261021/packages/event-gateway/tests/fixtures /Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node /private/tmp/event-current-source-messaging-freeze.mjs",
+    "result": "PASS",
+    "inputCount": 353,
+    "inputCountsByPrefix": {
+      "cloud": 134,
+      "dependency": 218,
+      "fixture": 1
+    },
+    "bundleSha256": "ae2780852f959675a19a53d04f8b6a05cbf9915a8fa97b2e359c7f39524b81d4",
+    "inputManifestSha256": "04a6d134f4c26851900e61bcf0bc698fab2af6b948924d368c2c78851845a83c",
+    "workerProcessStarted": false,
+    "miniflareConstructed": false,
+    "workerdSpawned": false,
+    "testsRun": false
+  },
+  "executableSourceFreeze": {
+    "packages/event-gateway/tests/test_messaging_workerd.py": "9df79d3a1aadd4e688b18c5e1204427e167f6705d0096df13c68a7634fa0b365",
+    "packages/event-gateway/tests/test_messaging_process_restart.py": "6b7c8b31e33fdfa81b6010cec141212487fd55cadc663269dfe42b382931d137",
+    "packages/event-gateway/tests/test_messaging_abrupt_cloud_crash.py": "d82a901181b8bfebb1d6796683e1bb7fb5ba7c860921a14e89dbf6a2f63214d4",
+    "packages/event-gateway/tests/test_messaging_autonomous_alarm.py": "ecf9e7d724d9f5039d65d081ec34e5b1bb8bf2b6654ffa83e3ab1fc3202283d8",
+    "packages/event-gateway/tests/fixtures/messaging_process_child.py": "9d4394717ddaa7f340a06c465b4f487abc681ac7717fed7c82d3fe4eee8e2eb5",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-broker.mjs": "a4ce61a829b0685804862859992e26b9d01f550e8af29aea3572076e4bb3690d",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-worker.ts": "2920aac75e7fc192cc557debd42c404ca228c41affb910f52e65d9cc4eb9681a",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-crash.mjs": "e803adf37ad2fdbba8e2857e816acde94fd54ce15a3c210af45f88b8dad02d41",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-crash.test.mjs": "215f447baf2a0e1b411d4af7e120defcd0fcc34af33a58f224fdb27f87226914",
+    "packages/event-gateway/tests/fixtures/messaging-autonomous-observer.mjs": "cd98791a63608ca42554e8c4db7e44bf6614cd91350cce14890c597242bf74ca",
+    "packages/event-gateway/tests/fixtures/messaging-autonomous-observer.test.mjs": "e87c25c86c12a5efbd18ccde1f6ce1c0de41aac0a5ef1ea08d049361bebc184e",
+    "packages/event-gateway/tests/fixtures/messaging-autonomous-binding.test.mjs": "fd86ef532dd15650951bb81d7359318b2719477caaa3cdcfebb68f2543c0a4a8",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-runtime.json": "d8a69221828d38a5c7140fbbc68ee3d837fb046eff86c80290ecc81857c776ac"
+  },
+  "historicalReceipts": "messaging-v2-abrupt-crash-result.json and messaging-v2-autonomous-alarm-result.json are retained unchanged and remain evidence for their earlier source freeze only."
+}

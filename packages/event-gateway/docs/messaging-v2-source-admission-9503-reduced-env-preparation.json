@@ -1,0 +1,167 @@
+{
+  "status": "PREPARED_REDUCED_ENV_COMPILE_PASS_NOT_EXECUTED",
+  "scope": "Corrected compile-only freeze using the actual broker reduced environment and per-workspace cached package links; no Miniflare construction or fixture profile execution.",
+  "source": {
+    "repositoryCommit": "9503b8e2a99fbe099a4b90cb576a17dcf4b786aa",
+    "repositoryPath": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021",
+    "cloudSourcePath": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os",
+    "cloudflareOsGitlink": "22daf8d01f701da90d3d68f686883288802ad420",
+    "cloudflareOsPath": "apps/os/cloudflare-os",
+    "workspaceAliases": "esbuild aliases each Cloud workspace package to the exact apps/os source tree above; input names in the freeze are relative to that tree."
+  },
+  "runtime": {
+    "nodeVersion": "24.21.0",
+    "nodePath": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+    "esbuildVersion": "0.28.1",
+    "rpcValidationPlugin": "capnweb-validate 0.3.0, using cloudflare-os patch from gitlink above",
+    "miniflareVersion": "5.20261001.0-alpha",
+    "miniflareEntry": "/opt/coder/knitli-site/apps/os/node_modules/.pnpm/miniflare@5.20261001.0-alpha_@types+node@26.1.0/node_modules/miniflare/dist/src/index.js",
+    "miniflareEntrySha256": "d6c68c92bc33371e4baa88a1c6da0042b4fbf8c872a297b84e729556f49f9632",
+    "workerdVersion": "1.20261001.1",
+    "workerdBinary": "/opt/coder/knitli-site/apps/os/node_modules/.pnpm/@cloudflare+workerd-darwin-arm64@1.20261001.1/node_modules/@cloudflare/workerd-darwin-arm64/bin/workerd",
+    "workerdSha256": "3fd4b350cebf887265a20222fc530b21d843791266476199d16968600fa01922",
+    "dependencyCache": "18 ignored cached node_modules links remain temporarily staged for upcoming local profiles; remove after qualification. All point to the existing /opt/coder/knitli-site/apps/os cache; no installs occurred.",
+    "nodeBinarySha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+    "capnwebValidatePatchSha256": "4bb77ca1f93b152c4f276dd5769c693a64917ed61743b9d4943358fe6a8f7536"
+  },
+  "compileOnly": {
+    "command": "env -i FIXTURE_NODE=/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node FIXTURE_CLOUD_SOURCE=/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os FIXTURE_DIRECTORY=/opt/coder/toolshed/.worktrees/event-current-source-messaging-proof-20261021/packages/event-gateway/tests/fixtures PATH=/usr/bin:/bin HOME=<unique /private/tmp temporary directory> /Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node /private/tmp/event-current-source-messaging-freeze.mjs",
+    "result": "PASS",
+    "resultArtifact": "/private/tmp/event-9503-reduced-env-freeze.json",
+    "resultArtifactSha256": "cf56dfd773571f0a28342b479026926f3348beae809d874ef249175d106a8053",
+    "inputCount": 353,
+    "inputCountsByPrefix": {
+      "cloud": 134,
+      "dependency": 218,
+      "fixture": 1
+    },
+    "bundleSha256": "ae2780852f959675a19a53d04f8b6a05cbf9915a8fa97b2e359c7f39524b81d4",
+    "inputManifestSha256": "04a6d134f4c26851900e61bcf0bc698fab2af6b948924d368c2c78851845a83c",
+    "exactPreparedManifestMatch": true,
+    "changedInputs": 0,
+    "missingInputs": 0,
+    "addedInputs": 0,
+    "workerProcessStarted": false,
+    "miniflareImportedOrConstructed": false,
+    "workerdSpawned": false,
+    "testsRun": false,
+    "compilerScriptSha256": "48801c67f89318e96f8a4aae87a5fe3e1cd429948587dde9fa704544edbce946"
+  },
+  "executableSourceFreeze": {
+    "packages/event-gateway/tests/test_messaging_workerd.py": "887e0a4b56c72a41cc134ad4616faa4e51808566d9af493870f135211543ffe6",
+    "packages/event-gateway/tests/test_messaging_process_restart.py": "d1f89344a34681ed4c4c298fa0b7ef26539cbb624da98f82e5ae21a4cf2033d3",
+    "packages/event-gateway/tests/test_messaging_abrupt_cloud_crash.py": "d82a901181b8bfebb1d6796683e1bb7fb5ba7c860921a14e89dbf6a2f63214d4",
+    "packages/event-gateway/tests/test_messaging_autonomous_alarm.py": "ecf9e7d724d9f5039d65d081ec34e5b1bb8bf2b6654ffa83e3ab1fc3202283d8",
+    "packages/event-gateway/tests/fixtures/messaging_process_child.py": "9d4394717ddaa7f340a06c465b4f487abc681ac7717fed7c82d3fe4eee8e2eb5",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-broker.mjs": "a4ce61a829b0685804862859992e26b9d01f550e8af29aea3572076e4bb3690d",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-worker.ts": "2920aac75e7fc192cc557debd42c404ca228c41affb910f52e65d9cc4eb9681a",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-crash.mjs": "e803adf37ad2fdbba8e2857e816acde94fd54ce15a3c210af45f88b8dad02d41",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-crash.test.mjs": "215f447baf2a0e1b411d4af7e120defcd0fcc34af33a58f224fdb27f87226914",
+    "packages/event-gateway/tests/fixtures/messaging-autonomous-observer.mjs": "cd98791a63608ca42554e8c4db7e44bf6614cd91350cce14890c597242bf74ca",
+    "packages/event-gateway/tests/fixtures/messaging-autonomous-observer.test.mjs": "e87c25c86c12a5efbd18ccde1f6ce1c0de41aac0a5ef1ea08d049361bebc184e",
+    "packages/event-gateway/tests/fixtures/messaging-autonomous-binding.test.mjs": "fd86ef532dd15650951bb81d7359318b2719477caaa3cdcfebb68f2543c0a4a8",
+    "packages/event-gateway/tests/fixtures/messaging-workerd-runtime.json": "d8a69221828d38a5c7140fbbc68ee3d837fb046eff86c80290ecc81857c776ac"
+  },
+  "historicalReceipts": "messaging-v2-abrupt-crash-result.json and messaging-v2-autonomous-alarm-result.json are retained unchanged and remain evidence for their earlier source freeze only.",
+  "priorPreparation": {
+    "record": "/opt/coder/toolshed/.worktrees/event-current-source-messaging-proof-20261021/packages/event-gateway/docs/messaging-v2-source-admission-9503-preparation.json",
+    "retainedAs": "Initial 9503 compile-only preparation; its recorded command omitted NODE_PATH even though the successful invocation included it.",
+    "actualInitialInvocation": "FIXTURE_NODE=/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node FIXTURE_CLOUD_SOURCE=/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os FIXTURE_DIRECTORY=/opt/coder/toolshed/.worktrees/event-current-source-messaging-proof-20261021/packages/event-gateway/tests/fixtures NODE_PATH=/opt/coder/knitli-site/apps/os/node_modules:/opt/coder/knitli-site/apps/os/packages/gatekeeper-messaging/node_modules /Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node /private/tmp/event-current-source-messaging-freeze.mjs > /private/tmp/event-current-source-messaging-freeze.json",
+    "supersededBy": "This corrected reduced-environment compile result; prior record and output remain unchanged."
+  },
+  "dependencyLookup": {
+    "sourceAliases": "The compiler keeps the existing fixture esbuild alias mapping every Cloud workspace package to this exact 9503 source tree; no alias or guard changes.",
+    "cacheLinks": [
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/admin-ui/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/admin-ui/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/agent-client/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/agent-client/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/ai-inference/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/ai-inference/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/authority/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/authority/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/catalog-agent/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/catalog-agent/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/custom-gatekeeper/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/custom-gatekeeper/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/error-reporter/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/error-reporter/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/event-runtime/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/event-runtime/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/execution-runtime/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/execution-runtime/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/gatekeeper-execution/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/gatekeeper-execution/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/gatekeeper-memory/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/gatekeeper-memory/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/gatekeeper-messaging/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/gatekeeper-messaging/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/gatekeeper-messaging-egress/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/gatekeeper-messaging-egress/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/gatekeeper-openapi/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/gatekeeper-openapi/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/openapi-operator/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/openapi-operator/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/presence-ui/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/presence-ui/node_modules"
+      },
+      {
+        "sourceLink": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os/packages/setup/node_modules",
+        "cacheTarget": "/opt/coder/knitli-site/apps/os/packages/setup/node_modules"
+      }
+    ],
+    "lookupEnvironment": {
+      "FIXTURE_NODE": "/Users/adampoulemanos/.local/share/mise/installs/node/24.21.0/bin/node",
+      "FIXTURE_CLOUD_SOURCE": "/opt/coder/toolshed/.worktrees/event-messaging-proof-cloud-20261021/apps/os",
+      "FIXTURE_DIRECTORY": "/opt/coder/toolshed/.worktrees/event-current-source-messaging-proof-20261021/packages/event-gateway/tests/fixtures",
+      "PATH": "/usr/bin:/bin",
+      "HOME": "unique private temporary directory under /private/tmp, removed after compile",
+      "NODE_PATH": "unset",
+      "FIXTURE_MINIFLARE": "unset; compile-only builder does not import or construct Miniflare"
+    },
+    "cacheManifestComparison": {
+      "sourceLockSha256": "f02a9c5876545a538445f8740fb69df6473bf8f356ef30ebedf6e098455df981",
+      "cacheLockSha256": "4ff3fc3bc082b931147ac1c2ec1e4f278798678e05286b61ce82743a7099a5a9",
+      "sourceEventRuntimePackageSha256": "0660dbcfda7a2df2efedd607e5502d89e25ce42d7d8967442a2646fd6172422d",
+      "cacheEventRuntimePackageSha256": "f67a1de1605ace5b40ebb6650cdca4531a5533f21d643d60aabc4bfa4807c6bf",
+      "lockDifference": "Only three added lines in the source lockfile: packages/event-runtime gains authority with specifier workspace:* and version link:../authority. The matching cached event-runtime package.json is missing that new workspace dependency; all other workspace package.json files and the root package.json/pnpm-workspace.yaml match byte-for-byte.",
+      "runtimeDependency": "zod remains 4.6.5 in source lock and cached event-runtime node_modules symlink; the new authority workspace import resolves through the unchanged esbuild workspace alias to 9503 source."
+    }
+  },
+  "statusExplanation": "Preparation only. The earlier profile failure occurred because its broker environment omitted NODE_PATH and the source tree lacked per-workspace node_modules links. This corrected compile uses the broker reduced lookup environment and all 17 matching workspace package node_modules links plus the root link. The exact 353-input map and bundle remain unchanged. Root and independent review are required before any fixture profile runs."
+}

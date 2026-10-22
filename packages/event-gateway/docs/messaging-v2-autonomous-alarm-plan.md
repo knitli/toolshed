@@ -1,6 +1,7 @@
 # Autonomous alarm proof: prepared execution plan
 
-Status: preparation only. No run result or autonomous recovery claim is recorded here.
+Status: method and controls only; point-in-time results are recorded in the
+[final 9503 qualification receipt](messaging-v2-source-admission-9503-final-qualification.json).
 Scope: private local fixture, one after-reserve SIGKILL per fresh fixture, actual
 persisted workerd alarm, production coordinator alarm implementation. No native
 client, provider, deployment, production attachment, or external messaging.
@@ -11,10 +12,12 @@ client, provider, deployment, production attachment, or external messaging.
    process child/helpers and pinned production source before any execution.
    Include `messaging-autonomous-observer.mjs` and its inert test in the source
    manifest; these broker-side modules are outside the worker bundle closure.
-   Refresh `messaging-workerd-inputs.json` only using the reviewed compile-only
-   command, with no Miniflare construction/listener/workerd spawn. The exact
-   compile-only command and resulting root freeze artifact are pending; this
-   plan alone does not authorize execution.
+   `messaging-workerd-inputs.json` contains the exact 353-input freeze for
+   merged Cloud source 9503. Its compile preparation is retained at
+   [the corrected 9503 preparation receipt](messaging-v2-source-admission-9503-reduced-env-preparation.json);
+   the executed results and full hashes are in the
+   [final 9503 qualification receipt](messaging-v2-source-admission-9503-final-qualification.json).
+   This plan documents method and controls; it is not itself the execution record.
 2. Set the existing pinned `FIXTURE_NODE`, `FIXTURE_MINIFLARE`, and
    `FIXTURE_CLOUD_SOURCE` paths and `FIXTURE_ABRUPT_CLOUD_CRASH=reviewed`.
 3. Run exactly `test_messaging_autonomous_alarm.MessagingAutonomousAlarmTests`

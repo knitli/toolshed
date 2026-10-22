@@ -27,6 +27,9 @@ from event_gateway.store import Store
 
 
 BROKER = Path(__file__).parent / 'fixtures/messaging-workerd-broker.mjs'
+BROKER_COMPANION_FILES = (
+    'messaging-workerd-worker.ts', 'messaging-autonomous-observer.mjs',
+)
 SETTINGS = ('FIXTURE_NODE', 'FIXTURE_CLOUD_SOURCE', 'FIXTURE_MINIFLARE')
 STARTUP_HANDSHAKE_MAX_BYTES = 1024 * 1024
 
@@ -469,7 +472,8 @@ class FixtureMutationTests(unittest.IsolatedAsyncioTestCase):
             broker_source = BROKER.read_text().replace(
                 'const ed25519 = async () => {',
                 "throw new Error('worker execution reached');\nconst ed25519 = async () => {")
-            shutil.copy(BROKER.with_name('messaging-workerd-worker.ts'), scratch)
+            for name in BROKER_COMPANION_FILES:
+                shutil.copy(BROKER.with_name(name), scratch)
             manifest_path = broker.with_name('messaging-workerd-inputs.json')
             manifest = json.loads(BROKER.with_name('messaging-workerd-inputs.json').read_text())
             cloud = scratch / 'cloud'
