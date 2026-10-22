@@ -177,7 +177,30 @@ test("registry readiness retries packument visibility and accepts only the exact
   expect(delays).toEqual([10000, 10000]);
 });
 
-test("registry readiness exhausts six visibility attempts without a final sleep", async () => {
+test("registry readiness accepts a version that appears after six attempts", async () => {
+  let requests = 0;
+  const delays: number[] = [];
+  await release.waitForRegistryVersion("1.2.3", {
+    fetch: async () => {
+      requests++;
+      return requests < 7
+        ? Response.json({ name: "@knitli/openapi-mcp", versions: {} })
+        : Response.json({
+            name: "@knitli/openapi-mcp",
+            versions: {
+              "1.2.3": { name: "@knitli/openapi-mcp", version: "1.2.3" },
+            },
+          });
+    },
+    sleep: async (delay: number) => {
+      delays.push(delay);
+    },
+  });
+  expect(requests).toBe(7);
+  expect(delays).toEqual(Array(6).fill(10000));
+});
+
+test("registry readiness exhausts 31 visibility attempts without a final sleep", async () => {
   for (const response of [
     () => new Response(null, { status: 404 }),
     () => Response.json({ name: "@knitli/openapi-mcp", versions: {} }),
@@ -194,9 +217,9 @@ test("registry readiness exhausts six visibility attempts without a final sleep"
           delays.push(ms);
         },
       }),
-    ).rejects.toThrow("6 attempts");
-    expect(requests).toBe(6);
-    expect(delays).toEqual([10000, 10000, 10000, 10000, 10000]);
+    ).rejects.toThrow("31 attempts");
+    expect(requests).toBe(31);
+    expect(delays).toEqual(Array(30).fill(10000));
   }
 });
 

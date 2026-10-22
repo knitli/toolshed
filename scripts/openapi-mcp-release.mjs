@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const packageName = "@knitli/openapi-mcp";
 const registry = "https://registry.npmjs.org/";
+const registryVisibilityAttempts = 31;
 const { parse: parseYaml } = createRequire(
   new URL("../packages/openapi-mcp/package.json", import.meta.url),
 )("yaml");
@@ -19,7 +20,7 @@ export async function waitForRegistryVersion(version, dependencies = {}) {
   const fetchRegistry = dependencies.fetch ?? fetch;
   const sleep =
     dependencies.sleep ?? ((ms) => new Promise((done) => setTimeout(done, ms)));
-  for (let attempt = 0; attempt < 6; attempt++) {
+  for (let attempt = 0; attempt < registryVisibilityAttempts; attempt++) {
     const signal = AbortSignal.timeout(10000);
     let onAbort;
     let response;
@@ -67,10 +68,10 @@ export async function waitForRegistryVersion(version, dependencies = {}) {
       }
     } else if (response.status !== 404)
       throw new Error(`Registry request failed with HTTP ${response.status}`);
-    if (attempt < 5) await sleep(10000);
+    if (attempt < registryVisibilityAttempts - 1) await sleep(10000);
   }
   throw new Error(
-    `Registry version ${version} was not visible after 6 attempts`,
+    `Registry version ${version} was not visible after ${registryVisibilityAttempts} attempts`,
   );
 }
 

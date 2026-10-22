@@ -459,10 +459,10 @@ and the remaining first-`latest` gate.
 
 After publication, the verification step waits for the exact version to appear
 in the public package listing before attempting a fresh installation. Only a
-missing package or missing version is retried: at most six requests, each with
-a ten-second timeout, separated by ten-second waits. Invalid metadata and other
-errors fail the check. This readiness probe cannot guarantee every registry
-replica or tarball URL is ready. Installation, cryptographic verification, and
+missing package or missing version is retried: at most 31 requests with a
+ten-second timeout each and 30 ten-second waits (five minutes total, plus
+request time). Invalid metadata and other errors fail the check. This readiness
+probe cannot guarantee every registry replica or tarball URL is ready. Installation, cryptographic verification, and
 consumer checks remain mandatory; publication itself is never retried by this
 probe.
 
