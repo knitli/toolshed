@@ -824,6 +824,51 @@ sha256sum() { printf 'checksum\\n' >> "$TRACE"; printf 'fixture-checksum\\n'; }
   }
 });
 
+test("release workflow pins audited npm after setup-node and before release", async () => {
+  const workflow = Bun.YAML.parse(
+    await readFile(
+      new URL("../.github/workflows/release.yml", import.meta.url),
+      "utf8",
+    ),
+  ) as {
+    jobs: Record<
+      string,
+      {
+        steps: {
+          name?: string;
+          uses?: string;
+          run?: string;
+          "working-directory"?: string;
+        }[];
+      }
+    >;
+  };
+  const steps = workflow.jobs["release-openapi-mcp"].steps;
+  const nodeIndex = steps.findIndex((step) =>
+    step.uses?.startsWith("actions/setup-node@"),
+  );
+  const pinIndex = steps.findIndex(
+    (step) => step.name === "Pin npm for audited HTTP diagnostics",
+  );
+  const installIndex = steps.findIndex(
+    (step) => step.run === "bun i --frozen-lockfile",
+  );
+  const releaseIndex = steps.findIndex(
+    (step) =>
+      step.name === "Release exact tested openapi-mcp tarball through OIDC",
+  );
+  if (nodeIndex < 0 || pinIndex < 0 || installIndex < 0 || releaseIndex < 0)
+    throw new Error("Node setup, npm pin, or release step is missing");
+  expect(pinIndex).toBeGreaterThan(nodeIndex);
+  expect(pinIndex).toBeLessThan(installIndex);
+  expect(pinIndex).toBeLessThan(releaseIndex);
+  expect(steps[pinIndex]["working-directory"]).toBe(`\${{ runner.temp }}`);
+  expect(steps[pinIndex].run?.trimEnd().split("\n")).toEqual([
+    "npm install --global --ignore-scripts --registry=https://registry.npmjs.org/ npm@11.19.0",
+    'test "$(npm --version)" = "11.19.0"',
+  ]);
+});
+
 test("release rejects token authentication, bootstrap version, wrong package and wrong workflow context", async () => {
   for (const change of [
     (f: Awaited<ReturnType<typeof fixture>>) => {
