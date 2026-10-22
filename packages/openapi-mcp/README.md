@@ -232,6 +232,16 @@ port backed by one semantic search context, alongside `routes`, `authorizer`,
 and the same reduction-only `limits`. A single-catalog embedding can pass its
 existing runtime as `searchRuntime`; the CLI assembles shared search itself.
 
+The built-in server uses stdio; HTTP hosting is not qualified by this package.
+An HTTP embedder needs a fresh SDK server and transport per request or session,
+tool-input and request-body limits, and token-audience validation when using
+SDK bearer authentication. `createOpenApiMcpServer` does not expose the SDK's
+`maxToolInputElements` option; HTTP hosting needs additional integration work.
+Upgrading the SDK alone does not enable these protections; follow the upstream
+[isolation](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-jm63-cq47-j5jp),
+[input-limit](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-46jr-4wx8-v453), and
+[audience](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-rvq5-wwqv-78pq) advisories.
+
 If an action reports `UPSTREAM_OUTCOME_UNKNOWN`, its error includes the exact
 `details.preparedCallDigest` and `retryable: false`. Use that digest to reconcile
 the uncertain outcome; the server has consumed the authorization and does not
