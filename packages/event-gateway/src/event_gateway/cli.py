@@ -51,7 +51,7 @@ def main(argv=None):
     presence = commands.add_parser("client-status", help="Query one live launcher selection")
     presence.add_argument("--session-id", required=True)
     enroll = commands.add_parser("enroll", help="Prepare a node key or complete an owner-approved enrollment")
-    enroll.add_argument("--challenge", help="Legacy owner request label; prepares the local key")
+    enroll.add_argument("--challenge", help="Owner request label; prepares the local node key")
     enroll.add_argument("--challenge-file", type=Path, help="Private JSON owner-approved challenge")
     enroll.add_argument("--cloud-config", type=Path)
     enroll.add_argument("--mesh-ip")
@@ -129,7 +129,8 @@ def main(argv=None):
             getattr(args, "command", None), "attached",
         )
         if error.ambiguous:
-            print(json.dumps({result_key: None, "reason": "commit_outcome_unknown"}))
+            reason = "enrollment_outcome_unknown" if args.command == "enroll" else "commit_outcome_unknown"
+            print(json.dumps({result_key: None, "reason": reason}))
         else:
             print(json.dumps({result_key: False, "reason": error.code}))
         return 2
@@ -457,6 +458,7 @@ def _complete_enrollment(args, state_dir):
     retain_attempt = True
     terminal = None
     try:
+        # Keep concurrent enrollment invocations behind the same in-flight outcome.
         fcntl.flock(directory_fd, fcntl.LOCK_EX)
         if attempt.exists() or attempt.is_symlink():
             saved, _ = _private_json(attempt, 8192, "unsafe_enrollment_attempt")
@@ -488,10 +490,6 @@ def _complete_enrollment(args, state_dir):
             retain_attempt = unresolved
             terminal = (json.dumps({"enrolled": None if unresolved else False,
                                     "reason": "enrollment_outcome_unknown" if unresolved else error.code}), 2)
-        except SecurityError:
-            # Credential/schema reads fail before transport, so this attempt is safe to replace.
-            retain_attempt = existing_attempt
-            raise
         else:
             retain_attempt = False
             terminal = (json.dumps({"enrolled": True, "nodeId": result["nodeId"],

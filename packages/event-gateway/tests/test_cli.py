@@ -74,6 +74,9 @@ class CliTests(unittest.TestCase):
         self.assertIn("--session-id", help_text)
         self.assertIn("--cloud-config", help_text)
         self.assertNotIn("--thread-id", help_text)
+        enroll_help = self.cli("enroll", "--help")
+        self.assertIn("prepares the local node key", enroll_help)
+        self.assertNotIn("Legacy", enroll_help)
 
     def test_attach_commits_challenge_sample_rechecks_and_persists_mapping(self):
         runtime_id, session_id = str(uuid.uuid4()), str(uuid.uuid4())
@@ -1194,6 +1197,17 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(json.loads(output.getvalue()), {"enrolled": False, "reason": "invalid_configuration"})
         self.assertFalse((self.state / "enrollment-attempt.json").exists())
+
+        output = io.StringIO()
+        with patch.object(cli, "load_cloud_client",
+                          side_effect=CloudError("unavailable", ambiguous=True)), redirect_stdout(output):
+            code = cli.main(["--state-dir", str(self.state), "enroll", "--challenge-file", str(challenge_path),
+                             "--cloud-config", "/unused", "--mesh-ip", "100.96.0.1",
+                             "--mesh-port", "8789", "--agent", "codex"])
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "enrolled": None, "reason": "enrollment_outcome_unknown",
+        })
 
     def test_enrollment_cleanup_precedes_terminal_success_output(self):
         challenge_path = self.state.parent / "owner-challenge.json"
