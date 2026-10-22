@@ -25,8 +25,17 @@ Without `run --dispatch-config`, the shipped CLI runs only the private control
 daemon. An explicit configuration connects the signed listener, cloud authority,
 and durable dispatch/recovery worker; see [configured dispatch](docs/native-dispatch.md). `attach`, `renew`, and `transfer` require an explicit
 private cloud configuration and remain subject to the server's native-admission
-gate. `enroll` creates a local key and prepares an owner request without
-claiming cloud enrollment. The private control daemon supports status, detach,
+gate. `enroll --challenge LABEL` creates a local key and prepares a public-key
+request without claiming cloud enrollment. To complete an owner-approved
+challenge, save its JSON (`challengeId`, `nodeId`, `expiresAt`, and
+`signingPayload`) in a mode-600 file and run `enroll --challenge-file FILE
+--cloud-config FILE --mesh-ip 100.x.x.x --mesh-port PORT --agent NAME`;
+repeat `--agent` for each explicitly approved agent. This signs through the
+existing private key and CloudClient, and prints the returned node ID and
+generation only after validation. The private attempt record fences retries to
+the same challenge, cloud identity, and binding if the reply is lost; use that
+same challenge to retry. This command does not alter cloud configuration or
+credentials, activate the node, or attach a runtime. The private control daemon supports status, detach,
 and single-writer attachment mapping updates. Installation does not start it.
 The separate foreground `launch` command owns one explicitly qualified native
 client and exposes local selection status plus bounded conditional Start and
