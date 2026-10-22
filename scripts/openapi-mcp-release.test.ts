@@ -406,6 +406,7 @@ test("release prepares nextRelease.version with Bun and publishes only the teste
     "--tag",
     "latest",
     "--provenance",
+    "--loglevel=verbose",
     "--registry=https://registry.npmjs.org/",
   ]);
   expect(publish?.cwd.startsWith(f.runnerTemp)).toBe(true);
