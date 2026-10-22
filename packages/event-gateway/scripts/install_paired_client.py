@@ -19,6 +19,7 @@ import stat
 import subprocess
 import sys
 import tomllib
+import urllib.error
 import venv
 import zipfile
 
@@ -206,7 +207,15 @@ def preflight(api, wheel, artifact, destination):
                       api.request(f"actions/runs/{selected['runId']}/attempts/{selected['runAttempt']}"),
                       api.request(f"actions/artifacts/{selected['artifactId']}"))
     V.require_ancestry(api, selected['headSha'], main)
-    inputs, manifest = V.resolve_build_inputs(api, main, main, selected)
+    try:
+        inputs, manifest = V.resolve_build_inputs(api, main, main, selected)
+    except (ValueError, urllib.error.HTTPError) as error:
+        if isinstance(error, urllib.error.HTTPError) and error.code != 404:
+            raise
+        raise ValueError(
+            'consumer_native_pair_mismatch: promoted native recipe unavailable or unverified; '
+            'keep previous working client until paired release is promoted'
+        ) from error
     artifact = Path(artifact)
     require(stat.S_ISREG(artifact.lstat().st_mode), "unsafe_native_archive")
     V.verify_archive(artifact, selected, inputs, manifest)

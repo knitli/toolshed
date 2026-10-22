@@ -13,6 +13,7 @@ import tempfile
 import tomllib
 import unittest
 from types import SimpleNamespace
+import urllib.error
 from uuid import uuid4
 from unittest.mock import patch
 
@@ -70,6 +71,10 @@ class InstallAPI(FakeAPI):
             return {'protected': self.protected, 'commit': {'sha': MAIN}}
         if endpoint == f'git/trees/{MAIN}?recursive=1':
             return {'truncated': False, 'tree': self.source_tree}
+        if endpoint == f"actions/runs/{self.selected['runId']}/attempts/{self.selected['runAttempt']}":
+            return self.run
+        if endpoint == f"actions/artifacts/{self.selected['artifactId']}":
+            return self.artifact
         return super().request(endpoint, payload)
 
 
@@ -119,6 +124,75 @@ class PairedInstallTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.preflight()
                 self.unchanged()
+
+    def test_promoted_legacy_recipe_404_has_actionable_paired_release_error(self):
+        self.api = InstallAPI()
+        promoted = '7ff224a1fc8a9923e33aeafbd66cfa65efdc8bea'
+        current_launcher = (INSTALL.ROOT / 'src/event_gateway/launcher.py').read_bytes()
+        pins = INSTALL.V.pins(current_launcher)
+        self.api.payload['event_gateway/launcher.py'] = current_launcher
+        self.api.blobs[INSTALL.PREFIX + 'src/event_gateway/launcher.py', MAIN] = current_launcher
+        self.wheel.write_bytes(wheel_bytes(self.api.payload, self.api.project))
+        self.api.selected.update(
+            headSha=promoted,
+            runId=38273438173,
+            runAttempt=1,
+            artifactId=11758567975,
+            binarySha256=pins['QUALIFIED_SHA256'],
+            codeModeHostSha256=pins['QUALIFIED_CODE_MODE_HOST_SHA256'],
+        )
+        self.api.run.update(id=38273438173, run_attempt=1, head_sha=promoted)
+        self.api.artifact.update(id=11758567975, name='native-client-38273438173-1')
+        self.api.artifact['workflow_run'].update(id=38273438173, head_sha=promoted)
+        self.api.comparison['headTarget']['oid'] = promoted
+        self.api.blobs[INSTALL.V.PROVENANCE, 'a' * 40] = json.dumps(self.api.selected).encode()
+        self.api.blobs[INSTALL.V.PROVENANCE, MAIN] = json.dumps(self.api.selected).encode()
+        original_blob = self.api.blob
+        missing_manifest = INSTALL.V.INPUTS['sourceManifestSha256']
+
+        def promoted_blobs(path, revision):
+            if revision == promoted:
+                if path == missing_manifest:
+                    raise urllib.error.HTTPError(
+                        'https://api.github.test/missing-native-manifest', 404, 'Not Found', {}, None,
+                    )
+                return original_blob(path, BUILD)
+            return original_blob(path, revision)
+
+        with patch.object(self.api, 'blob', side_effect=promoted_blobs), \
+                patch.object(INSTALL, 'install_wheel') as installer:
+            with self.assertRaisesRegex(
+                    ValueError,
+                    'consumer_native_pair_mismatch: promoted native recipe unavailable or unverified; '
+                    'keep previous working client until paired release is promoted') as caught:
+                self.preflight()
+        self.assertIsInstance(caught.exception.__cause__, urllib.error.HTTPError)
+        self.assertEqual(caught.exception.__cause__.code, 404)
+        installer.assert_not_called()
+        self.unchanged()
+
+    def test_recipe_resolution_auth_and_transport_errors_are_preserved(self):
+        failures = (
+            urllib.error.HTTPError('https://api.github.test/recipe', 403, 'Forbidden', {}, None),
+            urllib.error.HTTPError('https://api.github.test/recipe', 429, 'Rate limited', {}, None),
+            OSError('transport unavailable'),
+        )
+        for error in failures:
+            with self.subTest(error=type(error).__name__, code=getattr(error, 'code', None)):
+                with patch.object(INSTALL.V, 'resolve_build_inputs', side_effect=error):
+                    with self.assertRaises(type(error)) as caught:
+                        self.preflight()
+                self.assertIs(caught.exception, error)
+                self.unchanged()
+
+    def test_unverified_recipe_has_actionable_paired_release_error(self):
+        error = ValueError('native_ci_provenance_verification_failed')
+        with patch.object(INSTALL.V, 'resolve_build_inputs', side_effect=error):
+            with self.assertRaisesRegex(
+                    ValueError, 'consumer_native_pair_mismatch:.*keep previous working client') as caught:
+                self.preflight()
+        self.assertIs(caught.exception.__cause__, error)
+        self.unchanged()
 
     def select_v2(self, family):
         self.api = InstallAPI(family)
