@@ -344,17 +344,33 @@ async function fixture() {
       engines: { node: ">=24.16.0 <25", bun: ">=1.4.0" },
     }),
   );
-  const calls: { command: string[]; cwd: string }[] = [];
+  const calls: { command: string[]; cwd: string; env: NodeJS.ProcessEnv }[] =
+    [];
+  let npmVersion: string | null = "11.19.0";
+  let npmVersionExit = 0;
+  let authChecks = 0;
   const adapter = createReleaseAdapter({
-    run: async (command: string[], options: { cwd: string }) => {
-      calls.push({ command, cwd: options.cwd });
+    run: async (
+      command: string[],
+      options: { cwd: string; env: NodeJS.ProcessEnv },
+      captureStdout = false,
+    ) => {
+      calls.push({ command, cwd: options.cwd, env: options.env });
+      if (command[0] === "npm" && command[1] === "--version") {
+        if (npmVersionExit !== 0)
+          throw new Error(`npm --version failed (${npmVersionExit})`);
+        return captureStdout ? npmVersion : undefined;
+      }
       if (command[0] === "bun" && command[1] === "pm")
         await writeFile(
           command[command.indexOf("--filename") + 1],
           "exact tested tarball",
         );
     },
-    verifyNpm: async () => {},
+    verifyNpm: async () => {
+      authChecks++;
+      calls.push({ command: ["verifyNpm"], cwd: "", env: {} });
+    },
   });
   const context = {
     cwd,
@@ -378,7 +394,23 @@ async function fixture() {
     options: {},
     logger: { log() {} },
   };
-  return { root, cwd, runnerTemp, adapter, context, calls };
+  return {
+    root,
+    cwd,
+    runnerTemp,
+    adapter,
+    context,
+    calls,
+    setNpmVersion(version: string | null) {
+      npmVersion = version;
+    },
+    setNpmVersionExit(code: number) {
+      npmVersionExit = code;
+    },
+    get authChecks() {
+      return authChecks;
+    },
+  };
 }
 
 test("release prepares nextRelease.version with Bun and publishes only the tested absolute tarball from clean runner temp", async () => {
@@ -393,7 +425,9 @@ test("release prepares nextRelease.version with Bun and publishes only the teste
     packed?.command[(packed?.command.indexOf("--filename") ?? -1) + 1];
   expect(tarball?.startsWith(f.runnerTemp)).toBe(true);
   const result = await f.adapter.publish({}, f.context);
-  const publish = f.calls.find((call) => call.command[0] === "npm");
+  const publish = f.calls.find(
+    (call) => call.command[0] === "npm" && call.command[1] === "publish",
+  );
   expect(f.calls.filter((call) => call.command[1] === "publish")).toHaveLength(
     1,
   );
@@ -411,11 +445,60 @@ test("release prepares nextRelease.version with Bun and publishes only the teste
   ]);
   expect(publish?.cwd.startsWith(f.runnerTemp)).toBe(true);
   expect(publish?.cwd).not.toBe(f.cwd);
+  const versionChecks = f.calls.filter(
+    (call) => call.command[0] === "npm" && call.command[1] === "--version",
+  );
+  expect(versionChecks).toHaveLength(2);
+  expect(versionChecks[0].cwd).toBe(publish?.cwd);
+  expect(versionChecks[0].env).toBe(publish?.env);
+  expect(f.calls.indexOf(versionChecks[0])).toBeLessThan(
+    f.calls.findIndex((call) => call.command[0] === "verifyNpm"),
+  );
+  expect(f.calls.indexOf(versionChecks[1])).toBeLessThan(
+    f.calls.findIndex(
+      (call) => call.command[0] === "npm" && call.command[1] === "publish",
+    ),
+  );
+  expect(f.authChecks).toBe(1);
   expect(result.version).toBe("1.2.3");
   expect(f.calls.some((call) => call.command[1] === "test")).toBe(true);
 });
 
-test("release refuses absent and modified prepared tarballs before npm can run", async () => {
+test.each([
+  ["missing", null, 0],
+  ["malformed", "v11.19.0", 0],
+  ["different", "11.19.1", 0],
+  ["untrusted output", "fixture-private-token", 0],
+  ["nonzero exit", "11.19.0", 1],
+])(
+  "release blocks npm %s before OIDC auth and publication",
+  async (_, version, exit) => {
+    const f = await fixture();
+    f.setNpmVersion(version);
+    f.setNpmVersionExit(exit);
+    await expect(f.adapter.verifyConditions({}, f.context)).rejects.toThrow(
+      exit
+        ? "npm --version failed"
+        : /^npm 11\.19\.0 is required for audited HTTP diagnostics$/,
+    );
+    expect(f.authChecks).toBe(0);
+    expect(f.calls.filter((call) => call.command[0] === "npm")).toHaveLength(1);
+    expect(f.calls.some((call) => call.command[1] === "publish")).toBe(false);
+  },
+);
+
+test("release rechecks npm version immediately before publishing", async () => {
+  const f = await fixture();
+  await f.adapter.verifyConditions({}, f.context);
+  await f.adapter.prepare({}, f.context);
+  f.setNpmVersion("11.19.1");
+  await expect(f.adapter.publish({}, f.context)).rejects.toThrow("11.19.0");
+  expect(f.authChecks).toBe(1);
+  expect(f.calls.filter((call) => call.command[0] === "npm")).toHaveLength(2);
+  expect(f.calls.some((call) => call.command[1] === "publish")).toBe(false);
+});
+
+test("release refuses absent and modified prepared tarballs before npm publish", async () => {
   const f = await fixture();
   await expect(f.adapter.publish({}, f.context)).rejects.toThrow(
     "tested tarball",
@@ -429,7 +512,7 @@ test("release refuses absent and modified prepared tarballs before npm can run",
     "tampered bytes",
   );
   await expect(f.adapter.publish({}, f.context)).rejects.toThrow("digest");
-  expect(f.calls.filter((call) => call.command[0] === "npm")).toEqual([]);
+  expect(f.calls.some((call) => call.command[1] === "publish")).toBe(false);
 });
 
 test("bootstrap cleanup checks environment mappings while allowing harmless token documentation", async () => {

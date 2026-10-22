@@ -131,16 +131,21 @@ export function verifyAuditBinding(audit, expected) {
   return { package: packageName, ...expected };
 }
 
-async function run(command, options) {
-  await new Promise((accept, reject) => {
+async function run(command, options, captureStdout = false) {
+  return await new Promise((accept, reject) => {
+    let stdout = "";
     const child = spawn(command[0], command.slice(1), {
       ...options,
-      stdio: "inherit",
+      stdio: captureStdout ? ["ignore", "pipe", "inherit"] : "inherit",
     });
+    if (captureStdout)
+      child.stdout.setEncoding("utf8").on("data", (chunk) => {
+        stdout += chunk;
+      });
     child.on("error", reject);
-    child.on("exit", (code) =>
+    child.on("close", (code) =>
       code === 0
-        ? accept()
+        ? accept(captureStdout ? stdout.trim() : undefined)
         : reject(new Error(`${command[0]} failed (${code})`)),
     );
   });
@@ -241,6 +246,16 @@ export function createReleaseAdapter(dependencies = {}) {
   let prepared;
   let cleanDirectory;
   let cleanEnv;
+  // HTTP diagnostics were audited for this exact npm release.
+  const assertNpmVersion = async () => {
+    const version = await execute(
+      ["npm", "--version"],
+      { cwd: cleanDirectory, env: cleanEnv },
+      true,
+    );
+    if (version !== "11.19.0")
+      throw new Error("npm 11.19.0 is required for audited HTTP diagnostics");
+  };
   return {
     async verifyConditions(_config, context) {
       const manifest = await checkContext(context);
@@ -269,6 +284,7 @@ export function createReleaseAdapter(dependencies = {}) {
           engines: manifest.engines,
         }),
       );
+      await assertNpmVersion();
       const verifyNpm =
         dependencies.verifyNpm ??
         (await import("@semantic-release/npm")).verifyConditions;
@@ -343,6 +359,7 @@ export function createReleaseAdapter(dependencies = {}) {
         throw new Error(
           "Prepared tarball version/source/digest does not match",
         );
+      await assertNpmVersion();
       await execute(
         [
           "npm",

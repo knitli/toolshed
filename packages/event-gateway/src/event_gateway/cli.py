@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import base64
+import fcntl
 from functools import partial
 import json
 import os
@@ -17,6 +18,7 @@ from .client_runtime import (
     clear_pending_commit, cloud_identity, load_cloud_client, load_pending_commit,
     pending_commit_summary, save_pending_commit, load_pending_commit_snapshot,
     load_reconciliation, save_reconciliation, has_reconciliation, complete_reconciliation,
+    _private_json,
 )
 from .cloud import CloudError, _iso, _uuid, _native_challenge_request, _same_json_value
 from .security import (
@@ -48,8 +50,13 @@ def main(argv=None):
     client.add_argument("--resume", help="Exact native thread UUID")
     presence = commands.add_parser("client-status", help="Query one live launcher selection")
     presence.add_argument("--session-id", required=True)
-    enroll = commands.add_parser("enroll", help="Prepare a public node-key request")
-    enroll.add_argument("--challenge", required=True)
+    enroll = commands.add_parser("enroll", help="Prepare a node key or complete an owner-approved enrollment")
+    enroll.add_argument("--challenge", help="Owner request label; prepares the local node key")
+    enroll.add_argument("--challenge-file", type=Path, help="Private JSON owner-approved challenge")
+    enroll.add_argument("--cloud-config", type=Path)
+    enroll.add_argument("--mesh-ip")
+    enroll.add_argument("--mesh-port", type=int)
+    enroll.add_argument("--agent", action="append", help="Explicit agent binding; repeat as needed")
     attach = commands.add_parser("attach", help="Attach one live native session to a runtime")
     attach.add_argument("--runtime-id", required=True)
     attach.add_argument("--session-id", required=True)
@@ -117,11 +124,13 @@ def main(argv=None):
         print(json.dumps({"reason": "interrupted"}), file=sys.stderr)
         return 130
     except CloudError as error:
-        result_key = {"attach": "attached", "renew": "renewed", "transfer": "transferred"}.get(
+        result_key = {"attach": "attached", "renew": "renewed", "transfer": "transferred",
+                      "enroll": "enrolled"}.get(
             getattr(args, "command", None), "attached",
         )
         if error.ambiguous:
-            print(json.dumps({result_key: None, "reason": "commit_outcome_unknown"}))
+            reason = "enrollment_outcome_unknown" if args.command == "enroll" else "commit_outcome_unknown"
+            print(json.dumps({result_key: None, "reason": reason}))
         else:
             print(json.dumps({result_key: False, "reason": error.code}))
         return 2
@@ -413,15 +422,87 @@ def _renew_stock_attachment(state_dir, expected_mapping, lease_expires_at):
 
 
 def _execute_enrollment(args, state_dir, parser):
-    if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", args.challenge):
+    completion = args.challenge_file is not None
+    if completion:
+        if (args.challenge is not None or args.cloud_config is None or not args.mesh_ip
+                or args.mesh_port is None or not args.agent):
+            parser.error("enrollment_requires_explicit_binding")
+        return _complete_enrollment(args, state_dir)
+    if (args.challenge is None or args.cloud_config is not None or args.mesh_ip is not None
+            or args.mesh_port is not None or args.agent is not None
+            or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", args.challenge)):
         parser.error("invalid_challenge")
     ensure_private_directory(state_dir)
     key = load_or_create_signing_key(state_dir / "node-key.pem")
     print(json.dumps({
         "status": "owner_enrollment_pending", "publicKey": public_key_text(key),
-        "challenge": args.challenge, "reason": "cloud_enrollment_not_integrated",
+        "challenge": args.challenge, "reason": "owner_approval_required",
     }))
     return 2
+
+
+def _complete_enrollment(args, state_dir):
+    """Complete one explicit owner challenge and retain its exact retry identity."""
+    ensure_private_directory(state_dir)
+    challenge, _, digest = _private_json(args.challenge_file, 8192, "invalid_challenge",
+                                         include_sha256=True)
+    cloud = load_cloud_client(args.cloud_config, state_dir)
+    attempt = state_dir / "enrollment-attempt.json"
+    binding = {"challengeSha256": digest, "cloudIdentity": cloud_identity(cloud),
+               "meshIp": args.mesh_ip, "meshPort": args.mesh_port,
+               "agents": sorted(args.agent)}
+    encoded = json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
+    directory_fd = os.open(state_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    existing_attempt = False
+    clean_attempt = False
+    retain_attempt = True
+    terminal = None
+    try:
+        # Keep concurrent enrollment invocations behind the same in-flight outcome.
+        fcntl.flock(directory_fd, fcntl.LOCK_EX)
+        if attempt.exists() or attempt.is_symlink():
+            saved, _ = _private_json(attempt, 8192, "unsafe_enrollment_attempt")
+            if saved != binding:
+                raise SecurityError("enrollment_attempt_mismatch")
+            existing_attempt = True
+            clean_attempt = True
+        else:
+            fd = os.open(attempt, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    os.fchmod(stream.fileno(), 0o600)
+                    stream.write(encoded)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.fsync(directory_fd)
+                clean_attempt = True
+            except BaseException:
+                attempt.unlink(missing_ok=True)
+                os.fsync(directory_fd)
+                raise
+        try:
+            result = asyncio.run(cloud.complete_enrollment(
+                challenge, mesh_ip=args.mesh_ip, mesh_port=args.mesh_port, agents=args.agent,
+            ))
+        except CloudError as error:
+            unresolved = (existing_attempt or error.ambiguous
+                          or error.code in ("invalid_response", "identity_mismatch"))
+            retain_attempt = unresolved
+            terminal = (json.dumps({"enrolled": None if unresolved else False,
+                                    "reason": "enrollment_outcome_unknown" if unresolved else error.code}), 2)
+        else:
+            retain_attempt = False
+            terminal = (json.dumps({"enrolled": True, "nodeId": result["nodeId"],
+                                    "generation": result["generation"]}), 0)
+    finally:
+        try:
+            if clean_attempt and not retain_attempt:
+                attempt.unlink(missing_ok=True)
+                os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    print(terminal[0])
+    return terminal[1]
 
 
 def _execute_status_or_detach(args, state_dir):
