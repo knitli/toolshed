@@ -14,6 +14,7 @@ from event_gateway.client_runtime import (
     _https_send, _pending_lock, clear_pending_commit, load_cloud_client, load_pending_commit,
     save_pending_commit,
 )
+from event_gateway.cloud import CloudError
 from event_gateway.security import SecurityError, load_or_create_signing_key
 
 
@@ -52,6 +53,65 @@ class ClientRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((second.access_token, second.agent_token), ("access-two", "agent-two"))
         self.assertEqual(client.origin, "https://events.example.com")
         self.assertNotIn("access-two", repr(second))
+
+    async def test_gateway_helper_renews_each_request_and_after_restart_without_token_file(self):
+        settings = {"nodePath": "/absolute/node", "helperPath": "/absolute/knitli-agent.mjs"}
+        self.write_config(authMode="gateway", agentTokenProvider=settings)
+        config = json.loads(self.config.read_text())
+        del config["credentialsFile"]
+        self.config.write_text(json.dumps(config))
+        self.tokens.unlink()
+        provider = AsyncMock(side_effect=["one.jwt.signature", "two.jwt.signature", "three.jwt.signature"])
+        with patch("event_gateway.client_runtime.AgentTokenProvider", return_value=provider) as constructor:
+            client = load_cloud_client(self.config, self.state)
+            first = await client._post_headers("/v1/runtimes/status", b"{}", node_proof=True, before_send=None)
+            second = await client._post_headers("/v1/runtimes/status", b"{}", node_proof=True, before_send=None)
+            restarted = load_cloud_client(self.config, self.state)
+            third = await restarted._post_headers("/v1/runtimes/status", b"{}", node_proof=True, before_send=None)
+        self.assertEqual([headers["authorization"] for headers in (first, second, third)],
+                         ["Bearer one.jwt.signature", "Bearer two.jwt.signature", "Bearer three.jwt.signature"])
+        self.assertTrue(all("cf-access-token" not in headers for headers in (first, second, third)))
+        self.assertTrue(all("x-event-node-proof" in headers for headers in (first, second, third)))
+        self.assertEqual(provider.await_count, 3)
+        self.assertEqual(constructor.call_count, 2)
+        constructor.assert_called_with(settings["nodePath"], settings["helperPath"],
+                                       origin=config["origin"], agent="codex")
+        self.assertFalse(self.tokens.exists())
+
+    async def test_gateway_does_not_fall_back_to_retained_access_credentials(self):
+        self.write_config(authMode="gateway", agentTokenProvider={
+            "nodePath": "/absolute/node", "helperPath": "/absolute/knitli-agent.mjs",
+        })
+        provider = AsyncMock(side_effect=OSError("private helper failure"))
+        with patch("event_gateway.client_runtime.AgentTokenProvider", return_value=provider):
+            client = load_cloud_client(self.config, self.state)
+            with self.assertRaisesRegex(CloudError, "^unavailable$"):
+                await client._post_headers("/v1/runtimes/status", b"{}", node_proof=True, before_send=None)
+        self.assertEqual(json.loads(self.tokens.read_text())["accessToken"], "access-one")
+
+    async def test_explicit_access_mode_preserves_file_credentials(self):
+        self.write_config(authMode="access")
+        with patch("event_gateway.client_runtime.AgentTokenProvider") as provider:
+            client = load_cloud_client(self.config, self.state)
+            credentials = await client._credentials()
+        self.assertEqual((credentials.access_token, credentials.agent_token), ("access-one", "agent-one"))
+        provider.assert_not_called()
+
+    def test_auth_configuration_is_closed_and_requires_explicit_gateway_mode(self):
+        valid = {"nodePath": "/absolute/node", "helperPath": "/absolute/knitli-agent.mjs"}
+        for changes in (
+            {"authMode": "other"}, {"authMode": None}, {"authMode": []},
+            {"agentTokenProvider": valid},
+            {"authMode": "gateway"},
+            {"authMode": "gateway", "agentTokenProvider": None},
+            {"authMode": "gateway", "agentTokenProvider": {**valid, "args": []}},
+            {"authMode": "gateway", "agentTokenProvider": {**valid, "nodePath": "node"}},
+            {"authMode": "gateway", "agentTokenProvider": {**valid, "helperPath": "\x00"}},
+        ):
+            with self.subTest(changes=changes):
+                self.write_config(**changes)
+                with self.assertRaisesRegex(SecurityError, "^invalid_cloud_config$"):
+                    load_cloud_client(self.config, self.state)
 
     async def test_config_and_tokens_require_closed_owner_only_files(self):
         for changes in ({"extra": True}, {"version": True}, {"version": False},

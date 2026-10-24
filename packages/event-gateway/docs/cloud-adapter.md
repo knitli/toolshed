@@ -18,9 +18,24 @@ node generation, local Ed25519 key, asynchronous `credentials` and `send`
 callables. Its node generation is a snapshot; construct a new client after
 owner-approved reenrollment. Credentials are obtained anew on every request,
 kept in memory, omitted from their representation, and never persisted or logged.
-The provider must supply a fresh human Event Access token and a registered
-agent's short-lived token for that same Event origin and owner. This module does
-not manufacture either identity or change Access policy.
+The default `auth_mode="access"` requires both a human Event Access token and a
+registered agent's short-lived token for that same Event origin and owner.
+Explicit `auth_mode="gateway"` requires `Credentials(None, agent_token)` and
+omits `cf-access-token`; the Gateway Forward Worker supplies the human identity
+through its private NodeEdge service binding. The public Event fetch API keeps
+its Access authentication. There is no automatic fallback between modes.
+
+The private runtime configuration selects Gateway mode with `authMode` and
+`agentTokenProvider: {nodePath, helperPath}`. Both paths are absolute regular
+files; the node binary must be executable. `AgentTokenProvider` invokes the fixed
+`header --audience ORIGIN --agent NAME` argv with no shell, input, browser or
+custom arguments. Each request mints a fresh agent JWT using the existing helper
+and key. The helper's stdout must be a closed JSON header object containing only
+`X-Knitli-Agent-Token`; the bare JWT is extracted, never logged or written back
+to disk. Output is limited to 8 KiB, execution to two seconds, stderr is
+discarded, and cancellation kills and reaps the child. Missing `authMode` retains
+the original Access credential-file behavior. This module does not change
+Access/Gateway policy or deploy the NodeEdge path.
 
 The HTTP port receives `method`, `url`, `headers`, `body`, `timeout`,
 `max_response_bytes`, and `follow_redirects=False`; it returns
@@ -28,6 +43,11 @@ The HTTP port receives `method`, `url`, `headers`, `body`, `timeout`,
 limit while reading, honor cancellation/deadlines, and never follow redirects.
 The adapter independently rejects redirects, encoded bodies, non-JSON replies,
 duplicate JSON keys, bodies over 8 KiB, unknown fields and unknown outcomes.
+In Gateway mode only, a 302 to the exact HTTPS Cloudflare Gateway block host
+becomes `owner_interaction_required`: check WARP authentication and policy.
+Other redirects remain `redirect_refused`; none are followed. The block page
+does not establish which policy condition failed. Existing claim/commit
+ambiguity fences remain in effect, with no automatic replay or mode switch.
 One five-second deadline covers credentials, signing and the HTTP call.
 Provider/transport exceptions, including exceptions already typed as `CloudError`,
 become fixed codes without their original message. Timeouts retain
@@ -82,12 +102,13 @@ occur in signed node-proof JSON.
   qualification enables the server route.
 
 The explicit `attach`, `renew`, and `transfer` commands require a private
-mode-600 cloud configuration, a separate mode-600 credential file reread for
-each request, and the already enrolled node key. The bounded HTTPS transport
+mode-600 cloud configuration and the already enrolled node key. Access mode
+rereads its separate mode-600 credential file; Gateway mode invokes the token
+helper for each request. The bounded HTTPS transport
 uses the fixed `/usr/bin/curl` executable, passes headers and request bytes over
 stdin, verifies TLS, refuses redirects, and kills the process when its total
-deadline expires. These commands run in the foreground; they do not install a
-background service or refresh credentials themselves.
+deadline expires. These commands run in the foreground and do not install a
+background service or renew the owner's WARP/Access session.
 
 Before its first commit send the CLI atomically writes a mode-600, secret-free
 exact-request record under `.native-pending`. A timeout or invalid success
