@@ -73,7 +73,8 @@ class AgentTokenProvider:
     """Invoke the configured helper once per request and return its bare JWT."""
 
     def __init__(self, node_path, helper_path, *, origin, agent):
-        """Bind helper execution to an HTTPS origin and validated agent identity.
+        """
+        Bind helper execution to an HTTPS origin and validated agent identity.
 
         Absolute node and helper paths are validated at construction and revalidated on each call.
         Targets must be regular files owned by root or this user, without group/world writes.
