@@ -31,6 +31,9 @@ file paths or symlink aliases whose targets are owned by root or the current
 user and are not group/world writable; the node target must be executable.
 Targets are resolved and checked before every invocation, so a stable Node alias
 can follow package upgrades without restarting the Gateway.
+Node and the helper are trusted local installations, in directories other users
+cannot replace. The metadata checks are not atomic executable admission and do
+not isolate the agent from compromise of those installations or the local user.
 `AgentTokenProvider` invokes the fixed
 `header --audience ORIGIN --agent NAME` argv with no shell, input, browser or
 custom arguments. Each request mints a fresh agent JWT using the existing helper

@@ -9,7 +9,7 @@ import stat
 from urllib.parse import urlsplit
 
 from .cloud import CloudError
-from .protocol import ProtocolError, _pairs
+from .protocol import ProtocolError, _depth, _pairs
 
 _MAX_OUTPUT = 8192
 _MAX_TOKEN = 4096
@@ -90,6 +90,7 @@ class AgentTokenProvider:
     async def __call__(self):
         node_path = _path(self.node_path, executable=True)
         helper_path = _path(self.helper_path, executable=False)
+        # shortcut: trust local install directories; revisit atomic admission if local-user isolation is required.
         command = (node_path, helper_path, "header", "--audience", self.origin, "--agent", self.agent)
         environment = {key: value for key, value in os.environ.items()
                        if key not in {"NODE_OPTIONS", "NODE_PATH"}}
@@ -106,6 +107,7 @@ class AgentTokenProvider:
                     raise CloudError("credentials_unavailable")
             value = json.loads(output.decode("utf-8"), object_pairs_hook=_pairs,
                                parse_constant=_reject_constant)
+            _depth(value)
             if (not isinstance(value, dict) or set(value) != {"X-Knitli-Agent-Token"}
                     or not isinstance(value["X-Knitli-Agent-Token"], str)):
                 raise ValueError

@@ -47,8 +47,8 @@ def _valid_token(token, maximum):
 def _valid_credentials(credential, auth_mode):
     return (isinstance(credential, Credentials)
             and _valid_token(credential.agent_token, 4096)
-            and (auth_mode == "gateway" and credential.access_token is None
-                 or auth_mode == "access" and _valid_token(credential.access_token, 16384)))
+            and ((auth_mode == "gateway" and credential.access_token is None)
+                 or (auth_mode == "access" and _valid_token(credential.access_token, 16384))))
 
 
 def _json(value):

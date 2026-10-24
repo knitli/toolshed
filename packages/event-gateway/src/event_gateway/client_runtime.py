@@ -13,7 +13,7 @@ import stat
 import tempfile
 from urllib.parse import urlsplit
 
-from .agent_credentials import AgentTokenProvider
+from .agent_credentials import AgentTokenProvider, _reap
 from .cloud import (
     CloudClient, CloudError, Credentials, _uuid, _native_challenge_request,
     _runtime_status_response, _same_json_value, _generation,
@@ -153,14 +153,7 @@ async def _https_send(method, url, headers, body, timeout, max_response_bytes, f
     except TimeoutError:
         raise TimeoutError("https_transport_timeout") from None
     finally:
-        await _reap_curl(process)
-
-
-async def _reap_curl(process):
-    if process is not None:
-        if process.returncode is None:
-            process.kill()
-        await process.wait()
+        await _reap(process)
 
 
 async def _collect_curl_response(process, deadline, max_response_bytes):

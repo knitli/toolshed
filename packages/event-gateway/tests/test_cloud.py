@@ -20,7 +20,10 @@ from event_gateway import cli
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from event_gateway.cloud import CloudClient, CloudError, Credentials, _iso, canonical_node_proof, validate_admission
+from event_gateway.cloud import (
+    CloudClient, CloudError, Credentials, _iso, _valid_credentials, canonical_node_proof,
+    validate_admission,
+)
 from event_gateway.gateway import Gateway
 from event_gateway.protocol import _timestamp, derive_delivery_id
 
@@ -177,6 +180,18 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
                 client._credentials = credentials
             with self.subTest(mode=mode, credential=credential), self.assertRaisesRegex(CloudError, "^credentials_unavailable$"):
                 await client.claim(FIXTURE["original"])
+
+    def test_credential_mode_validation_truth_table(self):
+        for mode, credential, expected in (
+            ("access", Credentials("access", "agent"), True),
+            ("access", Credentials(None, "agent"), False),
+            ("gateway", Credentials(None, "agent"), True),
+            ("gateway", Credentials("access", "agent"), False),
+            ("gateway", Credentials(None, "bad agent"), False),
+            ("invalid", Credentials(None, "agent"), False),
+        ):
+            with self.subTest(mode=mode, credential=credential):
+                self.assertEqual(_valid_credentials(credential, mode), expected)
 
     async def test_gateway_auth_headers_and_redirect_classification(self):
         self.assertTrue(await self.client.claim(FIXTURE["original"]))
