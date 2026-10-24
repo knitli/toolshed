@@ -134,6 +134,7 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         self.credential_calls = 0
         self.result = copy.deepcopy(FIXTURE["admitted"])
         self.status = 200
+        self.response_headers = JSON_HEADERS
         self.now = NOW
         self.client = CloudClient(
             origin="https://events.example.com", principal=FIXTURE["original"]["principal"],
@@ -147,7 +148,66 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
 
     async def send(self, **request):
         self.requests.append(request)
-        return self.status, JSON_HEADERS, json.dumps(self.result).encode()
+        return self.status, self.response_headers, json.dumps(self.result).encode()
+
+    def gateway_client(self, credentials=None):
+        return CloudClient(
+            origin=self.client.origin, principal=self.client.principal, agent=self.client.agent,
+            node_id=NODE, node_generation=1, private_key=self.key,
+            credentials=credentials or (lambda: asyncio.sleep(0, result=Credentials(None, "gateway-agent"))),
+            send=self.send, auth_mode="gateway", clock=lambda: self.now,
+        )
+
+    async def test_auth_modes_validate_credentials_and_keep_secrets_out_of_repr(self):
+        self.assertNotIn("human-proof", repr(Credentials("human-proof", "agent-proof")))
+        for mode in (None, "", "Gateway", [], 1):
+            with self.subTest(mode=mode), self.assertRaisesRegex(CloudError, "^invalid_configuration$"):
+                CloudClient(origin=self.client.origin, principal=self.client.principal, agent=self.client.agent,
+                            node_id=NODE, node_generation=1, private_key=self.key,
+                            credentials=self.credentials, send=self.send, auth_mode=mode)
+
+        for mode, credential in (("access", Credentials(None, "agent")),
+                                 ("access", Credentials("access", "bad token")),
+                                 ("gateway", Credentials("access", "agent")),
+                                 ("gateway", Credentials(None, "bad token"))):
+            async def credentials(credential=credential):
+                return credential
+            client = self.client if mode == "access" else self.gateway_client(credentials)
+            if mode == "access":
+                client._credentials = credentials
+            with self.subTest(mode=mode, credential=credential), self.assertRaisesRegex(CloudError, "^credentials_unavailable$"):
+                await client.claim(FIXTURE["original"])
+
+    async def test_gateway_auth_headers_and_redirect_classification(self):
+        self.assertTrue(await self.client.claim(FIXTURE["original"]))
+        self.assertEqual(self.requests[-1]["headers"]["cf-access-token"], "human-proof-1")
+        self.assertEqual(self.requests[-1]["headers"]["authorization"], "Bearer agent-proof-1")
+
+        client = self.gateway_client()
+        self.status, self.response_headers = 200, JSON_HEADERS
+        self.assertTrue(await client.claim(FIXTURE["original"]))
+        headers = self.requests[-1]["headers"]
+        self.assertNotIn("cf-access-token", headers)
+        self.assertEqual(headers["authorization"], "Bearer gateway-agent")
+        self.assertIn("x-event-node-proof", headers)
+        self.assertFalse(self.requests[-1]["follow_redirects"])
+
+        for location, code in (("https://blocked.teams.cloudflare.com/cdn-cgi/access/blocked", "owner_interaction_required"),
+                               ("http://blocked.teams.cloudflare.com/", "redirect_refused"),
+                               ("https://blocked.teams.cloudflare.com.evil.test/", "redirect_refused"),
+                               ("https://user@blocked.teams.cloudflare.com/", "redirect_refused"),
+                               ("https://blocked.teams.cloudflare.com:443/", "redirect_refused")):
+            self.status, self.response_headers = 302, {"location": location}
+            with self.subTest(location=location), self.assertRaisesRegex(CloudError, f"^{code}$") as caught:
+                await client.claim(FIXTURE["original"])
+            self.assertTrue(caught.exception.ambiguous)
+
+        self.status, self.response_headers = 302, {"location": "https://blocked.teams.cloudflare.com/"}
+        with self.assertRaisesRegex(CloudError, "^redirect_refused$"):
+            await self.client.claim(FIXTURE["original"])
+        with self.assertRaisesRegex(CloudError, "^owner_interaction_required$") as caught:
+            client._post_response("/v1/runtimes/attach", 302, self.response_headers, b"")
+        self.assertTrue(caught.exception.ambiguous)
 
     def native_binding(self):
         return {
