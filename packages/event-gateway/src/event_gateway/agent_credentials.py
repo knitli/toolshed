@@ -22,10 +22,12 @@ def _reject_constant(_):
 def _path(value, *, executable):
     if not isinstance(value, str) or not Path(value).is_absolute():
         raise CloudError("credentials_unavailable")
-    path = Path(value)
+    configured = Path(value)
     try:
+        path = configured.resolve(strict=True)
         info = path.stat()
-        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.getuid())
+                or info.st_mode & 0o022
                 or (executable and not os.access(path, os.X_OK))):
             raise CloudError("credentials_unavailable")
     except (OSError, ValueError):
@@ -71,14 +73,23 @@ class AgentTokenProvider:
     """Invoke the configured helper once per request and return its bare JWT."""
 
     def __init__(self, node_path, helper_path, *, origin, agent):
-        self.node_path = _path(node_path, executable=True)
-        self.helper_path = _path(helper_path, executable=False)
+        """Bind helper execution to an HTTPS origin and validated agent identity.
+
+        Absolute node and helper paths are validated at construction and revalidated on each call.
+        Targets must be regular files owned by root or this user, without group/world writes.
+        The node target must be executable; symlink aliases are resolved again for every call.
+        """
+        _path(node_path, executable=True)
+        _path(helper_path, executable=False)
+        self.node_path = str(Path(node_path))
+        self.helper_path = str(Path(helper_path))
         self.origin = _identity(origin, agent)
         self.agent = agent
 
     async def __call__(self):
-        command = (self.node_path, self.helper_path, "header", "--audience", self.origin,
-                   "--agent", self.agent)
+        node_path = _path(self.node_path, executable=True)
+        helper_path = _path(self.helper_path, executable=False)
+        command = (node_path, helper_path, "header", "--audience", self.origin, "--agent", self.agent)
         environment = {key: value for key, value in os.environ.items()
                        if key not in {"NODE_OPTIONS", "NODE_PATH"}}
         process = None

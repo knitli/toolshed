@@ -278,7 +278,8 @@ configuration replaces `credentialsFile` with these fields:
 }
 ```
 
-The installer must record the actual absolute paths. The existing agent must
+The installer must record actual absolute paths; a stable Node symlink may be
+used and is resolved and checked on every invocation. The existing agent must
 grant this exact Event origin in its separate `apiAudiences` list. Before every
 request, the Gateway invokes the helper's noninteractive
 `header --audience ORIGIN --agent NAME` operation, extracts the token from its

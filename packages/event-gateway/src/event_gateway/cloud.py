@@ -896,6 +896,8 @@ class CloudClient:
             credential = await self._credentials()
         except TimeoutError:
             raise CloudError("request_timeout") from None
+        except CloudError as error:
+            raise CloudError("request_timeout" if error.code == "credentials_timeout" else "unavailable") from None
         except Exception:
             raise CloudError("unavailable") from None
         if not _valid_credentials(credential, self.auth_mode):

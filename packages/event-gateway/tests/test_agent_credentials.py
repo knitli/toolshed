@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -102,6 +103,51 @@ class AgentTokenProviderTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(node=node, origin=origin), self.assertRaises(CloudError) as caught:
                 AgentTokenProvider(node, str(self.helper), origin=origin, agent="codex")
             self.assertEqual(str(caught.exception), "credentials_unavailable")
+
+    async def test_re_resolves_stable_node_symlink_for_each_call(self):
+        first = Path(self.tmp.name) / "node-v1"
+        second = Path(self.tmp.name) / "node-v2"
+        first.write_text("#!/bin/sh\nprintf '%s\\n' '{\"X-Knitli-Agent-Token\":\"aaa.bbb.one\"}'\n")
+        second.write_text("#!/bin/sh\nprintf '%s\\n' '{\"X-Knitli-Agent-Token\":\"aaa.bbb.two\"}'\n")
+        first.chmod(0o700)
+        second.chmod(0o700)
+        alias = Path(self.tmp.name) / "node-current"
+        alias.symlink_to(first)
+        provider = AgentTokenProvider(str(alias), str(self.helper),
+                                     origin="https://events.example.com", agent="codex")
+        self.assertEqual(await provider(), "aaa.bbb.one")
+        alias.unlink()
+        alias.symlink_to(second)
+        first.unlink()
+        self.assertEqual(await provider(), "aaa.bbb.two")
+
+    def test_rejects_broken_nonfile_untrusted_and_writable_targets(self):
+        broken = Path(self.tmp.name) / "broken-node"
+        broken.symlink_to(Path(self.tmp.name) / "missing-node")
+        directory = Path(self.tmp.name) / "node-directory"
+        directory.mkdir()
+        writable = Path(self.tmp.name) / "world-writable-node"
+        writable.write_text("#!/bin/sh\nexit 0\n")
+        writable.chmod(0o777)
+        for node in (str(broken), str(directory), str(writable)):
+            with self.subTest(node=node), self.assertRaisesRegex(CloudError, "^credentials_unavailable$"):
+                AgentTokenProvider(node, str(self.helper),
+                                   origin="https://events.example.com", agent="codex")
+
+        self.provider("exit 0\n")
+        original_stat = Path.stat
+        resolved_node = self.node.resolve()
+
+        def untrusted_stat(path, *args, **kwargs):
+            info = original_stat(path, *args, **kwargs)
+            if path == resolved_node:
+                return SimpleNamespace(st_mode=info.st_mode, st_uid=os.getuid() + 1000)
+            return info
+
+        with patch.object(Path, "stat", untrusted_stat):
+            with self.assertRaisesRegex(CloudError, "^credentials_unavailable$"):
+                AgentTokenProvider(str(self.node), str(self.helper),
+                                   origin="https://events.example.com", agent="codex")
 
     async def test_strips_node_preload_environment(self):
         provider = self.provider(

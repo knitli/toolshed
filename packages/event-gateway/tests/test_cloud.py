@@ -717,16 +717,27 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_credential_cloud_error_is_sanitized(self):
         async def fails():
-            raise CloudError("synthetic-provider-detail")
+            raise CloudError("secret")
 
         def fails_synchronously():
-            raise CloudError("synthetic-provider-detail")
+            raise CloudError("secret")
 
         for callback in (fails, fails_synchronously):
             self.client._credentials = callback
             with self.subTest(callback=callback.__name__), self.assertRaisesRegex(CloudError, "^unavailable$") as caught:
                 await self.client.claim(FIXTURE["original"])
             self.assertEqual(caught.exception.code, "unavailable")
+            self.assertFalse(caught.exception.ambiguous)
+
+    async def test_credential_timeout_cloud_error_is_sanitized_before_send(self):
+        async def times_out():
+            raise CloudError("credentials_timeout")
+
+        self.client._credentials = times_out
+        with self.assertRaisesRegex(CloudError, "^request_timeout$") as caught:
+            await self.client.claim(FIXTURE["original"])
+        self.assertFalse(caught.exception.ambiguous)
+        self.assertEqual(self.requests, [])
 
     async def test_transport_cloud_error_is_sanitized(self):
         async def fails(**_):

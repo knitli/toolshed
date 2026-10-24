@@ -27,7 +27,11 @@ its Access authentication. There is no automatic fallback between modes.
 
 The private runtime configuration selects Gateway mode with `authMode` and
 `agentTokenProvider: {nodePath, helperPath}`. Both paths are absolute regular
-files; the node binary must be executable. `AgentTokenProvider` invokes the fixed
+file paths or symlink aliases whose targets are owned by root or the current
+user and are not group/world writable; the node target must be executable.
+Targets are resolved and checked before every invocation, so a stable Node alias
+can follow package upgrades without restarting the Gateway.
+`AgentTokenProvider` invokes the fixed
 `header --audience ORIGIN --agent NAME` argv with no shell, input, browser or
 custom arguments. Each request mints a fresh agent JWT using the existing helper
 and key. The helper's stdout must be a closed JSON header object containing only
@@ -50,8 +54,8 @@ does not establish which policy condition failed. Existing claim/commit
 ambiguity fences remain in effect, with no automatic replay or mode switch.
 One five-second deadline covers credentials, signing and the HTTP call.
 Provider/transport exceptions, including exceptions already typed as `CloudError`,
-become fixed codes without their original message. Timeouts retain
-`request_timeout`; cancellation propagates.
+become fixed codes without their original message. Native timeouts and the
+helper's `credentials_timeout` become `request_timeout`; cancellation propagates.
 Malformed response JSON, UTF-8, duplicate keys and excessive nesting return
 `invalid_response`, distinct from provider/transport `unavailable`.
 Envelope and ACK identity mismatches retain `identity_mismatch`; parse failures
