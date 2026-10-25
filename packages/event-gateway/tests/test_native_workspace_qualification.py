@@ -1,7 +1,7 @@
 import hashlib
 import io
 import json
-import subprocess
+import subprocess  # nosec B404 - only the absolute Git executable in private fixtures.
 import sys
 import tempfile
 from pathlib import Path
@@ -17,6 +17,7 @@ import native_workspace_qualification as qualification  # noqa: E402
 
 class PinnedV8InputsTest(unittest.TestCase):
     def test_registry_returns_the_fixed_default_source_recipe(self):
+        self.assertTrue(Path(qualification.GIT).is_absolute())
         evidence = qualification.builder.registry.validate_recipe("core-idle-v1", 1)
         self.assertEqual(evidence.recipe.family, "core-idle-v1")
         self.assertEqual(evidence.recipe.revision, 1)
@@ -79,24 +80,27 @@ http_file(
 
 
 class PreparePipelineTest(unittest.TestCase):
+    def git(self, *args, **kwargs):
+        # Fixed argv in an owned private fixture; no shell or external inputs.
+        return subprocess.run([qualification.GIT, *args], cwd=self.source, check=True,  # nosec B603
+                              **kwargs)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.source = self.root / "upstream"
         self.source.mkdir()
-        subprocess.run(["git", "init", "-q"], cwd=self.source, check=True)
-        subprocess.run(["git", "config", "user.name", "Fixture"], cwd=self.source, check=True)
-        subprocess.run(["git", "config", "user.email", "fixture@example.invalid"],
-                       cwd=self.source, check=True)
+        self.git("init", "-q")
+        self.git("config", "user.name", "Fixture")
+        self.git("config", "user.email", "fixture@example.invalid")
         (self.source / "MODULE.bazel").write_text('module(name = "fixture")\n')
         (self.source / "codex-rs").mkdir()
         (self.source / "codex-rs/Cargo.lock").write_text("fixture lock\n")
-        subprocess.run(["git", "add", "."], cwd=self.source, check=True)
-        subprocess.run(["git", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture"],
-                       cwd=self.source, check=True)
-        self.commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.source,
-                                     check=True, text=True, capture_output=True).stdout.strip()
+        self.git("add", ".")
+        self.git("-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+        self.commit = self.git("rev-parse", "HEAD", text=True,
+                               capture_output=True).stdout.strip()
         self.archive = b"archive bytes"
         self.binding = b"binding bytes"
         self.assets = {
@@ -138,6 +142,14 @@ class PreparePipelineTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "rusty_v8_asset_digest_mismatch"):
             self.run_prepare(output, [self.archive + b"corrupt", self.binding])
         self.assertFalse((output / "qualification.json").exists())
+
+    def test_prepare_rejects_non_pinned_checkout_before_creating_output(self):
+        output = self.root / "wrong-upstream"
+        self.assertNotEqual(self.commit, qualification.UPSTREAM)
+        with self.assertRaisesRegex(ValueError,
+                                    "native_source_checkout_must_be_exact_pinned_commit"):
+            qualification.prepare(self.source, output)
+        self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":

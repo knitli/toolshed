@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -15,6 +16,9 @@ import package_native_client as builder
 
 
 UPSTREAM = builder.UPSTREAM_COMMIT
+GIT = shutil.which("git")
+if GIT is None:
+    raise RuntimeError("native_workspace_requires_git")
 V8_TAG = "rusty-v8-v150.4.0"
 MAX_ASSET_BYTES = 32 * 1024 * 1024
 V8_ASSETS = {
@@ -71,14 +75,14 @@ def _run(argv, *, cwd=None, capture=False):
 
 
 def prepare(source, output):
-    if _run(["git", "rev-parse", "HEAD"], cwd=source, capture=True).stdout.strip() != UPSTREAM:
+    if _run([GIT, "rev-parse", "HEAD"], cwd=source, capture=True).stdout.strip() != UPSTREAM:
         raise ValueError("native_source_checkout_must_be_exact_pinned_commit")
     recipe = builder.registry.validate_recipe("core-idle-v1", 1).recipe
     output.mkdir(mode=0o700, parents=False, exist_ok=False)
     with tempfile.TemporaryDirectory(prefix="native-workspace-replay-") as temporary:
         archive = Path(temporary) / "source.tar"
         with archive.open("wb") as stream:
-            subprocess.run(["git", "-c", f"core.attributesFile={Path('/dev/null')}",
+            subprocess.run([GIT, "-c", f"core.attributesFile={Path('/dev/null')}",
                             "archive", "--format=tar", UPSTREAM], cwd=source,
                            check=True, stdout=stream)
         with tarfile.open(archive) as bundle:
@@ -86,9 +90,9 @@ def prepare(source, output):
     work = output / "codex-rs"
     for patch in recipe.ordered_patches:
         contents = builder.registry._read_asset(patch)
-        subprocess.run(["git", "apply", "--check", "--whitespace=error", "-"], cwd=output,
+        subprocess.run([GIT, "apply", "--check", "--whitespace=error", "-"], cwd=output,
                        input=contents, check=True)
-        subprocess.run(["git", "apply", "--whitespace=error", "-"], cwd=output,
+        subprocess.run([GIT, "apply", "--whitespace=error", "-"], cwd=output,
                        input=contents, check=True)
     evidence = builder.registry.validate_recipe("core-idle-v1", 1)
     file_count, inventory = builder.verify_recipe_source(output, evidence)
