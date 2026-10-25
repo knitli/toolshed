@@ -2,7 +2,7 @@
 
 import base64
 import csv
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stderr
 import importlib.util
 import io
 import json
@@ -633,9 +633,14 @@ class PairedInstallTests(unittest.TestCase):
     def test_cli_rejects_missing_or_mixed_native_artifact_before_preflight(self):
         flags = {name: getattr(sys.flags, name) for name in dir(sys.flags) if not name.startswith('_')}
         implementation = vars(sys.implementation)
-        for profile in (['--wheel', str(self.wheel), '--destination', str(self.destination)],
-                        ['--wheel', str(self.wheel), '--destination', str(self.destination),
-                         '--enrollment-only', '--native-artifact', str(self.artifact)]):
+        profiles = (
+            (['--wheel', str(self.wheel), '--destination', str(self.destination)],
+             '--native-artifact is required unless --enrollment-only is selected'),
+            (['--wheel', str(self.wheel), '--destination', str(self.destination),
+              '--enrollment-only', '--native-artifact', str(self.artifact)],
+             '--native-artifact cannot be used with --enrollment-only'),
+        )
+        for profile, expected_error in profiles:
             with self.subTest(profile=profile), ExitStack() as stack:
                 stack.enter_context(patch.object(INSTALL.sys, 'platform', 'darwin'))
                 stack.enter_context(patch.object(INSTALL.sys, 'version_info', (3, 13)))
@@ -646,8 +651,12 @@ class PairedInstallTests(unittest.TestCase):
                 stack.enter_context(patch.object(INSTALL.sys, 'argv', ['install_paired_client.py', *profile]))
                 preflight = stack.enter_context(patch.object(INSTALL, 'preflight'))
                 install = stack.enter_context(patch.object(INSTALL, 'install'))
-                with self.assertRaises(ValueError):
+                stderr = io.StringIO()
+                with redirect_stderr(stderr), self.assertRaises(SystemExit) as caught:
                     INSTALL.main()
+                self.assertEqual(caught.exception.code, 2)
+                self.assertIn('usage:', stderr.getvalue())
+                self.assertIn(expected_error, stderr.getvalue())
                 preflight.assert_not_called()
                 install.assert_not_called()
                 self.unchanged()

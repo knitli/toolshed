@@ -381,14 +381,15 @@ def main():
                         help='Install only enrollment/status/help commands; native launch remains unavailable')
     parser.add_argument('--destination', required=True)
     args = parser.parse_args()
+    if not args.enrollment_only and args.native_artifact is None:
+        parser.error('--native-artifact is required unless --enrollment-only is selected')
+    if args.enrollment_only and args.native_artifact is not None:
+        parser.error('--native-artifact cannot be used with --enrollment-only')
     require(sys.flags.isolated and sys.version_info >= (3, 13) and sys.platform == "darwin"
             and platform.machine() == "arm64" and sys.implementation.name == "cpython",
             "requires_isolated_macos_arm64_cpython_3_13")
     token = os.environ.get('GITHUB_TOKEN')
     require(bool(token), "github_token_required")
-    require(args.enrollment_only or args.native_artifact is not None, 'native_artifact_required')
-    require(not (args.enrollment_only and args.native_artifact is not None),
-            'native_artifact_not_allowed_for_enrollment_only')
     result = install(preflight(V.GitHub(token), args.wheel, args.native_artifact, args.destination,
                                enrollment_only=args.enrollment_only))
     print(json.dumps(result, sort_keys=True))
