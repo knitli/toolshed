@@ -55,8 +55,9 @@ uv run --frozen knitli-event-gateway run
 ```
 
 Build with `uv build --wheel`. For a supported owner installation on Apple Silicon
-macOS, use the repository's paired installer from current protected main with
-CPython 3.13+ and an authenticated `GITHUB_TOKEN`:
+macOS, use the repository's installer from current protected main with CPython
+3.13+ and an authenticated `GITHUB_TOKEN`. Native launch, attach, and delivery
+require the default paired profile and its promoted native artifact:
 
 ```sh
 python3 -I scripts/install_paired_client.py \
@@ -65,20 +66,39 @@ python3 -I scripts/install_paired_client.py \
   --destination /absolute/path/to/new-client-environment
 ```
 
-The destination must not exist. Before creating it, the command checks the wheel
-against authenticated main source and verifies the promoted native/companion pair,
-CI receipt and current build recipe. A pending consumer/native transition fails
-closed, even when launcher pins have not changed. Keep the previous working client
-until the paired release is promoted; a successful consumer PR alone does not
-permit installation. Raw `uv tool install` bypasses this paired release gate.
+The destination must not exist. Before creating it, the paired profile checks the
+wheel against authenticated main source and verifies the promoted native/companion
+pair, CI receipt, and current build recipe. A pending consumer/native transition
+fails closed, even when launcher pins have not changed. Keep the previous working
+client until the paired release is promoted; a successful consumer PR alone does
+not permit paired installation.
+
+For enrollment and local status only, omit `--native-artifact` and pass
+`--enrollment-only`:
+
+```sh
+python3 -I scripts/install_paired_client.py \
+  --wheel /absolute/path/to/knitli_event_gateway-0.1.0-py3-none-any.whl \
+  --destination /absolute/path/to/new-enrollment-environment \
+  --enrollment-only
+```
+
+This profile still verifies the protected-main installer policy, package source,
+wheel metadata and hashes, and locked runtime dependencies. It installs no native
+artifact and replaces the standard `knitli-event-gateway` console command with
+the restricted `event_gateway.cli:enrollment_main` entry point, which accepts
+only `enroll`, `status`, and `--help`. It does not enable native launch, attach,
+or delivery. This is a trusted local installation boundary, not a same-user Python
+sandbox: the owner of the environment can alter or invoke installed code directly.
+Raw `uv tool install` does not provide either install profile's verification.
 
 The installer uses PyPI only for runtime dependencies pinned by main's `uv.lock`,
 requires approved wheel hashes and refuses source builds. It verifies the fresh
-installed package and copied executables before printing handoff paths. It does
-not switch the active client, register a default tool, create gateway state, start
-a service, or execute the native binary. Failures clean up its owned destination;
-existing installations remain untouched. Same-user code is trusted, as for launch.
-The wheel embeds the verified contract; no contract fetch happens at runtime.
+installed package and profile-specific console command before printing handoff
+paths. It does not switch the active client, register a default tool, create
+gateway state, start a service, or execute the native binary. Failures clean up its
+owned destination; existing installations remain untouched. The wheel embeds the
+verified contract; no contract fetch happens at runtime.
 
 The wheel includes `event_gateway.native_reader.NativeBridge`, the same private
 socket reader used by the qualification harness. A qualified host supplies an

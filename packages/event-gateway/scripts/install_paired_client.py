@@ -13,6 +13,7 @@ import json
 import os
 import platform
 import re
+import shlex
 from pathlib import Path
 import shutil
 import stat
@@ -165,9 +166,11 @@ def locked_requirements(data, project):
     return '\n'.join(selected[name] for name in sorted(selected)) + '\n'
 
 
-def preflight(api, wheel, artifact, destination):
-    """Read and authenticate all release inputs without creating any local files."""
+def preflight(api, wheel, artifact, destination, *, enrollment_only=False):
+    """Authenticate the protected-main wheel; paired installs also require native release proof."""
     destination = destination_path(destination)
+    require(artifact is not None or enrollment_only, "native_artifact_required")
+    require(artifact is None or not enrollment_only, "native_artifact_not_allowed_for_enrollment_only")
     require(api.request('')['id'] == V.REPOSITORY_ID, "wrong_repository")
     branch = api.request('branches/main')
     require(branch.get('protected') is True, "main_not_protected")
@@ -199,30 +202,34 @@ def preflight(api, wheel, artifact, destination):
     requirements = locked_requirements(api.blob(PREFIX + 'uv.lock', main), project)
     wheel_bytes = read_file(wheel, WHEEL_LIMIT)
     wheel_payload(wheel_bytes, expected, project)
-    selected = V.selection(json.loads(api.blob(V.PROVENANCE, main)))
-    pins = V.pins(expected['event_gateway/launcher.py'])
-    require(pins['QUALIFIED_SHA256'] == selected['binarySha256']
-            and pins['QUALIFIED_CODE_MODE_HOST_SHA256'] == selected['codeModeHostSha256'], "consumer_native_pair_mismatch")
-    V.verify_metadata(selected, api.request('actions/workflows/event-native-build.yml'),
-                      api.request(f"actions/runs/{selected['runId']}/attempts/{selected['runAttempt']}"),
-                      api.request(f"actions/artifacts/{selected['artifactId']}"))
-    V.require_ancestry(api, selected['headSha'], main)
-    try:
-        inputs, manifest = V.resolve_build_inputs(api, main, main, selected)
-    except (ValueError, urllib.error.HTTPError) as error:
-        if isinstance(error, urllib.error.HTTPError) and error.code != 404:
-            raise
-        raise ValueError(
-            'consumer_native_pair_mismatch: promoted native recipe unavailable or unverified; '
-            'keep previous working client until paired release is promoted'
-        ) from error
-    artifact = Path(artifact)
-    require(stat.S_ISREG(artifact.lstat().st_mode), "unsafe_native_archive")
-    V.verify_archive(artifact, selected, inputs, manifest)
+    selected = None
+    if not enrollment_only:
+        selected = V.selection(json.loads(api.blob(V.PROVENANCE, main)))
+        pins = V.pins(expected['event_gateway/launcher.py'])
+        require(pins['QUALIFIED_SHA256'] == selected['binarySha256']
+                and pins['QUALIFIED_CODE_MODE_HOST_SHA256'] == selected['codeModeHostSha256'], "consumer_native_pair_mismatch")
+        V.verify_metadata(selected, api.request('actions/workflows/event-native-build.yml'),
+                          api.request(f"actions/runs/{selected['runId']}/attempts/{selected['runAttempt']}"),
+                          api.request(f"actions/artifacts/{selected['artifactId']}"))
+        V.require_ancestry(api, selected['headSha'], main)
+        try:
+            inputs, manifest = V.resolve_build_inputs(api, main, main, selected)
+        except (ValueError, urllib.error.HTTPError) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code != 404:
+                raise
+            raise ValueError(
+                'consumer_native_pair_mismatch: promoted native recipe unavailable or unverified; '
+                'keep previous working client until paired release is promoted'
+            ) from error
+        artifact = Path(artifact)
+        require(stat.S_ISREG(artifact.lstat().st_mode), "unsafe_native_archive")
+        V.verify_archive(artifact, selected, inputs, manifest)
     require(api.request('branches/main')['commit']['sha'] == main, "main_changed_during_preflight")
     return {'main': main, 'destination': destination, 'wheel_name': wheel.name, 'wheel': wheel_bytes,
-            'expected': expected, 'selected': selected, 'inputs': inputs, 'manifest': manifest,
-            'artifact': artifact, 'requirements': requirements, 'helper': trusted_helpers[HELPER]}
+            'expected': expected, 'selected': selected, 'inputs': None if enrollment_only else inputs,
+            'manifest': None if enrollment_only else manifest,
+            'artifact': None if enrollment_only else artifact, 'requirements': requirements,
+            'helper': trusted_helpers[HELPER], 'enrollment_only': enrollment_only}
 
 
 def install_wheel(destination, wheel, requirements, wheel_sha256):
@@ -251,7 +258,6 @@ module.verified_python()
 module.verify_installed(source)
 from event_gateway import launcher
 launcher.qualified_binary(binary, digest)
-module.verified_executable(Path(sys.prefix) / "bin/knitli-event-gateway")
 '''
 
 
@@ -262,10 +268,51 @@ def verify_destination(destination, source, helper, selected):
                    env={'PATH': '/usr/bin:/bin', 'HOME': str(destination)})
 
 
+def enrollment_entrypoint(destination):
+    command = 'from event_gateway.cli import enrollment_main; raise SystemExit(enrollment_main())'
+    return ('#!/bin/sh\nexec ' + shlex.quote(str(destination / 'bin/python')) + ' -I -c '
+            + shlex.quote(command) + ' "$@"\n').encode()
+
+
+def restrict_enrollment_entrypoint(destination):
+    entrypoint = destination / 'bin/knitli-event-gateway'
+    info = entrypoint.lstat()
+    require(stat.S_ISREG(info.st_mode) and info.st_uid in (0, os.getuid()), 'unsafe_installed_entrypoint')
+    fd = os.open(entrypoint, os.O_WRONLY | os.O_NOFOLLOW | os.O_TRUNC)
+    with os.fdopen(fd, 'wb') as stream:
+        stream.write(enrollment_entrypoint(destination))
+    entrypoint.chmod(0o700)
+    return entrypoint
+
+
+ENROLLMENT_POSTCHECK = '''import importlib.util, sys
+from pathlib import Path
+helper, source = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("paired_installed", helper)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.verified_python()
+module.verify_installed(source)
+module.verified_executable(Path(sys.prefix) / "bin/knitli-event-gateway")
+'''
+
+
+def verify_enrollment_destination(destination, source, helper):
+    subprocess.run([str(destination / 'bin/python'), '-I', '-c', ENROLLMENT_POSTCHECK,
+                    str(helper), str(source / 'src/event_gateway')], check=True,
+                   env={'PATH': '/usr/bin:/bin', 'HOME': str(destination)})
+    entrypoint = destination / 'bin/knitli-event-gateway'
+    info = entrypoint.lstat()
+    require(stat.S_ISREG(info.st_mode) and info.st_uid in (0, os.getuid()) and info.st_mode & 0o111
+            and entrypoint.read_bytes() == enrollment_entrypoint(destination),
+            'enrollment_entrypoint_mismatch')
+
+
 def install(plan):
     """Populate only a fresh private destination; hand off only after verification."""
     destination = destination_path(plan['destination'])
-    V.verify_archive(plan['artifact'], plan['selected'], plan['inputs'], plan['manifest'])
+    if not plan['enrollment_only']:
+        V.verify_archive(plan['artifact'], plan['selected'], plan['inputs'], plan['manifest'])
     parent, identity = create_destination(destination)
     try:
         current = destination.lstat()
@@ -284,6 +331,12 @@ def install(plan):
         requirements = destination / '.paired-requirements.txt'
         requirements.write_text(plan['requirements'])
         install_wheel(destination, wheel, requirements, V.digest(plan['wheel']))
+        if plan['enrollment_only']:
+            restrict_enrollment_entrypoint(destination)
+            verify_enrollment_destination(destination, source, helper)
+            return {'sourceRevision': plan['main'], 'wheelSha256': V.digest(plan['wheel']),
+                    'environment': str(destination), 'command': str(destination / 'bin/knitli-event-gateway'),
+                    'profile': 'enrollment-only'}
         native = destination / 'native'
         native.mkdir(mode=0o700)
         with zipfile.ZipFile(plan['artifact']) as archive:
@@ -322,7 +375,9 @@ def install(plan):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--wheel', required=True)
-    parser.add_argument('--native-artifact', required=True)
+    parser.add_argument('--native-artifact')
+    parser.add_argument('--enrollment-only', action='store_true',
+                        help='Install only enrollment/status/help commands; native launch remains unavailable')
     parser.add_argument('--destination', required=True)
     args = parser.parse_args()
     require(sys.flags.isolated and sys.version_info >= (3, 13) and sys.platform == "darwin"
@@ -330,7 +385,11 @@ def main():
             "requires_isolated_macos_arm64_cpython_3_13")
     token = os.environ.get('GITHUB_TOKEN')
     require(bool(token), "github_token_required")
-    result = install(preflight(V.GitHub(token), args.wheel, args.native_artifact, args.destination))
+    require(args.enrollment_only or args.native_artifact is not None, 'native_artifact_required')
+    require(not (args.enrollment_only and args.native_artifact is not None),
+            'native_artifact_not_allowed_for_enrollment_only')
+    result = install(preflight(V.GitHub(token), args.wheel, args.native_artifact, args.destination,
+                               enrollment_only=args.enrollment_only))
     print(json.dumps(result, sort_keys=True))
 
 

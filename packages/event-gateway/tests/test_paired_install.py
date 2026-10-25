@@ -12,6 +12,7 @@ from pathlib import Path
 import tempfile
 import tomllib
 import unittest
+import zipfile
 from types import SimpleNamespace
 import urllib.error
 from uuid import uuid4
@@ -107,6 +108,35 @@ class PairedInstallTests(unittest.TestCase):
         self.assertIn('cryptography==50.0.2 --hash=sha256:', plan['requirements'])
         self.assertIn('pycparser==3.0', plan['requirements'])
         self.assertNotIn('ruff', plan['requirements'])
+
+    def test_enrollment_preflight_authenticates_wheel_without_native_release_queries(self):
+        self.api.calls.clear()
+        plan = INSTALL.preflight(self.api, self.wheel, None, self.destination, enrollment_only=True)
+        self.assertTrue(plan['enrollment_only'])
+        self.assertIsNone(plan['selected'])
+        self.assertIsNone(plan['artifact'])
+        self.assertFalse(any(call in ('actions/workflows/event-native-build.yml',
+                                      f"actions/runs/{self.api.selected['runId']}/attempts/{self.api.selected['runAttempt']}",
+                                      f"actions/artifacts/{self.api.selected['artifactId']}")
+                             for call in self.api.calls))
+        self.assertNotIn((INSTALL.V.PROVENANCE, MAIN), self.api.calls)
+        self.unchanged()
+
+    def test_enrollment_preflight_rejects_native_artifact_profile_mixing(self):
+        with self.assertRaisesRegex(ValueError, 'native_artifact_not_allowed_for_enrollment_only'):
+            INSTALL.preflight(self.api, self.wheel, self.artifact, self.destination, enrollment_only=True)
+        self.unchanged()
+
+    def test_enrollment_preflight_rejects_invalid_wheel_before_creation(self):
+        self.wheel.write_bytes(b'not a wheel')
+        with self.assertRaises((ValueError, zipfile.BadZipFile)):
+            INSTALL.preflight(self.api, self.wheel, None, self.destination, enrollment_only=True)
+        self.unchanged()
+
+    def test_paired_preflight_requires_native_artifact(self):
+        with self.assertRaisesRegex(ValueError, 'native_artifact_required'):
+            INSTALL.preflight(self.api, self.wheel, None, self.destination)
+        self.unchanged()
 
     def test_registered_legacy_build_accepts_current_shared_input_drift(self):
         for name in ('builderSha256', 'producerSha256', 'workflowSha256'):
@@ -372,6 +402,20 @@ class PairedInstallTests(unittest.TestCase):
                         INSTALL.install(plan)
                 self.unchanged()
 
+    def test_enrollment_postcheck_failure_cleans_only_new_destination(self):
+        plan = INSTALL.preflight(self.api, self.wheel, None, self.destination, enrollment_only=True)
+
+        def install_fake(destination, wheel, requirements, wheel_sha256):
+            (destination / 'bin').mkdir()
+            (destination / 'bin/knitli-event-gateway').write_text('#!/bin/sh\nexit 1\n')
+            (destination / 'bin/knitli-event-gateway').chmod(0o700)
+
+        with patch.object(INSTALL, 'install_wheel', side_effect=install_fake), \
+                patch.object(INSTALL, 'verify_enrollment_destination', side_effect=RuntimeError('postcheck failed')):
+            with self.assertRaisesRegex(RuntimeError, 'postcheck failed'):
+                INSTALL.install(plan)
+        self.unchanged()
+
     def test_cleanup_preserves_replaced_destination(self):
         plan = self.preflight()
 
@@ -449,7 +493,13 @@ class PairedInstallTests(unittest.TestCase):
         destination = self.destination
         binary_directory = destination / 'bin'
         binary_directory.mkdir(parents=True)
-        interpreter = Path(sys._base_executable).resolve()
+        runtime = self.root / 'runtime'
+        (runtime / 'bin').mkdir(parents=True)
+        interpreter = runtime / 'bin/python3.13'
+        shutil.copy2(Path(sys._base_executable).resolve(), interpreter)
+        interpreter.chmod(0o755)
+        (runtime / 'lib').symlink_to(Path(sys._base_executable).resolve().parent.parent / 'lib',
+                                     target_is_directory=True)
         (binary_directory / 'python').symlink_to(interpreter)
         (destination / 'pyvenv.cfg').write_text(
             f'home = {interpreter.parent}\ninclude-system-site-packages = false\nversion = {sys.version.split()[0]}\n',
@@ -557,6 +607,28 @@ class PairedInstallTests(unittest.TestCase):
                 install.assert_not_called()
                 self.unchanged()
 
+    def test_cli_rejects_missing_or_mixed_native_artifact_before_preflight(self):
+        flags = {name: getattr(sys.flags, name) for name in dir(sys.flags) if not name.startswith('_')}
+        implementation = vars(sys.implementation)
+        for profile in (['--wheel', str(self.wheel), '--destination', str(self.destination)],
+                        ['--wheel', str(self.wheel), '--destination', str(self.destination),
+                         '--enrollment-only', '--native-artifact', str(self.artifact)]):
+            with self.subTest(profile=profile), ExitStack() as stack:
+                stack.enter_context(patch.object(INSTALL.sys, 'platform', 'darwin'))
+                stack.enter_context(patch.object(INSTALL.sys, 'version_info', (3, 13)))
+                stack.enter_context(patch.object(INSTALL.sys, 'flags', SimpleNamespace(**{**flags, 'isolated': 1})))
+                stack.enter_context(patch.object(INSTALL.sys, 'implementation', SimpleNamespace(**{**implementation, 'name': 'cpython'})))
+                stack.enter_context(patch.object(INSTALL.platform, 'machine', return_value='arm64'))
+                stack.enter_context(patch.dict(INSTALL.os.environ, {'GITHUB_TOKEN': uuid4().hex}))
+                stack.enter_context(patch.object(INSTALL.sys, 'argv', ['install_paired_client.py', *profile]))
+                preflight = stack.enter_context(patch.object(INSTALL, 'preflight'))
+                install = stack.enter_context(patch.object(INSTALL, 'install'))
+                with self.assertRaises(ValueError):
+                    INSTALL.main()
+                preflight.assert_not_called()
+                install.assert_not_called()
+                self.unchanged()
+
     def test_offline_synthetic_install_runs_real_pip_postcheck_and_handoff(self):
         self.api.project['dependencies'] = []
         self.api.payload['event_gateway/__init__.py'] = b''
@@ -597,6 +669,73 @@ class PairedInstallTests(unittest.TestCase):
         self.assertEqual(marker.read_text(), 'verified')
         self.assertEqual(result['environment'], str(self.destination))
         self.assertEqual(INSTALL.V.digest((self.destination / 'native/codex').read_bytes()), result['binarySha256'])
+        self.assertEqual(self.existing.read_bytes(), b'keep working installation')
+
+    def test_offline_enrollment_install_restricts_console_entrypoint_without_native_files(self):
+        self.api.project['dependencies'] = []
+        self.api.payload['event_gateway/__init__.py'] = b''
+        self.api.payload['event_gateway/cli.py'] = (
+            b'import argparse\n'
+            b'def enrollment_main(argv=None):\n'
+            b'    parser = argparse.ArgumentParser(prog="knitli-event-gateway")\n'
+            b'    commands = parser.add_subparsers(dest="command", required=True)\n'
+            b'    commands.add_parser("status")\n'
+            b'    commands.add_parser("enroll")\n'
+            b'    parser.parse_args(argv)\n'
+            b'    return 0\n'
+            b'def main(argv=None):\n'
+            b'    parser = argparse.ArgumentParser(prog="knitli-event-gateway")\n'
+            b'    commands = parser.add_subparsers(dest="command", required=True)\n'
+            b'    commands.add_parser("status")\n'
+            b'    commands.add_parser("enroll")\n'
+            b'    commands.add_parser("launch")\n'
+            b'    parser.parse_args(argv)\n'
+            b'    return 0\n'
+        )
+        marker = self.root / 'enrollment-launcher-imported'
+        self.api.payload['event_gateway/launcher.py'] = (
+            f'from pathlib import Path\nPath({str(marker)!r}).write_text("imported")\n'.encode()
+        )
+        for name, value in self.api.payload.items():
+            relative = name.removeprefix('event_gateway/')
+            path = INSTALL.PREFIX + (relative if relative.startswith('contracts/') else 'src/event_gateway/' + relative)
+            self.api.blobs[path, MAIN] = value
+            if not any(item['path'] == path for item in self.api.source_tree):
+                self.api.source_tree.append({'path': path, 'type': 'blob', 'mode': '100644'})
+        project = (INSTALL.ROOT / 'pyproject.toml').read_text()
+        start = project.index('dependencies = [')
+        end = project.index(']', start) + 1
+        self.api.blobs[INSTALL.PREFIX + 'pyproject.toml', MAIN] = (project[:start] + 'dependencies = []' + project[end:]).encode()
+        self.api.blobs[INSTALL.PREFIX + 'uv.lock', MAIN] = (
+            'version = 1\n[[package]]\nname = "knitli-event-gateway"\nversion = "0.1.0"\ndependencies = []\n'
+        ).encode()
+        self.wheel.write_bytes(wheel_bytes(self.api.payload, self.api.project))
+        plan = INSTALL.preflight(self.api, self.wheel, None, self.destination, enrollment_only=True)
+        real_run = INSTALL.subprocess.run
+
+        def offline_run(command, *args, **kwargs):
+            if isinstance(command, list) and command[1:4] == ['-I', '-m', 'pip']:
+                command = [command[0], '-I', '-c',
+                           'import runpy, socket, sys\n'
+                           'def deny(*args, **kwargs): raise RuntimeError("network forbidden in offline fixture")\n'
+                           'socket.create_connection = deny\nsocket.socket.connect = deny\n'
+                           'sys.argv = ["pip", *sys.argv[1:]]\nrunpy.run_module("pip", run_name="__main__")\n',
+                           *command[4:]]
+            return real_run(command, *args, **kwargs)
+
+        with patch.object(INSTALL.subprocess, 'run', side_effect=offline_run):
+            result = INSTALL.install(plan)
+        command = Path(result['command'])
+        self.assertEqual(result['profile'], 'enrollment-only')
+        self.assertFalse((self.destination / 'native').exists())
+        self.assertFalse(marker.exists())
+        self.assertEqual(command.read_bytes(), INSTALL.enrollment_entrypoint(self.destination))
+        help_result = INSTALL.subprocess.run([str(command), '--help'], capture_output=True, text=True)
+        launch_result = INSTALL.subprocess.run([str(command), 'launch'], capture_output=True, text=True)
+        self.assertEqual(help_result.returncode, 0)
+        self.assertNotIn('launch', help_result.stdout)
+        self.assertNotEqual(launch_result.returncode, 0, launch_result.stdout + launch_result.stderr)
+        self.assertFalse(marker.exists())
         self.assertEqual(self.existing.read_bytes(), b'keep working installation')
 
     def test_identity_failure_rolls_back_only_new_empty_destination(self):
