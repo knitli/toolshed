@@ -13,6 +13,7 @@ import stat
 import tempfile
 from urllib.parse import urlsplit
 
+from .agent_credentials import AgentTokenProvider, _reap
 from .cloud import (
     CloudClient, CloudError, Credentials, _uuid, _native_challenge_request,
     _runtime_status_response, _same_json_value, _generation,
@@ -68,19 +69,30 @@ def _private_json(path, limit, code, *, include_sha256=False, sync=False):
 
 
 def load_cloud_config(path):
-    """Load identity and a relative credentials filename from a private mode-600 file."""
+    """Load private identity and an explicit authentication mode; legacy files use Access."""
     config, path = _private_json(path, 4096, "invalid_cloud_config")
-    if (not isinstance(config, dict)
-            or set(config) != {"version", "origin", "principal", "agent", "nodeId",
-                               "nodeGeneration", "credentialsFile"}
-            or not isinstance(config["version"], int) or isinstance(config["version"], bool)
-            or config["version"] != 1
-            or not isinstance(config["credentialsFile"], str)
-            or config["credentialsFile"] in ("", ".", "..")
-            or Path(config["credentialsFile"]).name != config["credentialsFile"]
-            or "\\" in config["credentialsFile"]):
+    if not isinstance(config, dict):
         raise SecurityError("invalid_cloud_config")
-    return config, path.parent / config["credentialsFile"]
+    mode = config.get("authMode", "access")
+    identity = {"version", "origin", "principal", "agent", "nodeId", "nodeGeneration"}
+    required = identity | ({"credentialsFile"} if mode == "access" else {"authMode", "agentTokenProvider"})
+    if (mode not in ("access", "gateway") or not required <= set(config)
+            or set(config) - required - {"authMode", "credentialsFile"}
+            or not isinstance(config["version"], int) or isinstance(config["version"], bool)
+            or config["version"] != 1):
+        raise SecurityError("invalid_cloud_config")
+    filename = config.get("credentialsFile")
+    if "credentialsFile" in config and (
+            not isinstance(filename, str) or filename in ("", ".", "..")
+            or Path(filename).name != filename or "\\" in filename or "\x00" in filename):
+        raise SecurityError("invalid_cloud_config")
+    if mode == "gateway":
+        provider = config["agentTokenProvider"]
+        if (not isinstance(provider, dict) or set(provider) != {"nodePath", "helperPath"}
+                or any(not isinstance(value, str) or not Path(value).is_absolute()
+                       or "\x00" in value for value in provider.values())):
+            raise SecurityError("invalid_cloud_config")
+    return config, path.parent / filename if filename is not None else None
 
 
 async def _https_send(method, url, headers, body, timeout, max_response_bytes, follow_redirects):
@@ -141,14 +153,7 @@ async def _https_send(method, url, headers, body, timeout, max_response_bytes, f
     except TimeoutError:
         raise TimeoutError("https_transport_timeout") from None
     finally:
-        await _reap_curl(process)
-
-
-async def _reap_curl(process):
-    if process is not None:
-        if process.returncode is None:
-            process.kill()
-        await process.wait()
+        await _reap(process)
 
 
 async def _collect_curl_response(process, deadline, max_response_bytes):
@@ -567,11 +572,19 @@ async def _send_https(**request):
 
 
 def load_cloud_client(config_path, state_dir):
-    """Bind a CloudClient to immutable identity, the existing node key, and fresh file tokens."""
+    """Bind existing node identity to fresh file tokens or the fixed noninteractive helper."""
     config, credentials_path = load_cloud_config(config_path)
     key = load_signing_key(Path(state_dir) / "node-key.pem")
+    mode = config.get("authMode", "access")
+    provider = None
+    if mode == "gateway":
+        settings = config["agentTokenProvider"]
+        provider = AgentTokenProvider(settings["nodePath"], settings["helperPath"],
+                                      origin=config["origin"], agent=config["agent"])
 
     async def credentials():
+        if provider is not None:
+            return Credentials(None, await provider())
         value, _ = _private_json(credentials_path, 8192, "invalid_credentials")
         if (not isinstance(value, dict) or set(value) != {"accessToken", "agentToken"}
                 or not isinstance(value["accessToken"], str)
@@ -583,7 +596,7 @@ def load_cloud_client(config_path, state_dir):
         return CloudClient(
             origin=config["origin"], principal=config["principal"], agent=config["agent"],
             node_id=config["nodeId"], node_generation=config["nodeGeneration"],
-            private_key=key, credentials=credentials, send=_send_https,
+            private_key=key, credentials=credentials, send=_send_https, auth_mode=mode,
         )
     except CloudError:
         raise

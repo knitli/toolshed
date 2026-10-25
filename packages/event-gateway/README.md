@@ -244,9 +244,9 @@ the TUI closes. Fully stopped-runtime behavior remains unqualified; the
 [0.163.0 upstream command](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/tui/src/session_archive_commands.rs)
 can choose an embedded server when no shared daemon is available.
 
-Create `cloud-config.json` and its sibling `cloud-credentials.json` in a private
-directory. The configuration stores immutable identity and only the credential
-filename; credentials are reread for each request:
+Existing Access-mode installations use `cloud-config.json` and its sibling
+`cloud-credentials.json` in a private directory. Omitted `authMode` means
+`access`; credentials are reread for each request:
 
 ```json
 {
@@ -262,7 +262,41 @@ filename; credentials are reread for each request:
 
 The credential file has exactly `accessToken` and `agentToken`. Set both files
 to mode `600`; replace the sample identity with the enrolled node and
-owner-approved agent for this Event origin. A new attach can be requested with:
+owner-approved agent for this Event origin.
+
+Gateway-mode installations use the deployed Gateway Forward/NodeEdge path and
+an authenticated WARP session instead of a copied Access token. Their private
+configuration replaces `credentialsFile` with these fields:
+
+```json
+{
+  "authMode": "gateway",
+  "agentTokenProvider": {
+    "nodePath": "/absolute/path/to/node",
+    "helperPath": "/absolute/path/to/knitli-agent.mjs"
+  }
+}
+```
+
+The installer must record actual absolute paths; a stable Node symlink may be
+used and is resolved and checked on every invocation. The existing agent must
+grant this exact Event origin in its separate `apiAudiences` list. Before every
+request, the Gateway invokes the helper's noninteractive
+`header --audience ORIGIN --agent NAME` operation, extracts the token from its
+JSON headers, and sends it as `Authorization: Bearer ...`. Tokens remain in
+memory; restarting the Gateway obtains a fresh token. Helper execution has a
+two-second deadline and bounded output. A retained `credentialsFile` is ignored
+in Gateway mode; authentication never falls back automatically.
+
+`owner_interaction_required` means the Gateway recognized a Cloudflare Gateway
+block redirect. Check WARP authentication and the Gateway policy; this code alone
+does not prove session expiry. The daemon never opens a browser or follows the
+redirect. Restoring Access mode requires an explicit configuration change and
+valid Access credentials. Gateway mode requires compatible deployed Workers,
+Forward/session/posture policies, and the helper's `--audience` support; this
+client change does not deploy or enable them.
+
+A new attach can be requested with:
 
 ```sh
 chmod 600 /private/path/cloud-config.json /private/path/cloud-credentials.json

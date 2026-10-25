@@ -36,15 +36,19 @@ class CloudError(ValueError):
 
 @dataclass(frozen=True)
 class Credentials:
-    access_token: str = field(repr=False)
+    access_token: str | None = field(repr=False)
     agent_token: str = field(repr=False)
 
 
-def _valid_credentials(credential):
-    return isinstance(credential, Credentials) and all(
-        isinstance(token, str) and token and len(token) <= 16384 and not re.search(r"\s", token)
-        for token in (credential.access_token, credential.agent_token)
-    ) and len(credential.agent_token) <= 4096
+def _valid_token(token, maximum):
+    return isinstance(token, str) and token and len(token) <= maximum and not re.search(r"\s", token)
+
+
+def _valid_credentials(credential, auth_mode):
+    return (isinstance(credential, Credentials)
+            and _valid_token(credential.agent_token, 4096)
+            and ((auth_mode == "gateway" and credential.access_token is None)
+                 or (auth_mode == "access" and _valid_token(credential.access_token, 16384))))
 
 
 def _json(value):
@@ -861,8 +865,10 @@ class CloudClient:
     # Node generation is an immutable snapshot: construct anew after reenrollment.
 
     def __init__(self, *, origin, principal, agent, node_id, node_generation,
-                 private_key, credentials, send, clock=time.time, nonce=uuid.uuid4):
+                 private_key, credentials, send, auth_mode="access", clock=time.time, nonce=uuid.uuid4):
         """Validate an immutable identity binding and inject its credential/HTTP ports."""
+        if auth_mode not in ("access", "gateway"):
+            raise CloudError("invalid_configuration")
         if not isinstance(origin, str) or not isinstance(agent, str):
             raise CloudError("invalid_configuration")
         try:
@@ -879,6 +885,7 @@ class CloudClient:
         self.origin, self.principal, self.agent = origin, principal, agent
         self.node_id, self.node_generation = node_id, node_generation
         self._key, self._credentials, self._send = private_key, credentials, send
+        self.auth_mode = auth_mode
         self._clock, self._nonce = clock, nonce
 
     def _sign(self, body):
@@ -889,12 +896,15 @@ class CloudClient:
             credential = await self._credentials()
         except TimeoutError:
             raise CloudError("request_timeout") from None
+        except CloudError as error:
+            raise CloudError("request_timeout" if error.code == "credentials_timeout" else "unavailable") from None
         except Exception:
             raise CloudError("unavailable") from None
-        if not _valid_credentials(credential):
+        if not _valid_credentials(credential, self.auth_mode):
             raise CloudError("credentials_unavailable")
-        headers = {"content-type": "application/json", "cf-access-token": credential.access_token,
-                   "authorization": "Bearer " + credential.agent_token}
+        headers = {"content-type": "application/json", "authorization": "Bearer " + credential.agent_token}
+        if self.auth_mode == "access":
+            headers["cf-access-token"] = credential.access_token
         if node_proof:
             proof = {"nodeId": self.node_id, "nodeGeneration": self.node_generation,
                      "issuedAt": _iso(self._clock()), "nonce": str(self._nonce())}
@@ -918,9 +928,12 @@ class CloudClient:
             # The transport may have sent the request before it failed.
             raise CloudError("unavailable", ambiguous=True) from None
 
-    @staticmethod
-    def _post_response(path, status, response_headers, raw):
+    def _post_response(self, path, status, response_headers, raw):
         try:
+            if (self.auth_mode == "gateway" and status == 302
+                    and isinstance(response_headers, dict)
+                    and self._is_gateway_block(response_headers.get("location"))):
+                raise CloudError("owner_interaction_required")
             return _response(status, response_headers, raw)
         except CloudError as error:
             definitive_refusal = (
@@ -933,6 +946,17 @@ class CloudClient:
             if path in _AMBIGUOUS_COMMIT_PATHS and not definitive_refusal:
                 raise CloudError(error.code, ambiguous=True) from None
             raise
+
+    @staticmethod
+    def _is_gateway_block(location):
+        if not isinstance(location, str):
+            return False
+        try:
+            parsed = urlsplit(location)
+            return (parsed.scheme == "https" and parsed.hostname == "blocked.teams.cloudflare.com"
+                    and parsed.username is None and parsed.password is None and parsed.port is None)
+        except ValueError:
+            return False
 
     async def _post(self, path, value, *, node_proof=True, encoded_body=None, before_send=None):
         send_started = False
