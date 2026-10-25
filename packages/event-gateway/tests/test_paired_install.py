@@ -762,6 +762,32 @@ class PairedInstallTests(unittest.TestCase):
         self.assertFalse((self.destination / 'native').exists())
         self.assertFalse(marker.exists())
         self.assertEqual(command.read_bytes(), INSTALL.enrollment_entrypoint(self.destination))
+        trusted_entrypoint = command.with_name('trusted-entrypoint')
+        original_lstat = Path.lstat
+        swapped = False
+
+        def swap_entrypoint_after_lstat(path, *args, **kwargs):
+            nonlocal swapped
+            info = original_lstat(path, *args, **kwargs)
+            if path == command and not swapped:
+                command.rename(trusted_entrypoint)
+                command.symlink_to(trusted_entrypoint.name)
+                swapped = True
+            return info
+
+        try:
+            with patch.object(INSTALL.Path, 'lstat', autospec=True, side_effect=swap_entrypoint_after_lstat):
+                with self.assertRaises(OSError):
+                    INSTALL.verify_enrollment_destination(
+                        self.destination, self.destination / '.paired-source',
+                        self.destination / '.paired-source/qualification-installed.py',
+                    )
+        finally:
+            if command.is_symlink():
+                command.unlink()
+            if trusted_entrypoint.exists():
+                trusted_entrypoint.rename(command)
+        self.assertTrue(swapped)
         help_result = INSTALL.subprocess.run([str(command), '--help'], capture_output=True, text=True)
         launch_result = INSTALL.subprocess.run([str(command), 'launch'], capture_output=True, text=True)
         self.assertEqual(help_result.returncode, 0)

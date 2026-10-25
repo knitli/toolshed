@@ -1,5 +1,6 @@
 """Exercise the shipped CLI boundary in disposable private state."""
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
+import argparse
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import fcntl
@@ -48,6 +49,9 @@ class CliTests(unittest.TestCase):
         self.assertIn("cloud_authority_not_integrated", value["blockers"])
 
     def test_enrollment_cli_only_exposes_enroll_and_status(self):
+        parser = cli._parser(enrollment_only=True)
+        commands = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+        self.assertEqual(set(commands.choices), {"status", "enroll"})
         help_output = io.StringIO()
         with redirect_stdout(help_output), self.assertRaises(SystemExit) as exit_info:
             cli.enrollment_main(["--help"])

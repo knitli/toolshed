@@ -304,9 +304,10 @@ def verify_enrollment_destination(destination, source, helper):
                    env={'PATH': '/usr/bin:/bin', 'HOME': str(destination)})
     entrypoint = destination / 'bin/knitli-event-gateway'
     info = entrypoint.lstat()
+    expected = enrollment_entrypoint(destination)
+    actual = read_file(entrypoint, len(expected))
     require(stat.S_ISREG(info.st_mode) and info.st_uid in (0, os.getuid()) and info.st_mode & 0o111
-            and entrypoint.read_bytes() == enrollment_entrypoint(destination),
-            'enrollment_entrypoint_mismatch')
+            and actual == expected, 'enrollment_entrypoint_mismatch')
 
 
 def install(plan):
