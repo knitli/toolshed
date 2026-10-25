@@ -518,6 +518,7 @@ class PairedInstallTests(unittest.TestCase):
         files = {'__init__.py': b'', 'contracts/event-v1/protocol.json': b'{}',
                  'launcher.py': (f'from pathlib import Path\nPath({str(marker)!r}).write_text("imported")\n'
                                  'def qualified_binary(binary, digest):\n'
+                                 '    assert Path(binary).read_bytes() == b"fixture-native"\n'
                                  '    assert digest == "fixture-native-digest"\n').encode()}
         source = destination / '.paired-source'
         for name, data in files.items():
@@ -529,6 +530,9 @@ class PairedInstallTests(unittest.TestCase):
             installed.write_bytes(data)
         helper = source / 'qualification-installed.py'
         helper.write_bytes((INSTALL.ROOT / INSTALL.HELPER).read_bytes())
+        native = destination / 'native'
+        native.mkdir()
+        (native / 'codex').write_bytes(b'fixture-native')
 
         def write_record():
             output = io.StringIO()
@@ -544,6 +548,25 @@ class PairedInstallTests(unittest.TestCase):
         INSTALL.verify_destination(destination, source, helper, {'binarySha256': 'fixture-native-digest'})
         self.assertEqual(marker.read_text(), 'imported')
         marker.unlink()
+        for fault in ('nonexecutable', 'symlink'):
+            with self.subTest(entrypoint_fault=fault):
+                if fault == 'nonexecutable':
+                    entrypoint.chmod(0o600)
+                else:
+                    target = entrypoint.with_name('entrypoint-target')
+                    entrypoint.rename(target)
+                    entrypoint.symlink_to(target.name)
+                with self.assertRaises(INSTALL.subprocess.CalledProcessError):
+                    INSTALL.verify_destination(destination, source, helper,
+                                               {'binarySha256': 'fixture-native-digest'})
+                self.assertEqual(marker.read_text(), 'imported',
+                                 'valid wheel and native pair must be checked before entrypoint policy')
+                marker.unlink()
+                if fault == 'nonexecutable':
+                    entrypoint.chmod(0o700)
+                else:
+                    entrypoint.unlink()
+                    target.rename(entrypoint)
         (package / 'launcher.py').write_bytes(files['launcher.py'] + b'\n# tampered installed payload\n')
         for rewrite_record in (False, True):
             with self.subTest(rewrite_record=rewrite_record):

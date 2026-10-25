@@ -258,6 +258,7 @@ module.verified_python()
 module.verify_installed(source)
 from event_gateway import launcher
 launcher.qualified_binary(binary, digest)
+module.verified_executable(Path(sys.prefix) / "bin/knitli-event-gateway")
 '''
 
 
