@@ -33,6 +33,19 @@ from .protocol import ProtocolError, _pairs, _timestamp
 
 
 def main(argv=None):
+    parser = _parser()
+    args = parser.parse_args(argv)
+    return _run(args, parser)
+
+
+def enrollment_main(argv=None):
+    """Run only local enrollment/status commands for the paired installer."""
+    parser = _parser(enrollment_only=True)
+    args = parser.parse_args(argv)
+    return _run(args, parser)
+
+
+def _parser(*, enrollment_only=False):
     parser = argparse.ArgumentParser(prog="knitli-event-gateway")
     parser.add_argument(
         "--state-dir",
@@ -41,6 +54,15 @@ def main(argv=None):
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
+    enroll = commands.add_parser("enroll", help="Prepare a node key or complete an owner-approved enrollment")
+    enroll.add_argument("--challenge", help="Owner request label; prepares the local node key")
+    enroll.add_argument("--challenge-file", type=Path, help="Private JSON owner-approved challenge")
+    enroll.add_argument("--cloud-config", type=Path)
+    enroll.add_argument("--mesh-ip")
+    enroll.add_argument("--mesh-port", type=int)
+    enroll.add_argument("--agent", action="append", help="Explicit agent binding; repeat as needed")
+    if enrollment_only:
+        return parser
     run = commands.add_parser("run", help="Run the private control daemon")
     run.add_argument("--dispatch-config", type=Path, help="Private configuration for qualified event delivery")
     client = commands.add_parser("launch", help="Launch an explicit qualified Codex TUI")
@@ -50,13 +72,6 @@ def main(argv=None):
     client.add_argument("--resume", help="Exact native thread UUID")
     presence = commands.add_parser("client-status", help="Query one live launcher selection")
     presence.add_argument("--session-id", required=True)
-    enroll = commands.add_parser("enroll", help="Prepare a node key or complete an owner-approved enrollment")
-    enroll.add_argument("--challenge", help="Owner request label; prepares the local node key")
-    enroll.add_argument("--challenge-file", type=Path, help="Private JSON owner-approved challenge")
-    enroll.add_argument("--cloud-config", type=Path)
-    enroll.add_argument("--mesh-ip")
-    enroll.add_argument("--mesh-port", type=int)
-    enroll.add_argument("--agent", action="append", help="Explicit agent binding; repeat as needed")
     attach = commands.add_parser("attach", help="Attach one live native session to a runtime")
     attach.add_argument("--runtime-id", required=True)
     attach.add_argument("--session-id", required=True)
@@ -110,7 +125,10 @@ def main(argv=None):
     reconcile.add_argument("--cloud-config", type=Path, required=True)
     detach = commands.add_parser("detach")
     detach.add_argument("runtime_id")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def _run(args, parser):
     # Keep component identity: resolving symlinks would hide unsafe input.
     state_dir = args.state_dir.absolute()
     if any(part.is_symlink() for part in (state_dir, *state_dir.parents)):

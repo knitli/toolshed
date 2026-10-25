@@ -1,5 +1,6 @@
 """Exercise the shipped CLI boundary in disposable private state."""
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
+import argparse
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import fcntl
@@ -46,6 +47,74 @@ class CliTests(unittest.TestCase):
         self.assertFalse(value["automaticWakeEnabled"])
         self.assertIn("native_client_binding_unavailable", value["blockers"])
         self.assertIn("cloud_authority_not_integrated", value["blockers"])
+
+    def test_enrollment_cli_only_exposes_enroll_and_status(self):
+        parser = cli._parser(enrollment_only=True)
+        commands = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+        self.assertEqual(set(commands.choices), {"status", "enroll"})
+        help_output = io.StringIO()
+        with redirect_stdout(help_output), self.assertRaises(SystemExit) as exit_info:
+            cli.enrollment_main(["--help"])
+        self.assertEqual(exit_info.exception.code, 0)
+        self.assertIn("{status,enroll}", help_output.getvalue())
+        self.assertNotIn("run", help_output.getvalue())
+        self.assertNotIn("attach", help_output.getvalue())
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(cli.enrollment_main(["--state-dir", str(self.state), "status"]), 0)
+        self.assert_disabled(json.loads(output.getvalue()))
+
+        with patch.object(cli, "_execute_enrollment", return_value=0) as enroll:
+            self.assertEqual(cli.enrollment_main([
+                "--state-dir", str(self.state), "enroll", "--challenge", "owner-approved",
+            ]), 0)
+        enroll.assert_called_once()
+
+    def test_enrollment_cli_rejects_runtime_commands_before_state_or_external_work(self):
+        commands = (
+            "run", "launch", "client-status", "attach", "renew", "transfer",
+            "runtime-status", "stock-control", "github-event-read", "github-source-read",
+            "github-source-material", "reconcile", "detach",
+        )
+        arguments = {
+            "launch": ["--codex-binary", "/unused", "--binary-sha256", "unused", "--cwd", "/unused"],
+            "client-status": ["--session-id", "session"],
+            "attach": ["--runtime-id", "runtime", "--session-id", "session", "--cloud-config", "config"],
+            "renew": ["--runtime-id", "runtime", "--session-id", "session", "--cloud-config", "config",
+                       "--expected-runtime-generation", "1", "--expected-attachment-generation", "1"],
+            "transfer": ["--source-runtime-id", "source", "--expected-source-runtime-generation", "1",
+                         "--expected-source-attachment-generation", "1", "--replacement-runtime-id", "target",
+                         "--expected-replacement-runtime-generation", "1", "--expected-replacement-attachment-generation", "1",
+                         "--session-id", "session", "--cloud-config", "config"],
+            "runtime-status": ["--runtime-id", "runtime", "--cloud-config", "config"],
+            "stock-control": ["attach", "--runtime-id", "runtime", "--conversation-id", "conversation", "--cloud-config", "config"],
+            "github-event-read": ["--cloud-config", "config", "--event-reference", "reference"],
+            "github-source-read": ["--cloud-config", "config", "--installation-id", "1", "--repository-id", "1",
+                                   "--pr-number", "1", "--from-version", "1", "--to-version", "1"],
+            "github-source-material": ["--cloud-config", "config", "--installation-id", "1", "--repository-id", "1",
+                                       "--pr-number", "1", "--from-version", "1", "--to-version", "1",
+                                       "--source-id", "source", "--fingerprint", "fingerprint", "--private-output", "output"],
+            "reconcile": ["--operation", "attach", "--original-session-id", "original", "--session-id", "session",
+                          "--cloud-config", "config"],
+            "detach": ["runtime"],
+        }
+        for command in commands:
+            with self.subTest(command=command):
+                state = self.state / command
+                stderr = io.StringIO()
+                with (
+                    redirect_stderr(stderr),
+                    patch.object(cli, "_execute_command", side_effect=AssertionError("dispatched")),
+                    patch.object(cli, "serve", side_effect=AssertionError("started daemon")),
+                    patch.object(cli, "launch", side_effect=AssertionError("started client")),
+                    patch.object(cli, "load_cloud_client", side_effect=AssertionError("network auth")),
+                    self.assertRaises(SystemExit) as exit_info,
+                ):
+                    cli.enrollment_main(["--state-dir", str(state), command, *arguments.get(command, [])])
+                self.assertEqual(exit_info.exception.code, 2)
+                self.assertIn("invalid choice", stderr.getvalue())
+                self.assertFalse(state.exists())
 
     def test_launch_keyboard_interrupt_is_sanitized(self):
         stdout, stderr = io.StringIO(), io.StringIO()
