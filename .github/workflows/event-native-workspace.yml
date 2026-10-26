@@ -113,6 +113,13 @@ jobs:
           RUSTY_V8_SRC_BINDING_PATH: ${{ runner.temp }}/native-workspace-source/rusty-v8-binding.rs
         run: |
           set -euo pipefail
+          TARGET_DIR="$RUNNER_TEMP/native-workspace-source/codex-rs/target"
+          DISK_LOG="$RUNNER_TEMP/native-workspace-disk.log"
+          DISK_RESERVE="$RUNNER_TEMP/native-workspace-disk-reserve.bin"
+          TEST_LOG="$RUNNER_TEMP/native-workspace-test.log"
+          printf 'Test command not started: disk reserve preflight pending.\n' > "$TEST_LOG"
+          : > "$DISK_LOG"
+          echo 'test_started=false' >> "$GITHUB_OUTPUT"
           cat > "$RUNNER_TEMP/native-workspace-loopback.sb" <<'PROFILE'
           (version 1)
           (allow default)
@@ -129,19 +136,75 @@ jobs:
             "cargo 1.95.0 "*) ;;
             *) echo "expected pinned Cargo 1.95.0 in $RUST_TOOLCHAIN_BIN_DIR" >&2; exit 1 ;;
           esac
+          if [[ -e "$DISK_RESERVE" || -L "$DISK_RESERVE" ]]; then
+            printf 'refusing to overwrite existing disk reserve: %s\n' "$DISK_RESERVE" >&2
+            printf 'Disk reserve preflight failed: refusing to overwrite existing path %s\n' \
+              "$DISK_RESERVE" >> "$DISK_LOG" 2>&1 || true
+            printf 'Test command not started: disk reserve path already exists.\n' >> "$TEST_LOG" 2>&1 || true
+            exit 1
+          fi
+          {
+            printf 'Disk before build and reserve:\n'
+            df -h "$RUNNER_TEMP"
+            du -sh "$TARGET_DIR" 2>/dev/null || true
+          } >> "$DISK_LOG" 2>&1 || true
+          # 64 MiB is over 7x the prior 8.5 MiB artifact size; it preserves reporting space, not a build-fit guarantee.
+          trap 'rm -f -- "$DISK_RESERVE"' EXIT
+          if dd if=/dev/urandom of="$DISK_RESERVE" bs=1048576 count=64 2>> "$DISK_LOG"; then
+            :
+          else
+            reserve_status=$?
+            rm -f -- "$DISK_RESERVE"
+            trap - EXIT
+            printf 'Disk reserve preflight failed: allocation command exited %s; test command was not started.\n' \
+              "$reserve_status" >> "$DISK_LOG" 2>&1 || true
+            printf 'Test command not started: disk reserve allocation failed (exit %s).\n' \
+              "$reserve_status" >> "$TEST_LOG" 2>&1 || true
+            exit 1
+          fi
+          if ! reserve_blocks="$(stat -f '%b' "$DISK_RESERVE" 2>> "$DISK_LOG")"; then
+            rm -f -- "$DISK_RESERVE"
+            trap - EXIT
+            printf 'Disk reserve preflight failed: could not read allocated blocks; test command was not started.\n' \
+              >> "$DISK_LOG" 2>&1 || true
+            printf 'Test command not started: could not verify disk reserve allocation.\n' \
+              >> "$TEST_LOG" 2>&1 || true
+            exit 1
+          fi
+          reserve_allocated_bytes=$((reserve_blocks * 512))
+          if (( reserve_allocated_bytes < 67108864 )); then
+            printf 'disk reserve allocated only %s of %s bytes\n' \
+              "$reserve_allocated_bytes" 67108864 >&2
+            rm -f -- "$DISK_RESERVE"
+            trap - EXIT
+            printf 'Disk reserve preflight failed: allocated %s of %s bytes; test command was not started.\n' \
+              "$reserve_allocated_bytes" 67108864 >> "$DISK_LOG" 2>&1 || true
+            printf 'Test command not started: disk reserve allocated only %s of %s bytes.\n' \
+              "$reserve_allocated_bytes" 67108864 >> "$TEST_LOG" 2>&1 || true
+            exit 1
+          fi
+          printf 'Disk reserve allocated: %s bytes\n' "$reserve_allocated_bytes" >> "$DISK_LOG"
+          echo 'test_started=true' >> "$GITHUB_OUTPUT"
           if gtimeout --signal=TERM --kill-after=1m 90m \
             /usr/bin/sandbox-exec -f "$RUNNER_TEMP/native-workspace-loopback.sb" \
             /usr/bin/env -i \
             PATH="$RUST_TOOLCHAIN_BIN_DIR:$CARGO_HOME/bin:$RUSTUP_MANAGER_BIN_DIR:/opt/homebrew/bin:/usr/bin:/bin" \
             HOME="$NATIVE_WORKSPACE_HOME" TMPDIR="$RUNNER_TEMP" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" RUSTUP_TOOLCHAIN=1.95.0 \
-            CARGO_NET_OFFLINE=true RUST_MIN_STACK=8388608 NEXTEST_PROFILE=local \
+            CARGO_NET_OFFLINE=true CARGO_INCREMENTAL=0 RUST_MIN_STACK=8388608 NEXTEST_PROFILE=local \
             RUSTY_V8_ARCHIVE="$RUNNER_TEMP/native-workspace-source/rusty-v8.a.gz" \
             RUSTY_V8_SRC_BINDING_PATH="$RUNNER_TEMP/native-workspace-source/rusty-v8-binding.rs" \
-            just test --cargo-profile dev-small 2>&1 | tee "$RUNNER_TEMP/native-workspace-test.log"; then
+            just test --cargo-profile dev-small 2>&1 | tee "$TEST_LOG"; then
             test_status=0
           else
             test_status=$?
           fi
+          rm -f -- "$DISK_RESERVE"
+          trap - EXIT
+          {
+            printf 'Disk after build and reserve release:\n'
+            df -h "$RUNNER_TEMP"
+            du -sh "$TARGET_DIR" 2>/dev/null || true
+          } >> "$DISK_LOG" 2>&1 || true
           cmp Cargo.lock "$RUNNER_TEMP/native-workspace-normalized.lock"
           exit "$test_status"
       - name: Record qualification outcome and tool failure details
@@ -152,16 +215,20 @@ jobs:
           SETUP_OUTCOME: ${{ steps.setup.outcome }}
           REPLAY_OUTCOME: ${{ steps.replay.outcome }}
           DEPS_OUTCOME: ${{ steps.deps.outcome }}
+          TEST_STARTED: ${{ steps.tests.outputs.test_started || 'false' }}
         run: |
           set -euo pipefail
           {
-            printf '## Full native Rust workspace qualification\n\nSetup: `%s`; source replay: `%s`; dependency prime: `%s`; tests: `%s`.\n\n' \
-              "$SETUP_OUTCOME" "$REPLAY_OUTCOME" "$DEPS_OUTCOME" "$TEST_OUTCOME"
+            printf '## Full native Rust workspace qualification\n\nSetup: `%s`; source replay: `%s`; dependency prime: `%s`; tests step: `%s`; test command started: `%s`.\n\n' \
+              "$SETUP_OUTCOME" "$REPLAY_OUTCOME" "$DEPS_OUTCOME" "$TEST_OUTCOME" \
+              "$TEST_STARTED"
             printf 'Command: `just test --cargo-profile dev-small`\n\n'
             printf 'Test log SHA-256: `%s`\n' "$(shasum -a 256 "$RUNNER_TEMP/native-workspace-test.log" 2>/dev/null | awk '{print $1}' || true)"
+            printf '%s\n' "Disk log SHA-256: \`$(shasum -a 256 "$RUNNER_TEMP/native-workspace-disk.log" 2>/dev/null | awk '{print $1}' || true)\`"
           } >> "$GITHUB_STEP_SUMMARY"
-          printf '{"kind":"native-workspace-run-result","setup":"%s","sourceReplay":"%s","dependencyPrime":"%s","tests":"%s"}\n' \
+          printf '{"kind":"native-workspace-run-result","setup":"%s","sourceReplay":"%s","dependencyPrime":"%s","tests":"%s","testStarted":%s}\n' \
             "$SETUP_OUTCOME" "$REPLAY_OUTCOME" "$DEPS_OUTCOME" "$TEST_OUTCOME" \
+            "$TEST_STARTED" \
             > "$RUNNER_TEMP/native-workspace-run-result.json"
       - name: Upload full workspace qualification evidence
         if: always()
@@ -171,6 +238,7 @@ jobs:
           path: |
             ${{ runner.temp }}/native-workspace-source/qualification.json
             ${{ runner.temp }}/native-workspace-test.log
+            ${{ runner.temp }}/native-workspace-disk.log
             ${{ runner.temp }}/native-workspace-metadata.json
             ${{ runner.temp }}/native-workspace-initial.lock
             ${{ runner.temp }}/native-workspace-normalized.lock
