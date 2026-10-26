@@ -54,8 +54,18 @@ http_file(
 
     def test_named_v8_pins_survive_reordered_mapping(self):
         module = '''
-http_file(name = "rusty_v8_150_4_0_aarch64_apple_darwin_archive", downloaded_file_path = "librusty_v8_ptrcomp_sandbox_release_aarch64-apple-darwin.a.gz", sha256 = "00adbb48798848c77550441c68673a5e8529b8e1b73eabcdee232cb39b40f4a1", urls = ["https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0/librusty_v8_ptrcomp_sandbox_release_aarch64-apple-darwin.a.gz"])
-http_file(name = "rusty_v8_150_4_0_aarch64_apple_darwin_binding", downloaded_file_path = "src_binding_ptrcomp_sandbox_release_aarch64-apple-darwin.rs", sha256 = "ca5adf0cf89c9a70ad460ae73648b2fe89b74aa113b3cb7f757b6a02b758394f", urls = ["https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0/src_binding_ptrcomp_sandbox_release_aarch64-apple-darwin.rs"])
+http_file(
+    name = "rusty_v8_150_4_0_aarch64_apple_darwin_archive",
+    downloaded_file_path = "librusty_v8_ptrcomp_sandbox_release_aarch64-apple-darwin.a.gz",
+    sha256 = "00adbb48798848c77550441c68673a5e8529b8e1b73eabcdee232cb39b40f4a1",
+    urls = ["https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0/librusty_v8_ptrcomp_sandbox_release_aarch64-apple-darwin.a.gz"],
+)
+http_file(
+    name = "rusty_v8_150_4_0_aarch64_apple_darwin_binding",
+    downloaded_file_path = "src_binding_ptrcomp_sandbox_release_aarch64-apple-darwin.rs",
+    sha256 = "ca5adf0cf89c9a70ad460ae73648b2fe89b74aa113b3cb7f757b6a02b758394f",
+    urls = ["https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0/src_binding_ptrcomp_sandbox_release_aarch64-apple-darwin.rs"],
+)
 '''
         with patch.dict(qualification.__dict__, {"V8_ASSETS": dict(reversed(list(qualification.V8_ASSETS.items())))}):
             self.assertEqual(set(qualification.pinned_v8_assets(module)), set(qualification.V8_ASSETS))
