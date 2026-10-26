@@ -71,6 +71,22 @@ negative-input mutations each rejected startup at their named assertion.
 This repairs the synthetic authority; it is no evidence
 of production Messaging authorization or a completed hosted scenario.
 
+[Hosted run 40256182518](https://github.com/knitli/knitli-site/actions/runs/40256182518)
+passed staging, acquisition and the mandatory authority check for candidate
+`0d8eb983`. Four native starts returned InputRecorded receipts. Proof construction
+then exceeded its fixed metadata limit; no proof was published and native recovery
+did not run. The result remains INCOMPLETE, with source writers stopped,
+complete descendant termination and VM disposal all unproven. The repair moves
+the complete workerd input hash map into bounded companion evidence while keeping
+the proof limit and every source hash check. The companion is fixed-name canonical
+JSON with a 1,000,000-byte cap; its digest includes the trailing newline. The
+trusted runner verifies its exact bytes and entry count before source readback.
+The 22 verifier tests and 111 fixture tests pass. Separately bypassing only the
+digest comparison and only the count comparison made the corresponding assertion
+fail; restoring each comparison passed. A synthetic 213-entry map is retained in
+full; replacing the inline map in a historical projection leaves 11,544 pretty
+JSON bytes. This is size and contract evidence, not a new hosted qualification.
+
 Before promotion, retain and independently audit fresh exact-wheel evidence for:
 
 - Full patched Rust workspace tests with the pinned V8 pair and GLib present.
