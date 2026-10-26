@@ -53,6 +53,21 @@ passed source/V8 replay and dependency priming, but stopped before tests because
 Cargo was absent from the restricted PATH. This is no native test result;
 [PR #205](https://github.com/knitli/toolshed/pull/205) corrects the runner path.
 
+[Hosted run 40252979964](https://github.com/knitli/knitli-site/actions/runs/40252979964)
+authenticated this pair, staged the same wheel digest, and matched all 517 package
+file hashes to candidate `76ecb545`. Three native clients launched, then the synthetic
+manual-source authority lacked the current activation method and namespace.
+Three-session and native recovery qualification remain incomplete; descendant
+termination and VM disposal were not independently proven. The preceding hosted
+attempt stopped at the source-overlay guard before acquisition; PR #1002 fixes
+its new-file staging check.
+
+The coupled fixture now supplies the configured namespace and scoped manual
+owner-direct activation claims. Broker-only assertions check denied scope,
+canonical snapshots, stale/changed sources, optional status queries and
+idempotent reservation. This repairs the synthetic authority; it is no evidence
+of production Messaging authorization or a completed hosted scenario.
+
 Before promotion, retain and independently audit fresh exact-wheel evidence for:
 
 - Full patched Rust workspace tests with the pinned V8 pair and GLib present.
