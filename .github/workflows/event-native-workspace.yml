@@ -84,9 +84,13 @@ jobs:
           changes = builder.lock_version_changes(before, tomllib.loads(after_bytes.decode()))
           if changes != 159:
               raise SystemExit(f"unexpected pinned local lock normalization: {changes}")
+          import os
+          normalized_path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "native-workspace-normalized.lock"
+          normalized_path.write_bytes(after_bytes)
           print(f"Pinned local Cargo.lock changes: {changes}\nNormalized Cargo.lock SHA-256: {hashlib.sha256(after_bytes).hexdigest()}")
           PY
           cargo fetch --locked
+          cmp Cargo.lock "$RUNNER_TEMP/native-workspace-normalized.lock"
       - name: Run full Rust workspace tests offline
         id: tests
         continue-on-error: true
@@ -108,7 +112,7 @@ jobs:
           PROFILE
           set -o pipefail
           RUSTUP_BIN_DIR="$(dirname "$(command -v rustup)")"
-          gtimeout --signal=TERM --kill-after=1m 90m \
+          if gtimeout --signal=TERM --kill-after=1m 90m \
             /usr/bin/sandbox-exec -f "$RUNNER_TEMP/native-workspace-loopback.sb" \
             /usr/bin/env -i \
             PATH="$CARGO_HOME/bin:$RUSTUP_BIN_DIR:/opt/homebrew/bin:/usr/bin:/bin" \
@@ -116,7 +120,13 @@ jobs:
             CARGO_NET_OFFLINE=true RUST_MIN_STACK=8388608 NEXTEST_PROFILE=local \
             RUSTY_V8_ARCHIVE="$RUNNER_TEMP/native-workspace-source/rusty-v8.a.gz" \
             RUSTY_V8_SRC_BINDING_PATH="$RUNNER_TEMP/native-workspace-source/rusty-v8-binding.rs" \
-            just test --cargo-profile dev-small 2>&1 | tee "$RUNNER_TEMP/native-workspace-test.log"
+            just test --cargo-profile dev-small 2>&1 | tee "$RUNNER_TEMP/native-workspace-test.log"; then
+            test_status=0
+          else
+            test_status=$?
+          fi
+          cmp Cargo.lock "$RUNNER_TEMP/native-workspace-normalized.lock"
+          exit "$test_status"
       - name: Record qualification outcome and tool failure details
         if: always()
         shell: bash
@@ -146,6 +156,7 @@ jobs:
             ${{ runner.temp }}/native-workspace-test.log
             ${{ runner.temp }}/native-workspace-metadata.json
             ${{ runner.temp }}/native-workspace-initial.lock
+            ${{ runner.temp }}/native-workspace-normalized.lock
             ${{ runner.temp }}/native-workspace-run-result.json
           if-no-files-found: warn
           retention-days: 90
