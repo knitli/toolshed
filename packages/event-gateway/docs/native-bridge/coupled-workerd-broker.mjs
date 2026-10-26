@@ -74,6 +74,15 @@ process.on('disconnect',()=>void stop().then(()=>process.exit(0)));
 try {
   try {await mf.ready;} catch(error) {restoreLoopback(false);throw error;}
   restoreLoopback();
+  try {
+    const response=await mf.dispatchFetch('https://events.example.com/fixture/authority-contract',{method:'POST',headers:{'x-fixture-secret':secret}});
+    const body=await response.text();
+    if(response.status!==200)throw new Error(`HTTP ${response.status}: ${body}`);
+    JSON.parse(body);
+  } catch(error) {
+    restoreLoopback(false);
+    throw new Error('Mandatory fixture authority contract self-check failed',{cause:error});
+  }
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(ports.BROKER,'127.0.0.1',resolve);});
   process.stdout.write(`${JSON.stringify({port:server.address().port,secret,bundle:bundleEvidence})}\n`);
 } catch(error) {console.error(error);await stop();process.exitCode=1;}

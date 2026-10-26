@@ -65,7 +65,10 @@ its new-file staging check.
 The coupled fixture now supplies the configured namespace and scoped manual
 owner-direct activation claims. Broker-only assertions check denied scope,
 canonical snapshots, stale/changed sources, optional status queries and
-idempotent reservation. This repairs the synthetic authority; it is no evidence
+idempotent reservation. The broker requires these assertions before its startup
+handshake, so a failure prevents native clients from launching. Two isolated
+negative-input mutations each rejected startup at their named assertion.
+This repairs the synthetic authority; it is no evidence
 of production Messaging authorization or a completed hosted scenario.
 
 Before promotion, retain and independently audit fresh exact-wheel evidence for:
