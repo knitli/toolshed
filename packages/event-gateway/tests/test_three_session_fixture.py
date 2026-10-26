@@ -31,6 +31,18 @@ FIXTURE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(FIXTURE)
 
 
+def attach_workerd_input_sidecar(target, evidence, proof, directory_fd, publication_stack):
+    inputs = {"packages/event-runtime/src/index.ts": "a" * 64}
+    raw = (json.dumps(inputs, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    evidence.workerd_inputs = FIXTURE.private_json(
+        target.with_name(FIXTURE.WORKERD_INPUTS_FILE), inputs,
+        directory_fd=directory_fd, publication_stack=publication_stack,
+    )
+    proof["workerdInputs"] = {"file": FIXTURE.WORKERD_INPUTS_FILE, "entryCount": len(inputs),
+                              "sha256": FIXTURE.digest(raw)}
+    return evidence.workerd_inputs
+
+
 class ThreeSessionDaemonBudgetTests(unittest.TestCase):
     def test_sixth_daemon_start_refuses_before_serve_or_task_creation(self):
         ctx = SimpleNamespace(state=Path("/fixture"), daemon_start_attempts=0)
@@ -1058,6 +1070,38 @@ class ThreeSessionArtifactFailureTests(unittest.TestCase):
                     with self.assertRaises((AssertionError, OSError)):
                         FIXTURE.private_json(path, {"nonce": "private"}, directory_fd=directory_fd)
 
+    def test_workerd_input_summary_matches_213_source_sidecar(self):
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as resources:
+            root = Path(directory)
+            root.chmod(0o700)
+            directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            resources.callback(os.close, directory_fd)
+            target = root / FIXTURE.WORKERD_INPUTS_FILE
+            source = root / "apps/os/packages/event-runtime/src"
+            source.mkdir(parents=True)
+            bundle_inputs = {}
+            for index in range(213):
+                path = source / f"module-{index:03}.ts"
+                path.write_text(f"export const moduleId = {index};\n")
+                bundle_inputs[str(path)] = FIXTURE.digest(path.read_bytes())
+            context = SimpleNamespace(cloud_source=source.resolve(),
+                address={"bundle": {"inputs": bundle_inputs}},
+                args=SimpleNamespace(output=str(root / "proof.json")),
+                evidence=SimpleNamespace(directory_fd=directory_fd), publication_stack=resources)
+            reference, artifact = FIXTURE.write_workerd_input_evidence(context)
+            expected = (json.dumps({f"packages/event-runtime/src/module-{index:03}.ts": bundle_inputs[
+                str(source / f"module-{index:03}.ts")] for index in range(213)},
+                sort_keys=True, separators=(",", ":")) + "\n").encode()
+            self.assertEqual(reference, {"file": FIXTURE.WORKERD_INPUTS_FILE, "entryCount": 213,
+                                         "sha256": FIXTURE.digest(expected)})
+            self.assertIsNotNone(artifact)
+            self.assertEqual(target.read_bytes(), expected)
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(target.stat().st_nlink, 1)
+            self.assertFalse((root / "proof.json").exists())
+            FIXTURE.verify_private_json(artifact)
+            self.assertEqual(sorted(path.name for path in root.iterdir()), ["apps", FIXTURE.WORKERD_INPUTS_FILE])
+
     def test_retained_private_json_wrapper_failure_closes_owned_descriptor(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "causal.json"
@@ -1077,7 +1121,8 @@ class ThreeSessionArtifactFailureTests(unittest.TestCase):
                     os.fstat(fd)
 
     def test_causal_sidecar_stays_pinned_until_pass(self):
-        for mutation in ("rename", "replace", "disappear", "bytes", "mode", "hardlink", "parent-mode", None):
+        for mutation in ("rename", "replace", "disappear", "bytes", "mode", "hardlink", "parent-mode",
+                         "workerd", None):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 target, sidecar = root / "proof.json", root / "proof.private-causal.json"
@@ -1089,6 +1134,7 @@ class ThreeSessionArtifactFailureTests(unittest.TestCase):
                         target.with_suffix(".private-evidence.jsonl"), directory_fd))
                     evidence.drained = True
                     proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
+                    attach_workerd_input_sidecar(target, evidence, proof, directory_fd, publication_stack)
                     # Exercise the real scenario cleanup path that publishes the sidecar.
                     state = root / "state"
                     state.mkdir()
@@ -1101,6 +1147,10 @@ class ThreeSessionArtifactFailureTests(unittest.TestCase):
 
                 def opened(path, *args, **kwargs):
                     if path == target.name:
+                        if mutation == "workerd":
+                            workerd_sidecar = root / FIXTURE.WORKERD_INPUTS_FILE
+                            workerd_sidecar.write_bytes(b"replacement")
+                            workerd_sidecar.chmod(0o600)
                         if mutation in ("rename", "replace"):
                             sidecar.rename(root / "owned-sidecar")
                         if mutation == "replace":
@@ -1148,15 +1198,33 @@ class ThreeSessionArtifactFailureTests(unittest.TestCase):
                 evidence = publication_stack.enter_context(FIXTURE.evidence_archive(
                     target.with_suffix(".private-evidence.jsonl"), directory_fd))
                 evidence.drained = True
-                return {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}, evidence
+                proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
+                attach_workerd_input_sidecar(target, evidence, proof, directory_fd, publication_stack)
+                evidence.causal = FIXTURE.private_json(target.with_name("proof.private-causal.json"), {},
+                                                        directory_fd=directory_fd,
+                                                        publication_stack=publication_stack)
+                return proof, evidence
+
+            proof_descriptor = None
+            original_open, original_fdopen = os.open, os.fdopen
+
+            def open_output(path, *args, **kwargs):
+                nonlocal proof_descriptor
+                fd = original_open(path, *args, **kwargs)
+                if path == target.name:
+                    proof_descriptor = fd
+                return fd
 
             def fdopen(fd, *_args, **_kwargs):
                 descriptors.append(fd)
-                raise failure
+                if fd == proof_descriptor:
+                    raise failure
+                return original_fdopen(fd, *_args, **_kwargs)
 
             with patch.object(FIXTURE, "cli", return_value=SimpleNamespace(output=str(target))), \
                     patch.object(FIXTURE, "configure"), \
                     patch.object(FIXTURE, "run_scenario", side_effect=scenario), \
+                    patch.object(FIXTURE.os, "open", side_effect=open_output), \
                     patch.object(FIXTURE.os, "fdopen", side_effect=fdopen), patch("builtins.print") as output:
                 with self.assertRaises(OSError) as caught:
                     FIXTURE.main()
@@ -1783,6 +1851,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     descriptors.extend((directory_fd, evidence.fd, evidence.directory_fd))
                     evidence.drained = True
                     proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
+                    attach_workerd_input_sidecar(target, evidence, proof, directory_fd, publication_stack)
                     evidence.causal = FIXTURE.private_json(target.with_name("proof.private-causal.json"), {},
                                                             directory_fd=directory_fd,
                                                             publication_stack=publication_stack)
@@ -1862,6 +1931,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                     descriptors.extend((directory_fd, evidence.fd, evidence.directory_fd))
                     evidence.drained = True
                     proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
+                    attach_workerd_input_sidecar(target, evidence, proof, directory_fd, publication_stack)
                     evidence.causal = FIXTURE.private_json(target.with_name("proof.private-causal.json"), {},
                                                             directory_fd=directory_fd,
                                                             publication_stack=publication_stack)
@@ -1932,6 +2002,7 @@ class ThreeSessionPrivateEvidenceTests(unittest.TestCase):
                         target.with_suffix(".private-evidence.jsonl"), directory_fd))
                     evidence.drained = True
                     proof = {"privateEvidence": FIXTURE.seal_evidence(SimpleNamespace(evidence=evidence))}
+                    attach_workerd_input_sidecar(target, evidence, proof, directory_fd, publication_stack)
                     evidence.causal = FIXTURE.private_json(parent / "proof.private-causal.json", {},
                                                             directory_fd=evidence.directory_fd,
                                                             publication_stack=publication_stack)

@@ -100,8 +100,11 @@ Miniflare loopback, broker, daemon and models A/B/C. Occupied ports abort withou
 fallback. The fixture rejects ports inside the host's ephemeral range.
 
 Retain `hosted-result.json`, `network.sb`, `three-session/proof.json`, its private
-causal and evidence sidecars, and `native-recovery/proof.json`, plus bounded private
-logs from each directory. The recovery proof contains raw synthetic native identities
+causal and evidence sidecars, `three-session/proof.workerd-inputs.json`, and
+`native-recovery/proof.json`, plus bounded private logs from each directory. The
+three-session proof binds the fixed-name input map by canonical SHA-256 and entry
+count; the runner rechecks every mapped source hash against the pinned cloud tree.
+The recovery proof contains raw synthetic native identities
 and wire bodies; it is private evidence. Update the cloud workflow export allowlist
 for both directories before enabling this runner. Archive only an explicit allowlist
 with size limits; never upload whole scratch or public raw evidence. Cancellation
