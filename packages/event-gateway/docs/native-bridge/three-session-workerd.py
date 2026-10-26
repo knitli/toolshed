@@ -49,6 +49,9 @@ NATIVE_DIAGNOSTIC_ROWS = 256
 NATIVE_DIAGNOSTIC_BYTES = 64 * 1024
 # Covers the fixed busy-stage waits, bounded fixture RPCs and follow-up probes.
 NATIVE_DIAGNOSTIC_WINDOW_SECONDS = 240
+PROOF_METADATA_MAX_BYTES = 32_768
+WORKERD_INPUTS_FILE = "proof.workerd-inputs.json"
+WORKERD_INPUTS_MAX_BYTES = 1_000_000
 
 args = None
 binary = node = cloud_source = package_source = None
@@ -476,6 +479,32 @@ def private_json(path, value, *, directory_fd=None, publication_stack=None):
             os.fsync(directory_fd)
         verify_private_json(artifact)
         return artifact if publication_stack is not None else None
+
+
+def write_workerd_input_evidence(ctx):
+    cloud_root = ctx.cloud_source.parents[2]
+    inputs = {}
+    for path, file_digest in ctx.address["bundle"]["inputs"].items():
+        source = Path(path).resolve(strict=True)
+        try:
+            relative = source.relative_to(cloud_root)
+        except ValueError:
+            continue
+        inputs[str(relative)] = file_digest
+    inputs = dict(sorted(inputs.items()))
+    require(bool(inputs), "workerd bundle has no source inputs")
+    raw = (json.dumps(inputs, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    require(len(raw) <= WORKERD_INPUTS_MAX_BYTES, "workerd input evidence exceeds fixed bound")
+    artifact = private_json(
+        Path(ctx.args.output).with_name(WORKERD_INPUTS_FILE), inputs,
+        directory_fd=ctx.evidence.directory_fd, publication_stack=ctx.publication_stack,
+    )
+    require(artifact is not None or ctx.publication_stack is None,
+            "workerd input evidence descriptor was not retained")
+    if artifact is not None:
+        require(artifact.raw == raw, "workerd input evidence serialization mismatch")
+    return {"file": WORKERD_INPUTS_FILE, "entryCount": len(inputs),
+            "sha256": hashlib.sha256(raw).hexdigest()}, artifact
 
 
 @contextmanager
@@ -2602,15 +2631,8 @@ def build_proof(ctx):
         str(Path(path).relative_to(ctx.installed_proof["packageRoot"])): file_digest
         for path, file_digest in ctx.installed_proof["verifiedSha256"].items()
     }
-    cloud_root = ctx.cloud_source.parents[2]
-    workerd_inputs = {}
-    for path, file_digest in ctx.address["bundle"]["inputs"].items():
-        source = Path(path).resolve(strict=True)
-        try:
-            relative = source.relative_to(cloud_root)
-        except ValueError:
-            continue
-        workerd_inputs[str(relative)] = file_digest
+    workerd_inputs, workerd_inputs_artifact = write_workerd_input_evidence(ctx)
+    ctx.evidence.workerd_inputs = workerd_inputs_artifact
     ctx.proof = {
         "result": "PASS",
         "qualification": "controlled-three-real-cli-production-daemon-workerd",
@@ -2625,7 +2647,7 @@ def build_proof(ctx):
         "installedPackageFilesSha256": package_files,
         "cloudSourceCommit": ctx.args.cloud_commit,
         "workerdBundleSha256": ctx.address["bundle"]["sha256"],
-        "workerdInputsSha256": workerd_inputs,
+        "workerdInputs": workerd_inputs,
         "productionEntrypoints": ["event_gateway.daemon.serve", "event_gateway.listener.Listener",
                                   "event_gateway.native.SessionNativeBridge", "event_gateway.gateway.Gateway"],
         "nativeCliSessions": summaries,
@@ -2742,13 +2764,14 @@ def build_proof(ctx):
                 FIXTURE_AGENT not in encoded,
                 '"nativeBinding":' not in encoded,
                 '"transportPrivateKey":' not in encoded)
-    require(len(encoded.encode()) <= 32_768, "proof exceeds fixed metadata bound")
     ctx.private_nonce_record = {
         "sourceNonceSha256": {"C1": ctx.c1_source_nonce_sha256, "C3": ctx.c3_source_nonce_sha256},
         "nonReuse": ctx.c1_source_nonce_sha256 != ctx.c3_source_nonce_sha256,
     }
     causal_bytes = (json.dumps(ctx.private_nonce_record, separators=(",", ":")) + "\n").encode()
     ctx.proof["privateCausal"] = {"bytes": len(causal_bytes), "sha256": digest(causal_bytes)}
+    require(len(json.dumps(ctx.proof, sort_keys=True).encode()) <= PROOF_METADATA_MAX_BYTES,
+            "proof exceeds fixed metadata bound")
     return ctx.proof, ctx.private_nonce_record
 
 
@@ -3013,10 +3036,16 @@ def main():
 
         with ExitStack() as publication_stack:
             proof, evidence = asyncio.run(run_scenario(directory, publication_stack))
+            compact = json.dumps(proof, sort_keys=True).encode()
             encoded = (json.dumps(proof, indent=2) + "\n").encode()
-            require(len(encoded) <= 32_768, "proof exceeds fixed metadata bound")
+            require(len(compact) <= PROOF_METADATA_MAX_BYTES
+                    and len(encoded) <= PROOF_METADATA_MAX_BYTES,
+                    "proof exceeds fixed metadata bound")
             verify_parent()
             verify_evidence(evidence)
+            require("workerdInputs" in proof and getattr(evidence, "workerd_inputs", None) is not None,
+                    "workerd input evidence missing before publication")
+            verify_private_json(evidence.workerd_inputs)
             descriptor = os.open(target.name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                  0o600, dir_fd=directory)
             publication_stack.callback(os.close, descriptor)
@@ -3041,6 +3070,7 @@ def main():
                 require(stream.read(32_769) == encoded, "proof output changed before publication")
                 require(evidence.causal is not None, "private causal sidecar missing before publication")
                 verify_private_json(evidence.causal)
+                verify_private_json(evidence.workerd_inputs)
                 print(json.dumps({"result": "PASS", "proof": str(target),
                                   "productionAdmissionProven": False, "nativeCliSessions": 3}))
     except BaseException:

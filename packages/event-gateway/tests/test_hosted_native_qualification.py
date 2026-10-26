@@ -109,6 +109,75 @@ def c2_proof(result, identities):
 
 
 class HostedNativeTests(unittest.TestCase):
+    def test_workerd_input_companion_is_canonical_and_bound_to_proof(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = {'event-runtime/src/a.ts': 'a' * 64, 'event-runtime/src/b.ts': 'b' * 64}
+            canonical = json.dumps(inputs, sort_keys=True, separators=(',', ':')).encode()
+            (root / HOSTED.WORKERD_INPUTS_FILE).write_bytes(canonical + b'\n')
+            reference = {'file': HOSTED.WORKERD_INPUTS_FILE, 'entryCount': 2,
+                         'sha256': hashlib.sha256(canonical + b'\n').hexdigest()}
+            accepted, digest = HOSTED.canonical_workerd_inputs({'workerdInputs': reference}, root)
+            self.assertEqual(accepted, inputs)
+            self.assertEqual(digest, reference['sha256'])
+
+            bad_map = {**inputs, 'event-runtime/src/b.ts': 'c' * 64}
+            (root / HOSTED.WORKERD_INPUTS_FILE).write_bytes(
+                (json.dumps(bad_map, sort_keys=True, separators=(',', ':')) + '\n').encode())
+            with self.assertRaisesRegex(ValueError, 'workerd input evidence mismatch'):
+                HOSTED.canonical_workerd_inputs({'workerdInputs': reference}, root)
+            (root / HOSTED.WORKERD_INPUTS_FILE).write_bytes(canonical + b'\n')
+            for mutation in (
+                {'entryCount': 3}, {'sha256': '0' * 64}, {'file': '../proof.workerd-inputs.json'},
+                {'unexpected': 'field'},
+            ):
+                candidate = {'workerdInputs': {**reference, **mutation}}
+                with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                    HOSTED.canonical_workerd_inputs(candidate, root)
+            with self.assertRaisesRegex(ValueError, 'legacy inline workerd inputs are forbidden'):
+                HOSTED.canonical_workerd_inputs({
+                    'workerdInputs': reference, 'workerdInputsSha256': inputs,
+                }, root)
+            unsafe = {'../outside.ts': 'd' * 64}
+            unsafe_raw = json.dumps(unsafe, sort_keys=True, separators=(',', ':')).encode()
+            (root / HOSTED.WORKERD_INPUTS_FILE).write_bytes(unsafe_raw + b'\n')
+            with self.assertRaisesRegex(ValueError, 'invalid workerd input evidence map'):
+                HOSTED.canonical_workerd_inputs({'workerdInputs': {
+                    **reference, 'entryCount': 1, 'sha256': hashlib.sha256(unsafe_raw).hexdigest(),
+                }}, root)
+            (root / HOSTED.WORKERD_INPUTS_FILE).write_bytes(
+                b' ' * (HOSTED.WORKERD_INPUTS_MAX_BYTES + 1))
+            with self.assertRaisesRegex(ValueError, 'invalid bounded evidence'):
+                HOSTED.canonical_workerd_inputs({'workerdInputs': reference}, root)
+
+    def test_workerd_input_reference_rejects_wrong_count_and_digest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = {'event-runtime/src/a.ts': 'a' * 64}
+            canonical_raw = (json.dumps(inputs, sort_keys=True, separators=(',', ':')) + '\n').encode()
+            (root / HOSTED.WORKERD_INPUTS_FILE).write_bytes(canonical_raw)
+            reference = {'file': HOSTED.WORKERD_INPUTS_FILE, 'entryCount': 1,
+                         'sha256': hashlib.sha256(canonical_raw).hexdigest()}
+            for mutation in ({'entryCount': 2}, {'sha256': '0' * 64}):
+                with self.subTest(mutation=mutation), self.assertRaisesRegex(
+                        ValueError, 'workerd input evidence mismatch'):
+                    HOSTED.canonical_workerd_inputs(
+                        {'workerdInputs': {**reference, **mutation}}, root)
+
+    def test_proof_metadata_bound_checks_raw_compact_and_pretty_sizes(self):
+        limit = HOSTED.PROOF_METADATA_MAX_BYTES
+        empty = {'x': ''}
+        base_size = len((json.dumps(empty, indent=2) + '\n').encode())
+        exact = {'x': 'a' * (limit - base_size)}
+        exact_raw = (json.dumps(exact, indent=2) + '\n').encode()
+        self.assertEqual(len(exact_raw), limit)
+        HOSTED.verify_proof_metadata_bound(exact_raw, exact)
+        over = {'x': exact['x'] + 'a'}
+        with self.assertRaisesRegex(ValueError, 'proof exceeds fixed metadata bound'):
+            HOSTED.verify_proof_metadata_bound((json.dumps(over, indent=2) + '\n').encode(), over)
+        with self.assertRaisesRegex(ValueError, 'proof exceeds fixed metadata bound'):
+            HOSTED.verify_proof_metadata_bound(b' ' * (limit + 1), empty)
+
     def test_admission_rejects_non_hosted_or_automatic_attempts(self):
         with patch.object(HOSTED.platform, 'system', return_value='Darwin'), \
                 patch.object(HOSTED.platform, 'machine', return_value='arm64'):
@@ -643,7 +712,12 @@ class HostedNativeTests(unittest.TestCase):
                 'privateEvidence': {'bytes': len(evidence), 'sha256': __import__('hashlib').sha256(evidence).hexdigest()},
                 'privateCausal': {'bytes': (root / 'proof.private-causal.json').stat().st_size,
                                   'sha256': HOSTED.sha(root / 'proof.private-causal.json')},
-                'workerdInputsSha256': {str(source.relative_to(cloud.parents[2])): HOSTED.sha(source)}}
+                'workerdInputs': {'file': HOSTED.WORKERD_INPUTS_FILE, 'entryCount': 1,
+                    'sha256': hashlib.sha256((json.dumps({str(source.relative_to(cloud.parents[2])):
+                        HOSTED.sha(source)}, sort_keys=True, separators=(',', ':')) + '\n').encode()).hexdigest()}}
+            workerd_inputs = {str(source.relative_to(cloud.parents[2])): HOSTED.sha(source)}
+            canonical_inputs = json.dumps(workerd_inputs, sort_keys=True, separators=(',', ':')).encode()
+            (root / HOSTED.WORKERD_INPUTS_FILE).write_bytes(canonical_inputs + b'\n')
             busy_result, busy_row, identities = busy_attach_evidence()
             proof['busyFixtureAttach'] = busy_result
             proof['nativeCliSessions']['C'].update(identities)
@@ -663,7 +737,21 @@ class HostedNativeTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         HOSTED.verify_proof(args, 'three-session', root)
                 else:
-                    self.assertTrue(HOSTED.verify_proof(args, 'three-session', root)['semanticChecksPassed'])
+                    verified = HOSTED.verify_proof(args, 'three-session', root)
+                    self.assertTrue(verified['semanticChecksPassed'])
+                    self.assertEqual(verified['workerdInputsSha256'], proof['workerdInputs']['sha256'])
+                    self.assertEqual(verified['workerdInputCount'], 1)
+            extra_inputs = {**workerd_inputs, 'event-runtime/src/unlisted.ts': 'c' * 64}
+            extra_canonical = json.dumps(extra_inputs, sort_keys=True, separators=(',', ':')).encode()
+            (root / HOSTED.WORKERD_INPUTS_FILE).write_bytes(extra_canonical + b'\n')
+            proof['workerdInputs'] = {'file': HOSTED.WORKERD_INPUTS_FILE, 'entryCount': 2,
+                                      'sha256': hashlib.sha256(extra_canonical + b'\n').hexdigest()}
+            (root / 'proof.json').write_text(json.dumps(proof))
+            with self.assertRaises(FileNotFoundError):
+                HOSTED.verify_proof(args, 'three-session', root)
+            proof['workerdInputs'] = {'file': HOSTED.WORKERD_INPUTS_FILE, 'entryCount': 1,
+                                      'sha256': hashlib.sha256(canonical_inputs + b'\n').hexdigest()}
+            (root / HOSTED.WORKERD_INPUTS_FILE).write_bytes(canonical_inputs + b'\n')
             (root / 'proof.json').write_text(json.dumps(proof))
             aliases = root / 'bin'
             aliases.mkdir()

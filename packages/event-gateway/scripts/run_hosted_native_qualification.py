@@ -19,6 +19,9 @@ import tempfile
 from uuid import UUID
 
 PORTS = (43121, 43122, 43123, 43124, 43125, 43126, 43127)
+PROOF_METADATA_MAX_BYTES = 32_768
+WORKERD_INPUTS_FILE = 'proof.workerd-inputs.json'
+WORKERD_INPUTS_MAX_BYTES = 1_000_000
 
 
 def require(value, message):
@@ -137,9 +140,48 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def canonical_workerd_inputs(summary, output):
+    require('workerdInputsSha256' not in summary, 'legacy inline workerd inputs are forbidden')
+    require(isinstance(summary.get('workerdInputs'), dict)
+            and set(summary['workerdInputs']) == {'file', 'entryCount', 'sha256'},
+            'invalid workerd input evidence reference')
+    reference = summary['workerdInputs']
+    require(reference['file'] == WORKERD_INPUTS_FILE
+            and type(reference['entryCount']) is int and reference['entryCount'] > 0
+            and isinstance(reference['sha256'], str)
+            and re.fullmatch(r'[0-9a-f]{64}', reference['sha256']) is not None,
+            'invalid workerd input evidence reference')
+    evidence_raw = read_bounded(output / WORKERD_INPUTS_FILE, WORKERD_INPUTS_MAX_BYTES)
+    inputs = json.loads(evidence_raw)
+    require(isinstance(inputs, dict) and bool(inputs)
+            and all(isinstance(name, str) and name and '\\' not in name
+                    and not Path(name).is_absolute() and name == Path(name).as_posix()
+                    and all(part not in ('', '.', '..') for part in name.split('/'))
+                    and isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value) is not None
+                    for name, value in inputs.items()),
+            'invalid workerd input evidence map')
+    canonical = json.dumps(inputs, sort_keys=True, separators=(',', ':')).encode()
+    canonical_raw = canonical + b'\n'
+    require(evidence_raw == canonical_raw
+            and reference['entryCount'] == len(inputs)
+            and reference['sha256'] == hashlib.sha256(canonical_raw).hexdigest(),
+            'workerd input evidence mismatch')
+    return inputs, reference['sha256']
+
+
+def verify_proof_metadata_bound(raw, proof):
+    compact = json.dumps(proof, sort_keys=True).encode()
+    pretty = (json.dumps(proof, indent=2) + '\n').encode()
+    require(len(raw) <= PROOF_METADATA_MAX_BYTES and len(compact) <= PROOF_METADATA_MAX_BYTES
+            and len(pretty) <= PROOF_METADATA_MAX_BYTES,
+            'proof exceeds fixed metadata bound')
+
+
 def verify_proof(args, scenario, output):
     raw = read_bounded(output / 'proof.json', 2_000_000)
     proof = json.loads(raw)
+    if scenario == 'three-session':
+        verify_proof_metadata_bound(raw, proof)
     require(proof['result'] == 'PASS' and proof['productionAdmissionProven'] is False
             and proof['realModelCalls'] == 0 and proof['cloudSourceCommit'] == args.cloud_commit,
             'wrong scenario outcome or cloud identity')
@@ -156,7 +198,11 @@ def verify_proof(args, scenario, output):
         require(scenario == 'native-recovery', 'unknown qualification scenario')
         verify_native_recovery_proof(args, proof, fixture, package)
     cloud_root = Path(args.cloud_source).resolve(strict=True).parents[2]
-    inputs = (proof['workerdInputsSha256'] if scenario == 'three-session' else proof['cloudBundle']['inputs'])
+    input_summary = None
+    if scenario == 'three-session':
+        inputs, input_summary = canonical_workerd_inputs(proof, output)
+    else:
+        inputs = proof['cloudBundle']['inputs']
     require(isinstance(inputs, dict) and bool(inputs), 'missing cloud source hashes')
     for name, expected in inputs.items():
         if scenario == 'native-recovery':
@@ -164,8 +210,11 @@ def verify_proof(args, scenario, output):
         source = (cloud_root / name).resolve(strict=True)
         require(source.is_relative_to(cloud_root) or source.is_relative_to(fixture), 'unexpected cloud bundle input')
         require(sha(source) == expected, 'cloud bundle source mismatch')
-    return {'proofSha256': hashlib.sha256(raw).hexdigest(), 'scenario': scenario,
-            'semanticChecksPassed': True}
+    result = {'proofSha256': hashlib.sha256(raw).hexdigest(), 'scenario': scenario,
+              'semanticChecksPassed': True}
+    if input_summary is not None:
+        result.update(workerdInputsSha256=input_summary, workerdInputCount=len(inputs))
+    return result
 
 
 def verify_busy_attach(proof, evidence):
