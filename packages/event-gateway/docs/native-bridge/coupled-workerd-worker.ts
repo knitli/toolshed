@@ -56,16 +56,18 @@ export class FixtureCoordinator extends AgentCoordinator {
     return {...transport,signedDelivery:{body:await req.text(),headers:Object.fromEntries(req.headers)}};
   }
   async fixtureAdmission() {
+    await this.status();
     return Object.fromEntries(['runtimes','native_runtime_bindings'].map(t=>[t,this.ctx.storage.sql.exec(`SELECT * FROM ${t}`).toArray()]));
   }
   async fixtureAlarm() { await this.alarm(); }
   async fixtureRead() {
+    await this.status();
     const tables=['attempts','deliveries','native_claims','native_correlations','manual_sources','slot_intents','no_start_settlements'];
     return Object.fromEntries(tables.map(t=>[t,this.ctx.storage.sql.exec(`SELECT * FROM ${t}`).toArray()]));
   }
 }
 export class FixtureRegistry extends OwnerRegistry {
-  async fixtureRead() { return this.ctx.storage.sql.exec('SELECT * FROM slots').toArray(); }
+  async fixtureRead() { await this.status(); return this.ctx.storage.sql.exec('SELECT * FROM slots').toArray(); }
 }
 export default { async fetch(request:Request,env:FixtureEnv) {
   if (request.headers.get('x-fixture-secret')!==env.FIXTURE_SECRET) return new Response(null,{status:403});

@@ -15,6 +15,7 @@ export class AdmissionCoordinator extends AgentCoordinator {
     super(ctx,{...env,MESSAGE_AUTHORITY:authority as unknown as typeof env.MESSAGE_AUTHORITY});
   }
   async fixtureRead() {
+    await this.status();
     return Object.fromEntries(['runtimes','native_runtime_bindings','native_runtime_challenges'].map(table =>
       [table,this.ctx.storage.sql.exec(`SELECT * FROM ${table}`).toArray()]));
   }

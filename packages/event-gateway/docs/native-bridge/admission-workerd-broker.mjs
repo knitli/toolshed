@@ -10,7 +10,7 @@ const esbuildRequire=createRequire(join(process.env.FIXTURE_ESBUILD,'package.jso
 const miniflareRequire=createRequire(join(process.env.FIXTURE_MINIFLARE,'package.json'));
 const {build}=esbuildRequire('esbuild');
 const {Miniflare,convertV4MiniflareOptions}=miniflareRequire('miniflare');
-const bundle=await build({entryPoints:[new URL('./admission-workerd-worker.ts',import.meta.url).pathname],alias:{'fixture-event-runtime':process.env.FIXTURE_CLOUD_SOURCE},write:false,metafile:true,bundle:true,format:'esm',platform:'neutral',external:['cloudflare:workers'],logLevel:'warning'});
+const bundle=await build({entryPoints:[new URL('./admission-workerd-worker.ts',import.meta.url).pathname],alias:{'fixture-event-runtime':process.env.FIXTURE_CLOUD_SOURCE},write:false,metafile:true,bundle:true,format:'esm',platform:'neutral',external:['cloudflare:workers','node:crypto'],logLevel:'warning'});
 const sha256=bytes=>createHash('sha256').update(bytes).digest('hex');
 const bundleEvidence={sha256:sha256(bundle.outputFiles[0].contents),inputs:sourceHashes(Object.keys(bundle.metafile.inputs),[join(process.env.FIXTURE_CLOUD_SOURCE,'../../..'),fileURLToPath(new URL('.',import.meta.url))])};
 const secret=randomUUID();
