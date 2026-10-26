@@ -111,7 +111,8 @@ jobs:
           (allow network* (local unix-socket) (remote unix-socket))
           PROFILE
           set -o pipefail
-          RUST_TOOLCHAIN_BIN_DIR="$(dirname "$(rustup which cargo)")"
+          RUSTUP_MANAGER_BIN_DIR="$(dirname "$(command -v rustup)")"
+          RUST_TOOLCHAIN_BIN_DIR="$(dirname "$(rustup which --toolchain 1.95.0 cargo)")"
           case "$("$RUST_TOOLCHAIN_BIN_DIR/cargo" --version)" in
             "cargo 1.95.0 "*) ;;
             *) echo "expected pinned Cargo 1.95.0 in $RUST_TOOLCHAIN_BIN_DIR" >&2; exit 1 ;;
@@ -119,8 +120,8 @@ jobs:
           if gtimeout --signal=TERM --kill-after=1m 90m \
             /usr/bin/sandbox-exec -f "$RUNNER_TEMP/native-workspace-loopback.sb" \
             /usr/bin/env -i \
-            PATH="$RUST_TOOLCHAIN_BIN_DIR:$CARGO_HOME/bin:/opt/homebrew/bin:/usr/bin:/bin" \
-            HOME="$NATIVE_WORKSPACE_HOME" TMPDIR="$RUNNER_TEMP" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
+            PATH="$RUST_TOOLCHAIN_BIN_DIR:$CARGO_HOME/bin:$RUSTUP_MANAGER_BIN_DIR:/opt/homebrew/bin:/usr/bin:/bin" \
+            HOME="$NATIVE_WORKSPACE_HOME" TMPDIR="$RUNNER_TEMP" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" RUSTUP_TOOLCHAIN=1.95.0 \
             CARGO_NET_OFFLINE=true RUST_MIN_STACK=8388608 NEXTEST_PROFILE=local \
             RUSTY_V8_ARCHIVE="$RUNNER_TEMP/native-workspace-source/rusty-v8.a.gz" \
             RUSTY_V8_SRC_BINDING_PATH="$RUNNER_TEMP/native-workspace-source/rusty-v8-binding.rs" \
