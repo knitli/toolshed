@@ -112,8 +112,9 @@ jobs:
           PROFILE
           set -o pipefail
           RUSTUP_MANAGER_BIN_DIR="$(dirname "$(command -v rustup)")"
-          RUST_TOOLCHAIN_BIN_DIR="$(dirname "$(rustup which --toolchain 1.95.0 cargo)")"
-          case "$("$RUST_TOOLCHAIN_BIN_DIR/cargo" --version)" in
+          RUST_TOOLCHAIN_CARGO="$(rustup which --toolchain 1.95.0 cargo)"
+          RUST_TOOLCHAIN_BIN_DIR="$(dirname "$RUST_TOOLCHAIN_CARGO")"
+          case "$("$RUST_TOOLCHAIN_CARGO" --version)" in
             "cargo 1.95.0 "*) ;;
             *) echo "expected pinned Cargo 1.95.0 in $RUST_TOOLCHAIN_BIN_DIR" >&2; exit 1 ;;
           esac
