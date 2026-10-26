@@ -1,0 +1,168 @@
+name: Event Native Workspace Qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: event-native-workspace
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    if: github.repository_id == '1200860702' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      RUST_MIN_STACK: 8388608
+      NEXTEST_PROFILE: local
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.15"
+          python-version: "3.13.14"
+      - name: Prepare isolated toolchain and native dependencies
+        id: setup
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          test "$RUNNER_ARCH" = ARM64
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          export CARGO_HOME="$RUNNER_TEMP/native-workspace-cargo"
+          export RUSTUP_HOME="$RUNNER_TEMP/native-workspace-rustup"
+          export NATIVE_WORKSPACE_HOME="$RUNNER_TEMP/native-workspace-home"
+          {
+            printf 'CARGO_HOME=%s\n' "$CARGO_HOME"
+            printf 'RUSTUP_HOME=%s\n' "$RUSTUP_HOME"
+            printf 'NATIVE_WORKSPACE_HOME=%s\n' "$NATIVE_WORKSPACE_HOME"
+          } >> "$GITHUB_ENV"
+          mkdir -m 700 -p "$CARGO_HOME" "$RUSTUP_HOME" "$NATIVE_WORKSPACE_HOME"
+          export PATH="$CARGO_HOME/bin:$PATH"
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          rustup toolchain install 1.95.0 --profile minimal --no-self-update
+          rustup default 1.95.0
+          brew install glib pkg-config just coreutils
+          cargo install cargo-nextest --locked --version 0.9.128
+          printf 'rustc: %s\ncargo: %s\njust: %s\nnextest: %s\nglib: %s\npkg-config: %s\ntimeout: %s\n' \
+            "$(rustc --version)" "$(cargo --version)" "$(just --version)" \
+            "$(cargo nextest --version)" "$(brew list --versions glib)" \
+            "$(pkg-config --modversion glib-2.0)" "$(gtimeout --version | head -1)" >> "$GITHUB_STEP_SUMMARY"
+          git init "$RUNNER_TEMP/native-upstream"
+          git -C "$RUNNER_TEMP/native-upstream" remote add origin https://github.com/openai/codex.git
+          git -C "$RUNNER_TEMP/native-upstream" fetch --depth=1 origin a956835d020762cb2b570053af06f643a11c0ecc
+          git -C "$RUNNER_TEMP/native-upstream" checkout --detach FETCH_HEAD
+      - name: Replay registered source and pinned Rusty V8 inputs
+        id: replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.13.14 python packages/event-gateway/scripts/native_workspace_qualification.py \
+            --source "$RUNNER_TEMP/native-upstream" \
+            --output "$RUNNER_TEMP/native-workspace-source"
+          cat "$RUNNER_TEMP/native-workspace-source/qualification.json" >> "$GITHUB_STEP_SUMMARY"
+          cp "$RUNNER_TEMP/native-workspace-source/codex-rs/Cargo.lock" "$RUNNER_TEMP/native-workspace-initial.lock"
+      - name: Prime exact workspace lock and dependencies
+        id: deps
+        shell: bash
+        working-directory: ${{ runner.temp }}/native-workspace-source/codex-rs
+        run: |
+          set -euo pipefail
+          cargo metadata --format-version 1 > "$RUNNER_TEMP/native-workspace-metadata.json"
+          uv run --no-project --python 3.13.14 python - "$RUNNER_TEMP/native-workspace-initial.lock" Cargo.lock "$GITHUB_WORKSPACE/packages/event-gateway/scripts" <<'PY'
+          import hashlib, pathlib, sys, tomllib
+          sys.path.insert(0, sys.argv[3])
+          import package_native_client as builder
+          before = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
+          after_bytes = pathlib.Path(sys.argv[2]).read_bytes()
+          changes = builder.lock_version_changes(before, tomllib.loads(after_bytes.decode()))
+          if changes != 159:
+              raise SystemExit(f"unexpected pinned local lock normalization: {changes}")
+          import os
+          normalized_path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "native-workspace-normalized.lock"
+          normalized_path.write_bytes(after_bytes)
+          print(f"Pinned local Cargo.lock changes: {changes}\nNormalized Cargo.lock SHA-256: {hashlib.sha256(after_bytes).hexdigest()}")
+          PY
+          cargo fetch --locked
+          cmp Cargo.lock "$RUNNER_TEMP/native-workspace-normalized.lock"
+      - name: Run full Rust workspace tests offline
+        id: tests
+        continue-on-error: true
+        shell: bash
+        working-directory: ${{ runner.temp }}/native-workspace-source/codex-rs
+        env:
+          CARGO_NET_OFFLINE: "true"
+          RUSTY_V8_ARCHIVE: ${{ runner.temp }}/native-workspace-source/rusty-v8.a.gz
+          RUSTY_V8_SRC_BINDING_PATH: ${{ runner.temp }}/native-workspace-source/rusty-v8-binding.rs
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/native-workspace-loopback.sb" <<'PROFILE'
+          (version 1)
+          (allow default)
+          (deny network*)
+          (allow network-inbound (local ip "localhost:*"))
+          (allow network-outbound (remote ip "localhost:*"))
+          (allow network* (local unix-socket) (remote unix-socket))
+          PROFILE
+          set -o pipefail
+          RUSTUP_BIN_DIR="$(dirname "$(command -v rustup)")"
+          if gtimeout --signal=TERM --kill-after=1m 90m \
+            /usr/bin/sandbox-exec -f "$RUNNER_TEMP/native-workspace-loopback.sb" \
+            /usr/bin/env -i \
+            PATH="$CARGO_HOME/bin:$RUSTUP_BIN_DIR:/opt/homebrew/bin:/usr/bin:/bin" \
+            HOME="$NATIVE_WORKSPACE_HOME" TMPDIR="$RUNNER_TEMP" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
+            CARGO_NET_OFFLINE=true RUST_MIN_STACK=8388608 NEXTEST_PROFILE=local \
+            RUSTY_V8_ARCHIVE="$RUNNER_TEMP/native-workspace-source/rusty-v8.a.gz" \
+            RUSTY_V8_SRC_BINDING_PATH="$RUNNER_TEMP/native-workspace-source/rusty-v8-binding.rs" \
+            just test --cargo-profile dev-small 2>&1 | tee "$RUNNER_TEMP/native-workspace-test.log"; then
+            test_status=0
+          else
+            test_status=$?
+          fi
+          cmp Cargo.lock "$RUNNER_TEMP/native-workspace-normalized.lock"
+          exit "$test_status"
+      - name: Record qualification outcome and tool failure details
+        if: always()
+        shell: bash
+        env:
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          REPLAY_OUTCOME: ${{ steps.replay.outcome }}
+          DEPS_OUTCOME: ${{ steps.deps.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            printf '## Full native Rust workspace qualification\n\nSetup: `%s`; source replay: `%s`; dependency prime: `%s`; tests: `%s`.\n\n' \
+              "$SETUP_OUTCOME" "$REPLAY_OUTCOME" "$DEPS_OUTCOME" "$TEST_OUTCOME"
+            printf 'Command: `just test --cargo-profile dev-small`\n\n'
+            printf 'Test log SHA-256: `%s`\n' "$(shasum -a 256 "$RUNNER_TEMP/native-workspace-test.log" 2>/dev/null | awk '{print $1}' || true)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf '{"kind":"native-workspace-run-result","setup":"%s","sourceReplay":"%s","dependencyPrime":"%s","tests":"%s"}\n' \
+            "$SETUP_OUTCOME" "$REPLAY_OUTCOME" "$DEPS_OUTCOME" "$TEST_OUTCOME" \
+            > "$RUNNER_TEMP/native-workspace-run-result.json"
+      - name: Upload full workspace qualification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-workspace-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/native-workspace-source/qualification.json
+            ${{ runner.temp }}/native-workspace-test.log
+            ${{ runner.temp }}/native-workspace-metadata.json
+            ${{ runner.temp }}/native-workspace-initial.lock
+            ${{ runner.temp }}/native-workspace-normalized.lock
+            ${{ runner.temp }}/native-workspace-run-result.json
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Fail if tests or required setup failed
+        if: always()
+        shell: bash
+        env:
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+        run: test "$TEST_OUTCOME" = success
