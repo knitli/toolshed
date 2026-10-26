@@ -5,6 +5,8 @@ for the Event Runtime. **Automatic wake is disabled by default.** An explicit
 private dispatch configuration enables local delivery through an admitted,
 launcher-owned session. Production release still requires live qualification.
 
+**Candidate held for qualification:** the [2026-10-25 native pair](docs/native-bridge/native-candidate-20261025.md) is not promoted or approved for owner installation.
+
 Owner decision, 2026-10-05: build the foundation and investigate Codex bridges
 with a separate agent. Do not infer a live client's selected thread from a PID,
 working directory, loaded thread, or session-tree ID.

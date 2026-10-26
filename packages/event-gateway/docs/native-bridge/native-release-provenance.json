@@ -1,11 +1,16 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "repositoryId": 1200860702,
-  "runId": 38273438173,
+  "runId": 40245269530,
   "runAttempt": 1,
-  "headSha": "7ff224a1fc8a9923e33aeafbd66cfa65efdc8bea",
-  "artifactId": 11758567975,
-  "artifactSha256": "6c84263897f36f40d78513b4710be8d2cd13120175d087ca83f98117be2a4b13",
-  "binarySha256": "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b",
-  "codeModeHostSha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a"
+  "headSha": "378a017bcc2c53bb198ff555727c52e046037f94",
+  "artifactId": 12619145586,
+  "artifactSha256": "990c03c664cb795b4c26b358dc49ac2b8b43045ac22f40751ba6e9fe8b8a2510",
+  "binarySha256": "d1758a403e2066209e01f2c250cb58a50ab9636383f5cdee87a41a6d4463d993",
+  "codeModeHostSha256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
+  "recipe": {
+    "family": "core-idle-v1",
+    "manifestSha256": "8c6f136f215deb4dca30b4d230eede5eaf8e65c1850635b199b62457a7759924",
+    "revision": 1
+  }
 }

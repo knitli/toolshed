@@ -584,7 +584,8 @@ class LauncherTests(unittest.TestCase):
                     launcher.qualified_binary(binary, digest)
 
     def test_promoted_digest_requires_both_reviewed_pin_and_opened_binary_hash(self):
-        promoted = "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b"
+        promoted = "d1758a403e2066209e01f2c250cb58a50ab9636383f5cdee87a41a6d4463d993"
+        previous_main = "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b"
         previous_candidate = "62eac2a58bdac388850948aa82bf341c376e8653010d628de12ba642a2e343a3"
         superseded = "362074bba4d43bbcc7e1e4162f67f8439106ef388670899309effd75cca65f27"
         unqualified_v2 = "9888c1f1631fee081d797189ea4c18809ce3fcac6c44cef4af291da1e263ae78"
@@ -597,6 +598,9 @@ class LauncherTests(unittest.TestCase):
             companion.write_bytes(b"host fixture")
             companion.chmod(0o700)
             for supplied, actual, error in (
+                (previous_main, previous_main, "unqualified_native_binary"),
+                (previous_main, promoted, "unqualified_native_binary"),
+                (promoted, previous_main, "native_binary_hash_mismatch"),
                 (previous_candidate, previous_candidate, "unqualified_native_binary"),
                 (previous_candidate, promoted, "unqualified_native_binary"),
                 (promoted, previous_candidate, "native_binary_hash_mismatch"),

@@ -299,7 +299,7 @@ class NativeRecipeRegistryTests(unittest.TestCase):
                 and isinstance(node.targets[0], ast.Name) and node.targets[0].id in {
                     "QUALIFIED_SHA256", "QUALIFIED_CODE_MODE_HOST_SHA256"}}
         self.assertEqual(pins, {
-            "QUALIFIED_SHA256": "763e5e2b574f60b766d0d1b73b74ecc32d09d46479afe24e164299ca3633717b",
+            "QUALIFIED_SHA256": "d1758a403e2066209e01f2c250cb58a50ab9636383f5cdee87a41a6d4463d993",
             "QUALIFIED_CODE_MODE_HOST_SHA256": "679eedaea70529aa1cffc9bc0a0788c186412663544fa76c09d63b57f383a65a",
         })
 

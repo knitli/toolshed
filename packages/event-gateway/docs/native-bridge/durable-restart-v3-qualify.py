@@ -30,9 +30,9 @@ def require(condition, message=None):
 
 
 SOURCE = Path(os.environ['EVENT_NATIVE_QUALIFIER']).resolve(strict=True)
-SOURCE_SHA = 'e4068916c0739657186b8be34d087714ad9a544642dc8921a9c502ca1ab9ac11'
+SOURCE_SHA = 'ebf1fed24edf631f5598079d00a21ccb6c956aa72df9dbdd8308f2434dd62580'
 require(hashlib.sha256(SOURCE.read_bytes()).hexdigest() == SOURCE_SHA)
-INSTALLED_SHA = '25e7221ab4b8b378d2f7378b7e4b7f85b0ccf1f8f286b0385c88f4fee23fbf9e'
+INSTALLED_SHA = 'b718e6e48e1031a79a3900294b4cd62f1a11b373edd5ff10ceae919131c275d1'
 DISTRIBUTION = importlib.metadata.distribution('knitli-event-gateway')
 require(any(str(file) == 'event_gateway/native.py' for file in DISTRIBUTION.files or ()))
 INSTALLED = Path(DISTRIBUTION.locate_file('event_gateway/native.py')).resolve(strict=True)
@@ -43,7 +43,7 @@ require(any(str(file) == 'event_gateway/__init__.py' for file in DISTRIBUTION.fi
 require(PACKAGE_INIT == Path(DISTRIBUTION.locate_file('event_gateway/__init__.py')).resolve(strict=True))
 require(hashlib.sha256(PACKAGE_INIT.read_bytes()).hexdigest() == PACKAGE_INIT_SHA)
 READER = INSTALLED.with_name('native_reader.py')
-READER_SHA = '7ee1925d3334382199159525dc9e066edef2d9a7910621143f61b0b808166c7a'
+READER_SHA = '7835194727b43a9b3a0a5c5fa62d093c022a4da09849862d6f5f74bd61f68bdc'
 require(any(str(file) == 'event_gateway/native_reader.py' for file in DISTRIBUTION.files or ()))
 require(READER == Path(DISTRIBUTION.locate_file('event_gateway/native_reader.py')).resolve(strict=True))
 require(hashlib.sha256(READER.read_bytes()).hexdigest() == READER_SHA)
