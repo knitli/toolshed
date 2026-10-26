@@ -48,12 +48,23 @@ jobs:
           echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
           rustup toolchain install 1.95.0 --profile minimal --no-self-update
           rustup default 1.95.0
-          brew install glib pkg-config just coreutils
+          brew install glib gstreamer pkg-config just coreutils
+          pkg-config --print-errors --exists \
+            glib-2.0 gobject-2.0 \
+            'gstreamer-1.0 >= 1.28' \
+            'gstreamer-base-1.0 >= 1.28' \
+            'gstreamer-app-1.0 >= 1.28' \
+            'gstreamer-audio-1.0 >= 1.28'
+          printf 'pkg-config modules:\n' >> "$GITHUB_STEP_SUMMARY"
+          for module in gstreamer-1.0 gstreamer-base-1.0 gstreamer-app-1.0 gstreamer-audio-1.0; do
+            printf '%s: %s\n' "$module" "$(pkg-config --modversion "$module")" >> "$GITHUB_STEP_SUMMARY"
+          done
           cargo install cargo-nextest --locked --version 0.9.128
-          printf 'rustc: %s\ncargo: %s\njust: %s\nnextest: %s\nglib: %s\npkg-config: %s\ntimeout: %s\n' \
+          printf 'rustc: %s\ncargo: %s\njust: %s\nnextest: %s\nglib: %s\ngobject: %s\npkg-config: %s\ntimeout: %s\n' \
             "$(rustc --version)" "$(cargo --version)" "$(just --version)" \
-            "$(cargo nextest --version)" "$(brew list --versions glib)" \
-            "$(pkg-config --modversion glib-2.0)" "$(gtimeout --version | head -1)" >> "$GITHUB_STEP_SUMMARY"
+            "$(cargo nextest --version)" "$(pkg-config --modversion glib-2.0)" \
+            "$(pkg-config --modversion gobject-2.0)" \
+            "$(pkg-config --version)" "$(gtimeout --version | head -1)" >> "$GITHUB_STEP_SUMMARY"
           git init "$RUNNER_TEMP/native-upstream"
           git -C "$RUNNER_TEMP/native-upstream" remote add origin https://github.com/openai/codex.git
           git -C "$RUNNER_TEMP/native-upstream" fetch --depth=1 origin a956835d020762cb2b570053af06f643a11c0ecc
