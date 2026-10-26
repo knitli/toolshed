@@ -119,7 +119,7 @@ jobs:
           if gtimeout --signal=TERM --kill-after=1m 90m \
             /usr/bin/sandbox-exec -f "$RUNNER_TEMP/native-workspace-loopback.sb" \
             /usr/bin/env -i \
-            PATH="$CARGO_HOME/bin:$RUST_TOOLCHAIN_BIN_DIR:/opt/homebrew/bin:/usr/bin:/bin" \
+            PATH="$RUST_TOOLCHAIN_BIN_DIR:$CARGO_HOME/bin:/opt/homebrew/bin:/usr/bin:/bin" \
             HOME="$NATIVE_WORKSPACE_HOME" TMPDIR="$RUNNER_TEMP" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
             CARGO_NET_OFFLINE=true RUST_MIN_STACK=8388608 NEXTEST_PROFILE=local \
             RUSTY_V8_ARCHIVE="$RUNNER_TEMP/native-workspace-source/rusty-v8.a.gz" \
