@@ -180,6 +180,12 @@ uses them. Any ALLOW entry with a mutating permission rejects the path; DENY ent
 access. ACL inspection errors fail closed. The host must provide Apple's
 `libSystem.B.dylib` ACL APIs used for this check.
 
+The evidence directory also requires a protected, symlink-free ancestor chain,
+a current-user-owned mode-0700 leaf, and no mutating Darwin ALLOW ACL. The CLI
+uses the status and SHA-256 of the exact manifest bytes generated and published
+by the controller, including any tainted size-limit fallback. It does not
+reopen the caller's evidence path to decide success.
+
 The controller hashes the installed Tart binary and the actual base files,
 checks capacity, clones to a random local VM name, starts only that clone with
 the inherited `--net-fd` socket, runs the fixed guest script, and attempts to

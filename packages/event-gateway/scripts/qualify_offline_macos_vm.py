@@ -90,19 +90,19 @@ def _sha256(data):
 
 def _safe_dir(path, *, empty=False):
     try:
-        path = Path(path).absolute()
-        if path.is_symlink():
-            raise CanaryError("unsafe_evidence_directory")
-        path = path.resolve(strict=True)
+        path = _qualified_tart_path(path)
         info = path.stat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
             raise CanaryError("unsafe_evidence_directory")
+        _check_tart_acl(path)
         if empty and any(path.iterdir()):
             raise CanaryError("evidence_directory_not_empty")
-    except CanaryError:
-        raise
+    except CanaryError as exc:
+        if exc.args and exc.args[0] == "evidence_directory_not_empty":
+            raise
+        raise CanaryError("unsafe_evidence_directory") from None
     except (OSError, RuntimeError):
-        raise CanaryError("unsafe_evidence_directory")
+        raise CanaryError("unsafe_evidence_directory") from None
     return path
 
 
@@ -746,11 +746,12 @@ def _write_result_manifest(evidence, result):
         os.fsync(evidence_fd)
     finally:
         os.close(evidence_fd)
+    return {"kind": result["kind"], "status": result["status"], "resultSha256": _sha256(raw)}
 
 
 def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart", clock=time.monotonic,
             popen=subprocess.Popen, run_bounded=_run_bounded, tart_home=None):
-    """Clone one local prepared VM, run the fixed canary, and delete only that clone."""
+    """Run one owned clone and return its published summary after cleanup."""
     if not BASE_NAME.fullmatch(base_vm) or "://" in base_vm:
         raise CanaryError("base_vm_must_be_local_name")
     receipt = _read_receipt(receipt_path)
@@ -992,9 +993,10 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 result["hostCommandTemplates"].append([str(tart_path), "delete", clone])
             result["vmStop"] = stop_outcome
             result["frameCounters"] = {**counters, "hostTransmitted": 0}
-            _write_result_manifest(evidence, result)
+            summary = _write_result_manifest(evidence, result)
         finally:
             _restore_termination_handlers(saved_signal_handlers)
+    return summary
 
 
 def main(argv=None):
@@ -1007,17 +1009,15 @@ def main(argv=None):
                         help="private Tart home (defaults to TART_HOME, then ~/.tart)")
     args = parser.parse_args(argv)
     try:
-        qualify(args.base_vm, args.receipt, args.evidence_dir, tart=str(args.tart), tart_home=args.tart_home)
+        summary = qualify(args.base_vm, args.receipt, args.evidence_dir, tart=str(args.tart), tart_home=args.tart_home)
     except CanaryError as exc:
         print(str(exc), file=sys.stderr)
         return 1
     except OSError:
         print("filesystem_operation_failed", file=sys.stderr)
         return 1
-    result = json.loads((args.evidence_dir / "offline-macos-vm-canary.json").read_text())
-    print(json.dumps({"kind": result["kind"], "status": result["status"],
-                      "resultSha256": _sha256((args.evidence_dir / "offline-macos-vm-canary.json").read_bytes())}, separators=(",", ":")))
-    return 0 if result["status"] == "passed" else 1
+    print(json.dumps(summary, separators=(",", ":")))
+    return 0 if summary["status"] == "passed" else 1
 
 
 if __name__ == "__main__":

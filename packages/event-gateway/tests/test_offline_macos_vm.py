@@ -1,7 +1,7 @@
 """Unit and causal tests for the fixed offline Tart canary."""
 
 import ast
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 from io import StringIO
 import json
@@ -261,6 +261,15 @@ raise SystemExit(2)
         with patch.object(canary, "TART_BINARY_SHA256", canary._sha256(self.tart.read_bytes())):
             return canary.qualify(base_vm, self.receipt_path, self.evidence,
                                   tart=str(self.tart), tart_home=self.tart_home)
+
+    def _assert_published_summary(self, summary, evidence=None):
+        manifest = (evidence or self.evidence) / "offline-macos-vm-canary.json"
+        raw = manifest.read_bytes()
+        saved = json.loads(raw)
+        expected = {"kind": saved["kind"], "status": saved["status"],
+                    "resultSha256": canary._sha256(raw)}
+        self.assertEqual(summary, expected)
+        return saved
 
     def test_missing_paths_return_stable_codes_without_disclosing_paths(self):
         missing_receipt = self.root / "private-receipt-not-found.json"
@@ -596,8 +605,7 @@ raise SystemExit(2)
         self._write_fake_tart(frames="both", readiness={"failures": 2})
         self._write_receipt()
         result = self._run()
-        self.assertEqual(result, None)
-        saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+        saved = self._assert_published_summary(result)
         self.assertEqual(saved["status"], "passed")
         self.assertEqual(saved["frames"]["hostReceived"], 2)
         self.assertEqual(saved["frames"]["hostTransmitted"], 0)
@@ -628,8 +636,8 @@ raise SystemExit(2)
     def test_readiness_probe_timeout_retries_within_budget(self):
         self._write_fake_tart(frames="both", readiness={"delay_first": 1.0})
         self._write_receipt()
-        self.assertIsNone(self._run(probe_timeout=0.5))
-        saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+        summary = self._run(probe_timeout=0.5)
+        saved = self._assert_published_summary(summary)
         self.assertEqual(saved["status"], "passed")
         self.assertEqual(saved["readinessProbe"]["attempts"], 2)
         self.assertEqual(saved["hostCommandTemplates"].count(saved["readinessProbe"]["argv"]), 1)
@@ -638,8 +646,9 @@ raise SystemExit(2)
         self._write_fake_tart(frames="both")
         self._write_receipt()
         with patch.object(canary, "GUEST_CANARY", canary.GUEST_CANARY + "\n# " + "x" * 70_000):
-            self._run()
-        saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+            summary = self._run()
+        saved = self._assert_published_summary(summary)
+        self.assertEqual(summary["status"], "tainted")
         self.assertEqual(saved["status"], "tainted")
         self.assertEqual(saved["error"], "result_too_large")
         self.assertIn("result_too_large", saved["cleanupErrors"])
@@ -991,6 +1000,10 @@ raise SystemExit(2)
             with self.subTest(target=target.relative_to(self.root)):
                 try:
                     _set_macos_acl(target, "+a", "everyone allow write")
+                    if target == self.root:
+                        with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_acl"):
+                            canary._safe_tart_home(self.tart_home)
+                        continue
                     with patch.object(canary, "TART_BINARY_SHA256", self.receipt["tartBinarySha256"]), \
                             patch.object(canary, "_tart_identity", return_value=self.tart) as tart_identity:
                         run = unittest.mock.Mock(side_effect=canary.CanaryError("clone_reached"))
@@ -1142,6 +1155,127 @@ raise SystemExit(2)
         (self.evidence / "existing").write_text("preserve")
         with self.assertRaisesRegex(canary.CanaryError, "evidence_directory_not_empty"):
             self.qualify()
+
+    def test_evidence_directory_rejects_writable_ancestor_before_tart(self):
+        parent = self.root / "evidence-writable-parent"
+        parent.mkdir(mode=0o700)
+        evidence = parent / "private-evidence"
+        evidence.mkdir(mode=0o700)
+        os.chmod(parent, 0o777)  # nosec B103 -- lower-UID writable parent must be rejected.
+        foreign_uid = 1 if os.getuid() != 1 else 2
+        real_lstat = os.lstat
+
+        def fake_parent_owner(path):
+            info = real_lstat(path)
+            if Path(path) == parent:
+                return _stat_with_uid(info, foreign_uid)
+            return info
+
+        with patch.object(canary.os, "lstat", side_effect=fake_parent_owner), \
+                patch.object(canary, "TART_BINARY_SHA256", self.receipt["tartBinarySha256"]), \
+                patch.object(canary, "_tart_identity") as tart_identity, \
+                patch.object(canary, "_base_vm_measurement",
+                             side_effect=canary.CanaryError("base_measurement_reached")) as measurement:
+            run = unittest.mock.Mock()
+            with self.assertRaisesRegex(canary.CanaryError, "unsafe_evidence_directory"):
+                canary.qualify("prepared-macos15", self.receipt_path, evidence,
+                               tart=str(self.tart), tart_home=self.tart_home, run_bounded=run)
+            tart_identity.assert_not_called()
+            measurement.assert_not_called()
+            run.assert_not_called()
+
+    def test_evidence_directory_rejects_symlink_ancestor_before_tart(self):
+        real_parent = self.root / "real-evidence-parent"
+        real_parent.mkdir(mode=0o700)
+        evidence = real_parent / "private-evidence"
+        evidence.mkdir(mode=0o700)
+        alias = self.root / "evidence-parent-alias"
+        alias.symlink_to(real_parent, target_is_directory=True)
+        requested = alias / "private-evidence"
+        with patch.object(canary, "TART_BINARY_SHA256", self.receipt["tartBinarySha256"]), \
+                patch.object(canary, "_tart_identity") as tart_identity, \
+                patch.object(canary, "_base_vm_measurement",
+                             side_effect=canary.CanaryError("base_measurement_reached")) as measurement:
+            run = unittest.mock.Mock()
+            with self.assertRaisesRegex(canary.CanaryError, "unsafe_evidence_directory"):
+                canary.qualify("prepared-macos15", self.receipt_path, requested,
+                               tart=str(self.tart), tart_home=self.tart_home, run_bounded=run)
+            tart_identity.assert_not_called()
+            measurement.assert_not_called()
+            run.assert_not_called()
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS extended ACLs")
+    def test_macos_evidence_path_write_acls_reject_before_tart(self):
+        for target in (self.root, self.evidence):
+            with self.subTest(target=target.name):
+                try:
+                    _set_macos_acl(target, "+a", "everyone allow write")
+                    with patch.object(canary, "TART_BINARY_SHA256", self.receipt["tartBinarySha256"]), \
+                            patch.object(canary, "_tart_identity") as tart_identity, \
+                            patch.object(canary, "_base_vm_measurement",
+                                         side_effect=canary.CanaryError("base_measurement_reached")) as measurement:
+                        run = unittest.mock.Mock()
+                        with self.assertRaisesRegex(canary.CanaryError, "unsafe_evidence_directory"):
+                            canary.qualify("prepared-macos15", self.receipt_path, self.evidence,
+                                           tart=str(self.tart), tart_home=self.tart_home,
+                                           run_bounded=run)
+                        tart_identity.assert_not_called()
+                        measurement.assert_not_called()
+                        run.assert_not_called()
+                finally:
+                    _set_macos_acl(target, "-N")
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS extended ACLs")
+    def test_macos_evidence_read_allow_and_deny_write_acls_are_accepted(self):
+        try:
+            _set_macos_acl(self.root, "+a", "everyone deny write")
+            _set_macos_acl(self.evidence, "+a", "everyone allow read")
+            self.assertEqual(canary._safe_dir(self.evidence, empty=True), self.evidence.resolve())
+        finally:
+            _set_macos_acl(self.root, "-N")
+            _set_macos_acl(self.evidence, "-N")
+
+    def test_main_uses_qualify_summary_after_manifest_is_replaced(self):
+        self._write_fake_tart(frames="both", fail_delete=True)
+        self._write_receipt()
+        evidence = self.root / "main-evidence"
+        evidence.mkdir(mode=0o700)
+        real_qualify = canary.qualify
+        returned = {}
+
+        def qualify_then_replace_manifest(*args, **kwargs):
+            summary = real_qualify(*args, **kwargs)
+            manifest = Path(args[2]) / "offline-macos-vm-canary.json"
+            published_raw = manifest.read_bytes()
+            returned["summary"] = summary
+            returned["publishedRaw"] = published_raw
+            forged = {"kind": "offline-macos-vm-boundary-canary-v1", "status": "passed"}
+            manifest.write_bytes(json.dumps(forged, sort_keys=True, separators=(",", ":")).encode() + b"\n")
+            return summary
+
+        class FixedUuid:
+            hex = "c" * 32
+
+        output = StringIO()
+        with patch.object(canary, "TART_BINARY_SHA256", canary._sha256(self.tart.read_bytes())), \
+                patch.object(canary, "qualify", side_effect=qualify_then_replace_manifest), \
+                patch.object(canary.uuid, "uuid4", return_value=FixedUuid()), \
+                redirect_stdout(output):
+            exit_code = canary.main([
+                "--base-vm", "prepared-macos15", "--receipt", str(self.receipt_path),
+                "--evidence-dir", str(evidence), "--tart", str(self.tart),
+                "--tart-home", str(self.tart_home),
+            ])
+
+        raw = returned["publishedRaw"]
+        expected = {"kind": "offline-macos-vm-boundary-canary-v1", "status": "tainted",
+                    "resultSha256": canary._sha256(raw)}
+        self.assertEqual(returned["summary"], expected)
+        self.assertEqual(json.loads(raw)["status"], "tainted")
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(output.getvalue(), json.dumps(expected, separators=(",", ":")) + "\n")
+        forged = json.loads((evidence / "offline-macos-vm-canary.json").read_text())
+        self.assertEqual(forged["status"], "passed")
 
 
 if __name__ == "__main__":
