@@ -3,7 +3,8 @@ from contextlib import ExitStack
 import json
 import os
 import shutil
-import subprocess
+import stat
+import subprocess  # nosec B404 - Fixed interpreter and owned temporary child; no shell.
 import sys
 import tempfile
 import unittest
@@ -60,7 +61,7 @@ class StageFixture(unittest.TestCase):
             receipt = {"upstreamCommit": builder.UPSTREAM_COMMIT, "recipe": self.recipe_identity,
                        "v8Assets": {"archive": {"sha256": "c" * 64}}}
             (staged / "qualification.json").write_text(json.dumps(receipt) + "\n")
-            (codex / "Cargo.lock").write_bytes(self.lock_before)
+            (codex / "Cargo.lock").write_bytes(self.lock_for_stage_before)
             if self.malicious_config:
                 config = codex / ".cargo/config.toml"
                 config.parent.mkdir()
@@ -68,7 +69,7 @@ class StageFixture(unittest.TestCase):
         elif "metadata" in command:
             offline = "--offline" in command
             if not offline:
-                (Path(cwd) / "Cargo.lock").write_bytes(self.lock_after)
+                (Path(cwd) / "Cargo.lock").write_bytes(self.lock_for_stage_after)
             graph = dict(self.graph)
             if offline and self.graph_drift:
                 graph["packages"] = ["different"]
@@ -82,10 +83,13 @@ class StageFixture(unittest.TestCase):
         return b"", b""
 
     def setup_stage(self, *, lock_drift_at=None, graph_drift=False, malicious_config=False,
-                    source_inventory_drift=False):
+                    source_inventory_drift=False, lock_normalization_deviation=None):
         self.lock_drift_at = lock_drift_at
         self.graph_drift = graph_drift
         self.malicious_config = malicious_config
+        self.lock_for_stage_before, self.lock_for_stage_after = self.lock_fixture(
+            lock_normalization_deviation,
+        )
         self.bounded_calls = []
         self.patchers = [
             patch.object(staging.canary, "_run_bounded", side_effect=self.fake_bounded),
@@ -93,7 +97,8 @@ class StageFixture(unittest.TestCase):
             patch.object(staging.platform, "mac_ver", return_value=("15.6", ("", "", ""), "")),
             patch.object(staging.platform, "machine", return_value="arm64"),
             patch.dict(os.environ, {"CARGO_HOME": str(self.cargo), "RUSTUP_HOME": str(self.rustup),
-                                    "HTTP_PROXY": "http://ambient.invalid", "AWS_SECRET_ACCESS_KEY": "ambient"}),
+                                    "HTTP_PROXY": "http://ambient.invalid",
+                                    "AWS_SECRET_ACCESS_KEY": str(self.root)}),
             patch.object(builder, "_toolchain", return_value=(
                 ["rustup", "run", "1.95.0"], "rustc 1.95.0", "cargo 1.95.0",
                 {"rustup": {"path": "/tools/rustup"}, "rustc": {}, "cargo": {}})),
@@ -115,6 +120,30 @@ class StageFixture(unittest.TestCase):
             item.start()
             self.addCleanup(item.stop)
 
+    def lock_fixture(self, deviation):
+        before, after = self.lock_before, self.lock_after
+        if deviation == "count-158":
+            after = after.rsplit(b'version = "0.160.0"', 1)[0] + b'version = "0.0.0"' + after.rsplit(
+                b'version = "0.160.0"', 1)[1]
+        elif deviation == "added-package":
+            after += b'[[package]]\nname = "unexpected"\nversion = "1.0.0"\n'
+        elif deviation == "removed-package":
+            after = after.rsplit(b"[[package]]", 1)[0]
+        elif deviation == "changed-name":
+            after = after.replace(b'name = "local-0"', b'name = "renamed-local-0"', 1)
+        elif deviation in {"external-version", "external-checksum"}:
+            external = (b'[[package]]\nname = "external"\nversion = "1.0.0"\n'
+                        b'source = "registry+https://example.invalid/index"\n'
+                        b'checksum = "' + b"a" * 64 + b'"\n')
+            before += external
+            after += external
+            if deviation == "external-version":
+                after = after.replace(b'version = "1.0.0"', b'version = "1.0.1"', 1)
+            else:
+                after = after.replace(b'checksum = "' + b"a" * 64 + b'"',
+                                      b'checksum = "' + b"b" * 64 + b'"', 1)
+        return before, after
+
     @staticmethod
     def versioned_tool(name, args, env, cwd):
         versions = {"cargo-nextest": "cargo-nextest 0.9.128", "just": "just 1.40.0",
@@ -130,6 +159,76 @@ class StageFixture(unittest.TestCase):
 
 
 class NativeWorkspaceStageTest(StageFixture):
+    @staticmethod
+    def _process_identity(pid):
+        identity = {"pid": pid}
+        for name, lookup in (("pgid", os.getpgid), ("sid", os.getsid)):
+            try:
+                identity[name] = lookup(pid)
+            except OSError as error:
+                identity[name] = f"{type(error).__name__}:{error.errno}"
+        return identity
+
+    def _cleanup_diagnostic(self, child, genv, popen):
+        info = Path(genv).stat()
+        state = {"genv": str(Path(genv).resolve()), "genvUid": info.st_uid,
+                 "genvMode": oct(stat.S_IMODE(info.st_mode)), "python": sys.executable,
+                 "parentUid": os.getuid(), "parentEuid": os.geteuid(),
+                 "parent": self._process_identity(os.getpid()),
+                 "child": self._process_identity(child.pid), "returncode": child.poll()}
+        group = state["child"].get("pgid")
+        if isinstance(group, int):
+            ps = popen(
+                ["/bin/ps", "-g", str(group), "-o", "pid=,ppid=,pgid=,uid=,stat="],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            try:
+                output, _ = ps.communicate(timeout=2)
+                state["psGroup"] = output[:4096].decode("utf-8", "replace")
+                if len(output) > 4096:
+                    state["psGroup"] += "[truncated]"
+            except subprocess.TimeoutExpired:
+                ps.kill()
+                ps.wait()
+                state["psGroup"] = "timeout"
+        return repr(state)
+
+    @staticmethod
+    def _kill_reap_test_child(child):
+        if child.poll() is None:
+            try:
+                child.kill()
+            except ProcessLookupError:
+                pass
+        child.wait(timeout=5)
+
+    def _run_capped_real_child(self, command, destination):
+        popen = subprocess.Popen
+        children = []
+        genv = shutil.which("genv") or shutil.which("env")
+        self.assertIsNotNone(genv)
+
+        def capture_child(*args, **kwargs):
+            child = popen(*args, **kwargs)
+            children.append(child)
+            self.addCleanup(self._kill_reap_test_child, child)
+            return child
+
+        with patch.object(staging, "MAX_METADATA_BYTES", 128), \
+                patch.object(subprocess, "Popen", side_effect=capture_child), self.genv_selector():
+            with self.assertRaisesRegex(ValueError, "tart_command_output_limit"):
+                try:
+                    staging._run_file(command, cwd=self.root, env=os.environ.copy(),
+                                      destination=destination)
+                except PermissionError as error:
+                    if children:
+                        try:
+                            error.add_note(self._cleanup_diagnostic(children[0], genv, popen))
+                        except Exception as diagnostic_error:
+                            error.add_note(f"cleanup diagnostics failed: {diagnostic_error!r}")
+                    raise
+        return children
+
     def test_wrong_host_rejects_before_output_or_subprocess(self):
         invalid_values = (("system", "Linux"), ("mac_ver", ("27.0", (), "")),
                           ("machine", "x86_64"), ("version_info", (3, 12, 0)))
@@ -181,7 +280,7 @@ class NativeWorkspaceStageTest(StageFixture):
         self.assertEqual(fetch_call[0][-2:], ["fetch", "--locked"])
         self.assertEqual(fetch_call[2]["CARGO_NET_OFFLINE"], "false")
         self.assertEqual(metadata_calls[-1][2]["CARGO_NET_OFFLINE"], "true")
-        for command, timeout, env, output_limit, paths in self.bounded_calls:
+        for command, timeout, _env, output_limit, paths in self.bounded_calls:
             self.assertEqual(command[0], "/tools/genv")
             self.assertTrue(command[1].startswith("--chdir="))
             self.assertEqual(timeout, 1800)
@@ -196,22 +295,10 @@ class NativeWorkspaceStageTest(StageFixture):
 
     def test_metadata_output_cap_kills_and_reaps_real_child(self):
         destination = self.root / "oversized.json"
-        popen = subprocess.Popen
-        children = []
-
-        def capture_child(*args, **kwargs):
-            child = popen(*args, **kwargs)
-            children.append(child)
-            return child
-
         cwd_marker = self.root / "child-cwd.txt"
         child_code = (f"import os, time; open({str(cwd_marker)!r}, 'w').write(os.getcwd()); "
                       "os.write(1, b'x' * 1000000); time.sleep(30)")
-        command = [sys.executable, "-c", child_code]
-        with patch.object(staging, "MAX_METADATA_BYTES", 128), \
-                patch.object(subprocess, "Popen", side_effect=capture_child), self.genv_selector():
-            with self.assertRaisesRegex(ValueError, "tart_command_output_limit"):
-                staging._run_file(command, cwd=self.root, env=os.environ.copy(), destination=destination)
+        children = self._run_capped_real_child([sys.executable, "-c", child_code], destination)
         self.assertEqual(len(children), 1)
         self.assertIsNotNone(children[0].returncode)
         with self.assertRaises(ProcessLookupError):
@@ -222,10 +309,9 @@ class NativeWorkspaceStageTest(StageFixture):
 
     def test_metadata_output_cap_rejects_large_completed_child(self):
         destination = self.root / "completed-oversized.json"
-        command = [sys.executable, "-c", "import os; os.write(1, b'x' * 1000000)"]
-        with patch.object(staging, "MAX_METADATA_BYTES", 128), self.genv_selector():
-            with self.assertRaisesRegex(ValueError, "tart_command_output_limit"):
-                staging._run_file(command, cwd=self.root, env=os.environ.copy(), destination=destination)
+        self._run_capped_real_child(
+            [sys.executable, "-c", "import os; os.write(1, b'x' * 1000000)"], destination,
+        )
         self.assertLessEqual(destination.stat().st_size, 128)
 
     def test_metadata_capture_collision_preserves_existing_file_and_skips_child(self):
@@ -247,6 +333,18 @@ class NativeWorkspaceStageTest(StageFixture):
                 with self.assertRaisesRegex(ValueError, error):
                     staging.stage(self.source, output)
                 self.assertFalse((output / "receipt.json").exists())
+
+    def test_lock_normalization_rejects_every_non_allowlisted_change(self):
+        deviations = ("count-158", "added-package", "removed-package", "changed-name",
+                      "external-version", "external-checksum")
+        for deviation in deviations:
+            with self.subTest(deviation=deviation):
+                self.setup_stage(lock_normalization_deviation=deviation)
+                output = self.root / f"lock-normalization-{deviation}"
+                with self.assertRaisesRegex(ValueError, "unexpected_cargo_lock_change"):
+                    staging.stage(self.source, output)
+                self.assertFalse((output / "receipt.json").exists())
+                self.assertFalse(any("fetch" in item[0] for item in self.bounded_calls))
 
     def test_offline_graph_drift_never_publishes_success_receipt(self):
         self.setup_stage(graph_drift=True)
