@@ -5,9 +5,29 @@ Unix-domain sockets, and nested Seatbelt while its Ethernet frames have no
 forwarding path to the host network. It does not run the Rust workspace and is
 not full native-suite qualification.
 
-**Status:** controller and fake Tart tests are implemented, but the real VM
-canary has not been run. No guest boundary or native workspace qualification
-is claimed yet.
+**Status (2026-10-27):** the fixed canary passed on this Mac with Tart 2.41.1
+and a macOS 15.7.7 (24G720), arm64 guest. All six guest checks and both nonce
+frames passed; the owned Tart process was reaped, its VM was confirmed stopped,
+and the exact clone was deleted. Full Rust qualification and native promotion
+remain on hold.
+
+The passing local attempt is `canary-02`, using controller SHA-256
+`82d10d6aece2191577dde76d5accd35496fa0b85cd0be9ec1a6c57a82f59f257`.
+Its result SHA-256 is
+`47dea24d8ede36a82a85c5a6805f27849d05807f37fd2bf5b681304f4341447d`.
+Raw evidence is retained under
+`/opt/coder/toolshed/.local-artifacts/offline-macos-vm-20261027/canary-02/`.
+The host received 75 datagrams (18,108 bytes); only the two nonce-matched
+frames were retained. The zero-transmit claim rests on the reviewed drain-only
+controller and pinned Tart network attachment; it is not a measurement of all
+host traffic. Raw output/frame hashes and nonce payloads were checked separately.
+
+The first local attempt remains `tainted`: its test fixture incorrectly used
+`State: "Stopped"`, while Tart returns exact lowercase `State: "stopped"`.
+Its guest checks and frames succeeded. A separate fresh state check and exact
+clone deletion receipt record cleanup; the original result was preserved. The
+corrected parser is tested against the captured Tart JSON and rejects wrong
+case, missing state fields, and `Running: true`.
 
 The controller runs a fixed guest script. It does not accept a guest command,
 install Tart, pull an image, change host firewall rules, or forward packets.
