@@ -401,9 +401,13 @@ for family, host in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
     sender = socket.socket(family, socket.SOCK_DGRAM); sender.sendto(b"loopback", (host, receiver.getsockname()[1]))
     require(receiver.recvfrom(32)[0] == b"loopback", "loopback_udp_failed"); sender.close(); receiver.close()
     results["loopback-" + ("ipv4" if family == socket.AF_INET else "ipv6")] = True
-path = tempfile.mktemp(prefix="offline-canary-", dir="/tmp")
-server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); server.bind(path); server.listen(1)
-client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); client.connect(path); conn, _ = server.accept(); conn.close(); client.close(); server.close(); os.unlink(path)
+def check_unix_socket():
+    with tempfile.TemporaryDirectory(prefix="offline-canary-", dir="/tmp") as directory:
+        path = os.path.join(directory, "probe.sock")
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); server.bind(path); server.listen(1)
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); client.connect(path)
+        conn, _ = server.accept(); conn.close(); client.close(); server.close()
+check_unix_socket()
 results["unix-socket"] = True
 subprocess.run(["/usr/bin/sandbox-exec", "-p", "(version 1) (allow default)", "/usr/bin/true"], check=True, timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 results["nested-seatbelt"] = True
@@ -411,9 +415,9 @@ def root(*args): subprocess.run(["/usr/bin/sudo", "-n", *args], check=True, time
 iface = "en0"
 root("/sbin/ifconfig", iface, "inet", "198.18.88.2", "netmask", "255.255.255.0", "up")
 root("/sbin/ifconfig", iface, "inet6", "fd00:8888::2", "prefixlen", "64")
-root("/usr/sbin/route", "-n", "add", "-host", "203.0.113.7", "-interface", iface)
+root("/sbin/route", "-n", "add", "-host", "203.0.113.7", "-interface", iface)
 root("/usr/sbin/arp", "-s", "203.0.113.7", "02:00:00:00:00:02")
-root("/usr/sbin/route", "-n", "add", "-inet6", "-host", "2001:db8::7", "-interface", iface)
+root("/sbin/route", "-n", "add", "-inet6", "-host", "2001:db8::7", "-interface", iface)
 root("/usr/sbin/ndp", "-s", "2001:db8::7", "02:00:00:00:00:02")
 v6_ready_deadline = time.monotonic() + 10
 while True:
@@ -673,7 +677,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                     raise CanaryError(failures[0]) from None
                 if vm_proc.poll() is not None:
                     raise CanaryError("tart_vm_exited_before_guest_ready") from None
-                if exc.args and exc.args[0] == "tart_command_failed":
+                if exc.args and exc.args[0] in {"tart_command_failed", "tart_command_timeout"}:
                     time.sleep(min(VM_READY_RETRY_INTERVAL, max(0, ready_deadline - clock())))
                     continue
                 raise

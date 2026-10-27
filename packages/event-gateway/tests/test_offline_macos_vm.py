@@ -1,16 +1,19 @@
-"""Unit and causal tests for the fixed offline Tart network canary.
+"""
+Unit and causal tests for the fixed offline Tart network canary.
 
 These tests use a fake Tart executable and a real inherited datagram socketpair.
-They never launch a VM, install software, or run guest/native test code.
+They run only the isolated guest Unix-socket function on localhost; they never
+launch a VM, install software, run host network setup, or invoke the native client.
 """
 
+import ast
 import importlib.util
 import json
 import os
 from pathlib import Path
 import socket
 import stat
-import subprocess
+import subprocess  # nosec B404 -- subprocess calls target the fake Tart fixture, never a VM.
 import sys
 import tempfile
 import signal
@@ -24,6 +27,58 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "qualify_offline_maco
 spec = importlib.util.spec_from_file_location("offline_macos_vm", SCRIPT)
 canary = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(canary)
+
+
+class GuestUnixSocketProbeTest(unittest.TestCase):
+    def test_guest_unix_socket_probe_uses_private_directory_and_cleans_up(self):
+        guest_tree = ast.parse(canary.GUEST_CANARY)
+        function = next(node for node in guest_tree.body
+                        if isinstance(node, ast.FunctionDef) and node.name == "check_unix_socket")
+        route_paths = [node.value for node in ast.walk(guest_tree)
+                       if isinstance(node, ast.Constant) and node.value in {"/sbin/route", "/usr/sbin/route"}]
+        self.assertEqual(route_paths, ["/sbin/route", "/sbin/route"])
+        namespace = {"os": os, "socket": socket, "tempfile": tempfile}
+        exec(
+            compile(ast.Module(body=[function], type_ignores=[]), "<guest-unix-probe>", "exec"),
+            namespace,
+        )  # nosec B102 -- function is the literal guest Unix-socket probe extracted above.
+        bound_paths = []
+        opened_sockets = []
+        real_socket = socket.socket
+
+        class SocketProbe(real_socket):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                opened_sockets.append(self)
+
+            def bind(self, address):
+                parent = Path(address).parent
+                self.assert_private_parent(parent)
+                bound_paths.append(Path(address))
+                super().bind(address)
+
+            def accept(self):
+                conn, address = super().accept()
+                opened_sockets.append(conn)
+                return conn, address
+
+            @staticmethod
+            def assert_private_parent(parent):
+                assert parent.is_dir()
+                assert stat.S_IMODE(parent.stat().st_mode) == 0o700
+
+        namespace["socket"] = type("SocketModule", (), {
+            "AF_UNIX": socket.AF_UNIX, "SOCK_STREAM": socket.SOCK_STREAM, "socket": SocketProbe,
+        })
+        try:
+            namespace["check_unix_socket"]()
+            self.assertEqual(len(bound_paths), 1)
+            self.assertFalse(bound_paths[0].parent.exists())
+            self.assertTrue(opened_sockets)
+            self.assertTrue(all(sock.fileno() == -1 for sock in opened_sockets))
+        finally:
+            for sock in opened_sockets:
+                sock.close()
 
 
 TART_CONFIG = {"OS": "macOS", "CPU": 4, "Memory": 8192, "Disk": "32.000 GB",
@@ -79,14 +134,20 @@ class OfflineMacosVmCanaryTest(unittest.TestCase):
 
     def _write_fake_tart(self, *, frames="none", fail_delete=False, running_after_stop=False,
                          readiness_failures=0, sleep_guest=0, guest_version="15.0.1",
-                         guest_arch="arm64"):
+                         guest_arch="arm64", readiness_delay_first=0):
         sender = ""
         source_mac = "02:aa:bb:cc:dd:ef" if frames == "badmac" else "02:aa:bb:cc:dd:ee"
         marker4 = "x" * 32 if frames == "wrongnonce" else "c" * 32
         if frames in ("both", "ipv4", "badmac", "wrongnonce"):
-            sender += f'''peer.send(m._ethernet_udp("{source_mac}", "02:00:00:00:00:02", "198.18.88.2", "203.0.113.7", 40000, 49371, ("OFFLINE_CANARY:" + "{marker4}" + "4").encode()))\n'''
+            sender += (
+                f'''peer.send(m._ethernet_udp("{source_mac}", "02:00:00:00:00:02", '''
+                f'''"198.18.88.2", "203.0.113.7", 40000, 49371, ("OFFLINE_CANARY:" + "{marker4}" + "4").encode()))\n'''
+            )
         if frames in ("both", "ipv6"):
-            sender += '''peer.send(m._ethernet_udp("02:aa:bb:cc:dd:ee", "02:00:00:00:00:02", "fd00:8888::2", "2001:db8::7", 40001, 49372, ("OFFLINE_CANARY:" + "c" * 32 + "6").encode()))\n'''
+            sender += (
+                '''peer.send(m._ethernet_udp("02:aa:bb:cc:dd:ee", "02:00:00:00:00:02", '''
+                '''"fd00:8888::2", "2001:db8::7", 40001, 49372, ("OFFLINE_CANARY:" + "c" * 32 + "6").encode()))\n'''
+            )
         fake_config = {**TART_CONFIG, "Running": running_after_stop,
                        "State": "Running" if running_after_stop else "Stopped"}
         script = f'''#!{sys.executable}
@@ -121,6 +182,7 @@ if cmd == "exec":
         try: count = int(open(count_path).read())
         except FileNotFoundError: count = 0
         with open(count_path, "w") as stream: stream.write(str(count + 1))
+        if count == 0: time.sleep({readiness_delay_first})
         if count < {readiness_failures}: raise SystemExit(1)
         raise SystemExit(0)
     nonce = sys.argv[-1]
@@ -188,6 +250,15 @@ raise SystemExit(2)
         self.assertEqual(stat.S_IMODE((self.evidence / "offline-macos-vm-canary.json").stat().st_mode), 0o600)
         self.assertTrue(self.base_vm_dir.exists())
         self.assertEqual(sorted(path.name for path in (self.tart_home / "vms").iterdir()), ["prepared-macos15"])
+
+    def test_readiness_probe_timeout_retries_within_budget(self):
+        self._write_fake_tart(frames="both", readiness_delay_first=0.3)
+        self._write_receipt()
+        self.assertIsNone(self._run())
+        saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+        self.assertEqual(saved["status"], "passed")
+        self.assertEqual(saved["readinessProbe"]["attempts"], 2)
+        self.assertEqual(saved["hostCommandTemplates"].count(saved["readinessProbe"]["argv"]), 1)
 
     def test_no_frame_is_causally_rejected_not_mistaken_for_denial(self):
         with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
@@ -337,6 +408,7 @@ raise SystemExit(2)
         self._write_receipt()
         evidence = self.root / "cli-evidence"
         evidence.mkdir(mode=0o700)
+
         class FixedUuid:
             hex = "c" * 32
         with patch.dict(os.environ, {"TART_HOME": str(self.tart_home)}), \
@@ -350,7 +422,7 @@ raise SystemExit(2)
         saved = json.loads((evidence / "offline-macos-vm-canary.json").read_text())
         self.assertEqual(saved["status"], "passed")
 
-        os.chmod(self.tart_home, 0o755)
+        os.chmod(self.tart_home, 0o755)  # nosec B103 -- intentionally unsafe fixture must be rejected.
         with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_home"):
             canary._safe_tart_home(self.tart_home)
         os.chmod(self.tart_home, 0o700)
@@ -364,7 +436,7 @@ raise SystemExit(2)
         self.base_vm_dir.unlink()
         preserved.rename(self.base_vm_dir)
 
-        os.chmod(self.base_vm_dir, 0o777)
+        os.chmod(self.base_vm_dir, 0o777)  # nosec B103 -- intentionally unsafe fixture must be rejected.
         with self.assertRaisesRegex(canary.CanaryError, "unsafe_base_vm_directory"):
             self.qualify()
         os.chmod(self.base_vm_dir, 0o700)
@@ -380,7 +452,7 @@ raise SystemExit(2)
     def test_foreign_writable_tart_vms_directory_is_rejected(self):
         vms = self.tart_home / "vms"
         original_mode = stat.S_IMODE(vms.stat().st_mode)
-        os.chmod(vms, 0o777)
+        os.chmod(vms, 0o777)  # nosec B103 -- intentionally unsafe fixture must be rejected.
         with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_vms_directory"):
             self.qualify()
         os.chmod(vms, original_mode)
