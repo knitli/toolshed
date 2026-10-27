@@ -17,6 +17,9 @@ Its result SHA-256 is
 `47dea24d8ede36a82a85c5a6805f27849d05807f37fd2bf5b681304f4341447d`.
 Raw evidence is retained under
 `/opt/coder/toolshed/.local-artifacts/offline-macos-vm-20261027/canary-02/`.
+This attempt used the earlier executable-path guard identified by controller
+hash `82d10d6aece2191577dde76d5accd35496fa0b85cd0be9ec1a6c57a82f59f257`;
+it is not live proof of the executable filesystem checks added afterward.
 The host received 75 datagrams (18,108 bytes); only the two nonce-matched
 frames were retained. The zero-transmit claim rests on the reviewed drain-only
 controller and pinned Tart network attachment; it is not a measurement of all
@@ -67,7 +70,10 @@ An authorized host owner must do these steps outside the canary controller:
    host software or request privilege.
 2. Acquire the pinned Tart package and image. Verify the package SHA-256 and
    signature, and verify the OCI manifest resolves to the pinned digest before
-   import. Keep credentials out of the canary environment.
+   import. Keep credentials out of the canary environment. For this run
+   example, complete the package's supported setup with the Tart executable
+   at `/private/tmp/offline-macos-vm-tooling/tart-2.41.1/tart.app/Contents/MacOS/tart`
+   under an owner-private staging directory.
 3. Prepare one local macOS 15 base VM and confirm the Tart guest agent is
    installed/configured for `tart exec`. Configure the guest so the fixed
    `/usr/bin/sudo -n` operations used by the canary succeed. Do not put
@@ -125,7 +131,7 @@ python3 packages/event-gateway/scripts/qualify_offline_macos_vm.py \
   --receipt /private/tmp/offline-macos-vm-base-receipt.json \
   --evidence-dir /private/tmp/offline-macos-vm-evidence \
   --tart-home "$TART_HOME" \
-  --tart /opt/coder/toolshed/.local-artifacts/offline-macos-vm-20261027/tooling/tart-2.41.1/tart.app/Contents/MacOS/tart
+  --tart /private/tmp/offline-macos-vm-tooling/tart-2.41.1/tart.app/Contents/MacOS/tart
 ```
 
 `--tart-home` defaults to the `TART_HOME` environment variable and then
@@ -133,6 +139,18 @@ python3 packages/event-gateway/scripts/qualify_offline_macos_vm.py \
 0700; its `vms` and prepared-base directories must be owned by that user and
 not writable by group/other. Symlinked Tart homes, VM directories, and base
 directories are rejected.
+The executable path itself must contain no symlink component. Every parent
+must be a directory owned by root or the current user, with no group/other
+write permission except a root-owned sticky temporary directory. The Tart
+binary must be a regular root/current-user-owned executable with no
+group/other write permission. The controller hashes that opened file
+descriptor and uses its canonical protected path for all Tart commands. This
+filesystem boundary excludes other users; same-UID actors are outside its
+threat model. On macOS, the controller also checks extended ACLs on each
+executable-path component and on the opened executable descriptor. Any ALLOW
+entry with a mutating permission rejects the path; DENY entries do not grant
+access. ACL inspection errors fail closed. The host must provide Apple's
+`libSystem.B.dylib` ACL APIs used for this check.
 
 The controller hashes the installed Tart binary and the actual base files,
 checks capacity, clones to a random local VM name, starts only that clone with

@@ -6,6 +6,8 @@ the Rust workspace, or accepts a caller-supplied guest command.
 """
 
 import argparse
+import ctypes
+import errno
 import hashlib
 import ipaddress
 import json
@@ -42,6 +44,14 @@ VM_READY_PROBE_TIMEOUT = 3
 VM_READY_RETRY_INTERVAL = 0.25
 CLONE_LOG_HEADROOM = 512 * 1024**2
 BASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}\Z")
+_TART_ACL_API = None
+_ACL_TYPE_EXTENDED = 0x100
+_ACL_FIRST_ENTRY = 0
+_ACL_NEXT_ENTRY = -1
+_ACL_EXTENDED_ALLOW = 1
+_ACL_EXTENDED_DENY = 2
+# Darwin sys/acl.h: write, append, delete, and metadata/ACL/owner changes.
+_ACL_MUTATING_PERMISSIONS = 4 | 16 | 32 | 64 | 256 | 1024 | 4096 | 8192
 
 
 class CanaryError(ValueError):
@@ -229,7 +239,7 @@ def _raw_evidence(path, maximum):
     return {"bytes": count, "sha256": digest, "maxBytes": maximum}
 
 
-def _hash_file(path, *, maximum, collect=False):
+def _hash_file(path, *, maximum, collect=False, require_executable=False):
     path = Path(path)
     if path.is_symlink():
         raise CanaryError("unsafe_base_vm_file")
@@ -245,6 +255,12 @@ def _hash_file(path, *, maximum, collect=False):
             info = os.fstat(fd)
         except OSError:
             raise CanaryError("unsafe_base_vm_file") from None
+        if require_executable and (
+                not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.getuid())
+                or stat.S_IMODE(info.st_mode) & 0o022 or not info.st_mode & 0o111):
+            raise CanaryError("unsafe_tart_executable")
+        if require_executable:
+            _check_tart_acl(path, fd=fd)
         if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
             raise CanaryError("unsafe_base_vm_file")
         try:
@@ -313,22 +329,125 @@ def _base_vm_measurement(tart_home, name, receipt):
 
 
 def _tart_identity(tart, receipt, env):
+    tart_path = _qualified_tart_path(tart)
     try:
-        tart_path = Path(tart).resolve(strict=True)
-    except (OSError, RuntimeError):
-        raise CanaryError("tart_not_executable") from None
-    if not tart_path.is_file() or not os.access(tart_path, os.X_OK):
-        raise CanaryError("tart_not_executable")
-    try:
-        digest, _ = _hash_file(tart_path, maximum=128 * 1024**2)
-    except CanaryError:
+        digest, _ = _hash_file(tart_path, maximum=128 * 1024**2, require_executable=True)
+    except CanaryError as exc:
+        if exc.args and exc.args[0] in ("unsafe_tart_executable", "unsafe_tart_acl"):
+            raise
         raise CanaryError("tart_binary_unreadable") from None
+    if not os.access(tart_path, os.X_OK):
+        raise CanaryError("tart_not_executable")
     if digest != receipt["tartBinarySha256"] or digest != TART_BINARY_SHA256:
         raise CanaryError("tart_binary_digest_mismatch")
     stdout, _ = _run_bounded([str(tart_path), "--version"], timeout=5, env=env)
     if stdout.decode("ascii", "replace").strip() != TART_VERSION:
         raise CanaryError("tart_version_mismatch")
     return tart_path
+
+
+def _qualified_tart_path(tart):
+    try:
+        requested = Path(tart)
+        if ".." in requested.parts:
+            raise CanaryError("unsafe_tart_path")
+        path = requested if requested.is_absolute() else Path.cwd() / requested
+        components = [Path(path.anchor)]
+        for part in path.parts[1:]:
+            components.append(components[-1] / part)
+        for index, current in enumerate(components):
+            info = os.lstat(current)
+            if stat.S_ISLNK(info.st_mode):
+                raise CanaryError("unsafe_tart_path")
+            if index < len(components) - 1:
+                sticky_root = info.st_uid == 0 and bool(info.st_mode & stat.S_ISVTX)
+                if (not stat.S_ISDIR(info.st_mode) or info.st_uid not in (0, os.getuid())
+                        or (info.st_mode & 0o022 and not sticky_root)):
+                    raise CanaryError("unsafe_tart_path")
+                _check_tart_acl(current)
+        canonical = path.resolve(strict=True)
+        if canonical != path:
+            raise CanaryError("unsafe_tart_path")
+        return canonical
+    except CanaryError:
+        raise
+    except (OSError, RuntimeError):
+        raise CanaryError("tart_not_executable") from None
+
+
+def _load_tart_acl_api():
+    global _TART_ACL_API
+    if _TART_ACL_API is None:
+        try:
+            library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+            library.acl_get_link_np.argtypes = [ctypes.c_char_p, ctypes.c_int]
+            library.acl_get_link_np.restype = ctypes.c_void_p
+            library.acl_get_fd_np.argtypes = [ctypes.c_int, ctypes.c_int]
+            library.acl_get_fd_np.restype = ctypes.c_void_p
+            library.acl_get_entry.argtypes = [
+                ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p),
+            ]
+            library.acl_get_entry.restype = ctypes.c_int
+            library.acl_get_tag_type.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
+            library.acl_get_tag_type.restype = ctypes.c_int
+            library.acl_get_permset_mask_np.argtypes = [
+                ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint64),
+            ]
+            library.acl_get_permset_mask_np.restype = ctypes.c_int
+            library.acl_free.argtypes = [ctypes.c_void_p]
+            library.acl_free.restype = ctypes.c_int
+            _TART_ACL_API = library
+        except (OSError, AttributeError, TypeError):
+            raise CanaryError("unsafe_tart_acl") from None
+    return _TART_ACL_API
+
+
+def _check_tart_acl(path, *, fd=None):
+    # POSIX ACL write masks appear in st_mode; Darwin extended ACLs do not.
+    if sys.platform != "darwin":
+        return
+    try:
+        library = _load_tart_acl_api()
+        ctypes.set_errno(0)
+        acl = (library.acl_get_fd_np(fd, _ACL_TYPE_EXTENDED) if fd is not None
+               else library.acl_get_link_np(os.fsencode(path), _ACL_TYPE_EXTENDED))
+        if not acl:
+            if ctypes.get_errno() == errno.ENOENT:
+                return
+            raise CanaryError("unsafe_tart_acl")
+        try:
+            entry_kind = _ACL_FIRST_ENTRY
+            for index in range(129):
+                entry = ctypes.c_void_p()
+                ctypes.set_errno(0)
+                status = library.acl_get_entry(acl, entry_kind, ctypes.byref(entry))
+                if status == -1:
+                    if ctypes.get_errno() == errno.EINVAL:
+                        return
+                    raise CanaryError("unsafe_tart_acl")
+                if status != 0:
+                    raise CanaryError("unsafe_tart_acl")
+                if index == 128:
+                    raise CanaryError("unsafe_tart_acl")
+                entry_kind = _ACL_NEXT_ENTRY
+                tag = ctypes.c_int()
+                permissions = ctypes.c_uint64()
+                if (library.acl_get_tag_type(entry, ctypes.byref(tag)) != 0
+                        or library.acl_get_permset_mask_np(entry, ctypes.byref(permissions)) != 0):
+                    raise CanaryError("unsafe_tart_acl")
+                if tag.value == _ACL_EXTENDED_DENY:
+                    continue
+                if tag.value != _ACL_EXTENDED_ALLOW:
+                    raise CanaryError("unsafe_tart_acl")
+                if permissions.value & _ACL_MUTATING_PERMISSIONS:
+                    raise CanaryError("unsafe_tart_acl")
+            raise CanaryError("unsafe_tart_acl")
+        finally:
+            library.acl_free(acl)
+    except CanaryError:
+        raise
+    except (OSError, ValueError, TypeError, AttributeError):
+        raise CanaryError("unsafe_tart_acl") from None
 
 
 def _safe_tart_home(tart_home):

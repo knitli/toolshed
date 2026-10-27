@@ -97,10 +97,17 @@ BASE_CONFIG = {"os": "darwin", "arch": "arm64", "macAddress": "02:aa:bb:cc:dd:ee
                "cpuCount": 4, "memorySize": 8192 * 1024 * 1024, "diskFormat": "asif"}
 
 
+def _set_macos_acl(path, *arguments):
+    subprocess.run(
+        ["/bin/chmod", *arguments, str(path)], check=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )  # nosec B603 -- fixed local chmod ACL fixture arguments, no shell.
+
+
 class OfflineMacosVmCanaryTest(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="offline-vm-test-")
-        self.root = Path(self.temp.name)
+        self.temp = tempfile.TemporaryDirectory(prefix="offline-vm-test-", dir="/tmp")
+        self.root = Path(self.temp.name).resolve(strict=True)
         self.tart_home = self.root / "tart-home"
         self.tart_home.mkdir(mode=0o700)
         self.base_vm_dir = self.tart_home / "vms" / "prepared-macos15"
@@ -299,6 +306,196 @@ raise SystemExit(2)
             with self.assertRaisesRegex(canary.CanaryError, "tart_command_timeout"):
                 canary._run_bounded(["fake-tart"], timeout=1, env={})
         self.assertTrue(process.reaped)
+
+    def test_tart_identity_accepts_private_path_beneath_root_sticky_tmp(self):
+        sticky_tmp = os.lstat(Path("/tmp").resolve(strict=True))
+        self.assertEqual(sticky_tmp.st_uid, 0)
+        self.assertTrue(sticky_tmp.st_mode & stat.S_ISVTX)
+        digest = canary._sha256(self.tart.read_bytes())
+        with patch.object(canary, "TART_BINARY_SHA256", digest), \
+                patch.object(canary, "_run_bounded", return_value=(f"{canary.TART_VERSION}\n".encode(), b"")) as run:
+            self.assertEqual(canary._tart_identity(self.tart, self.receipt, {}), self.tart.resolve())
+        self.assertEqual(run.call_args.args[0][0], str(self.tart.resolve()))
+
+    def test_tart_identity_rejects_symlink_and_writable_ancestors(self):
+        secure = self.root / "tart-secure"
+        secure.mkdir(mode=0o700)
+        binary = secure / "tart"
+        binary.write_bytes(self.tart.read_bytes())
+        binary.chmod(0o700)
+        link = self.root / "tart-link"
+        link.symlink_to(secure, target_is_directory=True)
+        executable_link = self.root / "tart-executable-link"
+        executable_link.symlink_to(binary)
+        writable = self.root / "tart-writable"
+        writable.mkdir(mode=0o700)
+        writable_binary = writable / "tart"
+        writable_binary.write_bytes(binary.read_bytes())
+        writable_binary.chmod(0o700)
+        nonroot_sticky = self.root / "tart-sticky"
+        nonroot_sticky.mkdir(mode=0o700)
+        sticky_binary = nonroot_sticky / "tart"
+        sticky_binary.write_bytes(binary.read_bytes())
+        sticky_binary.chmod(0o700)
+        os.chmod(writable, 0o777)  # nosec B103 -- intentionally unsafe ancestor must be rejected.
+        os.chmod(nonroot_sticky, 0o1777)  # nosec B103 -- sticky mode is insufficient for non-root owner.
+        digest = canary._sha256(binary.read_bytes())
+        with patch.object(canary, "TART_BINARY_SHA256", digest), \
+                patch.object(canary, "_run_bounded") as run:
+            for path in (link / "tart", executable_link, writable_binary, sticky_binary):
+                with self.subTest(path=path), self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_path"):
+                    canary._tart_identity(path, {**self.receipt, "tartBinarySha256": digest}, {})
+            run.assert_not_called()
+
+    def test_tart_identity_rejects_untrusted_ancestor_owner(self):
+        parent = self.root / "foreign-owner"
+        parent.mkdir(mode=0o700)
+        binary = parent / "tart"
+        binary.write_bytes(self.tart.read_bytes())
+        binary.chmod(0o700)
+        real_lstat = os.lstat
+
+        def foreign_owner(path):
+            info = real_lstat(path)
+            if Path(path) == parent:
+                return types.SimpleNamespace(st_mode=info.st_mode, st_uid=os.getuid() + 1)
+            return info
+
+        with patch.object(canary.os, "lstat", side_effect=foreign_owner), \
+                patch.object(canary, "_run_bounded") as run:
+            with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_path"):
+                canary._qualified_tart_path(binary)
+            run.assert_not_called()
+
+    def test_tart_executable_metadata_is_checked_on_hashed_descriptor(self):
+        digest = canary._sha256(self.tart.read_bytes())
+        with patch.object(canary, "TART_BINARY_SHA256", digest), \
+                patch.object(canary, "_run_bounded") as run:
+            for mode in (0o777, 0o600):
+                os.chmod(self.tart, mode)  # nosec B103 -- invalid executable modes must be rejected.
+                with self.subTest(mode=oct(mode)), self.assertRaisesRegex(
+                        canary.CanaryError, "unsafe_tart_executable"):
+                    canary._tart_identity(self.tart, self.receipt, {})
+            os.chmod(self.tart, 0o700)
+
+            real_fstat = os.fstat
+            tart_stat = os.stat(self.tart, follow_symlinks=False)
+
+            def foreign_file_owner(fd):
+                info = real_fstat(fd)
+                if info.st_dev == tart_stat.st_dev and info.st_ino == tart_stat.st_ino:
+                    return types.SimpleNamespace(
+                        st_mode=info.st_mode, st_uid=os.getuid() + 1, st_size=info.st_size,
+                    )
+                return info
+
+            with patch.object(canary.os, "fstat", side_effect=foreign_file_owner):
+                with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_executable"):
+                    canary._tart_identity(self.tart, self.receipt, {})
+            run.assert_not_called()
+
+    def test_writable_path_cannot_reach_tart_version_probe(self):
+        digest = canary._sha256(self.tart.read_bytes())
+        original_bytes = self.tart.read_bytes()
+        original_mode = stat.S_IMODE(self.root.stat().st_mode)
+        os.chmod(self.root, 0o777)  # nosec B103 -- writable ancestor is the replacement-race fixture.
+        real_hash_file = canary._hash_file
+
+        def replace_after_hash(path, **kwargs):
+            measurement = real_hash_file(path, **kwargs)
+            Path(path).write_text("#!/bin/sh\nexit 99\n")
+            Path(path).chmod(0o700)
+            return measurement
+
+        try:
+            with patch.object(canary, "TART_BINARY_SHA256", digest), \
+                    patch.object(canary, "_hash_file", side_effect=replace_after_hash) as hash_file, \
+                    patch.object(canary, "_run_bounded", return_value=(f"{canary.TART_VERSION}\n".encode(), b"")) as run:
+                with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_path"):
+                    canary._tart_identity(self.tart, self.receipt, {})
+                hash_file.assert_not_called()
+                run.assert_not_called()
+                self.assertEqual(self.tart.read_bytes(), original_bytes)
+        finally:
+            os.chmod(self.root, original_mode)
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS extended ACLs")
+    def test_macos_acl_write_grants_on_executable_or_ancestor_are_rejected(self):
+        parent = self.root / "acl-write-directory"
+        parent.mkdir(mode=0o700)
+        binary = parent / "tart"
+        binary.write_bytes(self.tart.read_bytes())
+        binary.chmod(0o700)
+        digest = canary._sha256(binary.read_bytes())
+        with patch.object(canary, "TART_BINARY_SHA256", digest), \
+                patch.object(canary, "_run_bounded", return_value=(f"{canary.TART_VERSION}\n".encode(), b"")) as run:
+            for target, executable in ((binary, binary), (parent, binary)):
+                with self.subTest(target=target):
+                    try:
+                        _set_macos_acl(target, "+a", "everyone allow write")
+                        self.assertEqual(stat.S_IMODE(os.stat(target).st_mode), 0o700)
+                        with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_acl"):
+                            canary._tart_identity(executable, self.receipt, {})
+                    finally:
+                        _set_macos_acl(target, "-N")
+            run.assert_not_called()
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS extended ACLs")
+    def test_macos_read_allow_and_deny_write_acl_are_accepted(self):
+        parent = self.root / "acl-read-deny-directory"
+        parent.mkdir(mode=0o700)
+        binary = parent / "tart"
+        binary.write_bytes(self.tart.read_bytes())
+        binary.chmod(0o700)
+        digest = canary._sha256(binary.read_bytes())
+        with patch.object(canary, "TART_BINARY_SHA256", digest), \
+                patch.object(canary, "_run_bounded", return_value=(f"{canary.TART_VERSION}\n".encode(), b"")):
+            try:
+                _set_macos_acl(binary, "+a", "everyone allow read")
+                _set_macos_acl(parent, "+a", "everyone deny write")
+                self.assertEqual(canary._tart_identity(binary, self.receipt, {}), binary.resolve())
+            finally:
+                _set_macos_acl(binary, "-N")
+                _set_macos_acl(parent, "-N")
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS extended ACLs")
+    def test_macos_multi_entry_read_allow_and_deny_acl_are_accepted(self):
+        parent = self.root / "acl-multi-entry-directory"
+        parent.mkdir(mode=0o700)
+        binary = parent / "tart"
+        binary.write_bytes(self.tart.read_bytes())
+        binary.chmod(0o700)
+        digest = canary._sha256(binary.read_bytes())
+        with patch.object(canary, "TART_BINARY_SHA256", digest), \
+                patch.object(canary, "_run_bounded", return_value=(f"{canary.TART_VERSION}\n".encode(), b"")):
+            try:
+                _set_macos_acl(binary, "+a", "everyone deny write")
+                _set_macos_acl(binary, "+a", "everyone allow read")
+                _set_macos_acl(binary, "+a", "everyone deny delete")
+                self.assertEqual(canary._tart_identity(binary, self.receipt, {}), binary.resolve())
+            finally:
+                _set_macos_acl(binary, "-N")
+
+    def test_tart_acl_api_failure_fails_closed(self):
+        with patch.object(canary.sys, "platform", "darwin"), \
+                patch.object(canary, "_load_tart_acl_api", side_effect=OSError("injected")):
+            with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_acl"):
+                canary._check_tart_acl(self.tart)
+
+    def test_null_tart_acl_with_zero_errno_fails_closed(self):
+        class EmptyAclApi:
+            @staticmethod
+            def acl_get_fd_np(_fd, _acl_type):
+                return None
+
+        canary.ctypes.set_errno(canary.errno.ENOENT)
+        try:
+            with patch.object(canary.sys, "platform", "darwin"), \
+                    patch.object(canary, "_load_tart_acl_api", return_value=EmptyAclApi()):
+                with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_acl"):
+                    canary._check_tart_acl(self.tart, fd=123)
+        finally:
+            canary.ctypes.set_errno(0)
 
     def test_inherited_real_datagram_fd_and_fixed_drop_canary(self):
         self._write_fake_tart(frames="both", readiness={"failures": 2})
