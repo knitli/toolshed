@@ -1170,16 +1170,33 @@ raise SystemExit(2)
         with self.assertRaisesRegex(canary.CanaryError, "oci_base_not_digest_pinned"):
             canary._read_receipt(self.receipt_path)
 
-    def test_deep_json_is_normalized_at_receipt_base_config_and_guest_boundaries(self):
-        nested = b"[" * 10_000 + b"0" + b"]" * 10_000
-        self.receipt_path.write_bytes(nested)
-        with self.assertRaisesRegex(canary.CanaryError, "invalid_receipt"):
+    def test_json_recursion_errors_are_normalized_at_boundaries(self):
+        with patch.object(canary.json, "loads", side_effect=RecursionError("injected")) as loads:
+            with self.assertRaisesRegex(canary.CanaryError, "invalid_receipt"):
+                canary._read_receipt(self.receipt_path)
+            loads.assert_called_once()
+
+        with patch.object(canary.json, "loads", side_effect=RecursionError("injected")) as loads:
+            with self.assertRaisesRegex(canary.CanaryError, "invalid_base_vm_config"):
+                canary._base_vm_measurement(self.tart_home, "prepared-macos15", self.receipt)
+            loads.assert_called_once()
+
+        with patch.object(canary.json, "loads", side_effect=RecursionError("injected")) as loads:
+            with self.assertRaisesRegex(canary.CanaryError, "invalid_guest_canary_result"):
+                canary._guest_result(b"{}", "n" * 32)
+            loads.assert_called_once()
+
+    def test_json_boundaries_reject_parsed_nonobject_shapes(self):
+        self.receipt_path.write_text("[]")
+        with self.assertRaisesRegex(canary.CanaryError, "invalid_receipt_shape"):
             canary._read_receipt(self.receipt_path)
-        (self.base_vm_dir / "config.json").write_bytes(nested)
-        with self.assertRaisesRegex(canary.CanaryError, "invalid_base_vm_config"):
+
+        (self.base_vm_dir / "config.json").write_text("[]")
+        with self.assertRaisesRegex(canary.CanaryError, "base_vm_config_not_macos_arm64"):
             canary._base_vm_measurement(self.tart_home, "prepared-macos15", self.receipt)
-        with self.assertRaisesRegex(canary.CanaryError, "invalid_guest_canary_result"):
-            canary._guest_result(nested, "n" * 32)
+
+        with self.assertRaisesRegex(canary.CanaryError, "guest_canary_checks_failed"):
+            canary._guest_result(b"[]", "n" * 32)
 
     def test_tart_binary_identity_mismatch_fails_before_clone(self):
         self.receipt["tartBinarySha256"] = "0" * 64
