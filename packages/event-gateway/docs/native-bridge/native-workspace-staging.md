@@ -97,3 +97,8 @@ separate blockers. Any fixture overlay must be reviewed independently without
 rewriting the immutable production recipe, excluding tests, weakening assertions,
 or automatically accepting snapshots. Keep native promotion and automatic turns
 off until the separate qualification and admission gates pass.
+
+Softnet's persistent host preference changes require the separate
+[typed snapshot and conditional recovery primitive](softnet-preference-recovery.md).
+That primitive does not launch the VM or authorize privileged host preparation;
+its owning controller and real SCPreferences qualification remain required.
