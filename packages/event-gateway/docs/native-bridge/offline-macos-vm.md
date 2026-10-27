@@ -90,6 +90,9 @@ before acquiring them. Do not substitute a mutable `latest` tag.
 
 ## Host and base-VM preparation
 
+Use host Python 3.13 or newer, the Event Gateway package minimum. Non-reaping
+`os.waitid` support is required before a clone is admitted.
+
 An authorized host owner must do these steps outside the canary controller:
 
 1. Confirm Apple Silicon, supported macOS/Virtualization.framework setup,
@@ -200,9 +203,16 @@ stop/reap Tart before deleting only that clone. It sets
 `TART_NO_AUTO_PRUNE=1`; it never deletes the prepared base. If it cannot prove
 the Tart process exited, it retains the exact owned clone and marks the
 evidence `tainted` instead of deleting a potentially active VM. Cleanup
-sends SIGTERM to the owned Tart process group and escalates to SIGKILL after a
-bounded wait. A tainted
-result is a failed canary requiring owner cleanup review.
+verifies the leader is still its waitable child, sends SIGTERM to the owned
+Tart process group, and observes a bounded grace period with `waitid(WNOWAIT)`.
+It sweeps descendants with SIGKILL before reaping, reserving the leader's PID
+until the sweep. A leader that has exited remains waitable during this check.
+If group identity, cleanup or reaping cannot be confirmed, the clone is
+retained and the result is tainted; an already-reaped PID is not signaled.
+On Darwin, a zombie-only group can reject SIGKILL with permission denied; the
+controller accepts that case only when a bounded `/bin/ps` check still sees
+the reserved leader and no live group members. A tainted result requires owner
+cleanup review.
 If Tart fails during clone creation, the controller cannot prove that the
 random name belongs to this invocation; it retains the partial path and marks
 the result `tainted`. The manifest records the exact `cloneVmName` for owner
@@ -210,8 +220,14 @@ inspection. Do not delete that path automatically.
 
 ## Evidence and interpretation
 
-The controller creates `offline-macos-vm-canary.json` with exclusive,
-no-follow creation in the empty mode-0700 evidence directory. It records the
+Preflight rejection prints a stable error code to stderr and exits 1 without
+creating a manifest. This covers invalid names/receipts, unsafe paths,
+identity/measurement mismatches, unavailable non-reaping wait support and
+insufficient capacity; the selected
+evidence directory is untouched. After preflight succeeds, the controller
+creates `offline-macos-vm-canary.json` with exclusive, no-follow creation in
+the empty mode-0700 evidence directory, unless the evidence filesystem itself
+fails. It records the
 pins, source/storage hashes and byte counts, selected deduplicated
 `hostCommandTemplates`, fixed guest script hash, bounded guest/Tart output
 hashes, received frame count/bytes,
@@ -228,7 +244,13 @@ in the JSON. Each output stream is limited to 16 KiB for guest output and 64
 KiB for Tart run output. Exceeding a cap fails the canary and terminates the
 owned Tart run process. If the complete result exceeds 64 KiB, the controller
 writes a bounded `tainted` fallback containing the primary error, cleanup
-errors, and exact base/clone names so the result remains reviewable.
+errors, and exact base/clone names so the result remains reviewable. Missing
+raw captures in a partial failure are recorded as null. Missing or invalid raw
+captures in an otherwise passing run taint the result as
+`raw_evidence_incomplete`. A file changing while
+its evidence hash is measured records
+`raw_evidence_file_changed_during_measurement` and taints the result without
+interrupting owned-clone cleanup.
 
 The guest reports `/usr/bin/sw_vers` ProductVersion and BuildVersion and
 `platform.machine()`. The controller accepts only macOS 15.x on `arm64` and
@@ -273,6 +295,8 @@ entire test log, report exact scope and exit status, and retain the ephemeral
 VM cleanup evidence.
 
 ## References
+
+- [Python 3.13 non-reaping waitid semantics](https://docs.python.org/3.13/library/os.html#os.waitid).
 
 - [Tart 2.41.1 `Run.swift`](https://github.com/openai/tart/blob/543453404cd1b15c1338b6b70e162d000c8ba5e2/Sources/tart/Commands/Run.swift)
 - [Tart 2.41.1 `NetworkFD.swift`](https://github.com/openai/tart/blob/543453404cd1b15c1338b6b70e162d000c8ba5e2/Sources/tart/Network/NetworkFD.swift)

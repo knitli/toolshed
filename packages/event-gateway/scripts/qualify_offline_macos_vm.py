@@ -29,7 +29,6 @@ import uuid
 TART_VERSION = "2.41.1"
 TART_PACKAGE_SHA256 = "e680a734febccfce7d4e910c1f7f13fc3b00f19a181c945e2d746de3214c32c2"
 TART_BINARY_SHA256 = "6d3a455456979c138387d0660af8e956a054018f7516bd0e8bcd175382973823"
-TART_SOURCE_COMMIT = "543453404cd1b15c1338b6b70e162d000c8ba5e2"
 OCI_BASE_DIGEST = "ghcr.io/cirruslabs/macos-sequoia-base@sha256:eee659985b01e4df2a6c0754bd8d25e54969933c43fdcd4edef8bea337b3d354"
 MAX_RECEIPT_BYTES = 64 * 1024
 MAX_CONFIG_BYTES = 1024 * 1024
@@ -114,10 +113,10 @@ def _read_receipt(path):
         value = json.loads(path.read_text())
     except CanaryError:
         raise
+    except (ValueError, UnicodeError, RecursionError):
+        raise CanaryError("invalid_receipt") from None
     except (OSError, RuntimeError):
         raise CanaryError("receipt_unavailable") from None
-    except (ValueError, UnicodeError):
-        raise CanaryError("invalid_receipt") from None
     required = {
         "kind", "baseVmName", "tartVersion", "tartPackageSha256", "tartBinarySha256",
         "ociBaseDigest", "preparedSnapshot", "storageMeasurement",
@@ -230,11 +229,15 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                 capture.close()
 
 
-def _raw_evidence(path, maximum):
+def _raw_evidence(path, maximum, cleanup_errors):
     path = Path(path)
     try:
         digest, count = _hash_file(path, maximum=maximum)
-    except (FileNotFoundError, CanaryError):
+    except FileNotFoundError:
+        return None
+    except CanaryError as exc:
+        if exc.args and exc.args[0] == "base_vm_file_changed_during_measurement":
+            cleanup_errors.append("raw_evidence_file_changed_during_measurement")
         return None
     return {"bytes": count, "sha256": digest, "maxBytes": maximum}
 
@@ -317,7 +320,7 @@ def _base_vm_measurement(tart_home, name, receipt):
         raise CanaryError("base_vm_config_empty")
     try:
         config = json.loads(config_raw)
-    except (ValueError, UnicodeError):
+    except (ValueError, UnicodeError, RecursionError):
         raise CanaryError("invalid_base_vm_config") from None
     if (not isinstance(config, dict) or config.get("os") != "darwin" or config.get("arch") != "arm64"
             or not isinstance(config.get("macAddress"), str)):
@@ -450,7 +453,6 @@ def _check_tart_acl(path, *, fd=None):
                     raise CanaryError("unsafe_tart_acl")
                 if permissions.value & _ACL_MUTATING_PERMISSIONS:
                     raise CanaryError("unsafe_tart_acl")
-            raise CanaryError("unsafe_tart_acl")
         finally:
             library.acl_free(acl)
     except CanaryError:
@@ -478,10 +480,40 @@ def _safe_tart_home(tart_home):
     return path
 
 
+def _wait_owned_vm_exit(process, timeout):
+    # WNOWAIT observes exit while reserving the child PID until the group sweep.
+    if getattr(process, "returncode", None) is not None:
+        raise ChildProcessError
+    deadline = time.monotonic() + timeout
+    while True:
+        exited = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        if exited is not None or time.monotonic() >= deadline:
+            return
+        time.sleep(0.05)
+
+
+def _owned_group_is_zombie_only(pid, run_bounded, env):
+    # Darwin killpg returns EPERM for a zombie-only group; keep its PID reserved.
+    try:
+        stdout, _ = run_bounded(["/bin/ps", "-A", "-o", "pid=", "-o", "pgid=", "-o", "stat="],
+                                timeout=5, env=env)
+        leader_seen = False
+        for line in stdout.splitlines():
+            member, group, state = line.split()
+            if int(group) != pid:
+                continue
+            if not state.startswith(b"Z"):
+                return False
+            leader_seen |= int(member) == pid
+        return leader_seen
+    except (OSError, CanaryError, ValueError):
+        return False
+
+
 def _vm_stopped(raw):
     try:
         value = json.loads(raw)
-    except (ValueError, UnicodeError):
+    except (ValueError, UnicodeError, RecursionError):
         return False
     return isinstance(value, dict) and value.get("Running") is False and value.get("State") == "stopped"
 
@@ -599,7 +631,7 @@ print(json.dumps({"kind": "offline-macos-vm-guest-canary-v1", "nonce": nonce, "c
 def _guest_result(data, nonce):
     try:
         value = json.loads(data)
-    except (ValueError, UnicodeError):
+    except (ValueError, UnicodeError, RecursionError):
         raise CanaryError("invalid_guest_canary_result") from None
     expected = {"loopback-ipv4", "loopback-ipv6", "unix-socket", "nested-seatbelt", "sent-ipv4", "sent-ipv6"}
     if (not isinstance(value, dict) or set(value) != {"kind", "nonce", "checks", "runtime"}
@@ -754,6 +786,8 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
     """Run one owned clone and return its published summary after cleanup."""
     if not BASE_NAME.fullmatch(base_vm) or "://" in base_vm:
         raise CanaryError("base_vm_must_be_local_name")
+    if not all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")):
+        raise CanaryError("nonreaping_wait_unavailable")
     receipt = _read_receipt(receipt_path)
     if receipt["baseVmName"] != base_vm:
         raise CanaryError("base_vm_receipt_mismatch")
@@ -812,7 +846,12 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
         child.close()
         child = None
         stdout, _ = run_bounded([str(tart_path), "get", clone, "--format", "json"], timeout=10, env=env)
-        clone_config = json.loads(stdout)
+        try:
+            clone_config = json.loads(stdout)
+        except (ValueError, UnicodeError, RecursionError):
+            raise CanaryError("clone_config_invalid") from None
+        if not isinstance(clone_config, dict):
+            raise CanaryError("clone_config_invalid")
         vm_mac = clone_config.get("MACAddress")
         if not isinstance(vm_mac, str) or not re.fullmatch(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", vm_mac):
             raise CanaryError("clone_mac_missing")
@@ -917,27 +956,46 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                     stop_outcome["commandSucceeded"] = False
                 else:
                     stop_outcome["commandSucceeded"] = True
+                group_owned = True
+                group_kill_failed = False
                 try:
-                    os.killpg(vm_proc.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
+                    _wait_owned_vm_exit(vm_proc, 0)
                 except OSError:
-                    vm_proc.terminate()
-                try:
-                    vm_proc.wait(timeout=10)
-                    vm_reaped = True
-                except BaseException:
+                    group_owned = False
+                    cleanup_errors.append("owned_clone_process_group_identity_lost")
+                if group_owned:
+                    try:
+                        os.killpg(vm_proc.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    except OSError:
+                        vm_proc.terminate()
+                    try:
+                        _wait_owned_vm_exit(vm_proc, 10)
+                    except OSError:
+                        group_owned = False
+                        cleanup_errors.append("owned_clone_process_group_identity_lost")
+                if group_owned:
+                    # Sweep descendants before reaping can release the group's PID.
                     try:
                         os.killpg(vm_proc.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
-                    except OSError:
-                        vm_proc.kill()
-                    try:
-                        vm_proc.wait(timeout=5)
-                        vm_reaped = True
-                    except BaseException:
-                        cleanup_errors.append("tart_process_reap_failed")
+                    except OSError as exc:
+                        zombie_only = isinstance(exc, PermissionError) and _owned_group_is_zombie_only(
+                            vm_proc.pid, run_bounded, env)
+                        if not zombie_only:
+                            group_kill_failed = True
+                            cleanup_errors.append("owned_clone_process_group_kill_failed")
+                            try:
+                                vm_proc.kill()
+                            except OSError:
+                                cleanup_errors.append("tart_process_kill_failed")
+                try:
+                    vm_proc.wait(timeout=5)
+                    vm_reaped = group_owned and not group_kill_failed
+                except BaseException:
+                    cleanup_errors.append("tart_process_reap_failed")
             if clone_created:
                 try:
                     state_output, _ = run_bounded(
@@ -962,13 +1020,15 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                                 "hostTransmitted": 0, "matched": records,
                                 "dropMechanism": "host-drained-and-discarded-every-datagram; no send operation exists"}
             result["rawEvidence"] = {
-                name: _raw_evidence(evidence / name, limit)
+                name: _raw_evidence(evidence / name, limit, cleanup_errors)
                 for name, limit in (("guest-stdout.bin", MAX_GUEST_OUTPUT),
                                     ("guest-stderr.bin", MAX_GUEST_OUTPUT),
                                     ("tart-stdout.bin", MAX_SHORT_OUTPUT),
                                     ("tart-stderr.bin", MAX_SHORT_OUTPUT),
                                     ("frame-ipv4.bin", MAX_FRAME), ("frame-ipv6.bin", MAX_FRAME))
             }
+            if result["status"] == "passed" and any(value is None for value in result["rawEvidence"].values()):
+                cleanup_errors.append("raw_evidence_incomplete")
             # Delete only our random clone. The prepared base is never modified or removed.
             if clone_created and vm_reaped and stop_outcome["stateConfirmedStopped"]:
                 try:

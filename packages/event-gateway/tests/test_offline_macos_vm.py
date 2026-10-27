@@ -157,6 +157,7 @@ class OfflineMacosVmCanaryTest(unittest.TestCase):
 
     def test_stopped_state_matches_captured_tart_json_exactly(self):
         self.assertTrue(canary._vm_stopped(TART_STOPPED_JSON))
+        self.assertFalse(canary._vm_stopped((b"{" + b'"x":' * 5000 + b"0" + b"}")))
         rejected = (
             {"Running": True, "State": "stopped"},
             {"Running": False, "State": "Stopped"},
@@ -170,7 +171,8 @@ class OfflineMacosVmCanaryTest(unittest.TestCase):
                 self.assertFalse(canary._vm_stopped(json.dumps(value)))
 
     def _write_fake_tart(self, *, frames="none", fail_delete=False, running_after_stop=False,
-                         readiness=None, sleep_guest=0, runtime=None, partial_clone_failure=False):
+                         readiness=None, sleep_guest=0, runtime=None, partial_clone_failure=False,
+                         spawn_term_ignoring_child=False):
         readiness = readiness or {}
         runtime = runtime or {}
         readiness_failures = readiness.get("failures", 0)
@@ -193,7 +195,7 @@ class OfflineMacosVmCanaryTest(unittest.TestCase):
         fake_config = {**TART_CONFIG, "Running": running_after_stop,
                        "State": "running" if running_after_stop else "stopped"}
         script = f'''#!{sys.executable}
-import json, os, shutil, signal, socket, sys, time
+import json, os, shutil, signal, socket, subprocess, sys, time
 root = {str(SCRIPT.parent)!r}
 if sys.argv[1:] == ["--version"]:
     print("{canary.TART_VERSION}"); raise SystemExit
@@ -209,6 +211,13 @@ if cmd == "run":
     import qualify_offline_macos_vm as m
     fd = int(next(x.split("=", 1)[1] for x in sys.argv if x.startswith("--net-fd=")))
     peer = socket.socket(fileno=fd)
+    if {spawn_term_ignoring_child!r}:
+        child_marker = os.path.join(os.environ["TART_HOME"], "descendant-pid")
+        child_code = "import os,signal,sys,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); open(sys.argv[1], 'w').write(str(os.getpid())); time.sleep(60)"
+        subprocess.Popen([sys.executable, "-c", child_code, child_marker])
+        child_deadline = time.monotonic() + 5
+        while not os.path.exists(child_marker) and time.monotonic() < child_deadline:
+            time.sleep(0.01)
 {''.join('    ' + line + '\n' for line in sender.rstrip().splitlines())}
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     while True: time.sleep(0.1)
@@ -633,6 +642,57 @@ raise SystemExit(2)
         self.assertTrue(self.base_vm_dir.exists())
         self.assertEqual(sorted(path.name for path in (self.tart_home / "vms").iterdir()), ["prepared-macos15"])
 
+    def test_main_reports_malformed_clone_config_and_cleans_clone(self):
+        malformed_outputs = (b"\xff", b"{invalid", b"[]", b"1", b"[" * 10_000 + b"0" + b"]" * 10_000)
+        real_qualify = canary.qualify
+        real_runner = canary._run_bounded
+
+        class FixedUuid:
+            hex = "c" * 32
+
+        for index, malformed in enumerate(malformed_outputs):
+            with self.subTest(malformed=malformed):
+                self._write_fake_tart(frames="both")
+                self._write_receipt()
+                evidence = self.root / f"malformed-config-evidence-{index}"
+                evidence.mkdir(mode=0o700)
+                initial_gets = 0
+
+                def runner(argv, **kwargs):
+                    nonlocal initial_gets
+                    if (len(argv) >= 5 and argv[1] == "get"
+                            and argv[2].startswith("offline-canary-")):
+                        initial_gets += 1
+                        if initial_gets == 1:
+                            return malformed, b""
+                    return real_runner(argv, **kwargs)
+
+                def qualify_with_malformed_get(*args, **kwargs):
+                    kwargs["run_bounded"] = runner
+                    return real_qualify(*args, **kwargs)
+
+                stdout, stderr = StringIO(), StringIO()
+                with patch.object(canary, "TART_BINARY_SHA256", canary._sha256(self.tart.read_bytes())), \
+                        patch.object(canary, "qualify", side_effect=qualify_with_malformed_get), \
+                        patch.object(canary.uuid, "uuid4", return_value=FixedUuid()), \
+                        redirect_stdout(stdout), redirect_stderr(stderr):
+                    exit_code = canary.main([
+                        "--base-vm", "prepared-macos15", "--receipt", str(self.receipt_path),
+                        "--evidence-dir", str(evidence), "--tart", str(self.tart),
+                        "--tart-home", str(self.tart_home),
+                    ])
+
+                self.assertEqual(exit_code, 1)
+                self.assertEqual(stderr.getvalue(), "clone_config_invalid\n")
+                self.assertNotIn("Traceback", stderr.getvalue())
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(initial_gets, 2)
+                saved = json.loads((evidence / "offline-macos-vm-canary.json").read_text())
+                self.assertEqual(saved["status"], "failed")
+                self.assertEqual(saved["error"], "clone_config_invalid")
+                self.assertEqual(sorted(path.name for path in (self.tart_home / "vms").iterdir()),
+                                 ["prepared-macos15"])
+
     def test_readiness_probe_timeout_retries_within_budget(self):
         self._write_fake_tart(frames="both", readiness={"delay_first": 1.0})
         self._write_receipt()
@@ -759,19 +819,188 @@ raise SystemExit(2)
         self.assertEqual(saved["status"], "failed")
         self.assertEqual(sorted(path.name for path in (self.tart_home / "vms").iterdir()), ["prepared-macos15"])
 
-    def test_cleanup_signals_owned_process_group(self):
-        self._write_fake_tart(frames="both")
+    def test_cleanup_kills_owned_process_group_before_leader_is_reaped(self):
+        self._write_fake_tart(frames="both", spawn_term_ignoring_child=True)
         self._write_receipt()
+        real_popen = subprocess.Popen
         real_killpg = os.killpg
         signals = []
+        state = {"leaderReaped": False, "killBeforeLeaderReaped": False, "leaderExitedObserved": False}
+
+        class ObservedProcess:
+            def __init__(self, process, argv):
+                self.process = process
+                self.argv = argv
+
+            def __getattr__(self, name):
+                return getattr(self.process, name)
+
+            def wait(self, *args, **kwargs):
+                result = self.process.wait(*args, **kwargs)
+                if self.argv[1] == "run" and self.process.poll() is not None:
+                    state["leaderReaped"] = True
+                return result
+
+        def observed_popen(argv, **kwargs):
+            process = real_popen(argv, **kwargs)
+            if len(argv) > 1 and argv[1] == "run":
+                state["groupId"] = process.pid
+                return ObservedProcess(process, argv)
+            return process
 
         def record_killpg(pid, sig):
             signals.append((pid, sig))
+            if sig == signal.SIGKILL:
+                state["killBeforeLeaderReaped"] = not state["leaderReaped"]
+                try:
+                    os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                    state["leaderExitedObserved"] = True
+                except ChildProcessError:
+                    pass
             return real_killpg(pid, sig)
 
-        with patch.object(canary.os, "killpg", side_effect=record_killpg):
-            self._run()
+        marker = self.tart_home / "descendant-pid"
+        try:
+            with patch.object(canary.os, "killpg", side_effect=record_killpg):
+                self._run(popen=observed_popen)
+        finally:
+            if marker.exists() and not state["killBeforeLeaderReaped"]:
+                try:
+                    real_killpg(state.get("groupId", int(marker.read_text())), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        self.assertTrue(marker.exists())
         self.assertTrue(any(sig == signal.SIGTERM for _, sig in signals))
+        self.assertTrue(any(sig == signal.SIGKILL for _, sig in signals))
+        self.assertTrue(state["killBeforeLeaderReaped"])
+        self.assertTrue(state["leaderExitedObserved"])
+
+    def test_already_reaped_owned_child_receives_no_group_signals_and_retains_clone(self):
+        self._write_fake_tart(frames="none")
+        self._write_receipt()
+        real_wait = canary._wait_owned_vm_exit
+        signals = []
+
+        def reap_before_identity_check(process, timeout):
+            os.kill(process.pid, signal.SIGTERM)
+            process.wait(timeout=5)
+            return real_wait(process, timeout)
+
+        with patch.object(canary, "_wait_owned_vm_exit", side_effect=reap_before_identity_check), \
+                patch.object(canary.os, "killpg", side_effect=lambda pid, sig: signals.append((pid, sig))):
+            with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
+                self._run()
+        self.assertEqual(signals, [])
+        saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+        self.assertEqual(saved["status"], "tainted")
+        self.assertIn("owned_clone_process_group_identity_lost", saved["cleanupErrors"])
+        self.assertIn("owned_clone_retained_vm_process_unreaped", saved["cleanupErrors"])
+        self.assertTrue((self.tart_home / "vms" / saved["cloneVmName"]).exists())
+
+    def test_zombie_only_process_group_proof_is_strict_and_bounded(self):
+        pid = 41001
+        valid_rows = b"41001 41001 Z\n41002 41001 Z+\n"
+        cases = (
+            (valid_rows, True),
+            (b"41001 41001 Z\n41002 41001 S\n", False),
+            (b"41002 41001 Z\n", False),
+            (b"", False),
+            (b"not a ps row\n", False),
+        )
+        for output, expected in cases:
+            with self.subTest(output=output):
+                calls = []
+
+                def runner(argv, *, timeout, env):
+                    calls.append((argv, timeout, env))
+                    return output, b""
+
+                self.assertEqual(canary._owned_group_is_zombie_only(pid, runner, {"SAFE": "1"}), expected)
+                self.assertEqual(calls, [
+                    (["/bin/ps", "-A", "-o", "pid=", "-o", "pgid=", "-o", "stat="],
+                     5, {"SAFE": "1"}),
+                ])
+
+        for failure in (OSError("ps unavailable"), canary.CanaryError("ps_failed")):
+            with self.subTest(failure=type(failure).__name__):
+                self.assertFalse(canary._owned_group_is_zombie_only(
+                    pid, lambda *args, **kwargs: (_ for _ in ()).throw(failure), {}))
+
+    def test_failed_final_group_kill_taints_and_retains_clone_before_leader_reaped(self):
+        self._write_fake_tart(frames="none")
+        self._write_receipt()
+        real_popen = subprocess.Popen
+        signals = []
+
+        class ReapedLeader:
+            pid = 99887766
+
+            def __init__(self, pass_fd):
+                out_read, out_write = os.pipe()
+                err_read, err_write = os.pipe()
+                self.write_fds = [out_write, err_write]
+                self.stdout = os.fdopen(out_read, "rb")
+                self.stderr = os.fdopen(err_read, "rb")
+                self.peer = socket.socket(fileno=os.dup(pass_fd))
+                self.reaped = False
+
+            def poll(self):
+                return 0 if self.reaped else None
+
+            def wait(self, timeout=None):
+                self.reaped = True
+                for fd in self.write_fds:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                self.write_fds.clear()
+                return 0
+
+            def terminate(self):
+                return None
+
+            def kill(self):
+                return None
+
+            def close(self):
+                self.peer.close()
+                for fd in self.write_fds:
+                    os.close(fd)
+
+        processes = []
+
+        def observe_synthetic_exit(process, timeout):
+            if process.reaped:
+                raise ChildProcessError
+
+        def popen(argv, **kwargs):
+            if len(argv) > 1 and argv[1] == "run":
+                process = ReapedLeader(kwargs["pass_fds"][0])
+                processes.append(process)
+                return process
+            return real_popen(argv, **kwargs)
+
+        def fail_final_group_kill(pid, sig):
+            signals.append(sig)
+            if sig == signal.SIGKILL:
+                self.assertFalse(processes[0].reaped)
+                raise PermissionError("injected group kill failure")
+
+        try:
+            with patch.object(canary, "_wait_owned_vm_exit", side_effect=observe_synthetic_exit), \
+                    patch.object(canary.os, "killpg", side_effect=fail_final_group_kill):
+                with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
+                    self._run(popen=popen)
+        finally:
+            for process in processes:
+                process.close()
+        self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
+        saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+        self.assertEqual(saved["status"], "tainted")
+        self.assertIn("owned_clone_process_group_kill_failed", saved["cleanupErrors"])
+        self.assertIn("owned_clone_retained_vm_process_unreaped", saved["cleanupErrors"])
+        self.assertTrue((self.tart_home / "vms" / saved["cloneVmName"]).exists())
 
     def test_guest_output_cap_is_retained_and_hashed(self):
         stdout_path = self.root / "bounded-stdout.bin"
@@ -782,8 +1011,74 @@ raise SystemExit(2)
                                 capture_paths=(stdout_path, stderr_path))
         retained = stdout_path.read_bytes()
         self.assertEqual(retained, b"x" * 8)
-        self.assertEqual(canary._raw_evidence(stdout_path, 8)["sha256"], canary._sha256(retained))
+        cleanup_errors = []
+        self.assertEqual(canary._raw_evidence(stdout_path, 8, cleanup_errors)["sha256"], canary._sha256(retained))
+        self.assertEqual(cleanup_errors, [])
+        self.assertIsNone(canary._raw_evidence(self.root / "missing-raw-evidence", 8, cleanup_errors))
+        self.assertEqual(cleanup_errors, [])
         self.assertEqual(stat.S_IMODE(stdout_path.stat().st_mode), 0o600)
+
+    def test_raw_evidence_change_taints_result_but_clone_cleanup_continues(self):
+        self._write_fake_tart(frames="both")
+        self._write_receipt()
+        target = self.evidence / "guest-stdout.bin"
+        real_read = os.read
+        real_fstat = os.fstat
+        mutation = {}
+
+        def mutate_evidence_during_read(fd, size):
+            data = real_read(fd, size)
+            if target.exists() and not mutation.get("done"):
+                file_stat = os.stat(target, follow_symlinks=False)
+                descriptor_stat = real_fstat(fd)
+                if (file_stat.st_dev, file_stat.st_ino) == (descriptor_stat.st_dev, descriptor_stat.st_ino):
+                    original = target.read_bytes()
+                    mutation["original"] = original
+                    with target.open("r+b") as stream:
+                        stream.write(b"X" + original[1:])
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    mutation["done"] = True
+            return data
+
+        try:
+            with patch.object(canary.os, "read", side_effect=mutate_evidence_during_read):
+                summary = self._run()
+        finally:
+            if mutation.get("original") is not None:
+                with target.open("r+b") as stream:
+                    stream.write(mutation["original"])
+                    stream.truncate()
+                    stream.flush()
+                    os.fsync(stream.fileno())
+
+        saved = self._assert_published_summary(summary)
+        self.assertTrue(mutation.get("done"))
+        self.assertEqual(saved["status"], "tainted")
+        self.assertIn("raw_evidence_file_changed_during_measurement", saved["cleanupErrors"])
+        self.assertIsNone(saved["rawEvidence"]["guest-stdout.bin"])
+        self.assertTrue(self.base_vm_dir.exists())
+        self.assertEqual(sorted(path.name for path in (self.tart_home / "vms").iterdir()),
+                         ["prepared-macos15"])
+
+    def test_missing_raw_capture_on_success_taints_but_clone_cleanup_continues(self):
+        self._write_fake_tart(frames="both")
+        self._write_receipt()
+        real_raw_evidence = canary._raw_evidence
+
+        def omit_capture(path, maximum, cleanup_errors):
+            if Path(path).name == "tart-stderr.bin":
+                return None
+            return real_raw_evidence(path, maximum, cleanup_errors)
+
+        with patch.object(canary, "_raw_evidence", side_effect=omit_capture):
+            summary = self._run()
+        saved = self._assert_published_summary(summary)
+        self.assertEqual(saved["status"], "tainted")
+        self.assertIn("raw_evidence_incomplete", saved["cleanupErrors"])
+        self.assertIsNone(saved["rawEvidence"]["tart-stderr.bin"])
+        self.assertEqual(sorted(path.name for path in (self.tart_home / "vms").iterdir()),
+                         ["prepared-macos15"])
 
     def test_one_family_only_is_rejected(self):
         self._write_fake_tart(frames="ipv4")
@@ -816,6 +1111,17 @@ raise SystemExit(2)
         self.receipt_path.write_text(json.dumps(self.receipt))
         with self.assertRaisesRegex(canary.CanaryError, "oci_base_not_digest_pinned"):
             canary._read_receipt(self.receipt_path)
+
+    def test_deep_json_is_normalized_at_receipt_base_config_and_guest_boundaries(self):
+        nested = b"[" * 10_000 + b"0" + b"]" * 10_000
+        self.receipt_path.write_bytes(nested)
+        with self.assertRaisesRegex(canary.CanaryError, "invalid_receipt"):
+            canary._read_receipt(self.receipt_path)
+        (self.base_vm_dir / "config.json").write_bytes(nested)
+        with self.assertRaisesRegex(canary.CanaryError, "invalid_base_vm_config"):
+            canary._base_vm_measurement(self.tart_home, "prepared-macos15", self.receipt)
+        with self.assertRaisesRegex(canary.CanaryError, "invalid_guest_canary_result"):
+            canary._guest_result(nested, "n" * 32)
 
     def test_tart_binary_identity_mismatch_fails_before_clone(self):
         self.receipt["tartBinarySha256"] = "0" * 64
@@ -1141,8 +1447,9 @@ raise SystemExit(2)
             return process
 
         try:
-            with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
-                self._run(popen=fake_popen)
+            with patch.object(canary, "_wait_owned_vm_exit", return_value=None):
+                with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
+                    self._run(popen=fake_popen)
         finally:
             for process in fake_processes:
                 process.close()
