@@ -85,7 +85,7 @@ jobs:
         working-directory: ${{ runner.temp }}/native-workspace-source/codex-rs
         run: |
           set -euo pipefail
-          cargo metadata --format-version 1 > "$RUNNER_TEMP/native-workspace-metadata.json"
+          cargo metadata --features codex-v8-poc/sandbox --format-version 1 > "$RUNNER_TEMP/native-workspace-metadata.json"
           uv run --no-project --python 3.13.14 python - "$RUNNER_TEMP/native-workspace-initial.lock" Cargo.lock "$GITHUB_WORKSPACE/packages/event-gateway/scripts" <<'PY'
           import hashlib, pathlib, sys, tomllib
           sys.path.insert(0, sys.argv[3])
@@ -193,7 +193,7 @@ jobs:
             CARGO_NET_OFFLINE=true CARGO_INCREMENTAL=0 RUST_MIN_STACK=8388608 NEXTEST_PROFILE=local \
             RUSTY_V8_ARCHIVE="$RUNNER_TEMP/native-workspace-source/rusty-v8.a.gz" \
             RUSTY_V8_SRC_BINDING_PATH="$RUNNER_TEMP/native-workspace-source/rusty-v8-binding.rs" \
-            just test --cargo-profile dev-small 2>&1 | tee "$TEST_LOG"; then
+            just test --cargo-profile dev-small --features codex-v8-poc/sandbox 2>&1 | tee "$TEST_LOG"; then
             test_status=0
           else
             test_status=$?
@@ -222,7 +222,7 @@ jobs:
             printf '## Full native Rust workspace qualification\n\nSetup: `%s`; source replay: `%s`; dependency prime: `%s`; tests step: `%s`; test command started: `%s`.\n\n' \
               "$SETUP_OUTCOME" "$REPLAY_OUTCOME" "$DEPS_OUTCOME" "$TEST_OUTCOME" \
               "$TEST_STARTED"
-            printf 'Command: `just test --cargo-profile dev-small`\n\n'
+            printf 'Command: `just test --cargo-profile dev-small --features codex-v8-poc/sandbox`\n\n'
             printf 'Test log SHA-256: `%s`\n' "$(shasum -a 256 "$RUNNER_TEMP/native-workspace-test.log" 2>/dev/null | awk '{print $1}' || true)"
             printf '%s\n' "Disk log SHA-256: \`$(shasum -a 256 "$RUNNER_TEMP/native-workspace-disk.log" 2>/dev/null | awk '{print $1}' || true)\`"
           } >> "$GITHUB_STEP_SUMMARY"
