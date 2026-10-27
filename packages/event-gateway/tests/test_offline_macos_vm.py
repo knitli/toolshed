@@ -111,6 +111,49 @@ def _stat_with_uid(info, uid):
     return types.SimpleNamespace(**values)
 
 
+class _ObservedPopen:
+    def __init__(self, real_popen):
+        self.real_popen = real_popen
+        self.process = None
+        self.terminate_calls = 0
+        self.kill_calls = 0
+
+    def __call__(self, argv, **kwargs):
+        process = self.real_popen(argv, **kwargs)
+        if len(argv) > 1 and argv[1] == "run":
+            self.process = process
+            return self
+        return process
+
+    def __getattr__(self, name):
+        return getattr(self.process, name)
+
+    def terminate(self):
+        self.terminate_calls += 1
+        return self.process.terminate()
+
+    def kill(self):
+        self.kill_calls += 1
+        return self.process.kill()
+
+
+class _UnverifiedGroupKillFailure:
+    def __init__(self, observed_popen):
+        self.process = observed_popen
+        self.signals = []
+
+    def __call__(self, pid, sig):
+        self.signals.append(sig)
+        if sig == signal.SIGTERM:
+            os.kill(pid, signal.SIGTERM)
+            canary._wait_owned_vm_exit(self.process, 5)
+        elif sig == signal.SIGKILL and self.process.returncode is not None:
+            raise AssertionError("Popen reaped the leader before final group KILL")
+        elif sig != signal.SIGKILL:
+            raise AssertionError(f"unexpected group signal {sig}")
+        raise PermissionError("injected unverified group signal failure")
+
+
 class OfflineMacosVmCanaryTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="offline-vm-test-", dir="/tmp")  # nosec B108 -- atomic private fixture under root-sticky tmp.
@@ -171,14 +214,13 @@ class OfflineMacosVmCanaryTest(unittest.TestCase):
                 self.assertFalse(canary._vm_stopped(json.dumps(value)))
 
     def _write_fake_tart(self, *, frames="none", fail_delete=False, running_after_stop=False,
-                         readiness=None, sleep_guest=0, runtime=None, partial_clone_failure=False,
+                         readiness=None, sleep_guest=0, partial_clone_failure=False,
                          spawn_term_ignoring_child=False):
         readiness = readiness or {}
-        runtime = runtime or {}
         readiness_failures = readiness.get("failures", 0)
         readiness_delay_first = readiness.get("delay_first", 0)
-        guest_version = runtime.get("product_version", "15.0.1")
-        guest_arch = runtime.get("architecture", "arm64")
+        guest_version = "15.0.1"
+        guest_arch = "arm64"
         sender = ""
         source_mac = "02:aa:bb:cc:dd:ef" if frames == "badmac" else "02:aa:bb:cc:dd:ee"
         marker4 = "x" * 32 if frames == "wrongnonce" else "c" * 32
@@ -1002,78 +1044,16 @@ raise SystemExit(2)
     def test_failed_final_group_kill_taints_and_retains_clone_before_leader_reaped(self):
         self._write_fake_tart(frames="none")
         self._write_receipt()
-        real_popen = subprocess.Popen
-        signals = []
-
-        class ReapedLeader:
-            pid = 99887766
-
-            def __init__(self, pass_fd):
-                out_read, out_write = os.pipe()
-                err_read, err_write = os.pipe()
-                self.write_fds = [out_write, err_write]
-                self.stdout = os.fdopen(out_read, "rb")
-                self.stderr = os.fdopen(err_read, "rb")
-                self.peer = socket.socket(fileno=os.dup(pass_fd))
-                self.reaped = False
-                self.terminated = False
-
-            def poll(self):
-                return 0 if self.reaped else None
-
-            def wait(self, timeout=None):
-                self.reaped = True
-                for fd in self.write_fds:
-                    try:
-                        os.close(fd)
-                    except OSError:
-                        pass
-                self.write_fds.clear()
-                return 0
-
-            def terminate(self):
-                self.terminated = True
-                return None
-
-            def kill(self):
-                return None
-
-            def close(self):
-                self.peer.close()
-                for fd in self.write_fds:
-                    os.close(fd)
-
-        processes = []
-
-        def observe_synthetic_exit(process, timeout):
-            if process.reaped:
-                raise ChildProcessError
-
-        def popen(argv, **kwargs):
-            if len(argv) > 1 and argv[1] == "run":
-                process = ReapedLeader(kwargs["pass_fds"][0])
-                processes.append(process)
-                return process
-            return real_popen(argv, **kwargs)
-
-        def fail_final_group_kill(pid, sig):
-            signals.append(sig)
-            if sig == signal.SIGTERM:
-                raise PermissionError("injected TERM EPERM for unverified group")
-            if sig == signal.SIGKILL:
-                self.assertFalse(processes[0].reaped)
-                raise PermissionError("injected group kill failure")
-
-        try:
-            with patch.object(canary, "_wait_owned_vm_exit", side_effect=observe_synthetic_exit), \
-                    patch.object(canary.os, "killpg", side_effect=fail_final_group_kill):
-                with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
-                    self._run(popen=popen)
-        finally:
-            for process in processes:
-                process.close()
-        self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
-        self.assertFalse(processes[0].terminated)
+        popen = _ObservedPopen(subprocess.Popen)
+        failed_group_kill = _UnverifiedGroupKillFailure(popen)
+        with patch.object(canary, "_owned_group_is_zombie_only", return_value=False) as zombie_proof, \
+                patch.object(canary.os, "killpg", side_effect=failed_group_kill):
+            with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
+                self._run(popen=popen)
+        self.assertEqual(failed_group_kill.signals, [signal.SIGTERM, signal.SIGKILL])
+        self.assertEqual(popen.terminate_calls, 0)
+        self.assertEqual(popen.kill_calls, 1)
+        zombie_proof.assert_called_once_with(popen.pid, canary._run_bounded, unittest.mock.ANY)
         saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
         self.assertEqual(saved["status"], "tainted")
         self.assertIn("owned_clone_process_group_kill_failed", saved["cleanupErrors"])
