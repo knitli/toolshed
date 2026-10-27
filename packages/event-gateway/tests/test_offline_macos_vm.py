@@ -15,6 +15,7 @@ import tempfile
 import signal
 import time
 import threading
+import types
 import unittest
 from unittest.mock import patch
 
@@ -35,10 +36,12 @@ class GuestUnixSocketProbeTest(unittest.TestCase):
         self.assertEqual(route_paths.count("/sbin/route"), 2)
         self.assertNotIn("/usr/sbin/route", route_paths)
         namespace = {"os": os, "socket": socket, "tempfile": tempfile}
-        exec(  # nosec B102 -- extracted function is a literal, reviewed guest-local probe.
-            compile(ast.Module(body=[function], type_ignores=[]), "<guest-unix-probe>", "exec"),
-            namespace,
+        module_code = compile(ast.Module(body=[function], type_ignores=[]), "<guest-unix-probe>", "exec")
+        function_code = next(
+            constant for constant in module_code.co_consts
+            if isinstance(constant, types.CodeType) and constant.co_name == function.name
         )
+        unix_probe = types.FunctionType(function_code, namespace)
         bound_paths = []
         opened_sockets = []
         real_socket = socket.socket
@@ -65,7 +68,7 @@ class GuestUnixSocketProbeTest(unittest.TestCase):
             "AF_UNIX": socket.AF_UNIX, "SOCK_STREAM": socket.SOCK_STREAM, "socket": SocketProbe,
         })
         try:
-            namespace["check_unix_socket"]()
+            unix_probe()
             self.assertEqual(len(bound_paths), 1)
             self.assertFalse(bound_paths[0].parent.exists())
             self.assertTrue(opened_sockets)
