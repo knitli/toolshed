@@ -1,10 +1,4 @@
-"""
-Unit and causal tests for the fixed offline Tart network canary.
-
-These tests use a fake Tart executable and a real inherited datagram socketpair.
-They run only the isolated guest Unix-socket function on localhost; they never
-launch a VM, install software, run host network setup, or invoke the native client.
-"""
+"""Unit and causal tests for the fixed offline Tart canary."""
 
 import ast
 from contextlib import redirect_stderr
@@ -38,15 +32,17 @@ class GuestUnixSocketProbeTest(unittest.TestCase):
                         if isinstance(node, ast.FunctionDef) and node.name == "check_unix_socket")
         route_paths = [node.value for node in ast.walk(guest_tree)
                        if isinstance(node, ast.Constant) and node.value in {"/sbin/route", "/usr/sbin/route"}]
-        self.assertEqual(route_paths, ["/sbin/route", "/sbin/route"])
+        self.assertEqual(route_paths.count("/sbin/route"), 2)
+        self.assertNotIn("/usr/sbin/route", route_paths)
         namespace = {"os": os, "socket": socket, "tempfile": tempfile}
-        exec(
+        exec(  # nosec B102 -- extracted function is a literal, reviewed guest-local probe.
             compile(ast.Module(body=[function], type_ignores=[]), "<guest-unix-probe>", "exec"),
             namespace,
-        )  # nosec B102 -- function is the literal guest Unix-socket probe extracted above.
+        )
         bound_paths = []
         opened_sockets = []
         real_socket = socket.socket
+        test_case = self
 
         class SocketProbe(real_socket):
             def __init__(self, *args, **kwargs):
@@ -55,7 +51,8 @@ class GuestUnixSocketProbeTest(unittest.TestCase):
 
             def bind(self, address):
                 parent = Path(address).parent
-                self.assert_private_parent(parent)
+                test_case.assertTrue(parent.is_dir())
+                test_case.assertEqual(stat.S_IMODE(parent.stat().st_mode), 0o700)
                 bound_paths.append(Path(address))
                 super().bind(address)
 
@@ -63,11 +60,6 @@ class GuestUnixSocketProbeTest(unittest.TestCase):
                 conn, address = super().accept()
                 opened_sockets.append(conn)
                 return conn, address
-
-            @staticmethod
-            def assert_private_parent(parent):
-                assert parent.is_dir()
-                assert stat.S_IMODE(parent.stat().st_mode) == 0o700
 
         namespace["socket"] = type("SocketModule", (), {
             "AF_UNIX": socket.AF_UNIX, "SOCK_STREAM": socket.SOCK_STREAM, "socket": SocketProbe,
@@ -83,9 +75,21 @@ class GuestUnixSocketProbeTest(unittest.TestCase):
                 sock.close()
 
 
-TART_CONFIG = {"OS": "macOS", "CPU": 4, "Memory": 8192, "Disk": "32.000 GB",
-               "DiskFormat": "ASIF", "Size": "1.250 GB", "Display": "1024x768",
-               "MACAddress": "02:aa:bb:cc:dd:ee", "Running": False, "State": "Stopped"}
+TART_CONFIG = {"OS": "darwin", "CPU": 4, "Memory": 8192, "Disk": 50,
+               "DiskFormat": "raw", "Size": "30.603", "Display": "1024x768",
+               "MACAddress": "02:aa:bb:cc:dd:ee", "Running": False, "State": "stopped"}
+TART_STOPPED_JSON = b'''{
+  "Size" : "30.603",
+  "Running" : false,
+  "State" : "stopped",
+  "DiskFormat" : "raw",
+  "Disk" : 50,
+  "MACAddress" : "02:aa:bb:cc:dd:ee",
+  "Display" : "1024x768",
+  "OS" : "darwin",
+  "Memory" : 8192,
+  "CPU" : 4
+}'''
 BASE_CONFIG = {"os": "darwin", "arch": "arm64", "macAddress": "02:aa:bb:cc:dd:ee",
                "cpuCount": 4, "memorySize": 8192 * 1024 * 1024, "diskFormat": "asif"}
 
@@ -134,9 +138,28 @@ class OfflineMacosVmCanaryTest(unittest.TestCase):
         self.receipt_path.write_text(json.dumps(self.receipt))
         os.chmod(self.receipt_path, 0o600)
 
+    def test_stopped_state_matches_captured_tart_json_exactly(self):
+        self.assertTrue(canary._vm_stopped(TART_STOPPED_JSON))
+        rejected = (
+            {"Running": True, "State": "stopped"},
+            {"Running": False, "State": "Stopped"},
+            {"Running": True, "State": "running"},
+            {"State": "stopped"},
+            {"Running": False},
+            [],
+        )
+        for value in rejected:
+            with self.subTest(value=value):
+                self.assertFalse(canary._vm_stopped(json.dumps(value)))
+
     def _write_fake_tart(self, *, frames="none", fail_delete=False, running_after_stop=False,
-                         readiness_failures=0, sleep_guest=0, guest_version="15.0.1",
-                         guest_arch="arm64", readiness_delay_first=0, partial_clone_failure=False):
+                         readiness=None, sleep_guest=0, runtime=None, partial_clone_failure=False):
+        readiness = readiness or {}
+        runtime = runtime or {}
+        readiness_failures = readiness.get("failures", 0)
+        readiness_delay_first = readiness.get("delay_first", 0)
+        guest_version = runtime.get("product_version", "15.0.1")
+        guest_arch = runtime.get("architecture", "arm64")
         sender = ""
         source_mac = "02:aa:bb:cc:dd:ef" if frames == "badmac" else "02:aa:bb:cc:dd:ee"
         marker4 = "x" * 32 if frames == "wrongnonce" else "c" * 32
@@ -151,7 +174,7 @@ class OfflineMacosVmCanaryTest(unittest.TestCase):
                 '''"fd00:8888::2", "2001:db8::7", 40001, 49372, ("OFFLINE_CANARY:" + "c" * 32 + "6").encode()))\n'''
             )
         fake_config = {**TART_CONFIG, "Running": running_after_stop,
-                       "State": "Running" if running_after_stop else "Stopped"}
+                       "State": "running" if running_after_stop else "stopped"}
         script = f'''#!{sys.executable}
 import json, os, shutil, signal, socket, sys, time
 root = {str(SCRIPT.parent)!r}
@@ -202,6 +225,7 @@ raise SystemExit(2)
 
     def _run(self, *, free_space=200 * 1024**3, popen=None, probe_timeout=0.2):
         nonce_file = self.root / "nonce"
+
         class FixedUuid:
             hex = "c" * 32
         with patch.object(canary.uuid, "uuid4", return_value=FixedUuid()):
@@ -274,7 +298,7 @@ raise SystemExit(2)
         self.assertTrue(process.reaped)
 
     def test_inherited_real_datagram_fd_and_fixed_drop_canary(self):
-        self._write_fake_tart(frames="both", readiness_failures=2)
+        self._write_fake_tart(frames="both", readiness={"failures": 2})
         self._write_receipt()
         result = self._run()
         self.assertEqual(result, None)
@@ -307,7 +331,7 @@ raise SystemExit(2)
         self.assertEqual(sorted(path.name for path in (self.tart_home / "vms").iterdir()), ["prepared-macos15"])
 
     def test_readiness_probe_timeout_retries_within_budget(self):
-        self._write_fake_tart(frames="both", readiness_delay_first=1.0)
+        self._write_fake_tart(frames="both", readiness={"delay_first": 1.0})
         self._write_receipt()
         self.assertIsNone(self._run(probe_timeout=0.5))
         saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())

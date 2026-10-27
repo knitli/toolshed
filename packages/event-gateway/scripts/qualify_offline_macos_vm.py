@@ -352,7 +352,7 @@ def _vm_stopped(raw):
         value = json.loads(raw)
     except (ValueError, UnicodeError):
         return False
-    return isinstance(value, dict) and value.get("Running") is False and value.get("State") == "Stopped"
+    return isinstance(value, dict) and value.get("Running") is False and value.get("State") == "stopped"
 
 
 def _decode_frame(frame):

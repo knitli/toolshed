@@ -172,7 +172,7 @@ the manifest. No unrelated guest Ethernet packets are written to evidence.
 
 Clone deletion is gated on both reaping the owned Tart run process and reading
 the exact Tart `get --format json` stopped-state fields (`Running: false` and
-`State: "Stopped"`). If either check is missing or disagrees, the controller
+`State: "stopped"`, lowercase). If either check is missing or disagrees, the controller
 retains only its random-named clone and marks the result tainted.
 
 The test makes no assertion about general Internet availability or arbitrary
