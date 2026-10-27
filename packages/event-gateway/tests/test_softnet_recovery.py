@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import plistlib
 import stat
-import subprocess
+import subprocess  # nosec B404 -- Fixed interpreter and private fake-preference crash probe.
 import sys
 import tempfile
 import unittest
