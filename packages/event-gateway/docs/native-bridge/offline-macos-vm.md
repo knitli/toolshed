@@ -11,22 +11,29 @@ frames passed; the owned Tart process was reaped, its VM was confirmed stopped,
 and the exact clone was deleted. Full Rust qualification and native promotion
 remain on hold.
 
-The latest passing attempt is `canary-04`, from source commit
-`882b75726d491faa568580bacc90129cd1c39a1a`, after executable, Tart-home ancestry
-and measured-base file admission checks were added. It uses the verified Tart
-copy under the private `tart-protected-5610wanb` directory and an APFS clone
-copy of the prepared base under private `tart-home-protected-1l0f4q7e`, both
-beneath `/private/tmp/events-live-enrollment-20261025/`. The original import
-was preserved. Every copied base file was remeasured by the controller.
+The latest passing attempt is `canary-05`, from source commit
+`66499a0c9bb4d44890b942e0918e0de0a8deba8e`, after executable, Tart-home,
+measured-base and evidence-path protection plus the in-memory CLI result
+handoff. It uses the verified Tart copy under private `tart-protected-5610wanb`
+and the prepared base's APFS clone copy under private
+`tart-home-protected-1l0f4q7e`, both beneath
+`/private/tmp/events-live-enrollment-20261025/`. The original import was
+preserved. Every copied base file was remeasured by the controller.
 The controller SHA-256 is
-`43da2ce8e0df9e6e307f295bcc692e41937a890075877707968deb9645133acf`;
+`f889a2ce4bb8c72e410e8979f1cb3e45de3b93318c09cd9612dd803f545990d3`;
 the result SHA-256 is
-`dea1a1ba9b767f6db57d998c7f34ed9f1db21861110ab6478ab620af388f8ec2`.
+`6ac486e4df2c803a330ca6776b9c044f64bf4b9093386bf8dcbc5fa0aa3fd806`.
 The invocation, result, raw log, guest/Tart output and two frames are retained
 in this worktree's managed Codex Security artifact collection under
-`artifacts/tart-home/canary04/`. The host received 63 datagrams
-(15,987 bytes); only the two nonce-matched frames were retained. Stop/reap,
+`artifacts/evidence-path/canary05/`. The host received 69 datagrams
+(16,406 bytes); only the two nonce-matched frames were retained. Stop/reap,
 stopped-state confirmation, and exact-clone deletion all succeeded.
+
+The previous `canary-04` passed before evidence-path and CLI-result hardening.
+Its source commit was `882b75726d491faa568580bacc90129cd1c39a1a`; its result
+SHA-256 remains
+`dea1a1ba9b767f6db57d998c7f34ed9f1db21861110ab6478ab620af388f8ec2`, retained
+under `artifacts/tart-home/canary04/` in the same collection.
 
 The previous `canary-03` passed after executable admission hardening but before
 Tart-home and base-file protection. Its source commit was
