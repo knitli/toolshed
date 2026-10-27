@@ -307,6 +307,10 @@ separately pin and stage source/toolchain inputs, run offline, preserve the
 entire test log, report exact scope and exit status, and retain the ephemeral
 VM cleanup evidence.
 
+The next input-preparation slice is documented in
+[native-workspace-staging.md](native-workspace-staging.md). Staging is separate
+from this fixed boundary canary and does not qualify the full workspace.
+
 ## References
 
 - [Python 3.13 non-reaping waitid semantics](https://docs.python.org/3.13/library/os.html#os.waitid).
