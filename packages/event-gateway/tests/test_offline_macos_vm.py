@@ -875,6 +875,79 @@ raise SystemExit(2)
         self.assertTrue(state["killBeforeLeaderReaped"])
         self.assertTrue(state["leaderExitedObserved"])
 
+    def test_term_eperm_keeps_exited_leader_unreaped_until_zombie_group_proof(self):
+        self._write_fake_tart(frames="both")
+        self._write_receipt()
+        real_popen = subprocess.Popen
+        real_waitid = os.waitid
+        state = {"pollCalls": 0, "pollCallsAtTerm": None, "terminateCalls": 0, "termExitObserved": False,
+                 "killExitObserved": False, "returncodeAtKill": "unset"}
+        signals = []
+
+        class ObservedProcess:
+            def __init__(self, process):
+                self.process = process
+                self.pid = process.pid
+
+            def __getattr__(self, name):
+                return getattr(self.process, name)
+
+            def poll(self):
+                state["pollCalls"] += 1
+                return self.process.poll()
+
+            def terminate(self):
+                state["terminateCalls"] += 1
+                return self.process.terminate()
+
+        processes = []
+
+        def observed_popen(argv, **kwargs):
+            process = real_popen(argv, **kwargs)
+            if len(argv) > 1 and argv[1] == "run":
+                process = ObservedProcess(process)
+                processes.append(process)
+            return process
+
+        def observe_exit_without_reaping(pid):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                info = real_waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                if info is not None:
+                    return True
+                time.sleep(0.01)
+            return False
+
+        def inject_darwin_eperm(pid, sig):
+            signals.append((pid, sig))
+            if sig == signal.SIGTERM:
+                state["pollCallsAtTerm"] = state["pollCalls"]
+                os.kill(pid, signal.SIGTERM)
+                state["termExitObserved"] = observe_exit_without_reaping(pid)
+                raise PermissionError(1, "operation not permitted")
+            if sig == signal.SIGKILL:
+                state["returncodeAtKill"] = processes[0].returncode
+                state["killExitObserved"] = observe_exit_without_reaping(pid)
+                raise PermissionError(1, "zombie-only group")
+            self.fail(f"unexpected signal {sig}")
+
+        real_zombie_proof = canary._owned_group_is_zombie_only
+        with patch.object(canary, "_owned_group_is_zombie_only", wraps=real_zombie_proof) as zombie_proof, \
+                patch.object(canary.os, "killpg", side_effect=inject_darwin_eperm):
+            summary = self._run(popen=observed_popen)
+
+        self.assertEqual(summary["status"], "passed")
+        self.assertEqual([sig for _, sig in signals], [signal.SIGTERM, signal.SIGKILL])
+        self.assertTrue(state["termExitObserved"])
+        self.assertTrue(state["killExitObserved"])
+        self.assertIsNone(state["returncodeAtKill"])
+        self.assertEqual(state["terminateCalls"], 0)
+        self.assertEqual(state["pollCalls"], state["pollCallsAtTerm"])
+        zombie_proof.assert_called_once()
+        self.assertEqual(zombie_proof.call_args.args[0], processes[0].pid)
+        self.assertEqual(sorted(path.name for path in (self.tart_home / "vms").iterdir()),
+                         ["prepared-macos15"])
+
     def test_already_reaped_owned_child_receives_no_group_signals_and_retains_clone(self):
         self._write_fake_tart(frames="none")
         self._write_receipt()
@@ -943,6 +1016,7 @@ raise SystemExit(2)
                 self.stderr = os.fdopen(err_read, "rb")
                 self.peer = socket.socket(fileno=os.dup(pass_fd))
                 self.reaped = False
+                self.terminated = False
 
             def poll(self):
                 return 0 if self.reaped else None
@@ -958,6 +1032,7 @@ raise SystemExit(2)
                 return 0
 
             def terminate(self):
+                self.terminated = True
                 return None
 
             def kill(self):
@@ -983,6 +1058,8 @@ raise SystemExit(2)
 
         def fail_final_group_kill(pid, sig):
             signals.append(sig)
+            if sig == signal.SIGTERM:
+                raise PermissionError("injected TERM EPERM for unverified group")
             if sig == signal.SIGKILL:
                 self.assertFalse(processes[0].reaped)
                 raise PermissionError("injected group kill failure")
@@ -996,6 +1073,7 @@ raise SystemExit(2)
             for process in processes:
                 process.close()
         self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
+        self.assertFalse(processes[0].terminated)
         saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
         self.assertEqual(saved["status"], "tainted")
         self.assertIn("owned_clone_process_group_kill_failed", saved["cleanupErrors"])

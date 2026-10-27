@@ -11,23 +11,36 @@ frames passed; the owned Tart process was reaped, its VM was confirmed stopped,
 and the exact clone was deleted. Full Rust qualification and native promotion
 remain on hold.
 
-The latest passing attempt is `canary-05`, from source commit
-`66499a0c9bb4d44890b942e0918e0de0a8deba8e`, after executable, Tart-home,
-measured-base and evidence-path protection plus the in-memory CLI result
-handoff. It uses the verified Tart copy under private `tart-protected-5610wanb`
-and the prepared base's APFS clone copy under private
+The latest passing attempt is `canary-08`, from source commit
+`c9c6fc4fb3d7b2e534bcf1bcb42b871645a0ba5a`, after filesystem admission,
+in-memory CLI result handoff, JSON/raw-evidence error handling, and owned
+process-group cleanup corrections. It uses the verified Tart copy under private
+`tart-protected-5610wanb` and the prepared base's APFS clone copy under private
 `tart-home-protected-1l0f4q7e`, both beneath
 `/private/tmp/events-live-enrollment-20261025/`. The original import was
 preserved. Every copied base file was remeasured by the controller.
 The controller SHA-256 is
-`f889a2ce4bb8c72e410e8979f1cb3e45de3b93318c09cd9612dd803f545990d3`;
+`9f1c6a29ca79c0493e681d1a862cce474c4b764b5c93bb5ca9d67921f5d5d6bd`;
 the result SHA-256 is
-`6ac486e4df2c803a330ca6776b9c044f64bf4b9093386bf8dcbc5fa0aa3fd806`.
+`06795fd81cba495e3a0d4c8049ed0f57e8999859d6411db6290f01a1406416b0`.
 The invocation, result, raw log, guest/Tart output and two frames are retained
 in this worktree's managed Codex Security artifact collection under
-`artifacts/evidence-path/canary05/`. The host received 69 datagrams
-(16,406 bytes); only the two nonce-matched frames were retained. Stop/reap,
+`artifacts/cleanup/canary08/`. The host received 61 datagrams
+(15,492 bytes); only the two nonce-matched frames were retained. Stop/reap,
 stopped-state confirmation, and exact-clone deletion all succeeded.
+
+Attempts `canary-06` and diagnostic `canary-07` remain preserved as `tainted`
+under `artifacts/cleanup/`. All guest checks and frames passed, but Darwin's
+zombie-only process group rejected SIGTERM and Python's fallback termination
+reaped the leader before the final group sweep. Canary 08 removes that fallback:
+the final group sweep remains authoritative, and uncertainty still taints the
+result and retains the clone.
+
+The previous `canary-05` passed before those cleanup/error-handling corrections.
+Its source commit was `66499a0c9bb4d44890b942e0918e0de0a8deba8e`; its result
+SHA-256 remains
+`6ac486e4df2c803a330ca6776b9c044f64bf4b9093386bf8dcbc5fa0aa3fd806`, retained
+under `artifacts/evidence-path/canary05/` in the same collection.
 
 The previous `canary-04` passed before evidence-path and CLI-result hardening.
 Its source commit was `882b75726d491faa568580bacc90129cd1c39a1a`; its result
