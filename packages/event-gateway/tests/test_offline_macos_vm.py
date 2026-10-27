@@ -340,8 +340,19 @@ raise SystemExit(2)
         os.chmod(writable, 0o777)  # nosec B103 -- intentionally unsafe ancestor must be rejected.
         os.chmod(nonroot_sticky, 0o1777)  # nosec B103 -- sticky mode is insufficient for non-root owner.
         digest = canary._sha256(binary.read_bytes())
+        operator_uid = os.getuid() if os.getuid() != 0 else 1
+        real_lstat = os.lstat
+
+        def lstat_with_nonroot_sticky_owner(path):
+            info = real_lstat(path)
+            if Path(path) == nonroot_sticky:
+                return types.SimpleNamespace(st_mode=info.st_mode, st_uid=operator_uid)
+            return info
+
         with patch.object(canary, "TART_BINARY_SHA256", digest), \
-                patch.object(canary, "_run_bounded") as run:
+                patch.object(canary, "_run_bounded", return_value=(f"{canary.TART_VERSION}\n".encode(), b"")) as run, \
+                patch.object(canary.os, "getuid", return_value=operator_uid), \
+                patch.object(canary.os, "lstat", side_effect=lstat_with_nonroot_sticky_owner):
             for path in (link / "tart", executable_link, writable_binary, sticky_binary):
                 with self.subTest(path=path), self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_path"):
                     canary._tart_identity(path, {**self.receipt, "tartBinarySha256": digest}, {})
