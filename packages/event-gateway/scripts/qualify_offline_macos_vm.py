@@ -969,7 +969,8 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                     except ProcessLookupError:
                         pass
                     except OSError:
-                        vm_proc.terminate()
+                        # Popen.terminate() can reap the leader; the group KILL below is authoritative.
+                        pass
                     try:
                         _wait_owned_vm_exit(vm_proc, 10)
                     except OSError:
