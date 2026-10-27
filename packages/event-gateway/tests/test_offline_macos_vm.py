@@ -104,6 +104,13 @@ def _set_macos_acl(path, *arguments):
     )  # nosec B603 -- fixed local chmod ACL fixture arguments, no shell.
 
 
+def _stat_with_uid(info, uid):
+    fields = ("st_mode", "st_uid", "st_size", "st_dev", "st_ino", "st_mtime_ns", "st_ctime_ns")
+    values = {name: getattr(info, name) for name in fields}
+    values["st_uid"] = uid
+    return types.SimpleNamespace(**values)
+
+
 class OfflineMacosVmCanaryTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="offline-vm-test-", dir="/tmp")  # nosec B108 -- atomic private fixture under root-sticky tmp.
@@ -278,8 +285,8 @@ raise SystemExit(2)
         self.assertNotIn(str(missing_receipt), stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
 
-    def test_wait_timeout_is_normalized_and_process_is_reaped(self):
-        class WaitTimeoutProcess:
+    def test_running_process_timeout_is_normalized_and_process_is_reaped(self):
+        class RunningProcess:
             pid = 987654321
 
             def __init__(self):
@@ -290,32 +297,109 @@ raise SystemExit(2)
                 self.stdout = os.fdopen(out_read, "rb")
                 self.stderr = os.fdopen(err_read, "rb")
                 self.reaped = False
+                self.wait_calls = []
 
             def poll(self):
-                return 0
+                return -signal.SIGKILL if self.reaped else None
 
             def wait(self, timeout=None):
-                if timeout is not None:
-                    raise subprocess.TimeoutExpired("fake-tart", timeout)
+                self.wait_calls.append(timeout)
                 self.reaped = True
                 return -signal.SIGKILL
 
-        process = WaitTimeoutProcess()
+        process = RunningProcess()
         with patch.object(canary.subprocess, "Popen", return_value=process), \
-                patch.object(canary.os, "killpg", side_effect=ProcessLookupError):
+                patch.object(canary.os, "killpg", side_effect=ProcessLookupError) as killpg:
             with self.assertRaisesRegex(canary.CanaryError, "tart_command_timeout"):
-                canary._run_bounded(["fake-tart"], timeout=1, env={})
+                canary._run_bounded(["fake-tart"], timeout=0.05, env={})
         self.assertTrue(process.reaped)
+        self.assertEqual(process.wait_calls, [None])
+        killpg.assert_called_once_with(process.pid, signal.SIGKILL)
+
+    def test_base_vm_file_changed_through_same_inode_during_read_is_rejected(self):
+        target = self.base_vm_dir / "disk.img"
+        original = target.read_bytes()
+        target_stat = os.stat(target, follow_symlinks=False)
+        real_read = os.read
+        real_fstat = os.fstat
+        mutated = False
+
+        def mutate_after_read(fd, size):
+            nonlocal mutated
+            data = real_read(fd, size)
+            info = real_fstat(fd)
+            if not mutated and (info.st_dev, info.st_ino) == (target_stat.st_dev, target_stat.st_ino):
+                with target.open("r+b") as stream:
+                    stream.write(b"X" + original[1:])
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                mutated = True
+            return data
+
+        try:
+            with patch.object(canary.os, "read", side_effect=mutate_after_read):
+                with self.assertRaisesRegex(canary.CanaryError, "base_vm_file_changed_during_measurement"):
+                    canary._hash_file(target, maximum=canary.MAX_DISK_BYTES, require_protected=True)
+            self.assertTrue(mutated)
+        finally:
+            with target.open("r+b") as stream:
+                stream.write(original)
+                stream.truncate()
+                stream.flush()
+                os.fsync(stream.fileno())
+
+    def test_tart_binary_changed_through_same_inode_during_hash_is_rejected(self):
+        original = self.tart.read_bytes()
+        tart_stat = os.stat(self.tart, follow_symlinks=False)
+        real_read = os.read
+        real_fstat = os.fstat
+        mutated = False
+
+        def mutate_after_read(fd, size):
+            nonlocal mutated
+            data = real_read(fd, size)
+            info = real_fstat(fd)
+            if not mutated and (info.st_dev, info.st_ino) == (tart_stat.st_dev, tart_stat.st_ino):
+                with self.tart.open("r+b") as stream:
+                    stream.write(b"X" + original[1:])
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                mutated = True
+            return data
+
+        digest = canary._sha256(original)
+        try:
+            with patch.object(canary, "TART_BINARY_SHA256", digest), \
+                    patch.object(canary, "_run_bounded") as run, \
+                    patch.object(canary.os, "read", side_effect=mutate_after_read):
+                with self.assertRaisesRegex(canary.CanaryError, "tart_binary_changed_during_measurement"):
+                    canary._tart_identity(self.tart, {**self.receipt, "tartBinarySha256": digest}, {})
+                run.assert_not_called()
+            self.assertTrue(mutated)
+        finally:
+            with self.tart.open("r+b") as stream:
+                stream.write(original)
+                stream.truncate()
+                stream.flush()
+                os.fsync(stream.fileno())
 
     def test_tart_identity_accepts_private_path_beneath_root_sticky_tmp(self):
         sticky_tmp = os.lstat(Path("/tmp").resolve(strict=True))  # nosec B108 -- inspect the real sticky test ancestor.
         self.assertEqual(sticky_tmp.st_uid, 0)
         self.assertTrue(sticky_tmp.st_mode & stat.S_ISVTX)
         digest = canary._sha256(self.tart.read_bytes())
+        injected_runner = unittest.mock.Mock(
+            return_value=(f"{canary.TART_VERSION}\n".encode(), b""),
+        )
         with patch.object(canary, "TART_BINARY_SHA256", digest), \
-                patch.object(canary, "_run_bounded", return_value=(f"{canary.TART_VERSION}\n".encode(), b"")) as run:
-            self.assertEqual(canary._tart_identity(self.tart, self.receipt, {}), self.tart.resolve())
-        self.assertEqual(run.call_args.args[0][0], str(self.tart.resolve()))
+                patch.object(canary, "_run_bounded") as default_runner:
+            self.assertEqual(canary._tart_identity(
+                self.tart, self.receipt, {}, run_bounded=injected_runner,
+            ), self.tart.resolve())
+        injected_runner.assert_called_once_with(
+            [str(self.tart.resolve()), "--version"], timeout=5, env={},
+        )
+        default_runner.assert_not_called()
 
     def test_tart_identity_rejects_symlink_and_writable_ancestors(self):
         secure = self.root / "tart-secure"
@@ -770,6 +854,178 @@ raise SystemExit(2)
         with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_home"):
             canary._safe_tart_home(self.tart_home)
         os.chmod(self.tart_home, 0o700)
+
+    def test_tart_home_rejects_writable_ancestor_before_tart_or_base_vm_work(self):
+        parent = self.root / "tart-home-writable-parent"
+        parent.mkdir(mode=0o700)
+        home = parent / "tart-home"
+        home.mkdir(mode=0o700)
+        os.chmod(parent, 0o777)  # nosec B103 -- unsafe ancestor must be rejected.
+        foreign_uid = 1 if os.getuid() != 1 else 2
+        real_lstat = os.lstat
+        real_stat = os.stat
+
+        def fake_owner(path, stat_call):
+            info = stat_call(path)
+            if Path(path) == parent:
+                return _stat_with_uid(info, foreign_uid)
+            return info
+
+        with patch.object(canary.os, "lstat", side_effect=lambda path: fake_owner(path, real_lstat)), \
+                patch.object(canary.os, "stat", side_effect=lambda path, **kwargs: fake_owner(
+                    path, lambda candidate: real_stat(candidate, **kwargs))), \
+                patch.object(canary, "TART_BINARY_SHA256", self.receipt["tartBinarySha256"]), \
+                patch.object(canary, "_tart_identity", return_value=self.tart) as tart_identity, \
+                patch.object(canary, "_base_vm_measurement",
+                             side_effect=canary.CanaryError("base_measurement_reached")) as measurement:
+            run = unittest.mock.Mock(side_effect=canary.CanaryError("clone_reached"))
+            with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_home"):
+                canary.qualify("prepared-macos15", self.receipt_path, self.evidence,
+                               tart=str(self.tart), tart_home=home, run_bounded=run)
+            tart_identity.assert_not_called()
+            measurement.assert_not_called()
+            run.assert_not_called()
+
+    def test_tart_home_rejects_symlink_ancestor_before_tart_or_base_vm_work(self):
+        real_parent = self.root / "real-tart-home-parent"
+        real_parent.mkdir(mode=0o700)
+        home = real_parent / "tart-home"
+        home.mkdir(mode=0o700)
+        symlink_parent = self.root / "symlink-tart-home-parent"
+        symlink_parent.symlink_to(real_parent, target_is_directory=True)
+        requested_home = symlink_parent / "tart-home"
+        with patch.object(canary, "TART_BINARY_SHA256", self.receipt["tartBinarySha256"]), \
+                patch.object(canary, "_tart_identity", return_value=self.tart) as tart_identity, \
+                patch.object(canary, "_base_vm_measurement",
+                             side_effect=canary.CanaryError("base_measurement_reached")) as measurement:
+            run = unittest.mock.Mock(side_effect=canary.CanaryError("clone_reached"))
+            with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_home"):
+                canary.qualify("prepared-macos15", self.receipt_path, self.evidence,
+                               tart=str(self.tart), tart_home=requested_home, run_bounded=run)
+            tart_identity.assert_not_called()
+            measurement.assert_not_called()
+            run.assert_not_called()
+
+    def test_tart_home_root_sticky_parent_is_allowed_but_nonroot_sticky_is_rejected(self):
+        root_sticky = self.root / "root-sticky-parent"
+        nonroot_sticky = self.root / "nonroot-sticky-parent"
+        root_sticky.mkdir(mode=0o700)
+        nonroot_sticky.mkdir(mode=0o700)
+        os.chmod(root_sticky, 0o1777)  # nosec B103 -- model a root-owned sticky ancestor.
+        os.chmod(nonroot_sticky, 0o1777)  # nosec B103 -- model a nonroot sticky ancestor.
+        root_home = root_sticky / "tart-home"
+        nonroot_home = nonroot_sticky / "tart-home"
+        root_home.mkdir(mode=0o700)
+        nonroot_home.mkdir(mode=0o700)
+        root_uid = 0
+        operator_uid = os.getuid() if os.getuid() != 0 else 1
+        real_lstat = os.lstat
+        real_stat = os.stat
+
+        def model_sticky_owners(path, stat_call):
+            info = stat_call(path)
+            if Path(path) == root_sticky:
+                return _stat_with_uid(info, root_uid)
+            if Path(path) == nonroot_sticky:
+                return _stat_with_uid(info, operator_uid)
+            if Path(path) in (root_home, nonroot_home):
+                return _stat_with_uid(info, operator_uid)
+            return info
+
+        with patch.object(canary.os, "getuid", return_value=operator_uid), \
+                patch.object(canary.os, "lstat", side_effect=lambda path: model_sticky_owners(path, real_lstat)), \
+                patch.object(canary.os, "stat", side_effect=lambda path, **kwargs: model_sticky_owners(
+                    path, lambda candidate: real_stat(candidate, **kwargs))):
+            self.assertEqual(canary._safe_tart_home(root_home), root_home.resolve())
+            with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_home"):
+                canary._safe_tart_home(nonroot_home)
+
+    def test_tart_home_rejects_writable_base_files_before_clone(self):
+        files = (self.base_vm_dir / "config.json", self.base_vm_dir / "disk.img",
+                 self.base_vm_dir / "nvram.bin")
+        for target in files:
+            with self.subTest(target=target.name):
+                original_mode = stat.S_IMODE(target.stat().st_mode)
+                os.chmod(target, 0o777)  # nosec B103 -- world-writable base file must be rejected.
+                try:
+                    with patch.object(canary, "TART_BINARY_SHA256", self.receipt["tartBinarySha256"]), \
+                            patch.object(canary, "_tart_identity", return_value=self.tart):
+                        run = unittest.mock.Mock(side_effect=canary.CanaryError("clone_reached"))
+                        evidence = self.root / f"evidence-mode-{target.name}"
+                        evidence.mkdir(mode=0o700)
+                        with self.assertRaisesRegex(canary.CanaryError, "unsafe_base_vm_file"):
+                            canary.qualify("prepared-macos15", self.receipt_path, evidence,
+                                           tart=str(self.tart), tart_home=self.tart_home, run_bounded=run)
+                        run.assert_not_called()
+                finally:
+                    os.chmod(target, original_mode)
+
+    def test_tart_home_rejects_foreign_owned_base_file_before_clone(self):
+        target = self.base_vm_dir / "config.json"
+        target_stat = os.stat(target, follow_symlinks=False)
+        foreign_uid = 1 if os.getuid() != 1 else 2
+        real_fstat = os.fstat
+
+        def foreign_file_owner(fd):
+            info = real_fstat(fd)
+            if (info.st_dev, info.st_ino) == (target_stat.st_dev, target_stat.st_ino):
+                return _stat_with_uid(info, foreign_uid)
+            return info
+
+        with patch.object(canary, "TART_BINARY_SHA256", self.receipt["tartBinarySha256"]), \
+                patch.object(canary, "_tart_identity", return_value=self.tart), \
+                patch.object(canary.os, "fstat", side_effect=foreign_file_owner):
+            run = unittest.mock.Mock(side_effect=canary.CanaryError("clone_reached"))
+            with self.assertRaisesRegex(canary.CanaryError, "unsafe_base_vm_file"):
+                canary.qualify("prepared-macos15", self.receipt_path, self.evidence,
+                               tart=str(self.tart), tart_home=self.tart_home, run_bounded=run)
+            run.assert_not_called()
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS extended ACLs")
+    def test_macos_tart_home_and_base_path_write_acls_reject_before_clone(self):
+        vms = self.tart_home / "vms"
+        targets = (self.root, self.tart_home, vms, self.base_vm_dir,
+                   self.base_vm_dir / "config.json", self.base_vm_dir / "disk.img",
+                   self.base_vm_dir / "nvram.bin")
+        for target in targets:
+            with self.subTest(target=target.relative_to(self.root)):
+                try:
+                    _set_macos_acl(target, "+a", "everyone allow write")
+                    with patch.object(canary, "TART_BINARY_SHA256", self.receipt["tartBinarySha256"]), \
+                            patch.object(canary, "_tart_identity", return_value=self.tart) as tart_identity:
+                        run = unittest.mock.Mock(side_effect=canary.CanaryError("clone_reached"))
+                        evidence = self.root / f"evidence-acl-{target.name or 'root'}"
+                        evidence.mkdir(mode=0o700)
+                        with self.assertRaisesRegex(canary.CanaryError, "unsafe_tart_acl"):
+                            canary.qualify("prepared-macos15", self.receipt_path, evidence,
+                                           tart=str(self.tart), tart_home=self.tart_home,
+                                           run_bounded=run)
+                        if target in (self.root, self.tart_home):
+                            tart_identity.assert_not_called()
+                        else:
+                            tart_identity.assert_called_once()
+                        run.assert_not_called()
+                finally:
+                    _set_macos_acl(target, "-N")
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS extended ACLs")
+    def test_macos_tart_home_and_base_read_or_deny_acls_are_accepted(self):
+        vms = self.tart_home / "vms"
+        config = self.base_vm_dir / "config.json"
+        try:
+            _set_macos_acl(self.tart_home, "+a", "everyone allow read")
+            _set_macos_acl(vms, "+a", "everyone deny write")
+            _set_macos_acl(config, "+a", "everyone deny write")
+            self.assertEqual(canary._safe_tart_home(self.tart_home), self.tart_home.resolve())
+            measured_config, disk_bytes = canary._base_vm_measurement(
+                self.tart_home, "prepared-macos15", self.receipt,
+            )
+            self.assertEqual(measured_config["os"], "darwin")
+            self.assertEqual(disk_bytes, self.receipt["preparedSnapshot"]["bytes"])
+        finally:
+            _set_macos_acl(self.tart_home, "-N")
+            _set_macos_acl(vms, "-N")
+            _set_macos_acl(config, "-N")
 
     def test_symlink_or_foreign_writable_base_storage_is_rejected(self):
         preserved = self.tart_home / "vms" / "prepared-macos15-preserved"

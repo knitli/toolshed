@@ -239,7 +239,7 @@ def _raw_evidence(path, maximum):
     return {"bytes": count, "sha256": digest, "maxBytes": maximum}
 
 
-def _hash_file(path, *, maximum, collect=False, require_executable=False):
+def _hash_file(path, *, maximum, collect=False, require_executable=False, require_protected=False):
     path = Path(path)
     if path.is_symlink():
         raise CanaryError("unsafe_base_vm_file")
@@ -259,7 +259,11 @@ def _hash_file(path, *, maximum, collect=False, require_executable=False):
                 not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.getuid())
                 or stat.S_IMODE(info.st_mode) & 0o022 or not info.st_mode & 0o111):
             raise CanaryError("unsafe_tart_executable")
-        if require_executable:
+        if require_protected and (
+                not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.getuid())
+                or stat.S_IMODE(info.st_mode) & 0o022):
+            raise CanaryError("unsafe_base_vm_file")
+        if require_executable or require_protected:
             _check_tart_acl(path, fd=fd)
         if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
             raise CanaryError("unsafe_base_vm_file")
@@ -295,18 +299,20 @@ def _base_vm_measurement(tart_home, name, receipt):
     vms_info = vms.stat()
     if vms_info.st_uid != os.getuid() or stat.S_IMODE(vms_info.st_mode) & 0o022:
         raise CanaryError("unsafe_tart_vms_directory")
+    _check_tart_acl(vms)
     root = Path(tart_home) / "vms" / name
     if root.is_symlink() or not root.is_dir():
         raise CanaryError("base_vm_storage_missing")
     root_info = root.stat()
     if root_info.st_uid != os.getuid() or stat.S_IMODE(root_info.st_mode) & 0o022:
         raise CanaryError("unsafe_base_vm_directory")
+    _check_tart_acl(root)
     config_path = root / "config.json"
     disk_path = root / "disk.img"
     nvram_path = root / "nvram.bin"
     if (root / "state").exists() or (root / "state").is_symlink():
         raise CanaryError("base_vm_has_saved_memory_state")
-    config_hash, config_bytes, config_raw = _hash_file(config_path, maximum=MAX_CONFIG_BYTES, collect=True)
+    config_hash, config_bytes, config_raw = _hash_file(config_path, maximum=MAX_CONFIG_BYTES, collect=True, require_protected=True)
     if config_bytes == 0:
         raise CanaryError("base_vm_config_empty")
     try:
@@ -316,8 +322,8 @@ def _base_vm_measurement(tart_home, name, receipt):
     if (not isinstance(config, dict) or config.get("os") != "darwin" or config.get("arch") != "arm64"
             or not isinstance(config.get("macAddress"), str)):
         raise CanaryError("base_vm_config_not_macos_arm64")
-    disk_hash, disk_bytes = _hash_file(disk_path, maximum=MAX_DISK_BYTES)
-    nvram_hash, nvram_bytes = _hash_file(nvram_path, maximum=MAX_CONFIG_BYTES * 1024)
+    disk_hash, disk_bytes = _hash_file(disk_path, maximum=MAX_DISK_BYTES, require_protected=True)
+    nvram_hash, nvram_bytes = _hash_file(nvram_path, maximum=MAX_CONFIG_BYTES * 1024, require_protected=True)
     measurement = {"configSha256": config_hash, "configBytes": config_bytes,
                    "nvramSha256": nvram_hash, "nvramBytes": nvram_bytes}
     if receipt["storageMeasurement"] != measurement:
@@ -328,11 +334,13 @@ def _base_vm_measurement(tart_home, name, receipt):
     return config, disk_bytes
 
 
-def _tart_identity(tart, receipt, env):
+def _tart_identity(tart, receipt, env, *, run_bounded=None):
     tart_path = _qualified_tart_path(tart)
     try:
         digest, _ = _hash_file(tart_path, maximum=128 * 1024**2, require_executable=True)
     except CanaryError as exc:
+        if exc.args and exc.args[0] == "base_vm_file_changed_during_measurement":
+            raise CanaryError("tart_binary_changed_during_measurement") from None
         if exc.args and exc.args[0] in ("unsafe_tart_executable", "unsafe_tart_acl"):
             raise
         raise CanaryError("tart_binary_unreadable") from None
@@ -340,7 +348,8 @@ def _tart_identity(tart, receipt, env):
         raise CanaryError("tart_not_executable")
     if digest != receipt["tartBinarySha256"] or digest != TART_BINARY_SHA256:
         raise CanaryError("tart_binary_digest_mismatch")
-    stdout, _ = _run_bounded([str(tart_path), "--version"], timeout=5, env=env)
+    runner = _run_bounded if run_bounded is None else run_bounded
+    stdout, _ = runner([str(tart_path), "--version"], timeout=5, env=env)
     if stdout.decode("ascii", "replace").strip() != TART_VERSION:
         raise CanaryError("tart_version_mismatch")
     return tart_path
@@ -452,17 +461,20 @@ def _check_tart_acl(path, *, fd=None):
 
 def _safe_tart_home(tart_home):
     configured = tart_home or os.environ.get("TART_HOME") or (Path.home() / ".tart")
-    path = Path(configured).absolute()
-    if path.is_symlink():
-        raise CanaryError("unsafe_tart_home")
     try:
-        path = path.resolve(strict=True)
+        # Protected ancestors keep every later Tart pathname lookup on the measured home.
+        path = _qualified_tart_path(configured)
+        info = path.stat()
+    except CanaryError as exc:
+        if exc.args and exc.args[0] == "unsafe_tart_acl":
+            raise
+        raise CanaryError("unsafe_tart_home") from None
     except OSError:
         raise CanaryError("unsafe_tart_home") from None
-    info = path.stat()
     if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
             or stat.S_IMODE(info.st_mode) != 0o700):
         raise CanaryError("unsafe_tart_home")
+    _check_tart_acl(path)
     return path
 
 
@@ -748,7 +760,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
     tart_home = _safe_tart_home(tart_home)
     env = {"PATH": os.defpath, "HOME": str(Path.home()), "TART_HOME": str(tart_home),
            "LC_ALL": "C", "LANG": "C", "TART_NO_AUTO_PRUNE": "1"}
-    tart_path = _tart_identity(tart, receipt, env)
+    tart_path = _tart_identity(tart, receipt, env, run_bounded=run_bounded)
     _, base_disk_bytes = _base_vm_measurement(tart_home, base_vm, receipt)
     free = shutil.disk_usage(tart_home).free
     if free < base_disk_bytes + CLONE_LOG_HEADROOM:
@@ -786,11 +798,6 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
         clone_attempted = True
         run_bounded([str(tart_path), "clone", base_vm, clone], timeout=60, env=env)
         clone_created = True
-        stdout, _ = run_bounded([str(tart_path), "get", clone, "--format", "json"], timeout=10, env=env)
-        clone_config = json.loads(stdout)
-        vm_mac = clone_config.get("MACAddress")
-        if not isinstance(vm_mac, str) or not re.fullmatch(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", vm_mac):
-            raise CanaryError("clone_mac_missing")
         parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
         parent.setblocking(False)
         network_fd = child.fileno()
@@ -888,9 +895,6 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
             raise CanaryError("guest_external_frames_not_observed")
         if failures:
             raise CanaryError(failures[0])
-        result["frames"] = {"hostReceived": counters["received"], "hostReceivedBytes": counters["receivedBytes"],
-                            "hostTransmitted": 0, "matched": records,
-                            "dropMechanism": "host-drained-and-discarded-every-datagram; no send operation exists"}
         result["status"] = "passed"
     except BaseException as exc:
         result["error"] = exc.args[0] if isinstance(exc, CanaryError) and exc.args else "canary_failed"

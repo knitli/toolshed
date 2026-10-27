@@ -137,7 +137,7 @@ command shape (run only after host-owner authorization and independent code QA):
 ```sh
 umask 077
 mkdir -m 700 /private/tmp/offline-macos-vm-evidence
-export TART_HOME=/opt/coder/toolshed/.local-artifacts/offline-macos-vm-20261027/tart-home
+export TART_HOME=/private/tmp/offline-macos-vm-tooling/tart-home
 python3 packages/event-gateway/scripts/qualify_offline_macos_vm.py \
   --base-vm prepared-macos15 \
   --receipt /private/tmp/offline-macos-vm-base-receipt.json \
@@ -148,9 +148,14 @@ python3 packages/event-gateway/scripts/qualify_offline_macos_vm.py \
 
 `--tart-home` defaults to the `TART_HOME` environment variable and then
 `~/.tart`. The selected Tart home must be owned by the current user with mode
-0700; its `vms` and prepared-base directories must be owned by that user and
-not writable by group/other. Symlinked Tart homes, VM directories, and base
-directories are rejected.
+0700; every ancestor must satisfy the same protection rules as the executable
+path below. Stage the base under that protected tree before measuring it; an
+owner-private leaf beneath group-writable `/opt` is rejected. Preserve any
+original import when making a protected APFS clone copy. Its `vms` and
+prepared-base directories must be owned by the current user and not writable
+by group/other. Each measured config, disk and NVRAM file must be owned by root
+or the current user and have no group/other write permission. Symlinked path
+components, VM directories and base files are rejected.
 The executable path itself must contain no symlink component. Every parent
 must be a directory owned by root or the current user, with no group/other
 write permission except a root-owned sticky temporary directory. The Tart
@@ -159,8 +164,10 @@ group/other write permission. The controller hashes that opened file
 descriptor and uses its canonical protected path for all Tart commands. This
 filesystem boundary excludes other users; same-UID actors are outside its
 threat model. On macOS, the controller also checks extended ACLs on each
-executable-path component and on the opened executable descriptor. Any ALLOW
-entry with a mutating permission rejects the path; DENY entries do not grant
+executable/home path component, VM/base directory, and opened executable or
+measured-base file descriptor. Protecting the full chain prevents another UID
+from swapping the measured home or modifying measured contents before Tart
+uses them. Any ALLOW entry with a mutating permission rejects the path; DENY entries do not grant
 access. ACL inspection errors fail closed. The host must provide Apple's
 `libSystem.B.dylib` ACL APIs used for this check.
 
