@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import plistlib
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -20,6 +21,7 @@ class Preferences:
     """In-memory stand-in for the locked SystemConfiguration preference pair."""
 
     def __init__(self):
+        """Start with absent bootpd preferences and no injected failures."""
         self.current = None
         self.staged = None
         self.commit_error = None
@@ -34,10 +36,12 @@ class Preferences:
         self.syncs = 0
 
     def __enter__(self):
+        """Model a fresh locked read session."""
         self.staged = self.current
         return self
 
     def __exit__(self, *_):
+        """Release the fake lock without suppressing errors."""
         return False
 
     def read(self):
@@ -207,6 +211,48 @@ class SoftnetRecoveryTests(unittest.TestCase):
             recovery.restore(self.directory, preferences_factory=self.factory)
         self.assertEqual(self.preferences.commits, 1)
 
+    def test_process_death_after_marker_rename_leaves_recoverable_single_link_journal(self):
+        self._capture()
+        script = """import os, sys, plistlib
+sys.path.insert(0, sys.argv[2])
+import softnet_recovery as recovery
+recovery.OWNER_UID = os.getuid()
+class Preferences:
+    def __init__(self):
+        self.current = plistlib.dumps({'DHCPLeaseTimeSecs': 600, 'dhcp_ignore_client_identifier': True}, fmt=plistlib.FMT_BINARY)
+        self.staged = self.current
+    def __enter__(self): return self
+    def __exit__(self, *_): return False
+    def read(self): return self.current
+    def write(self, value): self.staged = value
+    def commit_apply(self): self.current = self.staged
+    def synchronize(self): pass
+    def equal(self, left, right):
+        return (left is None and right is None) or (left is not None and right is not None and plistlib.loads(left) == plistlib.loads(right))
+    def encode_target(self):
+        return plistlib.dumps({'DHCPLeaseTimeSecs': 600, 'dhcp_ignore_client_identifier': True}, fmt=plistlib.FMT_BINARY)
+    def validate(self, blob): plistlib.loads(blob)
+real_rename = recovery._rename_new
+def exit_after_marker(fd, source, destination):
+    real_rename(fd, source, destination)
+    if destination == 'restored': os._exit(42)
+recovery._rename_new = exit_after_marker
+recovery.restore(sys.argv[1], preferences_factory=Preferences)
+"""
+        environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        child = subprocess.run(
+            [sys.executable, "-c", script, str(self.directory), str(Path(recovery.__file__).resolve().parent)],
+            capture_output=True, text=True, timeout=10, env=environment,
+        )  # nosec B603 -- fixed Python snippet uses only this private fake-preference fixture.
+        self.assertEqual(child.returncode, 42, child.stderr)
+
+        marker = self.directory / "restored"
+        marker_info = marker.stat()
+        self.assertEqual(marker_info.st_nlink, 1)
+        self.assertEqual(marker.read_bytes(), b"restored\n")
+        recovery.restore(self.directory, preferences_factory=self.factory)
+        self.assertEqual(marker.read_bytes(), b"restored\n")
+
     def test_restore_refuses_preference_drift_without_writing(self):
         self._capture()
         changed = plistlib.dumps({"thirdParty": True}, fmt=plistlib.FMT_BINARY)
@@ -267,6 +313,7 @@ class SoftnetRecoveryTests(unittest.TestCase):
     def test_completion_marker_collision_never_replaces_existing_marker(self):
         self._capture()
         marker = self.directory / "restored"
+
         def race_marker():
             marker.write_bytes(b"operator evidence\n")
             marker.chmod(0o600)
@@ -276,6 +323,42 @@ class SoftnetRecoveryTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             recovery.restore(self.directory, preferences_factory=self.factory)
         self.assertEqual(marker.read_bytes(), b"operator evidence\n")
+
+    def test_existing_snapshot_is_not_replaced_when_reservation_is_absent(self):
+        snapshot = self._journal()
+        original = plistlib.dumps(
+            {"version": 1, "present": False, "before": b"", "target": Preferences.encode_target()},
+            fmt=plistlib.FMT_BINARY,
+        )
+        snapshot.write_bytes(original)
+        snapshot.chmod(0o600)
+
+        with self.assertRaises(FileExistsError):
+            self._capture()
+
+        self.assertEqual(snapshot.read_bytes(), original)
+        self.assertTrue((self.directory / "reserved").exists())
+
+    def test_interruption_after_snapshot_rename_leaves_readable_single_link_journal(self):
+        actual_rename = recovery._rename_new
+
+        class Interrupted(BaseException):
+            """Model process death after the atomic publication syscall."""
+
+        def rename_then_interrupt(fd, source, destination):
+            actual_rename(fd, source, destination)
+            if destination == "snapshot.plist":
+                raise Interrupted("after_snapshot_publish")
+
+        with patch.object(recovery, "_rename_new", side_effect=rename_then_interrupt):
+            with self.assertRaisesRegex(Interrupted, "after_snapshot_publish"):
+                self._capture()
+
+        snapshot_info = self._journal().stat()
+        self.assertEqual(snapshot_info.st_nlink, 1)
+        self.assertEqual(self._read_journal()["version"], 1)
+        recovery.restore(self.directory, preferences_factory=self.factory)
+        self.assertEqual((self.directory / "restored").read_bytes(), b"restored\n")
 
     def test_restore_requires_snapshot_and_rejects_corrupt_or_oversized_snapshot(self):
         self._reserve()

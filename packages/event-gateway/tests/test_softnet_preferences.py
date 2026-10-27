@@ -33,6 +33,7 @@ class FakeSCPreferences:
     """In-memory stand-in. It never calls into SystemConfiguration."""
 
     def __init__(self, adapter):
+        """Keep fake state and borrowed CF refs isolated from host preferences."""
         self.adapter = adapter
         self.current = None
         self.staged = None

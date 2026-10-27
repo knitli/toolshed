@@ -5,12 +5,14 @@ must keep an unfinished journal as a gate against starting another run.
 """
 
 from contextlib import contextmanager
+import ctypes
 import fcntl
 import os
 from pathlib import Path
 import plistlib
 import secrets
 import stat
+import sys
 
 import qualify_offline_macos_vm as canary
 from softnet_preferences import Preferences
@@ -96,6 +98,28 @@ def _read(fd, name):
     return data
 
 
+def _rename_new(fd, source, destination):
+    """Atomically publish one name without a hard-link interruption window."""
+    if sys.platform == 'darwin':
+        library = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
+        function, flag = 'renameatx_np', 0x4  # RENAME_EXCL
+    elif sys.platform == 'linux':
+        library = ctypes.CDLL(None, use_errno=True)
+        function, flag = 'renameat2', 1  # RENAME_NOREPLACE
+    else:
+        raise RecoveryError('atomic_publication_unsupported')
+    try:
+        rename = getattr(library, function)
+    except AttributeError as error:
+        raise RecoveryError('atomic_publication_unsupported') from error
+    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                       ctypes.c_char_p, ctypes.c_uint]
+    rename.restype = ctypes.c_int
+    if rename(fd, os.fsencode(source), fd, os.fsencode(destination), flag) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), destination)
+
+
 def _publish(fd, name, data):
     """Publish durable immutable records without replacing an existing name."""
     temporary = '.pending-' + secrets.token_hex(16)
@@ -105,11 +129,15 @@ def _publish(fd, name, data):
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.link(temporary, name, src_dir_fd=fd, dst_dir_fd=fd, follow_symlinks=False)
+        _rename_new(fd, temporary, name)
         os.fsync(fd)
     finally:
-        os.unlink(temporary, dir_fd=fd)
-        os.fsync(fd)
+        try:
+            os.unlink(temporary, dir_fd=fd)
+        except FileNotFoundError:
+            pass  # A successful rename has already consumed our temporary name.
+        else:
+            os.fsync(fd)
 
 
 def _snapshot(fd, preferences):

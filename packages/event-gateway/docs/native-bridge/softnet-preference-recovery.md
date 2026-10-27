@@ -30,10 +30,13 @@ file excludes cooperating capture/recovery processes.
 | --- | --- |
 | `reserved` only | Capture failed/interrupted; no permission to launch. |
 | `snapshot.plist` | Original presence/value and fixed target were atomically published and fsynced before helper launch may be considered. |
-| `restored` | Conditional restoration committed, applied, synchronized and read back successfully. Retain both records for audit. |
+| `restored` | Preference restoration committed and read back; apply request accepted. Retain both records for audit. |
 
-Records are published without replacing existing names. A failed attempt consumes
-its directory. The controller must never infer launch readiness from directory
+Records are published with atomic no-replace rename (macOS `renameatx_np`
+with `RENAME_EXCL`; Linux fixture tests use `renameat2` with `RENAME_NOREPLACE`).
+Missing APIs or unsupported filesystems fail closed. This preserves the
+single-link invariant even if the process dies immediately after publication.
+A failed attempt consumes its directory. The controller must never infer launch readiness from directory
 or snapshot existence alone: `capture` must return successfully, and all other
 controller gates must pass. Journals are not deleted automatically.
 
@@ -49,9 +52,15 @@ including another Softnet target, so it cannot roll back a subsequent run.
 False API results, snapshot/publication errors, lock contention, and failed
 readback are failures, not evidence that the host is unchanged. A commit may
 have succeeded even if apply failed; retry with the same unfinished journal
-and a fresh session after proving the helper stopped. Never discard the snapshot
+and a fresh session after proving the helper stopped.
+[Apple's apply implementation](https://github.com/apple-oss-distributions/configd/blob/585b7f2fca293f4642d21d15c5daf187f63c4796/SystemConfiguration.fproj/SCPApply.c#L634-L640)
+posts the apply notification even without a staged Set/Remove, matching the
+[API contract](https://developer.apple.com/documentation/systemconfiguration/scpreferencesapplychanges%28_%3A%29). Never discard the snapshot
 on these paths. SCPreferences and the journal are separate persistence systems;
-there is no atomic transaction between them.
+there is no atomic transaction between them. Apply success accepts a notification
+request; it does not prove synchronous completion by the configuration daemon.
+The marker records preference readback and an accepted apply request; effective
+runtime configuration still requires disposable-environment qualification.
 
 ## Remaining gates
 
@@ -63,7 +72,8 @@ changed by those tests. The later controller must:
 1. Prove the exact owned helper/VM is stopped and reaped before restoration.
 2. Refuse another run while any prior recovery is unresolved, and bind the
    journal to that run outside disposable VM storage.
-3. Qualify the real commit/apply/error paths in a disposable macOS environment,
+3. Qualify the real commit/apply/error paths and effective runtime configuration
+   in a disposable macOS environment,
    then obtain authorization for concrete protected helper/sudoers installation.
 4. Preserve the non-TTY Tart invocation and exact pinned helper arguments.
 
