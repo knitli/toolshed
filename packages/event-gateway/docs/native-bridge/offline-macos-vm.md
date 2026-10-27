@@ -11,17 +11,29 @@ frames passed; the owned Tart process was reaped, its VM was confirmed stopped,
 and the exact clone was deleted. Full Rust qualification and native promotion
 remain on hold.
 
-The passing local attempt is `canary-02`, using controller SHA-256
-`82d10d6aece2191577dde76d5accd35496fa0b85cd0be9ec1a6c57a82f59f257`.
-Its result SHA-256 is
-`47dea24d8ede36a82a85c5a6805f27849d05807f37fd2bf5b681304f4341447d`.
-Raw evidence is retained under
-`/opt/coder/toolshed/.local-artifacts/offline-macos-vm-20261027/canary-02/`.
-This attempt used the earlier executable-path guard identified by controller
-hash `82d10d6aece2191577dde76d5accd35496fa0b85cd0be9ec1a6c57a82f59f257`;
-it is not live proof of the executable filesystem checks added afterward.
-The host received 75 datagrams (18,108 bytes); only the two nonce-matched
-frames were retained. The zero-transmit claim rests on the reviewed drain-only
+The latest passing attempt is `canary-03`, from source commit
+`f8ccce78753eec40166a87327cd25b8522c155d4`, after the executable and ACL
+admission checks were added. It uses the verified Tart copy beneath the
+operator-private `tart-protected-5610wanb` directory in `/private/tmp`.
+The controller SHA-256 is
+`07ad927281530cd5702d2dac1a9cb7c2fabfe6f932d6e33b18940ad89b1b99a3`;
+the result SHA-256 is
+`90eb549881ca89d31c587cd1680d405109bc716cdd952a7925bee837bb44b6d6`.
+The invocation, result, raw log, guest/Tart output and two frames are retained
+in this worktree's managed Codex Security artifact collection under
+`artifacts/tart-executable/canary03/`. The host received 58 datagrams
+(15,006 bytes); only the two nonce-matched frames were retained. Stop/reap,
+stopped-state confirmation, and exact-clone deletion all succeeded.
+
+The earlier `canary-02` result remains preserved at SHA-256
+`47dea24d8ede36a82a85c5a6805f27849d05807f37fd2bf5b681304f4341447d`
+under `/opt/coder/toolshed/.local-artifacts/offline-macos-vm-20261027/canary-02/`.
+It used controller SHA-256
+`82d10d6aece2191577dde76d5accd35496fa0b85cd0be9ec1a6c57a82f59f257`
+and predates the executable filesystem admission checks. Its host received
+75 datagrams (18,108 bytes), with two retained nonce frames.
+
+For both runs, the zero-transmit claim rests on the reviewed drain-only
 controller and pinned Tart network attachment; it is not a measurement of all
 host traffic. Raw output/frame hashes and nonce payloads were checked separately.
 
