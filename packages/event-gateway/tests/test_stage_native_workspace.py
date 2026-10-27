@@ -2,8 +2,8 @@ import hashlib
 from contextlib import ExitStack
 import json
 import os
+import platform
 import shutil
-import stat
 import subprocess  # nosec B404 - Fixed interpreter and owned temporary child; no shell.
 import sys
 import tempfile
@@ -45,7 +45,9 @@ class StageFixture(unittest.TestCase):
 
     def genv_selector(self):
         original = shutil.which
-        executable = original("genv") or original("env")
+        executable = original("genv")
+        if executable is None and platform.system() == "Linux":
+            executable = original("env")
         self.assertIsNotNone(executable)
         return patch.object(staging.shutil, "which", side_effect=lambda name, path=None:
                             executable if name == "genv" else original(name, path=path))
@@ -160,40 +162,6 @@ class StageFixture(unittest.TestCase):
 
 class NativeWorkspaceStageTest(StageFixture):
     @staticmethod
-    def _process_identity(pid):
-        identity = {"pid": pid}
-        for name, lookup in (("pgid", os.getpgid), ("sid", os.getsid)):
-            try:
-                identity[name] = lookup(pid)
-            except OSError as error:
-                identity[name] = f"{type(error).__name__}:{error.errno}"
-        return identity
-
-    def _cleanup_diagnostic(self, child, genv, popen):
-        info = Path(genv).stat()
-        state = {"genv": str(Path(genv).resolve()), "genvUid": info.st_uid,
-                 "genvMode": oct(stat.S_IMODE(info.st_mode)), "python": sys.executable,
-                 "parentUid": os.getuid(), "parentEuid": os.geteuid(),
-                 "parent": self._process_identity(os.getpid()),
-                 "child": self._process_identity(child.pid), "returncode": child.poll()}
-        group = state["child"].get("pgid")
-        if isinstance(group, int):
-            ps = popen(
-                ["/bin/ps", "-g", str(group), "-o", "pid=,ppid=,pgid=,uid=,stat="],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            )
-            try:
-                output, _ = ps.communicate(timeout=2)
-                state["psGroup"] = output[:4096].decode("utf-8", "replace")
-                if len(output) > 4096:
-                    state["psGroup"] += "[truncated]"
-            except subprocess.TimeoutExpired:
-                ps.kill()
-                ps.wait()
-                state["psGroup"] = "timeout"
-        return repr(state)
-
-    @staticmethod
     def _kill_reap_test_child(child):
         if child.poll() is None:
             try:
@@ -205,7 +173,9 @@ class NativeWorkspaceStageTest(StageFixture):
     def _run_capped_real_child(self, command, destination):
         popen = subprocess.Popen
         children = []
-        genv = shutil.which("genv") or shutil.which("env")
+        genv = shutil.which("genv")
+        if genv is None and platform.system() == "Linux":
+            genv = shutil.which("env")
         self.assertIsNotNone(genv)
 
         def capture_child(*args, **kwargs):
@@ -217,16 +187,8 @@ class NativeWorkspaceStageTest(StageFixture):
         with patch.object(staging, "MAX_METADATA_BYTES", 128), \
                 patch.object(subprocess, "Popen", side_effect=capture_child), self.genv_selector():
             with self.assertRaisesRegex(ValueError, "tart_command_output_limit"):
-                try:
-                    staging._run_file(command, cwd=self.root, env=os.environ.copy(),
-                                      destination=destination)
-                except PermissionError as error:
-                    if children:
-                        try:
-                            error.add_note(self._cleanup_diagnostic(children[0], genv, popen))
-                        except Exception as diagnostic_error:
-                            error.add_note(f"cleanup diagnostics failed: {diagnostic_error!r}")
-                    raise
+                staging._run_file(command, cwd=self.root, env=os.environ.copy(),
+                                  destination=destination)
         return children
 
     def test_wrong_host_rejects_before_output_or_subprocess(self):
@@ -303,16 +265,21 @@ class NativeWorkspaceStageTest(StageFixture):
         self.assertIsNotNone(children[0].returncode)
         with self.assertRaises(ProcessLookupError):
             os.killpg(children[0].pid, 0)
-        self.assertLessEqual(destination.stat().st_size, 128)
-        self.assertLessEqual(destination.with_suffix(".json.stderr.bin").stat().st_size, 128)
+        self.assertEqual(destination.read_bytes(), b"x" * 128)
+        self.assertEqual(destination.with_suffix(".json.stderr.bin").read_bytes(), b"")
         self.assertEqual(cwd_marker.read_text(), str(self.root))
 
-    def test_metadata_output_cap_rejects_large_completed_child(self):
+    def test_metadata_output_cap_kills_and_reaps_large_output_child(self):
         destination = self.root / "completed-oversized.json"
-        self._run_capped_real_child(
+        children = self._run_capped_real_child(
             [sys.executable, "-c", "import os; os.write(1, b'x' * 1000000)"], destination,
         )
-        self.assertLessEqual(destination.stat().st_size, 128)
+        self.assertEqual(len(children), 1)
+        self.assertIsNotNone(children[0].returncode)
+        with self.assertRaises(ProcessLookupError):
+            os.killpg(children[0].pid, 0)
+        self.assertEqual(destination.read_bytes(), b"x" * 128)
+        self.assertEqual(destination.with_suffix(".json.stderr.bin").read_bytes(), b"")
 
     def test_metadata_capture_collision_preserves_existing_file_and_skips_child(self):
         destination = self.root / "already-owned.json"
