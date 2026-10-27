@@ -120,8 +120,14 @@ the inherited `--net-fd` socket, runs the fixed guest script, and attempts to
 stop/reap Tart before deleting only that clone. It sets
 `TART_NO_AUTO_PRUNE=1`; it never deletes the prepared base. If it cannot prove
 the Tart process exited, it retains the exact owned clone and marks the
-evidence `tainted` instead of deleting a potentially active VM. A tainted
+evidence `tainted` instead of deleting a potentially active VM. Cleanup
+sends SIGTERM to the owned Tart process group and escalates to SIGKILL after a
+bounded wait. A tainted
 result is a failed canary requiring owner cleanup review.
+If Tart fails during clone creation, the controller cannot prove that the
+random name belongs to this invocation; it retains the partial path and marks
+the result `tainted`. The manifest records the exact `cloneVmName` for owner
+inspection. Do not delete that path automatically.
 
 ## Evidence and interpretation
 
@@ -141,7 +147,9 @@ stderr and Tart run stdout and stderr are also retained as four exclusive
 mode-0600 files beside it; their byte counts and SHA-256 values are recorded
 in the JSON. Each output stream is limited to 16 KiB for guest output and 64
 KiB for Tart run output. Exceeding a cap fails the canary and terminates the
-owned Tart run process.
+owned Tart run process. If the complete result exceeds 64 KiB, the controller
+writes a bounded `tainted` fallback containing the primary error, cleanup
+errors, and exact base/clone names so the result remains reviewable.
 
 The guest reports `/usr/bin/sw_vers` ProductVersion and BuildVersion and
 `platform.machine()`. The controller accepts only macOS 15.x on `arm64` and

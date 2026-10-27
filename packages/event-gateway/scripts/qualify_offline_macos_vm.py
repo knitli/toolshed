@@ -79,24 +79,33 @@ def _sha256(data):
 
 
 def _safe_dir(path, *, empty=False):
-    path = Path(path).absolute()
-    if path.is_symlink():
+    try:
+        path = Path(path).absolute()
+        if path.is_symlink():
+            raise CanaryError("unsafe_evidence_directory")
+        path = path.resolve(strict=True)
+        info = path.stat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+            raise CanaryError("unsafe_evidence_directory")
+        if empty and any(path.iterdir()):
+            raise CanaryError("evidence_directory_not_empty")
+    except CanaryError:
+        raise
+    except (OSError, RuntimeError):
         raise CanaryError("unsafe_evidence_directory")
-    path = path.resolve(strict=True)
-    info = path.stat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
-        raise CanaryError("unsafe_evidence_directory")
-    if empty and any(path.iterdir()):
-        raise CanaryError("evidence_directory_not_empty")
     return path
 
 
 def _read_receipt(path):
-    path = Path(path).resolve(strict=True)
-    if path.stat().st_size > MAX_RECEIPT_BYTES:
-        raise CanaryError("receipt_too_large")
     try:
+        path = Path(path).resolve(strict=True)
+        if path.stat().st_size > MAX_RECEIPT_BYTES:
+            raise CanaryError("receipt_too_large")
         value = json.loads(path.read_text())
+    except CanaryError:
+        raise
+    except (OSError, RuntimeError):
+        raise CanaryError("receipt_unavailable") from None
     except (ValueError, UnicodeError):
         raise CanaryError("invalid_receipt") from None
     required = {
@@ -185,7 +194,10 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                 if len(output) + len(chunk) > output_limit:
                     raise CanaryError("tart_command_output_limit")
                 output.extend(chunk)
-        code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
+        try:
+            code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            raise CanaryError("tart_command_timeout") from None
         if code:
             raise CanaryError("tart_command_failed")
         return bytes(streams[process.stdout]), bytes(streams[process.stderr])
@@ -221,25 +233,34 @@ def _hash_file(path, *, maximum, collect=False):
     path = Path(path)
     if path.is_symlink():
         raise CanaryError("unsafe_base_vm_file")
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        raise CanaryError("unsafe_base_vm_file") from None
     digest = hashlib.sha256()
     count = 0
     collected = bytearray() if collect else None
     try:
-        info = os.fstat(fd)
+        try:
+            info = os.fstat(fd)
+        except OSError:
+            raise CanaryError("unsafe_base_vm_file") from None
         if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
             raise CanaryError("unsafe_base_vm_file")
-        while True:
-            block = os.read(fd, 8 * 1024 * 1024)
-            if not block:
-                break
-            count += len(block)
-            if count > maximum:
-                raise CanaryError("base_vm_file_too_large")
-            digest.update(block)
-            if collected is not None:
-                collected.extend(block)
-        after = os.fstat(fd)
+        try:
+            while True:
+                block = os.read(fd, 8 * 1024 * 1024)
+                if not block:
+                    break
+                count += len(block)
+                if count > maximum:
+                    raise CanaryError("base_vm_file_too_large")
+                digest.update(block)
+                if collected is not None:
+                    collected.extend(block)
+            after = os.fstat(fd)
+        except OSError:
+            raise CanaryError("unsafe_base_vm_file") from None
     finally:
         os.close(fd)
     if (count != info.st_size or after.st_size != info.st_size or after.st_ino != info.st_ino
@@ -292,10 +313,16 @@ def _base_vm_measurement(tart_home, name, receipt):
 
 
 def _tart_identity(tart, receipt, env):
-    tart_path = Path(tart).resolve(strict=True)
+    try:
+        tart_path = Path(tart).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise CanaryError("tart_not_executable") from None
     if not tart_path.is_file() or not os.access(tart_path, os.X_OK):
         raise CanaryError("tart_not_executable")
-    digest, _ = _hash_file(tart_path, maximum=128 * 1024**2)
+    try:
+        digest, _ = _hash_file(tart_path, maximum=128 * 1024**2)
+    except CanaryError:
+        raise CanaryError("tart_binary_unreadable") from None
     if digest != receipt["tartBinarySha256"] or digest != TART_BINARY_SHA256:
         raise CanaryError("tart_binary_digest_mismatch")
     stdout, _ = _run_bounded([str(tart_path), "--version"], timeout=5, env=env)
@@ -563,6 +590,33 @@ def _drain_tart_logs(process, failures, result, evidence):
     }
 
 
+def _write_result_manifest(evidence, result):
+    raw = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    if len(raw) > MAX_SHORT_OUTPUT:
+        prior_errors = result.get("cleanupErrors", [])
+        result = {
+            "kind": "offline-macos-vm-boundary-canary-v1",
+            "status": "tainted",
+            "baseVmName": result.get("baseVmName"),
+            "cloneVmName": result.get("cloneVmName"),
+            "error": result.get("error") or "result_too_large",
+            "cleanupErrors": [*prior_errors, "result_too_large"],
+            "vmStop": result.get("vmStop", {"commandSucceeded": None, "stateConfirmedStopped": False}),
+        }
+        raw = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    path = evidence / "offline-macos-vm-canary.json"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    evidence_fd = os.open(evidence, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(evidence_fd)
+    finally:
+        os.close(evidence_fd)
+
+
 def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart", clock=time.monotonic,
             popen=subprocess.Popen, run_bounded=_run_bounded, tart_home=None):
     """Clone one local prepared VM, run the fixed canary, and delete only that clone."""
@@ -732,7 +786,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 child.close()
             if vm_proc is not None:
                 # No reconnect is attempted. Closing the inherited network FD leaves the VM NIC
-                # disconnected. Request exact-VM stop, then terminate only the owned Tart run process.
+                # disconnected. Request exact-VM stop, then terminate its owned Tart process group.
                 try:
                     run_bounded([str(tart_path), "stop", clone], timeout=15, env=env)
                 except BaseException:
@@ -740,7 +794,12 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 else:
                     stop_outcome["commandSucceeded"] = True
                 try:
+                    os.killpg(vm_proc.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                except OSError:
                     vm_proc.terminate()
+                try:
                     vm_proc.wait(timeout=10)
                     vm_reaped = True
                 except BaseException:
@@ -748,6 +807,8 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                         os.killpg(vm_proc.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
+                    except OSError:
+                        vm_proc.kill()
                     try:
                         vm_proc.wait(timeout=5)
                         vm_reaped = True
@@ -808,20 +869,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 result["hostCommandTemplates"].append([str(tart_path), "delete", clone])
             result["vmStop"] = stop_outcome
             result["frameCounters"] = {**counters, "hostTransmitted": 0}
-            raw = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
-            if len(raw) > MAX_SHORT_OUTPUT:
-                raise CanaryError("result_too_large")
-            path = evidence / "offline-macos-vm-canary.json"
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(raw)
-                stream.flush()
-                os.fsync(stream.fileno())
-            evidence_fd = os.open(evidence, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(evidence_fd)
-            finally:
-                os.close(evidence_fd)
+            _write_result_manifest(evidence, result)
         finally:
             _restore_termination_handlers(saved_signal_handlers)
 
@@ -839,6 +887,9 @@ def main(argv=None):
         qualify(args.base_vm, args.receipt, args.evidence_dir, tart=str(args.tart), tart_home=args.tart_home)
     except CanaryError as exc:
         print(str(exc), file=sys.stderr)
+        return 1
+    except OSError:
+        print("filesystem_operation_failed", file=sys.stderr)
         return 1
     result = json.loads((args.evidence_dir / "offline-macos-vm-canary.json").read_text())
     print(json.dumps({"kind": result["kind"], "status": result["status"],

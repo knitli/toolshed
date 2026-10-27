@@ -7,7 +7,9 @@ launch a VM, install software, run host network setup, or invoke the native clie
 """
 
 import ast
+from contextlib import redirect_stderr
 import importlib.util
+from io import StringIO
 import json
 import os
 from pathlib import Path
@@ -134,7 +136,7 @@ class OfflineMacosVmCanaryTest(unittest.TestCase):
 
     def _write_fake_tart(self, *, frames="none", fail_delete=False, running_after_stop=False,
                          readiness_failures=0, sleep_guest=0, guest_version="15.0.1",
-                         guest_arch="arm64", readiness_delay_first=0):
+                         guest_arch="arm64", readiness_delay_first=0, partial_clone_failure=False):
         sender = ""
         source_mac = "02:aa:bb:cc:dd:ef" if frames == "badmac" else "02:aa:bb:cc:dd:ee"
         marker4 = "x" * 32 if frames == "wrongnonce" else "c" * 32
@@ -160,6 +162,7 @@ if cmd == "get":
     print(json.dumps({fake_config!r}, separators=(",", ":"))); raise SystemExit
 if cmd == "clone":
     shutil.copytree(os.path.join(os.environ["TART_HOME"], "vms", sys.argv[2]), os.path.join(os.environ["TART_HOME"], "vms", sys.argv[3]))
+    if {partial_clone_failure!r}: raise SystemExit(1)
     raise SystemExit(0)
 if cmd == "run":
     sys.path.insert(0, root)
@@ -197,7 +200,7 @@ raise SystemExit(2)
         self.tart.write_text(script)
         self.tart.chmod(0o700)
 
-    def _run(self, *, free_space=200 * 1024**3, popen=None):
+    def _run(self, *, free_space=200 * 1024**3, popen=None, probe_timeout=0.2):
         nonce_file = self.root / "nonce"
         class FixedUuid:
             hex = "c" * 32
@@ -205,7 +208,7 @@ raise SystemExit(2)
             nonce_file.write_text("c" * 32)
             with patch.dict(os.environ, {"CANARY_NONCE_FILE": str(nonce_file)}):
                 with patch.multiple(canary, CANARY_TIMEOUT=2, VM_READY_TIMEOUT=4,
-                                    VM_READY_PROBE_TIMEOUT=0.2,
+                                    VM_READY_PROBE_TIMEOUT=probe_timeout,
                                     TART_BINARY_SHA256=canary._sha256(self.tart.read_bytes())), patch.object(
                     canary.shutil, "disk_usage", return_value=type("Usage", (), {"free": free_space})()
                 ):
@@ -217,6 +220,58 @@ raise SystemExit(2)
         with patch.object(canary, "TART_BINARY_SHA256", canary._sha256(self.tart.read_bytes())):
             return canary.qualify(base_vm, self.receipt_path, self.evidence,
                                   tart=str(self.tart), tart_home=self.tart_home)
+
+    def test_missing_paths_return_stable_codes_without_disclosing_paths(self):
+        missing_receipt = self.root / "private-receipt-not-found.json"
+        with self.assertRaisesRegex(canary.CanaryError, "receipt_unavailable") as receipt_error:
+            canary._read_receipt(missing_receipt)
+        self.assertNotIn(str(missing_receipt), str(receipt_error.exception))
+        with self.assertRaisesRegex(canary.CanaryError, "unsafe_evidence_directory"):
+            canary._safe_dir(self.root / "evidence-not-found")
+        with self.assertRaisesRegex(canary.CanaryError, "tart_not_executable"):
+            canary._tart_identity(self.root / "tart-not-found", self.receipt, {})
+        with self.assertRaisesRegex(canary.CanaryError, "unsafe_base_vm_file"):
+            canary._hash_file(self.root / "base-file-not-found", maximum=1024)
+
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            code = canary.main([
+                "--base-vm", "prepared-macos15", "--receipt", str(missing_receipt),
+                "--evidence-dir", str(self.evidence), "--tart", str(self.tart),
+            ])
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr.getvalue().strip(), "receipt_unavailable")
+        self.assertNotIn(str(missing_receipt), stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_wait_timeout_is_normalized_and_process_is_reaped(self):
+        class WaitTimeoutProcess:
+            pid = 987654321
+
+            def __init__(self):
+                out_read, out_write = os.pipe()
+                err_read, err_write = os.pipe()
+                os.close(out_write)
+                os.close(err_write)
+                self.stdout = os.fdopen(out_read, "rb")
+                self.stderr = os.fdopen(err_read, "rb")
+                self.reaped = False
+
+            def poll(self):
+                return 0
+
+            def wait(self, timeout=None):
+                if timeout is not None:
+                    raise subprocess.TimeoutExpired("fake-tart", timeout)
+                self.reaped = True
+                return -signal.SIGKILL
+
+        process = WaitTimeoutProcess()
+        with patch.object(canary.subprocess, "Popen", return_value=process), \
+                patch.object(canary.os, "killpg", side_effect=ProcessLookupError):
+            with self.assertRaisesRegex(canary.CanaryError, "tart_command_timeout"):
+                canary._run_bounded(["fake-tart"], timeout=1, env={})
+        self.assertTrue(process.reaped)
 
     def test_inherited_real_datagram_fd_and_fixed_drop_canary(self):
         self._write_fake_tart(frames="both", readiness_failures=2)
@@ -252,13 +307,53 @@ raise SystemExit(2)
         self.assertEqual(sorted(path.name for path in (self.tart_home / "vms").iterdir()), ["prepared-macos15"])
 
     def test_readiness_probe_timeout_retries_within_budget(self):
-        self._write_fake_tart(frames="both", readiness_delay_first=0.3)
+        self._write_fake_tart(frames="both", readiness_delay_first=1.0)
         self._write_receipt()
-        self.assertIsNone(self._run())
+        self.assertIsNone(self._run(probe_timeout=0.5))
         saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
         self.assertEqual(saved["status"], "passed")
         self.assertEqual(saved["readinessProbe"]["attempts"], 2)
         self.assertEqual(saved["hostCommandTemplates"].count(saved["readinessProbe"]["argv"]), 1)
+
+    def test_oversized_result_writes_bounded_tainted_manifest_and_keeps_identity(self):
+        self._write_fake_tart(frames="both")
+        self._write_receipt()
+        with patch.object(canary, "GUEST_CANARY", canary.GUEST_CANARY + "\n# " + "x" * 70_000):
+            self._run()
+        saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+        self.assertEqual(saved["status"], "tainted")
+        self.assertEqual(saved["error"], "result_too_large")
+        self.assertIn("result_too_large", saved["cleanupErrors"])
+        self.assertRegex(saved["cloneVmName"], r"^offline-canary-[0-9a-f]{32}$")
+        self.assertEqual(saved["baseVmName"], "prepared-macos15")
+        self.assertLess((self.evidence / "offline-macos-vm-canary.json").stat().st_size, canary.MAX_SHORT_OUTPUT)
+        self.assertTrue(self.base_vm_dir.exists())
+
+    def test_oversized_failure_manifest_preserves_primary_error(self):
+        self._write_fake_tart(frames="none")
+        self._write_receipt()
+        with patch.object(canary, "GUEST_CANARY", canary.GUEST_CANARY + "\n# " + "x" * 70_000):
+            with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
+                self._run()
+        saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+        self.assertEqual(saved["status"], "tainted")
+        self.assertEqual(saved["error"], "guest_external_frames_not_observed")
+        self.assertIn("result_too_large", saved["cleanupErrors"])
+        self.assertRegex(saved["cloneVmName"], r"^offline-canary-[0-9a-f]{32}$")
+        self.assertLess((self.evidence / "offline-macos-vm-canary.json").stat().st_size, canary.MAX_SHORT_OUTPUT)
+
+    def test_partial_clone_creation_failure_is_retained_and_recorded(self):
+        self._write_fake_tart(partial_clone_failure=True)
+        self._write_receipt()
+        with self.assertRaisesRegex(canary.CanaryError, "tart_command_failed"):
+            self._run()
+        saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+        clone_name = saved["cloneVmName"]
+        self.assertEqual(saved["status"], "tainted")
+        self.assertEqual(saved["error"], "tart_command_failed")
+        self.assertIn("clone_creation_ownership_unverified", saved["cleanupErrors"])
+        self.assertTrue((self.tart_home / "vms" / clone_name).exists())
+        self.assertTrue(self.base_vm_dir.exists())
 
     def test_no_frame_is_causally_rejected_not_mistaken_for_denial(self):
         with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
@@ -335,6 +430,20 @@ raise SystemExit(2)
         saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
         self.assertEqual(saved["status"], "failed")
         self.assertEqual(sorted(path.name for path in (self.tart_home / "vms").iterdir()), ["prepared-macos15"])
+
+    def test_cleanup_signals_owned_process_group(self):
+        self._write_fake_tart(frames="both")
+        self._write_receipt()
+        real_killpg = os.killpg
+        signals = []
+
+        def record_killpg(pid, sig):
+            signals.append((pid, sig))
+            return real_killpg(pid, sig)
+
+        with patch.object(canary.os, "killpg", side_effect=record_killpg):
+            self._run()
+        self.assertTrue(any(sig == signal.SIGTERM for _, sig in signals))
 
     def test_guest_output_cap_is_retained_and_hashed(self):
         stdout_path = self.root / "bounded-stdout.bin"
