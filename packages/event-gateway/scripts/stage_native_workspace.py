@@ -161,7 +161,8 @@ def stage(source: Path, output: Path):
     for name in ("credentials", "credentials.toml"):
         if (cargo_home / name).exists() or (cargo_home / name).is_symlink():
             raise ValueError("cargo_credentials_forbidden")
-    if (rustup_home / "credentials.toml").exists():
+    if ((rustup_home / "credentials.toml").exists()
+            or (rustup_home / "credentials.toml").is_symlink()):
         raise ValueError("rustup_credentials_forbidden")
     if any((cargo_home / name).exists() or (cargo_home / name).is_symlink()
            for name in ("config.toml", "config")):
@@ -188,7 +189,7 @@ def stage(source: Path, output: Path):
         raise ValueError("native_workspace_source_receipt_mismatch")
     lock_path = codex_rs / "Cargo.lock"
     lock_before = lock_path.read_bytes()
-    (output / "Cargo.lock.before").write_bytes(lock_before)
+    builder._write_new(output / "Cargo.lock.before", lock_before, mode=0o600)
     parsed_before = tomllib.loads(lock_before.decode())
     metadata_online = output / "metadata.online.json"
     online_env = dict(env)
@@ -201,7 +202,7 @@ def stage(source: Path, output: Path):
     changes = builder.lock_version_changes(
         parsed_before, tomllib.loads(lock_normalized.decode()),
     )
-    (output / "Cargo.lock.normalized").write_bytes(lock_normalized)
+    builder._write_new(output / "Cargo.lock.normalized", lock_normalized, mode=0o600)
     _run_file([*cargo, "fetch", "--locked"], cwd=codex_rs, env=online_env,
               destination=output / "fetch.stdout.bin")
     if lock_path.read_bytes() != lock_normalized:

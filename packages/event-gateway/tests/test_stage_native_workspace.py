@@ -52,6 +52,19 @@ class StageFixture(unittest.TestCase):
         return patch.object(staging.shutil, "which", side_effect=lambda name, path=None:
                             executable if name == "genv" else original(name, path=path))
 
+    def source_receipt(self):
+        receipt = {"upstreamCommit": builder.UPSTREAM_COMMIT, "recipe": dict(self.recipe_identity),
+                   "v8Assets": {"archive": {"sha256": "c" * 64}}}
+        if self.source_receipt_deviation == "upstream-commit":
+            receipt["upstreamCommit"] = "0" * 40
+        elif self.source_receipt_deviation == "recipe-family":
+            receipt["recipe"]["family"] = "unexpected"
+        elif self.source_receipt_deviation == "recipe-revision":
+            receipt["recipe"]["revision"] += 1
+        elif self.source_receipt_deviation == "recipe-manifest-hash":
+            receipt["recipe"]["manifestSha256"] = "d" * 64
+        return receipt
+
     def fake_bounded(self, argv, *, timeout, env, output_limit, capture_paths, **kwargs):
         self.bounded_calls.append((argv, timeout, env, output_limit, capture_paths))
         command = argv[2:]
@@ -60,8 +73,7 @@ class StageFixture(unittest.TestCase):
             staged = Path(command[command.index("--output") + 1])
             codex = staged / "codex-rs"
             codex.mkdir(parents=True)
-            receipt = {"upstreamCommit": builder.UPSTREAM_COMMIT, "recipe": self.recipe_identity,
-                       "v8Assets": {"archive": {"sha256": "c" * 64}}}
+            receipt = self.source_receipt()
             (staged / "qualification.json").write_text(json.dumps(receipt) + "\n")
             (codex / "Cargo.lock").write_bytes(self.lock_for_stage_before)
             if self.malicious_config:
@@ -85,10 +97,12 @@ class StageFixture(unittest.TestCase):
         return b"", b""
 
     def setup_stage(self, *, lock_drift_at=None, graph_drift=False, malicious_config=False,
-                    source_inventory_drift=False, lock_normalization_deviation=None):
+                    source_inventory_drift=False, lock_normalization_deviation=None,
+                    source_receipt_deviation=None):
         self.lock_drift_at = lock_drift_at
         self.graph_drift = graph_drift
         self.malicious_config = malicious_config
+        self.source_receipt_deviation = source_receipt_deviation
         self.lock_for_stage_before, self.lock_for_stage_after = self.lock_fixture(
             lock_normalization_deviation,
         )
@@ -327,6 +341,88 @@ class NativeWorkspaceStageTest(StageFixture):
             staging.stage(self.source, output)
         self.assertFalse((output / "receipt.json").exists())
 
+    def test_source_receipt_identity_mismatch_stops_after_replay(self):
+        for deviation in ("upstream-commit", "recipe-family", "recipe-revision",
+                          "recipe-manifest-hash"):
+            with self.subTest(deviation=deviation):
+                self.setup_stage(source_receipt_deviation=deviation)
+                output = self.root / f"source-receipt-{deviation}"
+                with self.assertRaisesRegex(ValueError, "native_workspace_source_receipt_mismatch"):
+                    staging.stage(self.source, output)
+                self.assertFalse((output / "receipt.json").exists())
+                self.assertEqual(len(self.bounded_calls), 1)
+                self.assertIn("--source", self.bounded_calls[0][0])
+
+    def test_rustup_credentials_regular_file_and_dangling_symlink_are_rejected(self):
+        self.setup_stage()
+        credentials = self.rustup / "credentials.toml"
+        for kind in ("regular-file", "dangling-symlink"):
+            with self.subTest(kind=kind):
+                if credentials.is_symlink() or credentials.exists():
+                    credentials.unlink()
+                if kind == "regular-file":
+                    credentials.write_text("token = 'sentinel'\n")
+                else:
+                    credentials.symlink_to(self.root / "missing-rustup-credentials")
+                output = self.root / f"rustup-credentials-{kind}"
+                with self.assertRaisesRegex(ValueError, "rustup_credentials_forbidden"):
+                    staging.stage(self.source, output)
+                self.assertFalse(output.exists())
+                self.assertEqual(self.bounded_calls, [])
+
+    def test_all_cache_and_output_overlap_shapes_reject_before_commands(self):
+        self.setup_stage()
+        nested_cache = self.cargo / "nested-rustup"
+        nested_cache.mkdir(mode=0o700)
+        self.source.chmod(0o700)
+        cases = (
+            ("equal-caches", self.cargo, self.cargo, self.root / "equal-caches",
+             "native_workspace_paths_overlap:cargo:rustup"),
+            ("nested-caches", self.cargo, nested_cache, self.root / "nested-caches",
+             "native_workspace_paths_overlap:cargo:rustup"),
+            ("cache-source", self.source, self.rustup, self.root / "cache-source",
+             "native_workspace_paths_overlap:source:cargo"),
+            ("output-cache", self.cargo, self.rustup, self.cargo / "prepared",
+             "native_workspace_paths_overlap:output:cargo"),
+        )
+        for name, cargo, rustup, output, error in cases:
+            with self.subTest(name=name):
+                with patch.dict(os.environ, {"CARGO_HOME": str(cargo),
+                                             "RUSTUP_HOME": str(rustup)}):
+                    with self.assertRaisesRegex(ValueError, error):
+                        staging.stage(self.source, output)
+                self.assertFalse(output.exists())
+                self.assertEqual(self.bounded_calls, [])
+
+    def test_lock_snapshot_collisions_preserve_regular_files_and_symlinks(self):
+        self.setup_stage()
+        writer = builder._write_new
+        for filename in ("Cargo.lock.before", "Cargo.lock.normalized"):
+            for kind in ("regular-file", "symlink"):
+                with self.subTest(filename=filename, kind=kind):
+                    output = self.root / f"snapshot-collision-{filename}-{kind}"
+                    target = output / filename
+                    marker = self.root / f"owned-{filename}-{kind}"
+                    marker.write_text("owned target\n")
+
+                    def collide(path, contents, mode=None):
+                        if Path(path).name == filename:
+                            if kind == "symlink":
+                                target.symlink_to(marker)
+                            else:
+                                target.write_text("owned target\n")
+                        return writer(path, contents, mode)
+
+                    with patch.object(builder, "_write_new", side_effect=collide):
+                        with self.assertRaisesRegex(ValueError, "native_output_must_be_new"):
+                            staging.stage(self.source, output)
+                    self.assertFalse((output / "receipt.json").exists())
+                    if kind == "symlink":
+                        self.assertTrue(target.is_symlink())
+                        self.assertEqual(target.resolve().read_text(), "owned target\n")
+                    else:
+                        self.assertEqual(target.read_text(), "owned target\n")
+
     def test_credentials_and_overlapping_paths_are_rejected(self):
         self.setup_stage()
         (self.cargo / "credentials.toml").write_text("token = 'secret'\n")
@@ -379,7 +475,8 @@ class NativeWorkspaceStageTest(StageFixture):
         writer = builder._write_new
 
         def race(path, contents, mode=None):
-            target.write_text("owned by another process\n")
+            if Path(path) == target:
+                target.write_text("owned by another process\n")
             return writer(path, contents, mode)
 
         with patch.object(builder, "_write_new", side_effect=race):
