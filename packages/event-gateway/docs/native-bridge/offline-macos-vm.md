@@ -11,19 +11,28 @@ frames passed; the owned Tart process was reaped, its VM was confirmed stopped,
 and the exact clone was deleted. Full Rust qualification and native promotion
 remain on hold.
 
-The latest passing attempt is `canary-03`, from source commit
-`f8ccce78753eec40166a87327cd25b8522c155d4`, after the executable and ACL
-admission checks were added. It uses the verified Tart copy beneath the
-operator-private `tart-protected-5610wanb` directory in `/private/tmp`.
+The latest passing attempt is `canary-04`, from source commit
+`882b75726d491faa568580bacc90129cd1c39a1a`, after executable, Tart-home ancestry
+and measured-base file admission checks were added. It uses the verified Tart
+copy under the private `tart-protected-5610wanb` directory and an APFS clone
+copy of the prepared base under private `tart-home-protected-1l0f4q7e`, both
+beneath `/private/tmp/events-live-enrollment-20261025/`. The original import
+was preserved. Every copied base file was remeasured by the controller.
 The controller SHA-256 is
-`07ad927281530cd5702d2dac1a9cb7c2fabfe6f932d6e33b18940ad89b1b99a3`;
+`43da2ce8e0df9e6e307f295bcc692e41937a890075877707968deb9645133acf`;
 the result SHA-256 is
-`90eb549881ca89d31c587cd1680d405109bc716cdd952a7925bee837bb44b6d6`.
+`dea1a1ba9b767f6db57d998c7f34ed9f1db21861110ab6478ab620af388f8ec2`.
 The invocation, result, raw log, guest/Tart output and two frames are retained
 in this worktree's managed Codex Security artifact collection under
-`artifacts/tart-executable/canary03/`. The host received 58 datagrams
-(15,006 bytes); only the two nonce-matched frames were retained. Stop/reap,
+`artifacts/tart-home/canary04/`. The host received 63 datagrams
+(15,987 bytes); only the two nonce-matched frames were retained. Stop/reap,
 stopped-state confirmation, and exact-clone deletion all succeeded.
+
+The previous `canary-03` passed after executable admission hardening but before
+Tart-home and base-file protection. Its source commit was
+`f8ccce78753eec40166a87327cd25b8522c155d4`; its result SHA-256 remains
+`90eb549881ca89d31c587cd1680d405109bc716cdd952a7925bee837bb44b6d6`, retained
+under `artifacts/tart-executable/canary03/` in the same collection.
 
 The earlier `canary-02` result remains preserved at SHA-256
 `47dea24d8ede36a82a85c5a6805f27849d05807f37fd2bf5b681304f4341447d`
@@ -33,7 +42,7 @@ It used controller SHA-256
 and predates the executable filesystem admission checks. Its host received
 75 datagrams (18,108 bytes), with two retained nonce frames.
 
-For both runs, the zero-transmit claim rests on the reviewed drain-only
+For these runs, the zero-transmit claim rests on the reviewed drain-only
 controller and pinned Tart network attachment; it is not a measurement of all
 host traffic. Raw output/frame hashes and nonce payloads were checked separately.
 
