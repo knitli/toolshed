@@ -28,6 +28,11 @@ jobs:
         with:
           version: "0.12.15"
           python-version: "3.13.14"
+      - name: Install GNU coreutils on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install coreutils
+          echo "$(brew --prefix coreutils)/bin" >> "$GITHUB_PATH"
       - run: uv sync --frozen
       - name: Verify vendored contract hashes without credentials
         run: uv run --frozen python scripts/sync_contract.py --check
