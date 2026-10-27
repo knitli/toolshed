@@ -106,7 +106,7 @@ def _set_macos_acl(path, *arguments):
 
 class OfflineMacosVmCanaryTest(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="offline-vm-test-", dir="/tmp")
+        self.temp = tempfile.TemporaryDirectory(prefix="offline-vm-test-", dir="/tmp")  # nosec B108 -- atomic private fixture under root-sticky tmp.
         self.root = Path(self.temp.name).resolve(strict=True)
         self.tart_home = self.root / "tart-home"
         self.tart_home.mkdir(mode=0o700)
@@ -308,7 +308,7 @@ raise SystemExit(2)
         self.assertTrue(process.reaped)
 
     def test_tart_identity_accepts_private_path_beneath_root_sticky_tmp(self):
-        sticky_tmp = os.lstat(Path("/tmp").resolve(strict=True))
+        sticky_tmp = os.lstat(Path("/tmp").resolve(strict=True))  # nosec B108 -- inspect the real sticky test ancestor.
         self.assertEqual(sticky_tmp.st_uid, 0)
         self.assertTrue(sticky_tmp.st_mode & stat.S_ISVTX)
         digest = canary._sha256(self.tart.read_bytes())
