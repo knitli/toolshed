@@ -145,7 +145,7 @@ class SoftnetRunStateTests(unittest.TestCase):
 
     def test_standalone_restored_marker_does_not_complete_a_run(self):
         with run_state.State(self.root) as state:
-            run, _ = self._run_with_recovery_records(state)
+            self._run_with_recovery_records(state)
         with self.assertRaisesRegex(recovery.RecoveryError, "unresolved_run"):
             with run_state.State(self.root):
                 self.fail("standalone restored marker admitted")

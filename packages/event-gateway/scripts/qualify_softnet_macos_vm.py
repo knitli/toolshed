@@ -106,14 +106,18 @@ def _admission(root):
              'state_inside_vm_storage')
     vm = _protected(home / 'vms' / value['vmName'], account.pw_uid, directory=True)
     _require(not (vm / 'state').exists() and not (vm / 'state').is_symlink(), 'saved_vm_state')
+    config_raw = None
     for filename, prefix, maximum in (('config.json', 'config', canary.MAX_CONFIG_BYTES),
                                       ('disk.img', 'disk', canary.MAX_DISK_BYTES),
                                       ('nvram.bin', 'nvram', canary.MAX_CONFIG_BYTES * 1024)):
         path = _protected(vm / filename, account.pw_uid)
-        digest, size = canary._hash_file(path, maximum=maximum)
+        measured = canary._hash_file(path, maximum=maximum, collect=prefix == 'config')
+        digest, size = measured[:2]
+        if prefix == 'config':
+            config_raw = measured[2]
         _require((digest, size) == (measurement[prefix + 'Sha256'], measurement[prefix + 'Bytes']),
                  'vm_measurement_mismatch')
-    config = json.loads((vm / 'config.json').read_bytes())
+    config = json.loads(config_raw)
     _require(isinstance(config, dict) and config.get('os') == 'darwin' and config.get('arch') == 'arm64'
              and config.get('macAddress') == value['macAddress'], 'vm_identity_mismatch')
     _binary(TART, canary.TART_BINARY_SHA256)
@@ -180,8 +184,14 @@ def _record(directory, name, value):
 def _start_logs(process, directory, failures):
     directory.mkdir(mode=0o700)
     result = {}
-    thread = threading.Thread(target=canary._drain_tart_logs,
-                              args=(process, failures, result, directory), daemon=True)
+
+    def drain():
+        try:
+            canary._drain_tart_logs(process, failures, result, directory)
+        except BaseException:
+            failures.append('log_drainer_failed')
+
+    thread = threading.Thread(target=drain, daemon=True)
     thread.start()
     return thread
 
@@ -292,6 +302,9 @@ def _exercise(run, admission, account, group, preferences_factory):
 def qualify(admission_directory, *, preferences_factory=Preferences):
     """Execute only the fixed startup canary under a retained global recovery gate."""
     _require(os.geteuid() == 0 and sys.platform == 'darwin', 'root_macos_required')
+    _require(sys.version_info >= (3, 13) and callable(getattr(os, 'waitid', None))
+             and all(hasattr(os, name) for name in ('P_PID', 'WEXITED', 'WNOHANG', 'WNOWAIT')),
+             'python_3_13_nonreaping_wait_required')
     root = Path(admission_directory)
     # Admission is root-only; no executable paths, guest commands, or helper flags are accepted.
     with State(STATE_ROOT) as state:

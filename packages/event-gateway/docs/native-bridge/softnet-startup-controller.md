@@ -54,7 +54,11 @@ Executable paths are fixed, root-owned and mode `0555`, with protected ancestry:
 - `/usr/local/libexec/knitli-event-qualification/softnet-0.22.1/softnet`
   with SHA-256 `1584af036b6d6d11319b2a3766d1be212534c525e3805bc566180aec7a1b2a0e`.
 
-Any eventual privileged installation must also protect the Python interpreter,
+The controller refuses Python older than 3.13 or a missing non-reaping `waitid`
+before opening run state or preferences. This Mac's Apple Python 3.9.6 has no
+`os.waitid`; it cannot run this controller.
+
+Any eventual privileged installation must also protect the Python 3.13+ interpreter,
 controller, imported modules and parent directories. Running a user-writable
 checkout as root is not a supported installation. This change does not install
 anything, create root directories, or grant sudo access.
