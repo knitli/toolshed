@@ -97,6 +97,7 @@ class DuplicateOfferPeer(Peer):
 
 class Process:
     def __init__(self):
+        """Track the fake helper exit and its output pipe descriptors."""
         self.pid = 999999
         self.returncode = None
         self.wait_result = 0
