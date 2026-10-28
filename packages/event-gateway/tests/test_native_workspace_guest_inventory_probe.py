@@ -15,6 +15,7 @@ import native_workspace_guest_inventory_probe as probe  # noqa: E402
 
 class Entry:
     def __init__(self, name, path=None, mode=stat.S_IFREG | 0o755, size=1):
+        """Represent one directory entry with a predictable stat result."""
         self.name, self.path = name, path or name
         self._stat = os.stat_result((mode, 1, 1, 1, 501, 20, size, 0, 0, 0))
 
@@ -24,12 +25,15 @@ class Entry:
 
 class Scan:
     def __init__(self, entries):
+        """Provide a minimal context-managed directory scan."""
         self.entries = entries
 
     def __enter__(self):
+        """Return the entries in this scan."""
         return iter(self.entries)
 
     def __exit__(self, *args):
+        """Leave scan cleanup to the test fixture."""
         return False
 
 
@@ -175,7 +179,7 @@ class GuestInventoryProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "guest_runtime_invalid"):
                 probe.collect_guest()
         run.assert_not_called()
-        with self._guest_patches(), mock.patch.dict(probe.os.environ, {"AWS_SECRET_ACCESS_KEY": "secret"}), \
+        with self._guest_patches(), mock.patch.dict(probe.os.environ, {"UNEXPECTED_TEST_ENV": "fixture-only"}), \
                 mock.patch.object(probe, "_run") as run:
             with self.assertRaisesRegex(ValueError, "guest_environment_invalid"):
                 probe.collect_guest()
@@ -274,6 +278,34 @@ class GuestInventoryProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "_run", return_value={"state": "missing", "version": None}):
             result = probe._sdk_inventory(10**30)
         self.assertTrue(result["scanCapped"])
+
+    def test_sdk_xcode_inventory_reads_sdk_settings_from_discovered_app_path(self):
+        app = Entry("Xcode-Fixture.app", "/Applications/Xcode-Fixture.app", stat.S_IFDIR | 0o755)
+        sdk = Entry("MacOSX15.4.sdk", "/Applications/Xcode-Fixture.app/Contents/Developer/Platforms/"
+                    "MacOSX.platform/Developer/SDKs/MacOSX15.4.sdk", stat.S_IFDIR | 0o755)
+        expected_plist = sdk.path + "/SDKSettings.plist"
+        reads = []
+
+        def scandir(path):
+            return Scan([app] if path == "/Applications" else
+                        [sdk] if path == "/Applications/Xcode-Fixture.app/Contents/Developer/Platforms/"
+                        "MacOSX.platform/Developer/SDKs" else [])
+
+        def hashed(path, *, maximum, collect):
+            reads.append((str(path), maximum, collect))
+            return "0" * 64, 1, plistlib.dumps({"Version": "15.4", "CanonicalName": "macosx15.4"})
+
+        with mock.patch.object(probe.os, "scandir", side_effect=scandir), \
+                mock.patch.object(probe.canary, "_hash_file", side_effect=hashed), \
+                mock.patch.object(probe, "_run", return_value={"state": "present",
+                                                                 "version": "version: 1.2.3"}):
+            result = probe._sdk_inventory(10**30)
+
+        self.assertEqual(reads, [(expected_plist, 16 * 1024, True)])
+        xcode = next(location for location in result["locations"] if location["label"] == "xcode")
+        self.assertEqual(xcode["sdks"], [{"state": "present", "version": "15.4",
+                                           "canonicalName": "macosx15.4"}])
+        self.assertNotIn("/Applications/Xcode-Fixture.app", json.dumps(result))
 
     def test_shallow_cache_never_descends_and_never_claims_complete(self):
         child = Entry("registry", "/Users/admin/.cargo/registry", stat.S_IFDIR | 0o755)
