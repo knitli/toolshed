@@ -271,9 +271,35 @@ def _validated_report(stdout, stderr, expected_hashes):
     return report
 
 
+def _report_summary(report):
+    """Keep the bounded manifest useful without duplicating raw report blobs."""
+    exchanges = []
+    for exchange in report["exchanges"]:
+        exchanges.append({
+            "clientIdBase64": exchange["clientIdBase64"], "xid": exchange["xid"],
+            "yiaddr": exchange["yiaddr"], "serverId": exchange["serverId"],
+            "offerLeaseSeconds": exchange["offerLeaseSeconds"],
+            "leaseSeconds": exchange["leaseSeconds"],
+            "frames": [{"bytes": frame["bytes"], "sha256": frame["sha256"]}
+                       for frame in exchange["frames"]],
+        })
+    return {
+        "kind": report["kind"], "status": report["status"],
+        "dhcpQualified": report["dhcpQualified"],
+        "fullNativeQualified": report["fullNativeQualified"],
+        "failureCode": report["failureCode"], "checks": report["checks"],
+        "sourceSha256": report["sourceSha256"], "binarySha256": report["binarySha256"],
+        "exchanges": exchanges,
+        "logs": {name: {"bytes": item["bytes"], "sha256": item["sha256"]}
+                 for name, item in report["logs"].items()},
+        "cleanupFailure": report["cleanupFailure"],
+    }
+
+
 def metadata(bundle, binary):
     return {"sourceSha256": bundle["sourceSha256"], "bundleSha256": bundle["bundleSha256"],
             "binarySha256": binary["sha256"], "binaryBytes": binary["bytes"],
+            "rawReport": {"file": "softnet-dhcp-stdout.bin", "maxBytes": MAX_OUTPUT_BYTES},
             "rawLogs": {"stdout": "softnet-dhcp-stdout.bin", "stderr": "softnet-dhcp-stderr.bin",
                         "maxBytesPerStream": MAX_OUTPUT_BYTES}}
 
@@ -291,7 +317,8 @@ def qualify(tart_path, vm_name, env, evidence, bundle, binary_fd, *, run_bounded
     stderr_path = Path(evidence) / "softnet-dhcp-stderr.bin"
     stdout, stderr = run_bounded(argv, timeout=TIMEOUT, env=env, output_limit=MAX_OUTPUT_BYTES,
                                  input_fd=binary_fd, capture_paths=(stdout_path, stderr_path))
-    return {"report": _validated_report(stdout, stderr, bundle["sourceSha256"])}
+    report = _validated_report(stdout, stderr, bundle["sourceSha256"])
+    return {"reportSummary": _report_summary(report)}
 
 
 def close(binary_fd):

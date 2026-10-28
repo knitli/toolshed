@@ -27,9 +27,13 @@ socket, explicit admin/staff privilege drop, and `--block=0.0.0.0/0`. It waits f
 fresh typed readback of the helper's fixed bootpd preferences. Two bounded
 DISCOVER/OFFER/REQUEST/ACK exchanges hold the MAC constant and change option 61.
 Passing requires 600-second OFFER and ACK leases and the same address for both
-client IDs. Source and binary hashes, exact capped frames, and helper logs join
-the existing evidence manifest. The host validates the report against the raw
-frames. Failure and cleanup failure remain failures.
+client IDs. The full validated guest report, including exact capped frames and
+helper logs, is retained in `softnet-dhcp-stdout.bin`; the main manifest binds
+that file by byte count and SHA-256 in `rawEvidence`. It carries a bounded
+`reportSummary` with scalar exchange results and frame/log byte counts and
+hashes, avoiding a second embedded copy of the base64 payloads. Source and
+binary hashes remain in the manifest. The host validates the report against the
+raw frames. Failure and cleanup failure remain failures.
 
 This is a compatibility experiment: vmnet Shared mode may be unavailable inside
 the guest. A startup failure does not establish a DHCP defect. Matching behavior

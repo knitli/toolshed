@@ -237,7 +237,8 @@ def qualify_guest_dhcp(helper_path):
             with patch.object(probe, "BINARY_SHA256", digest):
                 result = probe.qualify("/fixed/tart", "offline-canary-123", {"PATH": "/usr/bin"},
                                        temp, bundle, source.fileno(), run_bounded=run)
-            self.assertEqual(set(result), {"report"})
+                expected = probe._report_summary(probe._validated_report(output, b"", hashes))
+            self.assertEqual(result, {"reportSummary": expected})
             self.assertEqual(Path(temp, "softnet-dhcp-stdout.bin").read_bytes(), output)
             self.assertEqual(Path(temp, "softnet-dhcp-stderr.bin").read_bytes(), b"")
             self.assertEqual(captured["argv"], ["/fixed/tart", "exec", "-i", "offline-canary-123",
@@ -348,7 +349,8 @@ def qualify_guest_dhcp(helper_path):
             self.assertTrue(Path(evidence, "frame-ipv6.bin").is_file())
             Path(evidence, "softnet-dhcp-stdout.bin").write_bytes(payload)
             Path(evidence, "softnet-dhcp-stderr.bin").write_bytes(b"")
-            return {"report": probe._validated_report(payload, b"", hashes)}
+            return {"reportSummary": probe._report_summary(
+                probe._validated_report(payload, b"", hashes))}
 
         try:
             harness._write_fake_tart(frames="both")
@@ -375,13 +377,91 @@ def qualify_guest_dhcp(helper_path):
             saved = json.loads((harness.evidence / "offline-macos-vm-canary.json").read_text())
             self.assertEqual(saved["status"], "passed")
             self.assertEqual(saved["softnetDhcp"]["binarySha256"], probe.BINARY_SHA256)
-            self.assertEqual(saved["softnetDhcp"]["report"]["kind"], probe.REPORT_KIND)
+            self.assertEqual(saved["softnetDhcp"]["reportSummary"]["kind"], probe.REPORT_KIND)
             self.assertEqual(saved["rawEvidence"]["softnet-dhcp-stdout.bin"]["bytes"], len(payload))
             self.assertEqual((harness.evidence / "softnet-dhcp-stderr.bin").read_bytes(), b"")
             self.assertTrue(any(command[1:3] == ["exec", "-i"]
                                 for command in saved["hostCommandTemplates"] if len(command) > 2))
         finally:
             source.close()
+            harness.tearDown()
+
+    def test_near_limit_guest_logs_keep_full_raw_report_and_bounded_manifest(self):
+        from test_offline_macos_vm import OfflineMacosVmCanaryTest, canary as fixture_canary
+
+        harness = OfflineMacosVmCanaryTest()
+        harness.setUp()
+        helper_path = harness.root / "softnet-helper"
+        helper = b"pinned fixture helper"
+        helper_path.write_bytes(helper)
+        os.chmod(helper_path, 0o600)
+        digest = hashlib.sha256(helper).hexdigest()
+        bundle = probe.build_bundle()
+        report = report_for(bundle["sourceSha256"], digest)
+        report["logs"] = {name: blob(bytes((index + 1,)) * probe.MAX_LOG_BYTES)
+                           for index, name in enumerate(("stdout", "stderr"))}
+        payload = json.dumps(report, sort_keys=True, separators=(",", ":")).encode()
+        self.assertLessEqual(len(payload), probe.MAX_OUTPUT_BYTES)
+        calls = []
+        real_runner = fixture_canary._run_bounded
+
+        def run_bounded(argv, **kwargs):
+            if probe.LOADER in argv:
+                calls.append(argv)
+                for path, data in zip(kwargs["capture_paths"], (payload, b"")):
+                    Path(path).write_bytes(data)
+                return payload, b""
+            return real_runner(argv, **kwargs)
+
+        try:
+            harness._write_fake_tart(frames="both")
+            harness._write_receipt()
+
+            class FixedUuid:
+                hex = "c" * 32
+
+            with patch.multiple(fixture_canary, TART_BINARY_SHA256=harness.receipt["tartBinarySha256"],
+                                CANARY_TIMEOUT=2, VM_READY_TIMEOUT=4, VM_READY_PROBE_TIMEOUT=0.2), \
+                    patch.object(fixture_canary.uuid, "uuid4", return_value=FixedUuid()), \
+                    patch.object(fixture_canary.shutil, "disk_usage",
+                                 return_value=SimpleNamespace(free=200 * 1024**3)), \
+                    patch.object(probe, "BINARY_SHA256", digest):
+                summary = fixture_canary.qualify("prepared-macos15", harness.receipt_path,
+                                                 harness.evidence, tart=str(harness.tart),
+                                                 tart_home=harness.tart_home,
+                                                 softnet_dhcp_binary=helper_path,
+                                                 run_bounded=run_bounded)
+
+            saved = harness._assert_published_summary(summary)
+            manifest_path = harness.evidence / "offline-macos-vm-canary.json"
+            self.assertEqual(saved["status"], "passed", saved)
+            self.assertLess(manifest_path.stat().st_size, fixture_canary.MAX_SHORT_OUTPUT)
+            self.assertEqual(len(calls), 1)
+            softnet = saved["softnetDhcp"]
+            self.assertEqual(softnet["rawReport"], {
+                "file": "softnet-dhcp-stdout.bin", "maxBytes": probe.MAX_OUTPUT_BYTES})
+            compact = softnet["reportSummary"]
+            self.assertNotIn("base64", json.dumps(compact))
+            self.assertEqual(compact["logs"], {
+                name: {"bytes": probe.MAX_LOG_BYTES, "sha256": hashlib.sha256(
+                    bytes((index + 1,)) * probe.MAX_LOG_BYTES).hexdigest()}
+                for index, name in enumerate(("stdout", "stderr"))})
+            for exchange_summary, exchange in zip(compact["exchanges"], report["exchanges"]):
+                self.assertEqual(exchange_summary["clientIdBase64"], exchange["clientIdBase64"])
+                self.assertEqual(exchange_summary["xid"], exchange["xid"])
+                self.assertEqual(exchange_summary["yiaddr"], exchange["yiaddr"])
+                self.assertEqual(exchange_summary["serverId"], exchange["serverId"])
+                self.assertEqual(exchange_summary["offerLeaseSeconds"], exchange["offerLeaseSeconds"])
+                self.assertEqual(exchange_summary["leaseSeconds"], exchange["leaseSeconds"])
+                self.assertEqual(exchange_summary["frames"], [
+                    {"bytes": frame["bytes"], "sha256": frame["sha256"]}
+                    for frame in exchange["frames"]])
+            raw_report = (harness.evidence / "softnet-dhcp-stdout.bin").read_bytes()
+            raw_record = saved["rawEvidence"]["softnet-dhcp-stdout.bin"]
+            self.assertEqual(raw_report, payload)
+            self.assertEqual(raw_record["bytes"], len(payload))
+            self.assertEqual(raw_record["sha256"], hashlib.sha256(payload).hexdigest())
+        finally:
             harness.tearDown()
 
     def test_invalid_opt_in_binary_fails_before_clone(self):
