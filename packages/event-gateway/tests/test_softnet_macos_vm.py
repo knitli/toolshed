@@ -579,7 +579,7 @@ class SoftnetSupervisorTests(unittest.TestCase):
 
         def factory(argv, **kwargs):
             calls.append((argv, kwargs.copy()))
-            return subprocess.Popen(argv, **kwargs)
+            return subprocess.Popen(argv, **kwargs)  # nosec B603 -- Only the fixed argv below; no shell or external input.
 
         argv = [sys.executable, "-c", "print('bounded-child')"]
         stdout, stderr = canary._run_bounded(
@@ -685,7 +685,7 @@ class SoftnetSupervisorTests(unittest.TestCase):
         leader_code = ("import subprocess,sys,time; "
                        f"p=subprocess.Popen([sys.executable, '-c', {child_code!r}]); "
                        "print(p.pid, flush=True); time.sleep(30)")
-        process = subprocess.Popen([sys.executable, "-c", leader_code], stdin=subprocess.DEVNULL,
+        process = subprocess.Popen([sys.executable, "-c", leader_code], stdin=subprocess.DEVNULL,  # nosec B603 -- Fixed Python group fixture.
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    start_new_session=True, text=True)
         quiet_seen = []
@@ -798,7 +798,7 @@ class SoftnetSupervisorTests(unittest.TestCase):
                                  ("signal", signal.SIGKILL), "quiet", "wnowait", "wait"])
 
     def test_signals_without_group_quiet_proof_do_not_reap_child(self):
-        process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+        process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],  # nosec B603 -- Fixed bounded sleep fixture.
                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, start_new_session=True)
         try:
