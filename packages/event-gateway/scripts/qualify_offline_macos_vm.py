@@ -152,7 +152,7 @@ def _read_receipt(path):
     return value
 
 
-def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=(),
+def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=(), input_fd=None,
                  capture_paths=None, cancel_check=None, popen=None):
     """Run fixed local Tart commands with bounded stdout/stderr and process cleanup."""
     captures = []
@@ -167,7 +167,7 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
             raise CanaryError("raw_evidence_file_create_failed") from None
     try:
         factory = subprocess.Popen if popen is None else popen
-        process = factory(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        process = factory(argv, stdin=subprocess.DEVNULL if input_fd is None else input_fd, stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE, env=env, close_fds=True,
                           pass_fds=tuple(pass_fds), start_new_session=True)
     except BaseException:
@@ -817,13 +817,53 @@ def _append_scpreferences_api_evidence(probe, result, evidence, cleanup_errors):
         })
 
 
+def _prepare_softnet_dhcp(binary_path):
+    if binary_path is None:
+        return None, None, None, None
+    import softnet_dhcp_guest_probe as probe
+    try:
+        bundle, binary_fd, binary = probe.prepare(binary_path)
+        return probe, bundle, binary_fd, binary
+    except probe.canary.CanaryError as error:
+        raise CanaryError(*error.args) from None
+
+
+def _run_softnet_dhcp(probe, bundle, binary_fd, binary, tart_path, clone, env, evidence,
+                      run_bounded, result, commands):
+    if probe is None:
+        return
+    result["softnetDhcp"] = probe.metadata(bundle, binary)
+    commands.append(probe.command_template(tart_path, clone))
+    try:
+        result["softnetDhcp"].update(probe.qualify(
+            tart_path, clone, env, evidence, bundle, binary_fd, run_bounded=run_bounded))
+    except probe.canary.CanaryError as error:
+        raise CanaryError(*error.args) from None
+
+
+def _append_softnet_dhcp_evidence(probe, result, evidence, cleanup_errors):
+    if probe is not None:
+        result["rawEvidence"].update({
+            name: _raw_evidence(evidence / name, probe.MAX_OUTPUT_BYTES, cleanup_errors)
+            for name in ("softnet-dhcp-stdout.bin", "softnet-dhcp-stderr.bin")
+        })
+
+
+def _validate_softnet_dhcp_flag(binary_path):
+    if binary_path is not None and not isinstance(binary_path, (str, os.PathLike)):
+        raise CanaryError("invalid_softnet_dhcp_binary_path")
+
+
 def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart", clock=time.monotonic,
-            popen=subprocess.Popen, run_bounded=_run_bounded, tart_home=None, scpreferences_api=False):
+            popen=subprocess.Popen, run_bounded=_run_bounded, tart_home=None, scpreferences_api=False,
+            softnet_dhcp_binary=None):
     """Run one owned clone and return its published summary after cleanup."""
     if not BASE_NAME.fullmatch(base_vm) or "://" in base_vm:
         raise CanaryError("base_vm_must_be_local_name")
     _validate_scpreferences_api_flag(scpreferences_api)
+    _validate_softnet_dhcp_flag(softnet_dhcp_binary)
     api_probe = api_bundle = None
+    dhcp_probe = dhcp_bundle = dhcp_binary_fd = dhcp_binary = None
     if not all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")):
         raise CanaryError("nonreaping_wait_unavailable")
     receipt = _read_receipt(receipt_path)
@@ -869,6 +909,9 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
     stop_outcome = {"commandSucceeded": None, "stateConfirmedStopped": False}
     saved_signal_handlers = _install_termination_handlers()
     try:
+        dhcp_probe, dhcp_bundle, dhcp_binary_fd, dhcp_binary = _prepare_softnet_dhcp(softnet_dhcp_binary)
+        if dhcp_probe is not None:
+            result["softnetDhcp"] = dhcp_probe.metadata(dhcp_bundle, dhcp_binary)
         clone_attempted = True
         run_bounded([str(tart_path), "clone", base_vm, clone], timeout=60, env=env)
         clone_created = True
@@ -976,11 +1019,19 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
             raise CanaryError(failures[0])
         _run_scpreferences_api(api_probe, api_bundle, tart_path, clone, env, evidence,
                                run_bounded, result, commands)
+        _run_softnet_dhcp(dhcp_probe, dhcp_bundle, dhcp_binary_fd, dhcp_binary,
+                          tart_path, clone, env, evidence, run_bounded, result, commands)
         result["status"] = "passed"
     except BaseException as exc:
         result["error"] = exc.args[0] if isinstance(exc, CanaryError) and exc.args else "canary_failed"
         raise
     finally:
+        if dhcp_binary_fd is not None:
+            try:
+                dhcp_probe.close(dhcp_binary_fd)
+            except OSError:
+                cleanup_errors.append("softnet_dhcp_binary_fd_close_failed")
+            dhcp_binary_fd = None
         _ignore_termination_handlers(saved_signal_handlers)
         try:
             stop_drain.set()
@@ -1070,6 +1121,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                                     ("frame-ipv4.bin", MAX_FRAME), ("frame-ipv6.bin", MAX_FRAME))
             }
             _append_scpreferences_api_evidence(api_probe, result, evidence, cleanup_errors)
+            _append_softnet_dhcp_evidence(dhcp_probe, result, evidence, cleanup_errors)
             if result["status"] == "passed" and any(value is None for value in result["rawEvidence"].values()):
                 cleanup_errors.append("raw_evidence_incomplete")
             # Delete only our random clone. The prepared base is never modified or removed.
@@ -1112,11 +1164,15 @@ def main(argv=None):
                         help="private Tart home (defaults to TART_HOME, then ~/.tart)")
     parser.add_argument("--scpreferences-api", action="store_true",
                         help="also qualify the fixed guest SCPreferences APIs")
+    parser.add_argument("--softnet-dhcp-binary", type=Path, default=None,
+                        help="opt in to the fixed DHCP behavior probe using a local pinned helper")
     args = parser.parse_args(argv)
     try:
         options = {"tart": str(args.tart), "tart_home": args.tart_home}
         if args.scpreferences_api:
             options["scpreferences_api"] = True
+        if args.softnet_dhcp_binary is not None:
+            options["softnet_dhcp_binary"] = args.softnet_dhcp_binary
         summary = qualify(args.base_vm, args.receipt, args.evidence_dir, **options)
     except CanaryError as exc:
         print(str(exc), file=sys.stderr)

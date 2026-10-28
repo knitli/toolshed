@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import textwrap
 import zlib
 
 import qualify_offline_macos_vm as canary
@@ -28,7 +29,10 @@ MAX_BUNDLE_ARG = 128 * 1024
 MAX_REPORT_BYTES = 16 * 1024
 TIMEOUT = 30
 
-LOADER = r'''import base64, hashlib, json, os, re, shutil, stat, sys, tempfile, zlib
+def _source_loader(expected_files, module_name, function_name, temp_prefix, *, guest_setup="", call_args=""):
+    """Build one fixed loader from a source whitelist and fixed guest entry point."""
+    guest_setup = textwrap.indent(guest_setup, "    ")
+    return r'''import base64, hashlib, json, os, re, shutil, stat, sys, tempfile, zlib
 if len(sys.argv) != 2 or len(sys.argv[1]) > 131072:
     raise SystemExit("invalid_bundle_argument")
 try:
@@ -38,8 +42,7 @@ try:
     if len(raw) > 262144 or decoder.unconsumed_tail or not decoder.eof or decoder.unused_data:
         raise ValueError("invalid_bundle_size")
     bundle = json.loads(raw)
-    expected = {"qualify_offline_macos_vm.py", "softnet_preferences.py",
-                "softnet_recovery.py", "qualify_scpreferences_guest.py"}
+    expected = EXPECTED_FILES
     if type(bundle) is not dict or set(bundle) != expected:
         raise ValueError("invalid_bundle_files")
     files = {}
@@ -55,7 +58,7 @@ try:
         files[name] = content
 except (ValueError, TypeError, UnicodeError, zlib.error):
     raise SystemExit("invalid_source_bundle") from None
-root = tempfile.mkdtemp(prefix="softnet-scpreferences-modules-", dir="/private/tmp")
+root = tempfile.mkdtemp(prefix=TEMP_PREFIX, dir="/private/tmp")
 try:
     os.chmod(root, 0o700)
     for name, content in files.items():
@@ -78,26 +81,34 @@ try:
         os.close(directory_fd)
     sys.dont_write_bytecode = True
     sys.path.insert(0, root)
-    import qualify_scpreferences_guest
-    report = qualify_scpreferences_guest.qualify_guest_apis()
+GUEST_SETUP
+    module = __import__(MODULE_NAME)
+    report = getattr(module, FUNCTION_NAME)(CALL_ARGS)
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))
     raise SystemExit(0 if report.get("status") == "passed" else 1)
 finally:
     shutil.rmtree(root, ignore_errors=True)
-'''
+''' .replace("EXPECTED_FILES", repr(set(expected_files))).replace(
+        "TEMP_PREFIX", repr(temp_prefix)).replace("MODULE_NAME", repr(module_name)).replace(
+            "FUNCTION_NAME", repr(function_name)).replace("CALL_ARGS", call_args).replace(
+            "GUEST_SETUP", guest_setup)
 
 
-def _read_source(path):
+LOADER = _source_loader(set(SOURCE_FILES.values()), "qualify_scpreferences_guest", "qualify_guest_apis",
+                        "softnet-scpreferences-modules-")
+
+
+def _read_source(path, error_prefix="scpreferences_api"):
     path = Path(path)
     try:
         info = path.lstat()
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_size > MAX_SOURCE_BYTES:
-            raise canary.CanaryError("scpreferences_api_source_unsafe")
+            raise canary.CanaryError(error_prefix + "_source_unsafe")
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         try:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_SOURCE_BYTES:
-                raise canary.CanaryError("scpreferences_api_source_unsafe")
+                raise canary.CanaryError(error_prefix + "_source_unsafe")
             data = bytearray()
             while True:
                 block = os.read(fd, min(65536, MAX_SOURCE_BYTES + 1 - len(data)))
@@ -105,28 +116,33 @@ def _read_source(path):
                     break
                 data.extend(block)
                 if len(data) > MAX_SOURCE_BYTES:
-                    raise canary.CanaryError("scpreferences_api_source_oversized")
+                    raise canary.CanaryError(error_prefix + "_source_oversized")
             return bytes(data)
         finally:
             os.close(fd)
     except OSError as error:
-        raise canary.CanaryError("scpreferences_api_source_unavailable") from error
+        raise canary.CanaryError(error_prefix + "_source_unavailable") from error
 
 
-def build_bundle():
+def _build_source_bundle(source_files, source_paths, *, error_prefix, max_source_bytes, max_bundle_arg):
     files = {}
     source_hashes = {}
-    for key, filename in SOURCE_FILES.items():
-        data = _read_source(SOURCE_PATHS[key])
+    for key, filename in source_files.items():
+        data = _read_source(source_paths[key], error_prefix)
         digest = hashlib.sha256(data).hexdigest()
         files[filename] = {"sha256": digest, "content": base64.b64encode(data).decode("ascii")}
         source_hashes[key] = digest
     raw = json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
     encoded = base64.b64encode(zlib.compress(raw, 9))
-    if len(raw) > MAX_SOURCE_BYTES or len(encoded) > MAX_BUNDLE_ARG:
-        raise canary.CanaryError("scpreferences_api_bundle_oversized")
+    if len(raw) > max_source_bytes or len(encoded) > max_bundle_arg:
+        raise canary.CanaryError(error_prefix + "_bundle_oversized")
     return {"argument": encoded.decode("ascii"), "sourceSha256": source_hashes,
             "bundleSha256": hashlib.sha256(encoded).hexdigest()}
+
+
+def build_bundle():
+    return _build_source_bundle(SOURCE_FILES, SOURCE_PATHS, error_prefix="scpreferences_api",
+                               max_source_bytes=MAX_SOURCE_BYTES, max_bundle_arg=MAX_BUNDLE_ARG)
 
 
 def _validated_report(stdout, stderr, expected_hashes):
