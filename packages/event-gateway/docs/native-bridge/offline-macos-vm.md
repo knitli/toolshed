@@ -305,6 +305,14 @@ the disposable clone after the network checks. The report and capped output join
 the existing evidence manifest. This opt-in phase has a separate 30-second command
 timeout; it does not call host preference APIs or qualify effective daemon behavior.
 
+## Optional guest DHCP behavior probe
+
+Add `--softnet-dhcp-binary /absolute/private/path/softnet` to run the fixed
+[Softnet DHCP behavior experiment](softnet-guest-dhcp-qualification.md) after the
+network checks. It stages a pinned helper only inside the disposable clone and
+retains bounded frames and logs. This opt-in phase has a separate 60-second
+command timeout; full native qualification remains a separate gate.
+
 ## Next qualification gate
 
 This boundary canary does not contain the upstream Rust source, build
