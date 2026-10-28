@@ -21,6 +21,7 @@ MAX_BUNDLE_ARG = 128 * 1024
 MAX_OUTPUT_BYTES = 256 * 1024
 MAX_LOG_BYTES = 64 * 1024
 MAX_FRAME_BYTES = 2048
+MAX_DIAGNOSTICS_BYTES = 12 * 1024
 MAX_FRAMES = 8
 TIMEOUT = 60
 CHECKS = {"environment", "binary", "helperTargetReadback", "exchanges", "lease",
@@ -237,6 +238,24 @@ def _validate_exchange(exchange, expected_client_id):
     return yiaddr
 
 
+def _diagnostics_metadata(observations):
+    # Observations are opaque evidence, never a qualification input.
+    phases = ("before_helper", "helper_ready", "after_exchange")
+    if (not isinstance(observations, list) or len(observations) != len(phases)
+            or any(not isinstance(item, dict) or item.get("phase") != phase
+                   for item, phase in zip(observations, phases))):
+        raise canary.CanaryError("softnet_dhcp_report_unqualified")
+    try:
+        raw = json.dumps(observations, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=True, allow_nan=False).encode("ascii")
+    except (ValueError, TypeError, RecursionError):
+        raise canary.CanaryError("softnet_dhcp_report_unqualified") from None
+    if len(raw) > MAX_DIAGNOSTICS_BYTES:
+        raise canary.CanaryError("softnet_dhcp_report_unqualified")
+    return {"snapshots": len(observations), "bytes": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest()}
+
+
 def _validated_report(stdout, stderr, expected_hashes):
     if len(stdout) > MAX_OUTPUT_BYTES or len(stderr) > MAX_OUTPUT_BYTES or stderr:
         raise canary.CanaryError("softnet_dhcp_output_invalid")
@@ -245,7 +264,7 @@ def _validated_report(stdout, stderr, expected_hashes):
     except (ValueError, UnicodeError, RecursionError):
         raise canary.CanaryError("softnet_dhcp_report_invalid") from None
     keys = {"kind", "status", "dhcpQualified", "fullNativeQualified", "failureCode", "checks",
-            "sourceSha256", "binarySha256", "exchanges", "logs", "cleanupFailure"}
+            "sourceSha256", "binarySha256", "exchanges", "logs", "cleanupFailure", "diagnostics"}
     if (not isinstance(report, dict) or set(report) != keys or report["kind"] != REPORT_KIND
             or report["status"] != "passed" or report["dhcpQualified"] is not True
             or report["fullNativeQualified"] is not False or report["failureCode"] is not None
@@ -254,6 +273,7 @@ def _validated_report(stdout, stderr, expected_hashes):
             or not isinstance(report["checks"], dict) or set(report["checks"]) != CHECKS
             or any(value is not True for value in report["checks"].values())):
         raise canary.CanaryError("softnet_dhcp_report_unqualified")
+    _diagnostics_metadata(report["diagnostics"])
     logs = report["logs"]
     if not isinstance(logs, dict) or set(logs) != {"stdout", "stderr"}:
         raise canary.CanaryError("softnet_dhcp_report_unqualified")
@@ -293,6 +313,7 @@ def _report_summary(report):
         "logs": {name: {"bytes": item["bytes"], "sha256": item["sha256"]}
                  for name, item in report["logs"].items()},
         "cleanupFailure": report["cleanupFailure"],
+        "diagnostics": _diagnostics_metadata(report["diagnostics"]),
     }
 
 

@@ -1,13 +1,16 @@
 """Fixed DHCP behavior probe for a disposable, NIC-isolated macOS guest."""
 
 import base64
+import errno
 import hashlib
 import os
+import plistlib
 from pathlib import Path
 import platform
 import pwd
 import grp
 import signal
+import shlex
 import socket
 import stat
 import subprocess
@@ -33,6 +36,10 @@ TRANSACTION_SECONDS = 15
 RETRY_WINDOW_SECONDS = 1
 READY_SECONDS = 8
 PREFS_BUSY = "preferences_lock_failed:3002:"
+DIAGNOSTIC_MAX_BYTES = 64 * 1024
+DIAGNOSTIC_CONFIGS = (("etc", "/private/etc/bootpd.plist"),
+                      ("systemConfiguration", "/Library/Preferences/SystemConfiguration/bootpd.plist"))
+DIAGNOSTIC_LEASES = "/private/var/db/dhcpd_leases"
 
 
 def _report(binary_digest="", source_hashes=None):
@@ -44,8 +51,156 @@ def _report(binary_digest="", source_hashes=None):
                    "exchanges": False, "lease": False, "clientIdBehavior": False,
                    "helperReaped": False, "logsComplete": False},
         "sourceSha256": source_hashes or {}, "binarySha256": binary_digest,
-        "exchanges": [], "logs": {},
+        "exchanges": [], "logs": {}, "diagnostics": [],
     }
+
+
+def _diagnostic_file(path):
+    """Read one fixed guest file without following links or retaining its contents."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as error:
+        return {"status": "missing" if error.errno in (errno.ENOENT, errno.ENOTDIR) else "unreadable"}
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            return {"status": "not_regular"}
+        if before.st_size > DIAGNOSTIC_MAX_BYTES:
+            return {"status": "oversize"}
+        raw = bytearray()
+        while len(raw) <= DIAGNOSTIC_MAX_BYTES:
+            chunk = os.read(fd, min(4096, DIAGNOSTIC_MAX_BYTES + 1 - len(raw)))
+            if not chunk:
+                break
+            raw.extend(chunk)
+        after = os.fstat(fd)
+        if (len(raw) > DIAGNOSTIC_MAX_BYTES or len(raw) != before.st_size
+                or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+            return {"status": "changed" if len(raw) <= DIAGNOSTIC_MAX_BYTES else "oversize"}
+        return {"status": "ok", "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(), "raw": bytes(raw)}
+    except OSError:
+        return {"status": "unreadable"}
+    finally:
+        os.close(fd)
+
+
+def _diagnostic_selected(value, key):
+    if key not in value:
+        return {"status": "absent"}
+    item = value[key]
+    if type(item) is bool:
+        return {"status": "bool", "value": item}
+    if type(item) is int and -(1 << 63) <= item <= (1 << 64) - 1:
+        return {"status": "int", "value": item}
+    return {"status": "unsupported"}
+
+
+def _diagnostic_config(path):
+    result = _diagnostic_file(path)
+    raw = result.pop("raw", None)
+    if result["status"] != "ok":
+        return result
+    try:
+        value = plistlib.loads(raw)
+        if type(value) is not dict:
+            raise ValueError("plist root")
+    except Exception:
+        result["status"] = "malformed"
+        return result
+    result["selected"] = {key: _diagnostic_selected(value, key)
+                          for key in ("dhcp_ignore_client_identifier", "DHCPLeaseTimeSecs")}
+    return result
+
+
+def _diagnostic_bootpd():
+    try:
+        stdout, _stderr = canary._run_bounded(["/bin/ps", "-A", "-o", "pid=,comm="], timeout=0.75,
+                                               env=ENV, output_limit=32 * 1024)
+    except Exception as error:
+        code = str(error)
+        status = {"tart_command_timeout": "command_timeout", "tart_command_output_limit": "output_limit",
+                  "tart_command_failed": "command_error"}.get(code, "command_error")
+        return {"status": status, "pids": []}
+    try:
+        lines = stdout.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        return {"status": "invalid_output", "pids": []}
+    pids = []
+    seen = set()
+    for line in lines:
+        fields = line.split(None, 1)
+        if (len(fields) != 2 or not fields[0].isdigit()
+                or not 0 < int(fields[0]) <= (1 << 31) - 1 or not fields[1].strip()):
+            return {"status": "invalid_output", "pids": []}
+        pid = int(fields[0])
+        if os.path.basename(fields[1].strip()) == "bootpd":
+            if pid in seen or len(pids) >= 4:
+                return {"status": "invalid_output", "pids": []}
+            seen.add(pid)
+            pids.append(pid)
+    return {"status": "running" if pids else "none",
+            "pids": [{"pid": pid, **_diagnostic_process(pid)} for pid in pids]}
+
+
+def _diagnostic_config_argument(argv):
+    overrides = []
+    index = 0
+    while index < len(argv):
+        argument = argv[index]
+        if argument == "-f":
+            if index + 1 >= len(argv):
+                return "unclassified"
+            overrides.append(argv[index + 1])
+            index += 2
+        elif argument.startswith("-f/"):
+            overrides.append(argument[2:])
+            index += 1
+        else:
+            index += 1
+    if not overrides:
+        return "none_observed"
+    if len(overrides) != 1:
+        return "unclassified"
+    return {"/etc/bootpd.plist": "etc", "/private/etc/bootpd.plist": "etc",
+            "/Library/Preferences/SystemConfiguration/bootpd.plist": "systemConfiguration"}.get(
+                overrides[0], "other")
+
+
+def _diagnostic_process(pid):
+    try:
+        stdout, _stderr = canary._run_bounded(["/bin/ps", "-ww", "-p", str(pid), "-o", "args="],
+                                               timeout=0.75, env=ENV, output_limit=2048)
+        argv = shlex.split(stdout.decode("utf-8"))
+        if not argv or os.path.basename(argv[0]) != "bootpd":
+            return {"configArgument": "unclassified", "configStatus": "process_changed"}
+        return {"configArgument": _diagnostic_config_argument(argv)}
+    except Exception as error:
+        code = str(error)
+        status = {"tart_command_timeout": "command_timeout", "tart_command_output_limit": "output_limit",
+                  "tart_command_failed": "command_failed"}.get(code, "command_error")
+        return {"configArgument": "unclassified", "configStatus": status}
+
+
+def _diagnostic_snapshot(phase):
+    """Return a bounded, allowlisted observation of candidate DHCP state."""
+    configs = {name: _diagnostic_config(path) for name, path in DIAGNOSTIC_CONFIGS}
+    leases = _diagnostic_file(DIAGNOSTIC_LEASES)
+    leases.pop("raw", None)
+    return {"phase": phase, "configs": configs, "leases": leases, "bootpd": _diagnostic_bootpd()}
+
+
+def _capture_diagnostics(report, phase):
+    if len(report["diagnostics"]) >= 3:
+        return
+    try:
+        snapshot = _diagnostic_snapshot(phase)
+    except Exception:
+        snapshot = {"phase": phase, "status": "collector_failed",
+                    "configs": {name: {"status": "collector_failed"} for name, _path in DIAGNOSTIC_CONFIGS},
+                    "leases": {"status": "collector_failed"},
+                    "bootpd": {"status": "collector_failed", "pids": []}}
+    report["diagnostics"].append(snapshot)
 
 
 def _source_hashes():
@@ -307,6 +462,7 @@ def qualify_guest_dhcp(binary_path):
         failure = "binary_profile"
         report["binarySha256"] = _binary(binary_path)
         report["checks"]["binary"] = True
+        _capture_diagnostics(report, "before_helper")
         failure = "helper_launch"
         process, peer = _launch(binary_path)
         temp = tempfile.TemporaryDirectory(prefix="softnet-dhcp-logs-")
@@ -316,12 +472,16 @@ def qualify_guest_dhcp(binary_path):
         failure = "helper_target_readback"
         _target_readback()
         report["checks"]["helperTargetReadback"] = True
+        _capture_diagnostics(report, "helper_ready")
         failure = "dhcp_exchange"
         counters = {"sent": 0, "received": 0}
         frames = []
         deadline = time.monotonic() + TRANSACTION_SECONDS
-        for client_id in CLIENT_IDS:
-            report["exchanges"].append(_exchange(peer, client_id, counters, frames, deadline))
+        try:
+            for client_id in CLIENT_IDS:
+                report["exchanges"].append(_exchange(peer, client_id, counters, frames, deadline))
+        finally:
+            _capture_diagnostics(report, "after_exchange")
         report["checks"]["exchanges"] = True
         report["checks"]["lease"] = all(item["leaseSeconds"] == 600 and item["offerLeaseSeconds"] == 600
                                           for item in report["exchanges"])
