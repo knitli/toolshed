@@ -153,7 +153,7 @@ def _read_receipt(path):
 
 
 def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=(),
-                 capture_paths=None, cancel_check=None):
+                 capture_paths=None, cancel_check=None, popen=None):
     """Run fixed local Tart commands with bounded stdout/stderr and process cleanup."""
     captures = []
     if capture_paths is not None:
@@ -166,9 +166,10 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                 stream.close()
             raise CanaryError("raw_evidence_file_create_failed") from None
     try:
-        process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, env=env, close_fds=True,
-                                   pass_fds=tuple(pass_fds), start_new_session=True)
+        factory = subprocess.Popen if popen is None else popen
+        process = factory(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, env=env, close_fds=True,
+                          pass_fds=tuple(pass_fds), start_new_session=True)
     except BaseException:
         for capture in captures:
             capture.flush()

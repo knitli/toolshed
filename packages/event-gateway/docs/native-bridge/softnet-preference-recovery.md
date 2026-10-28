@@ -14,7 +14,7 @@ before equality because CFEqual alone can treat a boolean as an equal number,
 or an integer as an equal real. Binary plist serialization normalizes integer
 storage widths; comparisons distinguish plist node types, not integer widths. It never reads/writes the preference
 file directly. `scripts/softnet_recovery.py` provides `capture` and `restore` for
-a future owning VM controller. Neither module offers a privileged CLI or starts
+the separate [startup controller](softnet-startup-controller.md). Neither module offers a privileged CLI or starts
 Softnet, Tart, or a VM; existing canary behavior is unchanged.
 
 ## Journal and failure contract
@@ -67,15 +67,14 @@ runtime configuration still requires disposable-environment qualification.
 This code is preparation, not live qualification or authorization for host setup.
 Unit tests use fake preference sessions; macOS tests exercise real CoreFoundation
 serialization only, without opening SCPreferences. No system preferences are
-changed by those tests. The later controller must:
+changed by those tests. The startup controller now binds each run, gates unresolved journals and owns
+helper/VM cleanup. Its live gates remain:
 
-1. Prove the exact owned helper/VM is stopped and reaped before restoration.
-2. Refuse another run while any prior recovery is unresolved, and bind the
-   journal to that run outside disposable VM storage.
-3. Qualify the real commit/apply/error paths and effective runtime configuration
+1. Qualify the real commit/apply/error paths and effective runtime configuration
    in a disposable macOS environment,
-   then obtain authorization for concrete protected helper/sudoers installation.
-4. Preserve the non-TTY Tart invocation and exact pinned helper arguments.
+   then obtain authorization for concrete protected controller/helper installation and its exact invocation.
+2. Validate the fixed helper arguments and non-TTY Tart invocation on the
+   actual host; preserve the existing offline canary separately.
 
 The conditional check cannot distinguish a separate actor writing the identical
 value. Softnet itself can overwrite a change made after capture; recovery cannot
