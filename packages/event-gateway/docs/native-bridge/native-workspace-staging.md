@@ -27,6 +27,14 @@ later build needs no other inputs. The host must measure the powered-off VM's
 config, disk, and NVRAM and bind that receipt to the staging receipt before an
 offline clone can be admitted. The original prepared base remains unchanged.
 
+## Inspect the current guest
+
+The optional [fixed guest inventory](native-workspace-guest-inventory.md) records
+available interpreters, tool versions, SDK metadata, and resource estimates
+inside a NIC-isolated disposable clone. It runs without the Softnet helper or
+SCPreferences probe when only its flag is selected. Collection does not prepare
+the workspace or establish compatibility.
+
 ## Provisioned inputs
 
 Before staging, the guest must already have the reviewed tools used by the
