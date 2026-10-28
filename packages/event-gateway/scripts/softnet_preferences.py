@@ -305,7 +305,9 @@ class Preferences(CoreFoundation):
             self._prefs = None
         if unlock_error:
             if error is not None:
-                error.add_note(str(unlock_error))
+                add_note = getattr(error, "add_note", None)
+                if add_note is not None:
+                    add_note(str(unlock_error))
             else:
                 raise unlock_error
         return False

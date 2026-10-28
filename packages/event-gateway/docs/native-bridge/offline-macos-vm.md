@@ -297,6 +297,14 @@ control channel is an intentional host-to-guest command channel and remains in
 the trusted computing base; guest output is never converted to a host command
 or a host path.
 
+## Optional guest preference API probe
+
+Add `--scpreferences-api` to run the fixed
+[SCPreferences API qualification](scpreferences-guest-api-qualification.md) inside
+the disposable clone after the network checks. The report and capped output join
+the existing evidence manifest. This opt-in phase has a separate 30-second command
+timeout; it does not call host preference APIs or qualify effective daemon behavior.
+
 ## Next qualification gate
 
 This boundary canary does not contain the upstream Rust source, build
