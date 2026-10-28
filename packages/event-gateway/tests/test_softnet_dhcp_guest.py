@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import ipaddress
 import os
@@ -187,9 +188,11 @@ class GuestQualificationTests(unittest.TestCase):
 
     def test_client_id_address_mismatch_stays_failed_with_last_diagnostic(self):
         _process, _peer, patches = self._patch_run()
-        first = {"clientIdBase64": "AGtuaXRsaS1zb2Z0bmV0LWE=", "yiaddr": "192.0.2.2",
+        first = {"clientIdBase64": base64.b64encode(b"\x00knitli-softnet-a").decode("ascii"),
+                 "yiaddr": "192.0.2.2",
                  "leaseSeconds": 600, "offerLeaseSeconds": 600}
-        second = {"clientIdBase64": "AGtuaXRsaS1zb2Z0bmV0LWI=", "yiaddr": "192.0.2.3",
+        second = {"clientIdBase64": base64.b64encode(b"\x00knitli-softnet-b").decode("ascii"),
+                  "yiaddr": "192.0.2.3",
                   "leaseSeconds": 600, "offerLeaseSeconds": 600}
         patches.append(patch.object(guest, "_exchange", side_effect=[first, second]))
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], \
@@ -262,7 +265,7 @@ class GuestQualificationTests(unittest.TestCase):
         for argv, label in (
                 (["bootpd", "-f", "/etc/bootpd.plist"], "etc"),
                 (["bootpd", "-f/Library/Preferences/SystemConfiguration/bootpd.plist"], "systemConfiguration"),
-                (["bootpd", "-f", "/tmp/custom.plist"], "other"),
+                (["bootpd", "-f", "/opt/knitli-fixtures/other-bootpd.plist"], "other"),
                 (["bootpd"], "none_observed"),
                 (["bootpd", "-f"], "unclassified")):
             with self.subTest(argv=argv):
