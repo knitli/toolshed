@@ -62,6 +62,11 @@ request; it does not prove synchronous completion by the configuration daemon.
 The marker records preference readback and an accepted apply request; effective
 runtime configuration still requires disposable-environment qualification.
 
+The opt-in [guest API probe](scpreferences-guest-api-qualification.md) exercises
+real capture, commit/apply acceptance, readback, cross-process lock contention and
+restoration inside the isolated macOS VM. It does not qualify effective daemon
+configuration or inject real daemon commit/apply failures.
+
 ## Remaining gates
 
 This code is preparation, not live qualification or authorization for host setup.

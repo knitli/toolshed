@@ -782,11 +782,48 @@ def _write_result_manifest(evidence, result):
     return {"kind": result["kind"], "status": result["status"], "resultSha256": _sha256(raw)}
 
 
+def _validate_scpreferences_api_flag(enabled):
+    if type(enabled) is not bool:
+        raise CanaryError("invalid_scpreferences_api_flag")
+
+
+def _prepare_scpreferences_api(enabled):
+    if not enabled:
+        return None, None
+    import scpreferences_guest_probe as probe
+    try:
+        return probe, probe.build_bundle()
+    except probe.canary.CanaryError as error:
+        raise CanaryError(*error.args) from None
+
+
+def _run_scpreferences_api(probe, bundle, tart_path, clone, env, evidence, run_bounded, result, commands):
+    if probe is None:
+        return
+    result["scpreferencesApi"] = probe.metadata(bundle)
+    commands.append(probe.command_template(tart_path, clone))
+    try:
+        result["scpreferencesApi"].update(
+            probe.qualify(tart_path, clone, env, evidence, bundle, run_bounded=run_bounded))
+    except probe.canary.CanaryError as error:
+        raise CanaryError(*error.args) from None
+
+
+def _append_scpreferences_api_evidence(probe, result, evidence, cleanup_errors):
+    if probe is not None:
+        result["rawEvidence"].update({
+            name: _raw_evidence(evidence / name, MAX_GUEST_OUTPUT, cleanup_errors)
+            for name in ("scpreferences-api-stdout.bin", "scpreferences-api-stderr.bin")
+        })
+
+
 def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart", clock=time.monotonic,
-            popen=subprocess.Popen, run_bounded=_run_bounded, tart_home=None):
+            popen=subprocess.Popen, run_bounded=_run_bounded, tart_home=None, scpreferences_api=False):
     """Run one owned clone and return its published summary after cleanup."""
     if not BASE_NAME.fullmatch(base_vm) or "://" in base_vm:
         raise CanaryError("base_vm_must_be_local_name")
+    _validate_scpreferences_api_flag(scpreferences_api)
+    api_probe = api_bundle = None
     if not all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")):
         raise CanaryError("nonreaping_wait_unavailable")
     receipt = _read_receipt(receipt_path)
@@ -801,6 +838,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
     free = shutil.disk_usage(tart_home).free
     if free < base_disk_bytes + CLONE_LOG_HEADROOM:
         raise CanaryError("insufficient_vm_storage_capacity")
+    api_probe, api_bundle = _prepare_scpreferences_api(scpreferences_api)
     clone = "offline-canary-" + uuid.uuid4().hex
     clone_created = False
     clone_attempted = False
@@ -936,6 +974,8 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
             raise CanaryError("guest_external_frames_not_observed")
         if failures:
             raise CanaryError(failures[0])
+        _run_scpreferences_api(api_probe, api_bundle, tart_path, clone, env, evidence,
+                               run_bounded, result, commands)
         result["status"] = "passed"
     except BaseException as exc:
         result["error"] = exc.args[0] if isinstance(exc, CanaryError) and exc.args else "canary_failed"
@@ -1029,6 +1069,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                                     ("tart-stderr.bin", MAX_SHORT_OUTPUT),
                                     ("frame-ipv4.bin", MAX_FRAME), ("frame-ipv6.bin", MAX_FRAME))
             }
+            _append_scpreferences_api_evidence(api_probe, result, evidence, cleanup_errors)
             if result["status"] == "passed" and any(value is None for value in result["rawEvidence"].values()):
                 cleanup_errors.append("raw_evidence_incomplete")
             # Delete only our random clone. The prepared base is never modified or removed.
@@ -1069,9 +1110,14 @@ def main(argv=None):
     parser.add_argument("--tart", type=Path, default=Path("/opt/homebrew/bin/tart"))
     parser.add_argument("--tart-home", type=Path, default=None,
                         help="private Tart home (defaults to TART_HOME, then ~/.tart)")
+    parser.add_argument("--scpreferences-api", action="store_true",
+                        help="also qualify the fixed guest SCPreferences APIs")
     args = parser.parse_args(argv)
     try:
-        summary = qualify(args.base_vm, args.receipt, args.evidence_dir, tart=str(args.tart), tart_home=args.tart_home)
+        options = {"tart": str(args.tart), "tart_home": args.tart_home}
+        if args.scpreferences_api:
+            options["scpreferences_api"] = True
+        summary = qualify(args.base_vm, args.receipt, args.evidence_dir, **options)
     except CanaryError as exc:
         print(str(exc), file=sys.stderr)
         return 1

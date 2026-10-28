@@ -291,6 +291,24 @@ class SoftnetPreferencesTests(unittest.TestCase):
         self.assertEqual(names.count("apply"), 2)
         self.assertEqual(names.count("synchronize"), 1)
 
+    def test_unlock_failure_preserves_primary_error_without_add_note(self):
+        class Python39StyleError(RuntimeError):
+            add_note = None
+
+        self.sc.unlock_result = False
+        for add_note in (None, 42):
+            with self.subTest(add_note=add_note):
+                Python39StyleError.add_note = add_note
+                primary = Python39StyleError("target write failed")
+                self.sc.calls.clear()
+                with self.assertRaises(Python39StyleError) as raised:
+                    with self.adapter:
+                        raise primary
+                self.assertIs(raised.exception, primary)
+                self.assertIsNone(self.adapter._prefs)
+                self.assertFalse(self.adapter._locked)
+                self.assertEqual(sum(call[0] == "unlock" for call in self.sc.calls), 1)
+
     def test_set_commit_apply_and_unlock_failures_are_reported(self):
         target = self.adapter.encode_target()
         with self.adapter:

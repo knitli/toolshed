@@ -291,7 +291,8 @@ raise SystemExit(2)
         self.tart.write_text(script)
         self.tart.chmod(0o700)
 
-    def _run(self, *, free_space=200 * 1024**3, popen=None, probe_timeout=0.2):
+    def _run(self, *, free_space=200 * 1024**3, popen=None, probe_timeout=0.2,
+             scpreferences_api=False, run_bounded=None):
         nonce_file = self.root / "nonce"
 
         class FixedUuid:
@@ -304,9 +305,14 @@ raise SystemExit(2)
                                     TART_BINARY_SHA256=canary._sha256(self.tart.read_bytes())), patch.object(
                     canary.shutil, "disk_usage", return_value=type("Usage", (), {"free": free_space})()
                 ):
-                    return canary.qualify("prepared-macos15", self.receipt_path, self.evidence,
-                                          tart=str(self.tart), tart_home=self.tart_home,
-                                          **({"popen": popen} if popen is not None else {}))
+                    options = {"tart": str(self.tart), "tart_home": self.tart_home}
+                    if popen is not None:
+                        options["popen"] = popen
+                    if run_bounded is not None:
+                        options["run_bounded"] = run_bounded
+                    if scpreferences_api:
+                        options["scpreferences_api"] = True
+                    return canary.qualify("prepared-macos15", self.receipt_path, self.evidence, **options)
 
     def qualify(self, base_vm="prepared-macos15"):
         with patch.object(canary, "TART_BINARY_SHA256", canary._sha256(self.tart.read_bytes())):
@@ -321,6 +327,98 @@ raise SystemExit(2)
                     "resultSha256": canary._sha256(raw)}
         self.assertEqual(summary, expected)
         return saved
+
+    def _import_guest_probe(self):
+        with patch.object(sys, "path", [str(SCRIPT.parent), *sys.path]):
+            return importlib.import_module("scpreferences_guest_probe")
+
+    def test_scpreferences_api_opt_in_runs_and_publishes_report_and_raw_logs(self):
+        self._write_fake_tart(frames="both")
+        self._write_receipt()
+        probe = self._import_guest_probe()
+        source_hashes = {"offlineCanary": "a" * 64, "softnetPreferences": "b" * 64,
+                         "softnetRecovery": "c" * 64, "guestApi": "d" * 64}
+        bundle = {"argument": "fixed-test-bundle", "sourceSha256": source_hashes,
+                  "bundleSha256": "e" * 64}
+        report = {"kind": "scpreferences-guest-api-qualification-v1", "status": "passed",
+                  "apiQualified": True, "effectiveDaemonQualified": False, "failureCode": None,
+                  "checks": {name: True for name in probe.CHECKS}, "savedValuePresent": False,
+                  "sourceSha256": source_hashes,
+                  "journalDirectory": "/private/tmp/softnet-scpreferences-api-fixedtest"}
+        stdout = json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        stderr = b""
+        calls = []
+
+        def qualify_guest(tart_path, vm_name, env, evidence, actual_bundle, *, run_bounded):
+            calls.append((tart_path, vm_name, env, Path(evidence), actual_bundle, run_bounded))
+            (Path(evidence) / "scpreferences-api-stdout.bin").write_bytes(stdout)
+            (Path(evidence) / "scpreferences-api-stderr.bin").write_bytes(stderr)
+            return {"report": report}
+
+        with patch.object(sys, "path", [str(SCRIPT.parent), *sys.path]), \
+                patch.dict(sys.modules, {"scpreferences_guest_probe": probe}), \
+                patch.object(probe, "build_bundle", return_value=bundle) as build_bundle, \
+                patch.object(probe, "qualify", side_effect=qualify_guest) as qualify_guest_mock:
+            summary = self._run(scpreferences_api=True)
+
+        saved = self._assert_published_summary(summary)
+        self.assertEqual(saved["scpreferencesApi"]["report"], report)
+        self.assertEqual(saved["scpreferencesApi"]["sourceSha256"], source_hashes)
+        self.assertEqual(saved["status"], "passed", saved)
+        for name, raw in (("scpreferences-api-stdout.bin", stdout),
+                          ("scpreferences-api-stderr.bin", stderr)):
+            record = saved["rawEvidence"][name]
+            self.assertEqual(record["bytes"], len(raw))
+            self.assertEqual(record["sha256"], canary._sha256(raw))
+            self.assertEqual((self.evidence / name).read_bytes(), raw)
+        build_bundle.assert_called_once_with()
+        qualify_guest_mock.assert_called_once()
+        tart_path, clone, env, evidence, called_bundle, runner = calls[0]
+        self.assertEqual(tart_path, self.tart)
+        self.assertEqual(clone, saved["cloneVmName"])
+        self.assertEqual(env["TART_HOME"], str(self.tart_home))
+        self.assertEqual(evidence, self.evidence)
+        self.assertIs(called_bundle, bundle)
+        self.assertIs(runner, canary._run_bounded)
+        command = [str(self.tart), "exec", clone, "/usr/bin/sudo", "-n", "/usr/bin/python3", "-I",
+                   "-c", probe.LOADER, "<fixed-source-bundle-b64>"]
+        self.assertIn(command, saved["hostCommandTemplates"])
+        self.assertTrue(saved["vmStop"]["stateConfirmedStopped"])
+        self.assertFalse((self.tart_home / "vms" / clone).exists())
+
+    def test_scpreferences_api_report_validation_failure_still_cleans_exact_clone(self):
+        self._write_fake_tart(frames="both")
+        self._write_receipt()
+        probe = self._import_guest_probe()
+        captured = []
+        real_run_bounded = canary._run_bounded
+
+        def invalid_api_report(argv, **kwargs):
+            if len(argv) > 3 and argv[1] == "exec" and "/usr/bin/sudo" in argv:
+                if argv[-1] != "c" * 32:
+                    stdout, stderr = b"{}\n", b""
+                    for path, raw in zip(kwargs["capture_paths"], (stdout, stderr)):
+                        Path(path).write_bytes(raw)
+                    captured.append(tuple(argv))
+                    return stdout, stderr
+            return real_run_bounded(argv, **kwargs)
+
+        with patch.object(sys, "path", [str(SCRIPT.parent), *sys.path]), \
+                patch.dict(sys.modules, {"scpreferences_guest_probe": probe}), \
+                self.assertRaisesRegex(canary.CanaryError, "scpreferences_api_report_unqualified"):
+            self._run(scpreferences_api=True, run_bounded=invalid_api_report)
+
+        self.assertEqual(len(captured), 1)
+        saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_bytes())
+        self.assertEqual(saved["status"], "failed")
+        self.assertEqual(saved["error"], "scpreferences_api_report_unqualified")
+        self.assertEqual(saved["rawEvidence"]["scpreferences-api-stdout.bin"]["bytes"], 3)
+        self.assertTrue(saved["vmStop"]["stateConfirmedStopped"])
+        clone = saved["cloneVmName"]
+        self.assertEqual([path.name for path in (self.tart_home / "vms").iterdir()],
+                         ["prepared-macos15"])
+        self.assertFalse((self.tart_home / "vms" / clone).exists())
+        self.assertTrue((self.tart_home / "stop-started").is_file())
 
     def test_missing_paths_return_stable_codes_without_disclosing_paths(self):
         missing_receipt = self.root / "private-receipt-not-found.json"
