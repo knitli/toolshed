@@ -854,16 +854,69 @@ def _validate_softnet_dhcp_flag(binary_path):
         raise CanaryError("invalid_softnet_dhcp_binary_path")
 
 
+def _prepare_native_workspace_guest_inventory(enabled):
+    if not enabled:
+        return None, None
+    import native_workspace_guest_inventory_probe as probe
+    try:
+        return probe, probe.build_bundle()
+    except probe.canary.CanaryError as error:
+        raise CanaryError(*error.args) from None
+
+
+def _run_native_workspace_guest_inventory(probe, bundle, tart_path, clone, env, evidence,
+                                         run_bounded, result, commands):
+    if probe is None:
+        return
+    metadata = {
+        "sourceSha256": bundle["sourceSha256"], "bundleSha256": bundle["bundleSha256"],
+        "collectionOnly": True, "prepared": False, "nativeQualified": False,
+        "rawReport": {"file": "native-workspace-guest-inventory-stdout.json",
+                       "maxBytes": probe.MAX_REPORT_BYTES},
+        "rawLogs": {"stdout": "native-workspace-guest-inventory-stdout.json",
+                    "stderr": "native-workspace-guest-inventory-stderr.bin",
+                    "maxBytesPerStream": probe.MAX_REPORT_BYTES},
+    }
+    result["nativeWorkspaceGuestInventory"] = metadata
+    commands.append(probe.command_template(tart_path, clone, bundle["loader"]))
+    try:
+        collection = probe.collect(tart_path, clone, env, evidence, bundle,
+                                  run_bounded=run_bounded)
+    except probe.canary.CanaryError as error:
+        collection = {"status": "failed", "report": None,
+                      "failureCode": error.args[0] if error.args else "collection_failed",
+                      "rawEvidence": {}}
+    metadata.update(collection)
+    if metadata["status"] != "passed":
+        raise CanaryError("native_guest_inventory_collection_failed")
+
+
+def _append_native_workspace_guest_inventory_evidence(probe, result, evidence, cleanup_errors):
+    if probe is not None:
+        result["rawEvidence"].update({
+            name: _raw_evidence(evidence / name, probe.MAX_REPORT_BYTES, cleanup_errors)
+            for name in ("native-workspace-guest-inventory-stdout.json",
+                         "native-workspace-guest-inventory-stderr.bin")
+        })
+
+
+def _validate_native_workspace_guest_inventory_flag(enabled):
+    if type(enabled) is not bool:
+        raise CanaryError("invalid_native_workspace_guest_inventory_flag")
+
+
 def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart", clock=time.monotonic,
             popen=subprocess.Popen, run_bounded=_run_bounded, tart_home=None, scpreferences_api=False,
-            softnet_dhcp_binary=None):
+            softnet_dhcp_binary=None, native_workspace_guest_inventory=False):
     """Run one owned clone and return its published summary after cleanup."""
     if not BASE_NAME.fullmatch(base_vm) or "://" in base_vm:
         raise CanaryError("base_vm_must_be_local_name")
     _validate_scpreferences_api_flag(scpreferences_api)
     _validate_softnet_dhcp_flag(softnet_dhcp_binary)
+    _validate_native_workspace_guest_inventory_flag(native_workspace_guest_inventory)
     api_probe = api_bundle = None
     dhcp_probe = dhcp_bundle = dhcp_binary_fd = dhcp_binary = None
+    inventory_probe = inventory_bundle = None
     if not all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")):
         raise CanaryError("nonreaping_wait_unavailable")
     receipt = _read_receipt(receipt_path)
@@ -879,6 +932,8 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
     if free < base_disk_bytes + CLONE_LOG_HEADROOM:
         raise CanaryError("insufficient_vm_storage_capacity")
     api_probe, api_bundle = _prepare_scpreferences_api(scpreferences_api)
+    inventory_probe, inventory_bundle = _prepare_native_workspace_guest_inventory(
+        native_workspace_guest_inventory)
     clone = "offline-canary-" + uuid.uuid4().hex
     clone_created = False
     clone_attempted = False
@@ -1017,6 +1072,8 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
             raise CanaryError("guest_external_frames_not_observed")
         if failures:
             raise CanaryError(failures[0])
+        _run_native_workspace_guest_inventory(inventory_probe, inventory_bundle, tart_path, clone,
+                                             env, evidence, run_bounded, result, commands)
         _run_scpreferences_api(api_probe, api_bundle, tart_path, clone, env, evidence,
                                run_bounded, result, commands)
         _run_softnet_dhcp(dhcp_probe, dhcp_bundle, dhcp_binary_fd, dhcp_binary,
@@ -1122,6 +1179,8 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
             }
             _append_scpreferences_api_evidence(api_probe, result, evidence, cleanup_errors)
             _append_softnet_dhcp_evidence(dhcp_probe, result, evidence, cleanup_errors)
+            _append_native_workspace_guest_inventory_evidence(
+                inventory_probe, result, evidence, cleanup_errors)
             if result["status"] == "passed" and any(value is None for value in result["rawEvidence"].values()):
                 cleanup_errors.append("raw_evidence_incomplete")
             # Delete only our random clone. The prepared base is never modified or removed.
@@ -1166,6 +1225,8 @@ def main(argv=None):
                         help="also qualify the fixed guest SCPreferences APIs")
     parser.add_argument("--softnet-dhcp-binary", type=Path, default=None,
                         help="opt in to the fixed DHCP behavior probe using a local pinned helper")
+    parser.add_argument("--native-workspace-guest-inventory", action="store_true",
+                        help="collect the fixed native workspace guest inventory")
     args = parser.parse_args(argv)
     try:
         options = {"tart": str(args.tart), "tart_home": args.tart_home}
@@ -1173,6 +1234,8 @@ def main(argv=None):
             options["scpreferences_api"] = True
         if args.softnet_dhcp_binary is not None:
             options["softnet_dhcp_binary"] = args.softnet_dhcp_binary
+        if args.native_workspace_guest_inventory:
+            options["native_workspace_guest_inventory"] = True
         summary = qualify(args.base_vm, args.receipt, args.evidence_dir, **options)
     except CanaryError as exc:
         print(str(exc), file=sys.stderr)
