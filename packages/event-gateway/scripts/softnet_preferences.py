@@ -306,7 +306,7 @@ class Preferences(CoreFoundation):
         if unlock_error:
             if error is not None:
                 add_note = getattr(error, "add_note", None)
-                if add_note is not None:
+                if callable(add_note):
                     add_note(str(unlock_error))
             else:
                 raise unlock_error

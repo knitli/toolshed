@@ -36,10 +36,12 @@ class FakePreferences:
     external_change_on_target_read = False
 
     def __init__(self):
+        """Count construction and initialize this instance's staged value."""
         type(self).constructors += 1
         self.staged = None
 
     def __enter__(self):
+        """Acquire the fake nonwaiting lock and snapshot the current value."""
         if type(self).locked:
             raise softnet_preferences.PreferencesError("preferences_lock_failed:3002:busy")
         type(self).locked = True
@@ -47,6 +49,7 @@ class FakePreferences:
         return self
 
     def __exit__(self, *_):
+        """Release the fake lock without suppressing exceptions."""
         type(self).locked = False
         return False
 
@@ -90,8 +93,7 @@ class SCPreferencesGuestQualificationTests(unittest.TestCase):
     """Exercise real journal code around a fake preference API and temporary records."""
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(
-            prefix="scpreferences-guest-test-", dir="/private/tmp")
+        self.temp = tempfile.TemporaryDirectory(prefix="scpreferences-guest-test-")
         self.addCleanup(self.temp.cleanup)
         self.owner_patch = patch.object(recovery, "OWNER_UID", os.getuid())
         self.euid_patch = patch.object(guest_api.os, "geteuid", return_value=os.getuid())
@@ -99,7 +101,7 @@ class SCPreferencesGuestQualificationTests(unittest.TestCase):
         self.euid_patch.start()
         self.addCleanup(self.euid_patch.stop)
         self.addCleanup(self.owner_patch.stop)
-        self.journal_root = Path(self.temp.name) / "journals"
+        self.journal_root = Path(self.temp.name).resolve() / "journals"
         self.journal_root.mkdir(mode=0o700)
         real_mkdtemp = tempfile.mkdtemp
         self.tempdir_patch = patch.object(

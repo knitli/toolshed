@@ -73,6 +73,11 @@ class SCPreferencesGuestProbeTests(unittest.TestCase):
         self.assertEqual(bundle["bundleSha256"], hashlib.sha256(bundle["argument"].encode()).hexdigest())
 
     def test_guest_loader_executes_only_fake_modules_and_reports_verified_source_hashes(self):
+        # The production loader is fixed to macOS's /private/tmp. Redirect only this test copy to
+        # the persistent platform temp root so Linux can run it and the invalid second run does
+        # not point into the deleted source-fixture directory.
+        self.assertEqual(probe.LOADER.count('dir="/private/tmp"'), 1)
+        loader = probe.LOADER.replace('dir="/private/tmp"', f"dir={tempfile.gettempdir()!r}")
         with tempfile.TemporaryDirectory(prefix="fake-scpreferences-sources-") as temp:
             source_dir = Path(temp)
             (source_dir / "qualify_offline_macos_vm.py").write_text("BOUNDARY_MODULE = True\n")
@@ -104,7 +109,7 @@ def qualify_guest_apis():
                     "guestApi": source_dir / "qualify_scpreferences_guest.py"}):
                 bundle = probe.build_bundle()
             result = subprocess.run(  # nosec B603 -- fixed interpreter and inline fixture; no shell or external command.
-                [sys.executable, "-I", "-c", probe.LOADER, bundle["argument"]],
+                [sys.executable, "-I", "-c", loader, bundle["argument"]],
                 check=False, capture_output=True, timeout=10, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
@@ -115,8 +120,8 @@ def qualify_guest_apis():
         invalid_argument = base64.b64encode(zlib.compress(
             json.dumps(source_bundle, sort_keys=True, separators=(",", ":")).encode())).decode()
         invalid = subprocess.run(  # nosec B603 -- fixed loader with intentionally invalid fixture data, no shell.
-            [sys.executable, "-I", "-c", probe.LOADER, invalid_argument],
-                                 check=False, capture_output=True, timeout=10, text=True)
+            [sys.executable, "-I", "-c", loader, invalid_argument],
+            check=False, capture_output=True, timeout=10, text=True)
         self.assertNotEqual(invalid.returncode, 0)
         self.assertEqual(invalid.stdout, "")
 
