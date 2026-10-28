@@ -266,6 +266,8 @@ class GuestQualificationTests(unittest.TestCase):
                 (["bootpd", "-f", "/etc/bootpd.plist"], "etc"),
                 (["bootpd", "-f/Library/Preferences/SystemConfiguration/bootpd.plist"], "systemConfiguration"),
                 (["bootpd", "-f", "/opt/knitli-fixtures/other-bootpd.plist"], "other"),
+                (["bootpd", "-frelative.plist"], "other"),
+                (["bootpd", "-df/etc/bootpd.plist"], "unclassified"),
                 (["bootpd"], "none_observed"),
                 (["bootpd", "-f"], "unclassified")):
             with self.subTest(argv=argv):

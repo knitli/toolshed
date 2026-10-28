@@ -153,9 +153,11 @@ def _diagnostic_config_argument(argv):
                 return "unclassified"
             overrides.append(argv[index + 1])
             index += 2
-        elif argument.startswith("-f/"):
+        elif argument.startswith("-f"):
             overrides.append(argument[2:])
             index += 1
+        elif argument.startswith("-") and "f" in argument:
+            return "unclassified"
         else:
             index += 1
     if not overrides:
