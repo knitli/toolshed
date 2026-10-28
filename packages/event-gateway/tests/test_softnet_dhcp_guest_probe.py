@@ -101,24 +101,47 @@ class SoftnetDhcpGuestProbeTests(unittest.TestCase):
 
     def test_binary_preflight_accepts_only_owner_private_pinned_regular_file(self):
         payload = b"offline pinned helper fixture"
+        digest = hashlib.sha256(payload).hexdigest()
         with tempfile.TemporaryDirectory() as temp:
             helper = Path(temp).resolve() / "helper"
             helper.write_bytes(payload)
             os.chmod(helper, 0o600)
-            with patch.object(probe, "BINARY_SHA256", hashlib.sha256(payload).hexdigest()):
+            with patch.object(probe, "BINARY_SHA256", digest):
                 fd, metadata = probe._read_binary(helper)
-            try:
-                self.assertEqual(metadata, {"sha256": hashlib.sha256(payload).hexdigest(),
-                                            "bytes": len(payload)})
-                self.assertEqual(os.read(fd, len(payload)), payload)
-            finally:
-                os.close(fd)
+                try:
+                    self.assertEqual(metadata, {"sha256": digest, "bytes": len(payload)})
+                    self.assertEqual(os.read(fd, len(payload)), payload)
+                    for mode in (0o400, 0o500, 0o700):
+                        os.chmod(helper, mode)
+                        with self.subTest(transfer_mode=oct(mode)), self.assertRaisesRegex(
+                                canary.CanaryError, "softnet_dhcp_binary_unsafe"):
+                            probe._rewind_verified_binary(fd)
+                        os.chmod(helper, 0o600)
+                finally:
+                    os.close(fd)
+                real_open = os.open
+
+                def widen_after_open(path, flags):
+                    opened_fd = real_open(path, flags)
+                    os.fchmod(opened_fd, 0o700)
+                    return opened_fd
+
+                with patch.object(probe.os, "open", side_effect=widen_after_open), self.assertRaisesRegex(
+                        canary.CanaryError, "softnet_dhcp_binary_unsafe"):
+                    probe._read_binary(helper)
+                os.chmod(helper, 0o600)
+                for mode in (0o400, 0o500, 0o644, 0o700):
+                    os.chmod(helper, mode)
+                    with patch.object(probe.os, "open", wraps=os.open) as opened_file:
+                        with self.subTest(preflight_mode=oct(mode)), self.assertRaisesRegex(
+                                canary.CanaryError, "softnet_dhcp_binary_unsafe"):
+                            probe._read_binary(helper)
+                        opened_file.assert_not_called()
             with patch.object(probe, "BINARY_SHA256", "0" * 64), self.assertRaisesRegex(
                     canary.CanaryError, "softnet_dhcp_binary_digest_mismatch"):
+                os.chmod(helper, 0o600)
                 probe._read_binary(helper)
-            os.chmod(helper, 0o644)
-            with self.assertRaisesRegex(canary.CanaryError, "softnet_dhcp_binary_unsafe"):
-                probe._read_binary(helper)
+
 
     def test_fixed_loader_verifies_received_stdin_before_guest_call(self):
         payload = b"verified helper bytes\x00\xff"
@@ -330,6 +353,7 @@ def qualify_guest_dhcp(helper_path):
         try:
             harness._write_fake_tart(frames="both")
             harness._write_receipt()
+
             class FixedUuid:
                 hex = "c" * 32
 

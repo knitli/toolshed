@@ -120,7 +120,14 @@ def _receive(peer, mac, xid, message_type, server_id, deadline, counters, record
         counters["received"] += 1
         if counters["received"] + counters["sent"] > MAX_FRAMES or len(frame) > MAX_FRAME_BYTES:
             raise ValueError("frame_limit")
-        reply = dhcp.parse_reply(frame, mac, xid, message_type, server_id)
+        try:
+            reply = dhcp.parse_reply(frame, mac, xid, message_type, server_id)
+        except ValueError as error:
+            if message_type != 5 or str(error) != "unexpected DHCP message type":
+                raise
+            if dhcp.parse_reply(frame, mac, xid, 2, server_id) is not None:
+                continue
+            raise
         if reply is not None:
             if len(records) >= 8:
                 raise ValueError("retained_frame_limit")
@@ -219,17 +226,27 @@ def _launch(binary_path):
 
 
 def _collect_logs(temp, log_result, report):
-    entries = log_result.get("tartRunLogs", {})
-    for name, summary in entries.items():
-        path = Path(temp.name) / summary["file"]
-        raw = path.read_bytes()
+    entries = log_result.get("tartRunLogs")
+    if (type(entries) is not dict or set(entries) != {"stdout", "stderr", "maxBytesPerStream"}
+            or type(entries["maxBytesPerStream"]) is not int
+            or entries["maxBytesPerStream"] != canary.MAX_SHORT_OUTPUT):
+        raise ValueError("logs_incomplete")
+    for name in ("stdout", "stderr"):
+        summary = entries[name]
+        if (type(summary) is not dict or set(summary) != {"bytesObserved", "bytesRetained", "sha256", "file"}
+                or any(type(summary[key]) is not int or summary[key] < 0
+                       for key in ("bytesObserved", "bytesRetained"))
+                or summary["bytesObserved"] != summary["bytesRetained"]
+                or summary["bytesRetained"] > canary.MAX_SHORT_OUTPUT
+                or summary["file"] != "tart-" + name + ".bin"
+                or not isinstance(summary["sha256"], str) or len(summary["sha256"]) != 64
+                or any(char not in "0123456789abcdef" for char in summary["sha256"])):
+            raise ValueError("logs_incomplete")
+        raw = (Path(temp.name) / summary["file"]).read_bytes()
+        if len(raw) != summary["bytesRetained"] or hashlib.sha256(raw).hexdigest() != summary["sha256"]:
+            raise ValueError("logs_incomplete")
         report["logs"][name] = {"bytes": summary["bytesRetained"], "sha256": summary["sha256"],
                                 "base64": base64.b64encode(raw).decode("ascii")}
-        if (len(raw) != summary["bytesObserved"] or len(raw) != summary["bytesRetained"]
-                or len(raw) > canary.MAX_SHORT_OUTPUT or hashlib.sha256(raw).hexdigest() != summary["sha256"]):
-            raise ValueError("logs_incomplete")
-    if set(entries) != {"stdout", "stderr"} or len(report["logs"]) != 2:
-        raise ValueError("logs_incomplete")
 
 
 def _cleanup(process, log_thread, temp, log_result, log_errors, report):

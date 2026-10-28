@@ -45,6 +45,7 @@ def _reply(xid, kind, client_mac=MAC, yiaddr=ASSIGNED, server=SERVER, lease=600)
 
 class Peer:
     def __init__(self):
+        """Queue deterministic DHCP replies for the fixed MAC and 600-second lease."""
         self.incoming = []
         self.drop_next = False
         self.offer_lease = 600
@@ -72,6 +73,26 @@ class Peer:
 
     def close(self):
         pass
+
+
+class DuplicateOfferPeer(Peer):
+    def __init__(self, *, server=SERVER, malformed=False):
+        """Queue a duplicate OFFER before its ACK, optionally malformed."""
+        super().__init__()
+        self.stale_server = server
+        self.malformed = malformed
+
+    def send(self, frame):
+        options = frame[14 + 20 + 8 + 240:]
+        kind = options[2]
+        super().send(frame)
+        if kind == 3:
+            ack = self.incoming.pop()
+            xid = struct.unpack_from("!I", frame, 42 + 4)[0]
+            stale_offer = bytearray(_reply(xid, 2, server=self.stale_server))
+            if self.malformed:
+                stale_offer[24] ^= 1
+            self.incoming.extend((bytes(stale_offer), ack))
 
 
 class Process:
@@ -107,6 +128,7 @@ def _logs(process, errors, result):
         (directory / name).write_bytes(raw)
         entries[label] = {"bytesObserved": len(raw), "bytesRetained": len(raw),
                           "sha256": hashlib.sha256(raw).hexdigest(), "file": name}
+    entries["maxBytesPerStream"] = guest.canary.MAX_SHORT_OUTPUT
     result["tartRunLogs"] = entries
     os.close(process.stdout)
     os.close(process.stderr)
@@ -406,6 +428,44 @@ class GuestQualificationTests(unittest.TestCase):
         self.assertEqual(len(frames), 8)
         self.assertEqual(counters["sent"], 6)
 
+    def test_duplicate_offer_before_ack_is_ignored_and_counted(self):
+        peer = DuplicateOfferPeer()
+        counters = {"sent": 0, "received": 0}
+        records = []
+        result = guest._exchange(peer, guest.CLIENT_IDS[0], counters, records,
+                                 guest.time.monotonic() + 2)
+        self.assertEqual(result["leaseSeconds"], 600)
+        self.assertEqual(counters, {"sent": 2, "received": 3})
+        self.assertEqual(len(result["frames"]), 4)
+
+    def test_real_drainer_metadata_flows_through_log_collector(self):
+        out_read, out_write = os.pipe()
+        err_read, err_write = os.pipe()
+        os.write(out_write, b"drained stdout")
+        os.write(err_write, b"drained stderr")
+        os.close(out_write)
+        os.close(err_write)
+        process = SimpleNamespace(pid=999999, stdout=os.fdopen(out_read, "rb"),
+                                  stderr=os.fdopen(err_read, "rb"))
+        errors = []
+        with tempfile.TemporaryDirectory() as directory:
+            drained = {"_dir": directory}
+            guest._drain(process, errors, drained)
+            report = {"logs": {}}
+            guest._collect_logs(SimpleNamespace(name=directory), drained, report)
+            self.assertEqual(errors, [])
+            self.assertEqual(set(drained["tartRunLogs"]),
+                             {"stdout", "stderr", "maxBytesPerStream"})
+            self.assertEqual(report["logs"]["stdout"]["bytes"], len(b"drained stdout"))
+            self.assertEqual(report["logs"]["stderr"]["bytes"], len(b"drained stderr"))
+
+    def test_wrong_server_and_malformed_stale_offers_fail(self):
+        for peer, message in ((DuplicateOfferPeer(server="192.0.2.9"), "unexpected server"),
+                              (DuplicateOfferPeer(malformed=True), "checksum")):
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                guest._exchange(peer, guest.CLIENT_IDS[0], {"sent": 0, "received": 0}, [],
+                                guest.time.monotonic() + 2)
+
     def test_exchange_rejects_ack_address_that_changes_offer(self):
         peer = Peer()
         peer.ack_yiaddr = "192.0.2.55"
@@ -421,7 +481,7 @@ class GuestQualificationTests(unittest.TestCase):
         self.assertEqual(result["offerLeaseSeconds"], 599)
 
     def test_qualification_rejects_short_offer_lease(self):
-        process, peer, patches = self._patch_run()
+        _process, peer, patches = self._patch_run()
         peer.offer_lease = 599
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8]:
             report = guest.qualify_guest_dhcp("/fresh/root/private/softnet")
@@ -430,7 +490,7 @@ class GuestQualificationTests(unittest.TestCase):
         self.assertEqual(report["failureCode"], "dhcp_behavior")
 
     def test_partial_completed_exchange_survives_second_exchange_failure(self):
-        process, _peer, patches = self._patch_run()
+        _process, _peer, patches = self._patch_run()
         first = {"clientIdBase64": "first", "yiaddr": ASSIGNED, "leaseSeconds": 600}
         patches.append(patch.object(guest, "_exchange", side_effect=[first, ValueError("dhcp_deadline")]))
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], \
@@ -478,23 +538,27 @@ class GuestQualificationTests(unittest.TestCase):
 
     def test_log_collector_rejects_incomplete_stream(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "stdout.bin"
+            path = Path(directory) / "tart-stdout.bin"
             path.write_bytes(b"short")
             summary = {"bytesRetained": 5, "bytesObserved": 6, "sha256": "0" * 64,
-                       "file": "stdout.bin"}
+                       "file": "tart-stdout.bin"}
             with self.assertRaisesRegex(ValueError, "logs_incomplete"):
                 guest._collect_logs(SimpleNamespace(name=directory),
-                                    {"tartRunLogs": {"stdout": summary, "stderr": summary}}, {"logs": {}})
+                                    {"tartRunLogs": {"stdout": summary, "stderr": summary, "maxBytesPerStream": guest.canary.MAX_SHORT_OUTPUT}}, {"logs": {}})
 
     def test_log_collector_rejects_digest_mismatch(self):
         with tempfile.TemporaryDirectory() as directory:
             data = b"same length"
-            (Path(directory) / "stream.bin").write_bytes(data)
-            summary = {"bytesRetained": len(data), "bytesObserved": len(data), "sha256": "0" * 64,
-                       "file": "stream.bin"}
+            (Path(directory) / "tart-stdout.bin").write_bytes(data)
+            (Path(directory) / "tart-stderr.bin").write_bytes(data)
+            stdout = {"bytesRetained": len(data), "bytesObserved": len(data), "sha256": "0" * 64,
+                      "file": "tart-stdout.bin"}
+            stderr = {"bytesRetained": len(data), "bytesObserved": len(data),
+                      "sha256": hashlib.sha256(data).hexdigest(), "file": "tart-stderr.bin"}
             with self.assertRaisesRegex(ValueError, "logs_incomplete"):
                 guest._collect_logs(SimpleNamespace(name=directory),
-                                    {"tartRunLogs": {"stdout": summary, "stderr": summary}}, {"logs": {}})
+                                    {"tartRunLogs": {"stdout": stdout, "stderr": stderr,
+                                                     "maxBytesPerStream": guest.canary.MAX_SHORT_OUTPUT}}, {"logs": {}})
 
     def test_log_drainer_retains_and_hashes_both_bounded_streams(self):
         read_out, write_out = os.pipe()

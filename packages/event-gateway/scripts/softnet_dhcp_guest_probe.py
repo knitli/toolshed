@@ -81,14 +81,14 @@ def _read_binary(path):
                 raise canary.CanaryError("softnet_dhcp_binary_unsafe")
         info = path.lstat()
         if (stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode)
-                or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077
+                or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600
                 or info.st_size <= 0 or info.st_size > MAX_BINARY_BYTES):
             raise canary.CanaryError("softnet_dhcp_binary_unsafe")
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         try:
             opened = os.fstat(fd)
             if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid()
-                    or stat.S_IMODE(opened.st_mode) & 0o077 or opened.st_size != info.st_size
+                    or stat.S_IMODE(opened.st_mode) != 0o600 or opened.st_size != info.st_size
                     or opened.st_size > MAX_BINARY_BYTES):
                 raise canary.CanaryError("softnet_dhcp_binary_unsafe")
             canary._check_tart_acl(path, fd=fd)
@@ -124,7 +124,7 @@ def _rewind_verified_binary(binary_fd):
     try:
         before = os.fstat(binary_fd)
         if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
-                or stat.S_IMODE(before.st_mode) & 0o077 or before.st_size <= 0
+                or stat.S_IMODE(before.st_mode) != 0o600 or before.st_size <= 0
                 or before.st_size > MAX_BINARY_BYTES):
             raise canary.CanaryError("softnet_dhcp_binary_unsafe")
         os.lseek(binary_fd, 0, os.SEEK_SET)
