@@ -6,8 +6,10 @@ NIC-drop canary passes. Use it without the SCPreferences or Softnet DHCP flags
 for an inventory-only run. The original protected base stays unchanged; the
 controller stops, reaps, and disposes of its owned clone.
 
-The fixed command runs as `admin:staff` with a cleared environment. A two-source
-bundle reuses the existing loader and bounded runner under Apple Python 3.9.
+The fixed command runs as `admin:staff` with a cleared environment; the loader
+resets it again before import because Apple's Python launcher can add variables
+after `env -i`. A two-source bundle reuses the existing loader and bounded
+runner under Apple Python 3.9.
 It records Apple Python separately from available Homebrew interpreters, direct
 Rust toolchain paths, stage tool and pkg-config versions, SDK metadata, disk/RAM,
 and shallow metadata for the fixed Cargo/Rustup homes. It executes no Rustup or

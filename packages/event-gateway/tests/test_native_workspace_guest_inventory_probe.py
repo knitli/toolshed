@@ -56,6 +56,43 @@ class GuestInventoryProbeTests(unittest.TestCase):
         report = self._collect_guest()
         self.assertEqual(report["sourceSha256"], bundle["sourceSha256"])
 
+    def test_loader_resets_environment_before_importing_guest_module(self):
+        import scpreferences_guest_probe as shared
+
+        expected_env = repr(probe.FIXED_ENV)
+        fixture_sources = {
+            "native_workspace_guest_inventory_probe.py": (
+                "import os\nimport qualify_offline_macos_vm\n"
+                f"EXPECTED_ENV = {expected_env}\n"
+                "FIXED_AT_IMPORT = dict(os.environ) == EXPECTED_ENV\n"
+                "def collect_guest():\n"
+                "    return {'status': 'passed', 'fixedAtImport': FIXED_AT_IMPORT}\n"),
+            "qualify_offline_macos_vm.py": "CANARY_FIXTURE = True\n",
+        }
+        with mock.patch.object(shared, "_read_source", side_effect=lambda path, *_:
+                               fixture_sources[Path(path).name].encode()):
+            bundle = probe.build_bundle()
+        loader = bundle["loader"]
+        self.assertEqual(loader.count('dir="/private/tmp"'), 1)
+        loader = loader.replace('dir="/private/tmp"', f"dir={tempfile.gettempdir()!r}")
+        interpreters = [sys.executable]
+        # Avoid the Apple launcher on Macs without an installed CLT Python.
+        if sys.platform == "darwin" and Path("/Library/Developer/CommandLineTools/usr/bin/python3").is_file():
+            interpreters.append("/usr/bin/python3")
+        for interpreter in interpreters:
+            environments = (
+                ("unexpected-key", {**probe.FIXED_ENV, "UNEXPECTED_TEST_ENV": "fixture-only"}),
+                ("altered-fixed-value", {**probe.FIXED_ENV, "LANG": "altered-fixture-value"}),
+            )
+            for variant, changed in environments:
+                with self.subTest(interpreter=interpreter, variant=variant):
+                    output, _ = probe.canary._run_bounded(
+                        [interpreter, "-I", "-c", loader, bundle["argument"]],
+                        timeout=10, env=changed, output_limit=1024)
+                    report = json.loads(output)
+                    self.assertEqual(report["status"], "passed")
+                    self.assertTrue(report["fixedAtImport"])
+
     def test_alternate_python_scan_deduplicates_aliases_before_candidate_cap(self):
         aliases = [Entry("python3." + str(i), "/opt/homebrew/bin/python3." + str(i))
                    for i in range(10, 20)]
