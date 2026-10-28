@@ -49,7 +49,8 @@ def build_bundle():
         max_source_bytes=MAX_SOURCE_BYTES, max_bundle_arg=MAX_BUNDLE_ARG)
     bundle["loader"] = shared._source_loader(
         set(SOURCE_FILES.values()), "native_workspace_guest_inventory_probe", "collect_guest",
-        "native-guest-inventory-")
+        "native-guest-inventory-", guest_setup=(
+            "os.environ.clear()\nos.environ.update(" + repr(FIXED_ENV) + ")"))
     return bundle
 
 
