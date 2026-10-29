@@ -13,6 +13,7 @@ import subprocess  # nosec B404 - subprocesses use fixed Python test argv only.
 import sys
 import tempfile
 import unittest
+import time
 from contextlib import ExitStack
 from functools import partial
 from types import SimpleNamespace
@@ -94,7 +95,8 @@ class ExercisePatches:
     """Inject process, log, preference and recovery fakes into one exercise."""
 
     def __init__(self, *, capture_error=None, restore_error=None, stop_error=None,
-                 stopped=True, log_alive=False, command_error=None,
+                 stopped=True, log_alive=False, command_error=None, probe_stdout=b"",
+                 probe_error=None,
                  monotonic_values=(0, 0, 0, 0, 1000)):
         """Configure only the failure point exercised by the test."""
         self.capture_error = capture_error
@@ -103,6 +105,8 @@ class ExercisePatches:
         self.stopped = stopped
         self.log_alive = log_alive
         self.command_error = command_error
+        self.probe_stdout = probe_stdout
+        self.probe_error = probe_error
         self.monotonic_values = monotonic_values
         self.events = []
         self.processes = []
@@ -115,7 +119,7 @@ class ExercisePatches:
             patch.object(supervisor.canary, "_run_bounded", side_effect=self.bounded),
             patch.object(supervisor.subprocess, "Popen", side_effect=self.popen),
             patch.object(supervisor, "_start_logs", side_effect=self.start_logs),
-            patch.object(supervisor, "_record"),
+            patch.object(supervisor, "_record", side_effect=self.record),
             patch.object(supervisor, "_stop_owned", side_effect=self.stop_owned),
             patch.object(supervisor, "_child_exited", return_value=False),
             patch.object(supervisor.canary, "_install_termination_handlers", return_value=None),
@@ -143,9 +147,17 @@ class ExercisePatches:
                    if self.get_count == 1 or self.stopped else
                    b'{"Running":true,"State":"running"}')
             return raw, 0
-        if argv[1:2] == ["exec"] and self.command_error:
+        if argv[1:2] == ["exec"] and "/usr/bin/true" in argv and self.command_error:
             raise self.command_error
+        if argv[1:2] == ["exec"] and "/usr/bin/python3" in argv:
+            if self.probe_error:
+                raise self.probe_error
+            return self.probe_stdout, b""
         return b"", 0
+
+    def record(self, _directory, name, value):
+        """Retain only test-visible record metadata."""
+        self.events.append(("record", name, value))
 
     def popen(self, argv, **kwargs):
         """Record a fixed helper or Tart launch without starting a binary."""
@@ -367,6 +379,45 @@ class SoftnetSupervisorTests(unittest.TestCase):
 
         self.assertEqual(admission_dirs, [self.root / "admission-one", self.root / "admission-two"])
         self.assertEqual(state_roots, [supervisor.STATE_ROOT, supervisor.STATE_ROOT])
+
+    def test_qualify_public_probe_binds_the_admitted_dns_destination(self):
+        destination = "104.20.0.1"
+        admission = {**self.admission, "kind": "softnet-public-probe-admission-v1",
+                     "probeIPv4": destination}
+        account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_name="owner")
+        captured = {}
+
+        class State:
+            def __init__(self, root):
+                self.root = root
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def begin(self, identity):
+                captured["identity"] = identity
+                return self_outer.root / "run", "d" * 32
+
+            def complete(self, run, stop):
+                captured["complete"] = (run, stop)
+
+        self_outer = self
+        with patch.object(supervisor.os, "geteuid", return_value=0), \
+                patch.object(supervisor.sys, "platform", "darwin"), \
+                patch.object(supervisor, "State", State), \
+                patch.object(supervisor, "_admission", return_value=(admission, account, "staff", "e" * 64)), \
+                patch.object(supervisor, "_resolve_public_probe_ip", return_value=destination), \
+                patch.object(supervisor, "_exercise", return_value={
+                    "vmReaped": True, "helperReaped": True, "vmStopped": True}) as exercise:
+            result = supervisor.qualify(self.root, public_probe=True)
+
+        self.assertEqual(result["kind"], "softnet-public-probe-canary-v1")
+        self.assertEqual(captured["identity"]["probeIPv4"], destination)
+        self.assertEqual(captured["identity"]["admissionSha256"], "e" * 64)
+        self.assertEqual(exercise.call_args.kwargs["public_probe_ip"], destination)
 
     def test_real_state_capture_exercise_restore_complete_and_reopen_integration(self):
         state_root = self.root / "state"
@@ -629,6 +680,83 @@ class SoftnetSupervisorTests(unittest.TestCase):
                                                "TART_NO_AUTO_PRUNE": "1"})
             self.assertEqual(getattr(kwargs.get("popen"), "keywords", None),
                              {"user": 501, "group": 20, "extra_groups": []})
+
+    @staticmethod
+    def _public_probe_stdout(destination, *, status=200, body=b"knitli-probe-v1\n", tls=True,
+                             error=""):
+        report = {
+            "kind": "native-guest-public-probe-v1", "method": "GET",
+            "host": supervisor.PUBLIC_PROBE_HOST, "path": supervisor.PUBLIC_PROBE_PATH,
+            "destinationIPv4": destination, "port": 443,
+            "startedAtUnixNs": time.time_ns(), "finishedAtUnixNs": time.time_ns(),
+            "tlsVerified": tls, "status": status, "bodyBytes": len(body),
+            "bodySha256": hashlib.sha256(body).hexdigest(),
+            "verified": (tls and status == 200 and body == b"knitli-probe-v1\n" and not error),
+            "error": error,
+        }
+        return json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+
+    def test_public_probe_uses_only_pinned_destination_and_runs_after_readiness(self):
+        destination = "104.20.0.1"
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        with ExitStack() as patches:
+            harness = patches.enter_context(ExercisePatches(
+                probe_stdout=self._public_probe_stdout(destination)))
+            patches.enter_context(patch.object(supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
+            result = supervisor._exercise(self.root, self.admission, account, "staff", TargetPreferences,
+                                          public_probe_ip=destination)
+        self.assertTrue(all(result.values()))
+        helper, = [event for event in harness.events
+                   if event[0] == "popen" and event[1][0] == str(supervisor.SOFTNET)]
+        self.assertIn("--allow=out " + destination + "/32", helper[1])
+        self.assertIn("--block=0.0.0.0/0", helper[1])
+        commands = [event[1] for event in harness.events if event[0] == "command"]
+        readiness = next(i for i, argv in enumerate(commands) if "/usr/bin/true" in argv)
+        probe_indexes = [i for i, argv in enumerate(commands) if "/usr/bin/python3" in argv]
+        self.assertEqual(len(probe_indexes), 1)
+        self.assertGreater(probe_indexes[0], readiness)
+        probe = commands[probe_indexes[0]]
+        self.assertEqual(probe[1:5], ("exec", self.admission["vmName"], "/usr/bin/python3", "-I"))
+        self.assertEqual(probe[-1], destination)
+        self.assertEqual(sum(event[:2] == ("record", "probe.plist") for event in harness.events), 1)
+        stored = next(event[2] for event in harness.events
+                      if event[:2] == ("record", "probe.plist"))
+        self.assertNotIn("body", stored)
+
+    def test_public_probe_failure_still_stops_reaps_and_restores(self):
+        destination = "104.20.0.1"
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        failed_report = self._public_probe_stdout(destination, status=503, body=b"unavailable")
+        with ExitStack() as patches:
+            harness = patches.enter_context(ExercisePatches(probe_stdout=failed_report))
+            patches.enter_context(patch.object(supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
+            with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_result_failed"):
+                supervisor._exercise(self.root, self.admission, account, "staff", TargetPreferences,
+                                     public_probe_ip=destination)
+        self.assertTrue(any(event[0] == "stop_owned" for event in harness.events))
+        self.assertTrue(any(event[0] == "restore" for event in harness.events))
+        self.assertEqual(sum(event[0] == "record" and event[1] == "probe.plist"
+                             for event in harness.events), 1)
+
+    def test_probe_dns_resolution_is_deterministic_and_rejects_nonpublic_answers(self):
+        def answer(ip):
+            return (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))
+        result = supervisor._resolve_public_probe_ip(
+            lambda *_args: [answer("104.20.0.2"), answer("104.20.0.1"), answer("104.20.0.2")])
+        self.assertEqual(result, "104.20.0.1")
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_dns_answer_not_global"):
+            supervisor._resolve_public_probe_ip(lambda *_args: [answer("127.0.0.1")])
+
+    def test_probe_report_rejects_changed_destination_and_body_fields(self):
+        destination = "104.20.0.1"
+        report = self._public_probe_stdout(destination)
+        self.assertTrue(supervisor._validate_public_probe_report(report, destination)["verified"])
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
+            supervisor._validate_public_probe_report(report, "104.20.0.2")
+        altered = json.loads(report)
+        altered["body"] = "knitli-probe-v1\n"
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
+            supervisor._validate_public_probe_report(json.dumps(altered).encode() + b"\n", destination)
 
     def test_capture_failure_never_launches_and_failed_restore_never_completes(self):
         with self._exercise_patches(capture_error=RuntimeError("capture")) as harness:

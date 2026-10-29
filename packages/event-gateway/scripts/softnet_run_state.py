@@ -3,6 +3,7 @@
 from contextlib import AbstractContextManager
 import fcntl
 import hashlib
+import ipaddress
 import os
 from pathlib import Path
 import plistlib
@@ -18,12 +19,17 @@ STATE_KIND = "softnet-run-state"
 STATE_VERSION = 1
 IDENTITY_KEYS = {"vmName", "macAddress", "tartBinarySha256", "softnetBinarySha256",
                  "admissionSha256"}
+PROBE_IDENTITY_KEYS = IDENTITY_KEYS | {"probeIPv4"}
+PUBLIC_PROBE_HOST = "event-native-probe-83fc4c309835.knitli.workers.dev"
+PUBLIC_PROBE_PATH = "/probe"
+PUBLIC_PROBE_BODY_SHA256 = "773cdcdb36ecbdb7c720d4d135911f7d35252d862b10094f788d96a965b80600"
 HEX_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 MAC_ADDRESS = re.compile(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\Z")
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
 ROOT_ENTRIES = {"controller.lock"}
 RUN_ENTRIES = {"identity.plist", "complete.plist", "reserved", "snapshot.plist", "restored",
-               "launch.plist", "stop.plist", "helper-logs", "vm-logs", "disposition.plist"}
+               "launch.plist", "stop.plist", "helper-logs", "vm-logs", "disposition.plist",
+               "probe.plist"}
 LOG_FILES = {"tart-stdout.bin", "tart-stderr.bin"}
 DISPOSITION_FILES = ("identity.plist", "reserved", "snapshot.plist", "restored",
                      "launch.plist", "stop.plist", "helper-logs/tart-stdout.bin",
@@ -43,7 +49,8 @@ def _digest(data):
 
 
 def _identity_record(run_id, identity):
-    _require(isinstance(identity, dict) and set(identity) == IDENTITY_KEYS, "invalid_identity")
+    _require(isinstance(identity, dict) and set(identity) in (IDENTITY_KEYS, PROBE_IDENTITY_KEYS),
+             "invalid_identity")
     _require(isinstance(identity["vmName"], str) and 0 < len(identity["vmName"]) <= 128
              and "\x00" not in identity["vmName"], "invalid_identity")
     _require(isinstance(identity["macAddress"], str)
@@ -51,6 +58,13 @@ def _identity_record(run_id, identity):
     _require(identity["tartBinarySha256"] == canary.TART_BINARY_SHA256, "invalid_identity")
     _require(all(isinstance(identity[key], str) and HEX_SHA256.fullmatch(identity[key])
                  for key in ("softnetBinarySha256", "admissionSha256")), "invalid_identity")
+    if "probeIPv4" in identity:
+        try:
+            probe_ip = ipaddress.ip_address(identity["probeIPv4"])
+        except ValueError:
+            raise recovery.RecoveryError("invalid_identity") from None
+        _require(isinstance(probe_ip, ipaddress.IPv4Address) and probe_ip.is_global,
+                 "invalid_identity")
     return {"kind": STATE_KIND, "version": STATE_VERSION, "runId": run_id,
             "identity": identity}
 
@@ -105,8 +119,12 @@ def _failed_restored_files(root, name, *, receipt_present=False):
             if blob is not None:
                 _require(len(blob) <= recovery.MAX_BLOB and blob.startswith(b"bplist00"),
                          "invalid_snapshot")
+        disposition_files = DISPOSITION_FILES
+        if "probe.plist" in entries:
+            _require("probeIPv4" in identity, "invalid_probe")
+            disposition_files = (*DISPOSITION_FILES, "probe.plist")
         hashes = {}
-        for relative in DISPOSITION_FILES:
+        for relative in disposition_files:
             parts = relative.split("/")
             if len(parts) == 1:
                 data = recovery._read(fd, relative)
@@ -142,6 +160,7 @@ def _check_disposition(root, name):
     fd = recovery._directory(run)
     try:
         record = _plist(recovery._read(fd, "disposition.plist"), "invalid_disposition")
+        current_hashes = _failed_restored_files(root, name, receipt_present=True)
         _require(isinstance(record, dict) and set(record) == {
             "kind", "version", "runId", "approvalReference", "observation", "fileSha256"}
             and record["kind"] == DISPOSITION_KIND and type(record["version"]) is int
@@ -150,12 +169,11 @@ def _check_disposition(root, name):
             and 0 < len(record["approvalReference"].strip()) <= 256
             and "\x00" not in record["approvalReference"]
             and isinstance(record["fileSha256"], dict)
-            and set(record["fileSha256"]) == set(DISPOSITION_FILES)
+            and set(record["fileSha256"]) == set(current_hashes)
             and all(isinstance(digest, str) and HEX_SHA256.fullmatch(digest)
                     for digest in record["fileSha256"].values()), "invalid_disposition")
         _observation(record["observation"])
-        _require(record["fileSha256"] == _failed_restored_files(root, name, receipt_present=True),
-                 "invalid_disposition")
+        _require(record["fileSha256"] == current_hashes, "invalid_disposition")
     finally:
         os.close(fd)
 
@@ -172,6 +190,37 @@ def _check_stop(fd):
     stop = _plist(stop_bytes, "invalid_stop")
     _require(_stop_evidence_shape(stop), "invalid_stop")
     return stop_bytes, stop
+
+
+def _check_probe(fd, identity):
+    raw = recovery._read(fd, "probe.plist")
+    report = _plist(raw, "invalid_probe")
+    _require(isinstance(report, dict) and set(report) == {
+        "kind", "method", "host", "path", "destinationIPv4", "port",
+        "startedAtUnixNs", "finishedAtUnixNs", "tlsVerified", "status",
+        "bodyBytes", "bodySha256", "verified", "error"}
+        and report["kind"] == "native-guest-public-probe-v1"
+        and report["method"] == "GET" and report["host"] == PUBLIC_PROBE_HOST
+        and report["path"] == PUBLIC_PROBE_PATH
+        and report["destinationIPv4"] == identity.get("probeIPv4")
+        and type(report["port"]) is int and report["port"] == 443
+        and type(report["startedAtUnixNs"]) is int and report["startedAtUnixNs"] > 0
+        and type(report["finishedAtUnixNs"]) is int
+        and report["finishedAtUnixNs"] >= report["startedAtUnixNs"]
+        and report["finishedAtUnixNs"] - report["startedAtUnixNs"] <= 15_000_000_000
+        and type(report["tlsVerified"]) is bool
+        and type(report["status"]) is int and 0 <= report["status"] <= 599
+        and type(report["bodyBytes"]) is int and 0 <= report["bodyBytes"] <= 17
+        and isinstance(report["bodySha256"], str) and HEX_SHA256.fullmatch(report["bodySha256"])
+        and type(report["verified"]) is bool
+        and isinstance(report["error"], str)
+        and report["error"] in {"", "total_timeout", "transport_error"}, "invalid_probe")
+    expected_success = (report["tlsVerified"] and report["status"] == 200
+                        and report["bodyBytes"] == 16
+                        and report["bodySha256"] == PUBLIC_PROBE_BODY_SHA256
+                        and report["error"] == "")
+    _require(report["verified"] is expected_success, "invalid_probe")
+    return raw, report
 
 
 def _check_log_directory(root, run_name, name, *, complete):
@@ -205,8 +254,14 @@ def _check_run_directory(root, name):
                  and identity_record["runId"] == name, "invalid_identity")
         expected = _identity_record(name, identity_record["identity"])
         _require(identity_record == expected, "invalid_identity")
+        identity = identity_record["identity"]
+        probe_mode = "probeIPv4" in identity
+        _require(("probe.plist" not in entries or probe_mode), "invalid_probe")
         if "launch.plist" in entries:
             _check_launch(fd, identity_record["identity"])
+        probe_bytes = None
+        if "probe.plist" in entries:
+            probe_bytes, _ = _check_probe(fd, identity)
         stop_bytes = stop = None
         if "stop.plist" in entries:
             stop_bytes, stop = _check_stop(fd)
@@ -220,23 +275,30 @@ def _check_run_directory(root, name):
             _require(not ("restored" in entries and "snapshot.plist" not in entries),
                      "invalid_incomplete_run")
             return False
-        _require({"snapshot.plist", "restored", "reserved", "launch.plist", "stop.plist",
-                  "helper-logs", "vm-logs"} <= entries, "invalid_completion")
+        required = {"snapshot.plist", "restored", "reserved", "launch.plist", "stop.plist",
+                    "helper-logs", "vm-logs"}
+        if probe_mode:
+            required.add("probe.plist")
+        _require(required <= entries, "invalid_completion")
         _require(recovery._read(fd, "reserved") == b"", "invalid_completion")
         _require(_valid_stop_evidence(stop), "invalid_completion")
         snapshot = recovery._read(fd, "snapshot.plist")
         restored = recovery._read(fd, "restored")
         _require(restored == b"restored\n", "invalid_completion")
         complete = _plist(recovery._read(fd, "complete.plist"), "invalid_completion")
+        complete_keys = {"version", "identitySha256", "snapshotSha256",
+                         "restoredSha256", "stopSha256", "stopEvidence"}
+        if probe_mode:
+            complete_keys.add("probeSha256")
         _require(isinstance(complete, dict)
-                 and set(complete) == {"version", "identitySha256", "snapshotSha256",
-                                       "restoredSha256", "stopSha256", "stopEvidence"}
+                 and set(complete) == complete_keys
                  and type(complete["version"]) is int and complete["version"] == 1
                  and complete["identitySha256"] == _digest(identity_bytes)
                  and complete["snapshotSha256"] == _digest(snapshot)
                  and complete["restoredSha256"] == _digest(restored)
                  and complete["stopSha256"] == _digest(stop_bytes)
                  and complete["stopEvidence"] == stop
+                 and (not probe_mode or complete["probeSha256"] == _digest(probe_bytes))
                  and _valid_stop_evidence(complete["stopEvidence"]), "invalid_completion")
         return True
     finally:
@@ -339,11 +401,14 @@ class State(AbstractContextManager):
             entries = set(os.listdir(run_fd))
             required = {"identity.plist", "reserved", "snapshot.plist", "restored", "launch.plist",
                         "stop.plist", "helper-logs", "vm-logs"}
+            identity = plistlib.loads(identity_bytes)["identity"]
+            if "probeIPv4" in identity:
+                required.add("probe.plist")
             _require(entries <= RUN_ENTRIES and required <= entries, "invalid_run_entries")
             _require("disposition.plist" not in entries, "conflicting_disposition")
             _require(recovery._read(run_fd, "identity.plist") == identity_bytes,
                      "invalid_identity")
-            _check_launch(run_fd, plistlib.loads(identity_bytes)["identity"])
+            _check_launch(run_fd, identity)
             stop_bytes, recorded_stop = _check_stop(run_fd)
             _require(recorded_stop == stop_evidence, "stop_evidence_mismatch")
             _require(recovery._read(run_fd, "reserved") == b"", "invalid_completion")
@@ -356,6 +421,10 @@ class State(AbstractContextManager):
                       "snapshotSha256": _digest(snapshot), "restoredSha256": _digest(restored),
                       "stopSha256": _digest(stop_bytes),
                       "stopEvidence": stop_evidence}
+            if "probeIPv4" in identity:
+                probe_bytes, probe = _check_probe(run_fd, identity)
+                _require(probe["verified"], "invalid_probe")
+                record["probeSha256"] = _digest(probe_bytes)
             recovery._publish(run_fd, "complete.plist",
                               plistlib.dumps(record, fmt=plistlib.FMT_BINARY, sort_keys=True))
         finally:
