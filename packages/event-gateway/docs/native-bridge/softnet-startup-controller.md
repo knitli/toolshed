@@ -86,9 +86,48 @@ failed early. Restoration requires both children reaped, `Running: false` and
 `State: stopped`, and no cleanup/log errors. The immutable controller completion
 record binds the run identity, snapshot, restoration marker and stop evidence.
 A startup error is still reported as failure even when cleanup restored the
-preferences; it leaves an unresolved run for explicit reconciliation. Journals,
+preferences; it leaves an unresolved run until an explicit disposition below. Journals,
 logs and the disposable VM are retained. No automatic stale-PID recovery, journal
 pruning or boot-time recovery is implemented.
+
+## Explicit failed-restored disposition
+
+`scripts/dispose_softnet_failed_run.py` is a separate root operator command for
+one narrow failure: `helperReaped=true`, `vmStopped=true`, `vmReaped=false`, with
+an existing restoration marker and all original records and bounded logs intact.
+Installation and use require separate owner approval. The preference recovery
+approval alone does not authorize clearing this gate or starting another canary.
+
+The command requires `--admission-dir`, the exact `--run-id`, a nonempty
+`--approval-reference`, and `--accept-historical-vm-reaping-unknown`. Under the
+same global controller lock, it validates the original protected admission digest
+and current VM identity, runs only the pinned `tart get` as the admitted nonroot
+account, rejects any named Tart/Softnet process in a bounded process snapshot,
+and reads the saved original preference through a fresh locked API session.
+It neither starts a VM/helper nor writes preferences. The prepared guest and host
+owner must stay quiescent, as for startup admission; this is not hostile-host
+containment or proof of historical child reaping.
+
+Boot can legitimately change disk/NVRAM bytes. Disposition therefore validates the
+original admission record and present VM identity without comparing those assets
+to their preboot measurements. Ordinary startup still requires the full exact
+measurements and has no exception flag.
+
+An immutable `disposition.plist` binds the run, all ten retained record/log file
+hashes, the operator's approval reference, and the fresh observation timestamp.
+Observations must be no older than 30 seconds when published. The receipt permits
+future admission after every retained run is checked; it never creates
+`complete.plist`, rewrites `stop.plist`, claims qualification, or asserts that the
+historical VM child was reaped. Its observations are a publication-time fact, not
+perpetual quiescence. The approval reference records the trusted root operator's
+acknowledgment; it does not cryptographically authenticate the owner. Protect this
+script, its interpreter and all imports before any root invocation.
+
+Missing, conflicting, changed or malformed evidence still blocks admission.
+Other unresolved runs are not exempted, and a disposition cannot be overwritten.
+A failed invocation must be inspected before any retry: publication may already
+have committed even if a later check or output failed. No automatic reconciliation,
+archive, journal pruning, preference recovery or new canary is performed here.
 
 ## Live gates
 

@@ -69,7 +69,8 @@ def _binary(path, digest):
     _require(measured == digest, 'binary_digest_mismatch')
 
 
-def _admission(root):
+def _admission_record(root):
+    """Validate the protected operator record and storage identity, before measurement."""
     fd = recovery._directory(root)
     try:
         raw = recovery._read(fd, 'admission.plist')
@@ -106,6 +107,13 @@ def _admission(root):
              'state_inside_vm_storage')
     vm = _protected(home / 'vms' / value['vmName'], account.pw_uid, directory=True)
     _require(not (vm / 'state').exists() and not (vm / 'state').is_symlink(), 'saved_vm_state')
+    return value, account, group.gr_name, hashlib.sha256(raw).hexdigest()
+
+
+def _admission(root):
+    value, account, group, admission_digest = _admission_record(root)
+    vm = Path(value['tartHome']) / 'vms' / value['vmName']
+    measurement = value['measurement']
     config_raw = None
     for filename, prefix, maximum in (('config.json', 'config', canary.MAX_CONFIG_BYTES),
                                       ('disk.img', 'disk', canary.MAX_DISK_BYTES),
@@ -122,7 +130,7 @@ def _admission(root):
              and config.get('macAddress') == value['macAddress'], 'vm_identity_mismatch')
     _binary(TART, canary.TART_BINARY_SHA256)
     _binary(SOFTNET, SOFTNET_SHA256)
-    return value, account, group.gr_name, hashlib.sha256(raw).hexdigest()
+    return value, account, group, admission_digest
 
 
 def _child_exited(process):

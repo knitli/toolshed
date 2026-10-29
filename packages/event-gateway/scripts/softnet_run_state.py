@@ -8,6 +8,7 @@ from pathlib import Path
 import plistlib
 import re
 import stat
+import time
 import uuid
 
 import qualify_offline_macos_vm as canary
@@ -22,8 +23,13 @@ MAC_ADDRESS = re.compile(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\Z")
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
 ROOT_ENTRIES = {"controller.lock"}
 RUN_ENTRIES = {"identity.plist", "complete.plist", "reserved", "snapshot.plist", "restored",
-               "launch.plist", "stop.plist", "helper-logs", "vm-logs"}
+               "launch.plist", "stop.plist", "helper-logs", "vm-logs", "disposition.plist"}
 LOG_FILES = {"tart-stdout.bin", "tart-stderr.bin"}
+DISPOSITION_FILES = ("identity.plist", "reserved", "snapshot.plist", "restored",
+                     "launch.plist", "stop.plist", "helper-logs/tart-stdout.bin",
+                     "helper-logs/tart-stderr.bin", "vm-logs/tart-stdout.bin",
+                     "vm-logs/tart-stderr.bin")
+DISPOSITION_KIND = "softnet-failed-restored-disposition"
 MAX_LOG_BYTES = canary.MAX_SHORT_OUTPUT
 
 
@@ -64,6 +70,94 @@ def _stop_evidence_shape(evidence):
 
 def _valid_stop_evidence(evidence):
     return _stop_evidence_shape(evidence) and all(evidence.values())
+
+
+def _failed_restored_files(root, name, *, receipt_present=False):
+    """Validate the narrow failed-restored state and return hashes of retained evidence."""
+    path = Path(root) / name
+    fd = recovery._directory(path)
+    try:
+        entries = set(os.listdir(fd))
+        required = {"identity.plist", "reserved", "snapshot.plist", "restored", "launch.plist",
+                    "stop.plist", "helper-logs", "vm-logs"}
+        _require(not ("complete.plist" in entries and "disposition.plist" in entries),
+                 "conflicting_disposition")
+        _require("complete.plist" not in entries
+                 and (receipt_present or "disposition.plist" not in entries)
+                 and required <= entries, "ineligible_disposition")
+        _require(_check_run_directory(root, name) is False, "ineligible_disposition")
+        identity_bytes = recovery._read(fd, "identity.plist")
+        identity = _plist(identity_bytes, "invalid_identity")["identity"]
+        _check_launch(fd, identity)
+        stop_bytes, stop = _check_stop(fd)
+        _require(stop == {"helperReaped": True, "vmReaped": False, "vmStopped": True},
+                 "ineligible_disposition")
+        _require(recovery._read(fd, "reserved") == b""
+                 and recovery._read(fd, "restored") == b"restored\n", "invalid_incomplete_run")
+        snapshot = _plist(recovery._read(fd, "snapshot.plist"), "invalid_snapshot")
+        _require(isinstance(snapshot, dict)
+                 and set(snapshot) == {"version", "present", "before", "target"}
+                 and type(snapshot["version"]) is int and snapshot["version"] == 1
+                 and type(snapshot["present"]) is bool
+                 and type(snapshot["before"]) is bytes and type(snapshot["target"]) is bytes
+                 and (snapshot["present"] or snapshot["before"] == b""), "invalid_snapshot")
+        for blob in (snapshot["before"] if snapshot["present"] else None, snapshot["target"]):
+            if blob is not None:
+                _require(len(blob) <= recovery.MAX_BLOB and blob.startswith(b"bplist00"),
+                         "invalid_snapshot")
+        hashes = {}
+        for relative in DISPOSITION_FILES:
+            parts = relative.split("/")
+            if len(parts) == 1:
+                data = recovery._read(fd, relative)
+            else:
+                log_fd = recovery._directory(path / parts[0])
+                try:
+                    with os.fdopen(recovery._file(log_fd, parts[1], os.O_RDONLY), "rb") as stream:
+                        info = os.fstat(stream.fileno())
+                        _require(info.st_size <= MAX_LOG_BYTES, "oversized_run_log")
+                        data = stream.read(MAX_LOG_BYTES + 1)
+                        _require(len(data) <= MAX_LOG_BYTES, "oversized_run_log")
+                finally:
+                    os.close(log_fd)
+            hashes[relative] = _digest(data)
+        for log_name in ("helper-logs", "vm-logs"):
+            _check_log_directory(root, name, log_name, complete=True)
+        return hashes
+    finally:
+        os.close(fd)
+
+
+def _observation(value):
+    _require(isinstance(value, dict) and set(value) == {
+        "observedAtUnixNs", "vmStopped", "processesQuiet", "preferencesOriginal"},
+        "invalid_disposition_observation")
+    _require(type(value["observedAtUnixNs"]) is int and value["observedAtUnixNs"] > 0
+             and value["vmStopped"] is True and value["processesQuiet"] is True
+             and value["preferencesOriginal"] is True, "invalid_disposition_observation")
+
+
+def _check_disposition(root, name):
+    run = Path(root) / name
+    fd = recovery._directory(run)
+    try:
+        record = _plist(recovery._read(fd, "disposition.plist"), "invalid_disposition")
+        _require(isinstance(record, dict) and set(record) == {
+            "kind", "version", "runId", "approvalReference", "observation", "fileSha256"}
+            and record["kind"] == DISPOSITION_KIND and type(record["version"]) is int
+            and record["version"] == 1 and record["runId"] == name
+            and isinstance(record["approvalReference"], str)
+            and 0 < len(record["approvalReference"].strip()) <= 256
+            and "\x00" not in record["approvalReference"]
+            and isinstance(record["fileSha256"], dict)
+            and set(record["fileSha256"]) == set(DISPOSITION_FILES)
+            and all(isinstance(digest, str) and HEX_SHA256.fullmatch(digest)
+                    for digest in record["fileSha256"].values()), "invalid_disposition")
+        _observation(record["observation"])
+        _require(record["fileSha256"] == _failed_restored_files(root, name, receipt_present=True),
+                 "invalid_disposition")
+    finally:
+        os.close(fd)
 
 
 def _check_launch(fd, identity):
@@ -117,6 +211,8 @@ def _check_run_directory(root, name):
         if "stop.plist" in entries:
             stop_bytes, stop = _check_stop(fd)
         complete_present = "complete.plist" in entries
+        _require(not (complete_present and "disposition.plist" in entries),
+                 "conflicting_disposition")
         for log_name in ("helper-logs", "vm-logs"):
             if log_name in entries:
                 _check_log_directory(root, name, log_name, complete=complete_present)
@@ -159,6 +255,15 @@ class State(AbstractContextManager):
 
     def __enter__(self):
         """Lock the state and reject unresolved retained runs."""
+        self._acquire_lock()
+        try:
+            self._scan()
+            return self
+        except BaseException:
+            self._close()
+            raise
+
+    def _acquire_lock(self):
         _require(self._root_fd is None and self._lock_fd is None, "state_already_entered")
         _require(os.geteuid() == recovery.OWNER_UID, "root_required")
         self._root_fd = recovery._directory(self.root)
@@ -175,8 +280,6 @@ class State(AbstractContextManager):
                 fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as error:
                 raise recovery.RecoveryError("controller_busy") from error
-            self._scan()
-            return self
         except BaseException:
             self._close()
             raise
@@ -194,7 +297,7 @@ class State(AbstractContextManager):
             os.close(self._root_fd)
             self._root_fd = None
 
-    def _scan(self):
+    def _scan(self, *, allowed_unresolved=None):
         entries = set(os.listdir(self._root_fd))
         _require(entries <= ROOT_ENTRIES | {name for name in entries if RUN_ID.fullmatch(name)},
                  "invalid_state_entries")
@@ -203,9 +306,12 @@ class State(AbstractContextManager):
             info = os.stat(name, dir_fd=self._root_fd, follow_symlinks=False)
             _require(stat.S_ISDIR(info.st_mode) and info.st_uid == recovery.OWNER_UID
                      and stat.S_IMODE(info.st_mode) == 0o700, "invalid_run_directory")
-            if not _check_run_directory(self.root, name):
+            if "disposition.plist" in os.listdir(self.root / name):
+                _check_disposition(self.root, name)
+            elif not _check_run_directory(self.root, name):
                 unresolved.append(name)
-        _require(not unresolved, "unresolved_run")
+        _require(set(unresolved) <= ({allowed_unresolved} if allowed_unresolved else set()),
+                 "unresolved_run")
 
     def begin(self, identity):
         _require(self._root_fd is not None and self._active is None, "state_not_ready")
@@ -234,6 +340,7 @@ class State(AbstractContextManager):
             required = {"identity.plist", "reserved", "snapshot.plist", "restored", "launch.plist",
                         "stop.plist", "helper-logs", "vm-logs"}
             _require(entries <= RUN_ENTRIES and required <= entries, "invalid_run_entries")
+            _require("disposition.plist" not in entries, "conflicting_disposition")
             _require(recovery._read(run_fd, "identity.plist") == identity_bytes,
                      "invalid_identity")
             _check_launch(run_fd, plistlib.loads(identity_bytes)["identity"])
@@ -254,4 +361,43 @@ class State(AbstractContextManager):
         finally:
             os.close(run_fd)
         self._active = None
+
+
+def dispose_failed_restored(root, run_id, approval_reference, *, observe):
+    """Record a root operator's disposition using trusted root-installed observation code."""
+    _require(isinstance(run_id, str) and RUN_ID.fullmatch(run_id), "invalid_run_id")
+    _require(isinstance(approval_reference, str)
+             and 0 < len(approval_reference.strip()) <= 256
+             and "\x00" not in approval_reference, "invalid_approval_reference")
+    _require(callable(observe), "invalid_disposition_observer")
+    state = State(root)
+    state._acquire_lock()
+    try:
+        state._scan(allowed_unresolved=run_id)
+        run_path = state.root / run_id
+        before = _failed_restored_files(state.root, run_id)
+        run_fd = recovery._directory(run_path)
+        try:
+            identity = _plist(recovery._read(run_fd, "identity.plist"), "invalid_identity")["identity"]
+        finally:
+            os.close(run_fd)
+        observation = observe(run_path, identity)
+        _observation(observation)
+        after = _failed_restored_files(state.root, run_id)
+        _require(before == after, "disposition_source_changed")
+        _require(0 <= time.time_ns() - observation["observedAtUnixNs"] <= 30_000_000_000,
+                 "stale_disposition_observation")
+        state._scan(allowed_unresolved=run_id)
+        record = {"kind": DISPOSITION_KIND, "version": 1, "runId": run_id,
+                  "approvalReference": approval_reference, "observation": observation,
+                  "fileSha256": after}
+        run_fd = recovery._directory(run_path)
+        try:
+            recovery._publish(run_fd, "disposition.plist",
+                              plistlib.dumps(record, fmt=plistlib.FMT_BINARY, sort_keys=True))
+        finally:
+            os.close(run_fd)
+        state._scan()
+    finally:
+        state._close()
 
