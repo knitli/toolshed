@@ -70,6 +70,25 @@ class FakeThread:
         return self.alive
 
 
+class ManualTimer:
+    """Timer fixture that never fires or remains alive."""
+
+    def __init__(self, *_args):
+        pass
+
+    def start(self):
+        pass
+
+    def cancel(self):
+        pass
+
+    def is_alive(self):
+        return False
+
+    def join(self, timeout=None):
+        pass
+
+
 class TargetPreferences:
     """Tiny Softnet preference fake for supervisor branch tests."""
 
@@ -861,23 +880,7 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertTrue(any(event[0] == "stop_owned" for event in harness.events))
         self.assertTrue(any(event[0] == "restore" for event in harness.events))
 
-    def test_guest_probe_classifies_socket_deadline_without_timer_and_cleanup_overrun(self):
-        class ManualTimer:
-            def __init__(self, *_args):
-                pass
-
-            def start(self):
-                pass
-
-            def cancel(self):
-                pass
-
-            def is_alive(self):
-                return False
-
-            def join(self, timeout=None):
-                pass
-
+    def test_guest_probe_classifies_socket_deadline_without_timer(self):
         now = [100.0]
 
         def monotonic():
@@ -894,7 +897,11 @@ class SoftnetSupervisorTests(unittest.TestCase):
             report = probe_guest.probe_once("104.20.0.1")
         self.assertEqual(report["error"], "total_timeout")
 
-        now[0] = 200.0
+    def test_guest_probe_classifies_early_transport_error(self):
+        now = [200.0]
+
+        def monotonic():
+            return now[0]
 
         def early_transport_error(*_args, **_kwargs):
             now[0] = 201.0
@@ -907,6 +914,7 @@ class SoftnetSupervisorTests(unittest.TestCase):
             report = probe_guest.probe_once("104.20.0.1")
         self.assertEqual(report["error"], "transport_error")
 
+    def test_guest_probe_classifies_cleanup_overrun_as_total_timeout(self):
         client, server = socket.socketpair()
 
         class TransferredTLS:
