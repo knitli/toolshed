@@ -362,6 +362,7 @@ class SoftnetRunStateTests(unittest.TestCase):
         run, run_id = self._failed_restored_run()
         other_id = "e" * 32
         other = self.root / other_id
+
         def observe(*_):
             other.mkdir(mode=0o700)
             fd = recovery._directory(other)
@@ -430,6 +431,7 @@ class SoftnetRunStateTests(unittest.TestCase):
     def test_disposition_is_not_overwritten_and_requires_root(self):
         run, run_id = self._failed_restored_run()
         real_stat = os.stat
+
         def unowned_run(path, *args, **kwargs):
             info = real_stat(path, *args, **kwargs)
             if path == run_id and kwargs.get("dir_fd") is not None:
@@ -440,6 +442,7 @@ class SoftnetRunStateTests(unittest.TestCase):
                 run_state.dispose_failed_restored(self.root, run_id, "ticket",
                                                   observe=lambda *_: self._observation())
         original_publish = recovery._publish
+
         def race_publish(fd, name, data):
             if name == "disposition.plist":
                 existing = recovery._file(fd, name, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
@@ -454,6 +457,25 @@ class SoftnetRunStateTests(unittest.TestCase):
             with self.assertRaisesRegex(recovery.RecoveryError, "root_required"):
                 run_state.dispose_failed_restored(self.root, run_id, "ticket",
                                                   observe=lambda *_: self._observation())
+
+    def test_source_change_after_prepublication_scan_blocks_receipt(self):
+        run, run_id = self._failed_restored_run()
+        original_scan = run_state.State._scan
+        scan_count = 0
+
+        def scan_then_change(state, **kwargs):
+            nonlocal scan_count
+            original_scan(state, **kwargs)
+            scan_count += 1
+            if scan_count == 2:
+                self._rewrite(run / "helper-logs" / "tart-stdout.bin", b"changed\n")
+
+        with patch.object(run_state.State, "_scan", scan_then_change):
+            with self.assertRaisesRegex(recovery.RecoveryError, "disposition_source_changed"):
+                run_state.dispose_failed_restored(
+                    self.root, run_id, "ticket", observe=lambda *_: self._observation())
+        self.assertEqual(scan_count, 2)
+        self.assertFalse((run / "disposition.plist").exists())
 
 
 if __name__ == "__main__":

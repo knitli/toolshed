@@ -383,11 +383,11 @@ def dispose_failed_restored(root, run_id, approval_reference, *, observe):
             os.close(run_fd)
         observation = observe(run_path, identity)
         _observation(observation)
+        state._scan(allowed_unresolved=run_id)
         after = _failed_restored_files(state.root, run_id)
         _require(before == after, "disposition_source_changed")
         _require(0 <= time.time_ns() - observation["observedAtUnixNs"] <= 30_000_000_000,
                  "stale_disposition_observation")
-        state._scan(allowed_unresolved=run_id)
         record = {"kind": DISPOSITION_KIND, "version": 1, "runId": run_id,
                   "approvalReference": approval_reference, "observation": observation,
                   "fileSha256": after}

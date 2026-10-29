@@ -20,13 +20,16 @@ import softnet_run_state as run_state  # noqa: E402
 
 class Preferences:
     def __init__(self, current=b"original"):
+        """Initialize a preference store with its current value."""
         self.current = current
         self.reads = 0
 
     def __enter__(self):
+        """Return this preference store for use in a with statement."""
         return self
 
     def __exit__(self, *_args):
+        """Leave the preference store unchanged after the with statement."""
         return False
 
     def read(self):
