@@ -59,9 +59,10 @@ def _identity_record(run_id, identity):
     _require(all(isinstance(identity[key], str) and HEX_SHA256.fullmatch(identity[key])
                  for key in ("softnetBinarySha256", "admissionSha256")), "invalid_identity")
     if "probeIPv4" in identity:
+        _require(isinstance(identity["probeIPv4"], str), "invalid_identity")
         try:
             probe_ip = ipaddress.ip_address(identity["probeIPv4"])
-        except ValueError:
+        except (TypeError, ValueError):
             raise recovery.RecoveryError("invalid_identity") from None
         _require(isinstance(probe_ip, ipaddress.IPv4Address) and probe_ip.is_global,
                  "invalid_identity")
@@ -197,7 +198,8 @@ def _check_probe(fd, identity):
     report = _plist(raw, "invalid_probe")
     _require(isinstance(report, dict) and set(report) == {
         "kind", "method", "host", "path", "destinationIPv4", "port",
-        "startedAtUnixNs", "finishedAtUnixNs", "tlsVerified", "status",
+        "startedAtUnixNs", "finishedAtUnixNs", "tlsVerified",
+        "gatewayContextVerified", "expectedHostPosturePassed", "status",
         "bodyBytes", "bodySha256", "verified", "error"}
         and report["kind"] == "native-guest-public-probe-v1"
         and report["method"] == "GET" and report["host"] == PUBLIC_PROBE_HOST
@@ -209,13 +211,18 @@ def _check_probe(fd, identity):
         and report["finishedAtUnixNs"] >= report["startedAtUnixNs"]
         and report["finishedAtUnixNs"] - report["startedAtUnixNs"] <= 15_000_000_000
         and type(report["tlsVerified"]) is bool
+        and type(report["gatewayContextVerified"]) is bool
+        and type(report["expectedHostPosturePassed"]) is bool
         and type(report["status"]) is int and 0 <= report["status"] <= 599
         and type(report["bodyBytes"]) is int and 0 <= report["bodyBytes"] <= 17
         and isinstance(report["bodySha256"], str) and HEX_SHA256.fullmatch(report["bodySha256"])
         and type(report["verified"]) is bool
         and isinstance(report["error"], str)
-        and report["error"] in {"", "total_timeout", "transport_error"}, "invalid_probe")
-    expected_success = (report["tlsVerified"] and report["status"] == 200
+        and report["error"] in {"", "total_timeout", "transport_error",
+                                "gateway_context_invalid"}
+        and (report["gatewayContextVerified"] or report["error"] != ""), "invalid_probe")
+    expected_success = (report["tlsVerified"] and report["gatewayContextVerified"]
+                        and report["status"] == 200
                         and report["bodyBytes"] == 16
                         and report["bodySha256"] == PUBLIC_PROBE_BODY_SHA256
                         and report["error"] == "")

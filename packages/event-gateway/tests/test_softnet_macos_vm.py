@@ -1,6 +1,7 @@
 """Offline supervisor tests: no host preferences, Tart binary, or Softnet helper."""
 
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ import stat
 import subprocess  # nosec B404 - subprocesses use fixed Python test argv only.
 import sys
 import tempfile
+import threading
 import unittest
 import time
 from contextlib import ExitStack
@@ -25,6 +27,7 @@ import qualify_offline_macos_vm as canary  # noqa: E402
 import qualify_softnet_macos_vm as supervisor  # noqa: E402
 import softnet_recovery as recovery  # noqa: E402
 import softnet_run_state as run_state  # noqa: E402
+import softnet_public_probe_guest as probe_guest  # noqa: E402
 
 
 class FakeProcess:
@@ -683,15 +686,21 @@ class SoftnetSupervisorTests(unittest.TestCase):
 
     @staticmethod
     def _public_probe_stdout(destination, *, status=200, body=b"knitli-probe-v1\n", tls=True,
-                             error=""):
+                             error="", host_posture="1", gateway_marker="v1"):
+        gateway_context_verified = (gateway_marker == "v1" and host_posture in {"0", "1"})
+        if not gateway_context_verified and not error:
+            error = "gateway_context_invalid"
         report = {
             "kind": "native-guest-public-probe-v1", "method": "GET",
             "host": supervisor.PUBLIC_PROBE_HOST, "path": supervisor.PUBLIC_PROBE_PATH,
             "destinationIPv4": destination, "port": 443,
             "startedAtUnixNs": time.time_ns(), "finishedAtUnixNs": time.time_ns(),
-            "tlsVerified": tls, "status": status, "bodyBytes": len(body),
+            "tlsVerified": tls, "gatewayContextVerified": gateway_context_verified,
+            "expectedHostPosturePassed": host_posture == "1",
+            "status": status, "bodyBytes": len(body),
             "bodySha256": hashlib.sha256(body).hexdigest(),
-            "verified": (tls and status == 200 and body == b"knitli-probe-v1\n" and not error),
+            "verified": (tls and gateway_context_verified and status == 200
+                         and body == b"knitli-probe-v1\n" and not error),
             "error": error,
         }
         return json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n"
@@ -701,7 +710,7 @@ class SoftnetSupervisorTests(unittest.TestCase):
         account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
         with ExitStack() as patches:
             harness = patches.enter_context(ExercisePatches(
-                probe_stdout=self._public_probe_stdout(destination)))
+                probe_stdout=self._public_probe_stdout(destination, host_posture="0")))
             patches.enter_context(patch.object(supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
             result = supervisor._exercise(self.root, self.admission, account, "staff", TargetPreferences,
                                           public_probe_ip=destination)
@@ -722,6 +731,9 @@ class SoftnetSupervisorTests(unittest.TestCase):
         stored = next(event[2] for event in harness.events
                       if event[:2] == ("record", "probe.plist"))
         self.assertNotIn("body", stored)
+        self.assertTrue(stored["gatewayContextVerified"])
+        self.assertFalse(stored["expectedHostPosturePassed"])
+        self.assertTrue(stored["verified"])
 
     def test_public_probe_failure_still_stops_reaps_and_restores(self):
         destination = "104.20.0.1"
@@ -738,6 +750,37 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertEqual(sum(event[0] == "record" and event[1] == "probe.plist"
                              for event in harness.events), 1)
 
+    def test_public_probe_missing_or_invalid_gateway_headers_fail_closed(self):
+        destination = "104.20.0.1"
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        for host_posture, gateway_marker in ((None, None), ("2", "v1"), ("1", "invalid")):
+            with self.subTest(host_posture=host_posture, gateway_marker=gateway_marker):
+                invalid_headers = self._public_probe_stdout(
+                    destination, host_posture=host_posture, gateway_marker=gateway_marker)
+                with ExitStack() as patches:
+                    harness = patches.enter_context(ExercisePatches(probe_stdout=invalid_headers))
+                    patches.enter_context(patch.object(
+                        supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
+                    with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_result_failed"):
+                        supervisor._exercise(
+                            self.root, self.admission, account, "staff", TargetPreferences,
+                            public_probe_ip=destination)
+                stored = next(event[2] for event in harness.events
+                              if event[0] == "record" and event[1] == "probe.plist")
+                self.assertFalse(stored["gatewayContextVerified"])
+                self.assertFalse(stored["verified"])
+                self.assertEqual(stored["error"], "gateway_context_invalid")
+
+    def test_controller_rejects_missing_gateway_context_without_failure_reason(self):
+        destination = "104.20.0.1"
+        report = json.loads(self._public_probe_stdout(
+            destination, host_posture=None, gateway_marker=None))
+        report["error"] = ""
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
+            supervisor._validate_public_probe_report(
+                json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+                destination)
+
     def test_probe_dns_resolution_is_deterministic_and_rejects_nonpublic_answers(self):
         def answer(ip):
             return (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))
@@ -746,6 +789,150 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertEqual(result, "104.20.0.1")
         with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_dns_answer_not_global"):
             supervisor._resolve_public_probe_ip(lambda *_args: [answer("127.0.0.1")])
+
+    def test_probe_dns_rejects_integer_ipv4_answers(self):
+        destination = int(ipaddress.IPv4Address("104.20.0.1"))
+        answer = (socket.AF_INET, socket.SOCK_STREAM, 6, "", (destination, 443))
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_dns_answer_invalid"):
+            supervisor._resolve_public_probe_ip(lambda *_args: [answer])
+
+    def test_guest_probe_total_deadline_interrupts_detached_tls_socket(self):
+        client, server = socket.socketpair()
+        server.settimeout(1)
+
+        class TransferredTLS:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+
+            def do_handshake(self):
+                return None
+
+            def __getattr__(self, name):
+                return getattr(self.wrapped, name)
+
+        class FakeTLSContext:
+            def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=True):
+                self_test.assertEqual(server_hostname, probe_guest.HOST)
+                self_test.assertFalse(do_handshake_on_connect)
+                return TransferredTLS(socket.socket(fileno=raw.detach()))
+
+        def trickle_headers():
+            try:
+                server.recv(4096)
+                server.sendall(b"HTTP/1.1 200 OK\r\n")
+                for byte in b"X-Slow: " + b"x" * 24 + b"\r\nContent-Length: 16\r\n\r\n":
+                    server.sendall(bytes((byte,)))
+                    time.sleep(0.03)
+            except OSError:
+                pass
+
+        self_test = self
+        server_thread = threading.Thread(target=trickle_headers, daemon=True)
+        server_thread.start()
+        started = time.monotonic()
+        try:
+            with patch.object(probe_guest.socket, "create_connection", return_value=client), \
+                    patch.object(probe_guest.ssl, "create_default_context", return_value=FakeTLSContext()), \
+                    patch.object(probe_guest, "TOTAL_TIMEOUT", 0.15):
+                report = probe_guest.probe_once("104.20.0.1")
+            elapsed = time.monotonic() - started
+        finally:
+            server.close()
+            server_thread.join(timeout=1)
+        self.assertFalse(server_thread.is_alive())
+        self.assertLess(elapsed, 0.75)
+        self.assertEqual(report["kind"], "native-guest-public-probe-v1")
+        self.assertEqual(report["error"], "total_timeout")
+        destination = "104.20.0.1"
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        with ExitStack() as patches:
+            harness = patches.enter_context(ExercisePatches(
+                probe_stdout=json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n"))
+            patches.enter_context(patch.object(
+                supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
+            with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_result_failed"):
+                supervisor._exercise(self.root, self.admission, account, "staff", TargetPreferences,
+                                     public_probe_ip=destination)
+        retained = next(event[2] for event in harness.events
+                        if event[0] == "record" and event[1] == "probe.plist")
+        self.assertEqual(retained["error"], "total_timeout")
+        self.assertEqual(sum(event[0] == "record" and event[1] == "probe.plist"
+                             for event in harness.events), 1)
+        self.assertTrue(any(event[0] == "stop_owned" for event in harness.events))
+        self.assertTrue(any(event[0] == "restore" for event in harness.events))
+
+    def test_guest_probe_reports_gateway_context_and_boolean_host_posture_only(self):
+        cases = (("1", "v1", True, True), ("0", "v1", True, False),
+                 (None, "v1", False, False), ("2", "v1", False, False),
+                 ("1", None, False, True))
+        for host_posture, gateway_marker, context_verified, expected_host_passed in cases:
+            with self.subTest(host_posture=host_posture, gateway_marker=gateway_marker):
+                client, server = socket.socketpair()
+                headers = ["HTTP/1.1 200 OK", "Content-Length: 16", "Connection: close"]
+                if host_posture is not None:
+                    headers.append(f"x-knitli-probe-host: {host_posture}")
+                if gateway_marker is not None:
+                    headers.append(f"x-knitli-probe-gateway: {gateway_marker}")
+                response_bytes = ("\r\n".join(headers) + "\r\n\r\n").encode() + b"knitli-probe-v1\n"
+
+                class TransferredTLS:
+                    def __init__(self, wrapped):
+                        self.wrapped = wrapped
+
+                    def do_handshake(self):
+                        return None
+
+                    def __getattr__(self, name):
+                        return getattr(self.wrapped, name)
+
+                class FakeTLSContext:
+                    def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=True):
+                        return TransferredTLS(socket.socket(fileno=raw.detach()))
+
+                def respond():
+                    try:
+                        server.recv(4096)
+                        server.sendall(response_bytes)
+                    except OSError:
+                        pass
+
+                server_thread = threading.Thread(target=respond, daemon=True)
+                server_thread.start()
+                try:
+                    with patch.object(probe_guest.socket, "create_connection", return_value=client), \
+                            patch.object(probe_guest.ssl, "create_default_context",
+                                         return_value=FakeTLSContext()):
+                        report = probe_guest.probe_once("104.20.0.1")
+                finally:
+                    server.close()
+                    server_thread.join(timeout=1)
+                self.assertFalse(server_thread.is_alive())
+                self.assertEqual(report["gatewayContextVerified"], context_verified)
+                self.assertEqual(report["expectedHostPosturePassed"], expected_host_passed)
+                self.assertEqual(report["verified"], context_verified)
+                self.assertEqual(report["error"], "" if context_verified else "gateway_context_invalid")
+                self.assertFalse(any("header" in key.lower() for key in report))
+
+    def test_public_probe_admission_rejects_integer_ipv4(self):
+        admission_root = self.root / "public-probe-admission"
+        admission_root.mkdir(mode=0o700)
+        home = self.root / "probe-owner-home"
+        home.mkdir(mode=0o700)
+        value = {**self.admission, "kind": "softnet-public-probe-admission-v1",
+                 "probeIPv4": int(ipaddress.IPv4Address("104.20.0.1")),
+                 "ownerUid": os.getuid(), "tartHome": str(home)}
+        admission_file = admission_root / "admission.plist"
+        admission_file.write_bytes(plistlib.dumps(value))
+        admission_file.chmod(0o600)
+        account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_name="owner")
+        with patch.object(supervisor.recovery, "_directory",
+                           side_effect=lambda _: os.open(admission_root, os.O_RDONLY)), \
+                patch.object(supervisor.recovery, "_read", return_value=plistlib.dumps(value)), \
+                patch.object(supervisor, "_protected", side_effect=lambda path, *_a, **_k: Path(path)), \
+                patch.object(supervisor.pwd, "getpwuid", return_value=account), \
+                patch.object(supervisor.grp, "getgrgid", return_value=SimpleNamespace(gr_name="staff")):
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_admission"):
+                supervisor._admission_record(admission_root)
 
     def test_probe_report_rejects_changed_destination_and_body_fields(self):
         destination = "104.20.0.1"

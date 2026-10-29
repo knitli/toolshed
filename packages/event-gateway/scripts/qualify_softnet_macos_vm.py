@@ -41,7 +41,7 @@ PUBLIC_PROBE_HOST = 'event-native-probe-83fc4c309835.knitli.workers.dev'
 PUBLIC_PROBE_PATH = '/probe'
 PUBLIC_PROBE_BODY_SHA256 = '773cdcdb36ecbdb7c720d4d135911f7d35252d862b10094f788d96a965b80600'
 PUBLIC_PROBE_SOURCE = Path(__file__).with_name('softnet_public_probe_guest.py')
-PUBLIC_PROBE_SOURCE_SHA256 = '35f4cc03f67504fc203460a9f006c28e5375a792972aa5efb25a5974228b9bd0'
+PUBLIC_PROBE_SOURCE_SHA256 = 'fffc23922911756d3e1364a9f5845400fb573155758e226f4e3989fa01a44f6b'
 PUBLIC_PROBE_OUTPUT_LIMIT = 4096
 PUBLIC_PROBE_TIMEOUT = 25
 MAX_PUBLIC_PROBE_DNS_ANSWERS = 32
@@ -101,9 +101,10 @@ def _admission_record(root):
              and type(value['ownerUid']) is int and value['ownerUid'] > 0,
              'invalid_admission')
     if probe_admission:
+        _require(isinstance(value['probeIPv4'], str), 'invalid_admission')
         try:
             probe_ip = ipaddress.ip_address(value['probeIPv4'])
-        except ValueError:
+        except (TypeError, ValueError):
             raise recovery.RecoveryError('invalid_admission') from None
         _require(isinstance(probe_ip, ipaddress.IPv4Address) and probe_ip.is_global,
                  'invalid_admission')
@@ -173,9 +174,10 @@ def _resolve_public_probe_ip(resolver=None):
                  and answer[0] == socket.AF_INET and answer[1] == socket.SOCK_STREAM
                  and isinstance(answer[4], tuple) and len(answer[4]) >= 2,
                  'public_probe_dns_answer_invalid')
+        _require(isinstance(answer[4][0], str), 'public_probe_dns_answer_invalid')
         try:
             address = ipaddress.ip_address(answer[4][0])
-        except ValueError:
+        except (TypeError, ValueError):
             raise recovery.RecoveryError('public_probe_dns_answer_invalid') from None
         _require(isinstance(address, ipaddress.IPv4Address) and address.is_global,
                  'public_probe_dns_answer_not_global')
@@ -193,7 +195,8 @@ def _validate_public_probe_report(raw, destination):
     except (ValueError, UnicodeError):
         raise recovery.RecoveryError('public_probe_report_invalid') from None
     expected = {'kind', 'method', 'host', 'path', 'destinationIPv4', 'port',
-                'startedAtUnixNs', 'finishedAtUnixNs', 'tlsVerified', 'status',
+                'startedAtUnixNs', 'finishedAtUnixNs', 'tlsVerified',
+                'gatewayContextVerified', 'expectedHostPosturePassed', 'status',
                 'bodyBytes', 'bodySha256', 'verified', 'error'}
     _require(isinstance(report, dict) and set(report) == expected
              and report['kind'] == 'native-guest-public-probe-v1'
@@ -205,15 +208,20 @@ def _validate_public_probe_report(raw, destination):
              and report['finishedAtUnixNs'] >= report['startedAtUnixNs']
              and report['finishedAtUnixNs'] - report['startedAtUnixNs'] <= 15_000_000_000
              and type(report['tlsVerified']) is bool
+             and type(report['gatewayContextVerified']) is bool
+             and type(report['expectedHostPosturePassed']) is bool
              and type(report['status']) is int and 0 <= report['status'] <= 599
              and type(report['bodyBytes']) is int and 0 <= report['bodyBytes'] <= 17
              and isinstance(report['bodySha256'], str)
              and re.fullmatch(r'[0-9a-f]{64}', report['bodySha256'])
              and type(report['verified']) is bool
              and isinstance(report['error'], str)
-             and report['error'] in {'', 'total_timeout', 'transport_error'},
+             and report['error'] in {'', 'total_timeout', 'transport_error',
+                                     'gateway_context_invalid'}
+             and (report['gatewayContextVerified'] or report['error'] != ''),
              'public_probe_report_invalid')
-    expected_success = (report['tlsVerified'] and report['status'] == 200
+    expected_success = (report['tlsVerified'] and report['gatewayContextVerified']
+                        and report['status'] == 200
                         and report['bodyBytes'] == 16
                         and report['bodySha256'] == PUBLIC_PROBE_BODY_SHA256
                         and report['error'] == '')

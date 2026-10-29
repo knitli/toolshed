@@ -1,6 +1,7 @@
 """Offline tests for fail-closed Softnet run admission state."""
 
 import hashlib
+import ipaddress
 import os
 from pathlib import Path
 import plistlib
@@ -85,7 +86,8 @@ class SoftnetRunStateTests(unittest.TestCase):
             "host": run_state.PUBLIC_PROBE_HOST, "path": run_state.PUBLIC_PROBE_PATH,
             "destinationIPv4": destination, "port": 443,
             "startedAtUnixNs": now, "finishedAtUnixNs": now,
-            "tlsVerified": True, "status": 200, "bodyBytes": 16,
+            "tlsVerified": True, "gatewayContextVerified": True,
+            "expectedHostPosturePassed": True, "status": 200, "bodyBytes": 16,
             "bodySha256": run_state.PUBLIC_PROBE_BODY_SHA256,
             "verified": True, "error": "",
         }
@@ -137,6 +139,11 @@ class SoftnetRunStateTests(unittest.TestCase):
             with run_state.State(self.root):
                 self.fail("unfinished run admitted")
 
+    def test_probe_identity_requires_ipv4_text_not_integer_address(self):
+        self.identity["probeIPv4"] = int(ipaddress.IPv4Address("104.20.0.1"))
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
+            run_state._identity_record("a" * 32, self.identity)
+
     def test_complete_requires_all_stop_proofs(self):
         with run_state.State(self.root) as state:
             run, _ = self._run_with_recovery_records(state)
@@ -174,7 +181,10 @@ class SoftnetRunStateTests(unittest.TestCase):
 
     def test_probe_completion_requires_and_binds_fixed_report(self):
         self.identity["probeIPv4"] = "104.20.0.1"
-        report_bytes = plistlib.dumps(self._probe_report(), fmt=plistlib.FMT_BINARY)
+        # A valid "0" posture is an observed distinct host identity, not a failed network probe.
+        report_bytes = plistlib.dumps({**self._probe_report(),
+                                       "expectedHostPosturePassed": False},
+                                      fmt=plistlib.FMT_BINARY)
         with run_state.State(self.root) as state:
             run, _ = self._run_with_recovery_records(state)
             fd = recovery._directory(run)
@@ -403,6 +413,20 @@ class SoftnetRunStateTests(unittest.TestCase):
                 os.close(fd)
             with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe"):
                 state.complete(run, self._stop_evidence())
+
+    def test_probe_receipt_rejects_missing_gateway_context_without_error(self):
+        self.identity["probeIPv4"] = "104.20.0.1"
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            try:
+                recovery._publish(fd, "probe.plist", plistlib.dumps(
+                    {**self._probe_report(), "gatewayContextVerified": False,
+                     "verified": False}, fmt=plistlib.FMT_BINARY))
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe"):
+                    run_state._check_probe(fd, self.identity)
+            finally:
+                os.close(fd)
 
     def test_disposition_fails_closed_on_bad_observation_and_wrong_stop_shape(self):
         run, run_id = self._failed_restored_run()

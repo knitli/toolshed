@@ -4,6 +4,7 @@ import hashlib
 import http.client
 import ipaddress
 import json
+import os
 import socket
 import ssl
 import sys
@@ -27,9 +28,11 @@ class ProbeError(Exception):
 
 
 def _target(value):
+    if not isinstance(value, str):
+        raise ProbeError("destination_invalid")
     try:
         address = ipaddress.ip_address(value)
-    except ValueError:
+    except (TypeError, ValueError):
         raise ProbeError("destination_invalid") from None
     if not isinstance(address, ipaddress.IPv4Address) or not address.is_global:
         raise ProbeError("destination_invalid")
@@ -42,15 +45,17 @@ def probe_once(destination):
     started_ns = time.time_ns()
     deadline = time.monotonic() + TOTAL_TIMEOUT
     raw_socket = [None]
+    abort_socket = [None]
     expired = threading.Event()
     finished = threading.Event()
 
     def abort_at_deadline():
         if not finished.is_set():
             expired.set()
-            if raw_socket[0] is not None:
+            target = abort_socket[0] or raw_socket[0]
+            if target is not None:
                 try:
-                    raw_socket[0].shutdown(socket.SHUT_RDWR)
+                    target.shutdown(socket.SHUT_RDWR)
                 except OSError:
                     pass
 
@@ -59,6 +64,8 @@ def probe_once(destination):
     status = 0
     body = b""
     tls_verified = False
+    gateway_context_verified = False
+    expected_host_posture_passed = False
     error = ""
     try:
         timer.start()
@@ -69,7 +76,13 @@ def probe_once(destination):
         if expired.is_set() or remaining <= 0:
             raise ProbeError("total_timeout")
         raw_socket[0].settimeout(remaining)
-        tls_socket = ssl.create_default_context().wrap_socket(raw_socket[0], server_hostname=HOST)
+        # Keep a second descriptor because wrap_socket detaches the raw Python socket;
+        # the deadline thread needs an owned handle throughout handshake and response reads.
+        abort_socket[0] = socket.socket(fileno=os.dup(raw_socket[0].fileno()))
+        tls_socket = ssl.create_default_context().wrap_socket(
+            raw_socket[0], server_hostname=HOST, do_handshake_on_connect=False)
+        tls_socket.settimeout(remaining)
+        tls_socket.do_handshake()
         tls_verified = True
         remaining = deadline - time.monotonic()
         if expired.is_set() or remaining <= 0:
@@ -80,12 +93,18 @@ def probe_once(destination):
              "Connection: close\r\n\r\n").encode("ascii"))
         response = http.client.HTTPResponse(tls_socket)
         response.begin()
+        gateway_marker = response.getheader("x-knitli-probe-gateway")
+        host_posture = response.getheader("x-knitli-probe-host")
+        gateway_context_verified = (gateway_marker == "v1" and host_posture in {"0", "1"})
+        expected_host_posture_passed = host_posture == "1"
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise ProbeError("total_timeout")
         tls_socket.settimeout(remaining)
         body = response.read(MAX_BODY + 1)
         status = response.status
+        if not gateway_context_verified:
+            error = "gateway_context_invalid"
         if expired.is_set() or time.monotonic() > deadline:
             error = "total_timeout"
     except ProbeError as probe_error:
@@ -101,6 +120,8 @@ def probe_once(destination):
             tls_socket.close()
         elif raw_socket[0] is not None:
             raw_socket[0].close()
+        if abort_socket[0] is not None:
+            abort_socket[0].close()
     finished_ns = time.time_ns()
     return {
         "kind": "native-guest-public-probe-v1",
@@ -112,10 +133,13 @@ def probe_once(destination):
         "startedAtUnixNs": started_ns,
         "finishedAtUnixNs": finished_ns,
         "tlsVerified": tls_verified,
+        "gatewayContextVerified": gateway_context_verified,
+        "expectedHostPosturePassed": expected_host_posture_passed,
         "status": status,
         "bodyBytes": len(body),
         "bodySha256": hashlib.sha256(body).hexdigest(),
-        "verified": error == "" and status == 200 and body == EXPECTED and len(body) == MAX_BODY,
+        "verified": (error == "" and gateway_context_verified and status == 200
+                     and body == EXPECTED and len(body) == MAX_BODY),
         "error": error,
     }
 
