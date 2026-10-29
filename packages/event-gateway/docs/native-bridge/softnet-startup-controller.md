@@ -139,3 +139,15 @@ review the concrete installation and recovery procedure with the owner.
 Apply acceptance is asynchronous; neither startup success nor a readback proves
 effective daemon completion. Full Rust qualification, native pair promotion,
 attach, and automatic turns remain held.
+
+## Public probe TLS
+
+The opt-in `--public-probe` mode sends one anonymous HTTPS request to its fixed
+probe endpoint. Its TLS context trusts only the embedded account Gateway CA,
+with certificate and hostname verification enabled. It does not modify the
+guest's system trust store or accept caller-supplied CA paths.
+
+The pinned CA expires on March 27, 2030. If Gateway rotates it, verify the active
+public CA through the account certificate API, update `GATEWAY_CA_PEM` and the
+supervisor's guest-source digest, and review/test both changes before the next
+probe. A mismatched CA fails certificate verification; there is no fallback.

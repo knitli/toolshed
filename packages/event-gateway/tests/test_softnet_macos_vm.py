@@ -914,6 +914,72 @@ class SoftnetSupervisorTests(unittest.TestCase):
             report = probe_guest.probe_once("104.20.0.1")
         self.assertEqual(report["error"], "transport_error")
 
+    def test_guest_probe_rejects_a_certificate_from_a_mismatched_ca(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            certificate = Path(temporary_directory) / "server.pem"
+            private_key = Path(temporary_directory) / "server-key.pem"
+            subprocess.run(  # nosec B603 -- Fixed local OpenSSL argv and private temporary fixture paths.
+                ["/usr/bin/openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                 "-days", "1", "-subj", f"/CN={probe_guest.HOST}", "-addext",
+                 f"subjectAltName=DNS:{probe_guest.HOST}", "-keyout", str(private_key),
+                 "-out", str(certificate)],
+                check=True, capture_output=True, timeout=10)
+            private_key.chmod(0o600)
+
+            server_context = probe_guest.ssl.SSLContext(probe_guest.ssl.PROTOCOL_TLS_SERVER)
+            server_context.load_cert_chain(certificate, private_key)
+            client, server = socket.socketpair()
+            server.settimeout(3)
+            verification_errors = []
+            server_errors = []
+            original_handshake = probe_guest.ssl.SSLSocket.do_handshake
+
+            def record_verification_error(tls_socket, *args, **kwargs):
+                try:
+                    return original_handshake(tls_socket, *args, **kwargs)
+                except probe_guest.ssl.SSLCertVerificationError as error:
+                    verification_errors.append(error)
+                    raise
+
+            def serve_valid_probe_response():
+                try:
+                    with server_context.wrap_socket(server, server_side=True) as tls_socket:
+                        tls_socket.recv(4096)
+                        tls_socket.sendall(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\n"
+                            b"x-knitli-probe-gateway: v1\r\n"
+                            b"x-knitli-probe-host: 1\r\n\r\nknitli-probe-v1\n")
+                except (OSError, probe_guest.ssl.SSLError) as error:
+                    server_errors.append(error)
+
+            server_thread = threading.Thread(target=serve_valid_probe_response)
+            server_thread.start()
+
+            def paired_connection(*_args, **_kwargs):
+                return client
+
+            try:
+                with patch.object(probe_guest, "TOTAL_TIMEOUT", 5.0), \
+                        patch.object(probe_guest.socket, "create_connection",
+                                     side_effect=paired_connection) as create_connection, \
+                        patch.object(probe_guest.ssl.SSLSocket, "do_handshake",
+                                     new=record_verification_error):
+                    report = probe_guest.probe_once("104.20.0.1")
+            finally:
+                client.close()
+                server.close()
+                server_thread.join(timeout=4)
+
+        self.assertEqual(create_connection.call_count, 1)
+        self.assertFalse(server_thread.is_alive())
+        self.assertFalse(report["verified"])
+        self.assertFalse(report["tlsVerified"])
+        self.assertEqual(report["error"], "transport_error")
+        self.assertEqual(len(verification_errors), 1)
+        self.assertGreater(verification_errors[0].verify_code, 0)
+        self.assertEqual(len(server_errors), 1)
+        self.assertIsInstance(server_errors[0], probe_guest.ssl.SSLError)
+
     def test_guest_probe_classifies_cleanup_overrun_as_total_timeout(self):
         client, server = socket.socketpair()
 
@@ -957,6 +1023,15 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertFalse(server_thread.is_alive())
         self.assertEqual(report["error"], "total_timeout")
 
+    def test_gateway_tls_context_pins_only_the_verified_root(self):
+        context = probe_guest.ssl.create_default_context(cadata=probe_guest.GATEWAY_CA_PEM)
+        certificates = context.get_ca_certs(binary_form=True)
+        self.assertEqual(context.verify_mode, probe_guest.ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(len(certificates), 1)
+        self.assertEqual(hashlib.sha256(certificates[0]).hexdigest(),
+                         "a1c2722d8f42c698d98dad65487eb2467fb9117c60205d84907231ecf6aa9102")
+
     def test_guest_probe_source_matches_supervisor_digest_pin(self):
         source_digest = hashlib.sha256(supervisor.PUBLIC_PROBE_SOURCE.read_bytes()).hexdigest()
         self.assertEqual(source_digest, supervisor.PUBLIC_PROBE_SOURCE_SHA256)
@@ -998,10 +1073,15 @@ class SoftnetSupervisorTests(unittest.TestCase):
 
                 server_thread = threading.Thread(target=respond, daemon=True)
                 server_thread.start()
+
+                def create_context(**kwargs):
+                    self.assertEqual(kwargs, {"cadata": probe_guest.GATEWAY_CA_PEM})
+                    return FakeTLSContext()
+
                 try:
                     with patch.object(probe_guest.socket, "create_connection", return_value=client), \
                             patch.object(probe_guest.ssl, "create_default_context",
-                                         return_value=FakeTLSContext()):
+                                         side_effect=create_context):
                         report = probe_guest.probe_once("104.20.0.1")
                 finally:
                     server.close()
@@ -1292,6 +1372,23 @@ class SoftnetSupervisorTests(unittest.TestCase):
             supervisor._stop_owned(process)
         self.assertEqual(order, ["wnowait", "quiet", ("signal", signal.SIGINT),
                                  ("signal", signal.SIGKILL), "quiet", "wnowait", "wait"])
+
+    def test_group_quiet_validates_status_only_for_owned_process_group(self):
+        cases = (
+            (b"71001 71001 Z\n71002 71002 ?\n", True, None),
+            (b"71001 71001 ?\n", None, "invalid_process_table"),
+            (b"71001 71001 R\n", False, None),
+            (b"71002 71002 Z\n", None, "owned_group_identity_lost"),
+            (b"not-a-pid 71001 ?\n71001 71001 Z\n", None, "invalid_process_table"),
+        )
+        for raw, expected, error in cases:
+            with self.subTest(raw=raw):
+                with patch.object(canary, "_run_bounded", return_value=(raw, 0)):
+                    if error:
+                        with self.assertRaisesRegex(recovery.RecoveryError, error):
+                            supervisor._group_quiet(71001)
+                    else:
+                        self.assertIs(supervisor._group_quiet(71001), expected)
 
     def test_identity_lookup_failure_does_not_signal_or_reap_without_exit_and_leader_proofs(self):
         for exited, leader_present in ((False, True), (True, False)):
