@@ -21,10 +21,13 @@ import softnet_run_state as state
 def _observe(admission_directory, run, identity, *, preferences_factory=controller.Preferences):
     observed_at = time.time_ns()
     admission, account, _, digest = controller._admission_record(admission_directory)
-    controller._require(identity == {
+    expected_identity = {
         'vmName': admission['vmName'], 'macAddress': admission['macAddress'],
         'admissionSha256': digest, 'tartBinarySha256': controller.canary.TART_BINARY_SHA256,
-        'softnetBinarySha256': controller.SOFTNET_SHA256}, 'disposition_admission_mismatch')
+        'softnetBinarySha256': controller.SOFTNET_SHA256}
+    if 'probeIPv4' in admission:
+        expected_identity['probeIPv4'] = admission['probeIPv4']
+    controller._require(identity == expected_identity, 'disposition_admission_mismatch')
     controller._binary(controller.TART, controller.canary.TART_BINARY_SHA256)
     controller._binary(controller.SOFTNET, controller.SOFTNET_SHA256)
     config_path = controller._protected(

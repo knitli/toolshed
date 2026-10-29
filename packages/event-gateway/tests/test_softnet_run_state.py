@@ -1,6 +1,7 @@
 """Offline tests for fail-closed Softnet run admission state."""
 
 import hashlib
+import ipaddress
 import os
 from pathlib import Path
 import plistlib
@@ -77,6 +78,20 @@ class SoftnetRunStateTests(unittest.TestCase):
     def _stop_evidence():
         return {"vmReaped": True, "helperReaped": True, "vmStopped": True}
 
+    @staticmethod
+    def _probe_report(destination="104.20.0.1"):
+        now = time.time_ns()
+        return {
+            "kind": "native-guest-public-probe-v1", "method": "GET",
+            "host": run_state.PUBLIC_PROBE_HOST, "path": run_state.PUBLIC_PROBE_PATH,
+            "destinationIPv4": destination, "port": 443,
+            "startedAtUnixNs": now, "finishedAtUnixNs": now,
+            "tlsVerified": True, "gatewayContextVerified": True,
+            "expectedHostPosturePassed": True, "status": 200, "bodyBytes": 16,
+            "bodySha256": run_state.PUBLIC_PROBE_BODY_SHA256,
+            "verified": True, "error": "",
+        }
+
     def _completed_run(self):
         with run_state.State(self.root) as state:
             run, _ = self._run_with_recovery_records(state)
@@ -124,6 +139,11 @@ class SoftnetRunStateTests(unittest.TestCase):
             with run_state.State(self.root):
                 self.fail("unfinished run admitted")
 
+    def test_probe_identity_requires_ipv4_text_not_integer_address(self):
+        self.identity["probeIPv4"] = int(ipaddress.IPv4Address("104.20.0.1"))
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
+            run_state._identity_record("a" * 32, self.identity)
+
     def test_complete_requires_all_stop_proofs(self):
         with run_state.State(self.root) as state:
             run, _ = self._run_with_recovery_records(state)
@@ -158,6 +178,38 @@ class SoftnetRunStateTests(unittest.TestCase):
                 state.complete(run, evidence)
         with run_state.State(self.root):
             pass
+
+    def test_probe_completion_requires_and_binds_fixed_report(self):
+        self.identity["probeIPv4"] = "104.20.0.1"
+        # A valid "0" posture is an observed distinct host identity, not a failed network probe.
+        report_bytes = plistlib.dumps({**self._probe_report(),
+                                       "expectedHostPosturePassed": False},
+                                      fmt=plistlib.FMT_BINARY)
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            try:
+                recovery._publish(fd, "probe.plist", report_bytes)
+            finally:
+                os.close(fd)
+            state.complete(run, self._stop_evidence())
+        complete = plistlib.loads((run / "complete.plist").read_bytes())
+        self.assertEqual(complete["probeSha256"], hashlib.sha256(report_bytes).hexdigest())
+        with run_state.State(self.root):
+            pass
+        self._rewrite(run / "probe.plist", plistlib.dumps(
+            {**self._probe_report(), "destinationIPv4": "104.20.0.2"},
+            fmt=plistlib.FMT_BINARY))
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe"):
+            with run_state.State(self.root):
+                self.fail("changed probe receipt accepted")
+
+    def test_probe_completion_without_receipt_fails_closed(self):
+        self.identity["probeIPv4"] = "104.20.0.1"
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_run_entries"):
+                state.complete(run, self._stop_evidence())
 
     def test_standalone_restored_marker_does_not_complete_a_run(self):
         with run_state.State(self.root) as state:
@@ -311,6 +363,101 @@ class SoftnetRunStateTests(unittest.TestCase):
         self.assertFalse(plistlib.loads((run / "stop.plist").read_bytes())["vmReaped"])
         with run_state.State(self.root):
             pass
+
+    def test_timeout_probe_disposition_hashes_receipt_and_reopens(self):
+        self.identity["probeIPv4"] = "104.20.0.1"
+        with run_state.State(self.root) as state:
+            run, run_id = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            probe_report = self._probe_report()
+            failed_report = {**probe_report, "finishedAtUnixNs": (
+                probe_report["startedAtUnixNs"] + 15_000_763_492),
+                "gatewayContextVerified": False, "expectedHostPosturePassed": False,
+                "status": 0, "bodyBytes": 0, "bodySha256": hashlib.sha256(b"").hexdigest(),
+                "verified": False, "error": "total_timeout"}
+            try:
+                recovery._publish(fd, "probe.plist", plistlib.dumps(
+                    failed_report, fmt=plistlib.FMT_BINARY))
+            finally:
+                os.close(fd)
+        self._rewrite(run / "stop.plist", plistlib.dumps(
+            {"vmReaped": False, "helperReaped": True, "vmStopped": True},
+            fmt=plistlib.FMT_BINARY))
+
+        run_state.dispose_failed_restored(self.root, run_id, "ticket",
+                                          observe=lambda *_: self._observation())
+        disposition = plistlib.loads((run / "disposition.plist").read_bytes())
+        self.assertEqual(set(disposition["fileSha256"]),
+                         set(run_state.DISPOSITION_FILES) | {"probe.plist"})
+        self.assertEqual(disposition["fileSha256"]["probe.plist"],
+                         hashlib.sha256((run / "probe.plist").read_bytes()).hexdigest())
+        with run_state.State(self.root):
+            pass
+
+        changed_report = {**failed_report, "status": 502}
+        self._rewrite(run / "probe.plist", plistlib.dumps(
+            changed_report, fmt=plistlib.FMT_BINARY))
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_disposition"):
+            with run_state.State(self.root):
+                self.fail("changed probe receipt accepted after disposition")
+
+    def test_probe_completion_rejects_unverified_receipt(self):
+        self.identity["probeIPv4"] = "104.20.0.1"
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            failed_report = {**self._probe_report(), "status": 503, "bodyBytes": 11,
+                             "bodySha256": hashlib.sha256(b"unavailable").hexdigest(),
+                             "verified": False}
+            try:
+                recovery._publish(fd, "probe.plist", plistlib.dumps(
+                    failed_report, fmt=plistlib.FMT_BINARY))
+            finally:
+                os.close(fd)
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe"):
+                state.complete(run, self._stop_evidence())
+
+    def test_probe_receipt_rejects_missing_gateway_context_without_error(self):
+        self.identity["probeIPv4"] = "104.20.0.1"
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            try:
+                recovery._publish(fd, "probe.plist", plistlib.dumps(
+                    {**self._probe_report(), "gatewayContextVerified": False,
+                     "verified": False}, fmt=plistlib.FMT_BINARY))
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe"):
+                    run_state._check_probe(fd, self.identity)
+            finally:
+                os.close(fd)
+
+    def test_probe_receipt_duration_allows_only_bounded_timeout_overhead(self):
+        self.identity["probeIPv4"] = "104.20.0.1"
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            try:
+                report = self._probe_report()
+                self._rewrite(run / "probe.plist", plistlib.dumps(
+                    {**report, "finishedAtUnixNs": report["startedAtUnixNs"] + 15_000_000_001},
+                    fmt=plistlib.FMT_BINARY))
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe"):
+                    run_state._check_probe(fd, self.identity)
+
+                timeout = {**report, "finishedAtUnixNs": report["startedAtUnixNs"] + 25_000_000_000,
+                           "gatewayContextVerified": False,
+                           "expectedHostPosturePassed": False, "status": 0, "bodyBytes": 0,
+                           "bodySha256": hashlib.sha256(b"").hexdigest(), "verified": False,
+                           "error": "total_timeout"}
+                self._rewrite(run / "probe.plist", plistlib.dumps(timeout, fmt=plistlib.FMT_BINARY))
+                self.assertEqual(run_state._check_probe(fd, self.identity)[1], timeout)
+
+                timeout["finishedAtUnixNs"] += 1
+                self._rewrite(run / "probe.plist", plistlib.dumps(timeout, fmt=plistlib.FMT_BINARY))
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe"):
+                    run_state._check_probe(fd, self.identity)
+            finally:
+                os.close(fd)
 
     def test_disposition_fails_closed_on_bad_observation_and_wrong_stop_shape(self):
         run, run_id = self._failed_restored_run()

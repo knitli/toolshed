@@ -60,7 +60,8 @@ class DispositionTests(unittest.TestCase):
 
     def run_observer(self, *, table=b"  1 /sbin/launchd\n", tart=b'{"Running":false,"State":"stopped"}',
                      config=b'{"os":"darwin","arch":"arm64","macAddress":"02:00:00:00:00:01","afterBoot":true}',
-                     current=b"original", identity=None):
+                     current=b"original", identity=None, admission=None):
+        admitted = self.admission if admission is None else admission
         def preferences_factory():
             return self.prefs
         with tempfile.TemporaryDirectory() as directory:
@@ -68,7 +69,7 @@ class DispositionTests(unittest.TestCase):
             try:
                 with (
                     patch.object(disposition.controller, "_admission_record",
-                                 return_value=(self.admission, self.account, "staff", self.digest)) as admission,
+                                 return_value=(admitted, self.account, "staff", self.digest)) as admission_record,
                     patch.object(disposition.controller, "_binary") as binary,
                     patch.object(disposition.controller, "_protected", return_value=Path(directory) / "config.json") as protected,
                     patch.object(disposition.controller.canary, "_hash_file",
@@ -88,7 +89,7 @@ class DispositionTests(unittest.TestCase):
                     os.close(fd)
                 except OSError:
                     pass  # _observe closes its recovery directory descriptor.
-        return result, (admission, binary, protected, bounded, popen)
+        return result, (admission_record, binary, protected, bounded, popen)
 
     def test_observe_reads_only_saved_preferences_and_uses_admitted_owner_for_tart(self):
         result, (_, binary, protected, bounded, popen) = self.run_observer()
@@ -121,6 +122,23 @@ class DispositionTests(unittest.TestCase):
              patch.object(disposition.controller, "_binary") as binary:
             with self.assertRaisesRegex(recovery.RecoveryError, "disposition_admission_mismatch"):
                 disposition._observe("/unused", "/unused", wrong)
+        binary.assert_not_called()
+
+    def test_observe_binds_public_probe_identity_to_admitted_destination(self):
+        probe_ip = "104.20.0.1"
+        admission = {**self.admission, "kind": "softnet-public-probe-admission-v1",
+                     "probeIPv4": probe_ip}
+        identity = {**self.identity, "probeIPv4": probe_ip}
+        result, _ = self.run_observer(admission=admission, identity=identity)
+        self.assertTrue(result["vmStopped"])
+
+        wrong = {**identity, "probeIPv4": "104.20.0.2"}
+        with patch.object(disposition.controller, "_admission_record",
+                          return_value=(admission, self.account, "staff", self.digest)), \
+             patch.object(disposition.controller, "_binary") as binary:
+            with self.assertRaisesRegex(recovery.RecoveryError,
+                                       "disposition_admission_mismatch"):
+                disposition._observe("/unused/admission", "/unused/run", wrong)
         binary.assert_not_called()
 
     def test_observe_rejects_vm_identity_and_running_or_inconsistent_state(self):
