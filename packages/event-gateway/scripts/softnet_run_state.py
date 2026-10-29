@@ -37,6 +37,8 @@ DISPOSITION_FILES = ("identity.plist", "reserved", "snapshot.plist", "restored",
                      "vm-logs/tart-stderr.bin")
 DISPOSITION_KIND = "softnet-failed-restored-disposition"
 MAX_LOG_BYTES = canary.MAX_SHORT_OUTPUT
+PROBE_DURATION_LIMIT_NS = 15_000_000_000
+PROBE_TIMEOUT_LIMIT_NS = 25_000_000_000
 
 
 def _require(condition, message):
@@ -196,6 +198,9 @@ def _check_stop(fd):
 def _check_probe(fd, identity):
     raw = recovery._read(fd, "probe.plist")
     report = _plist(raw, "invalid_probe")
+    duration_limit_ns = (PROBE_TIMEOUT_LIMIT_NS
+                         if isinstance(report, dict) and report.get("error") == "total_timeout"
+                         else PROBE_DURATION_LIMIT_NS)
     _require(isinstance(report, dict) and set(report) == {
         "kind", "method", "host", "path", "destinationIPv4", "port",
         "startedAtUnixNs", "finishedAtUnixNs", "tlsVerified",
@@ -209,7 +214,7 @@ def _check_probe(fd, identity):
         and type(report["startedAtUnixNs"]) is int and report["startedAtUnixNs"] > 0
         and type(report["finishedAtUnixNs"]) is int
         and report["finishedAtUnixNs"] >= report["startedAtUnixNs"]
-        and report["finishedAtUnixNs"] - report["startedAtUnixNs"] <= 15_000_000_000
+        and report["finishedAtUnixNs"] - report["startedAtUnixNs"] <= duration_limit_ns
         and type(report["tlsVerified"]) is bool
         and type(report["gatewayContextVerified"]) is bool
         and type(report["expectedHostPosturePassed"]) is bool

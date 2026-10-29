@@ -364,14 +364,17 @@ class SoftnetRunStateTests(unittest.TestCase):
         with run_state.State(self.root):
             pass
 
-    def test_probe_disposition_hashes_optional_receipt_and_rejects_mutation(self):
+    def test_timeout_probe_disposition_hashes_receipt_and_reopens(self):
         self.identity["probeIPv4"] = "104.20.0.1"
         with run_state.State(self.root) as state:
             run, run_id = self._run_with_recovery_records(state)
             fd = recovery._directory(run)
-            failed_report = {**self._probe_report(), "status": 503, "bodyBytes": 11,
-                             "bodySha256": hashlib.sha256(b"unavailable").hexdigest(),
-                             "verified": False}
+            probe_report = self._probe_report()
+            failed_report = {**probe_report, "finishedAtUnixNs": (
+                probe_report["startedAtUnixNs"] + 15_000_763_492),
+                "gatewayContextVerified": False, "expectedHostPosturePassed": False,
+                "status": 0, "bodyBytes": 0, "bodySha256": hashlib.sha256(b"").hexdigest(),
+                "verified": False, "error": "total_timeout"}
             try:
                 recovery._publish(fd, "probe.plist", plistlib.dumps(
                     failed_report, fmt=plistlib.FMT_BINARY))
@@ -423,6 +426,34 @@ class SoftnetRunStateTests(unittest.TestCase):
                 recovery._publish(fd, "probe.plist", plistlib.dumps(
                     {**self._probe_report(), "gatewayContextVerified": False,
                      "verified": False}, fmt=plistlib.FMT_BINARY))
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe"):
+                    run_state._check_probe(fd, self.identity)
+            finally:
+                os.close(fd)
+
+    def test_probe_receipt_duration_allows_only_bounded_timeout_overhead(self):
+        self.identity["probeIPv4"] = "104.20.0.1"
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            try:
+                report = self._probe_report()
+                self._rewrite(run / "probe.plist", plistlib.dumps(
+                    {**report, "finishedAtUnixNs": report["startedAtUnixNs"] + 15_000_000_001},
+                    fmt=plistlib.FMT_BINARY))
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe"):
+                    run_state._check_probe(fd, self.identity)
+
+                timeout = {**report, "finishedAtUnixNs": report["startedAtUnixNs"] + 25_000_000_000,
+                           "gatewayContextVerified": False,
+                           "expectedHostPosturePassed": False, "status": 0, "bodyBytes": 0,
+                           "bodySha256": hashlib.sha256(b"").hexdigest(), "verified": False,
+                           "error": "total_timeout"}
+                self._rewrite(run / "probe.plist", plistlib.dumps(timeout, fmt=plistlib.FMT_BINARY))
+                self.assertEqual(run_state._check_probe(fd, self.identity)[1], timeout)
+
+                timeout["finishedAtUnixNs"] += 1
+                self._rewrite(run / "probe.plist", plistlib.dumps(timeout, fmt=plistlib.FMT_BINARY))
                 with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe"):
                     run_state._check_probe(fd, self.identity)
             finally:

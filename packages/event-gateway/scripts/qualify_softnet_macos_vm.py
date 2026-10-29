@@ -44,6 +44,8 @@ PUBLIC_PROBE_SOURCE = Path(__file__).with_name('softnet_public_probe_guest.py')
 PUBLIC_PROBE_SOURCE_SHA256 = 'fffc23922911756d3e1364a9f5845400fb573155758e226f4e3989fa01a44f6b'
 PUBLIC_PROBE_OUTPUT_LIMIT = 4096
 PUBLIC_PROBE_TIMEOUT = 25
+PUBLIC_PROBE_DURATION_LIMIT_NS = 15_000_000_000
+PUBLIC_PROBE_TIMEOUT_LIMIT_NS = PUBLIC_PROBE_TIMEOUT * 1_000_000_000
 MAX_PUBLIC_PROBE_DNS_ANSWERS = 32
 PUBLIC_PROBE_LOADER = (
     "import base64,sys; source=base64.b64decode(sys.argv[1],validate=True); "
@@ -194,6 +196,9 @@ def _validate_public_probe_report(raw, destination):
         report = json.loads(raw)
     except (ValueError, UnicodeError):
         raise recovery.RecoveryError('public_probe_report_invalid') from None
+    duration_limit_ns = (PUBLIC_PROBE_TIMEOUT_LIMIT_NS
+                         if isinstance(report, dict) and report.get('error') == 'total_timeout'
+                         else PUBLIC_PROBE_DURATION_LIMIT_NS)
     expected = {'kind', 'method', 'host', 'path', 'destinationIPv4', 'port',
                 'startedAtUnixNs', 'finishedAtUnixNs', 'tlsVerified',
                 'gatewayContextVerified', 'expectedHostPosturePassed', 'status',
@@ -206,7 +211,7 @@ def _validate_public_probe_report(raw, destination):
              and type(report['startedAtUnixNs']) is int and report['startedAtUnixNs'] > 0
              and type(report['finishedAtUnixNs']) is int
              and report['finishedAtUnixNs'] >= report['startedAtUnixNs']
-             and report['finishedAtUnixNs'] - report['startedAtUnixNs'] <= 15_000_000_000
+             and report['finishedAtUnixNs'] - report['startedAtUnixNs'] <= duration_limit_ns
              and type(report['tlsVerified']) is bool
              and type(report['gatewayContextVerified']) is bool
              and type(report['expectedHostPosturePassed']) is bool

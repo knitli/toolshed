@@ -945,6 +945,46 @@ class SoftnetSupervisorTests(unittest.TestCase):
         with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
             supervisor._validate_public_probe_report(json.dumps(altered).encode() + b"\n", destination)
 
+    def test_timeout_probe_report_allows_bounded_timer_cleanup_overhead(self):
+        destination = "104.20.0.1"
+        report = json.loads(self._public_probe_stdout(
+            destination, status=0, body=b"", error="total_timeout",
+            host_posture=None, gateway_marker=None))
+        report["finishedAtUnixNs"] = report["startedAtUnixNs"] + 15_000_763_492
+        accepted = supervisor._validate_public_probe_report(
+            json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+            destination)
+        self.assertEqual(accepted["error"], "total_timeout")
+        self.assertFalse(accepted["verified"])
+
+    def test_probe_report_duration_limits_keep_success_at_15s_and_timeout_at_25s(self):
+        destination = "104.20.0.1"
+        success = json.loads(self._public_probe_stdout(destination))
+        success["finishedAtUnixNs"] = success["startedAtUnixNs"] + 15_000_000_001
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
+            supervisor._validate_public_probe_report(
+                json.dumps(success, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+                destination)
+
+        transport_error = json.loads(self._public_probe_stdout(
+            destination, status=0, body=b"", error="transport_error",
+            host_posture=None, gateway_marker=None))
+        transport_error["finishedAtUnixNs"] = (
+            transport_error["startedAtUnixNs"] + 15_000_000_001)
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
+            supervisor._validate_public_probe_report(
+                json.dumps(transport_error, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+                destination)
+
+        timeout = json.loads(self._public_probe_stdout(
+            destination, status=0, body=b"", error="total_timeout",
+            host_posture=None, gateway_marker=None))
+        timeout["finishedAtUnixNs"] = timeout["startedAtUnixNs"] + 25_000_000_001
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
+            supervisor._validate_public_probe_report(
+                json.dumps(timeout, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+                destination)
+
     def test_capture_failure_never_launches_and_failed_restore_never_completes(self):
         with self._exercise_patches(capture_error=RuntimeError("capture")) as harness:
             with self.assertRaisesRegex(RuntimeError, "capture"):
