@@ -4,8 +4,11 @@ import hashlib
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import sys
 import tempfile
+import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -79,6 +82,19 @@ class SoftnetRunStateTests(unittest.TestCase):
             run, _ = self._run_with_recovery_records(state)
             state.complete(run, self._stop_evidence())
         return run
+
+    def _failed_restored_run(self):
+        with run_state.State(self.root) as state:
+            run, run_id = self._run_with_recovery_records(state)
+        self._rewrite(run / "stop.plist", plistlib.dumps(
+            {"vmReaped": False, "helperReaped": True, "vmStopped": True},
+            fmt=plistlib.FMT_BINARY))
+        return run, run_id
+
+    @staticmethod
+    def _observation():
+        return {"observedAtUnixNs": time.time_ns(), "vmStopped": True,
+                "processesQuiet": True, "preferencesOriginal": True}
 
     @staticmethod
     def _rewrite(path, data):
@@ -266,6 +282,200 @@ class SoftnetRunStateTests(unittest.TestCase):
             state.__exit__(None, None, None)
         self.assertTrue((self.root / "controller.lock").is_file())
         self.assertEqual(os.stat(self.root / "controller.lock").st_nlink, 1)
+
+    def test_failed_restored_disposition_is_immutable_and_admits_future_runs(self):
+        run, run_id = self._failed_restored_run()
+        before = {name: (run / name).read_bytes() for name in (
+            "identity.plist", "reserved", "snapshot.plist", "restored", "launch.plist",
+            "stop.plist")}
+        observed = self._observation()
+
+        def observe(path, identity):
+            self.assertEqual(path, run)
+            self.assertEqual(identity, self.identity)
+            with self.assertRaisesRegex(recovery.RecoveryError, "controller_busy"):
+                with run_state.State(self.root):
+                    pass
+            return observed
+
+        run_state.dispose_failed_restored(self.root, run_id, "operator ticket 42", observe=observe)
+        disposition = plistlib.loads((run / "disposition.plist").read_bytes())
+        self.assertEqual(disposition["kind"], run_state.DISPOSITION_KIND)
+        self.assertEqual(disposition["runId"], run_id)
+        self.assertEqual(disposition["approvalReference"], "operator ticket 42")
+        self.assertEqual(disposition["observation"], observed)
+        self.assertEqual(set(disposition["fileSha256"]), set(run_state.DISPOSITION_FILES))
+        self.assertEqual({name: (run / name).read_bytes() for name in before}, before)
+        self.assertFalse((run / "complete.plist").exists())
+        self.assertFalse(run_state._check_run_directory(self.root, run_id))
+        self.assertFalse(plistlib.loads((run / "stop.plist").read_bytes())["vmReaped"])
+        with run_state.State(self.root):
+            pass
+
+    def test_disposition_fails_closed_on_bad_observation_and_wrong_stop_shape(self):
+        run, run_id = self._failed_restored_run()
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_approval_reference"):
+            run_state.dispose_failed_restored(self.root, run_id, "   ",
+                                              observe=lambda *_: self._observation())
+        for observation in (
+            {**self._observation(), "extra": True},
+            {**self._observation(), "vmStopped": 1},
+            {**self._observation(), "preferencesOriginal": False},
+        ):
+            with self.subTest(observation=observation):
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_disposition_observation"):
+                    run_state.dispose_failed_restored(self.root, run_id, "ticket",
+                                                      observe=lambda *_: observation)
+                self.assertFalse((run / "disposition.plist").exists())
+        self._rewrite(run / "stop.plist", plistlib.dumps(self._stop_evidence()))
+        with self.assertRaisesRegex(recovery.RecoveryError, "ineligible_disposition"):
+            run_state.dispose_failed_restored(self.root, run_id, "ticket",
+                                              observe=lambda *_: self._observation())
+
+    def test_disposition_rejects_unrelated_unresolved_run_stale_observation_and_changes(self):
+        with run_state.State(self.root) as state:
+            run, run_id = self._run_with_recovery_records(state)
+            state.complete(run, self._stop_evidence())
+            other, _ = state.begin(self.identity)
+        (run / "complete.plist").unlink()
+        self._rewrite(run / "stop.plist", plistlib.dumps(
+            {"vmReaped": False, "helperReaped": True, "vmStopped": True},
+            fmt=plistlib.FMT_BINARY))
+        with self.assertRaisesRegex(recovery.RecoveryError, "unresolved_run"):
+            run_state.dispose_failed_restored(self.root, run_id, "ticket",
+                                              observe=lambda *_: self._observation())
+        shutil.rmtree(other)
+        self._rewrite(run / "stop.plist", plistlib.dumps(
+            {"vmReaped": False, "helperReaped": True, "vmStopped": True}))
+        stale = self._observation()
+        stale["observedAtUnixNs"] -= 31_000_000_000
+        with self.assertRaisesRegex(recovery.RecoveryError, "stale_disposition_observation"):
+            run_state.dispose_failed_restored(self.root, run_id, "ticket", observe=lambda *_: stale)
+
+        def changed(path, _identity):
+            self._rewrite(path / "helper-logs" / "tart-stdout.bin", b"changed\n")
+            return self._observation()
+        with self.assertRaisesRegex(recovery.RecoveryError, "disposition_source_changed"):
+            run_state.dispose_failed_restored(self.root, run_id, "ticket", observe=changed)
+
+    def test_new_unresolved_run_during_observation_prevents_receipt_publication(self):
+        run, run_id = self._failed_restored_run()
+        other_id = "e" * 32
+        other = self.root / other_id
+
+        def observe(*_):
+            other.mkdir(mode=0o700)
+            fd = recovery._directory(other)
+            try:
+                recovery._publish(fd, "identity.plist", plistlib.dumps(
+                    run_state._identity_record(other_id, self.identity), fmt=plistlib.FMT_BINARY,
+                    sort_keys=True))
+            finally:
+                os.close(fd)
+            return self._observation()
+        with self.assertRaisesRegex(recovery.RecoveryError, "unresolved_run"):
+            run_state.dispose_failed_restored(self.root, run_id, "ticket", observe=observe)
+        self.assertFalse((run / "disposition.plist").exists())
+        shutil.rmtree(other)
+
+    def test_disposition_receipt_schema_and_digests_are_checked_on_every_scan(self):
+        run, run_id = self._failed_restored_run()
+        run_state.dispose_failed_restored(self.root, run_id, "ticket",
+                                          observe=lambda *_: self._observation())
+        receipt = run / "disposition.plist"
+        original = receipt.read_bytes()
+        mutations = (
+            lambda record: record.update(runId="0" * 32),
+            lambda record: record.update(extra=True),
+            lambda record: record.update(version=2),
+            lambda record: record.update(approvalReference="   "),
+            lambda record: record["observation"].update(extra=True),
+            lambda record: record["fileSha256"].update(restored="0" * 64),
+        )
+        for mutate in mutations:
+            record = plistlib.loads(original)
+            mutate(record)
+            self._rewrite(receipt, plistlib.dumps(record, fmt=plistlib.FMT_BINARY))
+            with self.subTest(record=record):
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_disposition"):
+                    with run_state.State(self.root):
+                        self.fail("malformed disposition accepted")
+            self._rewrite(receipt, original)
+
+    def test_disposition_rejects_changed_sources_missing_marker_and_complete_conflict(self):
+        run, run_id = self._failed_restored_run()
+        restored = (run / "restored").read_bytes()
+        (run / "restored").unlink()
+        with self.assertRaisesRegex(recovery.RecoveryError, "ineligible_disposition"):
+            run_state.dispose_failed_restored(self.root, run_id, "ticket",
+                                              observe=lambda *_: self._observation())
+        self._rewrite(run / "restored", restored)
+        run_state.dispose_failed_restored(self.root, run_id, "ticket",
+                                          observe=lambda *_: self._observation())
+        for relative, changed in (("restored", b"changed\n"),
+                                  ("helper-logs/tart-stdout.bin", b"changed\n")):
+            source = run / relative
+            original = source.read_bytes()
+            self._rewrite(source, changed)
+            with self.subTest(source=relative):
+                with self.assertRaises(recovery.RecoveryError):
+                    with run_state.State(self.root):
+                        self.fail("changed retained source accepted")
+            self._rewrite(source, original)
+        (run / "complete.plist").write_bytes(b"conflict")
+        (run / "complete.plist").chmod(0o600)
+        with self.assertRaisesRegex(recovery.RecoveryError, "conflicting_disposition"):
+            with run_state.State(self.root):
+                self.fail("complete and disposition markers accepted together")
+
+    def test_disposition_is_not_overwritten_and_requires_root(self):
+        run, run_id = self._failed_restored_run()
+        real_stat = os.stat
+
+        def unowned_run(path, *args, **kwargs):
+            info = real_stat(path, *args, **kwargs)
+            if path == run_id and kwargs.get("dir_fd") is not None:
+                return SimpleNamespace(st_mode=info.st_mode, st_uid=info.st_uid + 1)
+            return info
+        with patch.object(run_state.os, "stat", side_effect=unowned_run):
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_run_directory"):
+                run_state.dispose_failed_restored(self.root, run_id, "ticket",
+                                                  observe=lambda *_: self._observation())
+        original_publish = recovery._publish
+
+        def race_publish(fd, name, data):
+            if name == "disposition.plist":
+                existing = recovery._file(fd, name, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+                os.close(existing)
+            return original_publish(fd, name, data)
+        with self.assertRaises(OSError):
+            with patch.object(recovery, "_publish", side_effect=race_publish):
+                run_state.dispose_failed_restored(self.root, run_id, "ticket",
+                                                  observe=lambda *_: self._observation())
+        (run / "disposition.plist").unlink()
+        with patch.object(recovery.os, "geteuid", return_value=os.getuid() + 1):
+            with self.assertRaisesRegex(recovery.RecoveryError, "root_required"):
+                run_state.dispose_failed_restored(self.root, run_id, "ticket",
+                                                  observe=lambda *_: self._observation())
+
+    def test_source_change_after_prepublication_scan_blocks_receipt(self):
+        run, run_id = self._failed_restored_run()
+        original_scan = run_state.State._scan
+        scan_count = 0
+
+        def scan_then_change(state, **kwargs):
+            nonlocal scan_count
+            original_scan(state, **kwargs)
+            scan_count += 1
+            if scan_count == 2:
+                self._rewrite(run / "helper-logs" / "tart-stdout.bin", b"changed\n")
+
+        with patch.object(run_state.State, "_scan", scan_then_change):
+            with self.assertRaisesRegex(recovery.RecoveryError, "disposition_source_changed"):
+                run_state.dispose_failed_restored(
+                    self.root, run_id, "ticket", observe=lambda *_: self._observation())
+        self.assertEqual(scan_count, 2)
+        self.assertFalse((run / "disposition.plist").exists())
 
 
 if __name__ == "__main__":
