@@ -918,7 +918,7 @@ class SoftnetSupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             certificate = Path(temporary_directory) / "server.pem"
             private_key = Path(temporary_directory) / "server-key.pem"
-            subprocess.run(
+            subprocess.run(  # nosec B603 -- Fixed local OpenSSL argv and private temporary fixture paths.
                 ["/usr/bin/openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
                  "-days", "1", "-subj", f"/CN={probe_guest.HOST}", "-addext",
                  f"subjectAltName=DNS:{probe_guest.HOST}", "-keyout", str(private_key),
