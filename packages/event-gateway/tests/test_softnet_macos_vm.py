@@ -74,6 +74,7 @@ class ManualTimer:
     """Timer fixture that never fires or remains alive."""
 
     def __init__(self, *_args):
+        """Accept the real timer arguments without scheduling a callback."""
         pass
 
     def start(self):
