@@ -26,9 +26,14 @@ function contextMatchesTarget(context) {
   return true;
 }
 
-export async function handleGatewayIdentityProbe(request, context, expiresAt = PROBE_EXPIRES_AT, now = Date.now()) {
+export async function handleGatewayIdentityProbe(request, context, expiresAt = PROBE_EXPIRES_AT, {
+  now = Date.now,
+  timeoutMs = 2_000,
+  schedule = setTimeout,
+  cancel = clearTimeout,
+} = {}) {
   if (!Number.isSafeInteger(expiresAt) || expiresAt <= 0) return response(503, false);
-  if (Math.floor(now / 1000) >= expiresAt) return response(410, false);
+  if (Math.floor(now() / 1000) >= expiresAt) return response(410, false);
 
   let url;
   try { url = new globalThis.URL(request.url); } catch { return response(404, false); }
@@ -36,11 +41,27 @@ export async function handleGatewayIdentityProbe(request, context, expiresAt = P
   try {
     if (!context || typeof context !== 'object' || !contextMatchesTarget(context)
         || typeof context.devicePosture !== 'function') return response(503, false);
-    const posture = await context.devicePosture();
+    let timer;
+    let timerScheduled = false;
+    let posture;
+    try {
+      // shortcut: Promise.race bounds the response, not the Gateway lookup; upgrade if cancellation becomes available.
+      posture = await Promise.race([
+        Promise.resolve().then(() => context.devicePosture()),
+        new Promise((_, reject) => {
+          timer = schedule(() => reject(new Error('device_posture_timeout')), timeoutMs);
+          timerScheduled = true;
+        }),
+      ]);
+    } finally {
+      if (timerScheduled) cancel(timer);
+    }
+    if (Math.floor(now() / 1000) >= expiresAt) return response(410, false);
     const passed = posture?.checks?.passed;
     if (!Array.isArray(passed) || passed.some((id) => typeof id !== 'string' || !UUID.test(id))) return response(503, false);
     return response(200, passed.includes(REQUIRED_CHECK));
   } catch {
+    if (Math.floor(now() / 1000) >= expiresAt) return response(410, false);
     return response(503, false);
   }
 }
