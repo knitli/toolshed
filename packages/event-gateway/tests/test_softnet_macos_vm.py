@@ -957,6 +957,15 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertFalse(server_thread.is_alive())
         self.assertEqual(report["error"], "total_timeout")
 
+    def test_gateway_tls_context_pins_only_the_verified_root(self):
+        context = probe_guest.ssl.create_default_context(cadata=probe_guest.GATEWAY_CA_PEM)
+        certificates = context.get_ca_certs(binary_form=True)
+        self.assertEqual(context.verify_mode, probe_guest.ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(len(certificates), 1)
+        self.assertEqual(hashlib.sha256(certificates[0]).hexdigest(),
+                         "a1c2722d8f42c698d98dad65487eb2467fb9117c60205d84907231ecf6aa9102")
+
     def test_guest_probe_source_matches_supervisor_digest_pin(self):
         source_digest = hashlib.sha256(supervisor.PUBLIC_PROBE_SOURCE.read_bytes()).hexdigest()
         self.assertEqual(source_digest, supervisor.PUBLIC_PROBE_SOURCE_SHA256)
@@ -998,10 +1007,15 @@ class SoftnetSupervisorTests(unittest.TestCase):
 
                 server_thread = threading.Thread(target=respond, daemon=True)
                 server_thread.start()
+
+                def create_context(**kwargs):
+                    self.assertEqual(kwargs, {"cadata": probe_guest.GATEWAY_CA_PEM})
+                    return FakeTLSContext()
+
                 try:
                     with patch.object(probe_guest.socket, "create_connection", return_value=client), \
                             patch.object(probe_guest.ssl, "create_default_context",
-                                         return_value=FakeTLSContext()):
+                                         side_effect=create_context):
                         report = probe_guest.probe_once("104.20.0.1")
                 finally:
                     server.close()

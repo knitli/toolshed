@@ -19,6 +19,26 @@ CONNECT_TIMEOUT = 5.0
 TOTAL_TIMEOUT = 15.0
 MAX_BODY = 16
 USER_AGENT = "knitli-event-native-probe/83fc4c309835"
+# Gateway inspection uses this account CA, absent from the disposable guest's system bundle.
+GATEWAY_CA_PEM = """-----BEGIN CERTIFICATE-----
+MIIDHTCCAsOgAwIBAgIUPtX8/cZsXvA2nXi+X+2mi1EBd+0wCgYIKoZIzj0EAwIw
+gcAxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlhMRYwFAYDVQQHEw1T
+YW4gRnJhbmNpc2NvMRkwFwYDVQQKExBDbG91ZGZsYXJlLCBJbmMuMRswGQYDVQQL
+ExJ3d3cuY2xvdWRmbGFyZS5jb20xTDBKBgNVBAMTQ0dhdGV3YXkgQ0EgLSBDbG91
+ZGZsYXJlIE1hbmFnZWQgRzEgNWRlZjUyNTkxOGE3ODVlZWRhNmRlY2Y2NmNmNmI5
+OWIwHhcNMjUwMzI3MjIxMTAwWhcNMzAwMzI3MjIxMTAwWjCBwDELMAkGA1UEBhMC
+VVMxEzARBgNVBAgTCkNhbGlmb3JuaWExFjAUBgNVBAcTDVNhbiBGcmFuY2lzY28x
+GTAXBgNVBAoTEENsb3VkZmxhcmUsIEluYy4xGzAZBgNVBAsTEnd3dy5jbG91ZGZs
+YXJlLmNvbTFMMEoGA1UEAxNDR2F0ZXdheSBDQSAtIENsb3VkZmxhcmUgTWFuYWdl
+ZCBHMSA1ZGVmNTI1OTE4YTc4NWVlZGE2ZGVjZjY2Y2Y2Yjk5YjBZMBMGByqGSM49
+AgEGCCqGSM49AwEHA0IABGU2lmMwAVyzI/yc/ic5/MORMFaBv+0eLhj87rSdnI+A
+GXtXF+Q0zfZT+1iaBXvuYUw6vbdzHBenmET1yYRTy5SjgZgwgZUwDgYDVR0PAQH/
+BAQDAgEGMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFGsxo456KDdUP0ZgYjGl
+q0hB8lURMFMGA1UdHwRMMEowSKBGoESGQmh0dHA6Ly9jcmwuY2xvdWRmbGFyZS5j
+b20vMzMwMGJkYmYtZWJkYS00NjE1LTlkYmMtNmRjOTU1NTA4YjQ3LmNybDAKBggq
+hkjOPQQDAgNIADBFAiEA4YyckDdhuNZ/+UzyZQ3qxgdWEHwb7aKJ7tnG3NCleIoC
+IDIkVX0GDj9oLOkWbXULm36mRFEs+h+X4RSffYJfrk2S
+-----END CERTIFICATE-----"""
 
 
 class ProbeError(Exception):
@@ -79,7 +99,7 @@ def probe_once(destination):
         # Keep a second descriptor because wrap_socket detaches the raw Python socket;
         # the deadline thread needs an owned handle throughout handshake and response reads.
         abort_socket[0] = socket.socket(fileno=os.dup(raw_socket[0].fileno()))
-        tls_socket = ssl.create_default_context().wrap_socket(
+        tls_socket = ssl.create_default_context(cadata=GATEWAY_CA_PEM).wrap_socket(
             raw_socket[0], server_hostname=HOST, do_handshake_on_connect=False)
         tls_socket.settimeout(remaining)
         tls_socket.do_handshake()
