@@ -797,6 +797,128 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertEqual(order, ["wnowait", ("signal", signal.SIGINT),
                                  ("signal", signal.SIGKILL), "quiet", "wnowait", "wait"])
 
+    def test_exited_unreaped_child_uses_nonreaping_group_proof_when_darwin_identity_lookup_fails(self):
+        process = FakeProcess("already-exited")
+        order = []
+
+        def observe(*args):
+            self.assertEqual(args[:2], (os.P_PID, process.pid))
+            self.assertTrue(args[2] & os.WNOWAIT, "exit observation must use WNOWAIT")
+            self.assertIsNone(process.returncode, "WNOWAIT observation must preserve the PID")
+            order.append("wnowait")
+            return True
+
+        quiet_results = iter((False, True))
+
+        def quiet(pid):
+            self.assertEqual(pid, process.pid)
+            self.assertIsNone(process.returncode, "group proof must precede reap")
+            order.append("quiet")
+            return next(quiet_results)
+
+        def killpg(pid, sig):
+            self.assertEqual(pid, process.pid)
+            order.append(("signal", sig))
+            raise ProcessLookupError("zombie-only group")
+
+        def wait(timeout=None):
+            self.assertEqual(order[-2:], ["quiet", "wnowait"])
+            order.append("wait")
+            process.returncode = 0
+            return 0
+
+        process.wait = wait
+        with patch.object(supervisor.os, "getpgid", side_effect=ProcessLookupError), \
+                patch.object(supervisor.os, "getsid", return_value=process.pid), \
+                patch.object(supervisor.os, "waitid", side_effect=observe), \
+                patch.object(supervisor.os, "killpg", side_effect=killpg), \
+                patch.object(canary, "_wait_owned_vm_exit"), \
+                patch.object(supervisor, "_group_quiet", side_effect=quiet):
+            supervisor._stop_owned(process)
+        self.assertEqual(order, ["wnowait", "quiet", ("signal", signal.SIGINT),
+                                 ("signal", signal.SIGKILL), "quiet", "wnowait", "wait"])
+
+    def test_identity_lookup_failure_does_not_signal_or_reap_without_exit_and_leader_proofs(self):
+        for exited, leader_present in ((False, True), (True, False)):
+            with self.subTest(exited=exited, leader_present=leader_present):
+                process = FakeProcess("unproven-identity")
+                events = []
+
+                def observe(child):
+                    self.assertIs(child, process)
+                    self.assertIsNone(child.returncode)
+                    events.append("wnowait")
+                    return exited
+
+                def quiet(pid):
+                    self.assertEqual(pid, process.pid)
+                    events.append("leader-proof")
+                    if not leader_present:
+                        raise recovery.RecoveryError("owned_group_identity_lost")
+                    return True
+
+                def killpg(*args):
+                    events.append("signal")
+
+                process.wait = lambda **kwargs: events.append("wait")
+                with patch.object(supervisor.os, "getpgid", side_effect=ProcessLookupError), \
+                        patch.object(supervisor.os, "getsid", return_value=process.pid), \
+                        patch.object(supervisor, "_child_exited", side_effect=observe), \
+                        patch.object(supervisor, "_group_quiet", side_effect=quiet), \
+                        patch.object(supervisor.os, "killpg", side_effect=killpg), \
+                        patch.object(canary, "_wait_owned_vm_exit"):
+                    with self.assertRaisesRegex(recovery.RecoveryError, "owned_group_identity_lost"):
+                        supervisor._stop_owned(process)
+                self.assertNotIn("signal", events)
+                self.assertNotIn("wait", events)
+                self.assertEqual(events, ["wnowait"] + (["leader-proof"] if exited else []))
+
+    def test_real_exited_unreaped_child_with_identity_lookup_failure_is_reaped_after_group_proof(self):
+        process = subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"],  # nosec B603 -- Fixed test argv.
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, start_new_session=True)
+        original_waitid = os.waitid
+        proof_seen = []
+
+        def waitid(*args, **kwargs):
+            self.assertIsNone(process.returncode, "child was reaped before WNOWAIT observation")
+            self.assertTrue(args[2] & os.WNOWAIT)
+            return original_waitid(*args, **kwargs)
+
+        def quiet(pid):
+            self.assertEqual(pid, process.pid)
+            self.assertIsNone(process.returncode, "child was reaped before process-table proof")
+            proof_seen.append(pid)
+            return original_quiet(pid)
+
+        def wait(timeout=None):
+            self.assertTrue(proof_seen, "child was reaped before process-table proof")
+            return original_wait(timeout=timeout)
+
+        original_wait = process.wait
+        original_quiet = supervisor._group_quiet
+        process.wait = wait
+        try:
+            deadline = supervisor.time.monotonic() + 3
+            while original_waitid(os.P_PID, process.pid,
+                                  os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+                self.assertLess(supervisor.time.monotonic(), deadline, "child did not exit")
+                supervisor.time.sleep(0.01)
+            with patch.object(supervisor.os, "getpgid", side_effect=ProcessLookupError), \
+                    patch.object(supervisor.os, "getsid", return_value=process.pid), \
+                    patch.object(supervisor.os, "waitid", side_effect=waitid), \
+                    patch.object(supervisor, "_group_quiet", side_effect=quiet), \
+                    patch.object(canary, "_wait_owned_vm_exit"):
+                supervisor._stop_owned(process)
+            self.assertTrue(proof_seen)
+            self.assertIsNotNone(process.returncode)
+        finally:
+            if process.returncode is None:
+                process.kill()
+                original_wait(timeout=3)
+            process.stdout.close()
+            process.stderr.close()
+
     def test_signals_without_group_quiet_proof_do_not_reap_child(self):
         process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],  # nosec B603 -- Fixed bounded sleep fixture.
                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,

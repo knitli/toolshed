@@ -150,9 +150,17 @@ def _group_quiet(pid):
 
 def _stop_owned(process, log_thread=None):
     """No poll/wait before the group is quiet: the unreaped leader reserves its PGID."""
-    _require(process.returncode is None and os.getpgid(process.pid) == process.pid
-             and os.getsid(process.pid) == process.pid, 'owned_group_identity_lost')
-    _child_exited(process)
+    _require(process.returncode is None, 'owned_child_already_reaped')
+    try:
+        pgid = os.getpgid(process.pid)
+        sid = os.getsid(process.pid)
+    except ProcessLookupError:
+        # Darwin cannot query a zombie's IDs, so prove its exit and reserved PGID without reaping it.
+        _require(_child_exited(process), 'owned_group_identity_lost')
+        _group_quiet(process.pid)
+    else:
+        _require(pgid == process.pid and sid == process.pid, 'owned_group_identity_lost')
+        _child_exited(process)
     try:
         os.killpg(process.pid, signal.SIGINT)
     except (ProcessLookupError, PermissionError):
