@@ -110,7 +110,8 @@ def probe_once(destination):
     except ProbeError as probe_error:
         error = probe_error.code
     except (OSError, ssl.SSLError, http.client.HTTPException, TimeoutError):
-        error = "total_timeout" if expired.is_set() else "transport_error"
+        error = ("total_timeout" if expired.is_set() or time.monotonic() >= deadline
+                 else "transport_error")
     finally:
         finished.set()
         timer.cancel()
@@ -122,6 +123,8 @@ def probe_once(destination):
             raw_socket[0].close()
         if abort_socket[0] is not None:
             abort_socket[0].close()
+    if expired.is_set() or time.monotonic() >= deadline:
+        error = "total_timeout"
     finished_ns = time.time_ns()
     return {
         "kind": "native-guest-public-probe-v1",

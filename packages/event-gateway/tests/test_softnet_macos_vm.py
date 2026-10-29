@@ -861,6 +861,98 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertTrue(any(event[0] == "stop_owned" for event in harness.events))
         self.assertTrue(any(event[0] == "restore" for event in harness.events))
 
+    def test_guest_probe_classifies_socket_deadline_without_timer_and_cleanup_overrun(self):
+        class ManualTimer:
+            def __init__(self, *_args):
+                pass
+
+            def start(self):
+                pass
+
+            def cancel(self):
+                pass
+
+            def is_alive(self):
+                return False
+
+            def join(self, timeout=None):
+                pass
+
+        now = [100.0]
+
+        def monotonic():
+            return now[0]
+
+        def timeout_at_deadline(*_args, **_kwargs):
+            now[0] = 115.0
+            raise TimeoutError("socket timed out")
+
+        with patch.object(probe_guest, "TOTAL_TIMEOUT", 15.0), \
+                patch.object(probe_guest.threading, "Timer", ManualTimer), \
+                patch.object(probe_guest.time, "monotonic", side_effect=monotonic), \
+                patch.object(probe_guest.socket, "create_connection", side_effect=timeout_at_deadline):
+            report = probe_guest.probe_once("104.20.0.1")
+        self.assertEqual(report["error"], "total_timeout")
+
+        now[0] = 200.0
+
+        def early_transport_error(*_args, **_kwargs):
+            now[0] = 201.0
+            raise OSError("connection refused")
+
+        with patch.object(probe_guest, "TOTAL_TIMEOUT", 15.0), \
+                patch.object(probe_guest.threading, "Timer", ManualTimer), \
+                patch.object(probe_guest.time, "monotonic", side_effect=monotonic), \
+                patch.object(probe_guest.socket, "create_connection", side_effect=early_transport_error):
+            report = probe_guest.probe_once("104.20.0.1")
+        self.assertEqual(report["error"], "transport_error")
+
+        client, server = socket.socketpair()
+
+        class TransferredTLS:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+
+            def do_handshake(self):
+                pass
+
+            def __getattr__(self, name):
+                return getattr(self.wrapped, name)
+
+        class FakeTLSContext:
+            def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=True):
+                return TransferredTLS(socket.socket(fileno=raw.detach()))
+
+        def respond():
+            try:
+                server.recv(4096)
+                server.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\n"
+                               b"x-knitli-probe-gateway: v1\r\n"
+                               b"x-knitli-probe-host: 1\r\n\r\nknitli-probe-v1\n")
+            except OSError:
+                pass
+
+        clock = iter((300.0, 300.1, 300.2, 300.3, 300.4, 316.0))
+        server_thread = threading.Thread(target=respond, daemon=True)
+        server_thread.start()
+        try:
+            with patch.object(probe_guest, "TOTAL_TIMEOUT", 15.0), \
+                    patch.object(probe_guest.threading, "Timer", ManualTimer), \
+                    patch.object(probe_guest.time, "monotonic", side_effect=lambda: next(clock)), \
+                    patch.object(probe_guest.socket, "create_connection", return_value=client), \
+                    patch.object(probe_guest.ssl, "create_default_context",
+                                 return_value=FakeTLSContext()):
+                report = probe_guest.probe_once("104.20.0.1")
+        finally:
+            server.close()
+            server_thread.join(timeout=1)
+        self.assertFalse(server_thread.is_alive())
+        self.assertEqual(report["error"], "total_timeout")
+
+    def test_guest_probe_source_matches_supervisor_digest_pin(self):
+        source_digest = hashlib.sha256(supervisor.PUBLIC_PROBE_SOURCE.read_bytes()).hexdigest()
+        self.assertEqual(source_digest, supervisor.PUBLIC_PROBE_SOURCE_SHA256)
+
     def test_guest_probe_reports_gateway_context_and_boolean_host_posture_only(self):
         cases = (("1", "v1", True, True), ("0", "v1", True, False),
                  (None, "v1", False, False), ("2", "v1", False, False),
