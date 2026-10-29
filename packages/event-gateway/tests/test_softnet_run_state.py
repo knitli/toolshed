@@ -1,7 +1,6 @@
 """Offline tests for fail-closed Softnet run admission state."""
 
 import hashlib
-import json
 import os
 from pathlib import Path
 import plistlib
