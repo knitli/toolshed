@@ -247,10 +247,12 @@ def _group_quiet(pid):
     quiet = True
     for line in raw.splitlines():
         fields = line.split()
-        _require(len(fields) == 3 and fields[0].isdigit() and fields[1].isdigit()
-                 and re.fullmatch(rb'[A-Za-z+<NsEXLTWsl-]+', fields[2]), 'invalid_process_table')
+        _require(len(fields) == 3 and fields[0].isdigit() and fields[1].isdigit(),
+                 'invalid_process_table')
         member, group = int(fields[0]), int(fields[1])
         if group == pid:
+            _require(re.fullmatch(rb'[A-Za-z+<NsEXLTWsl-]+', fields[2]),
+                     'invalid_process_table')
             leader |= member == pid
             quiet &= fields[2].startswith(b'Z')
     _require(leader, 'owned_group_identity_lost')
