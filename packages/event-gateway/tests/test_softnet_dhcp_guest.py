@@ -1,6 +1,8 @@
+import base64
 import hashlib
 import ipaddress
 import os
+import plistlib
 import signal
 import socket
 import struct
@@ -148,6 +150,10 @@ class GuestQualificationTests(unittest.TestCase):
                    patch.object(guest.pwd, "getpwnam", return_value=SimpleNamespace(pw_uid=501, pw_gid=20)),
                    patch.object(guest.grp, "getgrnam", return_value=SimpleNamespace(gr_gid=20)),
                    patch.object(guest.os, "killpg")]
+        diagnostic = patch.object(guest, "_diagnostic_snapshot",
+                                  side_effect=lambda phase: {"phase": phase, "marker": "fake"})
+        diagnostic.start()
+        self.addCleanup(diagnostic.stop)
         patches.extend(extra.values())
         return process, peer, patches
 
@@ -174,9 +180,108 @@ class GuestQualificationTests(unittest.TestCase):
                             and len(frame["sha256"]) == 64 for frame in frames))
         self.assertEqual(killpg.call_args_list, [call(process.pid, signal.SIGTERM)])
         self.assertEqual(set(report["logs"]), {"stdout", "stderr"})
+        self.assertEqual([item["phase"] for item in report["diagnostics"]],
+                         ["before_helper", "helper_ready", "after_exchange"])
         self.assertTrue(all(item["bytes"] == len(__import__("base64").b64decode(item["base64"]))
                             and len(item["sha256"]) == 64 for item in report["logs"].values()))
         self.assertIsNone(report["cleanupFailure"])
+
+    def test_client_id_address_mismatch_stays_failed_with_last_diagnostic(self):
+        _process, _peer, patches = self._patch_run()
+        first = {"clientIdBase64": base64.b64encode(b"\x00knitli-softnet-a").decode("ascii"),
+                 "yiaddr": "192.0.2.2",
+                 "leaseSeconds": 600, "offerLeaseSeconds": 600}
+        second = {"clientIdBase64": base64.b64encode(b"\x00knitli-softnet-b").decode("ascii"),
+                  "yiaddr": "192.0.2.3",
+                  "leaseSeconds": 600, "offerLeaseSeconds": 600}
+        patches.append(patch.object(guest, "_exchange", side_effect=[first, second]))
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], \
+             patches[8], patches[9]:
+            report = guest.qualify_guest_dhcp("/fresh/root/private/softnet")
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["failureCode"], "dhcp_behavior")
+        self.assertTrue(report["checks"]["exchanges"])
+        self.assertTrue(report["checks"]["lease"])
+        self.assertFalse(report["checks"]["clientIdBehavior"])
+        self.assertEqual([item["yiaddr"] for item in report["exchanges"]], ["192.0.2.2", "192.0.2.3"])
+        self.assertEqual([item["phase"] for item in report["diagnostics"]],
+                         ["before_helper", "helper_ready", "after_exchange"])
+
+    def test_diagnostic_files_distinguish_missing_oversize_malformed_and_selected_types(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing.plist"
+            self.assertEqual(guest._diagnostic_config(str(missing)), {"status": "missing"})
+            oversized = Path(directory) / "oversized.plist"
+            oversized.write_bytes(b"x" * (guest.DIAGNOSTIC_MAX_BYTES + 1))
+            self.assertEqual(guest._diagnostic_config(str(oversized)), {"status": "oversize"})
+            malformed = Path(directory) / "malformed.plist"
+            malformed.write_bytes(b"not a plist")
+            malformed_result = guest._diagnostic_config(str(malformed))
+            self.assertEqual(malformed_result["status"], "malformed")
+            self.assertEqual(malformed_result["bytes"], len(b"not a plist"))
+            self.assertEqual(malformed_result["sha256"], hashlib.sha256(b"not a plist").hexdigest())
+            typed = Path(directory) / "typed.plist"
+            typed.write_bytes(plistlib.dumps({"dhcp_ignore_client_identifier": 1,
+                                              "DHCPLeaseTimeSecs": True, "unknown": "private"}))
+            selected = guest._diagnostic_config(str(typed))["selected"]
+            self.assertEqual(selected["dhcp_ignore_client_identifier"], {"status": "int", "value": 1})
+            self.assertEqual(selected["DHCPLeaseTimeSecs"], {"status": "bool", "value": True})
+            self.assertEqual(guest._diagnostic_selected({}, "DHCPLeaseTimeSecs"), {"status": "absent"})
+            unsupported = guest._diagnostic_selected({"dhcp_ignore_client_identifier": "private"},
+                                                     "dhcp_ignore_client_identifier")
+            self.assertEqual(unsupported, {"status": "unsupported"})
+
+    def test_diagnostic_collector_error_does_not_replace_exchange_failure(self):
+        _process, _peer, patches = self._patch_run()
+        patches.append(patch.object(guest, "_exchange", side_effect=ValueError("dhcp_deadline")))
+        with patch.object(guest, "_diagnostic_snapshot", side_effect=OSError("private diagnostic failure")), \
+             patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], \
+             patches[8], patches[9]:
+            report = guest.qualify_guest_dhcp("/fresh/root/private/softnet")
+        self.assertEqual(report["failureCode"], "dhcp_deadline")
+        self.assertEqual([item["status"] for item in report["diagnostics"]],
+                         ["collector_failed", "collector_failed", "collector_failed"])
+
+    def test_bootpd_diagnostic_uses_fixed_bounded_command_and_validates_pids(self):
+        with patch.object(guest.canary, "_run_bounded",
+                          side_effect=[(b" 123 /usr/libexec/bootpd\n 124 bootpd-helper\n", b""),
+                                       (b"/usr/libexec/bootpd -f /etc/bootpd.plist", b"")]) as run_bounded:
+            self.assertEqual(guest._diagnostic_bootpd(),
+                             {"status": "running", "pids": [{"pid": 123, "configArgument": "etc"}]})
+        self.assertEqual(run_bounded.call_args_list, [
+            call(["/bin/ps", "-A", "-o", "pid=,comm="], timeout=0.75,
+                 env=guest.ENV, output_limit=32 * 1024),
+            call(["/bin/ps", "-ww", "-p", "123", "-o", "args="], timeout=0.75,
+                 env=guest.ENV, output_limit=2048),
+        ])
+
+    def test_bootpd_diagnostic_without_matching_process_reports_none(self):
+        with patch.object(guest.canary, "_run_bounded", return_value=(b" 123 launchd\n 124 helper\n", b"")) as run_bounded:
+            self.assertEqual(guest._diagnostic_bootpd(), {"status": "none", "pids": []})
+        run_bounded.assert_called_once_with(["/bin/ps", "-A", "-o", "pid=,comm="], timeout=0.75,
+                                            env=guest.ENV, output_limit=32 * 1024)
+
+    def test_bootpd_config_argument_reports_only_allowlisted_labels(self):
+        for argv, label in (
+                (["bootpd", "-f", "/etc/bootpd.plist"], "etc"),
+                (["bootpd", "-f/Library/Preferences/SystemConfiguration/bootpd.plist"], "systemConfiguration"),
+                (["bootpd", "-f", "/opt/knitli-fixtures/other-bootpd.plist"], "other"),
+                (["bootpd", "-frelative.plist"], "other"),
+                (["bootpd", "-df/etc/bootpd.plist"], "unclassified"),
+                (["bootpd"], "none_observed"),
+                (["bootpd", "-f"], "unclassified")):
+            with self.subTest(argv=argv):
+                self.assertEqual(guest._diagnostic_config_argument(argv), label)
+        with patch.object(guest.canary, "_run_bounded", side_effect=[
+                (b"123 bootpd", b""), (b"bootpd -f 'unterminated", b"")]):
+            process = guest._diagnostic_bootpd()
+        self.assertEqual(process["pids"][0]["configArgument"], "unclassified")
+        self.assertEqual(process["pids"][0]["configStatus"], "command_error")
+        with patch.object(guest.canary, "_run_bounded", side_effect=[
+                (b"123 bootpd", b""), (b"/usr/libexec/other -f /etc/bootpd.plist", b"")]):
+            changed = guest._diagnostic_bootpd()
+        self.assertEqual(changed["pids"][0],
+                         {"pid": 123, "configArgument": "unclassified", "configStatus": "process_changed"})
 
     def test_environment_failure_precedes_binary_preferences_and_launch(self):
         calls = []

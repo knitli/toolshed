@@ -35,6 +35,25 @@ hashes, avoiding a second embedded copy of the base64 payloads. Source and
 binary hashes remain in the manifest. The host validates the report against the
 raw frames. Failure and cleanup failure remain failures.
 
+The raw report also retains three read-only guest observations: immediately
+before helper launch, after typed preference readback, and after the exchange
+attempt, before helper cleanup. They record bounded metadata/digests for the two
+fixed bootpd configuration candidates and lease database, selected root preference
+types/values, and bounded daemon PID/config-argument observations. They omit raw
+configuration files, lease contents, hostnames, and command lines. Missing,
+malformed, oversized, or unreadable observations have explicit statuses. An
+observation error cannot change the DHCP checks or replace their failure code.
+The successful manifest summary includes only a digest/size/count of these
+observations. A failed probe retains them in the raw report and still fails the
+existing host validator.
+
+Apple's published bootpd source selects `/etc/bootpd.plist` on macOS, supports
+`-f` to override it, and reads `dhcp_ignore_client_identifier` at the plist root.
+Softnet writes the `bootpd` value in the InternetSharing SCPreferences group.
+The observations help investigate the link between these stores; neither a
+candidate file nor a PID proves the active daemon consumed that file. The public
+Apple source is not an attestation of the exact guest OS binary.
+
 This is a compatibility experiment: vmnet Shared mode may be unavailable inside
 the guest. A startup failure does not establish a DHCP defect. Matching behavior
 also does not uniquely prove which preference store the daemon consumed; defaults
@@ -54,5 +73,6 @@ A passing DHCP report always retains `fullNativeQualified: false`.
 References: [pinned Softnet release](https://github.com/openai/softnet/releases/tag/0.22.1),
 [DHCP identity checks](https://github.com/openai/softnet/blob/28bb29df4aa5935cc2899712f8d0feb08fda4e83/lib/proxy/vm.rs),
 [DHCP snooping](https://github.com/openai/softnet/blob/28bb29df4aa5935cc2899712f8d0feb08fda4e83/lib/dhcp_snooper.rs),
+[published Apple bootpd source](https://github.com/apple-oss-distributions/bootp/blob/63cb751ca6a4e148704a701090481fd9a895dda0/bootpd.tproj/bootpd.c),
 [DHCP](https://www.rfc-editor.org/rfc/rfc2131), and
 [BOOTP minimum packet size](https://www.rfc-editor.org/rfc/rfc1542#section-2.1).

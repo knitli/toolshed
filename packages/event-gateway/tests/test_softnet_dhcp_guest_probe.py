@@ -52,7 +52,9 @@ def report_for(hashes, binary_hash=None):
             "exchanges": [exchange_for(client_id, xid)
                           for client_id, xid in zip(CLIENT_IDS, (3, 4))],
             "logs": {"stdout": blob(b"helper stdout"), "stderr": blob(b"")},
-            "cleanupFailure": None}
+            "cleanupFailure": None,
+            "diagnostics": [{"phase": phase, "status": "collector_failed"}
+                            for phase in ("before_helper", "helper_ready", "after_exchange")]}
 
 
 class SoftnetDhcpGuestProbeTests(unittest.TestCase):
@@ -213,6 +215,35 @@ def qualify_guest_dhcp(helper_path):
                 probe._validated_report(json.dumps(invalid).encode(), b"", hashes)
         with self.assertRaisesRegex(canary.CanaryError, "softnet_dhcp_output_invalid"):
             probe._validated_report(json.dumps(report).encode(), b"unexpected diagnostic", hashes)
+
+    def test_diagnostics_are_bound_in_summary_without_copying_observations(self):
+        hashes = {name: "a" * 64 for name in probe.SOURCE_FILES}
+        report = report_for(hashes)
+        report["diagnostics"][1] = {"phase": "helper_ready", "configs": {
+            "etc": {"status": "ok", "selected": {"dhcp_ignore_client_identifier": {
+                "status": "absent"}}}}}
+        accepted = probe._validated_report(json.dumps(report).encode(), b"", hashes)
+        summary = probe._report_summary(accepted)
+        raw = json.dumps(report["diagnostics"], sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=True, allow_nan=False).encode("ascii")
+        self.assertEqual(summary["diagnostics"], {
+            "snapshots": 3, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()})
+        self.assertNotIn("dhcp_ignore_client_identifier", json.dumps(summary))
+        self.assertEqual(accepted["diagnostics"], report["diagnostics"])
+
+    def test_diagnostics_reject_wrong_phases_and_oversized_observations(self):
+        hashes = {name: "a" * 64 for name in probe.SOURCE_FILES}
+        invalid_cases = [None, {}, [], [{"phase": "helper_ready"}],
+                         [{"phase": phase} for phase in (
+                             "helper_ready", "before_helper", "after_exchange")],
+                         [{"phase": "before_helper"}, {"phase": "helper_ready"},
+                          {"phase": "after_exchange", "observation": "x" * (12 * 1024)}]]
+        for observations in invalid_cases:
+            report = report_for(hashes)
+            report["diagnostics"] = observations
+            with self.subTest(observations=observations), self.assertRaisesRegex(
+                    canary.CanaryError, "softnet_dhcp_report_unqualified"):
+                probe._validated_report(json.dumps(report).encode(), b"", hashes)
 
     def test_qualify_uses_fixed_nonpty_stdin_command_and_bounded_capture(self):
         hashes = {name: "d" * 64 for name in probe.SOURCE_FILES}
@@ -400,6 +431,8 @@ def qualify_guest_dhcp(helper_path):
         report = report_for(bundle["sourceSha256"], digest)
         report["logs"] = {name: blob(bytes((index + 1,)) * probe.MAX_LOG_BYTES)
                            for index, name in enumerate(("stdout", "stderr"))}
+        report["diagnostics"][-1]["observation"] = "x" * (11 * 1024)
+        self.assertGreater(probe._diagnostics_metadata(report["diagnostics"])["bytes"], 11 * 1024)
         payload = json.dumps(report, sort_keys=True, separators=(",", ":")).encode()
         self.assertLessEqual(len(payload), probe.MAX_OUTPUT_BYTES)
         calls = []
@@ -442,6 +475,8 @@ def qualify_guest_dhcp(helper_path):
                 "file": "softnet-dhcp-stdout.bin", "maxBytes": probe.MAX_OUTPUT_BYTES})
             compact = softnet["reportSummary"]
             self.assertNotIn("base64", json.dumps(compact))
+            self.assertEqual(compact["diagnostics"], probe._diagnostics_metadata(report["diagnostics"]))
+            self.assertNotIn("observation", json.dumps(compact))
             self.assertEqual(compact["logs"], {
                 name: {"bytes": probe.MAX_LOG_BYTES, "sha256": hashlib.sha256(
                     bytes((index + 1,)) * probe.MAX_LOG_BYTES).hexdigest()}
