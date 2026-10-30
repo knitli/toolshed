@@ -315,14 +315,16 @@ def _start_logs(process, directory, failures):
     return thread
 
 
-def _reap_children(vm, helper, threads, stop, failures):
+def _reap_children(vm, helper, threads, stop, failures, *, record_error=None):
     for key, process in (('vmReaped', vm), ('helperReaped', helper)):
         if process is not None:
             try:
                 _stop_owned(process, log_thread=threads.get(process))
                 stop[key] = True
-            except BaseException:
+            except BaseException as exc:
                 failures.append(key + '_unproven')
+                if record_error is not None:
+                    record_error(exc)
     for thread in threads.values():
         thread.join(timeout=2)
         if thread.is_alive():
@@ -333,7 +335,26 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
     env = {**ENV, 'HOME': admission['tartHome'], 'TART_HOME': admission['tartHome'],
            'TART_NO_AUTO_PRUNE': '1'}
     owner_popen = partial(subprocess.Popen, user=account.pw_uid, group=account.pw_gid, extra_groups=[])
-    command = partial(canary._run_bounded, env=env, popen=owner_popen)
+    bounded_command = partial(canary._run_bounded, env=env, popen=owner_popen)
+    command_cleanup_errors = []
+    command_processes = []
+
+    def record_command_error(exc):
+        """Keep cleanup diagnostics and unreaped Tart handles through reporting."""
+        errors, processes = canary._command_cleanup_metadata(exc)
+        for item in errors:
+            if item not in command_cleanup_errors:
+                command_cleanup_errors.append(item)
+        for process in processes:
+            if all(process is not existing for existing in command_processes):
+                command_processes.append(process)
+
+    def command(argv, **kwargs):
+        try:
+            return bounded_command(argv, **kwargs)
+        except BaseException as exc:
+            record_command_error(exc)
+            raise
     vm_name = admission['vmName']
     raw, _ = command([str(TART), 'get', vm_name, '--format', 'json'], timeout=10)
     _require(canary._vm_stopped(raw), 'vm_not_stopped_before_capture')
@@ -383,6 +404,11 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
                         timeout=canary.VM_READY_PROBE_TIMEOUT)
                 break
             except canary.CanaryError as exc:
+                cleanup_errors, unreaped_processes = canary._command_cleanup_metadata(exc)
+                if cleanup_errors or unreaped_processes:
+                    # The failure is retryable only when the runner proved that
+                    # its own command process group was cleaned up.
+                    raise
                 if str(exc) not in {'tart_command_failed', 'tart_command_timeout'}:
                     raise
                 _require(time.monotonic() < deadline, 'vm_readiness_timeout')
@@ -418,15 +444,30 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
                     command([str(TART), 'stop', vm_name], timeout=15)
                 except BaseException:
                     failures.append('vm_stop_command_failed')
-            _reap_children(vm, helper, threads, stop, failures)
+            _reap_children(vm, helper, threads, stop, failures,
+                           record_error=record_command_error)
             try:
                 raw, _ = command([str(TART), 'get', vm_name, '--format', 'json'], timeout=10)
                 stop['vmStopped'] = canary._vm_stopped(raw)
             except BaseException:
                 stop['vmStopped'] = False
             _record(run, 'stop.plist', stop)
-            _require(all(stop.values()) and not failures, 'cleanup_unproven')
-            recovery.restore(run, preferences_factory=preferences_factory)
+            try:
+                _require(all(stop.values()) and not failures, 'cleanup_unproven')
+            except BaseException as cleanup_error:
+                canary._attach_command_cleanup(
+                    cleanup_error, command_cleanup_errors, command_processes)
+                raise
+            if command_cleanup_errors or command_processes:
+                # An uncertain Tart command may still mutate host preferences.
+                # Leave the snapshot reservation and run incomplete for operator
+                # recovery; process handles stay attached to the raised error.
+                if error is None:
+                    error = recovery.RecoveryError('cleanup_unproven')
+                canary._attach_command_cleanup(
+                    error, command_cleanup_errors, command_processes)
+            else:
+                recovery.restore(run, preferences_factory=preferences_factory)
         finally:
             canary._restore_termination_handlers(previous)
     if error is not None:

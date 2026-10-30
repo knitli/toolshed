@@ -117,7 +117,8 @@ class ExercisePatches:
     """Inject process, log, preference and recovery fakes into one exercise."""
 
     def __init__(self, *, capture_error=None, restore_error=None, stop_error=None,
-                 stopped=True, log_alive=False, command_error=None, probe_stdout=b"",
+                 stopped=True, log_alive=False, command_error=None, reap_metadata_error=None,
+                 probe_stdout=b"",
                  probe_error=None,
                  monotonic_values=(0, 0, 0, 0, 1000)):
         """Configure only the failure point exercised by the test."""
@@ -127,6 +128,7 @@ class ExercisePatches:
         self.stopped = stopped
         self.log_alive = log_alive
         self.command_error = command_error
+        self.reap_metadata_error = reap_metadata_error
         self.probe_stdout = probe_stdout
         self.probe_error = probe_error
         self.monotonic_values = monotonic_values
@@ -170,7 +172,12 @@ class ExercisePatches:
                    b'{"Running":true,"State":"running"}')
             return raw, 0
         if argv[1:2] == ["exec"] and "/usr/bin/true" in argv and self.command_error:
-            raise self.command_error
+            if isinstance(self.command_error, list):
+                error = self.command_error.pop(0) if self.command_error else None
+            else:
+                error = self.command_error
+            if error is not None:
+                raise error
         if argv[1:2] == ["exec"] and "/usr/bin/python3" in argv:
             if self.probe_error:
                 raise self.probe_error
@@ -197,6 +204,8 @@ class ExercisePatches:
     def stop_owned(self, process, log_thread=None):
         """Inject an unproven child when requested by the test."""
         self.events.append(("stop_owned", process.name, log_thread))
+        if process.name == "vm" and self.reap_metadata_error is not None:
+            raise self.reap_metadata_error
         if self.stop_error == process.name:
             raise RuntimeError("unproven child")
 
@@ -665,12 +674,13 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertTrue(calls[0][1]["start_new_session"])
 
     def _exercise_patches(self, *, capture_error=None, restore_error=None, stop_error=None,
-                          stopped=True, log_alive=False, command_error=None,
+                          stopped=True, log_alive=False, command_error=None, reap_metadata_error=None,
                           monotonic_values=(0, 0, 0, 0, 1000)):
         """Build the narrow fake context used by supervisor exercise tests."""
         return ExercisePatches(capture_error=capture_error, restore_error=restore_error,
                                stop_error=stop_error, stopped=stopped, log_alive=log_alive,
-                               command_error=command_error, monotonic_values=monotonic_values)
+                               command_error=command_error, reap_metadata_error=reap_metadata_error,
+                               monotonic_values=monotonic_values)
 
     def test_capture_precedes_launch_and_tart_is_owner_scoped_fixed_argv(self):
         with self._exercise_patches() as harness:
@@ -1200,6 +1210,23 @@ class SoftnetSupervisorTests(unittest.TestCase):
                                              "staff", TargetPreferences)
                 self.assertFalse(any(event[0] == "restore" for event in harness.events))
 
+    def test_reaper_preserves_command_cleanup_metadata_and_finishes_remaining_children(self):
+        process = FakeProcess("unreaped-ps-proof")
+        failure = canary.CanaryError("tart_command_failed")
+        failure.cleanup_errors = ("process_not_reaped_group_unverified",)
+        failure.unreaped_processes = (process,)
+        with self._exercise_patches(reap_metadata_error=failure) as harness:
+            with self.assertRaisesRegex(recovery.RecoveryError, "cleanup_unproven") as raised:
+                supervisor._exercise(
+                    self.root, self.admission,
+                    SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner"),
+                    "staff", TargetPreferences)
+        self.assertIn("process_not_reaped_group_unverified", raised.exception.cleanup_errors)
+        self.assertIs(raised.exception.unreaped_processes[0], process)
+        reaped = [event[1] for event in harness.events if event[0] == "stop_owned"]
+        self.assertEqual(reaped, ["vm", "helper"])
+        self.assertFalse(any(event[0] == "restore" for event in harness.events))
+
     def test_readiness_timeout_is_bounded_and_does_not_restore_until_owned_children_proven(self):
         timeout = canary.CanaryError("tart_command_timeout")
         with self._exercise_patches(command_error=timeout,
@@ -1214,6 +1241,56 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertTrue(any(event[0] == "restore" for event in harness.events))
         self.assertLess(next(i for i, event in enumerate(harness.events) if event[0] == "stop_owned"),
                         next(i for i, event in enumerate(harness.events) if event[0] == "restore"))
+
+    def test_readiness_cleanup_metadata_fails_closed_and_keeps_failed_run_and_process(self):
+        state_root = self.root / "state-with-unreaped-command"
+        state_root.mkdir(mode=0o700)
+        owner_uid = os.getuid()
+        process = FakeProcess("unreaped-tart-exec")
+        failure = canary.CanaryError("tart_command_failed")
+        failure.cleanup_errors = ("process_not_reaped_group_unverified",)
+        failure.unreaped_process = process
+        failure.unreaped_processes = (process,)
+        account = SimpleNamespace(pw_uid=owner_uid, pw_gid=os.getgid(), pw_name="owner")
+        identity = {"vmName": self.admission["vmName"],
+                    "macAddress": self.admission["macAddress"],
+                    "tartBinarySha256": canary.TART_BINARY_SHA256,
+                    "softnetBinarySha256": supervisor.SOFTNET_SHA256,
+                    "admissionSha256": "f" * 64}
+        with patch.object(recovery, "OWNER_UID", owner_uid), \
+                patch.object(recovery.os, "geteuid", return_value=owner_uid), \
+                self._exercise_patches(command_error=[failure, None]) as harness:
+            with run_state.State(state_root) as state:
+                run, run_id = state.begin(identity)
+                with self.assertRaises(canary.CanaryError) as raised:
+                    supervisor._exercise(run, self.admission, account, "staff", TargetPreferences)
+
+            error = raised.exception
+            self.assertIn("process_not_reaped_group_unverified", error.cleanup_errors)
+            self.assertIs(error.unreaped_processes[0], process)
+            self.assertFalse(any(event[0] == "restore" for event in harness.events))
+            readiness_attempts = [event for event in harness.events
+                                  if event[0] == "command" and event[1][1:2] == ("exec",)
+                                  and "/usr/bin/true" in event[1]]
+            self.assertEqual(len(readiness_attempts), 1)
+            self.assertFalse((run / "complete.plist").exists())
+            with self.assertRaisesRegex(recovery.RecoveryError, "unresolved_run"):
+                run_state.State(state_root).__enter__()
+        self.assertEqual(run.name, run_id)
+
+    def test_verified_transient_readiness_failure_still_retries(self):
+        transient = canary.CanaryError("tart_command_failed")
+        with self._exercise_patches(command_error=[transient, None]) as harness:
+            result = supervisor._exercise(
+                self.root, self.admission,
+                SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner"),
+                "staff", TargetPreferences)
+        self.assertTrue(all(result.values()))
+        attempts = [event for event in harness.events
+                    if event[0] == "command" and event[1][1:2] == ("exec",)
+                    and "/usr/bin/true" in event[1]]
+        self.assertEqual(len(attempts), 2)
+        self.assertTrue(any(event[0] == "restore" for event in harness.events))
 
     def test_owned_python_process_group_is_quiet_before_wnowait_then_reaped(self):
         child_code = "import signal,time; signal.signal(signal.SIGINT, signal.SIG_IGN); time.sleep(30)"

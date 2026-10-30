@@ -571,6 +571,9 @@ def collect(tart_path, vm_name, env, evidence, bundle, *, run_bounded=None):
         return {"status": "passed", "report": report, "bundleSha256": bundle["bundleSha256"],
                 "failureCode": None, "rawEvidence": _raw_records(evidence)}
     except canary.CanaryError as exc:
+        cleanup_errors, unreaped_processes = canary._command_cleanup_metadata(exc)
+        if cleanup_errors or unreaped_processes or canary._is_interruption(exc):
+            raise
         return {"status": "failed", "report": None,
                 "failureCode": str(exc.args[0]) if exc.args else "inventory_collection_failed",
                 "rawEvidence": _raw_records(evidence)}
