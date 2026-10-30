@@ -466,13 +466,221 @@ raise SystemExit(2)
                 return -signal.SIGKILL
 
         process = RunningProcess()
-        with patch.object(canary.subprocess, "Popen", return_value=process), \
+        with patch.object(canary.os, "waitid", return_value=None), \
+                patch.object(canary.subprocess, "Popen", return_value=process), \
                 patch.object(canary.os, "killpg", side_effect=ProcessLookupError) as killpg:
             with self.assertRaisesRegex(canary.CanaryError, "tart_command_timeout"):
                 canary._run_bounded(["fake-tart"], timeout=0.05, env={})
         self.assertTrue(process.reaped)
-        self.assertEqual(process.wait_calls, [None])
+        self.assertEqual(process.wait_calls, [5])
         killpg.assert_called_once_with(process.pid, signal.SIGKILL)
+
+    def test_nonzero_child_is_group_swept_before_its_leader_is_reaped(self):
+        real_popen = subprocess.Popen
+        real_killpg = os.killpg
+        child = None
+        signals = []
+
+        def record_popen(argv, **kwargs):
+            nonlocal child
+            process = real_popen(argv, **kwargs)
+            if child is None:
+                child = process
+            return process
+
+        def observe_group_signal(pid, sig):
+            signals.append((pid, sig))
+            self.assertEqual(pid, child.pid)
+            self.assertEqual(sig, signal.SIGKILL)
+            self.assertIsNotNone(os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT))
+            return real_killpg(pid, sig)
+
+        with patch.object(canary.os, "killpg", side_effect=observe_group_signal), \
+                patch.object(canary.subprocess, "Popen", side_effect=record_popen):
+            with self.assertRaisesRegex(canary.CanaryError, "tart_command_failed"):
+                canary._run_bounded([sys.executable, "-c", "raise SystemExit(7)"], timeout=5, env=os.environ)
+
+        self.assertEqual(signals, [(child.pid, signal.SIGKILL)])
+        self.assertEqual(child.returncode, 7)
+
+    def test_reap_timeout_is_reported_without_replacing_command_timeout(self):
+        class UnreapableProcess:
+            pid = 987654322
+            returncode = None
+
+            def __init__(self):
+                out_read, out_write = os.pipe()
+                err_read, err_write = os.pipe()
+                os.close(out_write)
+                os.close(err_write)
+                self.stdout = os.fdopen(out_read, "rb")
+                self.stderr = os.fdopen(err_read, "rb")
+                self.wait_timeouts = []
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):
+                self.wait_timeouts.append(timeout)
+                raise subprocess.TimeoutExpired("fake", timeout)
+
+            def kill(self):
+                pass
+
+        process = UnreapableProcess()
+        with patch.object(canary.os, "waitid", return_value=None), \
+                patch.object(canary.subprocess, "Popen", return_value=process), \
+                patch.object(canary.os, "killpg", side_effect=ProcessLookupError):
+            with self.assertRaisesRegex(canary.CanaryError, "tart_command_timeout") as raised:
+                canary._run_bounded(["fake-tart"], timeout=0.02, env={})
+
+        self.assertEqual(process.wait_timeouts, [5])
+        self.assertIn("process_reap_failed", raised.exception.cleanup_errors)
+
+    def test_externally_reaped_child_with_unset_popen_returncode_receives_no_signals(self):
+        real_popen = subprocess.Popen
+        real_read = os.read
+        child = None
+        externally_reaped = False
+        reaped_status = None
+        signals = []
+
+        def record_popen(argv, **kwargs):
+            nonlocal child
+            child = real_popen(argv, **kwargs)
+            return child
+
+        def reap_during_output_read(fd, size):
+            nonlocal externally_reaped, reaped_status
+            chunk = real_read(fd, size)
+            if chunk and not externally_reaped:
+                waited_pid, reaped_status = os.waitpid(child.pid, 0)
+                self.assertEqual(waited_pid, child.pid)
+                externally_reaped = True
+            return chunk
+
+        with patch.object(canary.os, "read", side_effect=reap_during_output_read), \
+                patch.object(canary.os, "killpg", side_effect=lambda pid, sig: signals.append((pid, sig))), \
+                patch.object(canary.subprocess, "Popen", side_effect=record_popen):
+            with self.assertRaisesRegex(canary.CanaryError, "tart_command_process_identity_lost"):
+                canary._run_bounded(
+                    [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'done')"],
+                    timeout=5, env=os.environ,
+                )
+
+        self.assertTrue(externally_reaped)
+        self.assertIsNone(child.returncode)
+        self.assertEqual(signals, [])
+        child.returncode = os.waitstatus_to_exitcode(reaped_status)
+        self.assertEqual(child.returncode, 0)
+
+    def test_bounded_runner_preserves_primary_error_when_darwin_eprem_proves_zombie_group(self):
+        real_killpg = os.killpg
+        group_pid = None
+
+        def darwin_zombie_eperm(pid, sig):
+            if pid == group_pid and sig == signal.SIGKILL:
+                os.kill(pid, signal.SIGKILL)
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    try:
+                        if os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
+                            raise PermissionError(1, "operation not permitted")
+                    except ChildProcessError:
+                        break
+                    time.sleep(0.01)
+                self.fail("bounded child did not exit before the injected zombie-group EPERM")
+            return real_killpg(pid, sig)
+
+        real_popen = subprocess.Popen
+        processes = []
+
+        def record_popen(argv, **kwargs):
+            nonlocal group_pid
+            process = real_popen(argv, **kwargs)
+            if argv[0] == sys.executable:
+                group_pid = process.pid
+                processes.append(process)
+            return process
+
+        with patch.object(canary, "_owned_group_is_zombie_only", return_value=True) as zombie_proof, \
+                patch.object(canary.os, "killpg", side_effect=darwin_zombie_eperm), \
+                patch.object(canary.subprocess, "Popen", side_effect=record_popen):
+            with self.assertRaisesRegex(canary.CanaryError, "tart_command_output_limit") as raised:
+                canary._run_bounded(
+                    [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * (69 * 1024))"],
+                    timeout=5, env=os.environ,
+                )
+
+        self.assertTrue(processes[0].returncode is not None)
+        self.assertEqual(raised.exception.cleanup_errors, ())
+        zombie_proof.assert_called_once()
+        self.assertEqual(zombie_proof.call_args.args[0], group_pid)
+
+    def test_bounded_runner_reports_cleanup_failure_without_replacing_primary_error(self):
+        real_killpg = os.killpg
+        group_pid = None
+
+        def failed_group_signal(pid, sig):
+            if pid == group_pid and sig == signal.SIGKILL:
+                os.kill(pid, signal.SIGKILL)
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    try:
+                        if os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
+                            raise PermissionError(1, "operation not permitted")
+                    except ChildProcessError:
+                        break
+                    time.sleep(0.01)
+                self.fail("bounded child did not exit before the injected group-signal failure")
+            raise PermissionError(1, "injected proof-runner signal failure")
+
+        real_popen = subprocess.Popen
+        processes = []
+
+        def record_popen(argv, **kwargs):
+            nonlocal group_pid
+            process = real_popen(argv, **kwargs)
+            if argv[0] == sys.executable:
+                group_pid = process.pid
+                processes.append(process)
+            return process
+
+        def fail_proof(_pid, runner, env):
+            # Fail the bounded ps child too. The internal nonrecursive path must
+            # report this cleanup failure instead of attempting another proof.
+            with self.assertRaises(canary.CanaryError) as proof_error:
+                runner([sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'z' * 20)"],
+                       timeout=5, env=env, output_limit=8)
+            self.assertEqual(proof_error.exception.args, ("tart_command_output_limit",))
+            return False
+
+        with patch.object(canary, "_owned_group_is_zombie_only", side_effect=fail_proof), \
+                patch.object(canary.os, "killpg", side_effect=failed_group_signal), \
+                patch.object(canary.subprocess, "Popen", side_effect=record_popen):
+            with self.assertRaisesRegex(canary.CanaryError, "tart_command_output_limit") as raised:
+                canary._run_bounded(
+                    [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 20)"],
+                    timeout=5, env=os.environ, output_limit=8,
+                )
+
+        self.assertEqual(len(processes), 2)
+        self.assertIn("process_group_kill_failed", raised.exception.cleanup_errors)
+        self.assertIn("process_not_reaped_group_unverified", raised.exception.cleanup_errors)
+        self.assertIs(raised.exception.unreaped_process, processes[0])
+        for child in processes:
+            if child.returncode is None:
+                try:
+                    os.kill(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    waited_pid, status = os.waitpid(child.pid, 0)
+                except ChildProcessError:
+                    child.returncode = -signal.SIGKILL
+                else:
+                    self.assertEqual(waited_pid, child.pid)
+                    child.returncode = -os.WTERMSIG(status)
 
     def test_base_vm_file_changed_through_same_inode_during_read_is_rejected(self):
         target = self.base_vm_dir / "disk.img"
@@ -1157,6 +1365,72 @@ raise SystemExit(2)
         self.assertIn("owned_clone_process_group_kill_failed", saved["cleanupErrors"])
         self.assertIn("owned_clone_retained_vm_process_unreaped", saved["cleanupErrors"])
         self.assertTrue((self.tart_home / "vms" / saved["cloneVmName"]).exists())
+
+    def test_unverified_bounded_child_cleanup_taints_artifact_and_preserves_primary_error(self):
+        self._write_fake_tart(frames="both")
+        self._write_receipt()
+        real_runner = canary._run_bounded
+        real_popen = subprocess.Popen
+        real_killpg = os.killpg
+        injected_processes = []
+        vm_process = None
+
+        def record_vm_popen(argv, **kwargs):
+            nonlocal vm_process
+            process = real_popen(argv, **kwargs)
+            if len(argv) > 1 and argv[1] == "run":
+                vm_process = process
+            return process
+
+        def controlled_killpg(pid, sig):
+            if any(process.pid == pid for process in injected_processes):
+                raise PermissionError(1, "injected EPERM")
+            if vm_process is not None and vm_process.pid == pid:
+                os.kill(pid, sig)
+                return
+            return real_killpg(pid, sig)
+
+        def runner(argv, **kwargs):
+            if len(argv) > 1 and argv[1] == "exec" and argv[-1] == "/usr/bin/true":
+                def record_popen(command, **popen_kwargs):
+                    process = real_popen(command, **popen_kwargs)
+                    injected_processes.append(process)
+                    return process
+
+                with patch.object(canary, "_owned_group_is_zombie_only", return_value=False), \
+                        patch.object(canary.subprocess, "Popen", side_effect=record_popen):
+                    return real_runner(
+                        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 20)"],
+                        timeout=kwargs["timeout"], env=kwargs["env"], output_limit=8,
+                    )
+            if len(argv) > 1 and argv[1] == "stop":
+                error = canary.CanaryError("tart_command_failed")
+                error.cleanup_errors = ("stop_command_process_group_unverified",)
+                raise error
+            return real_runner(argv, **kwargs)
+
+        error = None
+        try:
+            with patch.object(canary.os, "killpg", side_effect=controlled_killpg):
+                with self.assertRaisesRegex(canary.CanaryError, "tart_command_output_limit") as raised:
+                    self._run(popen=record_vm_popen, run_bounded=runner)
+                error = raised.exception
+        finally:
+            for process in injected_processes:
+                if process.returncode is None:
+                    process.wait(timeout=5)
+
+        saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+        self.assertEqual(saved["error"], "tart_command_output_limit")
+        self.assertEqual(saved["status"], "tainted")
+        self.assertIn("process_group_kill_failed", saved["cleanupErrors"])
+        self.assertIn("process_not_reaped_group_unverified", saved["cleanupErrors"])
+        self.assertIn("stop_command_process_group_unverified", saved["cleanupErrors"])
+        self.assertFalse(saved["vmStop"]["commandSucceeded"])
+        self.assertTrue(saved["vmStop"]["stateConfirmedStopped"])
+        self.assertEqual(sorted(path.name for path in (self.tart_home / "vms").iterdir()),
+                         ["prepared-macos15"])
+        self.assertIsNotNone(error)
 
     def test_guest_output_cap_is_retained_and_hashed(self):
         stdout_path = self.root / "bounded-stdout.bin"
