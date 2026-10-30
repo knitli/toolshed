@@ -431,6 +431,34 @@ class GuestInventoryProbeTests(unittest.TestCase):
         self.assertEqual(result["failureCode"], "tart_command_timeout")
         self.assertIsNone(result["report"])
 
+    def test_collect_reraises_failure_when_bounded_cleanup_metadata_exists(self):
+        bundle = {"loader": "fixed", "argument": "AA==", "sourceSha256": {}, "bundleSha256": "b" * 64}
+        child = object()
+        error = probe.canary.CanaryError("tart_command_output_limit")
+        error.cleanup_errors = ("process_group_kill_failed", "process_not_reaped_group_unverified")
+        error.unreaped_process = child
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(probe.canary.CanaryError) as caught:
+                probe.collect("/fixed/tart", "owned-vm", {}, directory, bundle,
+                              run_bounded=lambda *args, **kwargs: (_ for _ in ()).throw(error))
+
+        self.assertIs(caught.exception, error)
+        errors, processes = probe.canary._command_cleanup_metadata(caught.exception)
+        self.assertEqual(errors, list(error.cleanup_errors))
+        self.assertEqual(processes, [child])
+
+    def test_collect_reraises_interruption_instead_of_converting_to_failure_result(self):
+        bundle = {"loader": "fixed", "argument": "AA==", "sourceSha256": {}, "bundleSha256": "b" * 64}
+        error = probe.canary.CanaryError("interrupted_by_sigterm")
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(probe.canary.CanaryError) as caught:
+                probe.collect("/fixed/tart", "owned-vm", {}, directory, bundle,
+                              run_bounded=lambda *args, **kwargs: (_ for _ in ()).throw(error))
+
+        self.assertIs(caught.exception, error)
+
     def _guest_patches(self):
         return mock.ExitStack() if hasattr(mock, "ExitStack") else _GuestPatches()
 

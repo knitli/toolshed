@@ -57,21 +57,139 @@ class CanaryError(ValueError):
     """Stable, non-sensitive failure code."""
 
 
+class _DarwinSiginfo(ctypes.Structure):
+    # XNU bsd/sys/signal.h: six 32-bit prefix fields followed by the 80-byte
+    # si_addr/si_value/si_band/pad tail on 64-bit Darwin.
+    _fields_ = [("si_signo", ctypes.c_int), ("si_errno", ctypes.c_int), ("si_code", ctypes.c_int),
+                ("si_pid", ctypes.c_int), ("si_uid", ctypes.c_uint), ("si_status", ctypes.c_int),
+                ("_tail", ctypes.c_long * 10)]
+
+
+_DARWIN_WAITID = None
+_DARWIN_WAITID_LOOKED_UP = False
+_DARWIN_P_PID = 1
+_DARWIN_WNOHANG = 0x00000001
+_DARWIN_WSTOPPED = 0x00000008
+_DARWIN_WEXITED = 0x00000004
+_DARWIN_WNOWAIT = 0x00000020
+_DARWIN_CLD_EXITED = 1
+_DARWIN_CLD_KILLED = 2
+_DARWIN_CLD_DUMPED = 3
+_DARWIN_CLD_STOPPED = 5
+
+
+def _python_waitid_available():
+    return all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT", "WSTOPPED"))
+
+
+def _darwin_waitid_function():
+    global _DARWIN_WAITID, _DARWIN_WAITID_LOOKED_UP
+    if not _DARWIN_WAITID_LOOKED_UP:
+        _DARWIN_WAITID_LOOKED_UP = True
+        if ctypes.sizeof(ctypes.c_void_p) == 8 and ctypes.sizeof(_DarwinSiginfo) == 104:
+            try:
+                library = ctypes.CDLL(None, use_errno=True)
+                function = library.waitid
+                function.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.POINTER(_DarwinSiginfo), ctypes.c_int]
+                function.restype = ctypes.c_int
+                _DARWIN_WAITID = (library, function)
+            except (AttributeError, OSError):
+                _DARWIN_WAITID = None
+    return None if _DARWIN_WAITID is None else _DARWIN_WAITID[1]
+
+
+def _waitid_available():
+    if _python_waitid_available():
+        return True
+    return sys.platform == "darwin" and _darwin_waitid_function() is not None
+
+
+def _waitid_no_reap(pid):
+    """Observe terminal child status without releasing its PID/process group."""
+    if _python_waitid_available():
+        try:
+            info = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        except InterruptedError:
+            raise
+        except ChildProcessError:
+            raise
+        if info is None:
+            return None
+        if info.si_pid != pid:
+            raise CanaryError("tart_command_process_status_unavailable")
+        code, status = info.si_code, info.si_status
+    elif sys.platform == "darwin":
+        function = _darwin_waitid_function()
+        if function is None:
+            raise CanaryError("nonreaping_wait_unavailable")
+        while True:
+            info = _DarwinSiginfo()
+            ctypes.set_errno(0)
+            result = function(_DARWIN_P_PID, pid, ctypes.byref(info),
+                              _DARWIN_WEXITED | _DARWIN_WNOHANG | _DARWIN_WNOWAIT)
+            if result == 0:
+                if info.si_pid == 0:
+                    return None
+                if info.si_pid != pid:
+                    raise CanaryError("tart_command_process_status_unavailable")
+                code, status = info.si_code, info.si_status
+                break
+            error = ctypes.get_errno()
+            if error == errno.EINTR:
+                raise InterruptedError(error, os.strerror(error))
+            if error == errno.ECHILD:
+                raise ChildProcessError(error, os.strerror(error))
+            raise OSError(error, os.strerror(error))
+    else:
+        raise CanaryError("nonreaping_wait_unavailable")
+
+    if code == _DARWIN_CLD_STOPPED:
+        # XNU may report a stopped process for WEXITED. Consume that stop
+        # notification (without reaping terminal status); the caller polls again.
+        if _python_waitid_available():
+            try:
+                os.waitid(os.P_PID, pid, os.WSTOPPED | os.WNOHANG)
+            except InterruptedError:
+                raise
+            except ChildProcessError:
+                raise
+        else:
+            function = _darwin_waitid_function()
+            while True:
+                stopped = _DarwinSiginfo()
+                ctypes.set_errno(0)
+                result = function(_DARWIN_P_PID, pid, ctypes.byref(stopped),
+                                  _DARWIN_WSTOPPED | _DARWIN_WNOHANG)
+                if result == 0:
+                    break
+                error = ctypes.get_errno()
+                if error == errno.EINTR:
+                    raise InterruptedError(error, os.strerror(error))
+                if error == errno.ECHILD:
+                    raise ChildProcessError(error, os.strerror(error))
+                raise OSError(error, os.strerror(error))
+        return None
+    if code == _DARWIN_CLD_EXITED:
+        return status
+    if code in (_DARWIN_CLD_KILLED, _DARWIN_CLD_DUMPED):
+        return -status
+    raise CanaryError("tart_command_process_status_unavailable")
+
+
 def _bounded_process_exit_status(process):
     if getattr(process, "returncode", None) is not None:
         return process.returncode
     try:
-        exited = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        return _waitid_no_reap(process.pid)
     except ChildProcessError:
         raise CanaryError("tart_command_process_identity_lost") from None
-    if exited is None:
+    except InterruptedError:
         return None
-    return exited.si_status if exited.si_code == os.CLD_EXITED else -exited.si_status
 
 
 def _command_cleanup_metadata(error):
     errors = []
-    unreaped_process = None
+    unreaped_processes = []
     pending = [error]
     seen = set()
     while pending:
@@ -82,10 +200,27 @@ def _command_cleanup_metadata(error):
         for item in getattr(current, "cleanup_errors", ()):
             if isinstance(item, str) and item not in errors:
                 errors.append(item)
-        if unreaped_process is None:
-            unreaped_process = getattr(current, "unreaped_process", None)
+        candidates = (*getattr(current, "unreaped_processes", ()),
+                     getattr(current, "unreaped_process", None))
+        for process in candidates:
+            if process is not None and all(process is not existing for existing in unreaped_processes):
+                unreaped_processes.append(process)
         pending.extend((getattr(current, "__cause__", None), getattr(current, "__context__", None)))
-    return errors, unreaped_process
+    return errors, unreaped_processes
+
+
+def _is_interruption(error):
+    pending = [error]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if current.args and current.args[0] in {"interrupted_by_sigint", "interrupted_by_sigterm"}:
+            return True
+        pending.extend((getattr(current, "__cause__", None), getattr(current, "__context__", None)))
+    return False
 
 
 def _record_command_cleanup(error, cleanup_errors):
@@ -95,12 +230,26 @@ def _record_command_cleanup(error, cleanup_errors):
             cleanup_errors.append(item)
 
 
+def _attach_command_cleanup(target, errors=(), unreaped_processes=()):
+    inherited_errors, inherited_processes = _command_cleanup_metadata(target)
+    combined_errors = list(inherited_errors)
+    for item in errors:
+        if item not in combined_errors:
+            combined_errors.append(item)
+    combined_processes = list(inherited_processes)
+    for process in unreaped_processes:
+        if all(process is not existing for existing in combined_processes):
+            combined_processes.append(process)
+    if combined_errors:
+        target.cleanup_errors = tuple(combined_errors)
+    if combined_processes:
+        target.unreaped_processes = tuple(combined_processes)
+        target.unreaped_process = combined_processes[0]
+
+
 def _inherit_command_cleanup(source, target):
-    errors, unreaped_process = _command_cleanup_metadata(source)
-    if errors:
-        target.cleanup_errors = tuple(errors)
-    if unreaped_process is not None:
-        target.unreaped_process = unreaped_process
+    errors, unreaped_processes = _command_cleanup_metadata(source)
+    _attach_command_cleanup(target, errors, unreaped_processes)
 
 
 def _install_termination_handlers():
@@ -265,12 +414,18 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
         cleanup_errors = []
         group_quiet = False
         identity_verified = False
+        proof_interruption = None
+        proof_cleanup_error = None
         try:
             if getattr(process, "returncode", None) is not None:
                 raise ChildProcessError
             _wait_owned_vm_exit(process, 0)
         except (ChildProcessError, OSError):
             cleanup_errors.append("process_group_identity_lost")
+        except CanaryError as exc:
+            cleanup_errors.append("process_group_identity_lost")
+            if _is_interruption(exc):
+                proof_interruption = exc
         else:
             identity_verified = True
             try:
@@ -286,7 +441,16 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                         return _run_bounded(proof_argv, timeout=timeout, env=env,
                                             _allow_zombie_proof=False, **kwargs)
 
-                    group_quiet = _owned_group_is_zombie_only(process.pid, proof_runner, env)
+                    try:
+                        group_quiet = _owned_group_is_zombie_only(process.pid, proof_runner, env)
+                    except CanaryError as exc:
+                        proof_errors, proof_processes = _command_cleanup_metadata(exc)
+                        if _is_interruption(exc) or proof_errors or proof_processes:
+                            proof_cleanup_error = exc
+                            if _is_interruption(exc):
+                                proof_interruption = exc
+                        else:
+                            raise
                 if not group_quiet:
                     cleanup_errors.append("process_group_kill_failed")
             except OSError:
@@ -298,20 +462,35 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                     pass
                 except OSError:
                     cleanup_errors.append("process_kill_failed")
+                except CanaryError as exc:
+                    if _is_interruption(exc):
+                        if proof_interruption is None:
+                            proof_interruption = exc
+                        else:
+                            _inherit_command_cleanup(exc, proof_interruption)
+                    else:
+                        cleanup_errors.append("process_kill_failed")
                 cleanup_errors.append("process_not_reaped_group_unverified")
+        if proof_interruption is not None:
+            _attach_command_cleanup(proof_interruption, cleanup_errors, (process,))
+            raise proof_interruption from primary_error
+        if proof_cleanup_error is not None:
+            _inherit_command_cleanup(proof_cleanup_error, primary_error)
         if group_quiet:
             try:
                 process.wait(timeout=5)
             except BaseException:
                 cleanup_errors.append("process_reap_failed")
-        if cleanup_errors:
-            primary_error.cleanup_errors = tuple(cleanup_errors)
-            if "process_not_reaped_group_unverified" in cleanup_errors:
-                # Keep the child PID reserved while the caller handles the
-                # failure; the exception owns the Popen handle until released.
-                primary_error.unreaped_process = process
+        proof_errors, proof_processes = _command_cleanup_metadata(primary_error)
+        keep_process = ("process_not_reaped_group_unverified" in cleanup_errors
+                        or "process_reap_failed" in cleanup_errors
+                        or "process_group_identity_lost" in cleanup_errors)
+        if cleanup_errors or proof_errors or proof_processes:
+            handles = (process,) if keep_process else ()
+            _attach_command_cleanup(primary_error, cleanup_errors, handles)
+            all_cleanup_errors, _ = _command_cleanup_metadata(primary_error)
             if hasattr(primary_error, "add_note"):
-                primary_error.add_note("bounded command cleanup failed: " + ", ".join(cleanup_errors))
+                primary_error.add_note("bounded command cleanup failed: " + ", ".join(all_cleanup_errors))
         else:
             primary_error.cleanup_errors = ()
         raise
@@ -584,10 +763,15 @@ def _wait_owned_vm_exit(process, timeout):
         raise ChildProcessError
     deadline = time.monotonic() + timeout
     while True:
-        exited = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        try:
+            exited = _waitid_no_reap(process.pid)
+        except InterruptedError:
+            if time.monotonic() >= deadline:
+                raise
+            exited = None
         if exited is not None or time.monotonic() >= deadline:
             return
-        time.sleep(0.05)
+        time.sleep(min(0.05, max(0, deadline - time.monotonic())))
 
 
 def _owned_group_is_zombie_only(pid, run_bounded, env):
@@ -604,7 +788,12 @@ def _owned_group_is_zombie_only(pid, run_bounded, env):
                 return False
             leader_seen |= int(member) == pid
         return leader_seen
-    except (OSError, CanaryError, ValueError):
+    except CanaryError as exc:
+        cleanup_errors, unreaped_processes = _command_cleanup_metadata(exc)
+        if _is_interruption(exc) or cleanup_errors or unreaped_processes:
+            raise
+        return False
+    except (OSError, ValueError):
         return False
 
 
@@ -991,7 +1180,10 @@ def _run_native_workspace_guest_inventory(probe, bundle, tart_path, clone, env, 
                       "rawEvidence": {}}
     metadata.update(collection)
     if metadata["status"] != "passed":
-        normalized = CanaryError("native_guest_inventory_collection_failed")
+        code = (cleanup_source.args[0] if cleanup_source is not None
+                and probe.canary._is_interruption(cleanup_source)
+                and cleanup_source.args else "native_guest_inventory_collection_failed")
+        normalized = CanaryError(code)
         if cleanup_source is not None:
             _inherit_command_cleanup(cleanup_source, normalized)
         raise normalized
@@ -1023,7 +1215,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
     api_probe = api_bundle = None
     dhcp_probe = dhcp_bundle = dhcp_binary_fd = dhcp_binary = None
     inventory_probe = inventory_bundle = None
-    if not all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")):
+    if not _waitid_available():
         raise CanaryError("nonreaping_wait_unavailable")
     receipt = _read_receipt(receipt_path)
     if receipt["baseVmName"] != base_vm:
