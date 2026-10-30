@@ -209,7 +209,7 @@ def _command_cleanup_metadata(error):
     return errors, unreaped_processes
 
 
-def _is_interruption(error):
+def _interruption_in_chain(error):
     pending = [error]
     seen = set()
     while pending:
@@ -218,9 +218,13 @@ def _is_interruption(error):
             continue
         seen.add(id(current))
         if current.args and current.args[0] in {"interrupted_by_sigint", "interrupted_by_sigterm"}:
-            return True
+            return current
         pending.extend((getattr(current, "__cause__", None), getattr(current, "__context__", None)))
-    return False
+    return None
+
+
+def _is_interruption(error):
+    return _interruption_in_chain(error) is not None
 
 
 def _record_command_cleanup(error, cleanup_errors):
@@ -416,6 +420,16 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
         identity_verified = False
         cleanup_interruption = None
         proof_cleanup_error = None
+
+        def remember_interruption(error):
+            nonlocal cleanup_interruption
+            interruption = _interruption_in_chain(error)
+            if interruption is None:
+                return
+            if cleanup_interruption is None:
+                cleanup_interruption = interruption
+            _inherit_command_cleanup(error, cleanup_interruption)
+
         try:
             if getattr(process, "returncode", None) is not None:
                 raise ChildProcessError
@@ -424,8 +438,7 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
             cleanup_errors.append("process_group_identity_lost")
         except CanaryError as exc:
             cleanup_errors.append("process_group_identity_lost")
-            if _is_interruption(exc):
-                cleanup_interruption = exc
+            remember_interruption(exc)
         except (KeyboardInterrupt, SystemExit) as exc:
             cleanup_errors.append("process_group_identity_lost")
             cleanup_interruption = exc
@@ -438,8 +451,7 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                 group_quiet = True
             except CanaryError as exc:
                 cleanup_errors.append("process_group_kill_failed")
-                if _is_interruption(exc):
-                    cleanup_interruption = exc
+                remember_interruption(exc)
             except (KeyboardInterrupt, SystemExit) as exc:
                 cleanup_errors.append("process_group_kill_failed")
                 cleanup_interruption = exc
@@ -455,10 +467,10 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                         group_quiet = _owned_group_is_zombie_only(process.pid, proof_runner, env)
                     except CanaryError as exc:
                         proof_errors, proof_processes = _command_cleanup_metadata(exc)
-                        if _is_interruption(exc) or proof_errors or proof_processes:
+                        interruption = _interruption_in_chain(exc)
+                        if interruption is not None or proof_errors or proof_processes:
                             proof_cleanup_error = exc
-                            if _is_interruption(exc):
-                                cleanup_interruption = exc
+                            remember_interruption(exc)
                         else:
                             raise
                     except (KeyboardInterrupt, SystemExit) as exc:
@@ -476,11 +488,8 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                 except OSError:
                     cleanup_errors.append("process_kill_failed")
                 except CanaryError as exc:
-                    if _is_interruption(exc):
-                        if cleanup_interruption is None:
-                            cleanup_interruption = exc
-                        else:
-                            _inherit_command_cleanup(exc, cleanup_interruption)
+                    if _interruption_in_chain(exc) is not None:
+                        remember_interruption(exc)
                     else:
                         cleanup_errors.append("process_kill_failed")
                 except (KeyboardInterrupt, SystemExit) as exc:
@@ -495,11 +504,7 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                 process.wait(timeout=5)
             except CanaryError as exc:
                 cleanup_errors.append("process_reap_failed")
-                if _is_interruption(exc):
-                    if cleanup_interruption is None:
-                        cleanup_interruption = exc
-                    else:
-                        _inherit_command_cleanup(exc, cleanup_interruption)
+                remember_interruption(exc)
             except (KeyboardInterrupt, SystemExit) as exc:
                 cleanup_errors.append("process_reap_failed")
                 if cleanup_interruption is None:
@@ -509,6 +514,8 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
         if cleanup_interruption is not None:
             _inherit_command_cleanup(primary_error, cleanup_interruption)
             _attach_command_cleanup(cleanup_interruption, cleanup_errors, (process,))
+            if cleanup_interruption is primary_error:
+                raise
             raise cleanup_interruption from primary_error
         proof_errors, proof_processes = _command_cleanup_metadata(primary_error)
         keep_process = ("process_not_reaped_group_unverified" in cleanup_errors

@@ -805,6 +805,46 @@ raise SystemExit(2)
         finally:
             _reap_test_children([proof_process, *process_recorder.processes])
 
+    def test_proof_failure_context_preserves_original_interruption_and_cleanup_metadata(self):
+        process_recorder = _PythonChildProcesses(subprocess.Popen)
+        proof_process = subprocess.Popen(  # nosec B603 -- fixed sys.executable sleep fixture, no shell.
+            [sys.executable, "-c", "import time; time.sleep(60)"], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+        )
+        interruption = canary.CanaryError("interrupted_by_sigterm")
+
+        def cancel_with_interruption():
+            raise interruption
+
+        def failed_proof(_pid, _runner, _env):
+            error = canary.CanaryError("tart_command_failed")
+            error.cleanup_errors = ("proof_process_group_unverified",)
+            error.unreaped_process = proof_process
+            try:
+                raise interruption
+            except canary.CanaryError:
+                raise error
+
+        try:
+            with patch.object(canary, "_owned_group_is_zombie_only", side_effect=failed_proof), \
+                    patch.object(canary.os, "killpg", side_effect=PermissionError(1, "injected EPERM")), \
+                    patch.object(canary.subprocess, "Popen", side_effect=process_recorder):
+                with self.assertRaises(canary.CanaryError) as raised:
+                    canary._run_bounded(
+                        [sys.executable, "-c", "import time; time.sleep(60)"],
+                        timeout=5, env=os.environ, cancel_check=cancel_with_interruption,
+                    )
+
+            parent_process = process_recorder.processes[0]
+            self.assertIs(raised.exception, interruption)
+            self.assertEqual(raised.exception.args, ("interrupted_by_sigterm",))
+            self.assertIn("proof_process_group_unverified", raised.exception.cleanup_errors)
+            self.assertIn("process_group_kill_failed", raised.exception.cleanup_errors)
+            self.assertIn("process_not_reaped_group_unverified", raised.exception.cleanup_errors)
+            self.assertEqual(raised.exception.unreaped_processes, (proof_process, parent_process))
+        finally:
+            _reap_test_children([proof_process, *process_recorder.processes])
+
     def test_base_vm_file_changed_through_same_inode_during_read_is_rejected(self):
         target = self.base_vm_dir / "disk.img"
         original = target.read_bytes()
