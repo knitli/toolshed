@@ -290,10 +290,14 @@ if cmd == "run":
     if {spawn_term_ignoring_child!r}:
         child_marker = os.path.join(os.environ["TART_HOME"], "descendant-pid")
         heartbeat = os.path.join(os.environ["TART_HOME"], "descendant-heartbeat")
+        heartbeat_tmp = heartbeat + ".tmp"
         child_code = ("import os,signal,sys,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
                       "open(sys.argv[1], 'w').write(str(os.getpid())); counter=0\\n"
-                      "while True: open(sys.argv[2], 'w').write(str(counter)); counter+=1; time.sleep(0.01)")
-        subprocess.Popen([sys.executable, "-c", child_code, child_marker, heartbeat])
+                      "while True: open(sys.argv[3], 'w').write(str(counter)); os.replace(sys.argv[3], sys.argv[2]); "
+                      "counter+=1; time.sleep(0.01)")
+        # Keep the socket peer alive until group cleanup. Otherwise a very fast
+        # fake VM exit can race the host drainer and mask the exit-status path.
+        subprocess.Popen([sys.executable, "-c", child_code, child_marker, heartbeat, heartbeat_tmp], pass_fds=(fd,))
         child_deadline = time.monotonic() + 5
         while (not os.path.exists(child_marker) or not os.path.exists(heartbeat)) and time.monotonic() < child_deadline:
             time.sleep(0.01)
@@ -1539,11 +1543,11 @@ raise SystemExit(2)
 
         marker = self.tart_home / "descendant-pid"
         self.assertTrue(marker.exists())
-        self.assertEqual(state["pollCalls"], 0)
-        self.assertEqual(state["returncodeAtSweep"], None)
         self.assertTrue(state["sweepSawLeader"])
+        self.assertEqual(state["returncodeAtSweep"], None)
         self.assertFalse(state["leaderReapedAtSweep"])
         self.assertTrue(state["leaderReaped"])
+        self.assertEqual(state["pollCalls"], 0)
         self.assertIn((vm_process.pid, signal.SIGKILL), signals)
         self.assertGreater(state["heartbeatAtSweep"], 0)
         heartbeat = self.tart_home / "descendant-heartbeat"
