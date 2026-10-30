@@ -249,7 +249,7 @@ class OfflineMacosVmCanaryTest(unittest.TestCase):
 
     def _write_fake_tart(self, *, frames="none", fail_delete=False, running_after_stop=False,
                          readiness=None, sleep_guest=0, partial_clone_failure=False,
-                         spawn_term_ignoring_child=False):
+                         spawn_term_ignoring_child=False, exit_run=False):
         readiness = readiness or {}
         readiness_failures = readiness.get("failures", 0)
         readiness_delay_first = readiness.get("delay_first", 0)
@@ -289,13 +289,17 @@ if cmd == "run":
     peer = socket.socket(fileno=fd)
     if {spawn_term_ignoring_child!r}:
         child_marker = os.path.join(os.environ["TART_HOME"], "descendant-pid")
-        child_code = "import os,signal,sys,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); open(sys.argv[1], 'w').write(str(os.getpid())); time.sleep(60)"
-        subprocess.Popen([sys.executable, "-c", child_code, child_marker])
+        heartbeat = os.path.join(os.environ["TART_HOME"], "descendant-heartbeat")
+        child_code = ("import os,signal,sys,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                      "open(sys.argv[1], 'w').write(str(os.getpid())); counter=0\\n"
+                      "while True: open(sys.argv[2], 'w').write(str(counter)); counter+=1; time.sleep(0.01)")
+        subprocess.Popen([sys.executable, "-c", child_code, child_marker, heartbeat])
         child_deadline = time.monotonic() + 5
-        while not os.path.exists(child_marker) and time.monotonic() < child_deadline:
+        while (not os.path.exists(child_marker) or not os.path.exists(heartbeat)) and time.monotonic() < child_deadline:
             time.sleep(0.01)
 {''.join('    ' + line + '\n' for line in sender.rstrip().splitlines())}
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    if {exit_run!r}: raise SystemExit(7)
     while True: time.sleep(0.1)
 if cmd == "stop":
     with open(os.path.join(os.environ["TART_HOME"], "stop-started"), "w") as stream: stream.write("stopping")
@@ -667,6 +671,33 @@ raise SystemExit(2)
         self.assertIn("process_not_reaped_group_unverified", raised.exception.cleanup_errors)
         self.assertIs(raised.exception.unreaped_process, processes[0])
         _reap_test_children(processes)
+
+    def test_uncertain_bounded_cleanup_keeps_exited_leader_reserved_until_caller_reaps(self):
+        process_recorder = _PythonChildProcesses(subprocess.Popen)
+
+        def deny_group_kill(pid, sig):
+            if pid == process_recorder.processes[0].pid and sig == signal.SIGKILL:
+                raise PermissionError(1, "injected EPERM")
+            return None
+
+        try:
+            with patch.object(canary, "_owned_group_is_zombie_only", return_value=False), \
+                    patch.object(canary.os, "killpg", side_effect=deny_group_kill), \
+                    patch.object(canary.subprocess, "Popen", side_effect=process_recorder):
+                with self.assertRaisesRegex(canary.CanaryError, "tart_command_failed") as raised:
+                    canary._run_bounded(
+                        [sys.executable, "-c", "import sys; sys.exit(7)"],
+                        timeout=5, env=os.environ,
+                    )
+
+            child = process_recorder.processes[0]
+            self.assertIn("process_not_reaped_group_unverified", raised.exception.cleanup_errors)
+            self.assertIs(raised.exception.unreaped_process, child)
+            self.assertIsNone(child.returncode)
+            self.assertIsNotNone(os.waitid(
+                os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT))
+        finally:
+            _reap_test_children(process_recorder.processes)
 
     def test_killpg_interruption_finishes_owned_leader_cleanup_and_preserves_primary(self):
         process_recorder = _PythonChildProcesses(subprocess.Popen)
@@ -1153,6 +1184,66 @@ raise SystemExit(2)
         self.assertTrue(self.base_vm_dir.exists())
         self.assertEqual(sorted(path.name for path in (self.tart_home / "vms").iterdir()), ["prepared-macos15"])
 
+    def test_readiness_cleanup_metadata_stops_retry_and_retains_process_through_manifest(self):
+        self._write_fake_tart(frames="both")
+        self._write_receipt()
+        proof_process = subprocess.Popen(  # nosec B603 -- fixed sys.executable sleep fixture, no shell.
+            [sys.executable, "-c", "import time; time.sleep(60)"], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+        )
+        real_popen = subprocess.Popen
+        vm_processes = []
+        real_runner = canary._run_bounded
+        real_write_manifest = canary._write_result_manifest
+        attempts = []
+        guest_probes = []
+        retained_during_manifest = []
+
+        def runner(argv, **kwargs):
+            if len(argv) > 1 and argv[1] == "exec" and argv[-1] == "/usr/bin/true":
+                attempts.append(argv)
+                error = canary.CanaryError("tart_command_failed")
+                error.cleanup_errors = ("readiness_process_group_unverified",)
+                error.unreaped_process = proof_process
+                raise error
+            if len(argv) > 1 and argv[1] == "exec":
+                guest_probes.append(argv)
+            return real_runner(argv, **kwargs)
+
+        def record_vm_popen(argv, **kwargs):
+            process = real_popen(argv, **kwargs)
+            if len(argv) > 1 and argv[1] == "run":
+                vm_processes.append(process)
+            return process
+
+        def inspect_manifest(evidence, result):
+            frame = sys._getframe(1)
+            while frame is not None and frame.f_code.co_name != "qualify":
+                frame = frame.f_back
+            self.assertIsNotNone(frame)
+            retained_during_manifest.append(any(
+                process is proof_process for process in frame.f_locals["cleanup_processes"]))
+            return real_write_manifest(evidence, result)
+
+        try:
+            with patch.object(canary, "_write_result_manifest", side_effect=inspect_manifest), \
+                    patch.object(canary, "VM_READY_TIMEOUT", 2), \
+                    patch.object(canary, "VM_READY_RETRY_INTERVAL", 0.01):
+                with self.assertRaisesRegex(canary.CanaryError, "tart_command_failed") as raised:
+                    self._run(popen=record_vm_popen, run_bounded=runner)
+
+            saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+            self.assertEqual(len(attempts), 1)
+            self.assertEqual(guest_probes, [])
+            self.assertEqual(retained_during_manifest, [True])
+            self.assertEqual(saved["status"], "tainted")
+            self.assertEqual(saved["error"], "tart_command_failed")
+            self.assertIn("readiness_process_group_unverified", saved["cleanupErrors"])
+            self.assertIs(raised.exception.unreaped_process, proof_process)
+            self.assertNotIn("Popen", (self.evidence / "offline-macos-vm-canary.json").read_text())
+        finally:
+            _reap_test_children([proof_process, *vm_processes])
+
     def test_main_reports_malformed_clone_config_and_cleans_clone(self):
         malformed_outputs = (b"\xff", b"{invalid", b"[]", b"1", b"[" * 10_000 + b"0" + b"]" * 10_000)
         real_qualify = canary.qualify
@@ -1386,6 +1477,80 @@ raise SystemExit(2)
         self.assertTrue(state["killBeforeLeaderReaped"])
         self.assertTrue(state["leaderExitedObserved"])
 
+    def test_supervision_observes_exited_leader_without_reaping_before_group_sweep(self):
+        self._write_fake_tart(frames="none", spawn_term_ignoring_child=True, exit_run=True)
+        self._write_receipt()
+        real_popen = subprocess.Popen
+        real_killpg = os.killpg
+        state = {"pollCalls": 0, "leaderReaped": False, "sweepSawLeader": False,
+                 "returncodeAtSweep": "unset"}
+        signals = []
+
+        class NoPollProcess:
+            def __init__(self, process):
+                self.process = process
+                self.pid = process.pid
+
+            def __getattr__(self, name):
+                return getattr(self.process, name)
+
+            def poll(self):
+                state["pollCalls"] += 1
+                raise AssertionError("VM liveness check reaped its process")
+
+            def wait(self, *args, **kwargs):
+                result = self.process.wait(*args, **kwargs)
+                state["leaderReaped"] = True
+                return result
+
+        vm_process = None
+
+        def observe_popen(argv, **kwargs):
+            nonlocal vm_process
+            process = real_popen(argv, **kwargs)
+            if len(argv) > 1 and argv[1] == "run":
+                vm_process = NoPollProcess(process)
+                return vm_process
+            return process
+
+        def record_killpg(pid, sig):
+            signals.append((pid, sig))
+            if vm_process is not None and pid == vm_process.pid and sig == signal.SIGKILL:
+                state["returncodeAtSweep"] = vm_process.returncode
+                state["sweepSawLeader"] = os.waitid(
+                    os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+                state["leaderReapedAtSweep"] = state["leaderReaped"]
+                state["heartbeatAtSweep"] = int((self.tart_home / "descendant-heartbeat").read_text())
+            return real_killpg(pid, sig)
+
+        try:
+            with patch.object(canary.os, "killpg", side_effect=record_killpg):
+                with self.assertRaisesRegex(
+                        canary.CanaryError,
+                        "tart_vm_exited_(before_guest_ready|during_guest_canary|during_canary)"):
+                    self._run(popen=observe_popen)
+        finally:
+            if vm_process is not None and vm_process.returncode is None:
+                try:
+                    real_killpg(vm_process.pid, signal.SIGKILL)
+                except OSError:
+                    pass
+                vm_process.process.wait(timeout=5)
+
+        marker = self.tart_home / "descendant-pid"
+        self.assertTrue(marker.exists())
+        self.assertEqual(state["pollCalls"], 0)
+        self.assertEqual(state["returncodeAtSweep"], None)
+        self.assertTrue(state["sweepSawLeader"])
+        self.assertFalse(state["leaderReapedAtSweep"])
+        self.assertTrue(state["leaderReaped"])
+        self.assertIn((vm_process.pid, signal.SIGKILL), signals)
+        self.assertGreater(state["heartbeatAtSweep"], 0)
+        heartbeat = self.tart_home / "descendant-heartbeat"
+        heartbeat_after_sweep = int(heartbeat.read_text())
+        time.sleep(0.05)
+        self.assertEqual(int(heartbeat.read_text()), heartbeat_after_sweep)
+
     def test_term_eperm_keeps_exited_leader_unreaped_until_zombie_group_proof(self):
         self._write_fake_tart(frames="both")
         self._write_receipt()
@@ -1515,19 +1680,25 @@ raise SystemExit(2)
         self._write_receipt()
         popen = _ObservedPopen(subprocess.Popen)
         failed_group_kill = _UnverifiedGroupKillFailure(popen)
-        with patch.object(canary, "_owned_group_is_zombie_only", return_value=False) as zombie_proof, \
-                patch.object(canary.os, "killpg", side_effect=failed_group_kill):
-            with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
-                self._run(popen=popen)
-        self.assertEqual(failed_group_kill.signals, [signal.SIGTERM, signal.SIGKILL])
-        self.assertEqual(popen.terminate_calls, 0)
-        self.assertEqual(popen.kill_calls, 1)
-        zombie_proof.assert_called_once_with(popen.pid, canary._run_bounded, unittest.mock.ANY)
-        saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
-        self.assertEqual(saved["status"], "tainted")
-        self.assertIn("owned_clone_process_group_kill_failed", saved["cleanupErrors"])
-        self.assertIn("owned_clone_retained_vm_process_unreaped", saved["cleanupErrors"])
-        self.assertTrue((self.tart_home / "vms" / saved["cloneVmName"]).exists())
+        try:
+            with patch.object(canary, "_owned_group_is_zombie_only", return_value=False) as zombie_proof, \
+                    patch.object(canary.os, "killpg", side_effect=failed_group_kill):
+                with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
+                    self._run(popen=popen)
+            self.assertEqual(failed_group_kill.signals, [signal.SIGTERM, signal.SIGKILL])
+            self.assertEqual(popen.terminate_calls, 0)
+            self.assertEqual(popen.kill_calls, 0)
+            self.assertIsNone(popen.returncode)
+            self.assertTrue(_wait_for_unreaped_exit(popen.pid))
+            zombie_proof.assert_called_once_with(popen.pid, canary._run_bounded, unittest.mock.ANY)
+            saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+            self.assertEqual(saved["status"], "tainted")
+            self.assertIn("owned_clone_process_group_kill_failed", saved["cleanupErrors"])
+            self.assertIn("owned_clone_retained_vm_process_unreaped", saved["cleanupErrors"])
+            self.assertTrue((self.tart_home / "vms" / saved["cloneVmName"]).exists())
+        finally:
+            if popen.process is not None and popen.process.returncode is None:
+                popen.process.wait(timeout=5)
 
     def test_vm_zombie_proof_cleanup_failure_keeps_handles_and_publishes_tainted_manifest(self):
         self._write_fake_tart(frames="none")
@@ -2174,6 +2345,7 @@ raise SystemExit(2)
 
         real_popen = subprocess.Popen
         fake_processes = []
+        real_exit_status = canary._bounded_process_exit_status
 
         def fake_popen(argv, **kwargs):
             if argv[1] != "run":
@@ -2183,7 +2355,10 @@ raise SystemExit(2)
             return process
 
         try:
-            with patch.object(canary, "_wait_owned_vm_exit", return_value=None):
+            with patch.object(canary, "_wait_owned_vm_exit", return_value=None), \
+                    patch.object(canary, "_bounded_process_exit_status",
+                                 side_effect=lambda process: None if isinstance(process, UnreapedProcess)
+                                 else real_exit_status(process)):
                 with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
                     self._run(popen=fake_popen)
         finally:

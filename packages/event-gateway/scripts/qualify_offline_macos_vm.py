@@ -482,7 +482,9 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                 cleanup_errors.append("process_group_kill_failed")
             if identity_verified and not group_quiet:
                 try:
-                    process.kill()
+                    # The leader PID is still reserved by WNOWAIT. Signal it
+                    # directly so Popen.send_signal cannot poll/reap it first.
+                    os.kill(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
                 except OSError:
@@ -1347,10 +1349,10 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 failures.append("network_drainer_stopped")
                 return True
             if (log_thread.ident is not None and not log_thread.is_alive()
-                    and vm_proc.poll() is None):
+                    and _bounded_process_exit_status(vm_proc) is None):
                 failures.append("tart_log_drainer_stopped")
                 return True
-            return vm_proc.poll() is not None
+            return _bounded_process_exit_status(vm_proc) is not None
 
         readiness_argv = [str(tart_path), "exec", clone, "/usr/bin/true"]
         result["readinessProbe"]["argv"] = readiness_argv
@@ -1363,7 +1365,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 if failures:
                     raise CanaryError(failures[0])
                 raise CanaryError("tart_vm_exited_before_guest_ready")
-            if vm_proc.poll() is not None:
+            if _bounded_process_exit_status(vm_proc) is not None:
                 raise CanaryError("tart_vm_exited_before_guest_ready")
             result["readinessProbe"]["attempts"] += 1
             try:
@@ -1373,10 +1375,13 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 result["readinessProbe"]["ready"] = True
                 break
             except CanaryError as exc:
-                _record_command_cleanup(exc, cleanup_errors)
+                record_cleanup_exception(exc)
+                retry_cleanup_errors, retry_processes = _command_cleanup_metadata(exc)
+                if retry_cleanup_errors or retry_processes:
+                    raise
                 if failures:
                     raise CanaryError(failures[0]) from None
-                if vm_proc.poll() is not None:
+                if _bounded_process_exit_status(vm_proc) is not None:
                     raise CanaryError("tart_vm_exited_before_guest_ready") from None
                 if exc.args and exc.args[0] in {"tart_command_failed", "tart_command_timeout"}:
                     time.sleep(min(VM_READY_RETRY_INTERVAL, max(0, ready_deadline - clock())))
@@ -1393,10 +1398,10 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 output_limit=MAX_GUEST_OUTPUT, capture_paths=(guest_stdout_path, guest_stderr_path),
                 cancel_check=supervision_failed)
         except CanaryError as exc:
-            _record_command_cleanup(exc, cleanup_errors)
+            record_cleanup_exception(exc)
             if failures:
                 raise CanaryError(failures[0]) from None
-            if vm_proc.poll() is not None:
+            if _bounded_process_exit_status(vm_proc) is not None:
                 raise CanaryError("tart_vm_exited_during_guest_canary") from None
             raise
         result["guestOutput"] = {"bytes": len(guest_stdout), "sha256": _sha256(guest_stdout),
@@ -1410,7 +1415,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 if failures:
                     raise CanaryError(failures[0])
                 raise CanaryError("tart_vm_exited_during_canary")
-            if vm_proc.poll() is not None:
+            if _bounded_process_exit_status(vm_proc) is not None:
                 raise CanaryError("tart_vm_exited_during_canary")
             time.sleep(0.05)
         if "ipv4" not in records or "ipv6" not in records:
@@ -1425,7 +1430,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                           tart_path, clone, env, evidence, run_bounded, result, commands)
         result["status"] = "passed"
     except BaseException as exc:
-        _record_command_cleanup(exc, cleanup_errors)
+        record_cleanup_exception(exc)
         result["error"] = exc.args[0] if isinstance(exc, CanaryError) and exc.args else "canary_failed"
         raise
     finally:
@@ -1528,7 +1533,11 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                             cleanup_errors.append("owned_clone_process_group_kill_failed")
                             if not proof_failed:
                                 try:
-                                    vm_proc.kill()
+                                    # Group identity is still reserved; avoid
+                                    # Popen.kill(), whose poll can reap first.
+                                    os.kill(vm_proc.pid, signal.SIGKILL)
+                                except ProcessLookupError:
+                                    pass
                                 except OSError:
                                     cleanup_errors.append("tart_process_kill_failed")
                 if group_owned and not group_kill_failed:
