@@ -6,7 +6,7 @@ import importlib.util
 import os
 from pathlib import Path
 import signal
-import subprocess
+import subprocess  # nosec B404 -- tests invoke only fixed local Python code, with no shell or caller-controlled argv.
 import sys
 import tempfile
 import time
@@ -33,7 +33,7 @@ class DarwinWaitidCompatibilityTest(unittest.TestCase):
     def _spawn(self, code):
         return subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                close_fds=True, start_new_session=True)
+                                close_fds=True, start_new_session=True)  # nosec B603 -- callers pass reviewed code literals only.
 
     def _stop_and_reap(self, process):
         if process.returncode is None:

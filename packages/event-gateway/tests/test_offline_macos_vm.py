@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import socket
 import stat
-import subprocess  # nosec B404 -- subprocess calls target the fake Tart fixture, never a VM.
+import subprocess  # nosec B404 -- fake Tart and fixed sys.executable process fixtures; no shell.
 import sys
 import tempfile
 import signal
@@ -668,10 +668,83 @@ raise SystemExit(2)
         self.assertIs(raised.exception.unreaped_process, processes[0])
         _reap_test_children(processes)
 
+    def test_killpg_interruption_finishes_owned_leader_cleanup_and_preserves_primary(self):
+        process_recorder = _PythonChildProcesses(subprocess.Popen)
+        signals = []
+
+        def interrupt_group_signal(pid, sig):
+            signals.append((pid, sig))
+            raise canary.CanaryError("interrupted_by_sigint")
+
+        try:
+            with patch.object(canary.os, "killpg", side_effect=interrupt_group_signal), \
+                    patch.object(canary.subprocess, "Popen", side_effect=process_recorder):
+                with self.assertRaisesRegex(canary.CanaryError, "interrupted_by_sigint") as raised:
+                    canary._run_bounded(
+                        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 20)"],
+                        timeout=5, env=os.environ, output_limit=8,
+                    )
+
+            child = process_recorder.processes[0]
+            self.assertEqual(raised.exception.__cause__.args, ("tart_command_output_limit",))
+            self.assertEqual(signals, [(child.pid, signal.SIGKILL)])
+            self.assertIn("process_group_kill_failed", raised.exception.cleanup_errors)
+            self.assertIn("process_not_reaped_group_unverified", raised.exception.cleanup_errors)
+            self.assertIs(raised.exception.unreaped_process, child)
+        finally:
+            _reap_test_children(process_recorder.processes)
+
+    def test_reap_interruption_propagates_and_retains_bounded_process(self):
+        real_popen = subprocess.Popen
+        real_killpg = os.killpg
+        processes = []
+        signals = []
+
+        class WaitInterruptProcess:
+            def __init__(self, process):
+                self.process = process
+
+            def __getattr__(self, name):
+                return getattr(self.process, name)
+
+            def wait(self, timeout=None):
+                if timeout == 5:
+                    raise canary.CanaryError("interrupted_by_sigterm")
+                return self.process.wait(timeout=timeout)
+
+        def record_popen(argv, **kwargs):
+            process = WaitInterruptProcess(real_popen(argv, **kwargs))
+            if argv[0] == sys.executable:
+                processes.append(process)
+            return process
+
+        def group_kill_succeeds(pid, sig):
+            signals.append((pid, sig))
+            return real_killpg(pid, sig)
+
+        try:
+            with patch.object(canary.os, "killpg", side_effect=group_kill_succeeds), \
+                    patch.object(canary.subprocess, "Popen", side_effect=record_popen):
+                with self.assertRaisesRegex(canary.CanaryError, "interrupted_by_sigterm") as raised:
+                    canary._run_bounded(
+                        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 20)"],
+                        timeout=5, env=os.environ, output_limit=8,
+                    )
+
+            process = processes[0]
+            self.assertEqual(raised.exception.__cause__.args, ("tart_command_output_limit",))
+            self.assertEqual(signals, [(process.pid, signal.SIGKILL)])
+            self.assertIn("process_reap_failed", raised.exception.cleanup_errors)
+            self.assertIs(raised.exception.unreaped_process, process)
+        finally:
+            for process in processes:
+                process.process.kill()
+                process.process.wait(timeout=5)
+
     def test_interruption_during_zombie_proof_cleans_parent_and_retains_both_children(self):
         real_runner = canary._run_bounded
         process_recorder = _PythonChildProcesses(subprocess.Popen)
-        proof_process = subprocess.Popen(
+        proof_process = subprocess.Popen(  # nosec B603 -- fixed sys.executable sleep fixture, no shell.
             [sys.executable, "-c", "import time; time.sleep(60)"], stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
         )
@@ -704,7 +777,7 @@ raise SystemExit(2)
     def test_proof_cleanup_failure_preserves_both_unreaped_process_handles(self):
         real_runner = canary._run_bounded
         process_recorder = _PythonChildProcesses(subprocess.Popen)
-        proof_process = subprocess.Popen(
+        proof_process = subprocess.Popen(  # nosec B603 -- fixed sys.executable sleep fixture, no shell.
             [sys.executable, "-c", "import time; time.sleep(60)"], stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
         )
@@ -1415,6 +1488,110 @@ raise SystemExit(2)
         self.assertIn("owned_clone_process_group_kill_failed", saved["cleanupErrors"])
         self.assertIn("owned_clone_retained_vm_process_unreaped", saved["cleanupErrors"])
         self.assertTrue((self.tart_home / "vms" / saved["cloneVmName"]).exists())
+
+    def test_vm_zombie_proof_cleanup_failure_keeps_handles_and_publishes_tainted_manifest(self):
+        self._write_fake_tart(frames="none")
+        self._write_receipt()
+        real_popen = subprocess.Popen
+        real_killpg = os.killpg
+        proof_process = subprocess.Popen(  # nosec B603 -- fixed sys.executable sleep fixture, no shell.
+            [sys.executable, "-c", "import time; time.sleep(60)"], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+        )
+        vm_process = None
+
+        def observe_vm_popen(argv, **kwargs):
+            nonlocal vm_process
+            process = real_popen(argv, **kwargs)
+            if len(argv) > 1 and argv[1] == "run":
+                vm_process = process
+            return process
+
+        def inject_vm_group_kill_failure(pid, sig):
+            if vm_process is not None and pid == vm_process.pid:
+                if sig == signal.SIGTERM:
+                    os.kill(pid, sig)
+                    return
+                if sig == signal.SIGKILL:
+                    raise PermissionError(1, "injected EPERM")
+            return real_killpg(pid, sig)
+
+        def fail_zombie_proof(*_args, **_kwargs):
+            error = canary.CanaryError("tart_command_output_limit")
+            error.cleanup_errors = ("proof_process_group_unverified",)
+            error.unreaped_process = proof_process
+            raise error
+
+        try:
+            with patch.object(canary, "_owned_group_is_zombie_only", side_effect=fail_zombie_proof), \
+                    patch.object(canary.os, "killpg", side_effect=inject_vm_group_kill_failure):
+                with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
+                    self._run(popen=observe_vm_popen)
+
+            saved = self._assert_published_summary(
+                {"kind": "offline-macos-vm-boundary-canary-v1", "status": "tainted",
+                 "resultSha256": canary._sha256(
+                     (self.evidence / "offline-macos-vm-canary.json").read_bytes())})
+            self.assertEqual(saved["error"], "guest_external_frames_not_observed")
+            self.assertEqual(saved["status"], "tainted")
+            self.assertIn("proof_process_group_unverified", saved["cleanupErrors"])
+            self.assertIn("owned_clone_process_group_kill_failed", saved["cleanupErrors"])
+            self.assertIn("owned_clone_retained_vm_process_unreaped", saved["cleanupErrors"])
+            self.assertTrue(saved["vmStop"]["stateConfirmedStopped"])
+            self.assertIsNone(proof_process.returncode)
+            self.assertIsNotNone(vm_process)
+            self.assertIsNone(vm_process.returncode)
+            self.assertTrue((self.tart_home / "vms" / saved["cloneVmName"]).exists())
+            self.assertNotIn("Popen", (self.evidence / "offline-macos-vm-canary.json").read_text())
+        finally:
+            _reap_test_children([proof_process, *([vm_process] if vm_process is not None else [])])
+
+    def test_unknown_vm_exit_status_fails_closed_and_still_publishes_manifest(self):
+        self._write_fake_tart(frames="none")
+        self._write_receipt()
+        real_popen = subprocess.Popen
+        real_killpg = os.killpg
+        vm_process = None
+        vm_group_signals = []
+
+        def observe_vm_popen(argv, **kwargs):
+            nonlocal vm_process
+            process = real_popen(argv, **kwargs)
+            if len(argv) > 1 and argv[1] == "run":
+                vm_process = process
+            return process
+
+        def unknown_vm_status(process, timeout):
+            if vm_process is not None and process.pid == vm_process.pid:
+                raise canary.CanaryError("tart_command_process_status_unavailable")
+            return real_wait_owned_vm_exit(process, timeout)
+
+        real_wait_owned_vm_exit = canary._wait_owned_vm_exit
+
+        def record_killpg(pid, sig):
+            if vm_process is not None and pid == vm_process.pid:
+                vm_group_signals.append(sig)
+                return
+            return real_killpg(pid, sig)
+
+        try:
+            with patch.object(canary, "_wait_owned_vm_exit", side_effect=unknown_vm_status), \
+                    patch.object(canary.os, "killpg", side_effect=record_killpg):
+                with self.assertRaisesRegex(canary.CanaryError, "guest_external_frames_not_observed"):
+                    self._run(popen=observe_vm_popen)
+
+            saved = json.loads((self.evidence / "offline-macos-vm-canary.json").read_text())
+            self.assertEqual(saved["error"], "guest_external_frames_not_observed")
+            self.assertEqual(saved["status"], "tainted")
+            self.assertIn("owned_clone_process_group_identity_lost", saved["cleanupErrors"])
+            self.assertIn("owned_clone_retained_vm_process_unreaped", saved["cleanupErrors"])
+            self.assertTrue(saved["vmStop"]["stateConfirmedStopped"])
+            self.assertEqual(vm_group_signals, [])
+            self.assertIsNotNone(vm_process)
+            self.assertIsNone(vm_process.returncode)
+            self.assertTrue((self.tart_home / "vms" / saved["cloneVmName"]).exists())
+        finally:
+            _reap_test_children([vm_process] if vm_process is not None else [])
 
     def test_unverified_bounded_child_cleanup_taints_artifact_and_preserves_primary_error(self):
         self._write_fake_tart(frames="both")

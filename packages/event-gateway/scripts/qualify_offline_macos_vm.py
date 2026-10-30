@@ -414,7 +414,7 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
         cleanup_errors = []
         group_quiet = False
         identity_verified = False
-        proof_interruption = None
+        cleanup_interruption = None
         proof_cleanup_error = None
         try:
             if getattr(process, "returncode", None) is not None:
@@ -425,7 +425,10 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
         except CanaryError as exc:
             cleanup_errors.append("process_group_identity_lost")
             if _is_interruption(exc):
-                proof_interruption = exc
+                cleanup_interruption = exc
+        except (KeyboardInterrupt, SystemExit) as exc:
+            cleanup_errors.append("process_group_identity_lost")
+            cleanup_interruption = exc
         else:
             identity_verified = True
             try:
@@ -433,6 +436,13 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                 group_quiet = True
             except ProcessLookupError:
                 group_quiet = True
+            except CanaryError as exc:
+                cleanup_errors.append("process_group_kill_failed")
+                if _is_interruption(exc):
+                    cleanup_interruption = exc
+            except (KeyboardInterrupt, SystemExit) as exc:
+                cleanup_errors.append("process_group_kill_failed")
+                cleanup_interruption = exc
             except PermissionError:
                 if _allow_zombie_proof:
                     # The proof is itself bounded. Disable nested proof if its own
@@ -448,9 +458,12 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                         if _is_interruption(exc) or proof_errors or proof_processes:
                             proof_cleanup_error = exc
                             if _is_interruption(exc):
-                                proof_interruption = exc
+                                cleanup_interruption = exc
                         else:
                             raise
+                    except (KeyboardInterrupt, SystemExit) as exc:
+                        cleanup_interruption = exc
+                        cleanup_errors.append("process_group_kill_failed")
                 if not group_quiet:
                     cleanup_errors.append("process_group_kill_failed")
             except OSError:
@@ -464,23 +477,39 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                     cleanup_errors.append("process_kill_failed")
                 except CanaryError as exc:
                     if _is_interruption(exc):
-                        if proof_interruption is None:
-                            proof_interruption = exc
+                        if cleanup_interruption is None:
+                            cleanup_interruption = exc
                         else:
-                            _inherit_command_cleanup(exc, proof_interruption)
+                            _inherit_command_cleanup(exc, cleanup_interruption)
                     else:
                         cleanup_errors.append("process_kill_failed")
+                except (KeyboardInterrupt, SystemExit) as exc:
+                    if cleanup_interruption is None:
+                        cleanup_interruption = exc
+                    cleanup_errors.append("process_kill_failed")
                 cleanup_errors.append("process_not_reaped_group_unverified")
-        if proof_interruption is not None:
-            _attach_command_cleanup(proof_interruption, cleanup_errors, (process,))
-            raise proof_interruption from primary_error
         if proof_cleanup_error is not None:
             _inherit_command_cleanup(proof_cleanup_error, primary_error)
         if group_quiet:
             try:
                 process.wait(timeout=5)
+            except CanaryError as exc:
+                cleanup_errors.append("process_reap_failed")
+                if _is_interruption(exc):
+                    if cleanup_interruption is None:
+                        cleanup_interruption = exc
+                    else:
+                        _inherit_command_cleanup(exc, cleanup_interruption)
+            except (KeyboardInterrupt, SystemExit) as exc:
+                cleanup_errors.append("process_reap_failed")
+                if cleanup_interruption is None:
+                    cleanup_interruption = exc
             except BaseException:
                 cleanup_errors.append("process_reap_failed")
+        if cleanup_interruption is not None:
+            _inherit_command_cleanup(primary_error, cleanup_interruption)
+            _attach_command_cleanup(cleanup_interruption, cleanup_errors, (process,))
+            raise cleanup_interruption from primary_error
         proof_errors, proof_processes = _command_cleanup_metadata(primary_error)
         keep_process = ("process_not_reaped_group_unverified" in cleanup_errors
                         or "process_reap_failed" in cleanup_errors
@@ -1259,7 +1288,16 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
     guest_stdout_path = evidence / "guest-stdout.bin"
     guest_stderr_path = evidence / "guest-stderr.bin"
     cleanup_errors = []
+    cleanup_processes = []
     stop_outcome = {"commandSucceeded": None, "stateConfirmedStopped": False}
+
+    def record_cleanup_exception(error):
+        _record_command_cleanup(error, cleanup_errors)
+        _, processes = _command_cleanup_metadata(error)
+        for process in processes:
+            if all(process is not existing for existing in cleanup_processes):
+                cleanup_processes.append(process)
+
     saved_signal_handlers = _install_termination_handlers()
     try:
         dhcp_probe, dhcp_bundle, dhcp_binary_fd, dhcp_binary = _prepare_softnet_dhcp(softnet_dhcp_binary)
@@ -1403,7 +1441,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 try:
                     run_bounded([str(tart_path), "stop", clone], timeout=15, env=env)
                 except BaseException as exc:
-                    _record_command_cleanup(exc, cleanup_errors)
+                    record_cleanup_exception(exc)
                     stop_outcome["commandSucceeded"] = False
                 else:
                     stop_outcome["commandSucceeded"] = True
@@ -1414,47 +1452,99 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 except OSError:
                     group_owned = False
                     cleanup_errors.append("owned_clone_process_group_identity_lost")
+                except CanaryError as exc:
+                    group_owned = False
+                    cleanup_errors.append("owned_clone_process_group_identity_lost")
+                    record_cleanup_exception(exc)
+                except (KeyboardInterrupt, SystemExit) as exc:
+                    group_owned = False
+                    cleanup_errors.append("owned_clone_process_group_identity_lost")
+                    record_cleanup_exception(exc)
                 if group_owned:
                     try:
                         os.killpg(vm_proc.pid, signal.SIGTERM)
                     except ProcessLookupError:
                         pass
+                    except CanaryError as exc:
+                        group_owned = False
+                        cleanup_errors.append("owned_clone_process_group_kill_failed")
+                        record_cleanup_exception(exc)
+                    except (KeyboardInterrupt, SystemExit) as exc:
+                        group_owned = False
+                        cleanup_errors.append("owned_clone_process_group_kill_failed")
+                        record_cleanup_exception(exc)
                     except OSError:
                         # Popen.terminate() can reap the leader; the group KILL below is authoritative.
                         pass
+                if group_owned:
                     try:
                         _wait_owned_vm_exit(vm_proc, 10)
                     except OSError:
                         group_owned = False
                         cleanup_errors.append("owned_clone_process_group_identity_lost")
+                    except CanaryError as exc:
+                        group_owned = False
+                        cleanup_errors.append("owned_clone_process_group_identity_lost")
+                        record_cleanup_exception(exc)
+                    except (KeyboardInterrupt, SystemExit) as exc:
+                        group_owned = False
+                        cleanup_errors.append("owned_clone_process_group_identity_lost")
+                        record_cleanup_exception(exc)
                 if group_owned:
                     # Sweep descendants before reaping can release the group's PID.
                     try:
                         os.killpg(vm_proc.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
+                    except CanaryError as exc:
+                        group_kill_failed = True
+                        cleanup_errors.append("owned_clone_process_group_kill_failed")
+                        record_cleanup_exception(exc)
+                    except (KeyboardInterrupt, SystemExit) as exc:
+                        group_kill_failed = True
+                        cleanup_errors.append("owned_clone_process_group_kill_failed")
+                        record_cleanup_exception(exc)
                     except OSError as exc:
-                        zombie_only = isinstance(exc, PermissionError) and _owned_group_is_zombie_only(
-                            vm_proc.pid, run_bounded, env)
+                        zombie_only = False
+                        proof_failed = False
+                        if isinstance(exc, PermissionError):
+                            try:
+                                zombie_only = _owned_group_is_zombie_only(vm_proc.pid, run_bounded, env)
+                            except BaseException as proof_error:
+                                # A raised proof error means the group state is unknown. Keep
+                                # the leader unreaped and its clone retained while recording
+                                # any bounded proof-process handles for the rest of teardown.
+                                proof_failed = True
+                                record_cleanup_exception(proof_error)
                         if not zombie_only:
                             group_kill_failed = True
                             cleanup_errors.append("owned_clone_process_group_kill_failed")
-                            try:
-                                vm_proc.kill()
-                            except OSError:
-                                cleanup_errors.append("tart_process_kill_failed")
-                try:
-                    vm_proc.wait(timeout=5)
-                    vm_reaped = group_owned and not group_kill_failed
-                except BaseException:
-                    cleanup_errors.append("tart_process_reap_failed")
+                            if not proof_failed:
+                                try:
+                                    vm_proc.kill()
+                                except OSError:
+                                    cleanup_errors.append("tart_process_kill_failed")
+                if group_owned and not group_kill_failed:
+                    try:
+                        vm_proc.wait(timeout=5)
+                        vm_reaped = True
+                    except CanaryError as exc:
+                        cleanup_errors.append("tart_process_reap_failed")
+                        record_cleanup_exception(exc)
+                    except (KeyboardInterrupt, SystemExit) as exc:
+                        cleanup_errors.append("tart_process_reap_failed")
+                        record_cleanup_exception(exc)
+                    except BaseException:
+                        cleanup_errors.append("tart_process_reap_failed")
+                elif not vm_reaped:
+                    cleanup_errors.append("owned_clone_retained_vm_process_unreaped")
             if clone_created:
                 try:
                     state_output, _ = run_bounded(
                         [str(tart_path), "get", clone, "--format", "json"], timeout=10, env=env)
                     stop_outcome["stateConfirmedStopped"] = _vm_stopped(state_output)
                 except BaseException as exc:
-                    _record_command_cleanup(exc, cleanup_errors)
+                    record_cleanup_exception(exc)
                     stop_outcome["stateConfirmedStopped"] = False
                 if not stop_outcome["stateConfirmedStopped"]:
                     cleanup_errors.append("owned_clone_vm_state_not_confirmed_stopped")
@@ -1491,7 +1581,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 try:
                     run_bounded([str(tart_path), "delete", clone], timeout=20, env=env)
                 except BaseException as exc:
-                    _record_command_cleanup(exc, cleanup_errors)
+                    record_cleanup_exception(exc)
                     cleanup_errors.append("owned_clone_delete_failed")
             elif clone_created and not vm_reaped:
                 cleanup_errors.append("owned_clone_retained_vm_process_unreaped")
