@@ -322,6 +322,10 @@ requires MASQUE and limits requests to ten seconds; Event API requests retain
 their five-second deadline, TLS verification, and redirect refusal. Live
 host/guest separation must be qualified before dependency acquisition.
 
+The bounded host qualification harness and its recovery requirements are
+documented in [the cloud adapter guide](docs/cloud-adapter.md). A successful
+host transport check alone does not qualify guest isolation or native execution.
+
 `owner_interaction_required` means the Gateway recognized a Cloudflare Gateway
 block redirect. Check WARP authentication and the Gateway policy; this code alone
 does not prove session expiry. The daemon never opens a browser or follows the
