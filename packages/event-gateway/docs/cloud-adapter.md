@@ -65,11 +65,28 @@ The absolute `--cloud-config` path selects the enrollment directory containing
 `node-key.pem`. Supply a fresh runtime UUID and an existing private (0700)
 `--evidence-root`; this script does not attach a runtime.
 
+The host trust boundary includes the owner, root, and local administrators. Only
+the fixed `/Applications` root:admin (gid 80, 0775) ancestor receives an explicit
+exception; other writable ancestors and mutating ACL grants are refused. The
+launcher symlink and its parents are checked, the app binary is hashed through
+one opened file, and commands execute the fixed verified bundle target. This
+does not defend against a malicious owner or local administrator.
+
+Receipts become visible only after complete, durable writes and never replace
+an existing receipt. A durable `command-active.json` fence is published before
+each bounded command starts; a per-run lock serializes commands. The fence is
+removed only after verified process cleanup. Death between commands permits
+independent recovery. Death during an unaccounted command leaves the fence and
+blocks further commands or success certification, even if recording the separate
+`command-cleanup-unresolved.json` failure also fails. Neither record is cleared
+automatically; retain the evidence and reconcile process quiescence before
+attempting manual recovery or another live trial.
+
 Run its offline tests and the independent fake-WARP LaunchAgent recovery proof
 before using it against the host. The [redacted scheduler proof](native-bridge/warp-proxy-recovery-proof.json)
-records the exact source hash and four real LaunchAgent cases with fake WARP
-commands, including a transient read failure after parent death and delayed
-mode visibility. A passing live receipt proves one authenticated
+records the exact source hash and real LaunchAgent cases with fake WARP
+commands, including recovery after parent death between commands, refusal after
+death during a command, a transient read failure, and delayed mode visibility. A passing live receipt proves one authenticated
 HTTPS transport request and verified restoration. The expected
 `native_binding_unqualified` response confirms agent authentication at the API;
 the server checks that guard before node proof. It does not qualify a native
