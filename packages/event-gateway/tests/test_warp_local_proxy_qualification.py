@@ -853,6 +853,7 @@ class QualificationTests(unittest.TestCase):
             config = root / 'cloud.json'
             config.write_text(json.dumps(cloud_config()))
             config.chmod(0o600)
+
             def loader_for_timeout(config_path, state_dir):
                 transport = json.loads(Path(config_path).read_text()).get('httpsTransport', 'direct')
                 return GuardedClient() if transport == 'direct' else TimeoutClient()
