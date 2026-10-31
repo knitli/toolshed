@@ -100,10 +100,10 @@ async function writeReceipt(env, receipt) {
   const serialized = JSON.stringify(receipt);
   if (new TextEncoder().encode(serialized).byteLength >= MAX_RECEIPT_BYTES) throw new Error('receipt_write_failed');
   try {
-    if (Number.isSafeInteger(receipt.scheduledAtMs)) {
-      await env.STATUS.put(`observations/${receipt.scheduledAtMs}`, serialized, { expirationTtl: 86_400 });
-    }
-    await env.STATUS.put('latest', serialized, { expirationTtl: 86_400 });
+    await env.STATUS.put(`observations/${receipt.observationId}`, serialized, { expirationTtl: 86_400 });
+    const scheduleKey = Number.isSafeInteger(receipt.scheduledAtMs) ? receipt.scheduledAtMs : 'invalid';
+    // Each commit pairs with one observation; there is no shared mutable latest pointer.
+    await env.STATUS.put(`commits/${scheduleKey}/${receipt.observationId}`, serialized, { expirationTtl: 86_400 });
   } catch { throw new Error('receipt_write_failed'); }
 }
 
@@ -130,6 +130,7 @@ async function runCleanup(token, calls) {
 
 export default {
   async scheduled(controller, env) {
+    const observationId = crypto.randomUUID();
     const now = Date.now();
     const scheduledAtMs = controller?.scheduledTime;
     const scheduleValid = Number.isSafeInteger(scheduledAtMs) && scheduledAtMs >= 0
@@ -150,6 +151,7 @@ export default {
 
     const receipt = {
       kind: 'device_profile_rollback',
+      observationId,
       profileId: PROFILE_ID,
       observedAtMs: now,
       scheduledAtMs: scheduleValid ? scheduledAtMs : null,

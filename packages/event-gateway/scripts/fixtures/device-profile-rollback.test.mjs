@@ -12,12 +12,13 @@ const TOKEN = 'test-secret-token-7e2c';
 const START = 1_900_000_000_000;
 
 async function harness(sourceText = source) {
-  const state = { now: START, calls: [], fetch: async () => { throw new Error('unexpected fetch'); }, timeoutSignals: [] };
+  const state = { now: START, calls: [], fetch: async () => { throw new Error('unexpected fetch'); }, timeoutSignals: [], uuidCounter: 0 };
   class FakeDate extends Date { static now() { return state.now; } }
   class FakeAbortSignal { static timeout(ms) { const signal = { timeoutMs: ms }; state.timeoutSignals.push(signal); return signal; } }
   const context = vm.createContext({
     Response, Headers, TextEncoder, TextDecoder, URL, Date: FakeDate, Number, Object, Array, Set, JSON, Uint8Array, AbortSignal: FakeAbortSignal,
     fetch: (...args) => { state.calls.push(args); return state.fetch(...args); },
+    crypto: { randomUUID: () => `00000000-0000-4000-8000-${String(++state.uuidCounter).padStart(12, '0')}` },
   });
   const module = new vm.SourceTextModule(sourceText, { context });
   await module.link((specifier) => { throw new Error(`unexpected import ${specifier}`); });
@@ -49,13 +50,18 @@ function lease(now = START, rollbackAtMs = now + 10_000, tokenExpiresAtMs = now 
 async function schedule(worker, environment, scheduledTime = START) {
   await worker.scheduled({ scheduledTime }, environment);
 }
-function receipt(writes, key = 'latest') {
-  const entry = [...writes].reverse().find(([k]) => k === key);
-  assert.ok(entry, `missing KV write ${key}`);
+function commitKey(value) {
+  const scheduleKey = Number.isSafeInteger(value.scheduledAtMs) ? value.scheduledAtMs : 'invalid';
+  return `commits/${scheduleKey}/${value.observationId}`;
+}
+function receipt(writes, key) {
+  const entry = [...writes].reverse().find(([k]) => key ? k === key : k.startsWith('commits/'));
+  assert.ok(entry, `missing KV write ${key ?? 'commits/<schedule>/<id>'}`);
   return JSON.parse(entry[1]);
 }
 function assertReceiptShape(value, status) {
-  assert.deepEqual(Object.keys(value).sort(), ['apiCalls', 'disabledVerified', 'kind', 'observedAtMs', 'profileId', 'rollbackAtMs', 'scheduledAtMs', 'status'].concat(value.failCode ? ['failCode'] : []).sort());
+  assert.deepEqual(Object.keys(value).sort(), ['apiCalls', 'disabledVerified', 'kind', 'observationId', 'observedAtMs', 'profileId', 'rollbackAtMs', 'scheduledAtMs', 'status'].concat(value.failCode ? ['failCode'] : []).sort());
+  assert.match(value.observationId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(value.kind, 'device_profile_rollback');
   assert.equal(value.profileId, PROFILE_ID);
   assert.equal(value.status, status);
@@ -151,8 +157,11 @@ test('all API calls use the fixed profile, reject redirects, bound timeout, and 
   assert.deepEqual(JSON.parse(h.state.calls[1][1].body), { enabled: false });
   assert.equal(receipt(data.writes).apiCalls, 3);
   assert.equal(receipt(data.writes).disabledVerified, true);
-  assert.equal(receipt(data.writes, `observations/${START}`).scheduledAtMs, START);
-  assert.deepEqual(data.writes.map(([key]) => key), [`observations/${START}`, 'latest']);
+  const committed = receipt(data.writes);
+  const observationKey = `observations/${committed.observationId}`;
+  assert.equal(receipt(data.writes, observationKey).scheduledAtMs, START);
+  assert.deepEqual(data.writes.map(([key]) => key), [observationKey, commitKey(committed)]);
+  assert.equal(data.writes[0][1], data.writes[1][1]);
 });
 
 test('pre-cleanup mutable drift still disables the pinned profile', async (t) => {
@@ -297,7 +306,86 @@ test('network error containing credentials is redacted and a later cron retries'
   assert.equal(h.state.calls.length, 1);
 });
 
-test('observation write failure preserves latest while due cleanup completes', async () => {
+test('duplicate scheduled times get distinct observations and exact per-run commits', async () => {
+  const h = await harness();
+  h.state.now = START;
+  let getCount = 0;
+  h.state.fetch = async (url, init) => init.method === 'GET'
+    ? jsonResponse(getCount++ % 2 === 0 ? enabledProfile() : disabledProfile())
+    : jsonResponse(disabledProfile());
+  const entries = new Map();
+  const kv = { async put(key, value) { entries.set(key, value); } };
+  const data = env({ lease: lease(START - 10_000, START), kv });
+
+  await schedule(h.worker, data.env, START);
+  const commits = () => [...entries].filter(([key]) => key.startsWith('commits/'));
+  const first = JSON.parse(commits()[0][1]);
+  const firstKey = `observations/${first.observationId}`;
+  assert.equal(entries.get(firstKey), commits()[0][1]);
+  await schedule(h.worker, data.env, START);
+  const second = JSON.parse(commits()[1][1]);
+  const secondKey = `observations/${second.observationId}`;
+
+  assert.equal(first.scheduledAtMs, START);
+  assert.equal(second.scheduledAtMs, START);
+  assert.notEqual(first.observationId, second.observationId);
+  assert.notEqual(firstKey, secondKey);
+  assert.equal(entries.get(firstKey), JSON.stringify(first));
+  assert.equal(entries.get(secondKey), commits()[1][1]);
+  assert.equal(entries.get(secondKey), JSON.stringify(second));
+  assert.deepEqual(commits().map(([key]) => key), [commitKey(first), commitKey(second)]);
+  assert.equal(entries.has('latest'), false);
+  assert.equal(h.state.calls.length, 6);
+});
+
+test('overlapping runs retain separate observation and commit pairs', async () => {
+  const h = await harness();
+  h.state.now = START + 30_000;
+  const entries = new Map();
+  const kv = { async put(key, value) { entries.set(key, value); } };
+  const data = env({ lease: lease(START, START + 10_000), kv });
+  let releaseOldGet;
+  let markOldGetStarted;
+  const oldGetStarted = new Promise((resolve) => { markOldGetStarted = resolve; });
+  const oldGetGate = new Promise((resolve) => { releaseOldGet = resolve; });
+  let getCount = 0;
+  h.state.fetch = async (url, init) => {
+    if (init.method === 'PATCH') return jsonResponse(disabledProfile());
+    const index = getCount++;
+    if (index === 0) {
+      markOldGetStarted();
+      await oldGetGate;
+      return jsonResponse(enabledProfile());
+    }
+    return jsonResponse(index === 1 ? enabledProfile() : disabledProfile());
+  };
+
+  const oldScheduledAt = START + 10_000;
+  const newScheduledAt = START + 20_000;
+  const oldRun = schedule(h.worker, data.env, oldScheduledAt);
+  await oldGetStarted;
+  await schedule(h.worker, data.env, newScheduledAt);
+  const commits = () => [...entries].filter(([key]) => key.startsWith('commits/'));
+  const newer = JSON.parse(commits()[0][1]);
+  const newerKey = `observations/${newer.observationId}`;
+  assert.equal(newer.scheduledAtMs, newScheduledAt);
+  assert.equal(entries.get(commits()[0][0]), entries.get(newerKey));
+
+  releaseOldGet();
+  await oldRun;
+  const older = JSON.parse(commits()[1][1]);
+  const olderKey = `observations/${older.observationId}`;
+  assert.equal(older.scheduledAtMs, oldScheduledAt);
+  assert.notEqual(older.observationId, newer.observationId);
+  assert.equal(entries.get(commits()[1][0]), entries.get(olderKey));
+  assert.equal(entries.get(olderKey), JSON.stringify(older));
+  assert.equal(entries.get(newerKey), JSON.stringify(newer));
+  assert.deepEqual(commits().map(([key]) => key), [commitKey(newer), commitKey(older)]);
+  assert.equal(entries.has('latest'), false);
+  assert.equal(h.state.calls.length, 6);
+});
+
+test('observation write failure preserves prior commits while due cleanup completes', async () => {
   const h = await harness();
   h.state.now = START;
   let getCount = 0;
@@ -305,16 +393,19 @@ test('observation write failure preserves latest while due cleanup completes', a
     ? jsonResponse(getCount++ === 0 ? enabledProfile() : disabledProfile())
     : jsonResponse(disabledProfile());
   const keys = [];
-  const values = new Map([['latest', 'previous receipt']]);
+  const priorCommitKey = 'commits/previous/previous-id';
+  const values = new Map([[priorCommitKey, 'previous receipt']]);
   const kv = { async put(key, value) { keys.push(key); if (key.startsWith('observations/')) throw new Error('observation storage unavailable'); values.set(key, value); } };
   const data = env({ lease: lease(START - 10_000, START), kv });
   await assert.rejects(schedule(h.worker, data.env, START), /receipt_write_failed/);
   assert.deepEqual(h.state.calls.map(([, init]) => init.method), ['GET', 'PATCH', 'GET']);
-  assert.deepEqual(keys, [`observations/${START}`]);
-  assert.equal(values.get('latest'), 'previous receipt');
+  assert.equal(keys.length, 1);
+  assert.match(keys[0], /^observations\/[0-9a-f-]{36}$/);
+  assert.equal(values.get(priorCommitKey), 'previous receipt');
+  assert.equal(values.has('latest'), false);
 });
 
-test('latest write failure leaves the completed observation history available', async () => {
+test('commit write failure leaves the completed observation available', async () => {
   const h = await harness();
   h.state.now = START;
   let getCount = 0;
@@ -322,14 +413,20 @@ test('latest write failure leaves the completed observation history available', 
     ? jsonResponse(getCount++ === 0 ? enabledProfile() : disabledProfile())
     : jsonResponse(disabledProfile());
   const keys = [];
-  const values = new Map([['latest', 'previous receipt']]);
-  const kv = { async put(key, value) { keys.push(key); if (key === 'latest') throw new Error('latest storage unavailable'); values.set(key, value); } };
+  const priorCommitKey = 'commits/previous/previous-id';
+  const values = new Map([[priorCommitKey, 'previous receipt']]);
+  const kv = { async put(key, value) { keys.push(key); if (key.startsWith('commits/')) throw new Error('commit storage unavailable'); values.set(key, value); } };
   const data = env({ lease: lease(START - 10_000, START), kv });
   await assert.rejects(schedule(h.worker, data.env, START), /receipt_write_failed/);
   assert.deepEqual(h.state.calls.map(([, init]) => init.method), ['GET', 'PATCH', 'GET']);
-  assert.deepEqual(keys, [`observations/${START}`, 'latest']);
-  assert.equal(values.get('latest'), 'previous receipt');
-  assert.equal(JSON.parse(values.get(`observations/${START}`)).status, 'disabled', values.get(`observations/${START}`));
+  assert.equal(keys.length, 2);
+  assert.match(keys[0], /^observations\/[0-9a-f-]{36}$/);
+  const observation = JSON.parse(values.get(keys[0]));
+  assert.equal(keys[1], commitKey(observation));
+  assert.equal(values.get(priorCommitKey), 'previous receipt');
+  assert.equal(values.has('latest'), false);
+  assert.equal(observation.observationId, keys[0].slice('observations/'.length));
+  assert.equal(observation.status, 'disabled');
 });
 
 test('invalid scheduled time is rejected without API calls', async () => {
@@ -338,11 +435,19 @@ test('invalid scheduled time is rejected without API calls', async () => {
     const data = env({ lease: lease(START - 10_000, START) });
     h.state.now = START;
     await schedule(h.worker, data.env, scheduledTime);
-    assertReceiptShape(receipt(data.writes), 'invalid_schedule');
+    const result = receipt(data.writes);
+    assertReceiptShape(result, 'invalid_schedule');
+    assert.equal(result.scheduledAtMs, null);
+    assert.equal(receipt(data.writes, `observations/${result.observationId}`).observationId, result.observationId);
+    assert.deepEqual(data.writes.map(([key]) => key), [`observations/${result.observationId}`, commitKey(result)]);
     assert.equal(h.state.calls.length, 0);
   }
   const missing = env({ lease: lease(START - 10_000, START) });
   await h.worker.scheduled({}, missing.env);
-  assertReceiptShape(receipt(missing.writes), 'invalid_schedule');
+  const missingResult = receipt(missing.writes);
+  assertReceiptShape(missingResult, 'invalid_schedule');
+  assert.equal(missingResult.scheduledAtMs, null);
+  assert.equal(receipt(missing.writes, `observations/${missingResult.observationId}`).observationId, missingResult.observationId);
+  assert.deepEqual(missing.writes.map(([key]) => key), [`observations/${missingResult.observationId}`, commitKey(missingResult)]);
   assert.equal(h.state.calls.length, 0);
 });
