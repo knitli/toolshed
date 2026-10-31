@@ -44,6 +44,8 @@ jobs:
         run: node --test tests/test_coupled_source_hashes.mjs
       - name: Test trusted Gateway probe fixture
         run: node --experimental-vm-modules --test scripts/fixtures/gateway-identity-probe.test.mjs
+      - name: Test bounded device profile rollback
+        run: node --experimental-vm-modules --test scripts/fixtures/device-profile-rollback.test.mjs
       - name: Build wheel
         run: uv build --wheel
       - name: Smoke test isolated installed wheel offline
