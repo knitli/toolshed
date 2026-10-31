@@ -66,17 +66,21 @@ async function readJsonResponse(response) {
 }
 
 async function callApi(method, token, calls) {
-  calls.count += 1;
+  calls.count += 1; // Counts fixed-URL request attempts, not confirmed network dispatches.
   let response;
   try {
     response = await fetch(API_URL, {
       method,
-      redirect: 'error',
+      redirect: 'manual',
       signal: AbortSignal.timeout(5_000),
       headers: { authorization: `Bearer ${token}`, accept: 'application/json', ...(method === 'PATCH' ? { 'content-type': 'application/json' } : {}) },
       ...(method === 'PATCH' ? { body: JSON.stringify({ enabled: false }) } : {}),
     });
   } catch { return { ok: false, code: 'api_network' }; }
+  if (response.status >= 300 && response.status < 400) {
+    try { await response.body?.cancel(); } catch { return { ok: false, code: 'api_body_read' }; }
+    return { ok: false, code: 'api_status' };
+  }
   if (method === 'GET' && response.status === 404) {
     try { await response.body?.cancel(); } catch { return { ok: false, code: 'api_body_read' }; }
     return { ok: true, absent: true };
