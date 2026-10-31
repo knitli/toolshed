@@ -811,7 +811,9 @@ class QualificationTests(unittest.TestCase):
             def record_loader(*_):
                 client_calls.append(True)
                 return GuardedClient()
-            with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+            with patch.object(QUAL, '_check_path_acl'), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                     patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                     patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), patch.object(QUAL, '_port_free', return_value=True):
                 with self.assertRaisesRegex(QUAL.QualificationError, 'cloud_transport_not_direct'):
@@ -835,7 +837,9 @@ class QualificationTests(unittest.TestCase):
                 Path(config_path).write_text(json.dumps(value))
                 Path(config_path).chmod(0o600)
                 return GuardedClient()
-            with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+            with patch.object(QUAL, '_check_path_acl'), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                     patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                     patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), patch.object(QUAL, '_port_free', return_value=True):
                 with self.assertRaisesRegex(QUAL.QualificationError, 'cloud_config_changed_during_baseline'):
@@ -868,7 +872,9 @@ class QualificationTests(unittest.TestCase):
             config = root / 'cloud.json'
             config.write_text(json.dumps(cloud_config()))
             config.chmod(0o600)
-            with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+            with patch.object(QUAL, '_check_path_acl'), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                     patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                     patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), \
                     patch.object(QUAL, '_port_free', return_value=True):
@@ -899,7 +905,9 @@ class QualificationTests(unittest.TestCase):
                     config = root / 'cloud.json'
                     config.write_text(json.dumps(cloud_config()))
                     config.chmod(0o600)
-                    with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+                    with patch.object(QUAL, '_check_path_acl'), \
+                            patch.object(QUAL.sys, 'platform', 'darwin'), \
+                            patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                             patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                             patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), \
                             patch.object(QUAL, '_port_free', return_value=True):
@@ -934,7 +942,9 @@ class QualificationTests(unittest.TestCase):
             config = root / 'cloud.json'
             config.write_text(json.dumps(cloud_config()))
             config.chmod(0o600)
-            with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+            with patch.object(QUAL, '_check_path_acl'), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                     patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                     patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), \
                     patch.object(QUAL, '_port_free', return_value=True):
@@ -971,7 +981,9 @@ class QualificationTests(unittest.TestCase):
             config = root / 'cloud.json'
             config.write_text(json.dumps(cloud_config()))
             config.chmod(0o600)
-            with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+            with patch.object(QUAL, '_check_path_acl'), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                     patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                     patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), \
                     patch.object(QUAL, '_port_free', return_value=True):
@@ -1004,7 +1016,9 @@ class QualificationTests(unittest.TestCase):
 
             def arm_without_launchd(directory, before, runner, _lock_fd):
                 return fake_arm(directory, before, runner)
-            with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+            with patch.object(QUAL, '_check_path_acl'), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                     patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                     patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), \
                     patch.object(QUAL, '_port_free', return_value=True), \
@@ -1042,7 +1056,9 @@ class QualificationTests(unittest.TestCase):
             config = root / 'cloud.json'
             config.write_text(json.dumps(cloud_config()))
             config.chmod(0o600)
-            with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+            with patch.object(QUAL, '_check_path_acl'), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                     patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                     patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), \
                     patch.object(QUAL, '_port_free', return_value=True):
@@ -1417,7 +1433,9 @@ class QualificationTests(unittest.TestCase):
             def arm_without_launchd(directory, before, runner, _lock_fd):
                 return fake_arm(directory, before, runner)
 
-            with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+            with patch.object(QUAL, '_check_path_acl'), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                     patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                     patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), \
                     patch.object(QUAL, '_port_free', return_value=True), \
@@ -1450,7 +1468,9 @@ class QualificationTests(unittest.TestCase):
         with temporary_directory() as tmp:
             root = Path(tmp)
             root.chmod(0o700)
-            with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+            with patch.object(QUAL, '_check_path_acl'), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                     patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                     patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), \
                     patch.object(QUAL, '_port_free', return_value=False):
@@ -1464,7 +1484,9 @@ class QualificationTests(unittest.TestCase):
         with temporary_directory() as tmp:
             root = Path(tmp)
             root.chmod(0o700)
-            with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+            with patch.object(QUAL, '_check_path_acl'), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                     patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                     patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), \
                     patch.object(QUAL, '_global_lock', side_effect=BlockingIOError):
@@ -1486,7 +1508,9 @@ class QualificationTests(unittest.TestCase):
                 transport = json.loads(Path(config_path).read_text()).get('httpsTransport', 'direct')
                 return GuardedClient() if transport == 'direct' else TimeoutClient()
             TimeoutClient.calls = 0
-            with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+            with patch.object(QUAL, '_check_path_acl'), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                     patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                     patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), \
                     patch.object(QUAL, '_port_free', return_value=True):
