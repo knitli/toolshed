@@ -605,6 +605,49 @@ class QualificationTests(unittest.TestCase):
             self.assertTrue(final['finalHealthy'])
             self.assertEqual(final['finalMode'], 'warp+doh')
 
+    def test_independent_restorer_waits_for_restore_lock_within_shared_deadline(self):
+        class AdvancingClock:
+            def __init__(self):
+                self.elapsed = 0.0
+
+            def monotonic(self):
+                return self.elapsed
+
+            def sleep(self, seconds):
+                self.elapsed += seconds
+
+        clock = AdvancingClock()
+        fake = FakeWarp('proxy')
+        real_flock = QUAL.fcntl.flock
+        lock_acquired_at = []
+
+        def parent_holds_restore_lock(fd, operation):
+            if operation == (QUAL.fcntl.LOCK_EX | QUAL.fcntl.LOCK_NB):
+                if clock.elapsed < 25:
+                    raise BlockingIOError
+                lock_acquired_at.append(clock.elapsed)
+            return real_flock(fd, operation)
+
+        with temporary_directory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            fake_arm(directory, {'mode': 'warp+doh'}, fake)
+            with patch.object(QUAL.time, 'monotonic', side_effect=clock.monotonic), \
+                    patch.object(QUAL.time, 'sleep', side_effect=clock.sleep), \
+                    patch.object(QUAL.fcntl, 'flock', side_effect=parent_holds_restore_lock):
+                result = QUAL._restore_record(directory, fake)
+
+            receipt = json.loads((directory / 'restoration.json').read_text())
+            self.assertEqual(result, 'restored')
+            self.assertEqual(receipt['result'], 'restored')
+            self.assertEqual(receipt['finalMode'], 'warp+doh')
+            self.assertTrue(receipt['finalHealthy'])
+            self.assertEqual(fake.mode, 'warp+doh')
+            self.assertEqual(len(lock_acquired_at), 1)
+            self.assertGreaterEqual(lock_acquired_at[0], 25)
+            self.assertLess(clock.elapsed, QUAL.RECOVERY_SECONDS)
+            self.assertFalse((directory / 'restoration-failed.json').exists())
+
     def test_restoration_receipt_tracks_delayed_mode_flip_during_health_readback(self):
         class DelayedModeWarp(FakeWarp):
             def __init__(self):

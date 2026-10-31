@@ -377,7 +377,8 @@ def _restore_record(directory, runner=None, *, wait_deadline=False):
             time.sleep(min(0.25, max(0, recovery_trigger - time.monotonic())))
     lock = os.open(directory / 'restore.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
-        lock_deadline = min(time.monotonic() + 20, hard_deadline)
+        # A live parent may still hold this lock while doing its bounded cleanup.
+        lock_deadline = hard_deadline
         while True:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
