@@ -12,12 +12,19 @@ const TOKEN = 'test-secret-token-7e2c';
 const START = 1_900_000_000_000;
 
 async function harness(sourceText = source) {
-  const state = { now: START, calls: [], fetch: async () => { throw new Error('unexpected fetch'); }, timeoutSignals: [], uuidCounter: 0 };
+  const state = { now: START, calls: [], networkCalls: [], fetch: async () => { throw new Error('unexpected fetch'); }, timeoutSignals: [], uuidCounter: 0 };
+  state.workerFetch = (url, init = {}) => {
+    state.calls.push([url, init]);
+    const redirect = init.redirect ?? 'follow';
+    if (redirect !== 'follow' && redirect !== 'manual') throw new TypeError('Invalid redirect mode');
+    state.networkCalls.push([url, init]);
+    return state.fetch(url, init);
+  };
   class FakeDate extends Date { static now() { return state.now; } }
   class FakeAbortSignal { static timeout(ms) { const signal = { timeoutMs: ms }; state.timeoutSignals.push(signal); return signal; } }
   const context = vm.createContext({
     Response, Headers, TextEncoder, TextDecoder, URL, Date: FakeDate, Number, Object, Array, Set, JSON, Uint8Array, AbortSignal: FakeAbortSignal,
-    fetch: (...args) => { state.calls.push(args); return state.fetch(...args); },
+    fetch: (...args) => state.workerFetch(...args),
     crypto: { randomUUID: () => `00000000-0000-4000-8000-${String(++state.uuidCounter).padStart(12, '0')}` },
   });
   const module = new vm.SourceTextModule(sourceText, { context });
@@ -142,15 +149,16 @@ test('before deadline is armed and exactly at deadline attempts cleanup', async 
   assert.equal(h.state.calls[0][1].method, 'GET');
 });
 
-test('all API calls use the fixed profile, reject redirects, bound timeout, and PATCH only enabled false', async () => {
+test('all API attempts use the fixed profile, manual redirects, bounded timeout, and PATCH only enabled false', async () => {
   const h = await harness();
   const { data } = await arm(h);
   await schedule(h.worker, data.env, START);
   assertReceiptShape(receipt(data.writes), 'disabled');
   assert.deepEqual(h.state.calls.map(([url]) => url), [API_URL, API_URL, API_URL]);
   assert.deepEqual(h.state.calls.map(([, init]) => init.method), ['GET', 'PATCH', 'GET']);
+  assert.equal(h.state.networkCalls.length, 3);
   for (const [, init] of h.state.calls) {
-    assert.equal(init.redirect, 'error');
+    assert.equal(init.redirect, 'manual');
     assert.equal(init.signal.timeoutMs, 5_000);
     assert.equal(init.headers.authorization, `Bearer ${TOKEN}`);
   }
@@ -210,9 +218,35 @@ test('GET 404 records absent without mutation', async () => {
   assert.equal(h.state.calls.length, 1);
 });
 
-test('redirect and malformed API envelopes fail closed', async (t) => {
+test('Workers fetch contract rejects redirect error before dispatch', async () => {
+  const h = await harness();
+  assert.throws(() => h.state.workerFetch(API_URL, { method: 'GET', redirect: 'error' }), TypeError);
+  assert.equal(h.state.calls.length, 1);
+  assert.equal(h.state.networkCalls.length, 0);
+});
+
+test('3xx response is canceled and rejected before API continuation', async () => {
+  const h = await harness();
+  const data = env({ lease: lease(START - 10_000, START) });
+  let cancelled = false;
+  h.state.now = START;
+  h.state.fetch = async () => new Response(new ReadableStream({ cancel() { cancelled = true; } }), {
+    status: 302, headers: { location: API_URL },
+  });
+  await schedule(h.worker, data.env, START);
+  const result = receipt(data.writes);
+  assertReceiptShape(result, 'cleanup_failed');
+  assert.equal(result.failCode, 'api_status');
+  assert.equal(result.apiCalls, 1);
+  assert.equal(result.disabledVerified, false);
+  assert.equal(h.state.calls.length, 1);
+  assert.equal(h.state.networkCalls.length, 1);
+  assert.deepEqual(h.state.networkCalls.map(([, init]) => init.method), ['GET']);
+  assert.equal(cancelled, true);
+});
+
+test('malformed API envelopes fail closed', async (t) => {
   for (const [label, response] of [
-    ['redirect', new Response(null, { status: 302, headers: { location: API_URL } })],
     ['success false', new Response(JSON.stringify({ success: false, result: enabledProfile() }), { status: 200 })],
     ['missing result', new Response(JSON.stringify({ success: true }), { status: 200 })],
     ['invalid JSON', new Response('{', { status: 200 })],
