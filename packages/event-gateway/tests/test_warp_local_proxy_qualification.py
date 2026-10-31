@@ -28,6 +28,7 @@ def settings(mode='warp+doh'):
 
 class FakeWarp:
     def __init__(self, mode='warp+doh', *, disconnected_proxy=False):
+        """Return deterministic settings and connectivity for the fake CLI."""
         self.mode = mode
         self.calls = []
         self.timeouts = []
@@ -55,6 +56,7 @@ class GuardedClient:
     error_codes = []
 
     def __init__(self):
+        """Consume queued response statuses and mapped error codes."""
         self.status = type(self).statuses.pop(0) if type(self).statuses else 409
         self.error_code = type(self).error_codes.pop(0) if type(self).error_codes else 'native_binding_unqualified'
 
@@ -148,6 +150,21 @@ class QualificationTests(unittest.TestCase):
         self.assertFalse(QUAL._listener_identity_matches(b'501', expected))
         self.assertFalse(QUAL._listener_identity_matches(b'0', b'/usr/bin/python3'))
 
+    def test_host_uid_mismatch_refuses_before_cli_inspection(self):
+        fake = FakeWarp()
+        actual_uid = os.getuid()
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            root.chmod(0o700)
+            with patch.object(QUAL, 'OWNER_UID', actual_uid + 1), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+                    patch.object(QUAL.os, 'geteuid', return_value=actual_uid):
+                with self.assertRaisesRegex(QUAL.QualificationError, 'unsupported_host'):
+                    QUAL.qualify('/ignored', '/ignored', '00000000-0000-0000-0000-000000000001', root,
+                                 runner=fake, client_loader=loader)
+        self.assertFalse(fake.calls)
+
     def test_baseline_failure_never_arms_or_switches(self):
         fake = FakeWarp('proxy')
         with temporary_directory() as tmp:
@@ -173,6 +190,7 @@ class QualificationTests(unittest.TestCase):
             path = root / 'cloud.json'
             path.write_text(json.dumps(config))
             path.chmod(0o600)
+
             def record_loader(*_):
                 client_calls.append(True)
                 return GuardedClient()
@@ -193,6 +211,7 @@ class QualificationTests(unittest.TestCase):
             path = root / 'cloud.json'
             path.write_text(json.dumps(cloud_config()))
             path.chmod(0o600)
+
             def mutating_loader(config_path, _state):
                 value = json.loads(Path(config_path).read_text())
                 value['nodeGeneration'] = 9
@@ -354,6 +373,7 @@ class QualificationTests(unittest.TestCase):
         GuardedClient.error_codes = ['native_binding_unqualified']
         TimeoutClient.calls = 0
 
+
         def loader_for_timeout(config_path, _state):
             transport = json.loads(Path(config_path).read_text()).get('httpsTransport', 'direct')
             return GuardedClient() if transport == 'direct' else TimeoutClient()
@@ -364,6 +384,7 @@ class QualificationTests(unittest.TestCase):
             config = root / 'cloud.json'
             config.write_text(json.dumps(cloud_config()))
             config.chmod(0o600)
+
             def arm_without_launchd(directory, before, runner, _lock_fd):
                 return fake_arm(directory, before, runner)
             with patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
@@ -541,6 +562,206 @@ class QualificationTests(unittest.TestCase):
             receipt = json.loads((directory / 'restoration.json').read_text())
             self.assertTrue(receipt['finalHealthy'])
             self.assertEqual(receipt['finalMode'], 'warp+doh')
+
+    def test_independent_restorer_retries_transient_deadline_mode_read(self):
+        class FlakySettingsWarp(FakeWarp):
+            def __init__(self):
+                super().__init__()
+                self.settings_reads = 0
+
+            def __call__(self, argv, timeout):
+                if argv[1:4] == ('--json', 'settings', 'list'):
+                    self.settings_reads += 1
+                    if self.settings_reads == 2:
+                        self.calls.append(argv)
+                        self.timeouts.append(timeout)
+                        raise QUAL.QualificationError('warp_command_timeout')
+                return super().__call__(argv, timeout)
+
+        fake = FlakySettingsWarp()
+        with temporary_directory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            fake_arm(directory, {'mode': 'warp+doh'}, fake)
+            # Model the parent's handoff so older implementations don't wait
+            # until their reserve-trigger time before reaching the flaky read.
+            (directory / 'restore.request').touch()
+            real_global_lock = QUAL._global_lock
+
+            def after_parent_switch(*, nonblocking=True, shared=False):
+                fake.mode = 'proxy'
+                return real_global_lock(nonblocking=nonblocking, shared=shared)
+
+            with patch.object(QUAL, 'GLOBAL_LOCK_PATH', directory / 'global.lock'), \
+                    patch.object(QUAL, 'RECOVERY_RESERVE_SECONDS', 0), \
+                    patch.object(QUAL, '_global_lock', side_effect=after_parent_switch):
+                result = QUAL._restore_record(directory, fake, wait_deadline=True)
+
+            self.assertEqual(result, 'restored')
+            self.assertGreaterEqual(fake.settings_reads, 3)
+            self.assertEqual(fake.mode, 'warp+doh')
+            self.assertTrue((directory / 'armed.json').exists())
+            final = json.loads((directory / 'restorer-final.json').read_text())
+            self.assertTrue(final['finalHealthy'])
+            self.assertEqual(final['finalMode'], 'warp+doh')
+
+    def test_restoration_receipt_tracks_delayed_mode_flip_during_health_readback(self):
+        class DelayedModeWarp(FakeWarp):
+            def __init__(self):
+                super().__init__('proxy')
+                self.restore_pending = False
+                self.health_reads = 0
+
+            def __call__(self, argv, timeout):
+                if argv[1:2] == ('mode',) and argv[2] == 'warp+doh':
+                    self.calls.append(argv)
+                    self.timeouts.append(timeout)
+                    self.restore_pending = True
+                    return b''
+                if argv[1:3] == ('--json', 'status') and self.restore_pending:
+                    self.health_reads += 1
+                    if self.health_reads >= 2:
+                        self.mode = 'warp+doh'
+                        self.restore_pending = False
+                return super().__call__(argv, timeout)
+
+        fake = DelayedModeWarp()
+        with temporary_directory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            fake_arm(directory, {'mode': 'warp+doh'}, fake)
+            self.assertEqual(QUAL._restore_record(directory, fake), 'restored')
+            receipt = json.loads((directory / 'restoration.json').read_text())
+            self.assertTrue(receipt['finalHealthy'])
+            self.assertEqual(receipt['finalMode'], 'warp+doh')
+            self.assertEqual(fake.mode, 'warp+doh')
+
+    def test_external_mode_reverting_to_proxy_resumes_conditional_restore(self):
+        class ExternalThenProxyWarp(FakeWarp):
+            def __init__(self):
+                super().__init__('warp')
+                self.settings_reads = 0
+
+            def __call__(self, argv, timeout):
+                if argv[1:4] == ('--json', 'settings', 'list'):
+                    self.settings_reads += 1
+                    if self.settings_reads == 2:
+                        self.mode = 'proxy'
+                return super().__call__(argv, timeout)
+
+        fake = ExternalThenProxyWarp()
+        with temporary_directory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            fake_arm(directory, {'mode': 'warp+doh'}, fake)
+            result = QUAL._restore_record(directory, fake)
+            receipt = json.loads((directory / 'restoration.json').read_text())
+            self.assertEqual(result, 'restored')
+            self.assertEqual(receipt['result'], 'restored')
+            self.assertEqual(receipt['finalMode'], 'warp+doh')
+            self.assertTrue(receipt['finalHealthy'])
+            self.assertEqual(fake.mode, 'warp+doh')
+            self.assertEqual([call[2] for call in fake.calls if call[1:2] == ('mode',)], ['warp+doh'])
+
+    def test_third_mode_during_health_verification_requires_stable_double_read(self):
+        class ThirdModeDuringHealthWarp(FakeWarp):
+            def __init__(self):
+                super().__init__('proxy')
+                self.restore_requested = False
+                self.status_reads_after_restore = 0
+                self.observed_modes = []
+
+            def __call__(self, argv, timeout):
+                if argv[1:2] == ('mode',) and argv[2] == 'warp+doh':
+                    self.calls.append(argv)
+                    self.timeouts.append(timeout)
+                    self.mode = 'warp+doh'
+                    self.restore_requested = True
+                    return b''
+                if argv[1:3] == ('--json', 'status') and self.restore_requested:
+                    self.status_reads_after_restore += 1
+                    if self.status_reads_after_restore == 2:
+                        self.mode = 'warp'
+                if argv[1:4] == ('--json', 'settings', 'list'):
+                    self.observed_modes.append(self.mode)
+                return super().__call__(argv, timeout)
+
+        fake = ThirdModeDuringHealthWarp()
+        with temporary_directory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            fake_arm(directory, {'mode': 'warp+doh'}, fake)
+            result = QUAL._restore_record(directory, fake)
+            receipt = json.loads((directory / 'restoration.json').read_text())
+            self.assertEqual(result, 'restore_skipped_external_change')
+            self.assertEqual(receipt['result'], 'restore_skipped_external_change')
+            self.assertEqual(receipt['finalMode'], 'warp')
+            self.assertFalse(receipt['finalHealthy'])
+            self.assertGreaterEqual(fake.observed_modes.count('warp'), 4)
+            self.assertEqual(fake.mode, 'warp')
+            self.assertEqual([call[2] for call in fake.calls if call[1:2] == ('mode',)], ['warp+doh'])
+
+    def test_expired_recovery_record_preserves_state_without_warp_commands(self):
+        fake = FakeWarp('proxy')
+        with temporary_directory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            fake_arm(directory, {'mode': 'warp+doh'}, fake)
+            record = rewrite_recovery_record(directory / 'recovery.json', deadline=int(time.time()) - 1)
+            original_bytes = (directory / 'recovery.json').read_bytes()
+            with self.assertRaisesRegex(QUAL.QualificationError, 'recovery_deadline_expired'):
+                QUAL._restore_record(directory, fake)
+            self.assertFalse(fake.calls)
+            self.assertEqual((directory / 'recovery.json').read_bytes(), original_bytes)
+            failed = json.loads((directory / 'restoration-failed.json').read_text())
+            self.assertEqual(failed['kind'], 'warp-restoration-failed-v1')
+            self.assertEqual(failed['nonce'], record['nonce'])
+            self.assertEqual(failed['recordSha256'], hashlib.sha256(original_bytes).hexdigest())
+            self.assertEqual(failed['code'], 'recovery_deadline_expired')
+
+    def test_failed_probe_preserves_owner_selected_third_mode(self):
+        fake = FakeWarp()
+        GuardedClient.calls = 0
+        GuardedClient.statuses = [409]
+        GuardedClient.error_codes = ['native_binding_unqualified']
+        TimeoutClient.calls = 0
+
+        class ExternalModeTimeoutClient(TimeoutClient):
+            async def runtime_status(self, _runtime_id):
+                type(self).calls += 1
+                fake.mode = 'warp'
+                raise TimeoutError('request_timeout')
+
+        def loader_for_timeout(config_path, _state):
+            transport = json.loads(Path(config_path).read_text()).get('httpsTransport', 'direct')
+            return GuardedClient() if transport == 'direct' else ExternalModeTimeoutClient()
+
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            root.chmod(0o700)
+            config = root / 'cloud.json'
+            config.write_text(json.dumps(cloud_config()))
+            config.chmod(0o600)
+
+            def arm_without_launchd(directory, before, runner, _lock_fd):
+                return fake_arm(directory, before, runner)
+
+            with patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+                    patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
+                    patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), \
+                    patch.object(QUAL, '_port_free', return_value=True), \
+                    patch.object(QUAL, 'RECOVERY_RESERVE_SECONDS', 0), \
+                    patch.object(QUAL, '_arm', side_effect=arm_without_launchd), \
+                    patch.object(QUAL, '_restorer_stopped', return_value=True) as stopped:
+                with self.assertRaises(TimeoutError):
+                    QUAL.qualify(config, root / 'state', '00000000-0000-0000-0000-000000000001', root,
+                                 runner=fake, client_loader=loader_for_timeout,
+                                 listener_check=lambda: True)
+
+            self.assertTrue(stopped.called)
+            self.assertEqual(fake.mode, 'warp')
+            self.assertEqual([call[2] for call in fake.calls if call[1:2] == ('mode',)], ['proxy'])
+            self.assertFalse(list(root.glob('warp-host-qualification-*/qualification.json')))
 
     def test_recovery_cli_commands_are_clamped_to_record_deadline(self):
         fake = FakeWarp('proxy')

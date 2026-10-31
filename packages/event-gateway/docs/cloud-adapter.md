@@ -54,8 +54,9 @@ reject this field. Token signing remains local and does not use the HTTP proxy.
 The configuration does not change the host WARP mode or qualify VM egress.
 
 The separate `scripts/qualify_warp_local_proxy.py` operator harness tests this
-transport on the enrolled Apple Silicon Mac. It requires the captured WARP
-version, healthy `warp+doh` mode, MASQUE, policy permission to switch modes,
+transport on the enrolled Apple Silicon Mac (owner UID 501). It refuses other
+UIDs before invoking WARP. It requires the captured WARP version, healthy
+`warp+doh` mode, MASQUE, policy permission to switch modes,
 and a free proxy port. It arms an independent owner LaunchAgent before changing
 mode, makes one read-only guarded runtime-status request through the proxy,
 and restores the original mode within the bounded recovery window. It uses a
@@ -65,7 +66,10 @@ The absolute `--cloud-config` path selects the enrollment directory containing
 `--evidence-root`; this script does not attach a runtime.
 
 Run its offline tests and the independent fake-WARP LaunchAgent recovery proof
-before using it against the host. A passing receipt proves one authenticated
+before using it against the host. The [redacted scheduler proof](native-bridge/warp-proxy-recovery-proof.json)
+records the exact source hash and four real LaunchAgent cases with fake WARP
+commands, including a transient read failure after parent death and delayed
+mode visibility. A passing live receipt proves one authenticated
 HTTPS transport request and verified restoration. The expected
 `native_binding_unqualified` response confirms agent authentication at the API;
 the server checks that guard before node proof. It does not qualify a native

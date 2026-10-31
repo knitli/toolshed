@@ -169,7 +169,7 @@ def _global_lock(nonblocking=True, *, shared=False):
         raise
 
 
-def _cli_integrity():
+def _cli_integrity(*, deadline=None):
     _need(CLI.is_absolute() and str(CLI) == '/usr/local/bin/warp-cli', 'warp_cli_path_invalid')
     link = CLI.lstat()
     _need(stat.S_ISLNK(link.st_mode) and link.st_uid == 0, 'warp_cli_untrusted')
@@ -178,7 +178,7 @@ def _cli_integrity():
     _protected(target)
     info = target.stat()
     _need(info.st_uid == 0 and not info.st_mode & 0o022 and os.access(CLI, os.X_OK), 'warp_cli_untrusted')
-    version = _run([str(CLI), '--version'])
+    version = _run([str(CLI), '--version'], deadline=deadline)
     _need(version.startswith(b'warp-cli 2026.8.2115.0\n'), 'warp_cli_version_mismatch')
     digest = hashlib.sha256(target.read_bytes()).hexdigest()
     _need(digest == CLI_SHA256, 'warp_cli_digest_mismatch')
@@ -196,20 +196,24 @@ def _port_free():
     return True
 
 
-def _proxy_listener_ready(runner=None):
+def _proxy_listener_ready(runner=None, *, deadline=None):
+    connect_timeout = 1 if deadline is None else min(1, deadline - time.monotonic())
+    if connect_timeout <= 0:
+        return False
     try:
-        with socket.create_connection(('127.0.0.1', PROXY_PORT), timeout=1):
+        with socket.create_connection(('127.0.0.1', PROXY_PORT), timeout=connect_timeout):
             pass
     except OSError:
         return False
     try:
         pids = _run(['/usr/sbin/lsof', '-nP', '-t', '-iTCP:127.0.0.1:40000', '-sTCP:LISTEN'],
-                    timeout=2, runner=runner).decode('ascii').splitlines()
+                    timeout=2, runner=runner, deadline=deadline).decode('ascii').splitlines()
         if len(pids) != 1 or not pids[0].isdigit():
             return False
-        owner = _run(['/bin/ps', '-p', pids[0], '-o', 'uid='], timeout=2, runner=runner).strip()
+        owner = _run(['/bin/ps', '-p', pids[0], '-o', 'uid='], timeout=2,
+                     runner=runner, deadline=deadline).strip()
         executable = _run(['/bin/ps', '-p', pids[0], '-o', 'comm='],
-                          timeout=2, runner=runner).strip()
+                          timeout=2, runner=runner, deadline=deadline).strip()
         _protected(WARP_DAEMON)
         daemon = WARP_DAEMON.stat()
         return (_listener_identity_matches(owner, executable) and daemon.st_uid == 0
@@ -270,26 +274,101 @@ def _safe_record(directory):
     return value, hashlib.sha256(raw).hexdigest()
 
 
+def _persist_recovery_failure(directory, record, record_digest, code):
+    path = Path(directory) / 'restoration-failed.json'
+    failure = {'kind': 'warp-restoration-failed-v1', 'nonce': record['nonce'],
+               'recordSha256': record_digest, 'code': code, 'at': int(time.time())}
+    if path.exists():
+        existing = _json_object(_protected(path, exact_mode=0o600).read_bytes(),
+                                'recovery_failure_receipt_invalid')
+        _need(existing.get('nonce') == record['nonce']
+              and existing.get('recordSha256') == record_digest,
+              'recovery_failure_receipt_mismatch')
+        return
+    _receipt(directory, 'restoration-failed.json', failure)
+
+
+def _read_mode_until_deadline(directory, record, record_digest, runner, hard_deadline):
+    last_code = 'warp_mode_read_unavailable'
+    while time.monotonic() < hard_deadline:
+        try:
+            return _read_mode(runner, deadline=hard_deadline)
+        except QualificationError as error:
+            last_code = str(error) if re.fullmatch('[a-z0-9_]{1,64}', str(error)) else last_code
+            if last_code == 'recovery_deadline_expired':
+                break
+            time.sleep(min(0.1, max(0, hard_deadline - time.monotonic())))
+    _persist_recovery_failure(directory, record, record_digest, last_code)
+    raise QualificationError(last_code)
+
+
+def _restore_original_mode(directory, record, record_digest, runner, hard_deadline,
+                           *, max_commands=3):
+    """Restore only while a fresh, bounded read still sees the exact proxy mode."""
+    restore_commands = 0
+    issued = False
+    while True:
+        current = _read_mode_until_deadline(directory, record, record_digest, runner, hard_deadline)
+        if current == record['originalMode']:
+            return ('restored' if issued else 'already_original', current, restore_commands)
+        if current != record['proxyMode']:
+            return ('restore_skipped_external_change', current, restore_commands)
+        if restore_commands >= max_commands:
+            _persist_recovery_failure(directory, record, record_digest, 'warp_restore_command_failed')
+            raise QualificationError('warp_restore_command_failed')
+        restore_commands += 1
+        issued = True
+        try:
+            _run([str(CLI), 'mode', record['originalMode']], runner=runner, deadline=hard_deadline)
+        except QualificationError as error:
+            if str(error) == 'recovery_deadline_expired':
+                _persist_recovery_failure(directory, record, record_digest, str(error))
+                raise
+            # The command may have switched despite a transient CLI failure.
+        settle_deadline = min(time.monotonic() + 5, hard_deadline)
+        while time.monotonic() < settle_deadline:
+            try:
+                _inspect(runner, deadline=hard_deadline)
+            except QualificationError:
+                pass
+            current = _read_mode_until_deadline(
+                directory, record, record_digest, runner, hard_deadline)
+            if current == record['originalMode']:
+                return ('restored' if issued else 'already_original', current, restore_commands)
+            if current != record['proxyMode']:
+                return ('restore_skipped_external_change', current, restore_commands)
+            time.sleep(min(0.1, max(0, settle_deadline - time.monotonic())))
+
+
 def _restore_record(directory, runner=None, *, wait_deadline=False):
     """Independent LaunchAgent entrypoint; compare-before-restore and bounded deadline."""
-    if runner is None:
-        _cli_integrity()
     record, record_digest = _safe_record(directory)
     directory = Path(directory)
     deadline = record['deadline']
     hard_deadline = time.monotonic() + max(0, deadline - time.time())
-    command_deadline = hard_deadline if hard_deadline > time.monotonic() else None
+    if hard_deadline <= time.monotonic():
+        _persist_recovery_failure(directory, record, record_digest, 'recovery_deadline_expired')
+        raise QualificationError('recovery_deadline_expired')
+    if runner is None:
+        try:
+            _cli_integrity(deadline=hard_deadline)
+        except QualificationError as error:
+            code = str(error) if re.fullmatch('[a-z0-9_]{1,64}', str(error)) else 'warp_cli_unavailable'
+            _persist_recovery_failure(directory, record, record_digest, code)
+            raise
     recovery_lock = None
     if wait_deadline:
-        current_mode = _read_mode(runner, deadline=command_deadline)
+        current_mode = _read_mode_until_deadline(
+            directory, record, record_digest, runner, hard_deadline)
         _need(current_mode == record['originalMode'], 'restorer_initial_mode_mismatch')
         recovery_trigger = hard_deadline - RECOVERY_RESERVE_SECONDS
-        while recovery_lock is None and time.monotonic() < recovery_trigger:
+        while recovery_lock is None and time.monotonic() < hard_deadline:
             try:
                 recovery_lock = _global_lock(shared=True)
             except BlockingIOError:
-                time.sleep(min(0.1, max(0, recovery_trigger - time.monotonic())))
+                time.sleep(min(0.1, max(0, hard_deadline - time.monotonic())))
         if recovery_lock is None:
+            _persist_recovery_failure(directory, record, record_digest, 'recovery_lock_deadline')
             raise QualificationError('recovery_lock_deadline')
         _receipt(directory, 'armed.json', {'nonce': record['nonce'], 'recordSha256': record_digest,
                                            'pid': os.getpid(), 'uid': os.geteuid(),
@@ -299,45 +378,88 @@ def _restore_record(directory, runner=None, *, wait_deadline=False):
     lock = os.open(directory / 'restore.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         lock_deadline = min(time.monotonic() + 20, hard_deadline)
-        if command_deadline is None:
-            lock_deadline = time.monotonic() + 5
         while True:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
                 if time.monotonic() >= lock_deadline:
+                    _persist_recovery_failure(directory, record, record_digest, 'restore_lock_timeout')
                     raise QualificationError('restore_lock_timeout') from None
                 time.sleep(0.05)
-        command_deadline = hard_deadline if hard_deadline > time.monotonic() else None
-        current_mode = _read_mode(runner, deadline=command_deadline)
-        if current_mode == record['proxyMode']:
-            try:
-                _run([str(CLI), 'mode', record['originalMode']], runner=runner, deadline=command_deadline)
-            except QualificationError:
-                if _read_mode(runner, deadline=command_deadline) != record['proxyMode']:
-                    raise
-                _run([str(CLI), 'mode', record['originalMode']], runner=runner, deadline=command_deadline)
-            result = 'restored'
-        elif current_mode == record['originalMode']:
-            result = 'already_original'
-        else:
-            result = 'restore_skipped_external_change'
-        command_deadline = hard_deadline if hard_deadline > time.monotonic() else None
-        final_mode = _read_mode(runner, deadline=command_deadline)
+        result, final_mode, restore_commands = _restore_original_mode(
+            directory, record, record_digest, runner, hard_deadline)
         healthy = False
-        verification_deadline = min(time.monotonic() + 12, hard_deadline)
-        while result != 'restore_skipped_external_change' and time.monotonic() < verification_deadline:
+        external_verified = False
+        verification_deadline = min(time.monotonic() + 20, hard_deadline)
+        while time.monotonic() < verification_deadline:
+            if result == 'restore_skipped_external_change':
+                observed = _read_mode_until_deadline(
+                    directory, record, record_digest, runner, hard_deadline)
+                if observed == record['originalMode']:
+                    result = 'restored' if restore_commands else 'already_original'
+                    final_mode = observed
+                    continue
+                if observed == record['proxyMode']:
+                    remaining = 3 - restore_commands
+                    if remaining <= 0:
+                        break
+                    result, final_mode, used = _restore_original_mode(
+                        directory, record, record_digest, runner, hard_deadline,
+                        max_commands=remaining)
+                    restore_commands += used
+                    continue
+                confirmation = _read_mode_until_deadline(
+                    directory, record, record_digest, runner, hard_deadline)
+                if confirmation == observed:
+                    final_mode = confirmation
+                    external_verified = True
+                    break
+                final_mode = confirmation
+                continue
             try:
                 final = _inspect(runner, deadline=hard_deadline)
                 final2 = _inspect(runner, deadline=hard_deadline)
                 healthy = (final == final2 and final['mode'] == record['originalMode']
                            and final['connected'] and final['healthy'])
                 if healthy:
+                    final_mode = final2['mode']
                     break
+                if final2['mode'] == record['proxyMode']:
+                    remaining = 3 - restore_commands
+                    if remaining <= 0:
+                        break
+                    result, final_mode, used = _restore_original_mode(
+                        directory, record, record_digest, runner, hard_deadline,
+                        max_commands=remaining)
+                    restore_commands += used
             except QualificationError:
-                pass
+                current = _read_mode_until_deadline(
+                    directory, record, record_digest, runner, hard_deadline)
+                if current not in (record['originalMode'], record['proxyMode']):
+                    result = 'restore_skipped_external_change'
+                    final_mode = current
+                    continue
+                if current == record['proxyMode']:
+                    remaining = 3 - restore_commands
+                    if remaining <= 0:
+                        break
+                    result, final_mode, used = _restore_original_mode(
+                        directory, record, record_digest, runner, hard_deadline,
+                        max_commands=remaining)
+                    restore_commands += used
             time.sleep(min(0.25, max(0, verification_deadline - time.monotonic())))
+        if result == 'restore_skipped_external_change' and not external_verified:
+            _persist_recovery_failure(directory, record, record_digest,
+                                      'external_mode_readback_unstable')
+            raise QualificationError('external_mode_readback_unstable')
+        if result != 'restore_skipped_external_change' and not healthy:
+            _persist_recovery_failure(directory, record, record_digest,
+                                      'warp_restoration_readback_failed')
+            raise QualificationError('warp_restoration_readback_failed')
+        if time.monotonic() >= hard_deadline:
+            _persist_recovery_failure(directory, record, record_digest, 'recovery_deadline_expired')
+            raise QualificationError('recovery_deadline_expired')
         receipt = {'kind': 'warp-restoration-v1', 'nonce': record['nonce'],
                    'recordSha256': record_digest, 'result': result, 'finalMode': final_mode,
                    'finalHealthy': healthy, 'at': int(time.time())}
@@ -345,15 +467,29 @@ def _restore_record(directory, runner=None, *, wait_deadline=False):
         if receipt_path.exists():
             existing = _json_object(_protected(receipt_path, exact_mode=0o600).read_bytes(),
                                      'restoration_receipt_invalid')
+            existing_result = existing.get('result')
+            same_original = (existing_result in ('restored', 'already_original')
+                             and receipt['result'] in ('restored', 'already_original')
+                             and existing.get('finalMode') == record['originalMode']
+                             and receipt['finalMode'] == record['originalMode']
+                             and existing.get('finalHealthy') is True and receipt['finalHealthy'] is True)
+            same_external = (existing_result == receipt['result'] == 'restore_skipped_external_change'
+                             and existing.get('finalMode') == receipt['finalMode']
+                             and existing.get('finalHealthy') is False and receipt['finalHealthy'] is False)
             _need(existing.get('nonce') == record['nonce']
                   and existing.get('recordSha256') == record_digest
-                  and existing.get('result') in ('restored', 'already_original', 'restore_skipped_external_change'),
+                  and (same_original or same_external),
                   'restoration_receipt_mismatch')
-            result = existing['result']
+            result = existing_result
+            final_mode = existing['finalMode']
+            healthy = existing['finalHealthy']
         else:
             _receipt(directory, 'restoration.json', receipt)
         _remove_proxy_config(directory)
         if wait_deadline:
+            if time.monotonic() >= hard_deadline:
+                _persist_recovery_failure(directory, record, record_digest, 'recovery_deadline_expired')
+                raise QualificationError('recovery_deadline_expired')
             _need(result == 'restore_skipped_external_change' or healthy,
                   'independent_restorer_readback_failed')
             _receipt(directory, 'restorer-final.json', {'kind': 'warp-restorer-final-v1',
@@ -409,16 +545,30 @@ def _restorer_stopped(pid, label, plist, runner, *, deadline=None):
 
 def _cleanup_failed_run(directory, runner, *, independent):
     record, digest = _safe_record(directory)
+    hard_deadline = time.monotonic() + max(0, record['deadline'] - time.time())
     label = 'com.knitli.eventgateway.warpqualifier.' + record['nonce']
     plist = Path.home() / 'Library' / 'LaunchAgents' / (label + '.plist')
     armed_path = Path(directory) / 'armed.json'
     if not (Path(directory) / 'restore.request').exists():
         _write_new(Path(directory) / 'restore.request', b'restore\n')
     result = _restore_record(directory, runner)
-    after = _inspect(runner)
-    after2 = _inspect(runner)
-    _need(result in ('restored', 'already_original') and after == after2
-          and after['mode'] == record['originalMode'], 'warp_failure_restore_unverified')
+    restoration = _json_object(_protected(Path(directory) / 'restoration.json', exact_mode=0o600).read_bytes(),
+                               'restoration_receipt_invalid')
+    if result == 'restore_skipped_external_change':
+        external_mode = restoration.get('finalMode')
+        _need(isinstance(external_mode, str)
+              and external_mode not in (record['originalMode'], record['proxyMode']),
+              'external_mode_not_preserved')
+        hard_deadline = time.monotonic() + max(0, record['deadline'] - time.time())
+        first = _read_mode_until_deadline(directory, record, digest, runner, hard_deadline)
+        second = _read_mode_until_deadline(directory, record, digest, runner, hard_deadline)
+        _need(first == second == external_mode and restoration.get('finalHealthy') is False,
+              'external_mode_readback_unverified')
+    else:
+        after = _inspect(runner, deadline=hard_deadline)
+        after2 = _inspect(runner, deadline=hard_deadline)
+        _need(result in ('restored', 'already_original') and after == after2
+              and after['mode'] == record['originalMode'], 'warp_failure_restore_unverified')
     armed = None
     if independent:
         end = time.monotonic() + min(RECOVERY_RESERVE_SECONDS,
@@ -436,9 +586,11 @@ def _cleanup_failed_run(directory, runner, *, independent):
             _need(final_path.exists(), 'independent_restorer_receipt_missing')
             final = _json_object(_protected(final_path, exact_mode=0o600).read_bytes(),
                                  'independent_restorer_receipt_invalid')
+            expected_health = result != 'restore_skipped_external_change'
             _need(final.get('nonce') == record['nonce'] and final.get('recordSha256') == digest
-                  and final.get('pid') == armed.get('pid') and final.get('finalHealthy') is True
-                  and final.get('finalMode') == record['originalMode'],
+                  and final.get('pid') == armed.get('pid') and final.get('result') == result
+                  and final.get('finalHealthy') is expected_health
+                  and final.get('finalMode') == restoration.get('finalMode'),
                   'independent_restorer_readback_unverified')
             _need(_restorer_stopped(final['pid'], label, plist, runner,
                                     deadline=time.monotonic() + max(0, record['deadline'] - time.time())),
@@ -567,22 +719,24 @@ def qualify(config_path, state_dir, runtime_id, evidence_root, *, runner=None,
             label, plist, record = _arm(directory, before, runner, lock_fd)
         else:
             label, plist, record = arm(directory, before, runner)
-        immediately_before = _inspect(runner)
+        hard_deadline = time.monotonic() + max(0, record['deadline'] - time.time())
+        immediately_before = _inspect(runner, deadline=hard_deadline)
         _need(immediately_before == before, 'warp_baseline_changed')
         trigger_at = record['deadline'] - RECOVERY_RESERVE_SECONDS
         _need(time.time() + REQUEST_TIMEOUT_SECONDS + PROXY_VERIFY_SECONDS
               + POST_PROBE_MODE_READBACK_SECONDS + TRIGGER_MARGIN_SECONDS < trigger_at,
               'recovery_deadline_too_close')
         switch_started = time.time_ns()
-        _run([str(CLI), 'mode', PROXY_MODE], runner=runner)
+        _run([str(CLI), 'mode', PROXY_MODE], runner=runner, deadline=hard_deadline)
         verify_deadline = time.monotonic() + PROXY_VERIFY_SECONDS
         switched = None
         while time.monotonic() < verify_deadline:
             try:
-                observed = _inspect(runner)
+                observed = _inspect(runner, deadline=hard_deadline)
             except QualificationError:
                 observed = None
-            ready = (_proxy_listener_ready(runner) if listener_check is None else listener_check())
+            ready = (_proxy_listener_ready(runner, deadline=hard_deadline)
+                     if listener_check is None else listener_check())
             if observed is not None and observed['mode'] == PROXY_MODE and ready:
                 switched = observed
                 break
@@ -631,8 +785,10 @@ def _finish(directory, before, baseline, probe, cli_digest, label, plist, runner
             switch_started, switch_verified, config_digest, node_binding_digest, *, require_independent):
     _write_new(directory / 'restore.request', b'restore\n')
     result = _restore_record(directory, runner)
-    after = _inspect(runner)
-    after2 = _inspect(runner)
+    recovery, _ = _safe_record(directory)
+    hard_deadline = time.monotonic() + max(0, recovery['deadline'] - time.time())
+    after = _inspect(runner, deadline=hard_deadline)
+    after2 = _inspect(runner, deadline=hard_deadline)
     _need(result in ('restored', 'already_original') and after == before == after2,
           'warp_restore_unverified')
     recovery, _ = _safe_record(directory)
