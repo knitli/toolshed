@@ -487,7 +487,7 @@ def _proxy_listener_ready(runner=None, *, deadline=None):
                      runner=runner, deadline=deadline).strip()
         executable = _run(['/bin/ps', '-p', pids[0], '-o', 'comm='],
                           timeout=2, runner=runner, deadline=deadline).strip()
-        _protected(WARP_DAEMON)
+        _protected_cli_target(WARP_DAEMON)
         daemon = WARP_DAEMON.stat()
         return (_listener_identity_matches(owner, executable) and daemon.st_uid == 0
                 and not daemon.st_mode & 0o022)

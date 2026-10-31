@@ -682,6 +682,89 @@ class QualificationTests(unittest.TestCase):
         self.assertFalse(QUAL._listener_identity_matches(b'501', expected))
         self.assertFalse(QUAL._listener_identity_matches(b'0', b'/usr/bin/python3'))
 
+    def test_proxy_listener_ready_accepts_trusted_admin_applications_bundle(self):
+        paths = [
+            '/Applications',
+            '/Applications/Cloudflare WARP.app',
+            '/Applications/Cloudflare WARP.app/Contents',
+            '/Applications/Cloudflare WARP.app/Contents/Resources',
+            str(QUAL.WARP_DAEMON),
+        ]
+        mutations = {}
+        acl_denials = set()
+
+        def metadata(path):
+            value = str(path)
+            index = paths.index(value)
+            if value in mutations:
+                return mutations[value]
+            is_leaf = index == len(paths) - 1
+            return SimpleNamespace(
+                st_mode=(stat.S_IFREG | 0o755 if is_leaf else stat.S_IFDIR |
+                        (0o775 if value == '/Applications' else 0o755)),
+                st_uid=0,
+                st_gid=QUAL.APPLICATIONS_ADMIN_GID if value == '/Applications' else 0,
+            )
+
+        def lstat(path):
+            return metadata(path)
+
+        def check_acl(path, fd=None):
+            if str(path) in acl_denials:
+                raise QUAL._canary.CanaryError('mutating_acl')
+
+        class ConnectedSocket:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+        outputs = {
+            '/usr/sbin/lsof': b'4321\n',
+            '/bin/ps uid': b'0\n',
+            '/bin/ps comm': str(QUAL.WARP_DAEMON).encode(),
+        }
+
+        def command(argv, **_kwargs):
+            if argv[0] == '/usr/sbin/lsof':
+                return outputs['/usr/sbin/lsof']
+            if argv[-1] == 'uid=':
+                return outputs['/bin/ps uid']
+            return outputs['/bin/ps comm']
+
+        real_target_guard = QUAL._protected_cli_target
+        with patch.object(QUAL.socket, 'create_connection', return_value=ConnectedSocket()), \
+                patch.object(QUAL, '_run', side_effect=command), \
+                patch.object(QUAL.Path, 'lstat', new=lstat), \
+                patch.object(QUAL.Path, 'stat', new=lstat), \
+                patch.object(QUAL._canary, '_check_tart_acl', side_effect=check_acl), \
+                patch.object(QUAL, '_protected_cli_target', wraps=real_target_guard) as target_guard:
+            self.assertTrue(QUAL._proxy_listener_ready())
+            target_guard.assert_called_once_with(QUAL.WARP_DAEMON)
+
+            for name, path, bad_info, deny_acl in (
+                ('admin_gid', '/Applications', SimpleNamespace(
+                    st_mode=stat.S_IFDIR | 0o775, st_uid=0, st_gid=81), False),
+                ('admin_mode', '/Applications', SimpleNamespace(
+                    st_mode=stat.S_IFDIR | 0o755, st_uid=0,
+                    st_gid=QUAL.APPLICATIONS_ADMIN_GID), False),
+                ('acl', '/Applications', None, True),
+                ('symlink', str(QUAL.WARP_DAEMON), SimpleNamespace(
+                    st_mode=stat.S_IFLNK | 0o755, st_uid=0, st_gid=0), False),
+                ('untrusted_daemon_owner', str(QUAL.WARP_DAEMON), SimpleNamespace(
+                    st_mode=stat.S_IFREG | 0o755, st_uid=501, st_gid=0), False),
+            ):
+                with self.subTest(case=name):
+                    mutations.clear()
+                    acl_denials.clear()
+                    if bad_info is not None:
+                        mutations[path] = bad_info
+                    if deny_acl:
+                        acl_denials.add(path)
+                    self.assertFalse(QUAL._proxy_listener_ready())
+
+
     def test_host_uid_mismatch_refuses_before_cli_inspection(self):
         fake = FakeWarp()
         actual_uid = os.getuid()
@@ -702,7 +785,9 @@ class QualificationTests(unittest.TestCase):
         with temporary_directory() as tmp:
             root = Path(tmp)
             root.chmod(0o700)
-            with patch.object(QUAL, '_check_path_acl'), patch.object(QUAL.sys, 'platform', 'darwin'), patch.object(QUAL.platform, 'machine', return_value='arm64'), \
+            with patch.object(QUAL, '_check_path_acl'), \
+                    patch.object(QUAL.sys, 'platform', 'darwin'), \
+                    patch.object(QUAL.platform, 'machine', return_value='arm64'), \
                     patch.object(QUAL.os, 'geteuid', return_value=QUAL.OWNER_UID), \
                     patch.object(QUAL, 'GLOBAL_LOCK_PATH', root / 'global.lock'), \
                     patch.object(QUAL, '_port_free', return_value=True):
