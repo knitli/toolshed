@@ -27,6 +27,7 @@ _PENDING_FIELDS = frozenset((
 ))
 _PENDING_OPERATIONS = frozenset(("attach", "renew", "transfer"))
 _PENDING_MAX_BYTES = 16_384
+_WARP_LOCAL_PROXY = "http://127.0.0.1:40000"
 
 
 def _reject_constant(_):
@@ -76,10 +77,13 @@ def load_cloud_config(path):
     mode = config.get("authMode", "access")
     identity = {"version", "origin", "principal", "agent", "nodeId", "nodeGeneration"}
     required = identity | ({"credentialsFile"} if mode == "access" else {"authMode", "agentTokenProvider"})
+    allowed = required | ({"httpsTransport"} if mode == "gateway" else set())
     if (mode not in ("access", "gateway") or not required <= set(config)
-            or set(config) - required - {"authMode", "credentialsFile"}
+            or set(config) - allowed - {"authMode", "credentialsFile"}
             or not isinstance(config["version"], int) or isinstance(config["version"], bool)
             or config["version"] != 1):
+        raise SecurityError("invalid_cloud_config")
+    if "httpsTransport" in config and config["httpsTransport"] not in ("direct", "warp-local-proxy"):
         raise SecurityError("invalid_cloud_config")
     filename = config.get("credentialsFile")
     if "credentialsFile" in config and (
@@ -95,8 +99,11 @@ def load_cloud_config(path):
     return config, path.parent / filename if filename is not None else None
 
 
-async def _https_send(method, url, headers, body, timeout, max_response_bytes, follow_redirects):
+async def _https_send(method, url, headers, body, timeout, max_response_bytes, follow_redirects,
+                      *, https_transport="direct"):
     """Make one verified HTTPS request in a killable, wall-clock-bounded curl process."""
+    if https_transport not in ("direct", "warp-local-proxy"):
+        raise ValueError("invalid_transport_request")
     if (method != "POST" or follow_redirects is not False
             or not isinstance(timeout, (int, float)) or isinstance(timeout, bool)
             or not math.isfinite(timeout) or not 0 < timeout <= 5
@@ -123,7 +130,9 @@ async def _https_send(method, url, headers, body, timeout, max_response_bytes, f
     config = [
         f"url = {quote(url)}", f"request = {quote(method)}",
         f"max-time = {quote(str(timeout))}", f"connect-timeout = {quote(str(timeout))}",
-        f"noproxy = {quote('*')}", f"proto = {quote('=https')}",
+        f"noproxy = {quote('*' if https_transport == 'direct' else '')}",
+        *([f"proxy = {quote(_WARP_LOCAL_PROXY)}"] if https_transport == "warp-local-proxy" else []),
+        f"proto = {quote('=https')}",
         f"data-binary = {quote(body.decode('utf-8'))}",
     ]
     config.extend(f"header = {quote(f'{key}: {value}')}" for key, value in headers.items())
@@ -131,8 +140,10 @@ async def _https_send(method, url, headers, body, timeout, max_response_bytes, f
         str(executable), "-q", "--silent", "--show-error", "--max-redirs", "0",
         "--dump-header", "-", "--output", "-", "--config", "-",
     ]
+    if https_transport == "warp-local-proxy":
+        command.insert(4, "--suppress-connect-headers")
     environment = {key: value for key, value in os.environ.items()
-                   if key.lower() not in {"http_proxy", "https_proxy", "all_proxy", "curl_home",
+                   if key.lower() not in {"http_proxy", "https_proxy", "all_proxy", "no_proxy", "curl_home",
                                           "curl_ca_bundle", "ssl_cert_file", "ssl_cert_dir"}}
     deadline = asyncio.get_running_loop().time() + timeout
     process = None
@@ -567,8 +578,8 @@ def pending_commit_summary(artifact):
     }
 
 
-async def _send_https(**request):
-    return await _https_send(**request)
+async def _send_https(*, https_transport="direct", **request):
+    return await _https_send(**request, https_transport=https_transport)
 
 
 def load_cloud_client(config_path, state_dir):
@@ -576,6 +587,7 @@ def load_cloud_client(config_path, state_dir):
     config, credentials_path = load_cloud_config(config_path)
     key = load_signing_key(Path(state_dir) / "node-key.pem")
     mode = config.get("authMode", "access")
+    https_transport = config.get("httpsTransport", "direct")
     provider = None
     if mode == "gateway":
         settings = config["agentTokenProvider"]
@@ -596,7 +608,9 @@ def load_cloud_client(config_path, state_dir):
         return CloudClient(
             origin=config["origin"], principal=config["principal"], agent=config["agent"],
             node_id=config["nodeId"], node_generation=config["nodeGeneration"],
-            private_key=key, credentials=credentials, send=_send_https, auth_mode=mode,
+            private_key=key, credentials=credentials,
+            send=lambda **request: _send_https(**request, https_transport=https_transport),
+            auth_mode=mode,
         )
     except CloudError:
         raise

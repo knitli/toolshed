@@ -308,6 +308,20 @@ memory; restarting the Gateway obtains a fresh token. Helper execution has a
 two-second deadline and bounded output. A retained `credentialsFile` is ignored
 in Gateway mode; authentication never falls back automatically.
 
+Gateway mode can explicitly select the Cloudflare One Client's local HTTP proxy
+by adding `"httpsTransport": "warp-local-proxy"` to `cloud-config.json`. This
+routes Event API requests through `http://127.0.0.1:40000`; it accepts no alternate
+proxy address, port, credentials, or environment override. Omitting the field
+keeps direct HTTPS transport. Proxy errors fail the request without falling back
+to direct access. Access mode does not accept this option.
+
+Configure and authenticate the Cloudflare One Client separately before selecting
+this transport. The option does not switch WARP modes or establish guest network
+isolation. Cloudflare's [local proxy documentation](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/configure/modes/)
+requires MASQUE and limits requests to ten seconds; Event API requests retain
+their five-second deadline, TLS verification, and redirect refusal. Live
+host/guest separation must be qualified before dependency acquisition.
+
 `owner_interaction_required` means the Gateway recognized a Cloudflare Gateway
 block redirect. Check WARP authentication and the Gateway policy; this code alone
 does not prove session expiry. The daemon never opens a browser or follows the

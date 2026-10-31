@@ -44,6 +44,15 @@ discarded, and cancellation kills and reaps the child. Missing `authMode` retain
 the original Access credential-file behavior. This module does not change
 Access/Gateway policy or deploy the NodeEdge path.
 
+Gateway-mode configuration optionally accepts `httpsTransport` as `direct` or
+`warp-local-proxy`. Direct is the default. The proxy selection binds only the
+existing HTTPS port to the fixed Cloudflare One Client HTTP proxy at
+`127.0.0.1:40000`, clears proxy bypasses, and refuses environment-selected proxies.
+It preserves verified HTTPS, the five-second deadline, response limits, and
+redirect refusal; a failed proxy request has no direct retry. Access-mode files
+reject this field. Token signing remains local and does not use the HTTP proxy.
+The configuration does not change the host WARP mode or qualify VM egress.
+
 The HTTP port receives `method`, `url`, `headers`, `body`, `timeout`,
 `max_response_bytes`, and `follow_redirects=False`; it returns
 `(status, lowercase_header_dict, body_bytes)`. The port must enforce the byte
