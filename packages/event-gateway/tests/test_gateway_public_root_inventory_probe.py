@@ -178,6 +178,16 @@ class ProbeTests(unittest.TestCase):
         ):
             probe._root_inventory(FakeContext([cert]))
 
+    def test_pinned_gateway_root_is_rejected_before_aggregate_capacity(self):
+        cert = self.roots[0]
+        with (
+            mock.patch.object(probe, "GATEWAY_CA_SHA256", hashlib.sha256(cert).hexdigest()),
+            self.assertRaisesRegex(
+                probe.ProbeError, "gateway_ca_present_in_default_roots"
+            ),
+        ):
+            probe._add_root({}, probe.MAX_TOTAL_DER_BYTES, cert)
+
     def test_root_count_and_total_der_caps_fail_closed(self):
         too_many = [_root_bytes(i) for i in range(513)]
         with self.assertRaisesRegex(probe.ProbeError, "root_inventory_too_large"):
@@ -225,6 +235,24 @@ class ProbeTests(unittest.TestCase):
             self.assertRaisesRegex(probe.ProbeError, "default_cafile_invalid"),
         ):
             probe._cafile_inventory("/fixture/too-big.pem")
+
+    def test_empty_regular_cafile_is_valid_metadata(self):
+        empty_info = os.stat_result(
+            (stat.S_IFREG | 0o644, 1, 1, 1, 501, 20, 0, 0, 0, 0)
+        )
+        with (
+            mock.patch.object(probe.os, "open", return_value=123),
+            mock.patch.object(probe.os, "fstat", return_value=empty_info),
+            mock.patch.object(probe.os, "read", side_effect=(b"", b"")),
+            mock.patch.object(probe.os, "close"),
+        ):
+            cafile = probe._cafile_inventory("/fixture/ca-bundle.pem")
+        self.assertEqual(cafile["state"], "present")
+        self.assertEqual(cafile["bytes"], 0)
+        self.assertEqual(cafile["sha256"], hashlib.sha256(b"").hexdigest())
+        report = self._collect()
+        report["defaultCafile"] = cafile
+        self.assertIs(probe.validate_report(report), report)
 
     def test_cafile_file_identity_must_be_stable_during_read(self):
         changed = os.stat_result(
@@ -371,6 +399,43 @@ class ProbeTests(unittest.TestCase):
             probe.validate_guest_output(stdout, b"diagnostic", hashes)
         with self.assertRaisesRegex(probe.ProbeError, "guest_output_invalid"):
             probe.validate_guest_output(stdout, b"", {"probe": "c" * 64})
+
+    def test_guest_preserves_only_fixed_collection_error_codes(self):
+        hashes = {"probe": "a" * 64}
+        for code, expected in (
+            ("default_roots_empty", "default_roots_empty"),
+            ("sensitive guest detail", "probe_failed"),
+        ):
+            with mock.patch.object(probe, "collect", side_effect=probe.ProbeError(code)):
+                guest = probe.collect_guest(hashes)
+            envelope = json.dumps(guest, separators=(",", ":")).encode()
+            with self.assertRaisesRegex(probe.ProbeError, expected):
+                probe.validate_guest_output(envelope, b"", hashes)
+
+    def test_build_bundle_preserves_fixed_shared_source_errors_only(self):
+        class CanaryError(Exception):
+            pass
+
+        shared = types.SimpleNamespace(
+            canary=types.SimpleNamespace(CanaryError=CanaryError),
+            _build_source_bundle=mock.Mock(),
+            _source_loader=mock.Mock(),
+        )
+        fixed_codes = (
+            "gateway_public_root_inventory_source_unsafe",
+            "gateway_public_root_inventory_source_oversized",
+            "gateway_public_root_inventory_source_unavailable",
+            "gateway_public_root_inventory_bundle_oversized",
+        )
+        with mock.patch.dict(sys.modules, {"scpreferences_guest_probe": shared}):
+            for code in fixed_codes:
+                with self.subTest(code=code):
+                    shared._build_source_bundle.side_effect = CanaryError(code)
+                    with self.assertRaisesRegex(probe.ProbeError, code):
+                        probe.build_bundle()
+            shared._build_source_bundle.side_effect = CanaryError("sensitive detail")
+            with self.assertRaisesRegex(probe.ProbeError, "bundle_invalid"):
+                probe.build_bundle()
 
     def test_platform_metadata_path_does_not_spawn_a_process(self):
         def forbidden(*_args, **_kwargs):

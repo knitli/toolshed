@@ -26,7 +26,8 @@ from `ssl.get_default_verify_paths()`, hostname and verification flags, and
 bounded cafile whole-file hash/stat provenance. Cafile bytes are read through
 one descriptor with a 2 MiB limit and matching before/after `fstat` identity.
 The guest output and each captured stream are capped at 64 KiB; stderr must be
-empty. The controller preserves both raw captures in `rawEvidence` and binds
+empty. The shared report validator reserves 257 bytes within that cap for the
+fixed transport envelope, including when the standalone collector uses it. The controller preserves both raw captures in `rawEvidence` and binds
 the probe source and compressed bundle hashes in the separate
 `gatewayPublicRootInventory` metadata.
 

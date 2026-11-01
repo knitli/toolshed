@@ -140,6 +140,55 @@ class GatewayPublicRootInventoryIntegrationTest(unittest.TestCase):
         self.assertEqual(metadata["failureCode"], "guest_output_invalid")
         self.assertEqual(result["rawEvidence"][STDOUT_NAME]["bytes"], len(output))
 
+    def test_guest_failure_envelope_keeps_specific_failure_and_cannot_pass(self):
+        code = "gateway_ca_present_in_default_roots"
+        output = json.dumps({
+            "status": "passed", "sourceSha256": HASHES,
+            "report": {"errorCode": code},
+        }).encode()
+
+        def runner(*_args, **_kwargs):
+            return output, b""
+
+        result, commands = {"rawEvidence": {}}, []
+        with self.assertRaisesRegex(
+            canary.CanaryError,
+            "^gateway_public_root_inventory_collection_failed$",
+        ):
+            canary._run_gateway_public_root_inventory(
+                probe, BUNDLE, "/fixed/tart", "owned-clone", {},
+                self.evidence, runner, result, commands,
+            )
+        metadata = result["gatewayPublicRootInventory"]
+        self.assertEqual(metadata["status"], "failed")
+        self.assertIsNone(metadata["report"])
+        self.assertEqual(metadata["failureCode"], code)
+
+    def test_host_failure_keeps_cause_and_safe_failure_class(self):
+        for failure, code in (
+            (OSError(24, "private host detail"), "host_os_error"),
+            (RuntimeError("private parser detail"), "collection_failed"),
+        ):
+            with self.subTest(failure=type(failure).__name__):
+                result, commands = {"rawEvidence": {}}, []
+
+                def runner(*_args, **_kwargs):
+                    raise failure
+
+                with self.assertRaisesRegex(
+                    canary.CanaryError,
+                    "^gateway_public_root_inventory_collection_failed$",
+                ) as raised:
+                    canary._run_gateway_public_root_inventory(
+                        probe, BUNDLE, "/fixed/tart", "owned-clone", {},
+                        self.evidence, runner, result, commands,
+                    )
+                self.assertIs(raised.exception.__cause__, failure)
+                self.assertEqual(
+                    result["gatewayPublicRootInventory"]["failureCode"], code
+                )
+                self.assertNotIn("private", json.dumps(result))
+
     def test_flag_validation_and_cli_reject_custom_command(self):
         with self.assertRaisesRegex(
             canary.CanaryError, "invalid_gateway_public_root_inventory_flag"

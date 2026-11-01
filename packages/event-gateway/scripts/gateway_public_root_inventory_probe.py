@@ -20,6 +20,36 @@ _HEX = frozenset("0123456789abcdef")
 SOURCE_FILES = {"probe": "gateway_public_root_inventory_probe.py"}
 MAX_SOURCE_BYTES = 256 * 1024
 MAX_BUNDLE_ARG = 128 * 1024
+COLLECTION_ERROR_CODES = frozenset({
+    "tls_environment_override_present",
+    "default_context_unavailable",
+    "default_context_flags_invalid",
+    "default_roots_unavailable",
+    "default_roots_invalid",
+    "default_roots_empty",
+    "root_der_invalid",
+    "root_fingerprint_collision",
+    "root_inventory_too_large",
+    "gateway_ca_present_in_default_roots",
+    "default_cafile_path_invalid",
+    "default_cafile_invalid",
+    "default_cafile_unavailable",
+    "default_capath_path_invalid",
+    "report_schema_invalid",
+    "report_capath_invalid",
+    "report_context_invalid",
+    "report_roots_invalid",
+    "report_digest_invalid",
+    "report_cafile_invalid",
+    "report_too_large",
+    "probe_failed",
+})
+BUNDLE_ERROR_CODES = frozenset({
+    "gateway_public_root_inventory_source_unsafe",
+    "gateway_public_root_inventory_source_oversized",
+    "gateway_public_root_inventory_source_unavailable",
+    "gateway_public_root_inventory_bundle_oversized",
+})
 FIXED_ENV = {
     "HOME": "/Users/admin",
     "USER": "admin",
@@ -62,11 +92,11 @@ def _add_root(roots, total, cert):
         if prior != cert:
             _error("root_fingerprint_collision")
         return total
+    if digest == GATEWAY_CA_SHA256:
+        _error("gateway_ca_present_in_default_roots")
     total += len(cert)
     if len(roots) + 1 > MAX_ROOTS or total > MAX_TOTAL_DER_BYTES:
         _error("root_inventory_too_large")
-    if digest == GATEWAY_CA_SHA256:
-        _error("gateway_ca_present_in_default_roots")
     roots[digest] = cert
     return total
 
@@ -292,7 +322,7 @@ def _validate_cafile(cafile, expected_path):
     metadata = cafile["stat"]
     if (
         not _exact_keys(metadata, ("mode", "sizeBytes", "mtimeNs", "device", "inode"))
-        or type(cafile["bytes"]) is not int or not 0 < cafile["bytes"] <= MAX_CAFILE_BYTES
+        or type(cafile["bytes"]) is not int or not 0 <= cafile["bytes"] <= MAX_CAFILE_BYTES
         or type(metadata["sizeBytes"]) is not int or metadata["sizeBytes"] != cafile["bytes"]
         or any(type(metadata[key]) is not int for key in ("mode", "mtimeNs", "device", "inode"))
         or type(cafile["sha256"]) is not str or len(cafile["sha256"]) != 64
@@ -325,6 +355,7 @@ def validate_report(report):
         )
     except (TypeError, ValueError, UnicodeError):
         _error("report_schema_invalid")
+    # Reserve envelope headroom for status and the fixed source hash in guest output.
     if len(encoded) + 257 > MAX_REPORT_BYTES:
         _error("report_too_large")
     return report
@@ -392,7 +423,10 @@ def build_bundle():
             + ")",
             call_args=repr(bundle["sourceSha256"]),
         )
-    except Exception:  # noqa: BLE001 - bundle preflight has one fixed safe failure
+    except shared.canary.CanaryError as exc:
+        code = exc.args[0] if exc.args and type(exc.args[0]) is str else ""
+        _error(code if code in BUNDLE_ERROR_CODES else "bundle_invalid")
+    except Exception:  # noqa: BLE001 - bundle preflight must not expose arbitrary errors
         _error("bundle_invalid")
     return bundle
 
@@ -426,7 +460,7 @@ def collect_guest(source_sha256):
         report = collect()
     except ProbeError as exc:
         code = exc.args[0] if exc.args and type(exc.args[0]) is str else "probe_failed"
-        report = {"errorCode": code}
+        report = {"errorCode": code if code in COLLECTION_ERROR_CODES else "probe_failed"}
     except Exception:  # noqa: BLE001 - guest output must not expose tracebacks
         report = {"errorCode": "probe_failed"}
     # The shared loader uses status only to set its process exit code; the host validates report.
@@ -449,7 +483,13 @@ def validate_guest_output(stdout, stderr, expected_source_sha256):
         or envelope["sourceSha256"] != expected_source_sha256
     ):
         _error("guest_output_invalid")
-    return validate_report(envelope["report"])
+    guest_report = envelope["report"]
+    if _exact_keys(guest_report, ("errorCode",)):
+        code = guest_report["errorCode"]
+        if type(code) is str and code in COLLECTION_ERROR_CODES:
+            _error(code)
+        _error("guest_output_invalid")
+    return validate_report(guest_report)
 
 
 def main(argv=None):
@@ -468,29 +508,7 @@ def main(argv=None):
             code = (
                 exc.args[0] if exc.args and type(exc.args[0]) is str else "probe_failed"
             )
-            if code not in {
-                "tls_environment_override_present",
-                "default_context_unavailable",
-                "default_context_flags_invalid",
-                "default_roots_unavailable",
-                "default_roots_invalid",
-                "default_roots_empty",
-                "root_der_invalid",
-                "root_fingerprint_collision",
-                "root_inventory_too_large",
-                "gateway_ca_present_in_default_roots",
-                "default_cafile_path_invalid",
-                "default_cafile_invalid",
-                "default_cafile_unavailable",
-                "default_capath_path_invalid",
-                "report_schema_invalid",
-                "report_capath_invalid",
-                "report_context_invalid",
-                "report_roots_invalid",
-                "report_digest_invalid",
-                "report_cafile_invalid",
-                "report_too_large",
-            }:
+            if code not in COLLECTION_ERROR_CODES:
                 code = "probe_failed"
             payload, status = {"errorCode": code}, 1
         except Exception:  # noqa: BLE001 - CLI must never expose a traceback

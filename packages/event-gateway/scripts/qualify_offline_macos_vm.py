@@ -1284,9 +1284,10 @@ def _run_gateway_public_root_inventory(probe, bundle, tart_path, clone, env, evi
         normalized = CanaryError("gateway_public_root_inventory_collection_failed")
         _inherit_command_cleanup(exc, normalized)
         raise normalized from None
-    except Exception:  # noqa: BLE001 - don't expose guest or parser tracebacks
-        metadata.update(status="failed", report=None, failureCode="collection_failed")
-        raise CanaryError("gateway_public_root_inventory_collection_failed") from None
+    except Exception as exc:  # noqa: BLE001 - retain cause without publishing private details
+        code = "host_os_error" if isinstance(exc, OSError) else "collection_failed"
+        metadata.update(status="failed", report=None, failureCode=code)
+        raise CanaryError("gateway_public_root_inventory_collection_failed") from exc
     metadata.update(status="passed", report=report, failureCode=None)
 
 
