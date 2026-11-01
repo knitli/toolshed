@@ -81,7 +81,7 @@ def dispose(admission_directory, run_id, approval_reference, *,
         observe=partial(_observe, Path(admission_directory), preferences_factory=preferences_factory))
     return {'kind': 'softnet-failed-restored-disposition-v1', 'runId': run_id,
             'status': 'failed-restored-disposition-recorded', 'admissionGateReleased': True,
-            'historicalVmReapingProven': expected_vm_reaped,
+            'recordedVmReaped': expected_vm_reaped,
             'qualified': False, 'vmDeleted': False}
 
 

@@ -205,7 +205,8 @@ class DispositionTests(unittest.TestCase):
              patch.object(disposition.state, "dispose_failed_restored") as record:
             result = disposition.dispose("/admission", "run", "ticket", expected_vm_reaped=False)
         self.assertEqual(record.call_args.args[:3], (disposition.controller.STATE_ROOT, "run", "ticket"))
-        self.assertEqual(result["historicalVmReapingProven"], False)
+        self.assertEqual(result["recordedVmReaped"], False)
+        self.assertNotIn("historicalVmReapingProven", result)
         self.assertEqual(result["qualified"], False)
         self.assertEqual(result["vmDeleted"], False)
 
@@ -267,7 +268,8 @@ class DispositionTests(unittest.TestCase):
                     self.assertIs(stop["vmReaped"], vm_reaped)
                     self.assertEqual(receipt["fileSha256"]["stop.plist"],
                                      hashlib.sha256((run / "stop.plist").read_bytes()).hexdigest())
-                    self.assertIs(result["historicalVmReapingProven"], vm_reaped)
+                    self.assertIs(result["recordedVmReaped"], vm_reaped)
+                    self.assertNotIn("historicalVmReapingProven", result)
                     with run_state.State(root):
                         pass
 
@@ -307,12 +309,14 @@ class DispositionTests(unittest.TestCase):
         for flag, expected in (("--accept-historical-vm-reaping-unknown", False),
                                ("--accept-fully-reaped-failure", True)):
             with self.subTest(flag=flag):
-                receipt = {"historicalVmReapingProven": expected}
+                receipt = {"recordedVmReaped": expected}
                 with patch.object(disposition, "dispose", return_value=receipt) as dispose, \
                      patch("builtins.print") as output:
                     self.assertEqual(disposition.main([*base, flag]), 0)
                 self.assertIs(dispose.call_args.kwargs["expected_vm_reaped"], expected)
-                self.assertIs(json.loads(output.call_args.args[0])["historicalVmReapingProven"], expected)
+                printed = json.loads(output.call_args.args[0])
+                self.assertIs(printed["recordedVmReaped"], expected)
+                self.assertNotIn("historicalVmReapingProven", printed)
 
 
 if __name__ == "__main__":
