@@ -141,6 +141,28 @@ class DispositionTests(unittest.TestCase):
                 disposition._observe("/unused/admission", "/unused/run", wrong)
         binary.assert_not_called()
 
+    def test_observe_binds_both_guest_route_ips_and_trust_root_digest(self):
+        identity_ip, positive_ip, roots = "104.20.0.1", "104.20.0.2", "f" * 64
+        admission = {**self.admission, "kind": "softnet-guest-route-admission-v1",
+                     "identityProbeIPv4": identity_ip, "positiveOriginIPv4": positive_ip,
+                     "publicTrustRootsSha256": roots}
+        identity = {**self.identity, "identityProbeIPv4": identity_ip,
+                    "positiveOriginIPv4": positive_ip, "publicTrustRootsSha256": roots}
+        result, _ = self.run_observer(admission=admission, identity=identity)
+        self.assertTrue(result["vmStopped"])
+        for field, changed in (("identityProbeIPv4", "104.20.0.3"),
+                               ("positiveOriginIPv4", "104.20.0.4"),
+                               ("publicTrustRootsSha256", "0" * 64)):
+            with self.subTest(field=field), \
+                 patch.object(disposition.controller, "_admission_record",
+                              return_value=(admission, self.account, "staff", self.digest)), \
+                 patch.object(disposition.controller, "_binary") as binary:
+                wrong = {**identity, field: changed}
+                with self.assertRaisesRegex(recovery.RecoveryError,
+                                           "disposition_admission_mismatch"):
+                    disposition._observe("/unused", "/unused", wrong)
+                binary.assert_not_called()
+
     def test_observe_rejects_vm_identity_and_running_or_inconsistent_state(self):
         cases = (
             (b'{"os":"darwin","arch":"arm64","macAddress":"02:00:00:00:00:02"}',

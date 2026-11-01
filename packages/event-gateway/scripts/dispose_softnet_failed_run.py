@@ -27,6 +27,12 @@ def _observe(admission_directory, run, identity, *, preferences_factory=controll
         'softnetBinarySha256': controller.SOFTNET_SHA256}
     if 'probeIPv4' in admission:
         expected_identity['probeIPv4'] = admission['probeIPv4']
+    if 'identityProbeIPv4' in admission:
+        expected_identity.update({
+            'identityProbeIPv4': admission['identityProbeIPv4'],
+            'positiveOriginIPv4': admission['positiveOriginIPv4'],
+            'publicTrustRootsSha256': admission['publicTrustRootsSha256'],
+        })
     controller._require(identity == expected_identity, 'disposition_admission_mismatch')
     controller._binary(controller.TART, controller.canary.TART_BINARY_SHA256)
     controller._binary(controller.SOFTNET, controller.SOFTNET_SHA256)
