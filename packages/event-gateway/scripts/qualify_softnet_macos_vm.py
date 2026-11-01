@@ -525,8 +525,9 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
         helper_argv = [str(SOFTNET), '--vm-fd', '0', '--vm-mac-address', admission['macAddress']]
         allowed_ips = ([public_probe_ip] if public_probe_ip is not None else
                        sorted(set(guest_route_ips or ()), key=lambda value: int(ipaddress.IPv4Address(value))))
-        for destination in allowed_ips:
-            helper_argv.append('--allow=out ' + destination + '/32')
+        if allowed_ips:
+            destinations = ','.join('out ' + destination + '/32' for destination in allowed_ips)
+            helper_argv.append('--allow=' + destinations)
         helper_argv.extend(['--block=0.0.0.0/0', '--user', account.pw_name, '--group', group])
         helper = subprocess.Popen(
             helper_argv,
