@@ -15,6 +15,7 @@ MAX_TOTAL_DER_BYTES = 2 * 1024 * 1024
 MAX_ROOT_DER_BYTES = 2 * 1024 * 1024
 MAX_CAFILE_BYTES = 2 * 1024 * 1024
 MAX_REPORT_BYTES = 64 * 1024
+REPORT_ENVELOPE_RESERVE_BYTES = 257
 GATEWAY_CA_SHA256 = "a1c2722d8f42c698d98dad65487eb2467fb9117c60205d84907231ecf6aa9102"
 _HEX = frozenset("0123456789abcdef")
 SOURCE_FILES = {"probe": "gateway_public_root_inventory_probe.py"}
@@ -142,6 +143,7 @@ def _cafile_inventory(path):
         _error("default_cafile_path_invalid")
     descriptor = None
     try:
+        # Follow the platform cafile path as its TLS loader does; measure only the bounded regular target.
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
         before = os.fstat(descriptor)
         if (
@@ -356,7 +358,7 @@ def validate_report(report):
     except (TypeError, ValueError, UnicodeError):
         _error("report_schema_invalid")
     # Reserve envelope headroom for status and the fixed source hash in guest output.
-    if len(encoded) + 257 > MAX_REPORT_BYTES:
+    if len(encoded) + REPORT_ENVELOPE_RESERVE_BYTES > MAX_REPORT_BYTES:
         _error("report_too_large")
     return report
 

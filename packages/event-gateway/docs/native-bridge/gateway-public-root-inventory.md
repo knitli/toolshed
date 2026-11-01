@@ -25,6 +25,10 @@ The report also records selected Python path/version/platform, public paths
 from `ssl.get_default_verify_paths()`, hostname and verification flags, and
 bounded cafile whole-file hash/stat provenance. Cafile bytes are read through
 one descriptor with a 2 MiB limit and matching before/after `fstat` identity.
+The platform cafile path may be a symlink, as permitted by the TLS loader; the
+inventory follows it and records the opened regular target's hash and metadata.
+This provenance does not establish that the file was the context's trust source;
+the separately validated materialized context roots provide that observation.
 The guest output and each captured stream are capped at 64 KiB; stderr must be
 empty. The shared report validator reserves 257 bytes within that cap for the
 fixed transport envelope, including when the standalone collector uses it. The controller preserves both raw captures in `rawEvidence` and binds

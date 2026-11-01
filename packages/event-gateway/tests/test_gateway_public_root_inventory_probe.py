@@ -9,6 +9,7 @@ import ssl
 import stat
 import subprocess  # nosec B404 -- APIs are patched to reject process execution in the collector test.
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -236,6 +237,25 @@ class ProbeTests(unittest.TestCase):
         ):
             probe._cafile_inventory("/fixture/too-big.pem")
 
+    def test_default_cafile_symlink_records_opened_regular_target(self):
+        with tempfile.TemporaryDirectory(prefix="cafile-provenance-") as directory:
+            target = Path(directory) / "ca-fixture.pem"
+            link = Path(directory) / "current-ca.pem"
+            content = b"bounded fixture provenance, not actual certificates"
+            target.write_bytes(content)
+            link.symlink_to(target.name)
+            cafile = probe._cafile_inventory(str(link))
+            self.assertEqual(cafile["path"], str(link))
+            self.assertEqual(cafile["state"], "present")
+            self.assertEqual(cafile["bytes"], len(content))
+            self.assertEqual(cafile["sha256"], hashlib.sha256(content).hexdigest())
+            self.assertEqual(cafile["stat"]["inode"], target.stat().st_ino)
+            self.assertEqual(cafile["stat"]["device"], target.stat().st_dev)
+            report = self._collect()
+            report["defaultVerifyPaths"]["cafile"] = str(link)
+            report["defaultCafile"] = cafile
+            self.assertIs(probe.validate_report(report), report)
+
     def test_empty_regular_cafile_is_valid_metadata(self):
         empty_info = os.stat_result(
             (stat.S_IFREG | 0o644, 1, 1, 1, 501, 20, 0, 0, 0, 0)
@@ -388,6 +408,18 @@ class ProbeTests(unittest.TestCase):
         )
         self.assertNotIn("SSL_CERT_FILE=", " ".join(command))
         self.assertNotIn("SSL_CERT_DIR=", " ".join(command))
+
+    def test_actual_guest_envelope_fits_reserved_headroom(self):
+        report = self._collect()
+        hashes = {name: "a" * 64 for name in probe.SOURCE_FILES}
+        with mock.patch.object(probe, "collect", return_value=report):
+            envelope = probe.collect_guest(hashes)
+        inner = json.dumps(report, sort_keys=True, separators=(",", ":")).encode()
+        stdout = json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        self.assertLessEqual(
+            len(stdout) - len(inner), probe.REPORT_ENVELOPE_RESERVE_BYTES
+        )
+        self.assertEqual(probe.validate_guest_output(stdout, b"", hashes), report)
 
     def test_guest_output_requires_exact_envelope_source_hash_and_empty_stderr(self):
         report = self._collect()
