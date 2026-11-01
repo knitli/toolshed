@@ -85,6 +85,7 @@ class SocketResponseHarness:
     """Serve fixed HTTP responses over local socket pairs for route tests."""
 
     def __init__(self, responses):
+        """Retain response bytes and socket-pair cleanup state."""
         self.responses = responses
         self.clients = []
         self.servers = []
@@ -1457,33 +1458,18 @@ class SoftnetSupervisorTests(unittest.TestCase):
     def test_guest_route_aggregate_budget_interrupts_in_progress_second_leg(self):
         """The identity leg timer uses only the aggregate time left after leg one."""
         roots = "a" * 64
-        clients, servers, threads, timers = [], [], [], []
+        timers = []
         positive_response = (b"HTTP/1.1 200 OK\r\n"
                              b"Content-Type: application/manifest+json\r\n"
                              b"Content-Length: 456\r\n\r\n" + b"x" * 456)
+        harness = SocketResponseHarness([positive_response, b""])
 
-        class ControlledTimer:
+        class ControlledTimer(ManualTimer):
             def __init__(self, interval, function):
+                super().__init__(interval, function)
                 self.interval = interval
                 self.function = function
-                self.started = False
-
-            def start(self):
-                self.started = True
-
-            def cancel(self):
-                self.started = False
-
-            def is_alive(self):
-                return False
-
-            def join(self, timeout=None):
-                pass
-
-        def make_timer(interval, function):
-            timer = ControlledTimer(interval, function)
-            timers.append(timer)
-            return timer
+                timers.append(self)
 
         class WrappedSocket:
             def __init__(self, sock):
@@ -1508,38 +1494,17 @@ class SoftnetSupervisorTests(unittest.TestCase):
 
         active_leg_timer_intervals = []
 
-        def connect(_destination, timeout=None):
-            client, server = socket.socketpair()
-            index = len(servers)
-            clients.append(client)
-            servers.append(server)
-
-            def serve():
-                try:
-                    server.recv(4096)
-                    if index == 0:
-                        server.sendall(positive_response)
-                except OSError:
-                    pass
-
-            thread = threading.Thread(target=serve, daemon=True)
-            threads.append(thread)
-            thread.start()
-            return client
-
         try:
             with patch.object(probe_guest, "ROUTE_TIMEOUT", 0.5), \
                  patch.object(probe_guest, "ROUTE_LEG_TIMEOUT", 1.5), \
-                 patch.object(probe_guest.threading, "Timer", side_effect=make_timer), \
-                 patch.object(probe_guest.socket, "create_connection", side_effect=connect), \
+                 patch.object(probe_guest.threading, "Timer", ControlledTimer), \
+                 patch.object(probe_guest.socket, "create_connection",
+                              side_effect=harness.connect), \
                  patch.object(probe_guest, "_public_context",
                               return_value=(Context(), roots, True)):
                 report = probe_guest.route_contract("104.20.0.1", "104.20.0.2", roots)
         finally:
-            for sock in clients + servers:
-                sock.close()
-            for thread in threads:
-                thread.join(timeout=1)
+            harness.close()
 
         self.assertEqual(len(active_leg_timer_intervals), 1)
         self.assertGreater(active_leg_timer_intervals[0], 0)
