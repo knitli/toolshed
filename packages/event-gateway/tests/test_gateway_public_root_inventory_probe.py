@@ -7,7 +7,7 @@ import os
 import socket
 import ssl
 import stat
-import subprocess
+import subprocess  # nosec B404 -- APIs are patched to reject process execution in the collector test.
 import sys
 import types
 import unittest

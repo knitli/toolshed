@@ -191,7 +191,7 @@ class GatewayPublicRootInventoryQualificationTest(unittest.TestCase):
             patch.object(
                 canary.shutil, "disk_usage", return_value=SimpleNamespace(free=200 * 1024**3)
             ),
-            patch.object(canary.os, "killpg", side_effect=lambda pid, sig: os.kill(pid, sig)),
+            patch.object(canary.os, "killpg", side_effect=os.kill),
         ):
             return canary.qualify(
                 "prepared-macos15",
