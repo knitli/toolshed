@@ -41,12 +41,32 @@ PUBLIC_PROBE_HOST = 'event-native-probe-83fc4c309835.knitli.workers.dev'
 PUBLIC_PROBE_PATH = '/probe'
 PUBLIC_PROBE_BODY_SHA256 = '773cdcdb36ecbdb7c720d4d135911f7d35252d862b10094f788d96a965b80600'
 PUBLIC_PROBE_SOURCE = Path(__file__).with_name('softnet_public_probe_guest.py')
-PUBLIC_PROBE_SOURCE_SHA256 = '8030101f61c7d87a720ee269b9ce508619ba5cca81c37fe99b70835a3adfcaa4'
+PUBLIC_PROBE_SOURCE_SHA256 = 'cbb45784a219065fc435f340757ea9c4d7e09d61babcd626a77070f3aed7d1f7'
 PUBLIC_PROBE_OUTPUT_LIMIT = 4096
 PUBLIC_PROBE_TIMEOUT = 25
 PUBLIC_PROBE_DURATION_LIMIT_NS = 15_000_000_000
 PUBLIC_PROBE_TIMEOUT_LIMIT_NS = PUBLIC_PROBE_TIMEOUT * 1_000_000_000
 MAX_PUBLIC_PROBE_DNS_ANSWERS = 32
+GUEST_ROUTE_IDENTITY_HOST = 'event-native-probe-83fc4c309835.knitli.workers.dev'
+GUEST_ROUTE_IDENTITY_PATH = '/probe'
+GUEST_ROUTE_POSITIVE_HOST = 'knitli.app'
+GUEST_ROUTE_POSITIVE_PATH = '/site.webmanifest'
+GUEST_ROUTE_POSITIVE_CONTENT_TYPE = 'application/manifest+json'
+GUEST_ROUTE_POSITIVE_BODY_BYTES = 456
+GUEST_ROUTE_POSITIVE_BODY_SHA256 = '096b1a4b927c04b0417ab1f49372e110c96d4db153cf3d6048f9d25c8b11d493'
+GUEST_ROUTE_SOURCE = PUBLIC_PROBE_SOURCE
+GUEST_ROUTE_SOURCE_SHA256 = 'cbb45784a219065fc435f340757ea9c4d7e09d61babcd626a77070f3aed7d1f7'
+GUEST_ROUTE_OUTPUT_LIMIT = 4096
+GUEST_ROUTE_TIMEOUT = 25
+GUEST_ROUTE_DURATION_LIMIT_NS = 12_000_000_000
+# Timeout/oversize failure receipts include bounded guest cleanup/unwind after the 12s deadline.
+# This is the fixed 25s supervised command backstop; successful and ordinary reports stay at 12s.
+GUEST_ROUTE_TIMEOUT_LIMIT_NS = GUEST_ROUTE_TIMEOUT * 1_000_000_000
+GUEST_ROUTE_LOADER = (
+    "import base64,sys; source=base64.b64decode(sys.argv[1],validate=True); "
+    "sys.argv=[sys.argv[0]]+['--guest-route-contract']+sys.argv[2:]; "
+    "exec(compile(source,'<fixed-guest-route-contract>','exec'))"
+)
 PUBLIC_PROBE_LOADER = (
     "import base64,sys; source=base64.b64decode(sys.argv[1],validate=True); "
     "sys.argv=[sys.argv[0]]+sys.argv[2:]; "
@@ -96,20 +116,30 @@ def _admission_record(root):
     value = plistlib.loads(raw)
     base_keys = {'kind', 'ownerUid', 'tartHome', 'vmName', 'macAddress', 'measurement'}
     probe_admission = isinstance(value, dict) and set(value) == base_keys | {'probeIPv4'}
-    _require(isinstance(value, dict) and (set(value) == base_keys or probe_admission),
+    route_fields = {'identityProbeIPv4', 'positiveOriginIPv4', 'publicTrustRootsSha256'}
+    route_admission = isinstance(value, dict) and set(value) == base_keys | route_fields
+    _require(isinstance(value, dict) and (set(value) == base_keys or probe_admission or route_admission),
              'invalid_admission')
-    _require(value['kind'] == ('softnet-public-probe-admission-v1' if probe_admission
-                               else 'softnet-startup-admission-v1')
+    expected_kind = ('softnet-guest-route-admission-v1' if route_admission else
+                     'softnet-public-probe-admission-v1' if probe_admission else
+                     'softnet-startup-admission-v1')
+    _require(value['kind'] == expected_kind
              and type(value['ownerUid']) is int and value['ownerUid'] > 0,
              'invalid_admission')
-    if probe_admission:
-        _require(isinstance(value['probeIPv4'], str), 'invalid_admission')
-        try:
-            probe_ip = ipaddress.ip_address(value['probeIPv4'])
-        except (TypeError, ValueError):
-            raise recovery.RecoveryError('invalid_admission') from None
-        _require(isinstance(probe_ip, ipaddress.IPv4Address) and probe_ip.is_global,
-                 'invalid_admission')
+    if probe_admission or route_admission:
+        ip_keys = ('probeIPv4',) if probe_admission else ('identityProbeIPv4', 'positiveOriginIPv4')
+        for key in ip_keys:
+            _require(isinstance(value[key], str), 'invalid_admission')
+            try:
+                probe_ip = ipaddress.ip_address(value[key])
+            except (TypeError, ValueError):
+                raise recovery.RecoveryError('invalid_admission') from None
+            _require(isinstance(probe_ip, ipaddress.IPv4Address) and probe_ip.is_global,
+                     'invalid_admission')
+        if route_admission:
+            _require(isinstance(value['publicTrustRootsSha256'], str)
+                     and re.fullmatch(r'[0-9a-f]{64}', value['publicTrustRootsSha256']),
+                     'invalid_admission')
     _require(isinstance(value['vmName'], str)
              and re.fullmatch(r'softnet-canary-[0-9a-f]{32}', value['vmName'])
              and isinstance(value['macAddress'], str)
@@ -161,11 +191,11 @@ def _admission(root):
     return value, account, group, admission_digest
 
 
-def _resolve_public_probe_ip(resolver=None):
-    """Select one deterministic globally routable IPv4 answer for the fixed Worker."""
+def _resolve_public_probe_ip(resolver=None, host=PUBLIC_PROBE_HOST):
+    """Select one deterministic globally routable IPv4 answer for a fixed origin."""
     resolver = socket.getaddrinfo if resolver is None else resolver
     try:
-        answers = resolver(PUBLIC_PROBE_HOST, 443, socket.AF_INET, socket.SOCK_STREAM)
+        answers = resolver(host, 443, socket.AF_INET, socket.SOCK_STREAM)
     except OSError:
         raise recovery.RecoveryError('public_probe_dns_failed') from None
     _require(isinstance(answers, (list, tuple)) and 0 < len(answers) <= MAX_PUBLIC_PROBE_DNS_ANSWERS,
@@ -231,6 +261,123 @@ def _validate_public_probe_report(raw, destination):
                         and report['bodySha256'] == PUBLIC_PROBE_BODY_SHA256
                         and report['error'] == '')
     _require(report['verified'] is expected_success, 'public_probe_report_inconsistent')
+    return report
+
+
+def _validate_guest_route_report(raw, identity_ip, positive_ip, trust_roots_sha256):
+    """Validate only the fixed two-leg receipt and its admitted guest trust inventory."""
+    _require(isinstance(raw, bytes) and 0 < len(raw) <= GUEST_ROUTE_OUTPUT_LIMIT
+             and raw.endswith(b'\n'), 'guest_route_report_size')
+    try:
+        report = json.loads(raw)
+    except (ValueError, UnicodeError):
+        raise recovery.RecoveryError('guest_route_report_invalid') from None
+    expected = {
+        'kind', 'identityHost', 'identityPath', 'identityDestinationIPv4', 'identityStatus',
+        'identityTlsVerified', 'identityBodyBytes', 'identityBodySha256', 'identityNoStore',
+        'identityNoGatewayMarkers', 'identityError', 'positiveHost', 'positivePath',
+        'positiveDestinationIPv4', 'positiveStatus', 'positiveTlsVerified',
+        'positiveContentType', 'positiveBodyBytes', 'positiveBodySha256', 'positiveError',
+        'publicTrustRootsSha256', 'gatewayCaAbsent', 'startedAtUnixNs', 'finishedAtUnixNs',
+        'verified', 'error'}
+    timeout = (isinstance(report, dict) and isinstance(report.get('error'), str)
+               and report['error'] in {'timeout', 'report_too_large'})
+    elapsed_limit = GUEST_ROUTE_TIMEOUT_LIMIT_NS if timeout else GUEST_ROUTE_DURATION_LIMIT_NS
+    _require(isinstance(report, dict) and set(report) == expected
+             and report['kind'] == 'native-guest-route-contract-v1'
+             and report['identityHost'] == GUEST_ROUTE_IDENTITY_HOST
+             and report['identityPath'] == GUEST_ROUTE_IDENTITY_PATH
+             and report['identityDestinationIPv4'] == identity_ip
+             and report['positiveHost'] == GUEST_ROUTE_POSITIVE_HOST
+             and report['positivePath'] == GUEST_ROUTE_POSITIVE_PATH
+             and report['positiveDestinationIPv4'] == positive_ip
+             and isinstance(report['publicTrustRootsSha256'], str)
+             and type(report['startedAtUnixNs']) is int and report['startedAtUnixNs'] > 0
+             and type(report['finishedAtUnixNs']) is int
+             and report['finishedAtUnixNs'] >= report['startedAtUnixNs']
+             and report['finishedAtUnixNs'] - report['startedAtUnixNs'] <= elapsed_limit
+             and type(report['identityStatus']) is int and 0 <= report['identityStatus'] <= 599
+             and type(report['identityTlsVerified']) is bool
+             and type(report['identityBodyBytes']) is int and 0 <= report['identityBodyBytes'] <= 8192
+             and isinstance(report['identityBodySha256'], str)
+             and re.fullmatch(r'[0-9a-f]{64}', report['identityBodySha256'])
+             and type(report['identityNoStore']) is bool
+             and type(report['identityNoGatewayMarkers']) is bool
+             and isinstance(report['identityError'], str)
+             and report['identityError'] in {'', 'timeout', 'transport_error', 'tls_error',
+                                              'trust_override', 'trust_roots_invalid',
+                                              'trust_roots_mismatch', 'body_too_large',
+                                              'report_too_large'}
+             and type(report['positiveStatus']) is int and 0 <= report['positiveStatus'] <= 599
+             and type(report['positiveTlsVerified']) is bool
+             and isinstance(report['positiveContentType'], str)
+             and report['positiveContentType'] in {'', GUEST_ROUTE_POSITIVE_CONTENT_TYPE}
+             and type(report['positiveBodyBytes']) is int and 0 <= report['positiveBodyBytes'] <= 8192
+             and isinstance(report['positiveBodySha256'], str)
+             and re.fullmatch(r'[0-9a-f]{64}', report['positiveBodySha256'])
+             and isinstance(report['positiveError'], str)
+             and report['positiveError'] in {'', 'timeout', 'transport_error', 'tls_error',
+                                              'trust_override', 'trust_roots_invalid',
+                                              'trust_roots_mismatch', 'body_too_large',
+                                              'report_too_large'}
+             and type(report['gatewayCaAbsent']) is bool
+             and type(report['verified']) is bool
+             and isinstance(report['error'], str)
+             and report['error'] in {'', 'timeout', 'transport_error', 'tls_error',
+                                     'trust_override', 'trust_roots_invalid', 'trust_roots_mismatch',
+                                     'body_too_large', 'predicate_failed', 'report_too_large'},
+             'guest_route_report_invalid')
+    preflight_errors = {'trust_override', 'trust_roots_invalid', 'trust_roots_mismatch'}
+    if report['error'] in preflight_errors:
+        empty_hash = hashlib.sha256(b'').hexdigest()
+        _require(report['identityError'] == report['error']
+                 and report['positiveError'] == report['error']
+                 and report['publicTrustRootsSha256'] == ''
+                 and report['gatewayCaAbsent'] is False
+                 and report['identityStatus'] == 0 and report['positiveStatus'] == 0
+                 and report['identityTlsVerified'] is False
+                 and report['positiveTlsVerified'] is False
+                 and report['identityBodyBytes'] == 0 and report['positiveBodyBytes'] == 0
+                 and report['identityBodySha256'] == empty_hash
+                 and report['positiveBodySha256'] == empty_hash
+                 and report['identityNoStore'] is False
+                 and report['identityNoGatewayMarkers'] is False
+                 and report['positiveContentType'] == ''
+                 and report['verified'] is False, 'guest_route_report_inconsistent')
+        return report
+    if report['error'] == 'report_too_large':
+        empty_hash = hashlib.sha256(b'').hexdigest()
+        _require(report['identityError'] == report['error']
+                 and report['positiveError'] == report['error']
+                 and report['publicTrustRootsSha256'] == trust_roots_sha256
+                 and report['gatewayCaAbsent'] is True
+                 and report['identityStatus'] == 0 and report['positiveStatus'] == 0
+                 and report['identityTlsVerified'] is False
+                 and report['positiveTlsVerified'] is False
+                 and report['identityBodyBytes'] == 0 and report['positiveBodyBytes'] == 0
+                 and report['identityBodySha256'] == empty_hash
+                 and report['positiveBodySha256'] == empty_hash
+                 and report['identityNoStore'] is False
+                 and report['identityNoGatewayMarkers'] is False
+                 and report['positiveContentType'] == ''
+                 and report['verified'] is False, 'guest_route_report_inconsistent')
+        return report
+    _require(report['publicTrustRootsSha256'] == trust_roots_sha256
+             and report['gatewayCaAbsent'] is True, 'guest_route_report_invalid')
+    identity_ok = (report['identityTlsVerified'] and report['identityStatus'] == 404
+                   and report['identityBodyBytes'] == 0
+                   and report['identityBodySha256'] == hashlib.sha256(b'').hexdigest()
+                   and report['identityNoStore'] and report['identityNoGatewayMarkers']
+                   and report['identityError'] == '')
+    positive_ok = (report['positiveTlsVerified'] and report['positiveStatus'] == 200
+                   and report['positiveContentType'] == GUEST_ROUTE_POSITIVE_CONTENT_TYPE
+                   and report['positiveBodyBytes'] == GUEST_ROUTE_POSITIVE_BODY_BYTES
+                   and report['positiveBodySha256'] == GUEST_ROUTE_POSITIVE_BODY_SHA256
+                   and report['positiveError'] == '')
+    expected_error = '' if identity_ok and positive_ok else (
+        report['positiveError'] or report['identityError'] or 'predicate_failed')
+    _require(report['verified'] is (identity_ok and positive_ok)
+             and report['error'] == expected_error, 'guest_route_report_inconsistent')
     return report
 
 
@@ -331,7 +478,8 @@ def _reap_children(vm, helper, threads, stop, failures, *, record_error=None):
             failures.append('log_drainer_unjoined')
 
 
-def _exercise(run, admission, account, group, preferences_factory, *, public_probe_ip=None):
+def _exercise(run, admission, account, group, preferences_factory, *, public_probe_ip=None,
+              guest_route_ips=None):
     env = {**ENV, 'HOME': admission['tartHome'], 'TART_HOME': admission['tartHome'],
            'TART_NO_AUTO_PRUNE': '1'}
     owner_popen = partial(subprocess.Popen, user=account.pw_uid, group=account.pw_gid, extra_groups=[])
@@ -375,8 +523,10 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
         _record(run, 'launch.plist', {'vmName': vm_name, 'macAddress': admission['macAddress']})
         stop['helperReaped'] = False
         helper_argv = [str(SOFTNET), '--vm-fd', '0', '--vm-mac-address', admission['macAddress']]
-        if public_probe_ip is not None:
-            helper_argv.append('--allow=out ' + public_probe_ip + '/32')
+        allowed_ips = ([public_probe_ip] if public_probe_ip is not None else
+                       sorted(set(guest_route_ips or ()), key=lambda value: int(ipaddress.IPv4Address(value))))
+        for destination in allowed_ips:
+            helper_argv.append('--allow=out ' + destination + '/32')
         helper_argv.extend(['--block=0.0.0.0/0', '--user', account.pw_name, '--group', group])
         helper = subprocess.Popen(
             helper_argv,
@@ -431,6 +581,22 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
             report = _validate_public_probe_report(stdout, public_probe_ip)
             _record(run, 'probe.plist', report)
             _require(report['verified'], 'public_probe_result_failed')
+        elif guest_route_ips is not None:
+            identity_ip, positive_ip = guest_route_ips
+            source = _protected(GUEST_ROUTE_SOURCE, 0)
+            source_bytes = source.read_bytes()
+            _require(len(source_bytes) <= 64 * 1024
+                     and hashlib.sha256(source_bytes).hexdigest() == GUEST_ROUTE_SOURCE_SHA256,
+                     'guest_route_source_digest_mismatch')
+            stdout, _ = command(
+                [str(TART), 'exec', vm_name, '/usr/bin/python3', '-I', '-c',
+                 GUEST_ROUTE_LOADER, base64.b64encode(source_bytes).decode('ascii'),
+                 identity_ip, positive_ip, admission['publicTrustRootsSha256']],
+                timeout=GUEST_ROUTE_TIMEOUT, output_limit=GUEST_ROUTE_OUTPUT_LIMIT)
+            report = _validate_guest_route_report(
+                stdout, identity_ip, positive_ip, admission['publicTrustRootsSha256'])
+            _record(run, 'route-probe.plist', report)
+            _require(report['verified'], 'guest_route_result_failed')
     except BaseException as exc:
         error = exc
     finally:
@@ -475,7 +641,8 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
     return stop
 
 
-def qualify(admission_directory, *, public_probe=False, preferences_factory=Preferences):
+def qualify(admission_directory, *, public_probe=False, guest_route_contract=False,
+            preferences_factory=Preferences):
     """Run the fixed startup canary or one fixed public-probe observation."""
     _require(os.geteuid() == 0 and sys.platform == 'darwin', 'root_macos_required')
     _require(sys.version_info >= (3, 13) and callable(getattr(os, 'waitid', None))
@@ -486,7 +653,19 @@ def qualify(admission_directory, *, public_probe=False, preferences_factory=Pref
     with State(STATE_ROOT) as state:
         admission, account, group, digest = _admission(root)
         probe_ip = None
-        if public_probe:
+        route_ips = None
+        if public_probe and guest_route_contract:
+            raise recovery.RecoveryError('mutually_exclusive_probe_modes')
+        if guest_route_contract:
+            _require(admission['kind'] == 'softnet-guest-route-admission-v1',
+                     'guest_route_admission_required')
+            identity_ip = _resolve_public_probe_ip(host=GUEST_ROUTE_IDENTITY_HOST)
+            positive_ip = _resolve_public_probe_ip(host=GUEST_ROUTE_POSITIVE_HOST)
+            _require(admission['identityProbeIPv4'] == identity_ip
+                     and admission['positiveOriginIPv4'] == positive_ip,
+                     'guest_route_admission_mismatch')
+            route_ips = (identity_ip, positive_ip)
+        elif public_probe:
             _require(admission['kind'] == 'softnet-public-probe-admission-v1',
                      'public_probe_admission_required')
             probe_ip = _resolve_public_probe_ip()
@@ -499,11 +678,15 @@ def qualify(admission_directory, *, public_probe=False, preferences_factory=Pref
                     'softnetBinarySha256': SOFTNET_SHA256, 'admissionSha256': digest}
         if probe_ip is not None:
             identity['probeIPv4'] = probe_ip
+        if route_ips is not None:
+            identity.update({'identityProbeIPv4': route_ips[0], 'positiveOriginIPv4': route_ips[1],
+                             'publicTrustRootsSha256': admission['publicTrustRootsSha256']})
         run, run_id = state.begin(identity)
         stop = _exercise(run, admission, account, group, preferences_factory,
-                         public_probe_ip=probe_ip)
+                         public_probe_ip=probe_ip, guest_route_ips=route_ips)
         state.complete(run, stop)
-        return {'kind': 'softnet-public-probe-canary-v1' if probe_ip else 'softnet-startup-canary-v1',
+        return {'kind': ('softnet-guest-route-canary-v1' if route_ips else
+                         'softnet-public-probe-canary-v1' if probe_ip else 'softnet-startup-canary-v1'),
                 'runId': run_id, 'status': 'passed', 'qualified': False,
                 'preferencesRestored': True, 'vmDeleted': False}
 
@@ -511,10 +694,13 @@ def qualify(admission_directory, *, public_probe=False, preferences_factory=Pref
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--admission-dir', type=Path, required=True)
-    parser.add_argument('--public-probe', action='store_true')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--public-probe', action='store_true')
+    mode.add_argument('--guest-route-contract', action='store_true')
     args = parser.parse_args(argv)
     try:
-        print(json.dumps(qualify(args.admission_dir, public_probe=args.public_probe), sort_keys=True))
+        print(json.dumps(qualify(args.admission_dir, public_probe=args.public_probe,
+                                 guest_route_contract=args.guest_route_contract), sort_keys=True))
     except (OSError, ValueError, RuntimeError):
         print('softnet_canary_failed; retain admission and run journal', file=sys.stderr)
         return 1

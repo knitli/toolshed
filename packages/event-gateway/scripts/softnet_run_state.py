@@ -20,16 +20,23 @@ STATE_VERSION = 1
 IDENTITY_KEYS = {"vmName", "macAddress", "tartBinarySha256", "softnetBinarySha256",
                  "admissionSha256"}
 PROBE_IDENTITY_KEYS = IDENTITY_KEYS | {"probeIPv4"}
+ROUTE_IDENTITY_KEYS = IDENTITY_KEYS | {
+    "identityProbeIPv4", "positiveOriginIPv4", "publicTrustRootsSha256"}
 PUBLIC_PROBE_HOST = "event-native-probe-83fc4c309835.knitli.workers.dev"
 PUBLIC_PROBE_PATH = "/probe"
 PUBLIC_PROBE_BODY_SHA256 = "773cdcdb36ecbdb7c720d4d135911f7d35252d862b10094f788d96a965b80600"
+ROUTE_POSITIVE_HOST = "knitli.app"
+ROUTE_POSITIVE_PATH = "/site.webmanifest"
+ROUTE_POSITIVE_CONTENT_TYPE = "application/manifest+json"
+ROUTE_POSITIVE_BODY_BYTES = 456
+ROUTE_POSITIVE_BODY_SHA256 = "096b1a4b927c04b0417ab1f49372e110c96d4db153cf3d6048f9d25c8b11d493"
 HEX_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 MAC_ADDRESS = re.compile(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\Z")
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
 ROOT_ENTRIES = {"controller.lock"}
 RUN_ENTRIES = {"identity.plist", "complete.plist", "reserved", "snapshot.plist", "restored",
                "launch.plist", "stop.plist", "helper-logs", "vm-logs", "disposition.plist",
-               "probe.plist"}
+               "probe.plist", "route-probe.plist"}
 LOG_FILES = {"tart-stdout.bin", "tart-stderr.bin"}
 DISPOSITION_FILES = ("identity.plist", "reserved", "snapshot.plist", "restored",
                      "launch.plist", "stop.plist", "helper-logs/tart-stdout.bin",
@@ -39,6 +46,11 @@ DISPOSITION_KIND = "softnet-failed-restored-disposition"
 MAX_LOG_BYTES = canary.MAX_SHORT_OUTPUT
 PROBE_DURATION_LIMIT_NS = 15_000_000_000
 PROBE_TIMEOUT_LIMIT_NS = 25_000_000_000
+ROUTE_DURATION_LIMIT_NS = 12_000_000_000
+# Timeout/oversize failure receipts include bounded guest cleanup/unwind after the 12s deadline.
+# This is the fixed 25s supervised command backstop; successful and ordinary reports stay at 12s.
+ROUTE_TIMEOUT_LIMIT_NS = 25_000_000_000
+ROUTE_REPORT_LIMIT = 4 * 1024
 
 
 def _require(condition, message):
@@ -51,7 +63,8 @@ def _digest(data):
 
 
 def _identity_record(run_id, identity):
-    _require(isinstance(identity, dict) and set(identity) in (IDENTITY_KEYS, PROBE_IDENTITY_KEYS),
+    _require(isinstance(identity, dict) and set(identity) in (
+        IDENTITY_KEYS, PROBE_IDENTITY_KEYS, ROUTE_IDENTITY_KEYS),
              "invalid_identity")
     _require(isinstance(identity["vmName"], str) and 0 < len(identity["vmName"]) <= 128
              and "\x00" not in identity["vmName"], "invalid_identity")
@@ -60,14 +73,19 @@ def _identity_record(run_id, identity):
     _require(identity["tartBinarySha256"] == canary.TART_BINARY_SHA256, "invalid_identity")
     _require(all(isinstance(identity[key], str) and HEX_SHA256.fullmatch(identity[key])
                  for key in ("softnetBinarySha256", "admissionSha256")), "invalid_identity")
-    if "probeIPv4" in identity:
-        _require(isinstance(identity["probeIPv4"], str), "invalid_identity")
-        try:
-            probe_ip = ipaddress.ip_address(identity["probeIPv4"])
-        except (TypeError, ValueError):
-            raise recovery.RecoveryError("invalid_identity") from None
-        _require(isinstance(probe_ip, ipaddress.IPv4Address) and probe_ip.is_global,
-                 "invalid_identity")
+    for key in ("probeIPv4", "identityProbeIPv4", "positiveOriginIPv4"):
+        if key in identity:
+            _require(isinstance(identity[key], str), "invalid_identity")
+            try:
+                probe_ip = ipaddress.ip_address(identity[key])
+            except (TypeError, ValueError):
+                raise recovery.RecoveryError("invalid_identity") from None
+            _require(isinstance(probe_ip, ipaddress.IPv4Address) and probe_ip.is_global,
+                     "invalid_identity")
+    if "identityProbeIPv4" in identity:
+        _require(isinstance(identity.get("positiveOriginIPv4"), str)
+                 and isinstance(identity.get("publicTrustRootsSha256"), str)
+                 and HEX_SHA256.fullmatch(identity["publicTrustRootsSha256"]), "invalid_identity")
     return {"kind": STATE_KIND, "version": STATE_VERSION, "runId": run_id,
             "identity": identity}
 
@@ -126,6 +144,10 @@ def _failed_restored_files(root, name, *, receipt_present=False):
         if "probe.plist" in entries:
             _require("probeIPv4" in identity, "invalid_probe")
             disposition_files = (*DISPOSITION_FILES, "probe.plist")
+        if "route-probe.plist" in entries:
+            _require("identityProbeIPv4" in identity, "invalid_route_probe")
+            _check_route_probe(fd, identity)
+            disposition_files = (*disposition_files, "route-probe.plist")
         hashes = {}
         for relative in disposition_files:
             parts = relative.split("/")
@@ -235,6 +257,111 @@ def _check_probe(fd, identity):
     return raw, report
 
 
+def _check_route_probe(fd, identity):
+    raw = recovery._read(fd, "route-probe.plist")
+    _require(0 < len(raw) <= ROUTE_REPORT_LIMIT, "invalid_route_probe")
+    report = _plist(raw, "invalid_route_probe")
+    timeout = (isinstance(report, dict) and isinstance(report.get("error"), str)
+               and report["error"] in {"timeout", "report_too_large"})
+    duration_limit = ROUTE_TIMEOUT_LIMIT_NS if timeout else ROUTE_DURATION_LIMIT_NS
+    _require(isinstance(report, dict) and set(report) == {
+        "kind", "identityHost", "identityPath", "identityDestinationIPv4", "identityStatus",
+        "identityTlsVerified", "identityBodyBytes", "identityBodySha256", "identityNoStore",
+        "identityNoGatewayMarkers", "identityError", "positiveHost", "positivePath",
+        "positiveDestinationIPv4", "positiveStatus", "positiveTlsVerified",
+        "positiveContentType", "positiveBodyBytes", "positiveBodySha256", "positiveError",
+        "publicTrustRootsSha256", "gatewayCaAbsent", "startedAtUnixNs", "finishedAtUnixNs",
+        "verified", "error"}
+        and report["kind"] == "native-guest-route-contract-v1"
+        and report["identityHost"] == PUBLIC_PROBE_HOST and report["identityPath"] == PUBLIC_PROBE_PATH
+        and report["identityDestinationIPv4"] == identity.get("identityProbeIPv4")
+        and report["positiveHost"] == ROUTE_POSITIVE_HOST and report["positivePath"] == ROUTE_POSITIVE_PATH
+        and report["positiveDestinationIPv4"] == identity.get("positiveOriginIPv4")
+        and isinstance(report["publicTrustRootsSha256"], str)
+        and type(report["gatewayCaAbsent"]) is bool
+        and type(report["startedAtUnixNs"]) is int and report["startedAtUnixNs"] > 0
+        and type(report["finishedAtUnixNs"]) is int
+        and report["finishedAtUnixNs"] >= report["startedAtUnixNs"]
+        and report["finishedAtUnixNs"] - report["startedAtUnixNs"] <= duration_limit
+        and type(report["identityStatus"]) is int and 0 <= report["identityStatus"] <= 599
+        and type(report["identityTlsVerified"]) is bool
+        and type(report["identityBodyBytes"]) is int and 0 <= report["identityBodyBytes"] <= 8192
+        and isinstance(report["identityBodySha256"], str) and HEX_SHA256.fullmatch(report["identityBodySha256"])
+        and type(report["identityNoStore"]) is bool
+        and type(report["identityNoGatewayMarkers"]) is bool
+        and isinstance(report["identityError"], str)
+        and report["identityError"] in {"", "timeout", "transport_error", "tls_error",
+                                         "trust_override", "trust_roots_invalid", "trust_roots_mismatch",
+                                         "body_too_large", "report_too_large"}
+        and type(report["positiveStatus"]) is int and 0 <= report["positiveStatus"] <= 599
+        and type(report["positiveTlsVerified"]) is bool
+        and isinstance(report["positiveContentType"], str)
+        and report["positiveContentType"] in {"", ROUTE_POSITIVE_CONTENT_TYPE}
+        and type(report["positiveBodyBytes"]) is int and 0 <= report["positiveBodyBytes"] <= 8192
+        and isinstance(report["positiveBodySha256"], str) and HEX_SHA256.fullmatch(report["positiveBodySha256"])
+        and isinstance(report["positiveError"], str)
+        and report["positiveError"] in {"", "timeout", "transport_error", "tls_error",
+                                         "trust_override", "trust_roots_invalid", "trust_roots_mismatch",
+                                         "body_too_large", "report_too_large"}
+        and type(report["verified"]) is bool
+        and isinstance(report["error"], str)
+        and report["error"] in {"", "timeout", "transport_error", "tls_error", "trust_override",
+                                "trust_roots_invalid", "trust_roots_mismatch", "body_too_large",
+                                "predicate_failed", "report_too_large"}, "invalid_route_probe")
+    preflight_errors = {"trust_override", "trust_roots_invalid", "trust_roots_mismatch"}
+    if report["error"] in preflight_errors:
+        empty_hash = _digest(b"")
+        _require(report["identityError"] == report["error"]
+                 and report["positiveError"] == report["error"]
+                 and report["publicTrustRootsSha256"] == ""
+                 and report["gatewayCaAbsent"] is False
+                 and report["identityStatus"] == 0 and report["positiveStatus"] == 0
+                 and report["identityTlsVerified"] is False
+                 and report["positiveTlsVerified"] is False
+                 and report["identityBodyBytes"] == 0 and report["positiveBodyBytes"] == 0
+                 and report["identityBodySha256"] == empty_hash
+                 and report["positiveBodySha256"] == empty_hash
+                 and report["identityNoStore"] is False
+                 and report["identityNoGatewayMarkers"] is False
+                 and report["positiveContentType"] == ""
+                 and report["verified"] is False, "invalid_route_probe")
+        return raw, report
+    if report["error"] == "report_too_large":
+        empty_hash = _digest(b"")
+        _require(report["identityError"] == report["error"]
+                 and report["positiveError"] == report["error"]
+                 and report["publicTrustRootsSha256"] == identity.get("publicTrustRootsSha256")
+                 and report["gatewayCaAbsent"] is True
+                 and report["identityStatus"] == 0 and report["positiveStatus"] == 0
+                 and report["identityTlsVerified"] is False
+                 and report["positiveTlsVerified"] is False
+                 and report["identityBodyBytes"] == 0 and report["positiveBodyBytes"] == 0
+                 and report["identityBodySha256"] == empty_hash
+                 and report["positiveBodySha256"] == empty_hash
+                 and report["identityNoStore"] is False
+                 and report["identityNoGatewayMarkers"] is False
+                 and report["positiveContentType"] == ""
+                 and report["verified"] is False, "invalid_route_probe")
+        return raw, report
+    _require(report["publicTrustRootsSha256"] == identity.get("publicTrustRootsSha256")
+             and report["gatewayCaAbsent"] is True, "invalid_route_probe")
+    empty_hash = _digest(b"")
+    identity_ok = (report["identityTlsVerified"] and report["identityStatus"] == 404
+                   and report["identityBodyBytes"] == 0 and report["identityBodySha256"] == empty_hash
+                   and report["identityNoStore"] and report["identityNoGatewayMarkers"]
+                   and report["identityError"] == "")
+    positive_ok = (report["positiveTlsVerified"] and report["positiveStatus"] == 200
+                   and report["positiveContentType"] == ROUTE_POSITIVE_CONTENT_TYPE
+                   and report["positiveBodyBytes"] == ROUTE_POSITIVE_BODY_BYTES
+                   and report["positiveBodySha256"] == ROUTE_POSITIVE_BODY_SHA256
+                   and report["positiveError"] == "")
+    expected_error = "" if identity_ok and positive_ok else (
+        report["positiveError"] or report["identityError"] or "predicate_failed")
+    _require(report["verified"] is (identity_ok and positive_ok)
+             and report["error"] == expected_error, "invalid_route_probe")
+    return raw, report
+
+
 def _check_log_directory(root, run_name, name, *, complete):
     fd = recovery._directory(Path(root) / run_name / name)
     try:
@@ -268,12 +395,20 @@ def _check_run_directory(root, name):
         _require(identity_record == expected, "invalid_identity")
         identity = identity_record["identity"]
         probe_mode = "probeIPv4" in identity
-        _require(("probe.plist" not in entries or probe_mode), "invalid_probe")
+        route_mode = "identityProbeIPv4" in identity
+        _require(not (probe_mode and route_mode)
+                 and ("probe.plist" not in entries or probe_mode)
+                 and ("route-probe.plist" not in entries or route_mode), "invalid_probe_mode")
         if "launch.plist" in entries:
             _check_launch(fd, identity_record["identity"])
         probe_bytes = None
+        probe = None
         if "probe.plist" in entries:
-            probe_bytes, _ = _check_probe(fd, identity)
+            probe_bytes, probe = _check_probe(fd, identity)
+        route_probe_bytes = None
+        route_probe = None
+        if "route-probe.plist" in entries:
+            route_probe_bytes, route_probe = _check_route_probe(fd, identity)
         stop_bytes = stop = None
         if "stop.plist" in entries:
             stop_bytes, stop = _check_stop(fd)
@@ -287,10 +422,16 @@ def _check_run_directory(root, name):
             _require(not ("restored" in entries and "snapshot.plist" not in entries),
                      "invalid_incomplete_run")
             return False
+        if probe_mode:
+            _require(probe is not None and probe["verified"], "invalid_probe")
+        if route_mode:
+            _require(route_probe is not None and route_probe["verified"], "invalid_route_probe")
         required = {"snapshot.plist", "restored", "reserved", "launch.plist", "stop.plist",
                     "helper-logs", "vm-logs"}
         if probe_mode:
             required.add("probe.plist")
+        if route_mode:
+            required.add("route-probe.plist")
         _require(required <= entries, "invalid_completion")
         _require(recovery._read(fd, "reserved") == b"", "invalid_completion")
         _require(_valid_stop_evidence(stop), "invalid_completion")
@@ -302,6 +443,8 @@ def _check_run_directory(root, name):
                          "restoredSha256", "stopSha256", "stopEvidence"}
         if probe_mode:
             complete_keys.add("probeSha256")
+        if route_mode:
+            complete_keys.add("routeProbeSha256")
         _require(isinstance(complete, dict)
                  and set(complete) == complete_keys
                  and type(complete["version"]) is int and complete["version"] == 1
@@ -311,6 +454,7 @@ def _check_run_directory(root, name):
                  and complete["stopSha256"] == _digest(stop_bytes)
                  and complete["stopEvidence"] == stop
                  and (not probe_mode or complete["probeSha256"] == _digest(probe_bytes))
+                 and (not route_mode or complete["routeProbeSha256"] == _digest(route_probe_bytes))
                  and _valid_stop_evidence(complete["stopEvidence"]), "invalid_completion")
         return True
     finally:
@@ -414,8 +558,15 @@ class State(AbstractContextManager):
             required = {"identity.plist", "reserved", "snapshot.plist", "restored", "launch.plist",
                         "stop.plist", "helper-logs", "vm-logs"}
             identity = plistlib.loads(identity_bytes)["identity"]
+            probe_mode = "probeIPv4" in identity
+            route_mode = "identityProbeIPv4" in identity
             if "probeIPv4" in identity:
                 required.add("probe.plist")
+            if "identityProbeIPv4" in identity:
+                required.add("route-probe.plist")
+            _require(not (probe_mode and route_mode)
+                     and ("probe.plist" not in entries or probe_mode)
+                     and ("route-probe.plist" not in entries or route_mode), "invalid_probe_mode")
             _require(entries <= RUN_ENTRIES and required <= entries, "invalid_run_entries")
             _require("disposition.plist" not in entries, "conflicting_disposition")
             _require(recovery._read(run_fd, "identity.plist") == identity_bytes,
@@ -433,10 +584,14 @@ class State(AbstractContextManager):
                       "snapshotSha256": _digest(snapshot), "restoredSha256": _digest(restored),
                       "stopSha256": _digest(stop_bytes),
                       "stopEvidence": stop_evidence}
-            if "probeIPv4" in identity:
+            if probe_mode:
                 probe_bytes, probe = _check_probe(run_fd, identity)
                 _require(probe["verified"], "invalid_probe")
                 record["probeSha256"] = _digest(probe_bytes)
+            if route_mode:
+                route_bytes, route_report = _check_route_probe(run_fd, identity)
+                _require(route_report["verified"], "invalid_route_probe")
+                record["routeProbeSha256"] = _digest(route_bytes)
             recovery._publish(run_fd, "complete.plist",
                               plistlib.dumps(record, fmt=plistlib.FMT_BINARY, sort_keys=True))
         finally:

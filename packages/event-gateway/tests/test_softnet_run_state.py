@@ -2,6 +2,8 @@
 
 import hashlib
 import ipaddress
+import io
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -9,6 +11,7 @@ import shutil
 import sys
 import tempfile
 import time
+from contextlib import redirect_stdout
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -16,6 +19,8 @@ from unittest.mock import patch
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import qualify_offline_macos_vm as canary  # noqa: E402 -- Script modules load from their local directory.
+import qualify_softnet_macos_vm as controller  # noqa: E402 -- Script modules load from their local directory.
+import softnet_public_probe_guest as probe_guest  # noqa: E402 -- Script modules load from their local directory.
 import softnet_recovery as recovery  # noqa: E402 -- Script modules load from their local directory.
 import softnet_run_state as run_state  # noqa: E402 -- Script modules load from their local directory.
 
@@ -92,15 +97,100 @@ class SoftnetRunStateTests(unittest.TestCase):
             "verified": True, "error": "",
         }
 
+    @staticmethod
+    def _route_report(identity="104.20.0.1", positive="104.20.0.2", roots="f" * 64):
+        now = time.time_ns()
+        return {
+            "kind": "native-guest-route-contract-v1",
+            "identityHost": run_state.PUBLIC_PROBE_HOST, "identityPath": run_state.PUBLIC_PROBE_PATH,
+            "identityDestinationIPv4": identity, "identityStatus": 404,
+            "identityTlsVerified": True, "identityBodyBytes": 0,
+            "identityBodySha256": hashlib.sha256(b"").hexdigest(),
+            "identityNoStore": True, "identityNoGatewayMarkers": True, "identityError": "",
+            "positiveHost": run_state.ROUTE_POSITIVE_HOST,
+            "positivePath": run_state.ROUTE_POSITIVE_PATH,
+            "positiveDestinationIPv4": positive, "positiveStatus": 200,
+            "positiveTlsVerified": True, "positiveContentType": run_state.ROUTE_POSITIVE_CONTENT_TYPE,
+            "positiveBodyBytes": run_state.ROUTE_POSITIVE_BODY_BYTES,
+            "positiveBodySha256": run_state.ROUTE_POSITIVE_BODY_SHA256, "positiveError": "",
+            "publicTrustRootsSha256": roots, "gatewayCaAbsent": True,
+            "startedAtUnixNs": now, "finishedAtUnixNs": now, "verified": True, "error": "",
+        }
+
+    @staticmethod
+    def _route_timeout_report(duration_ns):
+        """Return a valid positive-leg timeout receipt with controlled elapsed time."""
+        report = SoftnetRunStateTests._route_report()
+        empty_hash = hashlib.sha256(b"").hexdigest()
+        report.update({
+            "positiveStatus": 0, "positiveTlsVerified": False, "positiveContentType": "",
+            "positiveBodyBytes": 0, "positiveBodySha256": empty_hash,
+            "positiveError": "timeout", "finishedAtUnixNs": (
+                report["startedAtUnixNs"] + duration_ns),
+            "verified": False, "error": "timeout",
+        })
+        return report
+
+    @staticmethod
+    def _cli_report_too_large(identity, positive, roots):
+        """Run the actual guest CLI through route overflow and validate its receipt."""
+        empty_hash = hashlib.sha256(b"").hexdigest()
+        positive_leg = {
+            "status": 200, "tlsVerified": True,
+            "bodyBytes": run_state.ROUTE_POSITIVE_BODY_BYTES,
+            "bodySha256": run_state.ROUTE_POSITIVE_BODY_SHA256,
+            "contentType": run_state.ROUTE_POSITIVE_CONTENT_TYPE,
+            "noStore": False, "noGatewayMarkers": False, "error": "",
+        }
+        identity_leg = {
+            "status": 404, "tlsVerified": True, "bodyBytes": 0,
+            "bodySha256": empty_hash, "contentType": "", "noStore": True,
+            "noGatewayMarkers": True, "error": "",
+        }
+        output = io.StringIO()
+        with patch.object(probe_guest, "_public_context",
+                          return_value=(object(), roots, True)), \
+             patch.object(probe_guest, "_route_request",
+                          side_effect=[(positive_leg, b"x" * run_state.ROUTE_POSITIVE_BODY_BYTES),
+                                       (identity_leg, b"")]), \
+             patch.object(probe_guest, "ROUTE_MAX_REPORT", 1), \
+             redirect_stdout(output):
+            probe_guest.main(["--guest-route-contract", identity, positive, roots])
+        receipt = output.getvalue().encode("utf-8")
+        report = controller._validate_guest_route_report(receipt, identity, positive, roots)
+        return receipt, report
+
+    @classmethod
+    def _route_preflight_report(cls, error="trust_roots_mismatch"):
+        empty_hash = hashlib.sha256(b"").hexdigest()
+        report = cls._route_report()
+        report.update({
+            "identityStatus": 0, "identityTlsVerified": False, "identityBodyBytes": 0,
+            "identityBodySha256": empty_hash, "identityNoStore": False,
+            "identityNoGatewayMarkers": False, "identityError": error,
+            "positiveStatus": 0, "positiveTlsVerified": False,
+            "positiveContentType": "", "positiveBodyBytes": 0,
+            "positiveBodySha256": empty_hash, "positiveError": error,
+            "publicTrustRootsSha256": "", "gatewayCaAbsent": False,
+            "verified": False, "error": error,
+        })
+        return report
+
     def _completed_run(self):
         with run_state.State(self.root) as state:
             run, _ = self._run_with_recovery_records(state)
             state.complete(run, self._stop_evidence())
         return run
 
-    def _failed_restored_run(self):
+    def _failed_restored_run(self, identity=None):
         with run_state.State(self.root) as state:
-            run, run_id = self._run_with_recovery_records(state)
+            original = self.identity
+            if identity is not None:
+                self.identity = identity
+            try:
+                run, run_id = self._run_with_recovery_records(state)
+            finally:
+                self.identity = original
         self._rewrite(run / "stop.plist", plistlib.dumps(
             {"vmReaped": False, "helperReaped": True, "vmStopped": True},
             fmt=plistlib.FMT_BINARY))
@@ -401,6 +491,158 @@ class SoftnetRunStateTests(unittest.TestCase):
             with run_state.State(self.root):
                 self.fail("changed probe receipt accepted after disposition")
 
+    def test_failed_route_disposition_hashes_receipt_and_binds_both_admitted_ips(self):
+        identity = {**self.identity, "identityProbeIPv4": "104.20.0.1",
+                    "positiveOriginIPv4": "104.20.0.2", "publicTrustRootsSha256": "f" * 64}
+        run, run_id = self._failed_restored_run(identity)
+        report = self._route_report()
+        report.update({"positiveStatus": 503, "positiveTlsVerified": True,
+                       "positiveBodyBytes": 0, "positiveBodySha256": hashlib.sha256(b"").hexdigest(),
+                       "verified": False, "error": "predicate_failed"})
+        self._rewrite(run / "route-probe.plist", plistlib.dumps(report, fmt=plistlib.FMT_BINARY))
+        run_state.dispose_failed_restored(self.root, run_id, "ticket",
+                                          observe=lambda *_: self._observation())
+        record = plistlib.loads((run / "disposition.plist").read_bytes())
+        self.assertIn("route-probe.plist", record["fileSha256"])
+        self.assertEqual(record["fileSha256"]["route-probe.plist"],
+                         hashlib.sha256((run / "route-probe.plist").read_bytes()).hexdigest())
+        with run_state.State(self.root):
+            pass
+        changed_receipt = dict(report, positiveStatus=502)
+        self._rewrite(run / "route-probe.plist", plistlib.dumps(changed_receipt,
+                                                                  fmt=plistlib.FMT_BINARY))
+        with self.assertRaises(recovery.RecoveryError):
+            with run_state.State(self.root):
+                self.fail("changed route receipt accepted after disposition")
+        self._rewrite(run / "route-probe.plist", plistlib.dumps(report, fmt=plistlib.FMT_BINARY))
+        altered = dict(identity, positiveOriginIPv4="104.20.0.3")
+        identity_record = plistlib.loads((run / "identity.plist").read_bytes())
+        identity_record["identity"] = altered
+        self._rewrite(run / "identity.plist", plistlib.dumps(identity_record, fmt=plistlib.FMT_BINARY,
+                                                                sort_keys=True))
+        with self.assertRaises(recovery.RecoveryError):
+            with run_state.State(self.root):
+                self.fail("changed route admission IP accepted after disposition")
+
+    def test_cli_controller_retains_too_large_route_failure_and_blocks_completion(self):
+        identity_ip, positive_ip, roots = "104.20.0.1", "104.20.0.2", "f" * 64
+        identity = {**self.identity, "identityProbeIPv4": identity_ip,
+                    "positiveOriginIPv4": positive_ip, "publicTrustRootsSha256": roots}
+        receipt, report = self._cli_report_too_large(identity_ip, positive_ip, roots)
+        self.assertTrue(receipt.endswith(b"\n"))
+        self.assertEqual(report["error"], "report_too_large")
+        self.assertEqual(report["publicTrustRootsSha256"], roots)
+        self.assertTrue(report["gatewayCaAbsent"])
+        self.identity = identity
+        with run_state.State(self.root) as state:
+            run, run_id = self._run_with_recovery_records(state)
+            report_bytes = plistlib.dumps(report, fmt=plistlib.FMT_BINARY)
+            self._rewrite(run / "route-probe.plist", report_bytes)
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_route_probe"):
+                state.complete(run, self._stop_evidence())
+
+        self._rewrite(run / "stop.plist", plistlib.dumps(
+            {"vmReaped": False, "helperReaped": True, "vmStopped": True},
+            fmt=plistlib.FMT_BINARY))
+        run_state.dispose_failed_restored(self.root, run_id, "route overflow ticket",
+                                          observe=lambda *_: self._observation())
+        disposition_bytes = (run / "disposition.plist").read_bytes()
+        disposition = plistlib.loads(disposition_bytes)
+        self.assertEqual(disposition["fileSha256"]["route-probe.plist"],
+                         hashlib.sha256(report_bytes).hexdigest())
+        self.assertFalse((run / "complete.plist").exists())
+        with run_state.State(self.root):
+            pass
+
+        for change in ({"identityError": "timeout"},
+                       {"publicTrustRootsSha256": "0" * 64}):
+            with self.subTest(change=change):
+                changed_report = {**report, **change}
+                changed_bytes = plistlib.dumps(changed_report, fmt=plistlib.FMT_BINARY)
+                self._rewrite(run / "route-probe.plist", changed_bytes)
+                changed_disposition = dict(disposition)
+                changed_hashes = dict(disposition["fileSha256"])
+                changed_hashes["route-probe.plist"] = hashlib.sha256(changed_bytes).hexdigest()
+                changed_disposition["fileSha256"] = changed_hashes
+                self._rewrite(run / "disposition.plist", plistlib.dumps(
+                    changed_disposition, fmt=plistlib.FMT_BINARY))
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_route_probe"):
+                    with run_state.State(self.root):
+                        self.fail("tampered failed route receipt accepted")
+                self._rewrite(run / "route-probe.plist", report_bytes)
+                self._rewrite(run / "disposition.plist", disposition_bytes)
+
+    def test_route_failure_elapsed_backstop_does_not_relax_success_limit(self):
+        self.identity.update({"identityProbeIPv4": "104.20.0.1",
+                              "positiveOriginIPv4": "104.20.0.2",
+                              "publicTrustRootsSha256": "f" * 64})
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            try:
+                success = self._route_report()
+                success["finishedAtUnixNs"] = success["startedAtUnixNs"] + 13_000_000_000
+                self._rewrite(run / "route-probe.plist", plistlib.dumps(
+                    success, fmt=plistlib.FMT_BINARY))
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_route_probe"):
+                    run_state._check_route_probe(fd, self.identity)
+
+                for duration_ns in (13_000_000_000, 25_000_000_000):
+                    report = self._route_timeout_report(duration_ns)
+                    self._rewrite(run / "route-probe.plist", plistlib.dumps(
+                        report, fmt=plistlib.FMT_BINARY))
+                    _, validated = run_state._check_route_probe(fd, self.identity)
+                    self.assertFalse(validated["verified"])
+
+                too_slow = self._route_timeout_report(25_000_000_001)
+                self._rewrite(run / "route-probe.plist", plistlib.dumps(
+                    too_slow, fmt=plistlib.FMT_BINARY))
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_route_probe"):
+                    run_state._check_route_probe(fd, self.identity)
+            finally:
+                os.close(fd)
+
+    def test_failed_trust_preflight_route_disposition_retains_and_hashes_receipt(self):
+        identity = {**self.identity, "identityProbeIPv4": "104.20.0.1",
+                    "positiveOriginIPv4": "104.20.0.2", "publicTrustRootsSha256": "f" * 64}
+        run, run_id = self._failed_restored_run(identity)
+        receipt = plistlib.dumps(self._route_preflight_report("trust_override"),
+                                 fmt=plistlib.FMT_BINARY)
+        self._rewrite(run / "route-probe.plist", receipt)
+        run_state.dispose_failed_restored(self.root, run_id, "ticket",
+                                          observe=lambda *_: self._observation())
+        record = plistlib.loads((run / "disposition.plist").read_bytes())
+        self.assertEqual(record["fileSha256"]["route-probe.plist"], hashlib.sha256(receipt).hexdigest())
+        self.assertFalse((run / "complete.plist").exists())
+        with run_state.State(self.root):
+            pass
+
+    def test_guest_trust_override_receipt_is_retained_as_a_failed_state_disposition(self):
+        identity_ip, positive_ip, roots = "104.20.0.1", "104.20.0.2", "f" * 64
+        output = io.StringIO()
+        with patch.dict(probe_guest.os.environ, {"SSL_CERT_FILE": "/untrusted/ca.pem"}), \
+                redirect_stdout(output):
+            self.assertEqual(probe_guest.main([
+                "--guest-route-contract", identity_ip, positive_ip, roots]), 0)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["error"], "trust_override")
+        self.assertFalse(report["verified"])
+
+        identity = {**self.identity, "identityProbeIPv4": identity_ip,
+                    "positiveOriginIPv4": positive_ip, "publicTrustRootsSha256": roots}
+        run, run_id = self._failed_restored_run(identity)
+        receipt = plistlib.dumps(report, fmt=plistlib.FMT_BINARY)
+        self._rewrite(run / "route-probe.plist", receipt)
+        self.assertFalse(run_state._check_run_directory(self.root, run_id))
+        run_state.dispose_failed_restored(
+            self.root, run_id, "ticket", observe=lambda *_: self._observation()
+        )
+        disposition = plistlib.loads((run / "disposition.plist").read_bytes())
+        self.assertEqual(disposition["fileSha256"]["route-probe.plist"],
+                         hashlib.sha256(receipt).hexdigest())
+        with run_state.State(self.root):
+            pass
+
     def test_probe_completion_rejects_unverified_receipt(self):
         self.identity["probeIPv4"] = "104.20.0.1"
         with run_state.State(self.root) as state:
@@ -458,6 +700,137 @@ class SoftnetRunStateTests(unittest.TestCase):
                     run_state._check_probe(fd, self.identity)
             finally:
                 os.close(fd)
+
+    def test_route_receipt_is_exact_binds_two_ips_and_completes_with_digest(self):
+        self.identity.update({"identityProbeIPv4": "104.20.0.1", "positiveOriginIPv4": "104.20.0.2",
+                              "publicTrustRootsSha256": "f" * 64})
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            report_bytes = plistlib.dumps(self._route_report(), fmt=plistlib.FMT_BINARY)
+            try:
+                recovery._publish(fd, "route-probe.plist", report_bytes)
+            finally:
+                os.close(fd)
+            state.complete(run, self._stop_evidence())
+        complete = plistlib.loads((run / "complete.plist").read_bytes())
+        self.assertEqual(complete["routeProbeSha256"], hashlib.sha256(report_bytes).hexdigest())
+        with run_state.State(self.root):
+            pass
+        fd = recovery._directory(run)
+        try:
+            for change in ({"identityDestinationIPv4": "104.20.0.3"},
+                           {"positiveDestinationIPv4": "104.20.0.3"},
+                           {"publicTrustRootsSha256": "0" * 64}, {"identityStatus": 200},
+                           {"positiveStatus": 503}, {"identityBodyBytes": 1},
+                           {"identityNoStore": False}, {"identityNoGatewayMarkers": False},
+                           {"positiveContentType": "text/html"}, {"positiveBodyBytes": 455},
+                           {"positiveBodySha256": "0" * 64}, {"gatewayCaAbsent": False},
+                           {"verified": False}, {"error": "predicate_failed"}, {"error": {}},
+                           {"positiveContentType": []}, {"positiveError": []}):
+                report = self._route_report()
+                report.update(change)
+                self._rewrite(run / "route-probe.plist", plistlib.dumps(report, fmt=plistlib.FMT_BINARY))
+                with self.assertRaises(recovery.RecoveryError):
+                    run_state._check_route_probe(fd, self.identity)
+            self._rewrite(run / "route-probe.plist", report_bytes)
+        finally:
+            os.close(fd)
+
+    def test_route_completion_requires_receipt_and_rejects_cross_mode_entries(self):
+        self.identity.update({"identityProbeIPv4": "104.20.0.1", "positiveOriginIPv4": "104.20.0.2",
+                              "publicTrustRootsSha256": "f" * 64})
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_run_entries"):
+                state.complete(run, self._stop_evidence())
+            fd = recovery._directory(run)
+            try:
+                recovery._publish(fd, "probe.plist", plistlib.dumps(self._probe_report(), fmt=plistlib.FMT_BINARY))
+            finally:
+                os.close(fd)
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe_mode"):
+                run_state._check_run_directory(self.root, run.name)
+
+    def test_route_preflight_failure_is_valid_retained_but_never_complete(self):
+        self.identity.update({"identityProbeIPv4": "104.20.0.1", "positiveOriginIPv4": "104.20.0.2",
+                              "publicTrustRootsSha256": "f" * 64})
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            report_bytes = plistlib.dumps(self._route_preflight_report(), fmt=plistlib.FMT_BINARY)
+            try:
+                recovery._publish(fd, "route-probe.plist", report_bytes)
+                self.assertFalse(run_state._check_route_probe(fd, self.identity)[1]["verified"])
+            finally:
+                os.close(fd)
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_route_probe"):
+                state.complete(run, self._stop_evidence())
+            self.assertFalse((run / "complete.plist").exists())
+
+    def test_complete_scanner_rejects_failed_route_with_matching_receipt_digest(self):
+        self.identity.update({"identityProbeIPv4": "104.20.0.1", "positiveOriginIPv4": "104.20.0.2",
+                              "publicTrustRootsSha256": "f" * 64})
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            route_bytes = plistlib.dumps(self._route_report(), fmt=plistlib.FMT_BINARY)
+            try:
+                recovery._publish(fd, "route-probe.plist", route_bytes)
+            finally:
+                os.close(fd)
+            state.complete(run, self._stop_evidence())
+        failed = self._route_report()
+        failed.update({"positiveStatus": 503, "positiveContentType": "",
+                       "positiveBodyBytes": 0, "positiveBodySha256": hashlib.sha256(b"").hexdigest(),
+                       "verified": False, "error": "predicate_failed"})
+        failed_bytes = plistlib.dumps(failed, fmt=plistlib.FMT_BINARY)
+        self._rewrite(run / "route-probe.plist", failed_bytes)
+        complete = plistlib.loads((run / "complete.plist").read_bytes())
+        complete["routeProbeSha256"] = hashlib.sha256(failed_bytes).hexdigest()
+        self._rewrite(run / "complete.plist", plistlib.dumps(complete, fmt=plistlib.FMT_BINARY))
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_route_probe"):
+            with run_state.State(self.root):
+                self.fail("failed route result accepted as a complete run")
+
+    def test_complete_scanner_rejects_failed_v1_probe_with_matching_receipt_digest(self):
+        self.identity["probeIPv4"] = "104.20.0.1"
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            report_bytes = plistlib.dumps(self._probe_report(), fmt=plistlib.FMT_BINARY)
+            try:
+                recovery._publish(fd, "probe.plist", report_bytes)
+            finally:
+                os.close(fd)
+            state.complete(run, self._stop_evidence())
+        failed = {**self._probe_report(), "status": 503, "bodyBytes": 0,
+                  "bodySha256": hashlib.sha256(b"").hexdigest(), "verified": False}
+        failed_bytes = plistlib.dumps(failed, fmt=plistlib.FMT_BINARY)
+        self._rewrite(run / "probe.plist", failed_bytes)
+        complete = plistlib.loads((run / "complete.plist").read_bytes())
+        complete["probeSha256"] = hashlib.sha256(failed_bytes).hexdigest()
+        self._rewrite(run / "complete.plist", plistlib.dumps(complete, fmt=plistlib.FMT_BINARY))
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe"):
+            with run_state.State(self.root):
+                self.fail("failed v1 probe accepted as a complete run")
+
+    def test_complete_rejects_cross_mode_probe_before_publishing_marker(self):
+        self.identity.update({"identityProbeIPv4": "104.20.0.1", "positiveOriginIPv4": "104.20.0.2",
+                              "publicTrustRootsSha256": "f" * 64})
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            try:
+                recovery._publish(fd, "probe.plist", plistlib.dumps(
+                    self._probe_report(destination=None), fmt=plistlib.FMT_BINARY))
+                recovery._publish(fd, "route-probe.plist", plistlib.dumps(
+                    self._route_report(), fmt=plistlib.FMT_BINARY))
+            finally:
+                os.close(fd)
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_probe_mode"):
+                state.complete(run, self._stop_evidence())
+            self.assertFalse((run / "complete.plist").exists())
 
     def test_disposition_fails_closed_on_bad_observation_and_wrong_stop_shape(self):
         run, run_id = self._failed_restored_run()

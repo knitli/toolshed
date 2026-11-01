@@ -151,3 +151,40 @@ The pinned CA expires on March 27, 2030. If Gateway rotates it, verify the activ
 public CA through the account certificate API, update `GATEWAY_CA_PEM` and the
 supervisor's guest-source digest, and review/test both changes before the next
 probe. A mismatched CA fails certificate verification; there is no fallback.
+
+
+## Guest public route contract
+
+The separate `--guest-route-contract` mode makes two anonymous, fixed HTTPS
+observations: `knitli.app/site.webmanifest` must return the pinned 456-byte
+manifest with status 200; the identity probe's `/probe` must return an empty,
+`no-store` 404 without either Gateway or host marker. Each leg is bounded to
+five seconds, with a twelve-second route budget and no redirects or retries.
+
+Its protected admission uses kind `softnet-guest-route-admission-v1` and adds
+`identityProbeIPv4`, `positiveOriginIPv4`, and `publicTrustRootsSha256` to the
+startup fields. Both fixed names are resolved and compared with their admitted
+global IPv4 addresses before run-state or VM side effects. Softnet allows only
+those exact `/32` destinations. This mode cannot use a v1 `probeIPv4` admission
+or run together with `--public-probe`.
+
+Before live use, inventory and review the selected guest image's materialized
+default CA roots. The admitted digest is SHA-256 of their sorted unique
+lowercase DER SHA-256 fingerprints, joined with newlines and no trailing
+newline. The guest rejects trust-store environment overrides and the embedded
+Gateway CA, then freezes only that measured root set into a fresh verifying TLS
+context. It does not load default certificate directories into the network
+context: their certificates can otherwise be loaded lazily after inventory.
+There is no Gateway-CA fallback or caller-supplied CA input.
+
+The bounded `route-probe.plist` binds both addresses and the trust digest into
+completion or failed-run disposition. Failed observations still stop and reap
+the owned children and restore the saved preference; they remain unqualified.
+Existing startup and v1 probe records retain their original interpretation.
+
+Install and verify a new protected source closure before invoking this mode.
+Keep the host's observed WARP posture unchanged during the next guest route
+measurement. A trial that also changes a temporary WARP profile needs an
+independent guest-stop/reap gate before profile disable can restore host
+routing. A route pass and the separate host transport 409 are distinct evidence;
+neither enables native admission or automatic turns.
