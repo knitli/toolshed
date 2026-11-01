@@ -3,7 +3,10 @@ import hashlib
 import importlib.util
 import json
 import os
+import socket
 import stat
+import subprocess  # nosec B404 - Native regression uses fixed executables and a test-owned loopback socket.
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 import select
@@ -681,6 +684,70 @@ class QualificationTests(unittest.TestCase):
         self.assertTrue(QUAL._listener_identity_matches(b'0', expected))
         self.assertFalse(QUAL._listener_identity_matches(b'501', expected))
         self.assertFalse(QUAL._listener_identity_matches(b'0', b'/usr/bin/python3'))
+
+    def test_proxy_listener_ready_uses_real_lsof_loopback_selector(self):
+        lsof = Path('/usr/sbin/lsof')
+        if not lsof.is_file():
+            if sys.platform == 'darwin':
+                self.fail('macOS qualification requires /usr/sbin/lsof for native selector coverage')
+            self.skipTest('native selector coverage requires the fixed macOS /usr/sbin/lsof executable')
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(('127.0.0.1', 0))
+            listener.listen(1)
+            port = listener.getsockname()[1]
+            malformed = subprocess.run(  # nosec B603 - Fixed native lsof path and test-owned ephemeral loopback port.
+                [str(lsof), '-nP', '-t', f'-iTCP:127.0.0.1:{port}', '-sTCP:LISTEN'],
+                capture_output=True, timeout=2, check=False,
+            )
+            self.assertNotEqual(malformed.returncode, 0, malformed.stdout.decode(errors='replace'))
+            self.assertEqual(malformed.stdout, b'')
+            self.assertIn(b'unacceptable port specification', malformed.stderr)
+
+            corrected = subprocess.run(  # nosec B603 - Fixed native lsof path and test-owned ephemeral loopback port.
+                [str(lsof), '-nP', '-t', f'-iTCP@127.0.0.1:{port}', '-sTCP:LISTEN'],
+                capture_output=True, timeout=2, check=False,
+            )
+            self.assertEqual(corrected.returncode, 0, corrected.stderr.decode(errors='replace'))
+            self.assertEqual(corrected.stdout.decode('ascii').splitlines(), [str(os.getpid())])
+
+            observed = []
+            outputs = []
+
+            def native_runner(argv, timeout):
+                observed.append(tuple(argv))
+                result = subprocess.run(  # nosec B603 - _proxy_listener_ready supplies fixed native commands.
+                    argv, capture_output=True, timeout=timeout, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+                outputs.append(result.stdout)
+                return result.stdout
+
+            # This test covers real process discovery, not bundle availability.
+            # Stop after the real lsof and ps observations on every host.
+            identity_guard = patch.object(
+                QUAL, '_protected_cli_target',
+                side_effect=QUAL.QualificationError('native_warp_bundle_unavailable_in_test'),
+            )
+
+            with patch.object(QUAL, 'PROXY_PORT', port), identity_guard as target_guard:
+                # This process owns the socket, so the real selector must find
+                # its PID and real ps must identify its UID and executable. It
+                # is not the trusted WARP daemon, so readiness remains false.
+                self.assertFalse(QUAL._proxy_listener_ready(runner=native_runner))
+
+            target_guard.assert_called_once_with(QUAL.WARP_DAEMON)
+            self.assertEqual(observed[0], (
+                '/usr/sbin/lsof', '-nP', '-t', f'-iTCP@127.0.0.1:{port}', '-sTCP:LISTEN',
+            ))
+            self.assertEqual(outputs[0].decode('ascii').splitlines(), [str(os.getpid())])
+            self.assertEqual(observed[1][0:2], ('/bin/ps', '-p'))
+            self.assertEqual(observed[1][-1], 'uid=')
+            self.assertEqual(outputs[1].strip(), str(os.getuid()).encode('ascii'))
+            self.assertEqual(observed[2][0:2], ('/bin/ps', '-p'))
+            self.assertEqual(observed[2][-1], 'comm=')
+            self.assertNotEqual(outputs[2].strip(), str(QUAL.WARP_DAEMON).encode())
 
     def test_proxy_listener_ready_accepts_trusted_admin_applications_bundle(self):
         paths = [

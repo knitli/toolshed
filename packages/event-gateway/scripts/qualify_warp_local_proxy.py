@@ -479,7 +479,7 @@ def _proxy_listener_ready(runner=None, *, deadline=None):
     except OSError:
         return False
     try:
-        pids = _run(['/usr/sbin/lsof', '-nP', '-t', f'-iTCP:127.0.0.1:{PROXY_PORT}', '-sTCP:LISTEN'],
+        pids = _run(['/usr/sbin/lsof', '-nP', '-t', f'-iTCP@127.0.0.1:{PROXY_PORT}', '-sTCP:LISTEN'],
                     timeout=2, runner=runner, deadline=deadline).decode('ascii').splitlines()
         if len(pids) != 1 or not pids[0].isdigit():
             return False
