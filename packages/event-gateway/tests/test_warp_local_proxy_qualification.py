@@ -702,10 +702,8 @@ class QualificationTests(unittest.TestCase):
                 capture_output=True, timeout=2, check=False,
             )
             self.assertNotEqual(malformed.returncode, 0, malformed.stdout.decode(errors='replace'))
-            self.assertEqual(
-                malformed.stderr.splitlines()[0],
-                f'lsof: unacceptable port specification in: -i TCP:127.0.0.1:{port}'.encode(),
-            )
+            self.assertEqual(malformed.stdout, b'')
+            self.assertIn(b'unacceptable port specification', malformed.stderr)
 
             corrected = subprocess.run(  # nosec B603 - Fixed native lsof path and test-owned ephemeral loopback port.
                 [str(lsof), '-nP', '-t', f'-iTCP@127.0.0.1:{port}', '-sTCP:LISTEN'],
