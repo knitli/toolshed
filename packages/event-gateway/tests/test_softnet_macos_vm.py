@@ -946,18 +946,18 @@ class SoftnetSupervisorTests(unittest.TestCase):
         account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
         with ExitStack() as patches:
             harness = patches.enter_context(ExercisePatches(
-                probe_stdout=self._guest_route_stdout(identity, positive, positiveStatus=503,
+                probe_stdout=self._guest_route_stdout(positive, identity, positiveStatus=503,
                                                       positiveBodyBytes=0, positiveBodySha256=hashlib.sha256(b"").hexdigest(),
                                                       verified=False, error="predicate_failed")))
             patches.enter_context(patch.object(supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
             with self.assertRaisesRegex(recovery.RecoveryError, "guest_route_result_failed"):
                 supervisor._exercise(self.root, {**self.admission, "publicTrustRootsSha256": "f" * 64},
                                      account, "staff", TargetPreferences,
-                                     guest_route_ips=(identity, positive))
+                                     guest_route_ips=(positive, identity))
         helper, = [event for event in harness.events
                    if event[0] == "popen" and event[1][0] == str(supervisor.SOFTNET)]
-        self.assertEqual([arg for arg in helper[1] if arg.startswith("--allow=out ")],
-                         ["--allow=out 104.20.0.1/32", "--allow=out 104.20.0.2/32"])
+        allow_args = [arg for arg in helper[1] if arg.startswith("--allow=")]
+        self.assertEqual(allow_args, ["--allow=out 104.20.0.1/32,out 104.20.0.2/32"])
         self.assertIn("--block=0.0.0.0/0", helper[1])
         route_records = [event[2] for event in harness.events
                          if event[0] == "record" and event[1] == "route-probe.plist"]
@@ -980,7 +980,7 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertTrue(all(result.values()))
         helper, = [event for event in harness.events
                    if event[0] == "popen" and event[1][0] == str(supervisor.SOFTNET)]
-        self.assertEqual([arg for arg in helper[1] if arg.startswith("--allow=out ")],
+        self.assertEqual([arg for arg in helper[1] if arg.startswith("--allow=")],
                          ["--allow=out 104.20.0.1/32"])
 
     def test_public_probe_uses_only_pinned_destination_and_runs_after_readiness(self):
