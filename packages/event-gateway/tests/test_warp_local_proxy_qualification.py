@@ -5,12 +5,11 @@ import json
 import os
 import socket
 import stat
-import subprocess
+import subprocess  # nosec B404 - Native regression uses fixed executables and a test-owned loopback socket.
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 import select
-import shutil
 import tempfile
 import time
 import unittest
@@ -687,11 +686,11 @@ class QualificationTests(unittest.TestCase):
         self.assertFalse(QUAL._listener_identity_matches(b'0', b'/usr/bin/python3'))
 
     def test_proxy_listener_ready_uses_real_lsof_loopback_selector(self):
-        lsof = Path('/usr/sbin/lsof') if sys.platform == 'darwin' else Path(shutil.which('lsof') or '')
+        lsof = Path('/usr/sbin/lsof')
         if not lsof.is_file():
             if sys.platform == 'darwin':
                 self.fail('macOS qualification requires /usr/sbin/lsof for native selector coverage')
-            self.skipTest('native lsof selector coverage requires /usr/sbin/lsof')
+            self.skipTest('native selector coverage requires the fixed macOS /usr/sbin/lsof executable')
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -720,25 +719,19 @@ class QualificationTests(unittest.TestCase):
 
             def native_runner(argv, timeout):
                 observed.append(tuple(argv))
-                command = [str(lsof), *argv[1:]] if argv[0] == '/usr/sbin/lsof' else argv
                 result = subprocess.run(  # nosec B603 - _proxy_listener_ready supplies fixed native commands.
-                    command, capture_output=True, timeout=timeout, check=False,
+                    argv, capture_output=True, timeout=timeout, check=False,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
                 outputs.append(result.stdout)
                 return result.stdout
 
-            if sys.platform == 'linux':
-                # Linux CI has no installed Cloudflare WARP bundle. Stop after
-                # real lsof and ps observations instead of testing that path.
-                identity_guard = patch.object(
-                    QUAL, '_protected_cli_target',
-                    side_effect=QUAL.QualificationError('native_warp_bundle_unsupported'),
-                )
-            else:
-                identity_guard = patch.object(
-                    QUAL, '_protected_cli_target', wraps=QUAL._protected_cli_target,
-                )
+            # This test covers real process discovery, not bundle availability.
+            # Stop after the real lsof and ps observations on every host.
+            identity_guard = patch.object(
+                QUAL, '_protected_cli_target',
+                side_effect=QUAL.QualificationError('native_warp_bundle_unavailable_in_test'),
+            )
 
             with patch.object(QUAL, 'PROXY_PORT', port), identity_guard as target_guard:
                 # This process owns the socket, so the real selector must find
