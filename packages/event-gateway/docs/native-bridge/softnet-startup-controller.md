@@ -93,20 +93,26 @@ pruning or boot-time recovery is implemented.
 ## Explicit failed-restored disposition
 
 `scripts/dispose_softnet_failed_run.py` is a separate root operator command for
-one narrow failure: `helperReaped=true`, `vmStopped=true`, `vmReaped=false`, with
-an existing restoration marker and all original records and bounded logs intact.
+one narrow failure: `helperReaped=true`, `vmStopped=true`, and either recorded
+boolean value of `vmReaped`, with an existing restoration marker and all original
+records and bounded logs intact. The operator must acknowledge the exact recorded
+`vmReaped` value; a mismatched acknowledgement is rejected under the controller lock.
 Installation and use require separate owner approval. The preference recovery
 approval alone does not authorize clearing this gate or starting another canary.
 
 The command requires `--admission-dir`, the exact `--run-id`, a nonempty
-`--approval-reference`, and `--accept-historical-vm-reaping-unknown`. Under the
-same global controller lock, it validates the original protected admission digest
+`--approval-reference`, and exactly one of `--accept-historical-vm-reaping-unknown`
+or `--accept-fully-reaped-failure`. The former acknowledges `vmReaped=false`; the
+latter acknowledges `vmReaped=true`. Under the same global controller lock, it
+validates the original protected admission digest
 and current VM identity, runs only the pinned `tart get` as the admitted nonroot
 account, rejects any named Tart/Softnet process in a bounded process snapshot,
-and reads the saved original preference through a fresh locked API session.
+and reads the saved original preference through a fresh locked API session. The
+disposition receipt hashes the original `stop.plist` along with the other retained
+records; it does not rewrite that historical evidence.
 It neither starts a VM/helper nor writes preferences. The prepared guest and host
-owner must stay quiescent, as for startup admission; this is not hostile-host
-containment or proof of historical child reaping.
+owner must stay quiescent, as for startup admission; current `vmStopped` evidence
+does not replace the recorded child-reaping evidence.
 
 Boot can legitimately change disk/NVRAM bytes. Disposition therefore validates the
 original admission record and present VM identity without comparing those assets

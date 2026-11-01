@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit root operator disposition of one restored run with historical VM reaping unknown.
+"""Explicit root operator disposition of one restored failed run with retained stop evidence.
 
 Installing or invoking this requires separate owner approval. No VM/helper is
 started, no preferences are written, and no historical stop proof is replaced.
@@ -72,15 +72,17 @@ def _observe(admission_directory, run, identity, *, preferences_factory=controll
 
 
 def dispose(admission_directory, run_id, approval_reference, *,
-            preferences_factory=controller.Preferences):
+            expected_vm_reaped, preferences_factory=controller.Preferences):
     """Record the separately approved exception while holding the controller lock."""
     controller._require(os.geteuid() == 0 and sys.platform == 'darwin', 'root_macos_required')
     state.dispose_failed_restored(
         controller.STATE_ROOT, run_id, approval_reference,
+        expected_vm_reaped=expected_vm_reaped,
         observe=partial(_observe, Path(admission_directory), preferences_factory=preferences_factory))
     return {'kind': 'softnet-failed-restored-disposition-v1', 'runId': run_id,
             'status': 'failed-restored-disposition-recorded', 'admissionGateReleased': True,
-            'historicalVmReapingProven': False, 'qualified': False, 'vmDeleted': False}
+            'recordedVmReaped': expected_vm_reaped,
+            'qualified': False, 'vmDeleted': False}
 
 
 def main(argv=None):
@@ -88,10 +90,15 @@ def main(argv=None):
     parser.add_argument('--admission-dir', type=Path, required=True)
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--approval-reference', required=True)
-    parser.add_argument('--accept-historical-vm-reaping-unknown', action='store_true', required=True)
+    acknowledgement = parser.add_mutually_exclusive_group(required=True)
+    acknowledgement.add_argument('--accept-historical-vm-reaping-unknown',
+                                 dest='expected_vm_reaped', action='store_const', const=False)
+    acknowledgement.add_argument('--accept-fully-reaped-failure',
+                                 dest='expected_vm_reaped', action='store_const', const=True)
     args = parser.parse_args(argv)
     try:
-        print(json.dumps(dispose(args.admission_dir, args.run_id, args.approval_reference), sort_keys=True))
+        print(json.dumps(dispose(args.admission_dir, args.run_id, args.approval_reference,
+                                 expected_vm_reaped=args.expected_vm_reaped), sort_keys=True))
     except (OSError, ValueError, RuntimeError):
         print('softnet_disposition_failed; retain all run records', file=sys.stderr)
         return 1

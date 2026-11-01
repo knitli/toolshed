@@ -14,7 +14,7 @@ import time
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -440,7 +440,7 @@ class SoftnetRunStateTests(unittest.TestCase):
                     pass
             return observed
 
-        run_state.dispose_failed_restored(self.root, run_id, "operator ticket 42", observe=observe)
+        run_state.dispose_failed_restored(self.root, run_id, "operator ticket 42", expected_vm_reaped=False, observe=observe)
         disposition = plistlib.loads((run / "disposition.plist").read_bytes())
         self.assertEqual(disposition["kind"], run_state.DISPOSITION_KIND)
         self.assertEqual(disposition["runId"], run_id)
@@ -475,7 +475,7 @@ class SoftnetRunStateTests(unittest.TestCase):
             fmt=plistlib.FMT_BINARY))
 
         run_state.dispose_failed_restored(self.root, run_id, "ticket",
-                                          observe=lambda *_: self._observation())
+                                          expected_vm_reaped=False, observe=lambda *_: self._observation())
         disposition = plistlib.loads((run / "disposition.plist").read_bytes())
         self.assertEqual(set(disposition["fileSha256"]),
                          set(run_state.DISPOSITION_FILES) | {"probe.plist"})
@@ -501,7 +501,7 @@ class SoftnetRunStateTests(unittest.TestCase):
                        "verified": False, "error": "predicate_failed"})
         self._rewrite(run / "route-probe.plist", plistlib.dumps(report, fmt=plistlib.FMT_BINARY))
         run_state.dispose_failed_restored(self.root, run_id, "ticket",
-                                          observe=lambda *_: self._observation())
+                                          expected_vm_reaped=False, observe=lambda *_: self._observation())
         record = plistlib.loads((run / "disposition.plist").read_bytes())
         self.assertIn("route-probe.plist", record["fileSha256"])
         self.assertEqual(record["fileSha256"]["route-probe.plist"],
@@ -524,6 +524,128 @@ class SoftnetRunStateTests(unittest.TestCase):
             with run_state.State(self.root):
                 self.fail("changed route admission IP accepted after disposition")
 
+    def test_fully_reaped_failed_route_disposition_requires_restoration_and_binds_evidence(self):
+        identity = {**self.identity, "identityProbeIPv4": "104.20.0.1",
+                    "positiveOriginIPv4": "104.20.0.2", "publicTrustRootsSha256": "f" * 64}
+        run, run_id = self._failed_restored_run(identity)
+        report = self._route_report()
+        report.update({"positiveStatus": 503, "positiveTlsVerified": True,
+                       "positiveBodyBytes": 0, "positiveBodySha256": hashlib.sha256(b"").hexdigest(),
+                       "verified": False, "error": "predicate_failed"})
+        self._rewrite(run / "route-probe.plist", plistlib.dumps(report, fmt=plistlib.FMT_BINARY))
+        stop = {"vmReaped": True, "helperReaped": True, "vmStopped": True}
+        self._rewrite(run / "stop.plist", plistlib.dumps(stop, fmt=plistlib.FMT_BINARY))
+        retained_before = {path.relative_to(run): path.read_bytes()
+                           for path in run.rglob("*") if path.is_file()}
+
+        run_state.dispose_failed_restored(
+            self.root, run_id, "fully reaped ticket", expected_vm_reaped=True,
+            observe=lambda *_: self._observation())
+
+        receipt = plistlib.loads((run / "disposition.plist").read_bytes())
+        self.assertEqual(receipt["fileSha256"]["stop.plist"],
+                         hashlib.sha256((run / "stop.plist").read_bytes()).hexdigest())
+        self.assertEqual(receipt["fileSha256"]["route-probe.plist"],
+                         hashlib.sha256((run / "route-probe.plist").read_bytes()).hexdigest())
+        self.assertEqual({path.relative_to(run): path.read_bytes()
+                          for path in run.rglob("*") if path.is_file()
+                          and path.name != "disposition.plist"}, retained_before)
+        self.assertFalse((run / "complete.plist").exists())
+        self.assertFalse(run_state._check_run_directory(self.root, run_id))
+        with run_state.State(self.root):
+            pass
+
+    def test_fully_reaped_route_identity_without_probe_receipt_disposes_exact_failed_run(self):
+        identity = {**self.identity, "identityProbeIPv4": "104.20.0.1",
+                    "positiveOriginIPv4": "104.20.0.2", "publicTrustRootsSha256": "f" * 64}
+        run, run_id = self._failed_restored_run(identity)
+        stop = {"vmReaped": True, "helperReaped": True, "vmStopped": True}
+        self._rewrite(run / "stop.plist", plistlib.dumps(stop, fmt=plistlib.FMT_BINARY))
+        self.assertTrue((run / "restored").is_file())
+        self.assertFalse((run / "route-probe.plist").exists())
+        retained_before = {path.relative_to(run): path.read_bytes()
+                           for path in run.rglob("*") if path.is_file()}
+
+        run_state.dispose_failed_restored(
+            self.root, run_id, "fully reaped route ticket", expected_vm_reaped=True,
+            observe=lambda *_: self._observation())
+
+        receipt = plistlib.loads((run / "disposition.plist").read_bytes())
+        self.assertEqual(set(receipt["fileSha256"]), set(run_state.DISPOSITION_FILES))
+        self.assertEqual(receipt["fileSha256"]["stop.plist"],
+                         hashlib.sha256((run / "stop.plist").read_bytes()).hexdigest())
+        self.assertEqual({path.relative_to(run): path.read_bytes()
+                          for path in run.rglob("*") if path.is_file()
+                          and path.name != "disposition.plist"}, retained_before)
+        self.assertFalse((run / "route-probe.plist").exists())
+        self.assertFalse((run / "complete.plist").exists())
+        self.assertFalse(run_state._check_run_directory(self.root, run_id))
+        with run_state.State(self.root):
+            pass
+
+    def test_disposition_stop_mode_mismatch_and_non_boolean_ack_refuse_before_observation(self):
+        run, run_id = self._failed_restored_run()
+        observer = Mock(return_value=self._observation())
+        with self.assertRaisesRegex(recovery.RecoveryError, "disposition_stop_mode_mismatch"):
+            run_state.dispose_failed_restored(
+                self.root, run_id, "ticket", expected_vm_reaped=True, observe=observer)
+        observer.assert_not_called()
+        self.assertFalse((run / "disposition.plist").exists())
+
+        self._rewrite(run / "stop.plist", plistlib.dumps(self._stop_evidence(),
+                                                          fmt=plistlib.FMT_BINARY))
+        observer.reset_mock()
+        with self.assertRaisesRegex(recovery.RecoveryError, "disposition_stop_mode_mismatch"):
+            run_state.dispose_failed_restored(
+                self.root, run_id, "ticket", expected_vm_reaped=False, observe=observer)
+        observer.assert_not_called()
+        self.assertFalse((run / "disposition.plist").exists())
+
+        for invalid in (None, 1):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                    recovery.RecoveryError, "invalid_expected_vm_reaped"):
+                run_state.dispose_failed_restored(
+                    self.root, run_id, "ticket", expected_vm_reaped=invalid, observe=observer)
+            observer.assert_not_called()
+            self.assertFalse((run / "disposition.plist").exists())
+
+    def test_fully_reaped_disposition_still_requires_restored_marker(self):
+        run, run_id = self._failed_restored_run()
+        self._rewrite(run / "stop.plist", plistlib.dumps(self._stop_evidence(),
+                                                          fmt=plistlib.FMT_BINARY))
+        (run / "restored").unlink()
+        observer = Mock(return_value=self._observation())
+        with self.assertRaisesRegex(recovery.RecoveryError, "ineligible_disposition"):
+            run_state.dispose_failed_restored(
+                self.root, run_id, "ticket", expected_vm_reaped=True, observe=observer)
+        observer.assert_not_called()
+        self.assertFalse((run / "disposition.plist").exists())
+
+    def test_fully_reaped_disposition_rejects_unreaped_helper_or_unstopped_vm(self):
+        invalid_stops = (
+            {"vmReaped": True, "helperReaped": False, "vmStopped": True},
+            {"vmReaped": True, "helperReaped": True, "vmStopped": False},
+        )
+        for stop in invalid_stops:
+            with self.subTest(stop=stop):
+                shutil.rmtree(self.root)
+                self.root.mkdir(mode=0o700)
+                self.root.chmod(0o700)
+                run, run_id = self._failed_restored_run()
+                self._rewrite(run / "stop.plist", plistlib.dumps(stop, fmt=plistlib.FMT_BINARY))
+                records_before = {path.relative_to(run): path.read_bytes()
+                                  for path in run.rglob("*") if path.is_file()}
+                observer = Mock(return_value=self._observation())
+
+                with self.assertRaisesRegex(recovery.RecoveryError, "ineligible_disposition"):
+                    run_state.dispose_failed_restored(
+                        self.root, run_id, "ticket", expected_vm_reaped=True, observe=observer)
+
+                observer.assert_not_called()
+                self.assertFalse((run / "disposition.plist").exists())
+                self.assertEqual({path.relative_to(run): path.read_bytes()
+                                  for path in run.rglob("*") if path.is_file()}, records_before)
+
     def test_cli_controller_retains_too_large_route_failure_and_blocks_completion(self):
         identity_ip, positive_ip, roots = "104.20.0.1", "104.20.0.2", "f" * 64
         identity = {**self.identity, "identityProbeIPv4": identity_ip,
@@ -545,7 +667,7 @@ class SoftnetRunStateTests(unittest.TestCase):
             {"vmReaped": False, "helperReaped": True, "vmStopped": True},
             fmt=plistlib.FMT_BINARY))
         run_state.dispose_failed_restored(self.root, run_id, "route overflow ticket",
-                                          observe=lambda *_: self._observation())
+                                          expected_vm_reaped=False, observe=lambda *_: self._observation())
         disposition_bytes = (run / "disposition.plist").read_bytes()
         disposition = plistlib.loads(disposition_bytes)
         self.assertEqual(disposition["fileSha256"]["route-probe.plist"],
@@ -610,7 +732,7 @@ class SoftnetRunStateTests(unittest.TestCase):
                                  fmt=plistlib.FMT_BINARY)
         self._rewrite(run / "route-probe.plist", receipt)
         run_state.dispose_failed_restored(self.root, run_id, "ticket",
-                                          observe=lambda *_: self._observation())
+                                          expected_vm_reaped=False, observe=lambda *_: self._observation())
         record = plistlib.loads((run / "disposition.plist").read_bytes())
         self.assertEqual(record["fileSha256"]["route-probe.plist"], hashlib.sha256(receipt).hexdigest())
         self.assertFalse((run / "complete.plist").exists())
@@ -635,7 +757,7 @@ class SoftnetRunStateTests(unittest.TestCase):
         self._rewrite(run / "route-probe.plist", receipt)
         self.assertFalse(run_state._check_run_directory(self.root, run_id))
         run_state.dispose_failed_restored(
-            self.root, run_id, "ticket", observe=lambda *_: self._observation()
+            self.root, run_id, "ticket", expected_vm_reaped=False, observe=lambda *_: self._observation()
         )
         disposition = plistlib.loads((run / "disposition.plist").read_bytes())
         self.assertEqual(disposition["fileSha256"]["route-probe.plist"],
@@ -836,7 +958,7 @@ class SoftnetRunStateTests(unittest.TestCase):
         run, run_id = self._failed_restored_run()
         with self.assertRaisesRegex(recovery.RecoveryError, "invalid_approval_reference"):
             run_state.dispose_failed_restored(self.root, run_id, "   ",
-                                              observe=lambda *_: self._observation())
+                                              expected_vm_reaped=False, observe=lambda *_: self._observation())
         for observation in (
             {**self._observation(), "extra": True},
             {**self._observation(), "vmStopped": 1},
@@ -845,12 +967,12 @@ class SoftnetRunStateTests(unittest.TestCase):
             with self.subTest(observation=observation):
                 with self.assertRaisesRegex(recovery.RecoveryError, "invalid_disposition_observation"):
                     run_state.dispose_failed_restored(self.root, run_id, "ticket",
-                                                      observe=lambda *_: observation)
+                                                      expected_vm_reaped=False, observe=lambda *_: observation)
                 self.assertFalse((run / "disposition.plist").exists())
         self._rewrite(run / "stop.plist", plistlib.dumps(self._stop_evidence()))
-        with self.assertRaisesRegex(recovery.RecoveryError, "ineligible_disposition"):
+        with self.assertRaisesRegex(recovery.RecoveryError, "disposition_stop_mode_mismatch"):
             run_state.dispose_failed_restored(self.root, run_id, "ticket",
-                                              observe=lambda *_: self._observation())
+                                              expected_vm_reaped=False, observe=lambda *_: self._observation())
 
     def test_disposition_rejects_unrelated_unresolved_run_stale_observation_and_changes(self):
         with run_state.State(self.root) as state:
@@ -863,20 +985,20 @@ class SoftnetRunStateTests(unittest.TestCase):
             fmt=plistlib.FMT_BINARY))
         with self.assertRaisesRegex(recovery.RecoveryError, "unresolved_run"):
             run_state.dispose_failed_restored(self.root, run_id, "ticket",
-                                              observe=lambda *_: self._observation())
+                                              expected_vm_reaped=False, observe=lambda *_: self._observation())
         shutil.rmtree(other)
         self._rewrite(run / "stop.plist", plistlib.dumps(
             {"vmReaped": False, "helperReaped": True, "vmStopped": True}))
         stale = self._observation()
         stale["observedAtUnixNs"] -= 31_000_000_000
         with self.assertRaisesRegex(recovery.RecoveryError, "stale_disposition_observation"):
-            run_state.dispose_failed_restored(self.root, run_id, "ticket", observe=lambda *_: stale)
+            run_state.dispose_failed_restored(self.root, run_id, "ticket", expected_vm_reaped=False, observe=lambda *_: stale)
 
         def changed(path, _identity):
             self._rewrite(path / "helper-logs" / "tart-stdout.bin", b"changed\n")
             return self._observation()
         with self.assertRaisesRegex(recovery.RecoveryError, "disposition_source_changed"):
-            run_state.dispose_failed_restored(self.root, run_id, "ticket", observe=changed)
+            run_state.dispose_failed_restored(self.root, run_id, "ticket", expected_vm_reaped=False, observe=changed)
 
     def test_new_unresolved_run_during_observation_prevents_receipt_publication(self):
         run, run_id = self._failed_restored_run()
@@ -894,14 +1016,14 @@ class SoftnetRunStateTests(unittest.TestCase):
                 os.close(fd)
             return self._observation()
         with self.assertRaisesRegex(recovery.RecoveryError, "unresolved_run"):
-            run_state.dispose_failed_restored(self.root, run_id, "ticket", observe=observe)
+            run_state.dispose_failed_restored(self.root, run_id, "ticket", expected_vm_reaped=False, observe=observe)
         self.assertFalse((run / "disposition.plist").exists())
         shutil.rmtree(other)
 
     def test_disposition_receipt_schema_and_digests_are_checked_on_every_scan(self):
         run, run_id = self._failed_restored_run()
         run_state.dispose_failed_restored(self.root, run_id, "ticket",
-                                          observe=lambda *_: self._observation())
+                                          expected_vm_reaped=False, observe=lambda *_: self._observation())
         receipt = run / "disposition.plist"
         original = receipt.read_bytes()
         mutations = (
@@ -928,10 +1050,10 @@ class SoftnetRunStateTests(unittest.TestCase):
         (run / "restored").unlink()
         with self.assertRaisesRegex(recovery.RecoveryError, "ineligible_disposition"):
             run_state.dispose_failed_restored(self.root, run_id, "ticket",
-                                              observe=lambda *_: self._observation())
+                                              expected_vm_reaped=False, observe=lambda *_: self._observation())
         self._rewrite(run / "restored", restored)
         run_state.dispose_failed_restored(self.root, run_id, "ticket",
-                                          observe=lambda *_: self._observation())
+                                          expected_vm_reaped=False, observe=lambda *_: self._observation())
         for relative, changed in (("restored", b"changed\n"),
                                   ("helper-logs/tart-stdout.bin", b"changed\n")):
             source = run / relative
@@ -960,7 +1082,7 @@ class SoftnetRunStateTests(unittest.TestCase):
         with patch.object(run_state.os, "stat", side_effect=unowned_run):
             with self.assertRaisesRegex(recovery.RecoveryError, "invalid_run_directory"):
                 run_state.dispose_failed_restored(self.root, run_id, "ticket",
-                                                  observe=lambda *_: self._observation())
+                                                  expected_vm_reaped=False, observe=lambda *_: self._observation())
         original_publish = recovery._publish
 
         def race_publish(fd, name, data):
@@ -971,12 +1093,12 @@ class SoftnetRunStateTests(unittest.TestCase):
         with self.assertRaises(OSError):
             with patch.object(recovery, "_publish", side_effect=race_publish):
                 run_state.dispose_failed_restored(self.root, run_id, "ticket",
-                                                  observe=lambda *_: self._observation())
+                                                  expected_vm_reaped=False, observe=lambda *_: self._observation())
         (run / "disposition.plist").unlink()
         with patch.object(recovery.os, "geteuid", return_value=os.getuid() + 1):
             with self.assertRaisesRegex(recovery.RecoveryError, "root_required"):
                 run_state.dispose_failed_restored(self.root, run_id, "ticket",
-                                                  observe=lambda *_: self._observation())
+                                                  expected_vm_reaped=False, observe=lambda *_: self._observation())
 
     def test_source_change_after_prepublication_scan_blocks_receipt(self):
         run, run_id = self._failed_restored_run()
@@ -993,7 +1115,7 @@ class SoftnetRunStateTests(unittest.TestCase):
         with patch.object(run_state.State, "_scan", scan_then_change):
             with self.assertRaisesRegex(recovery.RecoveryError, "disposition_source_changed"):
                 run_state.dispose_failed_restored(
-                    self.root, run_id, "ticket", observe=lambda *_: self._observation())
+                    self.root, run_id, "ticket", expected_vm_reaped=False, observe=lambda *_: self._observation())
         self.assertEqual(scan_count, 2)
         self.assertFalse((run / "disposition.plist").exists())
 

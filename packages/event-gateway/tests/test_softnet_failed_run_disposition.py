@@ -1,5 +1,6 @@
 """Offline operator-disposition tests; never start Tart, Softnet, or touch host preferences."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -62,6 +63,7 @@ class DispositionTests(unittest.TestCase):
                      config=b'{"os":"darwin","arch":"arm64","macAddress":"02:00:00:00:00:01","afterBoot":true}',
                      current=b"original", identity=None, admission=None):
         admitted = self.admission if admission is None else admission
+
         def preferences_factory():
             return self.prefs
         with tempfile.TemporaryDirectory() as directory:
@@ -196,71 +198,80 @@ class DispositionTests(unittest.TestCase):
                  patch.object(disposition.sys, "platform", platform), \
                  patch.object(disposition.state, "dispose_failed_restored") as record:
                 with self.assertRaisesRegex(recovery.RecoveryError, "root_macos_required"):
-                    disposition.dispose("/admission", "run", "ticket")
+                    disposition.dispose("/admission", "run", "ticket", expected_vm_reaped=False)
                 record.assert_not_called()
         with patch.object(disposition.os, "geteuid", return_value=0), \
              patch.object(disposition.sys, "platform", "darwin"), \
              patch.object(disposition.state, "dispose_failed_restored") as record:
-            result = disposition.dispose("/admission", "run", "ticket")
+            result = disposition.dispose("/admission", "run", "ticket", expected_vm_reaped=False)
         self.assertEqual(record.call_args.args[:3], (disposition.controller.STATE_ROOT, "run", "ticket"))
-        self.assertEqual(result["historicalVmReapingProven"], False)
+        self.assertEqual(result["recordedVmReaped"], False)
+        self.assertNotIn("historicalVmReapingProven", result)
         self.assertEqual(result["qualified"], False)
         self.assertEqual(result["vmDeleted"], False)
 
     def test_dispose_records_receipt_through_real_state_with_private_fixture(self):
         uid = os.getuid()
-        with tempfile.TemporaryDirectory(prefix="softnet-disposition-test-") as directory:
-            root = Path(directory).resolve() / "state"
-            root.mkdir(mode=0o700)
-            root.chmod(0o700)
-            with patch.object(recovery, "OWNER_UID", uid), \
-                 patch.object(recovery.os, "geteuid", return_value=uid):
-                with run_state.State(root) as state:
-                    run, run_id = state.begin(self.identity)
-                fd = recovery._directory(run)
-                try:
-                    reserved = recovery._file(fd, "reserved", os.O_WRONLY | os.O_CREAT | os.O_EXCL)
-                    os.close(reserved)
-                    for name, data in (
-                        ("snapshot.plist", plistlib.dumps(
-                            {"version": 1, "present": False, "before": b"", "target": b"bplist00"},
-                            fmt=plistlib.FMT_BINARY)),
-                        ("restored", b"restored\n"),
-                        ("launch.plist", plistlib.dumps(
-                            {"vmName": self.identity["vmName"], "macAddress": self.identity["macAddress"]},
-                            fmt=plistlib.FMT_BINARY)),
-                        ("stop.plist", plistlib.dumps(
-                            {"vmReaped": False, "helperReaped": True, "vmStopped": True},
-                            fmt=plistlib.FMT_BINARY)),
-                    ):
-                        recovery._publish(fd, name, data)
-                finally:
-                    os.close(fd)
-                for name in ("helper-logs", "vm-logs"):
-                    log_dir = run / name
-                    log_dir.mkdir(mode=0o700)
-                    log_fd = recovery._directory(log_dir)
+        for vm_reaped in (False, True):
+            with self.subTest(vm_reaped=vm_reaped), \
+                 tempfile.TemporaryDirectory(prefix="softnet-disposition-test-") as directory:
+                root = Path(directory).resolve() / "state"
+                root.mkdir(mode=0o700)
+                root.chmod(0o700)
+                with patch.object(recovery, "OWNER_UID", uid), \
+                     patch.object(recovery.os, "geteuid", return_value=uid):
+                    with run_state.State(root) as state:
+                        run, run_id = state.begin(self.identity)
+                    fd = recovery._directory(run)
                     try:
-                        for filename in run_state.LOG_FILES:
-                            handle = recovery._file(log_fd, filename,
-                                                    os.O_WRONLY | os.O_CREAT | os.O_EXCL)
-                            os.close(handle)
+                        reserved = recovery._file(fd, "reserved", os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+                        os.close(reserved)
+                        for name, data in (
+                            ("snapshot.plist", plistlib.dumps(
+                                {"version": 1, "present": False, "before": b"", "target": b"bplist00"},
+                                fmt=plistlib.FMT_BINARY)),
+                            ("restored", b"restored\n"),
+                            ("launch.plist", plistlib.dumps(
+                                {"vmName": self.identity["vmName"], "macAddress": self.identity["macAddress"]},
+                                fmt=plistlib.FMT_BINARY)),
+                            ("stop.plist", plistlib.dumps(
+                                {"vmReaped": vm_reaped, "helperReaped": True, "vmStopped": True},
+                                fmt=plistlib.FMT_BINARY)),
+                        ):
+                            recovery._publish(fd, name, data)
                     finally:
-                        os.close(log_fd)
-                observation = {"observedAtUnixNs": time.time_ns(),
-                               "vmStopped": True, "processesQuiet": True,
-                               "preferencesOriginal": True}
-                with patch.object(disposition, "_observe", return_value=observation), \
-                     patch.object(disposition.controller, "STATE_ROOT", root), \
-                     patch.object(disposition, "os", SimpleNamespace(geteuid=lambda: 0)), \
-                     patch.object(disposition, "sys", SimpleNamespace(platform="darwin")):
-                    result = disposition.dispose("/unused/admission", run_id, "ticket")
-                receipt = plistlib.loads((run / "disposition.plist").read_bytes())
-                self.assertEqual(receipt["observation"], observation)
-                self.assertEqual(receipt["approvalReference"], "ticket")
-                self.assertFalse(result["historicalVmReapingProven"])
-                with run_state.State(root):
-                    pass
+                        os.close(fd)
+                    for name in ("helper-logs", "vm-logs"):
+                        log_dir = run / name
+                        log_dir.mkdir(mode=0o700)
+                        log_fd = recovery._directory(log_dir)
+                        try:
+                            for filename in run_state.LOG_FILES:
+                                handle = recovery._file(log_fd, filename,
+                                                        os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+                                os.close(handle)
+                        finally:
+                            os.close(log_fd)
+                    observation = {"observedAtUnixNs": time.time_ns(),
+                                   "vmStopped": True, "processesQuiet": True,
+                                   "preferencesOriginal": True}
+                    with patch.object(disposition, "_observe", return_value=observation), \
+                         patch.object(disposition.controller, "STATE_ROOT", root), \
+                         patch.object(disposition, "os", SimpleNamespace(geteuid=lambda: 0)), \
+                         patch.object(disposition, "sys", SimpleNamespace(platform="darwin")):
+                        result = disposition.dispose("/unused/admission", run_id, "ticket",
+                                                     expected_vm_reaped=vm_reaped)
+                    receipt = plistlib.loads((run / "disposition.plist").read_bytes())
+                    stop = plistlib.loads((run / "stop.plist").read_bytes())
+                    self.assertEqual(receipt["observation"], observation)
+                    self.assertEqual(receipt["approvalReference"], "ticket")
+                    self.assertIs(stop["vmReaped"], vm_reaped)
+                    self.assertEqual(receipt["fileSha256"]["stop.plist"],
+                                     hashlib.sha256((run / "stop.plist").read_bytes()).hexdigest())
+                    self.assertIs(result["recordedVmReaped"], vm_reaped)
+                    self.assertNotIn("historicalVmReapingProven", result)
+                    with run_state.State(root):
+                        pass
 
     def test_main_requires_explicit_acknowledgment_and_reports_failure(self):
         args = ["--admission-dir", "/admission", "--run-id", "run", "--approval-reference", "ticket"]
@@ -284,6 +295,28 @@ class DispositionTests(unittest.TestCase):
              patch("builtins.print") as output:
             self.assertEqual(disposition.main(args), 0)
         self.assertEqual(json.loads(output.call_args.args[0]), receipt)
+
+    def test_main_requires_exactly_one_stop_evidence_acknowledgment(self):
+        base = ["--admission-dir", "/admission", "--run-id", "run",
+                "--approval-reference", "ticket"]
+        for flags in ([], ["--accept-historical-vm-reaping-unknown",
+                           "--accept-fully-reaped-failure"]):
+            with self.subTest(flags=flags), patch.object(sys, "stderr"):
+                with self.assertRaises(SystemExit) as error:
+                    disposition.main([*base, *flags])
+            self.assertEqual(error.exception.code, 2)
+
+        for flag, expected in (("--accept-historical-vm-reaping-unknown", False),
+                               ("--accept-fully-reaped-failure", True)):
+            with self.subTest(flag=flag):
+                receipt = {"recordedVmReaped": expected}
+                with patch.object(disposition, "dispose", return_value=receipt) as dispose, \
+                     patch("builtins.print") as output:
+                    self.assertEqual(disposition.main([*base, flag]), 0)
+                self.assertIs(dispose.call_args.kwargs["expected_vm_reaped"], expected)
+                printed = json.loads(output.call_args.args[0])
+                self.assertIs(printed["recordedVmReaped"], expected)
+                self.assertNotIn("historicalVmReapingProven", printed)
 
 
 if __name__ == "__main__":
