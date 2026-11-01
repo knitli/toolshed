@@ -315,15 +315,15 @@ def route_contract(identity_destination, positive_destination, expected_roots_sh
     started_ns = time.time_ns()
     if not isinstance(expected_roots_sha256, str) or len(expected_roots_sha256) != 64 \
             or any(character not in "0123456789abcdef" for character in expected_roots_sha256):
-        return _trust_preflight_failure(identity_destination, positive_destination,
-                                         started_ns, "trust_roots_invalid")
+        return _fixed_failure_report(identity_destination, positive_destination,
+                                     started_ns, "trust_roots_invalid")
     try:
         context, roots_sha256, gateway_ca_absent = _public_context(expected_roots_sha256)
     except ProbeError as error:
         if error.code not in {"trust_override", "trust_roots_invalid", "trust_roots_mismatch"}:
             raise
-        return _trust_preflight_failure(identity_destination, positive_destination,
-                                         started_ns, error.code)
+        return _fixed_failure_report(identity_destination, positive_destination,
+                                     started_ns, error.code)
     deadline = time.monotonic() + ROUTE_TIMEOUT
     expired = threading.Event()
     timer = threading.Timer(ROUTE_TIMEOUT, expired.set)
@@ -368,11 +368,26 @@ def route_contract(identity_destination, positive_destination, expected_roots_sh
         "verified": positive_ok and identity_ok, "error": error,
     }
     if len(json.dumps(report, sort_keys=True, separators=(",", ":")).encode("utf-8")) > ROUTE_MAX_REPORT:
-        raise ProbeError("report_too_large")
+        return _fixed_failure_report(
+            identity_destination, positive_destination, started_ns, "report_too_large",
+            roots_sha256=roots_sha256, gateway_ca_absent=gateway_ca_absent)
     return report
 
 
-def _trust_preflight_failure(identity_destination, positive_destination, started_ns, error):
+def _fixed_failure_report(identity_destination, positive_destination, started_ns, error,
+                          *, roots_sha256="", gateway_ca_absent=False):
+    # The fixed fields and canonical IPs, with at most one 64-hex roots hash, keep this fallback
+    # below the 4 KiB route-report cap even when the attempted success report exceeded it.
+    preflight_errors = {"trust_override", "trust_roots_invalid", "trust_roots_mismatch"}
+    if error not in preflight_errors | {"report_too_large"}:
+        raise ProbeError("invalid_route_failure")
+    if error == "report_too_large":
+        if (not isinstance(roots_sha256, str) or len(roots_sha256) != 64
+                or any(character not in "0123456789abcdef" for character in roots_sha256)
+                or gateway_ca_absent is not True):
+            raise ProbeError("invalid_route_failure")
+    elif roots_sha256 != "" or gateway_ca_absent is not False:
+        raise ProbeError("invalid_route_failure")
     empty_hash = hashlib.sha256(b"").hexdigest()
     report = {
         "kind": "native-guest-route-contract-v1",
@@ -385,12 +400,10 @@ def _trust_preflight_failure(identity_destination, positive_destination, started
         "positiveDestinationIPv4": positive_destination, "positiveStatus": 0,
         "positiveTlsVerified": False, "positiveContentType": "",
         "positiveBodyBytes": 0, "positiveBodySha256": empty_hash,
-        "positiveError": error, "publicTrustRootsSha256": "",
-        "gatewayCaAbsent": False, "startedAtUnixNs": started_ns,
+        "positiveError": error, "publicTrustRootsSha256": roots_sha256,
+        "gatewayCaAbsent": gateway_ca_absent, "startedAtUnixNs": started_ns,
         "finishedAtUnixNs": time.time_ns(), "verified": False, "error": error,
     }
-    if len(json.dumps(report, sort_keys=True, separators=(",", ":")).encode("utf-8")) > ROUTE_MAX_REPORT:
-        raise ProbeError("report_too_large")
     return report
 
 

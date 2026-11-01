@@ -47,7 +47,9 @@ MAX_LOG_BYTES = canary.MAX_SHORT_OUTPUT
 PROBE_DURATION_LIMIT_NS = 15_000_000_000
 PROBE_TIMEOUT_LIMIT_NS = 25_000_000_000
 ROUTE_DURATION_LIMIT_NS = 12_000_000_000
-ROUTE_TIMEOUT_LIMIT_NS = ROUTE_DURATION_LIMIT_NS
+# Timeout/oversize failure receipts include bounded guest cleanup/unwind after the 12s deadline.
+# This is the fixed 25s supervised command backstop; successful and ordinary reports stay at 12s.
+ROUTE_TIMEOUT_LIMIT_NS = 25_000_000_000
 ROUTE_REPORT_LIMIT = 4 * 1024
 
 
@@ -290,7 +292,7 @@ def _check_route_probe(fd, identity):
         and isinstance(report["identityError"], str)
         and report["identityError"] in {"", "timeout", "transport_error", "tls_error",
                                          "trust_override", "trust_roots_invalid", "trust_roots_mismatch",
-                                         "body_too_large"}
+                                         "body_too_large", "report_too_large"}
         and type(report["positiveStatus"]) is int and 0 <= report["positiveStatus"] <= 599
         and type(report["positiveTlsVerified"]) is bool
         and isinstance(report["positiveContentType"], str)
@@ -300,7 +302,7 @@ def _check_route_probe(fd, identity):
         and isinstance(report["positiveError"], str)
         and report["positiveError"] in {"", "timeout", "transport_error", "tls_error",
                                          "trust_override", "trust_roots_invalid", "trust_roots_mismatch",
-                                         "body_too_large"}
+                                         "body_too_large", "report_too_large"}
         and type(report["verified"]) is bool
         and isinstance(report["error"], str)
         and report["error"] in {"", "timeout", "transport_error", "tls_error", "trust_override",
@@ -313,6 +315,23 @@ def _check_route_probe(fd, identity):
                  and report["positiveError"] == report["error"]
                  and report["publicTrustRootsSha256"] == ""
                  and report["gatewayCaAbsent"] is False
+                 and report["identityStatus"] == 0 and report["positiveStatus"] == 0
+                 and report["identityTlsVerified"] is False
+                 and report["positiveTlsVerified"] is False
+                 and report["identityBodyBytes"] == 0 and report["positiveBodyBytes"] == 0
+                 and report["identityBodySha256"] == empty_hash
+                 and report["positiveBodySha256"] == empty_hash
+                 and report["identityNoStore"] is False
+                 and report["identityNoGatewayMarkers"] is False
+                 and report["positiveContentType"] == ""
+                 and report["verified"] is False, "invalid_route_probe")
+        return raw, report
+    if report["error"] == "report_too_large":
+        empty_hash = _digest(b"")
+        _require(report["identityError"] == report["error"]
+                 and report["positiveError"] == report["error"]
+                 and report["publicTrustRootsSha256"] == identity.get("publicTrustRootsSha256")
+                 and report["gatewayCaAbsent"] is True
                  and report["identityStatus"] == 0 and report["positiveStatus"] == 0
                  and report["identityTlsVerified"] is False
                  and report["positiveTlsVerified"] is False

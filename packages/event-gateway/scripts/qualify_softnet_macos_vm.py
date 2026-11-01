@@ -41,7 +41,7 @@ PUBLIC_PROBE_HOST = 'event-native-probe-83fc4c309835.knitli.workers.dev'
 PUBLIC_PROBE_PATH = '/probe'
 PUBLIC_PROBE_BODY_SHA256 = '773cdcdb36ecbdb7c720d4d135911f7d35252d862b10094f788d96a965b80600'
 PUBLIC_PROBE_SOURCE = Path(__file__).with_name('softnet_public_probe_guest.py')
-PUBLIC_PROBE_SOURCE_SHA256 = '97a74b716af05047944d052fee716b56309f94a1923390e3dff85b644ca6e0f8'
+PUBLIC_PROBE_SOURCE_SHA256 = 'cbb45784a219065fc435f340757ea9c4d7e09d61babcd626a77070f3aed7d1f7'
 PUBLIC_PROBE_OUTPUT_LIMIT = 4096
 PUBLIC_PROBE_TIMEOUT = 25
 PUBLIC_PROBE_DURATION_LIMIT_NS = 15_000_000_000
@@ -55,11 +55,13 @@ GUEST_ROUTE_POSITIVE_CONTENT_TYPE = 'application/manifest+json'
 GUEST_ROUTE_POSITIVE_BODY_BYTES = 456
 GUEST_ROUTE_POSITIVE_BODY_SHA256 = '096b1a4b927c04b0417ab1f49372e110c96d4db153cf3d6048f9d25c8b11d493'
 GUEST_ROUTE_SOURCE = PUBLIC_PROBE_SOURCE
-GUEST_ROUTE_SOURCE_SHA256 = '97a74b716af05047944d052fee716b56309f94a1923390e3dff85b644ca6e0f8'
+GUEST_ROUTE_SOURCE_SHA256 = 'cbb45784a219065fc435f340757ea9c4d7e09d61babcd626a77070f3aed7d1f7'
 GUEST_ROUTE_OUTPUT_LIMIT = 4096
 GUEST_ROUTE_TIMEOUT = 25
 GUEST_ROUTE_DURATION_LIMIT_NS = 12_000_000_000
-GUEST_ROUTE_TIMEOUT_LIMIT_NS = GUEST_ROUTE_DURATION_LIMIT_NS
+# Timeout/oversize failure receipts include bounded guest cleanup/unwind after the 12s deadline.
+# This is the fixed 25s supervised command backstop; successful and ordinary reports stay at 12s.
+GUEST_ROUTE_TIMEOUT_LIMIT_NS = GUEST_ROUTE_TIMEOUT * 1_000_000_000
 GUEST_ROUTE_LOADER = (
     "import base64,sys; source=base64.b64decode(sys.argv[1],validate=True); "
     "sys.argv=[sys.argv[0]]+['--guest-route-contract']+sys.argv[2:]; "
@@ -304,7 +306,8 @@ def _validate_guest_route_report(raw, identity_ip, positive_ip, trust_roots_sha2
              and isinstance(report['identityError'], str)
              and report['identityError'] in {'', 'timeout', 'transport_error', 'tls_error',
                                               'trust_override', 'trust_roots_invalid',
-                                              'trust_roots_mismatch', 'body_too_large'}
+                                              'trust_roots_mismatch', 'body_too_large',
+                                              'report_too_large'}
              and type(report['positiveStatus']) is int and 0 <= report['positiveStatus'] <= 599
              and type(report['positiveTlsVerified']) is bool
              and isinstance(report['positiveContentType'], str)
@@ -315,7 +318,8 @@ def _validate_guest_route_report(raw, identity_ip, positive_ip, trust_roots_sha2
              and isinstance(report['positiveError'], str)
              and report['positiveError'] in {'', 'timeout', 'transport_error', 'tls_error',
                                               'trust_override', 'trust_roots_invalid',
-                                              'trust_roots_mismatch', 'body_too_large'}
+                                              'trust_roots_mismatch', 'body_too_large',
+                                              'report_too_large'}
              and type(report['gatewayCaAbsent']) is bool
              and type(report['verified']) is bool
              and isinstance(report['error'], str)
@@ -330,6 +334,23 @@ def _validate_guest_route_report(raw, identity_ip, positive_ip, trust_roots_sha2
                  and report['positiveError'] == report['error']
                  and report['publicTrustRootsSha256'] == ''
                  and report['gatewayCaAbsent'] is False
+                 and report['identityStatus'] == 0 and report['positiveStatus'] == 0
+                 and report['identityTlsVerified'] is False
+                 and report['positiveTlsVerified'] is False
+                 and report['identityBodyBytes'] == 0 and report['positiveBodyBytes'] == 0
+                 and report['identityBodySha256'] == empty_hash
+                 and report['positiveBodySha256'] == empty_hash
+                 and report['identityNoStore'] is False
+                 and report['identityNoGatewayMarkers'] is False
+                 and report['positiveContentType'] == ''
+                 and report['verified'] is False, 'guest_route_report_inconsistent')
+        return report
+    if report['error'] == 'report_too_large':
+        empty_hash = hashlib.sha256(b'').hexdigest()
+        _require(report['identityError'] == report['error']
+                 and report['positiveError'] == report['error']
+                 and report['publicTrustRootsSha256'] == trust_roots_sha256
+                 and report['gatewayCaAbsent'] is True
                  and report['identityStatus'] == 0 and report['positiveStatus'] == 0
                  and report['identityTlsVerified'] is False
                  and report['positiveTlsVerified'] is False

@@ -878,7 +878,6 @@ class SoftnetSupervisorTests(unittest.TestCase):
             {"positiveDestinationIPv4": "104.20.0.3"},
             {"identityDestinationIPv4": "104.20.0.3"}, {"publicTrustRootsSha256": "0" * 64},
             {"gatewayCaAbsent": False}, {"finishedAtUnixNs": time.time_ns() + 13_000_000_000},
-            {"finishedAtUnixNs": time.time_ns() + 12_000_000_001, "error": "timeout"},
             {"verified": False}, {"error": "predicate_failed"}, {"error": {}},
             {"positiveContentType": []}, {"positiveError": []},
         )
@@ -890,6 +889,25 @@ class SoftnetSupervisorTests(unittest.TestCase):
                     supervisor._validate_guest_route_report(
                         json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n",
                         identity, positive, roots)
+        empty_hash = hashlib.sha256(b"").hexdigest()
+        timeout = json.loads(good)
+        timeout.update({
+            "finishedAtUnixNs": timeout["startedAtUnixNs"] + 13_000_000_000,
+            "positiveStatus": 0, "positiveTlsVerified": False, "positiveContentType": "",
+            "positiveBodyBytes": 0, "positiveBodySha256": empty_hash,
+            "positiveError": "timeout", "verified": False, "error": "timeout",
+        })
+        timed_out = json.dumps(timeout, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        self.assertFalse(supervisor._validate_guest_route_report(
+            timed_out, identity, positive, roots)["verified"])
+        timeout["finishedAtUnixNs"] = timeout["startedAtUnixNs"] + 25_000_000_000
+        at_backstop = json.dumps(timeout, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        self.assertFalse(supervisor._validate_guest_route_report(
+            at_backstop, identity, positive, roots)["verified"])
+        timeout["finishedAtUnixNs"] += 1
+        beyond_backstop = json.dumps(timeout, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        with self.assertRaises(recovery.RecoveryError):
+            supervisor._validate_guest_route_report(beyond_backstop, identity, positive, roots)
         with self.assertRaisesRegex(recovery.RecoveryError, "guest_route_report_size"):
             supervisor._validate_guest_route_report(b" " * 4097, identity, positive, roots)
 
