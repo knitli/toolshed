@@ -107,7 +107,7 @@ def _valid_stop_evidence(evidence):
     return _stop_evidence_shape(evidence) and all(evidence.values())
 
 
-def _failed_restored_files(root, name, *, receipt_present=False):
+def _failed_restored_files(root, name, *, receipt_present=False, expected_vm_reaped=None):
     """Validate the narrow failed-restored state and return hashes of retained evidence."""
     path = Path(root) / name
     fd = recovery._directory(path)
@@ -125,8 +125,12 @@ def _failed_restored_files(root, name, *, receipt_present=False):
         identity = _plist(identity_bytes, "invalid_identity")["identity"]
         _check_launch(fd, identity)
         stop_bytes, stop = _check_stop(fd)
-        _require(stop == {"helperReaped": True, "vmReaped": False, "vmStopped": True},
+        _require(stop["helperReaped"] is True and stop["vmStopped"] is True
+                 and type(stop["vmReaped"]) is bool,
                  "ineligible_disposition")
+        if expected_vm_reaped is not None:
+            _require(type(expected_vm_reaped) is bool, "invalid_expected_vm_reaped")
+            _require(stop["vmReaped"] is expected_vm_reaped, "disposition_stop_mode_mismatch")
         _require(recovery._read(fd, "reserved") == b""
                  and recovery._read(fd, "restored") == b"restored\n", "invalid_incomplete_run")
         snapshot = _plist(recovery._read(fd, "snapshot.plist"), "invalid_snapshot")
@@ -599,19 +603,21 @@ class State(AbstractContextManager):
         self._active = None
 
 
-def dispose_failed_restored(root, run_id, approval_reference, *, observe):
+def dispose_failed_restored(root, run_id, approval_reference, *, expected_vm_reaped, observe):
     """Record a root operator's disposition using trusted root-installed observation code."""
     _require(isinstance(run_id, str) and RUN_ID.fullmatch(run_id), "invalid_run_id")
     _require(isinstance(approval_reference, str)
              and 0 < len(approval_reference.strip()) <= 256
              and "\x00" not in approval_reference, "invalid_approval_reference")
+    _require(type(expected_vm_reaped) is bool, "invalid_expected_vm_reaped")
     _require(callable(observe), "invalid_disposition_observer")
     state = State(root)
     state._acquire_lock()
     try:
         state._scan(allowed_unresolved=run_id)
         run_path = state.root / run_id
-        before = _failed_restored_files(state.root, run_id)
+        before = _failed_restored_files(
+            state.root, run_id, expected_vm_reaped=expected_vm_reaped)
         run_fd = recovery._directory(run_path)
         try:
             identity = _plist(recovery._read(run_fd, "identity.plist"), "invalid_identity")["identity"]
@@ -620,7 +626,8 @@ def dispose_failed_restored(root, run_id, approval_reference, *, observe):
         observation = observe(run_path, identity)
         _observation(observation)
         state._scan(allowed_unresolved=run_id)
-        after = _failed_restored_files(state.root, run_id)
+        after = _failed_restored_files(
+            state.root, run_id, expected_vm_reaped=expected_vm_reaped)
         _require(before == after, "disposition_source_changed")
         _require(0 <= time.time_ns() - observation["observedAtUnixNs"] <= 30_000_000_000,
                  "stale_disposition_observation")
