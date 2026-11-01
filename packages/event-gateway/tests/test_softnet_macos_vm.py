@@ -23,6 +23,16 @@ from types import SimpleNamespace
 from unittest.mock import call, patch
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+TEST_PUBLIC_ROOT_CERTS = (b"\x30\x03\x02\x01\x00", b"\x30\x03\x02\x01\x01")
+
+
+def root_inventory_sha256(certificates):
+    """Hash a deterministic root inventory using the route contract's encoding."""
+    fingerprints = sorted({hashlib.sha256(certificate).hexdigest()
+                           for certificate in certificates})
+    return hashlib.sha256("\n".join(fingerprints).encode("ascii")).hexdigest()
+
+
 sys.path.insert(0, str(SCRIPTS))
 import qualify_offline_macos_vm as canary  # noqa: E402
 import qualify_softnet_macos_vm as supervisor  # noqa: E402
@@ -69,6 +79,40 @@ class FakeThread:
     def is_alive(self):
         """Return the fixture's fixed thread state."""
         return self.alive
+
+
+class SocketResponseHarness:
+    """Serve fixed HTTP responses over local socket pairs for route tests."""
+
+    def __init__(self, responses):
+        self.responses = responses
+        self.clients = []
+        self.servers = []
+        self.threads = []
+
+    def connect(self, _destination, timeout=None):
+        client, server = socket.socketpair()
+        index = len(self.servers)
+        self.clients.append(client)
+        self.servers.append(server)
+
+        def serve():
+            try:
+                server.recv(4096)
+                server.sendall(self.responses[index])
+            except OSError:
+                pass
+
+        thread = threading.Thread(target=serve, daemon=True)
+        self.threads.append(thread)
+        thread.start()
+        return client
+
+    def close(self):
+        for sock in self.clients + self.servers:
+            sock.close()
+        for thread in self.threads:
+            thread.join(timeout=1)
 
 
 class ManualTimer:
@@ -458,15 +502,25 @@ class SoftnetSupervisorTests(unittest.TestCase):
                      "publicTrustRootsSha256": roots}
         account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_name="owner")
         events = []
+
         class State:
-            def __init__(self, root): pass
-            def __enter__(self): return self
-            def __exit__(self, *args): return False
+            def __init__(self, root):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
             def begin(self, identity):
                 events.append(("begin", identity.copy()))
                 return self_outer.root / "run", "d" * 32
-            def complete(self, run, stop): events.append(("complete", run, stop))
+
+            def complete(self, run, stop):
+                events.append(("complete", run, stop))
         self_outer = self
+
         def resolve(host=supervisor.PUBLIC_PROBE_HOST, resolver=None):
             events.append(("resolve", host))
             return identity_ip if host == supervisor.GUEST_ROUTE_IDENTITY_HOST else positive_ip
@@ -1067,7 +1121,7 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertTrue(any(event[0] == "restore" for event in harness.events))
 
     def test_guest_route_uses_public_context_and_positive_first_fixed_host_requests(self):
-        root_certs = probe_guest.ssl.create_default_context().get_ca_certs(binary_form=True)[:2]
+        root_certs = TEST_PUBLIC_ROOT_CERTS
         fingerprints = sorted(hashlib.sha256(cert).hexdigest() for cert in root_certs)
         roots = hashlib.sha256("\n".join(fingerprints).encode("ascii")).hexdigest()
         wire = [
@@ -1080,32 +1134,45 @@ class SoftnetSupervisorTests(unittest.TestCase):
         requests = []
         servers = []
         clients = []
+
         class WrappedSocket:
-            def __init__(self, wrapped): self.wrapped = wrapped
-            def do_handshake(self): return None
-            def __getattr__(self, name): return getattr(self.wrapped, name)
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+
+            def do_handshake(self):
+                return None
+
+            def __getattr__(self, name):
+                return getattr(self.wrapped, name)
+
         class DefaultContext:
             def get_ca_certs(self, binary_form=False):
                 self_test.assertTrue(binary_form)
                 return root_certs
+
         class TLSContext:
             def __init__(self, protocol):
                 self_test.assertEqual(protocol, probe_guest.ssl.PROTOCOL_TLS_CLIENT)
+
             def load_verify_locations(self, *, cadata):
                 self_test.assertIn("-----BEGIN CERTIFICATE-----", cadata)
+
             def get_ca_certs(self, binary_form=False):
                 self_test.assertTrue(binary_form)
                 return root_certs
+
             def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=False):
                 hostnames.append(server_hostname)
                 self_test.assertFalse(do_handshake_on_connect)
                 return WrappedSocket(raw)
+
         def connect(destination, timeout=None):
             destinations.append((destination, timeout))
             client, server = socket.socketpair()
             clients.append(client)
             servers.append(server)
             index = len(servers) - 1
+
             def serve():
                 try:
                     requests.append(server.recv(4096))
@@ -1150,8 +1217,10 @@ class SoftnetSupervisorTests(unittest.TestCase):
         gateway_der = probe_guest.ssl.PEM_cert_to_DER_cert(probe_guest.GATEWAY_CA_PEM)
         gateway_hash = hashlib.sha256(gateway_der).hexdigest()
         roots = hashlib.sha256(gateway_hash.encode("ascii")).hexdigest()
+
         class GatewayOnlyContext:
-            def get_ca_certs(self, binary_form=False): return [gateway_der]
+            def get_ca_certs(self, binary_form=False):
+                return [gateway_der]
         with patch.dict(probe_guest.os.environ, {}, clear=False), \
              patch.object(probe_guest.ssl, "create_default_context", return_value=GatewayOnlyContext()):
             probe_guest.os.environ.pop("SSL_CERT_FILE", None)
@@ -1160,25 +1229,53 @@ class SoftnetSupervisorTests(unittest.TestCase):
                 probe_guest._public_context(roots)
 
     def test_guest_route_freezes_default_root_inventory_into_fresh_tls_context(self):
-        default_context = probe_guest.ssl.create_default_context()
-        measured = default_context.get_ca_certs(binary_form=True)
-        fingerprints = sorted({hashlib.sha256(cert).hexdigest() for cert in measured})
-        roots = hashlib.sha256("\n".join(fingerprints).encode("ascii")).hexdigest()
-        with patch.object(probe_guest.ssl, "create_default_context", return_value=default_context):
+        root_certs = TEST_PUBLIC_ROOT_CERTS
+        fingerprints = sorted({hashlib.sha256(cert).hexdigest() for cert in root_certs})
+        roots = root_inventory_sha256(root_certs)
+        certificates_by_fingerprint = {
+            hashlib.sha256(certificate).hexdigest(): certificate for certificate in root_certs
+        }
+        expected_bundle = "".join(
+            probe_guest.ssl.DER_cert_to_PEM_cert(certificates_by_fingerprint[fingerprint])
+            for fingerprint in fingerprints
+        )
+
+        class DefaultContext:
+            def get_ca_certs(self, binary_form=False):
+                self.asserted_binary = binary_form
+                return root_certs
+
+        class FreshContext:
+            def __init__(self, protocol):
+                self.protocol = protocol
+                self.verify_mode = None
+                self.check_hostname = False
+
+            def load_verify_locations(self, *, cadata):
+                self.loaded_bundle = cadata
+
+            def get_ca_certs(self, binary_form=False):
+                return root_certs
+
+        default_context = DefaultContext()
+        with patch.object(probe_guest.ssl, "create_default_context", return_value=default_context), \
+             patch.object(probe_guest.ssl, "SSLContext", FreshContext):
             context, actual, gateway_absent = probe_guest._public_context(roots)
         self.assertIsNot(context, default_context)
         self.assertEqual(actual, roots)
         self.assertTrue(gateway_absent)
+        self.assertTrue(default_context.asserted_binary)
+        self.assertEqual(context.protocol, probe_guest.ssl.PROTOCOL_TLS_CLIENT)
         effective = sorted({hashlib.sha256(cert).hexdigest()
                             for cert in context.get_ca_certs(binary_form=True)})
         self.assertEqual(effective, fingerprints)
         self.assertEqual(context.verify_mode, probe_guest.ssl.CERT_REQUIRED)
         self.assertTrue(context.check_hostname)
+        self.assertEqual(context.loaded_bundle, expected_bundle)
 
-    def test_guest_route_identity_leg_rejects_status_body_headers_redirect_and_tls(self):
-        root_certs = probe_guest.ssl.create_default_context().get_ca_certs(binary_form=True)[:1]
-        roots = hashlib.sha256("\n".join(sorted(hashlib.sha256(cert).hexdigest()
-                                                  for cert in root_certs)).encode()).hexdigest()
+    def test_guest_route_identity_leg_rejects_status_body_headers_redirect(self):
+        root_certs = TEST_PUBLIC_ROOT_CERTS[:1]
+        roots = root_inventory_sha256(root_certs)
         positive_response = (b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n")
         cases = (
             (b"HTTP/1.1 200 OK\r\nCache-Control: no-store\r\nContent-Length: 0\r\n\r\n",
@@ -1200,107 +1297,127 @@ class SoftnetSupervisorTests(unittest.TestCase):
         for identity_response, field, expected in cases:
             with self.subTest(field=field, expected=expected):
                 responses = [positive_response, identity_response]
-                clients, servers, threads = [], [], []
+                harness = SocketResponseHarness(responses)
+
                 class Wrapped:
-                    def __init__(self, sock, fail=False): self.sock, self.fail = sock, fail
+                    def __init__(self, sock, fail=False):
+                        self.sock, self.fail = sock, fail
+
                     def do_handshake(self):
                         if self.fail:
                             raise probe_guest.ssl.SSLError("untrusted")
-                    def __getattr__(self, name): return getattr(self.sock, name)
+
+                    def __getattr__(self, name):
+                        return getattr(self.sock, name)
+
                 class DefaultContext:
-                    def get_ca_certs(self, binary_form=False): return root_certs
+                    def get_ca_certs(self, binary_form=False):
+                        return root_certs
+
                 class Context:
                     def __init__(self, protocol):
                         self_test.assertEqual(protocol, probe_guest.ssl.PROTOCOL_TLS_CLIENT)
+
                     def load_verify_locations(self, *, cadata):
                         self_test.assertIn("-----BEGIN CERTIFICATE-----", cadata)
-                    def get_ca_certs(self, binary_form=False): return root_certs
+
+                    def get_ca_certs(self, binary_form=False):
+                        return root_certs
+
                     def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=False):
                         self_test.assertFalse(do_handshake_on_connect)
                         return Wrapped(raw)
-                def connect(_destination, timeout=None):
-                    client, server = socket.socketpair()
-                    index = len(servers)
-                    clients.append(client)
-                    servers.append(server)
-                    def serve():
-                        try:
-                            server.recv(4096)
-                            server.sendall(responses[index])
-                        except OSError:
-                            pass
-                    thread = threading.Thread(target=serve, daemon=True)
-                    threads.append(thread)
-                    thread.start()
-                    return client
+
                 self_test = self
-                with patch.object(probe_guest.socket, "create_connection", side_effect=connect), \
-                     patch.object(probe_guest.ssl, "create_default_context", return_value=DefaultContext()), \
-                     patch.object(probe_guest.ssl, "SSLContext", Context), \
-                     patch.dict(probe_guest.os.environ, {}, clear=False):
-                    probe_guest.os.environ.pop("SSL_CERT_FILE", None)
-                    probe_guest.os.environ.pop("SSL_CERT_DIR", None)
-                    report = probe_guest.route_contract("104.20.0.1", "104.20.0.2", roots)
-                for sock in clients + servers:
-                    sock.close()
-                for thread in threads:
-                    thread.join(timeout=1)
+                try:
+                    with patch.object(probe_guest.socket, "create_connection",
+                                      side_effect=harness.connect), \
+                         patch.object(probe_guest.ssl, "create_default_context",
+                                      return_value=DefaultContext()), \
+                         patch.object(probe_guest.ssl, "SSLContext", Context), \
+                         patch.dict(probe_guest.os.environ, {}, clear=False):
+                        probe_guest.os.environ.pop("SSL_CERT_FILE", None)
+                        probe_guest.os.environ.pop("SSL_CERT_DIR", None)
+                        report = probe_guest.route_contract("104.20.0.1", "104.20.0.2", roots)
+                finally:
+                    harness.close()
                 self.assertFalse(report["verified"])
                 self.assertEqual(report[field], expected)
 
-        clients, servers, threads = [], [], []
-        calls = [0]
-        class TLSFailureContext:
-            def __init__(self, protocol): pass
-            def load_verify_locations(self, *, cadata): pass
-            def get_ca_certs(self, binary_form=False): return root_certs
+    def test_guest_route_identity_leg_classifies_tls_handshake_failure(self):
+        """The second leg reports TLS errors when the identity handshake fails."""
+        root_certs = TEST_PUBLIC_ROOT_CERTS[:1]
+        roots = root_inventory_sha256(root_certs)
+        positive_response = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n"
+        harness = SocketResponseHarness([positive_response, b""])
+        handshake_calls = [0]
+
+        class Wrapped:
+            def __init__(self, sock, fail=False):
+                self.sock = sock
+                self.fail = fail
+
+            def do_handshake(self):
+                if self.fail:
+                    raise probe_guest.ssl.SSLError("untrusted")
+
+            def __getattr__(self, name):
+                return getattr(self.sock, name)
+
+        class FailingHandshakeContext:
+            def __init__(self, protocol):
+                self.protocol = protocol
+
+            def load_verify_locations(self, *, cadata):
+                pass
+
+            def get_ca_certs(self, binary_form=False):
+                return root_certs
+
             def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=False):
-                calls[0] += 1
-                return Wrapped(raw, fail=calls[0] == 2)
-        def connect(_destination, timeout=None):
-            client, server = socket.socketpair()
-            index = len(servers)
-            clients.append(client)
-            servers.append(server)
-            def serve():
-                try:
-                    server.recv(4096)
-                    server.sendall(positive_response if index == 0 else b"")
-                except OSError:
-                    pass
-            thread = threading.Thread(target=serve, daemon=True)
-            threads.append(thread)
-            thread.start()
-            return client
-        class DefaultContext:
-            def get_ca_certs(self, binary_form=False): return root_certs
-        with patch.object(probe_guest.socket, "create_connection", side_effect=connect), \
-             patch.object(probe_guest.ssl, "create_default_context", return_value=DefaultContext()), \
-             patch.object(probe_guest.ssl, "SSLContext", TLSFailureContext), \
-             patch.dict(probe_guest.os.environ, {}, clear=False):
-            probe_guest.os.environ.pop("SSL_CERT_FILE", None)
-            probe_guest.os.environ.pop("SSL_CERT_DIR", None)
-            report = probe_guest.route_contract("104.20.0.1", "104.20.0.2", roots)
-        for sock in clients + servers:
-            sock.close()
-        for thread in threads:
-            thread.join(timeout=1)
+                handshake_calls[0] += 1
+                return Wrapped(raw, fail=handshake_calls[0] == 2)
+
+        class TlsCaseDefaultContext:
+            def get_ca_certs(self, binary_form=False):
+                return root_certs
+
+        try:
+            with patch.object(probe_guest.socket, "create_connection",
+                              side_effect=harness.connect), \
+                 patch.object(probe_guest.ssl, "create_default_context",
+                              return_value=TlsCaseDefaultContext()), \
+                 patch.object(probe_guest.ssl, "SSLContext", FailingHandshakeContext), \
+                 patch.dict(probe_guest.os.environ, {}, clear=False):
+                probe_guest.os.environ.pop("SSL_CERT_FILE", None)
+                probe_guest.os.environ.pop("SSL_CERT_DIR", None)
+                report = probe_guest.route_contract("104.20.0.1", "104.20.0.2", roots)
+        finally:
+            harness.close()
         self.assertFalse(report["verified"])
         self.assertEqual(report["identityError"], "tls_error")
 
     def test_guest_route_leg_timer_interrupts_a_slow_drip_response(self):
-        root_certs = probe_guest.ssl.create_default_context().get_ca_certs(binary_form=True)[:1]
-        roots = hashlib.sha256(hashlib.sha256(root_certs[0]).hexdigest().encode()).hexdigest()
+        root_certs = TEST_PUBLIC_ROOT_CERTS[:1]
+        roots = root_inventory_sha256(root_certs)
         clients, servers, threads = [], [], []
+
         class Wrapped:
-            def __init__(self, sock): self.sock = sock
-            def do_handshake(self): return None
-            def __getattr__(self, name): return getattr(self.sock, name)
+            def __init__(self, sock):
+                self.sock = sock
+
+            def do_handshake(self):
+                return None
+
+            def __getattr__(self, name):
+                return getattr(self.sock, name)
+
         def connect(_destination, timeout=None):
             client, server = socket.socketpair()
             index = len(servers)
             clients.append(client)
             servers.append(server)
+
             def serve():
                 try:
                     server.recv(4096)
@@ -1337,6 +1454,99 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertTrue(report["identityNoStore"])
         self.assertFalse(report["verified"])
 
+    def test_guest_route_aggregate_budget_interrupts_in_progress_second_leg(self):
+        """The identity leg timer uses only the aggregate time left after leg one."""
+        roots = "a" * 64
+        clients, servers, threads, timers = [], [], [], []
+        positive_response = (b"HTTP/1.1 200 OK\r\n"
+                             b"Content-Type: application/manifest+json\r\n"
+                             b"Content-Length: 456\r\n\r\n" + b"x" * 456)
+
+        class ControlledTimer:
+            def __init__(self, interval, function):
+                self.interval = interval
+                self.function = function
+                self.started = False
+
+            def start(self):
+                self.started = True
+
+            def cancel(self):
+                self.started = False
+
+            def is_alive(self):
+                return False
+
+            def join(self, timeout=None):
+                pass
+
+        def make_timer(interval, function):
+            timer = ControlledTimer(interval, function)
+            timers.append(timer)
+            return timer
+
+        class WrappedSocket:
+            def __init__(self, sock):
+                self.sock = sock
+
+            def do_handshake(self):
+                pass
+
+            def sendall(self, request):
+                self.sock.sendall(request)
+                if request.startswith(b"GET /probe "):
+                    second_leg_timer = timers[-1]
+                    active_leg_timer_intervals.append(second_leg_timer.interval)
+                    second_leg_timer.function()
+
+            def __getattr__(self, name):
+                return getattr(self.sock, name)
+
+        class Context:
+            def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=False):
+                return WrappedSocket(raw)
+
+        active_leg_timer_intervals = []
+
+        def connect(_destination, timeout=None):
+            client, server = socket.socketpair()
+            index = len(servers)
+            clients.append(client)
+            servers.append(server)
+
+            def serve():
+                try:
+                    server.recv(4096)
+                    if index == 0:
+                        server.sendall(positive_response)
+                except OSError:
+                    pass
+
+            thread = threading.Thread(target=serve, daemon=True)
+            threads.append(thread)
+            thread.start()
+            return client
+
+        try:
+            with patch.object(probe_guest, "ROUTE_TIMEOUT", 0.5), \
+                 patch.object(probe_guest, "ROUTE_LEG_TIMEOUT", 1.5), \
+                 patch.object(probe_guest.threading, "Timer", side_effect=make_timer), \
+                 patch.object(probe_guest.socket, "create_connection", side_effect=connect), \
+                 patch.object(probe_guest, "_public_context",
+                              return_value=(Context(), roots, True)):
+                report = probe_guest.route_contract("104.20.0.1", "104.20.0.2", roots)
+        finally:
+            for sock in clients + servers:
+                sock.close()
+            for thread in threads:
+                thread.join(timeout=1)
+
+        self.assertEqual(len(active_leg_timer_intervals), 1)
+        self.assertGreater(active_leg_timer_intervals[0], 0)
+        self.assertLessEqual(active_leg_timer_intervals[0], 0.5)
+        self.assertEqual(report["identityError"], "timeout")
+        self.assertFalse(report["verified"])
+
     def test_guest_route_aggregate_requires_each_fixed_leg_predicate(self):
         roots = "f" * 64
         positive = {"status": 200, "tlsVerified": True, "bodyBytes": 456,
@@ -1346,7 +1556,10 @@ class SoftnetSupervisorTests(unittest.TestCase):
         identity = {"status": 404, "tlsVerified": True, "bodyBytes": 0,
                     "bodySha256": hashlib.sha256(b"").hexdigest(), "contentType": "",
                     "noStore": True, "noGatewayMarkers": True, "error": ""}
-        def observe(positive_result=positive, identity_result=identity):
+
+        def observe(positive_result=None, identity_result=None):
+            positive_result = positive if positive_result is None else positive_result
+            identity_result = identity if identity_result is None else identity_result
             with patch.object(probe_guest, "_public_context", return_value=(object(), roots, True)), \
                  patch.object(probe_guest, "_route_request",
                               side_effect=[(positive_result, b"ignored"), (identity_result, b"")]):
@@ -1613,6 +1826,7 @@ class SoftnetSupervisorTests(unittest.TestCase):
                 "publicTrustRootsSha256": "f" * 64,
                 "ownerUid": os.getuid(), "tartHome": str(home)}
         account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_name="owner")
+
         def read(value):
             return plistlib.dumps(value)
         common = (patch.object(supervisor.recovery, "_directory",
@@ -1645,6 +1859,7 @@ class SoftnetSupervisorTests(unittest.TestCase):
         def answer(ip):
             return (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))
         calls = []
+
         def resolver(host, port, family, socktype):
             calls.append((host, port, family, socktype))
             return [answer("104.20.0.1")]
