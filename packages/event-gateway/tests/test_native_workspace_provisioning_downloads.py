@@ -345,6 +345,20 @@ print("pipe-read-interrupted")
             with self.assertRaisesRegex(ValueError, "manifest_pin_mismatch"):
                 downloads.load_manifest(self.root)
 
+    def test_checked_in_manifest_matches_its_pin_and_fixed_inventory(self):
+        document = downloads.load_manifest()
+        assets = document["assets"]
+        self.assertEqual(len(assets), 120)
+        bottles = {item["name"] for item in assets if item["name"].startswith("bottle-")}
+        self.assertEqual(len(bottles), 113)
+        self.assertTrue({"bottle-glib.tar.gz", "bottle-gstreamer.tar.gz", "bottle-pkgconf.tar.gz",
+                         "bottle-just.tar.gz", "bottle-coreutils.tar.gz"} <= bottles)
+        self.assertEqual(sum(item["maxBytes"] for item in assets), 445949854)
+        self.assertLessEqual(sum(item["maxBytes"] for item in assets), downloads.MAX_TOTAL_BYTES)
+        self.assertEqual({downloads._validate_url(item["url"]).hostname for item in assets},
+                         {"ghcr.io", "static.rust-lang.org", "github.com"})
+        self.assertEqual(sum(bool(item["redirects"]) for item in assets), 1)
+
     def test_pinned_tls_connection_uses_ip_socket_and_manifest_host_sni(self):
         connection = downloads._PinnedHTTPSConnection("assets.example", "93.184.216.34", self.context, 7)
         raw = Mock()
