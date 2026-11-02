@@ -29,7 +29,13 @@ import qualify_offline_macos_vm as canary
 import softnet_recovery as recovery
 import native_workspace_provisioning_guest as provisioning
 from softnet_preferences import Preferences
-from softnet_run_state import State
+from softnet_run_state import (
+    COMMAND_ERROR_CODE,
+    COMMAND_ERROR_TYPE,
+    COMMAND_FAILURE_KIND,
+    COMMAND_FAILURE_PHASES,
+    State,
+)
 
 TART = Path('/usr/local/libexec/knitli-event-qualification/tart-2.41.1/tart.app/Contents/MacOS/tart')
 SOFTNET = Path('/usr/local/libexec/knitli-event-qualification/softnet-0.22.1/softnet')
@@ -600,6 +606,7 @@ def _record(directory, name, value):
 
 
 def _record_command_failure(run, phase, error, *, command_error=None):
+    _require(phase in COMMAND_FAILURE_PHASES, 'invalid_command_failure_phase')
     output = (canary._command_failure_output(error)
               or canary._command_failure_output(command_error) or {
         'stdoutTail': b'', 'stderrTail': b'', 'stdoutObservedBytes': 0,
@@ -607,10 +614,10 @@ def _record_command_failure(run, phase, error, *, command_error=None):
     error_type = type(error).__name__
     error_code = str(error)
     return _record(run, 'command-failure.plist', {
-        'kind': 'softnet-command-failure-v1', 'phase': phase,
-        'errorType': error_type if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,63}', error_type)
+        'kind': COMMAND_FAILURE_KIND, 'phase': phase,
+        'errorType': error_type if COMMAND_ERROR_TYPE.fullmatch(error_type)
         else 'Exception',
-        'errorCode': error_code if re.fullmatch(r'[a-z0-9_]{1,128}', error_code)
+        'errorCode': error_code if COMMAND_ERROR_CODE.fullmatch(error_code)
         else 'unclassified_failure', **output})
 
 
@@ -679,8 +686,8 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
         if provisioning_downloads:
             try:
                 _record_command_failure(run, 'prelaunch', exc)
-            except BaseException:
-                raise recovery.RecoveryError('command_failure_record_failed') from exc
+            except BaseException as write_error:
+                raise recovery.RecoveryError('command_failure_record_failed') from write_error
         raise
     try:
         recovery.capture(run, preferences_factory=preferences_factory)
@@ -688,8 +695,8 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
         if provisioning_downloads:
             try:
                 _record_command_failure(run, 'prelaunch', exc)
-            except BaseException:
-                raise recovery.RecoveryError('command_failure_record_failed') from exc
+            except BaseException as write_error:
+                raise recovery.RecoveryError('command_failure_record_failed') from write_error
         raise
     vm = helper = None
     vm_attempted = False
@@ -852,7 +859,7 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
             canary._restore_termination_handlers(previous)
     if error is not None:
         if diagnostic_write_error is not None:
-            raise recovery.RecoveryError('command_failure_record_failed') from error
+            raise recovery.RecoveryError('command_failure_record_failed') from diagnostic_write_error
         raise error
     return stop
 

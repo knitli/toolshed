@@ -30,6 +30,7 @@ COMMAND_FAILURE_KIND = "softnet-command-failure-v1"
 COMMAND_FAILURE_PHASES = {"prelaunch", "vm-start", "vm-readiness", "preference-readback",
                           "provisioning-command", "provisioning-receipt"}
 MAX_COMMAND_FAILURE_BYTES = 16 * 1024
+# Match the shared runner metadata; each retained tail still has a 4096-byte cap.
 MAX_COMMAND_FAILURE_OUTPUT_BYTES = 16 * 1024 * 1024 + 4096
 PUBLIC_PROBE_HOST = "event-native-probe-83fc4c309835.knitli.workers.dev"
 PUBLIC_PROBE_PATH = "/probe"

@@ -78,7 +78,13 @@ def download_report(admission):
 class DownloadExercise(ExercisePatches):
     """Use the existing supervisor fakes for the one fixed stdin command."""
 
+    def __init__(self, *, initial_get_error=None, **kwargs):
+        super().__init__(**kwargs)
+        self.initial_get_error = initial_get_error
+
     def bounded(self, argv, **kwargs):
+        if argv[1:2] == ['get'] and self.initial_get_error:
+            raise self.initial_get_error
         if '/opt/homebrew/bin/python3' in argv:
             self.events.append(('command', tuple(argv), kwargs.copy()))
             self.received = os.read(kwargs['input_fd'], 1024)
@@ -400,6 +406,13 @@ class ProvisioningControllerTests(unittest.TestCase):
             self.assertEqual((artifact['stdoutTail'], artifact['stderrTail'], artifact['exitCode']), expected)
             self.assertFalse(any(event[:2] == ('record', 'provisioning-download.json') for event in fakes.events))
 
+    def test_command_failure_writer_rejects_unknown_phase_before_recording(self):
+        with patch.object(supervisor, '_record') as writer:
+            with self.assertRaisesRegex(recovery.RecoveryError, 'invalid_command_failure_phase'):
+                supervisor._record_command_failure(
+                    self.root, 'unrecognized-stage', recovery.RecoveryError('stage_failed'))
+        writer.assert_not_called()
+
     def test_readiness_retries_do_not_record_failure_and_terminal_failure_keeps_latest_output(self):
         retry = supervisor.canary.CanaryError('tart_command_timeout')
         retry.command_failure_output = {
@@ -434,6 +447,39 @@ class ProvisioningControllerTests(unittest.TestCase):
                 with self.assertRaises(recovery.RecoveryError):
                     supervisor._exercise(self.root, self.admission, self.account, 'staff',
                                          TargetPreferences, provisioning_bundle_fd=self.descriptor())
+        names = [event[0] for event in fakes.events]
+        self.assertLess(max(index for index, name in enumerate(names) if name == 'stop_owned'), names.index('restore'))
+
+    def test_diagnostic_write_failure_chains_original_error_for_all_prelaunch_paths(self):
+        for stage in ('get', 'capture'):
+            original = (supervisor.canary.CanaryError('tart_command_failed') if stage == 'get'
+                        else recovery.RecoveryError('capture_failed'))
+            kwargs = {'initial_get_error': original} if stage == 'get' else {'capture_error': original}
+            with self.subTest(stage=stage), DownloadExercise(**kwargs) as fakes:
+                with patch.object(supervisor, '_record', side_effect=OSError('failure record write failed')):
+                    with self.assertRaisesRegex(recovery.RecoveryError,
+                                                'command_failure_record_failed') as raised:
+                        supervisor._exercise(self.root, self.admission, self.account, 'staff',
+                                             TargetPreferences, provisioning_bundle_fd=self.descriptor())
+            self.assertIsInstance(raised.exception.__cause__, OSError)
+            self.assertIs(raised.exception.__cause__.__context__, original)
+            self.assertFalse(any(event[0] == 'popen' for event in fakes.events))
+
+    def test_terminal_diagnostic_write_failure_chains_writer_then_original_and_cleans_up(self):
+        original = supervisor.canary.CanaryError('tart_command_failed')
+        with DownloadExercise(probe_error=original) as fakes:
+            def record(_directory, name, _value):
+                if name == 'command-failure.plist':
+                    raise OSError('failure record write failed')
+                fakes.events.append(('record', name))
+            with patch.object(supervisor, '_record', side_effect=record):
+                with self.assertRaisesRegex(recovery.RecoveryError,
+                                            'command_failure_record_failed') as raised:
+                    supervisor._exercise(self.root, self.admission, self.account, 'staff',
+                                         TargetPreferences, provisioning_bundle_fd=self.descriptor())
+        writer_error = raised.exception.__cause__
+        self.assertIsInstance(writer_error, OSError)
+        self.assertIs(writer_error.__context__, original)
         names = [event[0] for event in fakes.events]
         self.assertLess(max(index for index, name in enumerate(names) if name == 'stop_owned'), names.index('restore'))
 
