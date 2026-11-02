@@ -52,6 +52,27 @@ existing [workspace workflow](../../../../.github/workflows/event-native-workspa
 The command does not bootstrap these tools. Record how their public inputs were
 acquired; successful version checks are not a supply-chain attestation.
 
+## Transfer the staging source inputs
+
+`scripts/native_workspace_stage_inputs.py` builds a deterministic archive of the
+fixed staging scripts, their launcher dependency, and the registered recipe assets.
+It preserves their repository-relative layout, checks the recipe asset pins, and
+binds every file's length and digest into the archive manifest.
+
+Its fixed receiver reads the archive from stdin and validates its bounds, exact
+member set, regular-file types, and digests before creating a private temporary
+tree. It writes `receipt.json` last and reports `inputs-received` with
+`qualified: false`. Receiving these files does not execute them or prepare the
+workspace.
+
+The host controller can use the helper's fixed `command_template` with Tart
+`exec -i` and the existing bounded runner's `input_fd`. The caller must verify the
+archive file and its private location, supply the pinned Tart and admitted VM,
+and close its descriptor after the runner completes child cleanup. This helper
+does not admit a VM, configure networking, install tools, or invoke staging.
+Connected staging still requires the separate reviewed controller and egress
+policy described above.
+
 ## Fixed preparation
 
 Run `packages/event-gateway/scripts/stage_native_workspace.py --source <upstream>
