@@ -71,7 +71,7 @@ class StageInputBundleTest(unittest.TestCase):
     def run_receiver(self, bundle, data=None):
         environment = dict(os.environ)
         environment["TMPDIR"] = str(self.private_tmp)
-        return subprocess.run([sys.executable, "-I", "-c", bundle["receiver"]],  # nosec B603 -- fixed receiver source; hostile inputs remain archive/JSON data.
+        return subprocess.run([sys.executable, "-I", "-c", bundle["receiver"]],  # nosec B603 -- fixed receiver; hostile inputs are archive/JSON data.
                               input=bundle["archive"] if data is None else data,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
                               env=environment)
