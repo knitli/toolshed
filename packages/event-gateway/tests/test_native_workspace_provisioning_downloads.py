@@ -2,7 +2,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import subprocess
+import subprocess  # nosec B404 -- Fixed child interpreter tests signal interruption without a shell.
 import sys
 import tempfile
 import unittest
@@ -15,6 +15,7 @@ import native_workspace_provisioning_downloads as downloads  # noqa: E402
 
 class FakeResponse:
     def __init__(self, status=200, body=b"", headers=None):
+        """Set the fixture HTTP status, response body and optional headers."""
         self.status = status
         self.body = body
         self.headers = headers or {}
@@ -56,9 +57,18 @@ def manifest(item=None):
             "assets": [item or asset()]}
 
 
+def release_fixture():
+    """Provide release bytes and an exact redirect for both transport paths."""
+    body = b"release"
+    item = asset(body, url="https://ghcr.io/v2/blob",
+                 redirects=[{"host": downloads.REDIRECT_HOST, "path": "/download/exact"}])
+    redirect = FakeResponse(302, headers={"Location": "https://release-assets.githubusercontent.com/download/exact?token=secret"})
+    return body, item, [redirect, FakeResponse(body=body)]
+
+
 class ProvisioningDownloadTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir="/private/tmp")
+        self.temp = tempfile.TemporaryDirectory(dir=Path(tempfile.gettempdir()).resolve())
         self.root = Path(self.temp.name)
         self.ca = self.root / "roots.pem"
         self.ca.write_bytes(b"test CA bundle")
@@ -133,12 +143,8 @@ class ProvisioningDownloadTests(unittest.TestCase):
         self.assertFalse((output / "receipt.json.partial").exists())
 
     def test_redirect_must_match_exact_allowance_and_never_reuses_auth(self):
-        body = b"release"
-        item = asset(body, url="https://ghcr.io/v2/blob",
-                     redirects=[{"host": downloads.REDIRECT_HOST, "path": "/download/exact"}])
-        redirect = FakeResponse(302, headers={"Location": "https://release-assets.githubusercontent.com/download/exact?token=secret"})
-        final = FakeResponse(body=body)
-        responses = [redirect, final]
+        body, item, responses = release_fixture()
+        redirect, final = responses
         result, calls, _ = self.run_download(body, responses, item)
         self.assertEqual([call[4] for call in calls], [True, False])
         self.assertNotIn("token=secret", json.dumps(result))
@@ -148,12 +154,8 @@ class ProvisioningDownloadTests(unittest.TestCase):
         self.assertEqual(result["assets"][0]["selectedIPv4"], "185.199.108.133")
 
     def test_direct_https_sends_only_fixed_initial_ghcr_auth_and_connects_to_pinned_ips(self):
-        body = b"release"
-        item = asset(body, url="https://ghcr.io/v2/blob",
-                     redirects=[{"host": downloads.REDIRECT_HOST, "path": "/download/exact"}])
-        redirect = FakeResponse(302, headers={"Location": "https://release-assets.githubusercontent.com/download/exact?token=secret"})
-        final = FakeResponse(body=body)
-        responses = [redirect, final]
+        _, item, responses = release_fixture()
+        redirect, final = responses
         requests = []
         connections = []
 
@@ -324,7 +326,8 @@ finally:
     os.close(write_fd)
 print("pipe-read-interrupted")
 '''
-        result = subprocess.run([sys.executable, "-c", child, str(SCRIPT_DIR)],
+        # Repository-controlled child/code, shell=False and a five-second timeout isolate signal behavior.
+        result = subprocess.run([sys.executable, "-c", child, str(SCRIPT_DIR)],  # nosec B603
                                 shell=False, capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "pipe-read-interrupted\n")
