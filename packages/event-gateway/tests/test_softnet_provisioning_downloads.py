@@ -79,6 +79,7 @@ class DownloadExercise(ExercisePatches):
     """Use the existing supervisor fakes for the one fixed stdin command."""
 
     def __init__(self, *, initial_get_error=None, **kwargs):
+        """Optionally fail the prelaunch VM state query."""
         super().__init__(**kwargs)
         self.initial_get_error = initial_get_error
 
