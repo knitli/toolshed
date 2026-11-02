@@ -95,6 +95,57 @@ import establish source transport, not dependency staging or suite success.
 
 ## Fixed preparation
 
+### Provisioning acquisition inputs
+
+`native-workspace-provisioning-assets.json` pins 120 data files: 113 Homebrew
+bottles, the Rust 1.95.0 distribution manifest and checksum, three ARM64 Rust
+components, rustup-init 1.29.2, and cargo-nextest 0.9.128. The bottle selection
+uses the runtime dependency closure of `glib`, `gstreamer`, `pkgconf`, `just`,
+and `coreutils`: 110 `arm64_sequoia` bottles and three `all` bottles. The
+[Homebrew formula API](https://formulae.brew.sh/docs/api/) supplied the bottle
+digests at core commit `ce79745293177f69e488c3cbd857b8cf9fd6bbdd`; the formula
+sources were checked against that commit's source checksums. Rust component
+digests come from the pinned [official channel manifest](https://static.rust-lang.org/dist/channel-rust-1.95.0.toml).
+The nextest digest comes from its [versioned release](https://github.com/nextest-rs/nextest/releases/tag/cargo-nextest-0.9.128).
+
+`scripts/native_workspace_provisioning_downloads.py` loads only this
+digest-pinned manifest. Its per-file byte caps match the observed file sizes;
+all 120 caps sum to 445,949,854 bytes, below its 512 MiB aggregate limit. It
+connects to an admitted public IPv4 address while retaining the manifest hostname for TLS
+certificate verification, SNI and HTTP authority. It sends no ambient proxy,
+cookie or authentication settings. GHCR requests use Homebrew's public anonymous
+`Bearer QQ==` marker; this is not an issued token. Redirects are refused unless
+their HTTPS hostname and exact path are in the selected asset's manifest entry;
+redirect query parameters are neither persisted nor reported. The nextest entry
+permits its observed immutable GitHub release-asset path. Bottle redirects have
+no allowance yet: a new redirect stops acquisition for review.
+
+The command requires macOS 15 ARM64 and Python 3.13 or newer, and runs in the
+main thread so an absolute alarm covers connection, TLS, headers and body reads.
+It publishes its receipt atomically after every digest matches, binding the
+manifest, verified CA bytes, address map and each final host/path/address.
+
+This downloader is a data-only building block. It does not configure Softnet,
+admit DNS/address snapshots, launch a VM, install or extract archives, fetch
+Cargo dependencies, or invoke staging. Its output receipt stays `prepared:
+false` and `qualified: false`. Successful download does not attest the guest's
+identity isolation or establish a general hostname-aware egress policy. The
+later controller must admit the exact address map and public CA inventory,
+supervise only the fixed downloader while online, then disconnect before
+executing installers or downloaded code.
+
+Offline installation must explicitly cover every bottle in dependency order.
+Homebrew's `--force-bottle` does not propagate to dependency installers. The
+reviewed local-bottle route therefore uses one verified local archive per
+command with `--ignore-dependencies --force-bottle`, inside a network-denied
+guest action. Before that action, bind a complete Cellar/link inventory and
+check each bottle's embedded formula identity. Preserve conflicts for diagnosis;
+do not use blanket overwrite or uninstall flags. Downloaded filenames are data
+identifiers, not Homebrew's install arguments. A local Rust distribution mirror
+must retain the verified manifest and component hashes and support the existing
+`rustup run 1.95.0` toolchain identity. Installation and its receipts remain a
+separate implementation and live qualification step.
+
 Run `packages/event-gateway/scripts/stage_native_workspace.py --source <upstream>
 --output <new-stage-directory>` inside that guest with the selected Cargo and
 Rustup homes. The output must be new, and the selected roots must be private and
