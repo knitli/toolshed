@@ -465,6 +465,7 @@ class ProvisioningControllerTests(unittest.TestCase):
             self.assertIsInstance(raised.exception.__cause__, OSError)
             self.assertIs(raised.exception.__cause__.__context__, original)
             self.assertFalse(any(event[0] == 'popen' for event in fakes.events))
+            self.assertEqual(any(event[0] == 'capture' for event in fakes.events), stage == 'capture')
 
     def test_terminal_diagnostic_write_failure_chains_writer_then_original_and_cleans_up(self):
         original = supervisor.canary.CanaryError('tart_command_failed')

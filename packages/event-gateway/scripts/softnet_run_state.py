@@ -29,9 +29,10 @@ PROVISIONING_IDENTITY_KEYS = IDENTITY_KEYS | {
 COMMAND_FAILURE_KIND = "softnet-command-failure-v1"
 COMMAND_FAILURE_PHASES = {"prelaunch", "vm-start", "vm-readiness", "preference-readback",
                           "provisioning-command", "provisioning-receipt"}
-MAX_COMMAND_FAILURE_BYTES = 16 * 1024
-# Match the shared runner metadata; each retained tail still has a 4096-byte cap.
-MAX_COMMAND_FAILURE_OUTPUT_BYTES = 16 * 1024 * 1024 + 4096
+# Keep the fixed record cap aligned with both retained tails plus metadata.
+MAX_COMMAND_FAILURE_BYTES = 2 * canary.COMMAND_FAILURE_TAIL_BYTES + 8 * 1024
+# Match the shared runner's observed-byte limit.
+MAX_COMMAND_FAILURE_OUTPUT_BYTES = canary.MAX_COMMAND_FAILURE_OBSERVED_BYTES
 PUBLIC_PROBE_HOST = "event-native-probe-83fc4c309835.knitli.workers.dev"
 PUBLIC_PROBE_PATH = "/probe"
 PUBLIC_PROBE_BODY_SHA256 = "773cdcdb36ecbdb7c720d4d135911f7d35252d862b10094f788d96a965b80600"
@@ -265,8 +266,10 @@ def _check_command_failure(fd):
              and COMMAND_ERROR_TYPE.fullmatch(record["errorType"])
              and isinstance(record["errorCode"], str)
              and COMMAND_ERROR_CODE.fullmatch(record["errorCode"])
-             and isinstance(record["stdoutTail"], bytes) and len(record["stdoutTail"]) <= 4096
-             and isinstance(record["stderrTail"], bytes) and len(record["stderrTail"]) <= 4096
+             and isinstance(record["stdoutTail"], bytes)
+             and len(record["stdoutTail"]) <= canary.COMMAND_FAILURE_TAIL_BYTES
+             and isinstance(record["stderrTail"], bytes)
+             and len(record["stderrTail"]) <= canary.COMMAND_FAILURE_TAIL_BYTES
              and type(record["stdoutObservedBytes"]) is int
              and len(record["stdoutTail"]) <= record["stdoutObservedBytes"]
              <= MAX_COMMAND_FAILURE_OUTPUT_BYTES

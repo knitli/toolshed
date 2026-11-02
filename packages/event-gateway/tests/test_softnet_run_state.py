@@ -226,6 +226,26 @@ class SoftnetRunStateTests(unittest.TestCase):
                                             "invalid_command_failure_mode"):
                     run_state._check_run_directory(mode_root, ordinary_id)
 
+    def test_command_failure_tail_validation_tracks_canary_cap(self):
+        identity = self._provisioning_identity()
+        run, _ = self._failed_restored_run(identity)
+        fd = recovery._directory(run)
+        try:
+            with patch.object(canary, "COMMAND_FAILURE_TAIL_BYTES", 2):
+                valid = self._command_failure_record(
+                    stdoutTail=b"ok", stdoutObservedBytes=2, stderrTail=b"x", stderrObservedBytes=1)
+                self._rewrite(run / "command-failure.plist",
+                              plistlib.dumps(valid, fmt=plistlib.FMT_BINARY))
+                self.assertEqual(run_state._check_command_failure(fd)[1]["stdoutTail"], b"ok")
+
+                over_limit = self._command_failure_record(stdoutTail=b"bad", stdoutObservedBytes=3)
+                self._rewrite(run / "command-failure.plist",
+                              plistlib.dumps(over_limit, fmt=plistlib.FMT_BINARY))
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_command_failure"):
+                    run_state._check_command_failure(fd)
+        finally:
+            os.close(fd)
+
     def test_command_failure_record_is_hashed_by_disposition_and_cannot_complete(self):
         identity = self._provisioning_identity()
         run, run_id = self._failed_restored_run(identity)

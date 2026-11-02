@@ -682,14 +682,6 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
     try:
         raw, _ = command([str(TART), 'get', vm_name, '--format', 'json'], timeout=10)
         _require(canary._vm_stopped(raw), 'vm_not_stopped_before_capture')
-    except BaseException as exc:
-        if provisioning_downloads:
-            try:
-                _record_command_failure(run, 'prelaunch', exc)
-            except BaseException as write_error:
-                raise recovery.RecoveryError('command_failure_record_failed') from write_error
-        raise
-    try:
         recovery.capture(run, preferences_factory=preferences_factory)
     except BaseException as exc:
         if provisioning_downloads:

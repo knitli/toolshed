@@ -35,6 +35,9 @@ MAX_CONFIG_BYTES = 1024 * 1024
 MAX_DISK_BYTES = 1024**4
 MAX_SHORT_OUTPUT = 64 * 1024
 COMMAND_FAILURE_TAIL_BYTES = 4096
+COMMAND_READ_BYTES = 4096
+# The observed-byte ceiling allows one full overflow read before the limit is enforced.
+MAX_COMMAND_FAILURE_OBSERVED_BYTES = 16 * 1024 * 1024 + COMMAND_READ_BYTES
 MAX_GUEST_OUTPUT = 16 * 1024
 MAX_FRAME = 2048
 MAX_FRAMES = 256
@@ -273,8 +276,8 @@ def _command_failure_output(error):
                 value["stdoutObservedBytes"], value["stderrObservedBytes"], value["exitCode"])
             if (isinstance(stdout, bytes) and len(stdout) <= COMMAND_FAILURE_TAIL_BYTES
                     and isinstance(stderr, bytes) and len(stderr) <= COMMAND_FAILURE_TAIL_BYTES
-                    and type(stdout_count) is int and len(stdout) <= stdout_count <= 16 * 1024 * 1024 + 4096
-                    and type(stderr_count) is int and len(stderr) <= stderr_count <= 16 * 1024 * 1024 + 4096
+                    and type(stdout_count) is int and len(stdout) <= stdout_count <= MAX_COMMAND_FAILURE_OBSERVED_BYTES
+                    and type(stderr_count) is int and len(stderr) <= stderr_count <= MAX_COMMAND_FAILURE_OBSERVED_BYTES
                     and (exit_code is None or (type(exit_code) is int and -255 <= exit_code <= 255 and exit_code != 0))):
                 return value
         pending.extend((getattr(current, "__cause__", None), getattr(current, "__context__", None)))
@@ -419,7 +422,7 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
             if remaining <= 0:
                 raise CanaryError("tart_command_timeout")
             for key, _ in selector.select(min(0.1, remaining)):
-                chunk = os.read(key.fileobj.fileno(), 4096)
+                chunk = os.read(key.fileobj.fileno(), COMMAND_READ_BYTES)
                 if not chunk:
                     selector.unregister(key.fileobj)
                     key.fileobj.close()
