@@ -117,7 +117,7 @@ class GuestInventoryProbeTests(unittest.TestCase):
         regular = os.stat_result((stat.S_IFREG | 0o755, 1, 1, 1, 501, 20, 10, 0, 0, 0))
         with mock.patch.object(probe.os, "lstat", return_value=regular), \
                 mock.patch.object(probe.os, "stat", return_value=regular), \
-                mock.patch.object(probe.os.path, "realpath", return_value="/tmp/attacker/brew"), \
+                mock.patch.object(probe.os.path, "realpath", return_value="/outside-homebrew/brew"), \
                 mock.patch.object(probe.os, "access", return_value=True), \
                 mock.patch.object(probe.canary, "_hash_file") as hash_file, \
                 mock.patch.object(probe, "_run") as run, \
