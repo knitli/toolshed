@@ -122,7 +122,8 @@ class ProvisioningControllerTests(unittest.TestCase):
         factory = stack.enter_context(patch.object(supervisor, 'State'))
         state = factory.return_value.__enter__.return_value
         state.begin.return_value = (self.root / 'run', 'e' * 32)
-        dns = stack.enter_context(patch.object(supervisor, '_resolve_provisioning_dns'))
+        dns = stack.enter_context(patch.object(supervisor.socket, 'getaddrinfo',
+                                               side_effect=AssertionError('DNS re-read after admission')))
         opened = stack.enter_context(patch.object(supervisor, '_open_provisioning_bundle', return_value=descriptor))
         return state, dns, opened
 
@@ -191,30 +192,102 @@ class ProvisioningControllerTests(unittest.TestCase):
                 with self.subTest(keys=sorted(value)), self.assertRaisesRegex(recovery.RecoveryError, 'invalid_admission'):
                     supervisor._admission_record(admission_root)
 
-    def test_dns_requires_complete_exact_snapshot(self):
-        mapping = self.admission['provisioningDnsMap']
+    def test_snapshot_rejects_unsafe_or_unbounded_complete_rrsets(self):
+        bundle = guest.build_bundle(guest.ROOT, b'CA fixture', self.admission['provisioningDnsMap'])
+        admission = {**self.admission, 'provisioningBundleSha256': bundle['bundleSha256'],
+                     'provisioningCaSha256': bundle['caBundleSha256']}
+        cases = (
+            ([], 'provisioning_dns_invalid'),
+            ([(socket.AF_INET6, socket.SOCK_STREAM, 6, '', ('::1', 443))], 'provisioning_dns_invalid'),
+            ([(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('not-an-ip', 443))], 'provisioning_dns_invalid'),
+            ([(socket.AF_INET6, socket.SOCK_STREAM, 6, '', ('140.82.112.3', 443))],
+             'provisioning_dns_invalid'),
+            ([(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('140.82.112.3', 443))[:-1]],
+             'provisioning_dns_invalid'),
+            ([(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('140.82.112.3', 443)),
+              (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('10.0.0.1', 443))],
+             'provisioning_destination_excluded'),
+            ([(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('140.82.112.3', 443)),
+              (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('104.18.4.128', 443))],
+             'provisioning_destination_excluded'),
+            ([(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('140.82.112.3', 443)),
+              (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('140.82.112.35', 443))],
+             'provisioning_destination_excluded'),
+            ([(socket.AF_INET, socket.SOCK_STREAM, 6, '', (f'140.82.112.{i}', 443))
+              for i in range(3, 12)], 'provisioning_dns_invalid'),
+            ([(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('140.82.112.3', 443))] * 33,
+             'provisioning_dns_invalid'),
+        )
+        for answers, error in cases:
+            with self.subTest(answers=answers), self.assertRaisesRegex(recovery.RecoveryError, error):
+                with patch.object(supervisor, 'PROVISIONING_CA_SHA256', bundle['caBundleSha256']):
+                    value = copy.deepcopy(admission)
+                    if any(len(answer) == 5 and answer[4][0] == '140.82.112.35' for answer in answers):
+                        value['provisioningDeniedIPv4'].append('140.82.112.35')
+                        bind_inventory(value)
+                    supervisor.snapshot_provisioning_admission(
+                        value, bundle['payload'], lambda *args: answers)
 
-        def resolve(host, *args):
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (value, 443))
-                    for value in mapping[host]]
+    def test_snapshot_freezes_current_public_ipv4s_into_admission_and_bundle(self):
+        bundle = guest.build_bundle(guest.ROOT, b'CA fixture', self.admission['provisioningDnsMap'])
+        admission = {**self.admission, 'provisioningBundleSha256': bundle['bundleSha256'],
+                     'provisioningCaSha256': bundle['caBundleSha256']}
 
-        supervisor._resolve_provisioning_dns(mapping, resolver=resolve)
-        for answers in ([], [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('151.101.66.137', 443))],
-                        [(socket.AF_INET6, socket.SOCK_STREAM, 6, '', ('::1', 443))]):
-            with self.subTest(answers=answers), self.assertRaisesRegex(
-                    recovery.RecoveryError, 'provisioning_dns_(invalid|drift)'):
-                supervisor._resolve_provisioning_dns(mapping, resolver=lambda *args: answers)
+        calls = []
+        original_document = json.loads(bundle['payload'])
 
-    def test_qualify_rejects_dns_drift_before_opening_bundle_or_reserving_run(self):
+        def resolve(host, port, family, socktype):
+            self.assertEqual((port, family, socktype), (443, socket.AF_UNSPEC, socket.SOCK_STREAM))
+            self.assertIn(host, admission['provisioningDnsMap'])
+            calls.append(host)
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('140.82.112.4', 443)),
+                    (socket.AF_INET6, socket.SOCK_STREAM, 6, '', ('2606:4700:4700::1111', 443)),
+                    (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('140.82.112.3', 443)),
+                    (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('140.82.112.3', 443))]
+
+        with patch.object(supervisor, 'PROVISIONING_CA_SHA256', bundle['caBundleSha256']):
+            snapshot, raw = supervisor.snapshot_provisioning_admission(admission, bundle['payload'], resolve)
+        self.assertEqual(set(snapshot['provisioningDnsMap']), set(admission['provisioningDnsMap']))
+        self.assertEqual(sorted(calls), sorted(admission['provisioningDnsMap']))
+        self.assertTrue(all(values == ['140.82.112.3', '140.82.112.4']
+                            for values in snapshot['provisioningDnsMap'].values()))
+        rebuilt = json.loads(raw)
+        self.assertEqual(rebuilt, {**original_document, 'dnsMap': snapshot['provisioningDnsMap']})
+        self.assertEqual(snapshot['provisioningBundleSha256'], hashlib.sha256(raw).hexdigest())
+        receipt = download_report(snapshot)['downloadReceipt']
+        self.assertEqual(receipt['dnsMap'], snapshot['provisioningDnsMap'])
+        expected_admission = {**admission, 'provisioningDnsMap': snapshot['provisioningDnsMap'],
+                              'provisioningBundleSha256': hashlib.sha256(raw).hexdigest()}
+        self.assertEqual(snapshot, expected_admission)
+        self.assertEqual(bundle['bundleSha256'], admission['provisioningBundleSha256'])
+        self.assertEqual(admission['provisioningDnsMap']['github.com'], ['140.82.112.3'])
+
+    def test_snapshot_rejects_bad_bundle_and_stale_or_future_inventory_before_dns(self):
+        bundle = guest.build_bundle(guest.ROOT, b'CA fixture', self.admission['provisioningDnsMap'])
+        admission = {**self.admission, 'provisioningBundleSha256': bundle['bundleSha256'],
+                     'provisioningCaSha256': bundle['caBundleSha256']}
+        def no_dns(*args):
+            self.fail('resolver called before admission validation')
+        with patch.object(supervisor, 'PROVISIONING_CA_SHA256', bundle['caBundleSha256']):
+            for age, observed in (('stale', time.time_ns() - supervisor.PROVISIONING_INVENTORY_MAX_AGE_NS - 1),
+                                  ('future', time.time_ns() + 10**12)):
+                value = copy.deepcopy(admission)
+                bind_inventory(value, observed=observed)
+                with self.subTest(age=age), self.assertRaisesRegex(
+                        recovery.RecoveryError, 'provisioning_inventory_stale'):
+                    supervisor.snapshot_provisioning_admission(value, bundle['payload'], no_dns)
+            with self.assertRaisesRegex(ValueError, 'payload_digest_mismatch'):
+                supervisor.snapshot_provisioning_admission(admission, bundle['payload'] + b' ', no_dns)
+
+    def test_qualify_uses_frozen_admission_without_dns_reread(self):
         with ExitStack() as stack:
             state, dns, opened = self.qualify_fakes(stack, self.descriptor())
-            dns.side_effect = recovery.RecoveryError('provisioning_dns_drift')
-            exercise = stack.enter_context(patch.object(supervisor, '_exercise'))
-            with self.assertRaisesRegex(recovery.RecoveryError, 'provisioning_dns_drift'):
-                supervisor.qualify(self.root, provisioning_downloads=True)
-            opened.assert_not_called()
-            state.begin.assert_not_called()
-            exercise.assert_not_called()
+            stack.enter_context(patch.object(supervisor, '_exercise', return_value={
+                'vmStopped': True, 'vmReaped': True, 'helperReaped': True}))
+            supervisor.qualify(self.root, provisioning_downloads=True)
+            dns.assert_not_called()
+            opened.assert_called_once()
+            state.begin.assert_called_once()
 
     def test_qualify_rejects_mixed_modes_before_admission(self):
         with ExitStack() as stack:
