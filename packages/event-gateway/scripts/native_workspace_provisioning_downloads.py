@@ -49,6 +49,10 @@ def _json_no_duplicates(data):
     return json.loads(data, object_pairs_hook=pairs, parse_constant=lambda _: (_ for _ in ()).throw(ValueError("invalid_json_constant")))
 
 
+def _canonical_manifest_bytes(document):
+    return (json.dumps(document, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+
+
 def _read_regular(path, maximum):
     path = Path(os.path.abspath(os.fspath(path)))
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -88,6 +92,8 @@ def load_manifest(root=ROOT):
         raise ValueError("manifest_pin_mismatch")
     document = _json_no_duplicates(raw)
     _validate_manifest(document)
+    if raw != _canonical_manifest_bytes(document):
+        raise ValueError("manifest_not_canonical")
     return document
 
 
@@ -204,6 +210,15 @@ def _tls_context(ca_bundle_bytes):
     return context
 
 
+def _close_quietly(handle):
+    if handle is None:
+        return
+    try:
+        handle.close()
+    except BaseException:
+        pass
+
+
 def _set_response_timeout(response, timeout):
     """Best-effort socket timeout; the absolute alarm enforces the deadline."""
     if response.isclosed():
@@ -229,29 +244,36 @@ def _absolute_deadline(deadline):
         raise TimeoutError("download_deadline")
 
     signal.signal(signal.SIGALRM, alarm)
+
+    def disarm():
+        signal.setitimer(signal.ITIMER_REAL, 0)
+
     try:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("download_deadline")
         signal.setitimer(signal.ITIMER_REAL, remaining)
-        yield
+        yield disarm
     finally:
         try:
-            signal.setitimer(signal.ITIMER_REAL, 0)
+            disarm()
         finally:
             signal.signal(signal.SIGALRM, previous_handler)
 
 
-def _download_asset(asset, dns, context, directory, deadline, remaining_total, opener=None):
+def _download_asset(asset, dns, context, directory, deadline, remaining_total, opener=None,
+                    disarm_deadline=None, owned_names=None):
     current = asset["url"]
     visited = 0
     digest = hashlib.sha256()
     size = 0
     destination = directory / asset["name"]
     fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
-    os.fchmod(fd, 0o600)
+    if owned_names is not None:
+        owned_names.append(asset["name"])
     connection = None
     try:
+        os.fchmod(fd, 0o600)
         while True:
             if time.monotonic() >= deadline:
                 raise TimeoutError("download_total_timeout")
@@ -311,6 +333,8 @@ def _download_asset(asset, dns, context, directory, deadline, remaining_total, o
                         view = view[written:]
                 if size == 0 or digest.hexdigest() != asset["sha256"]:
                     raise ValueError("asset_digest_or_empty_mismatch")
+                if disarm_deadline is not None:
+                    disarm_deadline()
                 os.fsync(fd)
                 return {"name": asset["name"], "initialUrl": asset["url"],
                         "finalHost": host, "finalPath": parts.path or "/",
@@ -318,20 +342,20 @@ def _download_asset(asset, dns, context, directory, deadline, remaining_total, o
                         "redirectCount": visited, "outcome": "downloaded",
                         "bytes": size, "sha256": digest.hexdigest()}
             finally:
-                try:
-                    if response is not None:
-                        response.close()
-                finally:
-                    if connection is not None:
-                        connection.close()
+                _close_quietly(response)
+                _close_quietly(connection)
     except BaseException:
-        os.close(fd)
+        if disarm_deadline is not None:
+            disarm_deadline()
+        try:
+            os.close(fd)
+        except OSError:
+            pass
         fd = -1
-        if connection is not None:
-            connection.close()
+        _close_quietly(connection)
         try:
             destination.unlink()
-        except FileNotFoundError:
+        except OSError:
             pass
         raise
     finally:
@@ -348,20 +372,35 @@ def _secure_output(path):
     for part in parent.parts[1:]:
         current = current / part
         info = current.lstat()
+        shared_writable = info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        sticky = info.st_mode & stat.S_ISVTX
         if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode)
-                or info.st_uid not in (os.geteuid(), 0)):
+                or info.st_uid not in (os.geteuid(), 0)
+                or (shared_writable and not sticky)):
             raise ValueError("output_parent_unsafe")
     os.mkdir(path, 0o700)
-    os.chmod(path, 0o700, follow_symlinks=False)
-    created = path.lstat()
-    if stat.S_IMODE(created.st_mode) != 0o700 or created.st_uid != os.geteuid():
-        raise ValueError("output_permissions_invalid")
+    try:
+        directory_fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                               | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            os.fchmod(directory_fd, 0o700)
+            created = os.fstat(directory_fd)
+            if stat.S_IMODE(created.st_mode) != 0o700 or created.st_uid != os.geteuid():
+                raise ValueError("output_permissions_invalid")
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+        raise
     return path
 
 
 def download_all(manifest, dns, ca_bundle, ca_sha256, output, opener=None):
     _validate_manifest(manifest)
-    canonical_manifest = (json.dumps(manifest, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+    canonical_manifest = _canonical_manifest_bytes(manifest)
     manifest_sha256 = hashlib.sha256(canonical_manifest).hexdigest()
     dns = _parse_dns_map(json.dumps(dns, separators=(",", ":")).encode(), manifest)
     bundle = _read_regular(ca_bundle, 16 * 1024 * 1024)
@@ -371,14 +410,16 @@ def download_all(manifest, dns, ca_bundle, ca_sha256, output, opener=None):
     target = _secure_output(output)
     deadline = time.monotonic() + TOTAL_TIMEOUT
     records = []
+    owned_names = []
     total = 0
     try:
         for asset in manifest["assets"]:
             start = time.monotonic()
-            with _absolute_deadline(min(deadline, start + ASSET_TIMEOUT)):
+            with _absolute_deadline(min(deadline, start + ASSET_TIMEOUT)) as disarm_deadline:
                 record = _download_asset(asset, dns, context, target,
                                          min(deadline, start + ASSET_TIMEOUT),
-                                         MAX_TOTAL_BYTES - total, opener)
+                                         MAX_TOTAL_BYTES - total, opener, disarm_deadline,
+                                         owned_names)
             records.append(record)
             total += record["bytes"]
             if total > MAX_TOTAL_BYTES:
@@ -392,6 +433,7 @@ def download_all(manifest, dns, ca_bundle, ca_sha256, output, opener=None):
         receipt_path = target / "receipt.json"
         partial_path = target / "receipt.json.partial"
         fd = os.open(partial_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        owned_names.append(partial_path.name)
         try:
             os.fchmod(fd, 0o600)
             view = memoryview(encoded)
@@ -404,6 +446,8 @@ def download_all(manifest, dns, ca_bundle, ca_sha256, output, opener=None):
         finally:
             os.close(fd)
         os.rename(partial_path, receipt_path)
+        owned_names.remove(partial_path.name)
+        owned_names.append(receipt_path.name)
         directory_fd = os.open(target, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
         try:
             os.fsync(directory_fd)
@@ -411,10 +455,18 @@ def download_all(manifest, dns, ca_bundle, ca_sha256, output, opener=None):
             os.close(directory_fd)
         return receipt
     except BaseException:
-        for child in target.iterdir():
-            if child.is_file() and not child.is_symlink():
-                child.unlink()
-        target.rmdir()
+        for name in owned_names:
+            child = target / name
+            try:
+                info = child.lstat()
+                if stat.S_ISREG(info.st_mode):
+                    child.unlink()
+            except OSError:
+                pass
+        try:
+            target.rmdir()
+        except OSError:
+            pass
         raise
 
 

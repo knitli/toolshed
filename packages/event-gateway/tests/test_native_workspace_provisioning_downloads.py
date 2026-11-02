@@ -242,6 +242,58 @@ class ProvisioningDownloadTests(unittest.TestCase):
         self.assertEqual(response.close_calls, 1)
         self.assertFalse((self.root / "private-output").exists())
 
+    def test_cleanup_disarms_deadline_before_unlinking_partial_asset(self):
+        output = self.root / "private-output"
+        response = FakeResponse(503)
+        real_unlink = Path.unlink
+        observed = []
+
+        def unlink_after_alarm_disarm(path, *args, **kwargs):
+            if path == output / "data.bin":
+                remaining, _interval = downloads.signal.getitimer(downloads.signal.ITIMER_REAL)
+                observed.append(remaining)
+                self.assertEqual(remaining, 0)
+            return real_unlink(path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", unlink_after_alarm_disarm):
+            with self.assertRaisesRegex(ValueError, "download_http_status"):
+                self.run_download(responses=[response])
+        self.assertEqual(observed, [0])
+        self.assertFalse(output.exists())
+
+    def test_cleanup_symlink_does_not_mask_original_download_error(self):
+        output = self.root / "private-output"
+        target = self.root / "outside.txt"
+        target.write_text("untouched")
+        response = FakeResponse(503)
+
+        def inject_unowned_symlink(*_args):
+            (output / "foreign-link").symlink_to(target)
+            return response
+
+        with self.assertRaisesRegex(ValueError, "download_http_status"):
+            downloads.download_all(
+                manifest(), {"example.test": ["93.184.216.34"]}, self.ca,
+                hashlib.sha256(self.ca.read_bytes()).hexdigest(), output,
+                opener=inject_unowned_symlink)
+        self.assertTrue((output / "foreign-link").is_symlink())
+        self.assertEqual(target.read_text(), "untouched")
+
+    def test_private_output_creation_does_not_require_path_chmod_support(self):
+        output = self.root / "private-output"
+        with patch.object(downloads.os, "chmod", side_effect=NotImplementedError) as chmod:
+            created = downloads._secure_output(output)
+        chmod.assert_not_called()
+        self.assertEqual(created.stat().st_mode & 0o777, 0o700)
+
+    def test_output_rejects_shared_writable_nonsticky_parent(self):
+        parent = self.root / "shared-parent"
+        parent.mkdir()
+        parent.chmod(0o777)
+        with self.assertRaisesRegex(ValueError, "output_parent_unsafe"):
+            downloads._secure_output(parent / "private-output")
+        self.assertFalse((parent / "private-output").exists())
+
     def test_manifest_rejects_noncanonical_or_unsafe_url_and_redirect_schema(self):
         for url in ("http://example.test/x", "https://u@example.test/x", "https://example.test:444/x",
                     "https://example.test/x#frag", "https://example.test/x?query=initial"):
@@ -335,7 +387,7 @@ print("pipe-read-interrupted")
 
     def test_manifest_loader_reads_fixed_path_and_checks_exact_pin(self):
         doc = manifest()
-        raw = json.dumps(doc, separators=(",", ":")).encode()
+        raw = downloads._canonical_manifest_bytes(doc)
         fixed = self.root / downloads.MANIFEST
         fixed.parent.mkdir(parents=True)
         fixed.write_bytes(raw)
@@ -343,6 +395,16 @@ print("pipe-read-interrupted")
             self.assertEqual(downloads.load_manifest(self.root), doc)
         with patch.object(downloads, "MANIFEST_SHA256", "0" * 64):
             with self.assertRaisesRegex(ValueError, "manifest_pin_mismatch"):
+                downloads.load_manifest(self.root)
+
+    def test_manifest_loader_rejects_pinned_noncanonical_bytes(self):
+        document = manifest()
+        raw = json.dumps(document, separators=(",", ":")).encode()
+        fixed = self.root / downloads.MANIFEST
+        fixed.parent.mkdir(parents=True)
+        fixed.write_bytes(raw)
+        with patch.object(downloads, "MANIFEST_SHA256", hashlib.sha256(raw).hexdigest()):
+            with self.assertRaisesRegex(ValueError, "manifest_not_canonical"):
                 downloads.load_manifest(self.root)
 
     def test_checked_in_manifest_matches_its_pin_and_fixed_inventory(self):
