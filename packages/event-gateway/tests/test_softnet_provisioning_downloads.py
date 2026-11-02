@@ -266,6 +266,7 @@ class ProvisioningControllerTests(unittest.TestCase):
         bundle = guest.build_bundle(guest.ROOT, b'CA fixture', self.admission['provisioningDnsMap'])
         admission = {**self.admission, 'provisioningBundleSha256': bundle['bundleSha256'],
                      'provisioningCaSha256': bundle['caBundleSha256']}
+
         def no_dns(*args):
             self.fail('resolver called before admission validation')
         with patch.object(supervisor, 'PROVISIONING_CA_SHA256', bundle['caBundleSha256']):
