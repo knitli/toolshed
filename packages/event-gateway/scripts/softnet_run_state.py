@@ -13,6 +13,7 @@ import time
 import uuid
 
 import qualify_offline_macos_vm as canary
+import native_workspace_provisioning_guest as provisioning_guest
 import softnet_recovery as recovery
 
 STATE_KIND = "softnet-run-state"
@@ -22,6 +23,9 @@ IDENTITY_KEYS = {"vmName", "macAddress", "tartBinarySha256", "softnetBinarySha25
 PROBE_IDENTITY_KEYS = IDENTITY_KEYS | {"probeIPv4"}
 ROUTE_IDENTITY_KEYS = IDENTITY_KEYS | {
     "identityProbeIPv4", "positiveOriginIPv4", "publicTrustRootsSha256"}
+PROVISIONING_IDENTITY_KEYS = IDENTITY_KEYS | {
+    "provisioningBundleSha256", "provisioningCaSha256", "provisioningDnsMap",
+    "provisioningManifest"}
 PUBLIC_PROBE_HOST = "event-native-probe-83fc4c309835.knitli.workers.dev"
 PUBLIC_PROBE_PATH = "/probe"
 PUBLIC_PROBE_BODY_SHA256 = "773cdcdb36ecbdb7c720d4d135911f7d35252d862b10094f788d96a965b80600"
@@ -36,7 +40,7 @@ RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
 ROOT_ENTRIES = {"controller.lock"}
 RUN_ENTRIES = {"identity.plist", "complete.plist", "reserved", "snapshot.plist", "restored",
                "launch.plist", "stop.plist", "helper-logs", "vm-logs", "disposition.plist",
-               "probe.plist", "route-probe.plist"}
+               "probe.plist", "route-probe.plist", "provisioning-download.json"}
 LOG_FILES = {"tart-stdout.bin", "tart-stderr.bin"}
 DISPOSITION_FILES = ("identity.plist", "reserved", "snapshot.plist", "restored",
                      "launch.plist", "stop.plist", "helper-logs/tart-stdout.bin",
@@ -64,7 +68,7 @@ def _digest(data):
 
 def _identity_record(run_id, identity):
     _require(isinstance(identity, dict) and set(identity) in (
-        IDENTITY_KEYS, PROBE_IDENTITY_KEYS, ROUTE_IDENTITY_KEYS),
+        IDENTITY_KEYS, PROBE_IDENTITY_KEYS, ROUTE_IDENTITY_KEYS, PROVISIONING_IDENTITY_KEYS),
              "invalid_identity")
     _require(isinstance(identity["vmName"], str) and 0 < len(identity["vmName"]) <= 128
              and "\x00" not in identity["vmName"], "invalid_identity")
@@ -86,6 +90,15 @@ def _identity_record(run_id, identity):
         _require(isinstance(identity.get("positiveOriginIPv4"), str)
                  and isinstance(identity.get("publicTrustRootsSha256"), str)
                  and HEX_SHA256.fullmatch(identity["publicTrustRootsSha256"]), "invalid_identity")
+    if "provisioningBundleSha256" in identity:
+        try:
+            provisioning_guest.validate_binding(
+                manifest_bytes=identity["provisioningManifest"],
+                dns_map=identity["provisioningDnsMap"],
+                ca_sha256=identity["provisioningCaSha256"],
+                bundle_sha256=identity["provisioningBundleSha256"])
+        except (TypeError, ValueError, UnicodeError, RecursionError):
+            raise recovery.RecoveryError("invalid_identity") from None
     return {"kind": STATE_KIND, "version": STATE_VERSION, "runId": run_id,
             "identity": identity}
 
@@ -152,6 +165,10 @@ def _failed_restored_files(root, name, *, receipt_present=False, expected_vm_rea
             _require("identityProbeIPv4" in identity, "invalid_route_probe")
             _check_route_probe(fd, identity)
             disposition_files = (*disposition_files, "route-probe.plist")
+        if "provisioning-download.json" in entries:
+            _require("provisioningBundleSha256" in identity, "invalid_provisioning_download")
+            _check_provisioning_download(fd, identity)
+            disposition_files = (*disposition_files, "provisioning-download.json")
         hashes = {}
         for relative in disposition_files:
             parts = relative.split("/")
@@ -366,6 +383,21 @@ def _check_route_probe(fd, identity):
     return raw, report
 
 
+def _check_provisioning_download(fd, identity):
+    raw = recovery._read(fd, "provisioning-download.json")
+    _require(0 < len(raw) <= provisioning_guest.MAX_OUTPUT_BYTES,
+             "invalid_provisioning_download")
+    try:
+        result = provisioning_guest.validate_result(
+            raw, manifest_bytes=identity["provisioningManifest"],
+            dns_map=identity["provisioningDnsMap"],
+            ca_sha256=identity["provisioningCaSha256"],
+            bundle_sha256=identity["provisioningBundleSha256"])
+    except (TypeError, ValueError, UnicodeError, RecursionError):
+        raise recovery.RecoveryError("invalid_provisioning_download") from None
+    return raw, result
+
+
 def _check_log_directory(root, run_name, name, *, complete):
     fd = recovery._directory(Path(root) / run_name / name)
     try:
@@ -400,9 +432,12 @@ def _check_run_directory(root, name):
         identity = identity_record["identity"]
         probe_mode = "probeIPv4" in identity
         route_mode = "identityProbeIPv4" in identity
-        _require(not (probe_mode and route_mode)
+        provisioning_mode = "provisioningBundleSha256" in identity
+        _require(sum((probe_mode, route_mode, provisioning_mode)) <= 1
                  and ("probe.plist" not in entries or probe_mode)
-                 and ("route-probe.plist" not in entries or route_mode), "invalid_probe_mode")
+                 and ("route-probe.plist" not in entries or route_mode)
+                 and ("provisioning-download.json" not in entries or provisioning_mode),
+                 "invalid_probe_mode")
         if "launch.plist" in entries:
             _check_launch(fd, identity_record["identity"])
         probe_bytes = None
@@ -413,6 +448,9 @@ def _check_run_directory(root, name):
         route_probe = None
         if "route-probe.plist" in entries:
             route_probe_bytes, route_probe = _check_route_probe(fd, identity)
+        provisioning_download_bytes = None
+        if "provisioning-download.json" in entries:
+            provisioning_download_bytes, _ = _check_provisioning_download(fd, identity)
         stop_bytes = stop = None
         if "stop.plist" in entries:
             stop_bytes, stop = _check_stop(fd)
@@ -430,12 +468,16 @@ def _check_run_directory(root, name):
             _require(probe is not None and probe["verified"], "invalid_probe")
         if route_mode:
             _require(route_probe is not None and route_probe["verified"], "invalid_route_probe")
+        if provisioning_mode:
+            _require(provisioning_download_bytes is not None, "invalid_provisioning_download")
         required = {"snapshot.plist", "restored", "reserved", "launch.plist", "stop.plist",
                     "helper-logs", "vm-logs"}
         if probe_mode:
             required.add("probe.plist")
         if route_mode:
             required.add("route-probe.plist")
+        if provisioning_mode:
+            required.add("provisioning-download.json")
         _require(required <= entries, "invalid_completion")
         _require(recovery._read(fd, "reserved") == b"", "invalid_completion")
         _require(_valid_stop_evidence(stop), "invalid_completion")
@@ -449,6 +491,8 @@ def _check_run_directory(root, name):
             complete_keys.add("probeSha256")
         if route_mode:
             complete_keys.add("routeProbeSha256")
+        if provisioning_mode:
+            complete_keys.add("provisioningDownloadSha256")
         _require(isinstance(complete, dict)
                  and set(complete) == complete_keys
                  and type(complete["version"]) is int and complete["version"] == 1
@@ -459,6 +503,8 @@ def _check_run_directory(root, name):
                  and complete["stopEvidence"] == stop
                  and (not probe_mode or complete["probeSha256"] == _digest(probe_bytes))
                  and (not route_mode or complete["routeProbeSha256"] == _digest(route_probe_bytes))
+                 and (not provisioning_mode or complete["provisioningDownloadSha256"]
+                      == _digest(provisioning_download_bytes))
                  and _valid_stop_evidence(complete["stopEvidence"]), "invalid_completion")
         return True
     finally:
@@ -564,13 +610,18 @@ class State(AbstractContextManager):
             identity = plistlib.loads(identity_bytes)["identity"]
             probe_mode = "probeIPv4" in identity
             route_mode = "identityProbeIPv4" in identity
+            provisioning_mode = "provisioningBundleSha256" in identity
             if "probeIPv4" in identity:
                 required.add("probe.plist")
             if "identityProbeIPv4" in identity:
                 required.add("route-probe.plist")
-            _require(not (probe_mode and route_mode)
+            if provisioning_mode:
+                required.add("provisioning-download.json")
+            _require(sum((probe_mode, route_mode, provisioning_mode)) <= 1
                      and ("probe.plist" not in entries or probe_mode)
-                     and ("route-probe.plist" not in entries or route_mode), "invalid_probe_mode")
+                     and ("route-probe.plist" not in entries or route_mode)
+                     and ("provisioning-download.json" not in entries or provisioning_mode),
+                     "invalid_probe_mode")
             _require(entries <= RUN_ENTRIES and required <= entries, "invalid_run_entries")
             _require("disposition.plist" not in entries, "conflicting_disposition")
             _require(recovery._read(run_fd, "identity.plist") == identity_bytes,
@@ -596,6 +647,9 @@ class State(AbstractContextManager):
                 route_bytes, route_report = _check_route_probe(run_fd, identity)
                 _require(route_report["verified"], "invalid_route_probe")
                 record["routeProbeSha256"] = _digest(route_bytes)
+            if provisioning_mode:
+                download_bytes, _ = _check_provisioning_download(run_fd, identity)
+                record["provisioningDownloadSha256"] = _digest(download_bytes)
             recovery._publish(run_fd, "complete.plist",
                               plistlib.dumps(record, fmt=plistlib.FMT_BINARY, sort_keys=True))
         finally:

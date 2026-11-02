@@ -2,7 +2,7 @@
 """Fixed, opt-in Softnet/Tart startup canary; installing/running it needs host approval.
 
 A root supervisor owns recovery and Softnet; every Tart command runs as the
-admitted nonroot user. This never stages inputs, compiles, promotes, or deletes VMs.
+admitted nonroot user. This never installs tools, compiles, promotes, or deletes VMs.
 """
 
 import argparse
@@ -27,6 +27,7 @@ import time
 
 import qualify_offline_macos_vm as canary
 import softnet_recovery as recovery
+import native_workspace_provisioning_guest as provisioning
 from softnet_preferences import Preferences
 from softnet_run_state import State
 
@@ -35,6 +36,20 @@ SOFTNET = Path('/usr/local/libexec/knitli-event-qualification/softnet-0.22.1/sof
 STATE_ROOT = Path('/private/var/db/knitli-event-qualification/softnet-runs')
 SOFTNET_SHA256 = '1584af036b6d6d11319b2a3766d1be212534c525e3805bc566180aec7a1b2a0e'
 ENV = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'LC_ALL': 'C', 'LANG': 'C'}
+PROVISIONING_FIELDS = {'provisioningBundleSha256', 'provisioningCaSha256',
+                       'provisioningDnsMap', 'provisioningManifest'}
+PROVISIONING_POLICY_FIELDS = {'provisioningDeniedIPv4', 'provisioningInventorySha256',
+                              'provisioningInventory'}
+PROVISIONING_INVENTORY_MAX_AGE_NS = 20 * 60 * 1_000_000_000
+PROVISIONING_CA_SHA256 = '9dae8d76e55cb08991f2b672d58999ea15560d910759c16b544f843bdffbb994'
+PROVISIONING_TIMEOUT = 1830
+# Published Cloudflare front-door ranges, verified 2026-11-02: https://www.cloudflare.com/ips-v4
+# This supplements the fresh account-owned destination inventory in the protected admission.
+PROVISIONING_EXCLUDED_NETWORKS = tuple(ipaddress.IPv4Network(value) for value in (
+    '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
+    '141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20',
+    '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
+    '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22'))
 MEASUREMENT = {'configSha256', 'configBytes', 'diskSha256', 'diskBytes',
                'nvramSha256', 'nvramBytes'}
 PUBLIC_PROBE_HOST = 'event-native-probe-83fc4c309835.knitli.workers.dev'
@@ -118,14 +133,20 @@ def _admission_record(root):
     probe_admission = isinstance(value, dict) and set(value) == base_keys | {'probeIPv4'}
     route_fields = {'identityProbeIPv4', 'positiveOriginIPv4', 'publicTrustRootsSha256'}
     route_admission = isinstance(value, dict) and set(value) == base_keys | route_fields
-    _require(isinstance(value, dict) and (set(value) == base_keys or probe_admission or route_admission),
+    download_admission = (isinstance(value, dict)
+                          and set(value) == base_keys | PROVISIONING_FIELDS | PROVISIONING_POLICY_FIELDS)
+    _require(isinstance(value, dict) and (set(value) == base_keys or probe_admission
+                                        or route_admission or download_admission),
              'invalid_admission')
-    expected_kind = ('softnet-guest-route-admission-v1' if route_admission else
+    expected_kind = ('softnet-provisioning-download-admission-v1' if download_admission else
+                     'softnet-guest-route-admission-v1' if route_admission else
                      'softnet-public-probe-admission-v1' if probe_admission else
                      'softnet-startup-admission-v1')
     _require(value['kind'] == expected_kind
              and type(value['ownerUid']) is int and value['ownerUid'] > 0,
              'invalid_admission')
+    if download_admission:
+        _validate_provisioning_admission(value)
     if probe_admission or route_admission:
         ip_keys = ('probeIPv4',) if probe_admission else ('identityProbeIPv4', 'positiveOriginIPv4')
         for key in ip_keys:
@@ -166,6 +187,101 @@ def _admission_record(root):
     vm = _protected(home / 'vms' / value['vmName'], account.pw_uid, directory=True)
     _require(not (vm / 'state').exists() and not (vm / 'state').is_symlink(), 'saved_vm_state')
     return value, account, group.gr_name, hashlib.sha256(raw).hexdigest()
+
+
+def _provisioning_binding(admission):
+    return {'manifest_bytes': admission['provisioningManifest'],
+            'dns_map': admission['provisioningDnsMap'],
+            'ca_sha256': admission['provisioningCaSha256'],
+            'bundle_sha256': admission['provisioningBundleSha256']}
+
+
+def _validate_provisioning_admission(admission):
+    """Bind the fixed public acquisition client to the reviewed destination policy."""
+    try:
+        _, mapping = provisioning.validate_binding(**_provisioning_binding(admission))
+    except (TypeError, ValueError, KeyError):
+        raise recovery.RecoveryError('invalid_provisioning_admission') from None
+    _require(admission['provisioningCaSha256'] == PROVISIONING_CA_SHA256,
+             'unreviewed_provisioning_ca')
+    denied = admission.get('provisioningDeniedIPv4')
+    _require(type(denied) is list and 0 < len(denied) <= 256,
+             'invalid_provisioning_destination_inventory')
+    try:
+        _require(all(type(value) is str and str(ipaddress.IPv4Address(value)) == value
+                     for value in denied) and len(set(denied)) == len(denied),
+                 'invalid_provisioning_destination_inventory')
+    except (TypeError, ValueError):
+        raise recovery.RecoveryError('invalid_provisioning_destination_inventory') from None
+    inventory = admission.get('provisioningInventorySha256')
+    _require(type(inventory) is str and re.fullmatch('[0-9a-f]{64}', inventory),
+             'invalid_provisioning_destination_inventory')
+    inventory_raw = admission.get('provisioningInventory')
+    _require(type(inventory_raw) is bytes and 0 < len(inventory_raw) <= 64 * 1024
+             and hashlib.sha256(inventory_raw).hexdigest() == inventory,
+             'provisioning_inventory_digest_mismatch')
+    try:
+        snapshot = provisioning.downloader._json_no_duplicates(inventory_raw)
+    except (ValueError, UnicodeError, RecursionError):
+        raise recovery.RecoveryError('invalid_provisioning_destination_inventory') from None
+    _require(type(snapshot) is dict and set(snapshot) == {
+        'kind', 'accountId', 'observedAtUnixNs', 'deniedIPv4',
+        'accountReadbackSha256', 'originReadbackSha256'}
+        and snapshot['kind'] == 'native-provisioning-destination-inventory-v1'
+        and snapshot['accountId'] == '5def525918a785eeda6decf66cf6b99b'
+        and snapshot['deniedIPv4'] == denied
+        and all(type(snapshot[key]) is str and re.fullmatch('[0-9a-f]{64}', snapshot[key])
+                for key in ('accountReadbackSha256', 'originReadbackSha256')),
+        'invalid_provisioning_destination_inventory')
+    observed = snapshot['observedAtUnixNs']
+    _require(type(observed) is int and 0 <= time.time_ns() - observed <= PROVISIONING_INVENTORY_MAX_AGE_NS,
+             'provisioning_inventory_stale')
+    for addresses in mapping.values():
+        for address in addresses:
+            ip = ipaddress.IPv4Address(address)
+            _require(address not in denied and not any(ip in net for net in PROVISIONING_EXCLUDED_NETWORKS),
+                     'provisioning_destination_excluded')
+    return mapping
+
+
+def _resolve_provisioning_dns(mapping, resolver=None):
+    """Refuse DNS drift before reserving state or changing host preferences."""
+    resolver = socket.getaddrinfo if resolver is None else resolver
+    for host, expected in sorted(mapping.items()):
+        try:
+            answers = resolver(host, 443, socket.AF_INET, socket.SOCK_STREAM)
+        except OSError:
+            raise recovery.RecoveryError('provisioning_dns_failed') from None
+        _require(isinstance(answers, (list, tuple)) and 0 < len(answers) <= 32,
+                 'provisioning_dns_invalid')
+        actual = set()
+        for answer in answers:
+            _require(isinstance(answer, tuple) and len(answer) == 5
+                     and answer[0] == socket.AF_INET and answer[1] == socket.SOCK_STREAM
+                     and isinstance(answer[4], tuple) and len(answer[4]) >= 2
+                     and type(answer[4][0]) is str, 'provisioning_dns_invalid')
+            actual.add(answer[4][0])
+        _require(actual == set(expected), 'provisioning_dns_drift')
+
+
+def _open_provisioning_bundle(root, admission):
+    """Retain one verified root-owned read-only descriptor through child cleanup."""
+    directory_fd = recovery._directory(root)
+    try:
+        descriptor = recovery._file(directory_fd, 'provisioning-bundle.json', os.O_RDONLY)
+    finally:
+        os.close(directory_fd)
+    try:
+        _require(os.fstat(descriptor).st_size <= provisioning.MAX_BUNDLE_BYTES,
+                 'provisioning_bundle_oversized')
+        with os.fdopen(os.dup(descriptor), 'rb') as stream:
+            payload = stream.read(provisioning.MAX_BUNDLE_BYTES + 1)
+        provisioning.validate_payload(payload, **_provisioning_binding(admission))
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
 
 
 def _admission(root):
@@ -442,7 +558,10 @@ def _stop_owned(process, log_thread=None):
 def _record(directory, name, value):
     fd = recovery._directory(directory)
     try:
-        recovery._publish(fd, name, plistlib.dumps(value, fmt=plistlib.FMT_BINARY))
+        payload = ((json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
+                   if name == 'provisioning-download.json' else
+                   plistlib.dumps(value, fmt=plistlib.FMT_BINARY))
+        recovery._publish(fd, name, payload)
     finally:
         os.close(fd)
 
@@ -479,7 +598,7 @@ def _reap_children(vm, helper, threads, stop, failures, *, record_error=None):
 
 
 def _exercise(run, admission, account, group, preferences_factory, *, public_probe_ip=None,
-              guest_route_ips=None):
+              guest_route_ips=None, provisioning_bundle_fd=None):
     env = {**ENV, 'HOME': admission['tartHome'], 'TART_HOME': admission['tartHome'],
            'TART_NO_AUTO_PRUNE': '1'}
     owner_popen = partial(subprocess.Popen, user=account.pw_uid, group=account.pw_gid, extra_groups=[])
@@ -525,6 +644,10 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
         helper_argv = [str(SOFTNET), '--vm-fd', '0', '--vm-mac-address', admission['macAddress']]
         allowed_ips = ([public_probe_ip] if public_probe_ip is not None else
                        sorted(set(guest_route_ips or ()), key=lambda value: int(ipaddress.IPv4Address(value))))
+        if provisioning_bundle_fd is not None:
+            # The fixed downloader selects only the first admitted answer per host.
+            allowed_ips = sorted({values[0] for values in admission['provisioningDnsMap'].values()},
+                                 key=lambda value: int(ipaddress.IPv4Address(value)))
         if allowed_ips:
             destinations = ','.join('out ' + destination + '/32' for destination in allowed_ips)
             helper_argv.append('--allow=' + destinations)
@@ -569,7 +692,17 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
                      'softnet_target_not_observed')
         _require(not failures and not _child_exited(helper) and not _child_exited(vm),
                  'owned_child_exited_or_log_failure')
-        if public_probe_ip is not None:
+        if provisioning_bundle_fd is not None:
+            stdout, _ = command(
+                provisioning.command_template(TART, vm_name), input_fd=provisioning_bundle_fd,
+                timeout=PROVISIONING_TIMEOUT, output_limit=provisioning.MAX_OUTPUT_BYTES,
+                cancel_check=lambda: bool(failures or _child_exited(helper) or _child_exited(vm)))
+            try:
+                report = provisioning.validate_result(stdout, **_provisioning_binding(admission))
+            except (TypeError, ValueError):
+                raise recovery.RecoveryError('invalid_provisioning_report') from None
+            _record(run, 'provisioning-download.json', report)
+        elif public_probe_ip is not None:
             source = _protected(PUBLIC_PROBE_SOURCE, 0)
             source_bytes = source.read_bytes()
             _require(len(source_bytes) <= 64 * 1024
@@ -643,7 +776,7 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
 
 
 def qualify(admission_directory, *, public_probe=False, guest_route_contract=False,
-            preferences_factory=Preferences):
+            provisioning_downloads=False, preferences_factory=Preferences):
     """Run the fixed startup canary or one fixed public-probe observation."""
     _require(os.geteuid() == 0 and sys.platform == 'darwin', 'root_macos_required')
     _require(sys.version_info >= (3, 13) and callable(getattr(os, 'waitid', None))
@@ -651,45 +784,60 @@ def qualify(admission_directory, *, public_probe=False, guest_route_contract=Fal
              'python_3_13_nonreaping_wait_required')
     root = Path(admission_directory)
     # Admission is root-only; no executable paths, guest commands, or helper flags are accepted.
-    with State(STATE_ROOT) as state:
-        admission, account, group, digest = _admission(root)
-        probe_ip = None
-        route_ips = None
-        if public_probe and guest_route_contract:
-            raise recovery.RecoveryError('mutually_exclusive_probe_modes')
-        if guest_route_contract:
-            _require(admission['kind'] == 'softnet-guest-route-admission-v1',
-                     'guest_route_admission_required')
-            identity_ip = _resolve_public_probe_ip(host=GUEST_ROUTE_IDENTITY_HOST)
-            positive_ip = _resolve_public_probe_ip(host=GUEST_ROUTE_POSITIVE_HOST)
-            _require(admission['identityProbeIPv4'] == identity_ip
-                     and admission['positiveOriginIPv4'] == positive_ip,
-                     'guest_route_admission_mismatch')
-            route_ips = (identity_ip, positive_ip)
-        elif public_probe:
-            _require(admission['kind'] == 'softnet-public-probe-admission-v1',
-                     'public_probe_admission_required')
-            probe_ip = _resolve_public_probe_ip()
-            _require(admission['probeIPv4'] == probe_ip, 'public_probe_admission_mismatch')
-        else:
-            _require(admission['kind'] == 'softnet-startup-admission-v1',
-                     'public_probe_mode_required')
-        identity = {'vmName': admission['vmName'], 'macAddress': admission['macAddress'],
-                    'tartBinarySha256': canary.TART_BINARY_SHA256,
-                    'softnetBinarySha256': SOFTNET_SHA256, 'admissionSha256': digest}
-        if probe_ip is not None:
-            identity['probeIPv4'] = probe_ip
-        if route_ips is not None:
-            identity.update({'identityProbeIPv4': route_ips[0], 'positiveOriginIPv4': route_ips[1],
-                             'publicTrustRootsSha256': admission['publicTrustRootsSha256']})
-        run, run_id = state.begin(identity)
-        stop = _exercise(run, admission, account, group, preferences_factory,
-                         public_probe_ip=probe_ip, guest_route_ips=route_ips)
-        state.complete(run, stop)
-        return {'kind': ('softnet-guest-route-canary-v1' if route_ips else
-                         'softnet-public-probe-canary-v1' if probe_ip else 'softnet-startup-canary-v1'),
-                'runId': run_id, 'status': 'passed', 'qualified': False,
-                'preferencesRestored': True, 'vmDeleted': False}
+    bundle_fd = None
+    try:
+        with State(STATE_ROOT) as state:
+            admission, account, group, digest = _admission(root)
+            probe_ip = None
+            route_ips = None
+            if sum(bool(mode) for mode in (public_probe, guest_route_contract, provisioning_downloads)) > 1:
+                raise recovery.RecoveryError('mutually_exclusive_probe_modes')
+            if provisioning_downloads:
+                _require(admission['kind'] == 'softnet-provisioning-download-admission-v1',
+                         'provisioning_download_admission_required')
+                mapping = _validate_provisioning_admission(admission)
+                _resolve_provisioning_dns(mapping)
+                bundle_fd = _open_provisioning_bundle(root, admission)
+            elif guest_route_contract:
+                _require(admission['kind'] == 'softnet-guest-route-admission-v1',
+                         'guest_route_admission_required')
+                identity_ip = _resolve_public_probe_ip(host=GUEST_ROUTE_IDENTITY_HOST)
+                positive_ip = _resolve_public_probe_ip(host=GUEST_ROUTE_POSITIVE_HOST)
+                _require(admission['identityProbeIPv4'] == identity_ip
+                         and admission['positiveOriginIPv4'] == positive_ip,
+                         'guest_route_admission_mismatch')
+                route_ips = (identity_ip, positive_ip)
+            elif public_probe:
+                _require(admission['kind'] == 'softnet-public-probe-admission-v1',
+                         'public_probe_admission_required')
+                probe_ip = _resolve_public_probe_ip()
+                _require(admission['probeIPv4'] == probe_ip, 'public_probe_admission_mismatch')
+            else:
+                _require(admission['kind'] == 'softnet-startup-admission-v1',
+                         'public_probe_mode_required')
+            identity = {'vmName': admission['vmName'], 'macAddress': admission['macAddress'],
+                        'tartBinarySha256': canary.TART_BINARY_SHA256,
+                        'softnetBinarySha256': SOFTNET_SHA256, 'admissionSha256': digest}
+            if probe_ip is not None:
+                identity['probeIPv4'] = probe_ip
+            if route_ips is not None:
+                identity.update({'identityProbeIPv4': route_ips[0], 'positiveOriginIPv4': route_ips[1],
+                                 'publicTrustRootsSha256': admission['publicTrustRootsSha256']})
+            exercise_options = {'public_probe_ip': probe_ip, 'guest_route_ips': route_ips}
+            if provisioning_downloads:
+                identity.update({key: admission[key] for key in PROVISIONING_FIELDS})
+                exercise_options['provisioning_bundle_fd'] = bundle_fd
+            run, run_id = state.begin(identity)
+            stop = _exercise(run, admission, account, group, preferences_factory, **exercise_options)
+            state.complete(run, stop)
+            return {'kind': ('softnet-provisioning-download-canary-v1' if provisioning_downloads else
+                             'softnet-guest-route-canary-v1' if route_ips else
+                             'softnet-public-probe-canary-v1' if probe_ip else 'softnet-startup-canary-v1'),
+                    'runId': run_id, 'status': 'passed', 'qualified': False,
+                    'preferencesRestored': True, 'vmDeleted': False}
+    finally:
+        if bundle_fd is not None:
+            os.close(bundle_fd)
 
 
 def main(argv=None):
@@ -698,10 +846,12 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--public-probe', action='store_true')
     mode.add_argument('--guest-route-contract', action='store_true')
+    mode.add_argument('--provisioning-downloads', action='store_true')
     args = parser.parse_args(argv)
     try:
         print(json.dumps(qualify(args.admission_dir, public_probe=args.public_probe,
-                                 guest_route_contract=args.guest_route_contract), sort_keys=True))
+                                 guest_route_contract=args.guest_route_contract,
+                                 provisioning_downloads=args.provisioning_downloads), sort_keys=True))
     except (OSError, ValueError, RuntimeError):
         print('softnet_canary_failed; retain admission and run journal', file=sys.stderr)
         return 1
