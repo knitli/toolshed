@@ -244,24 +244,52 @@ def _validate_provisioning_admission(admission):
     return mapping
 
 
-def _resolve_provisioning_dns(mapping, resolver=None):
-    """Refuse DNS drift before reserving state or changing host preferences."""
+def snapshot_provisioning_admission(admission, bundle, resolver=None):
+    """Freeze one fresh, policy-checked IPv4 DNS snapshot into the admission and bundle."""
     resolver = socket.getaddrinfo if resolver is None else resolver
-    for host, expected in sorted(mapping.items()):
+    mapping = _validate_provisioning_admission(admission)
+    document = provisioning.validate_payload(bundle, **_provisioning_binding(admission))
+    denied = set(admission['provisioningDeniedIPv4'])
+    snapshot = {}
+    for host in sorted(mapping):
         try:
-            answers = resolver(host, 443, socket.AF_INET, socket.SOCK_STREAM)
+            answers = resolver(host, 443, socket.AF_UNSPEC, socket.SOCK_STREAM)
         except OSError:
             raise recovery.RecoveryError('provisioning_dns_failed') from None
         _require(isinstance(answers, (list, tuple)) and 0 < len(answers) <= 32,
                  'provisioning_dns_invalid')
-        actual = set()
+        addresses = set()
         for answer in answers:
             _require(isinstance(answer, tuple) and len(answer) == 5
-                     and answer[0] == socket.AF_INET and answer[1] == socket.SOCK_STREAM
+                     and answer[0] in (socket.AF_INET, socket.AF_INET6)
+                     and answer[1] == socket.SOCK_STREAM
                      and isinstance(answer[4], tuple) and len(answer[4]) >= 2
                      and type(answer[4][0]) is str, 'provisioning_dns_invalid')
-            actual.add(answer[4][0])
-        _require(actual == set(expected), 'provisioning_dns_drift')
+            try:
+                address = ipaddress.ip_address(answer[4][0])
+            except ValueError:
+                raise recovery.RecoveryError('provisioning_dns_invalid') from None
+            if answer[0] == socket.AF_INET:
+                _require(isinstance(address, ipaddress.IPv4Address), 'provisioning_dns_invalid')
+                _require(address.is_global and str(address) not in denied
+                         and not any(address in net for net in PROVISIONING_EXCLUDED_NETWORKS),
+                         'provisioning_destination_excluded')
+                addresses.add(address)
+            else:
+                _require(isinstance(address, ipaddress.IPv6Address), 'provisioning_dns_invalid')
+        _require(0 < len(addresses) <= 8, 'provisioning_dns_invalid')
+        snapshot[host] = [str(address) for address in sorted(addresses, key=int)]
+
+    try:
+        document = {**document, 'dnsMap': snapshot}
+        frozen_bundle = provisioning._canonical(document)
+        frozen_admission = {**admission, 'provisioningDnsMap': snapshot,
+                            'provisioningBundleSha256': hashlib.sha256(frozen_bundle).hexdigest()}
+        _validate_provisioning_admission(frozen_admission)
+        provisioning.validate_payload(frozen_bundle, **_provisioning_binding(frozen_admission))
+    except (TypeError, ValueError, KeyError, UnicodeError, RecursionError):
+        raise recovery.RecoveryError('invalid_provisioning_bundle') from None
+    return frozen_admission, frozen_bundle
 
 
 def _open_provisioning_bundle(root, admission):
@@ -795,8 +823,7 @@ def qualify(admission_directory, *, public_probe=False, guest_route_contract=Fal
             if provisioning_downloads:
                 _require(admission['kind'] == 'softnet-provisioning-download-admission-v1',
                          'provisioning_download_admission_required')
-                mapping = _validate_provisioning_admission(admission)
-                _resolve_provisioning_dns(mapping)
+                _validate_provisioning_admission(admission)
                 bundle_fd = _open_provisioning_bundle(root, admission)
             elif guest_route_contract:
                 _require(admission['kind'] == 'softnet-guest-route-admission-v1',

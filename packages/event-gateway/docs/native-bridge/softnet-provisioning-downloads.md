@@ -33,8 +33,12 @@ or owner identity is sent to the guest.
 The CA pin identifies the reviewed public trust file containing 128 roots,
 without the known Gateway CA. Each candidate address must be globally routable,
 outside the published Cloudflare IPv4 front-door ranges and the known account
-destination list. Immediately before reserving a run, the controller resolves
-all four hosts again and refuses any answer-set drift.
+destination list. After validating the bundle and clone, the owner resolves each
+of the four fixed hosts once with IPv4 and IPv6 enabled, validates the complete
+answer set (at most 32 resolver records and 1–8 unique safe IPv4 addresses per
+host), and publishes the numerically sorted IPv4 snapshot in both the admission
+and rebuilt bundle. IPv6 answers are observed but never admitted. The controller
+consumes that frozen protected admission without resolving DNS again.
 
 The protected admission directory also contains `provisioning-bundle.json`.
 The controller opens it without following symlinks, validates its complete
