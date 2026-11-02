@@ -290,7 +290,7 @@ def validate_result(raw, *, manifest_bytes, dns_map, ca_sha256, bundle_sha256):
                                       for rule in asset["redirects"])
         addresses = checked_dns.get(final_host)
         if (not allowed_destination or type(record["selectedIPv4"]) is not str
-                or addresses is None or record["selectedIPv4"] not in addresses):
+                or addresses is None or record["selectedIPv4"] != addresses[0]):
             raise ValueError("download_asset_destination_invalid")
         total += record["bytes"]
     if total != receipt["totalBytes"]:

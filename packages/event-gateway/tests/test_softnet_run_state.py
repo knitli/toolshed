@@ -122,7 +122,7 @@ class SoftnetRunStateTests(unittest.TestCase):
 
     @staticmethod
     def _provisioning_identity():
-        manifest_raw = provisioning_downloads.MANIFEST.read_bytes()
+        manifest_raw = (provisioning_downloads.ROOT / provisioning_downloads.MANIFEST).read_bytes()
         manifest = provisioning_downloads._json_no_duplicates(manifest_raw)
         hosts = {urlsplit(asset["url"]).hostname for asset in manifest["assets"]}
         hosts.update(rule["host"] for asset in manifest["assets"]

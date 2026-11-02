@@ -79,7 +79,35 @@ class NativeWorkspaceProvisioningGuestTests(unittest.TestCase):
 
     def _fixture_bundle(self):
         """Prepare a known stub source; its fixed entry records writes and never downloads."""
-        source = b'''import json\nfrom pathlib import Path\ndef _runtime_guard(): pass\ndef _validate_manifest(value):\n    if type(value) is not dict: raise ValueError("bad_manifest")\ndef _parse_dns_map(raw, manifest):\n    return json.loads(raw)\ndef load_manifest(root):\n    return json.loads((Path(root) / "packages/event-gateway/docs/native-bridge/native-workspace-provisioning-assets.json").read_bytes())\ndef download_all(manifest, dns, ca, ca_sha, output):\n    root = Path(__file__).resolve().parents[3]\n    assert (root / "packages/event-gateway/scripts/native_workspace_provisioning_downloads.py").stat().st_mode & 0o777 == 0o600\n    assert (root / "packages/event-gateway/docs/native-bridge/native-workspace-provisioning-assets.json").stat().st_mode & 0o777 == 0o600\n    assert Path(ca).stat().st_mode & 0o777 == 0o600\n    assert Path(output).exists() is False\n    return {"kind":"fixture-download-receipt","status":"downloaded-only","qualified":False,"prepared":False}\n'''
+        source = b'''\
+import json
+from pathlib import Path
+
+def _runtime_guard():
+    pass
+
+def _validate_manifest(value):
+    if type(value) is not dict:
+        raise ValueError("bad_manifest")
+
+def _parse_dns_map(raw, manifest):
+    return json.loads(raw)
+
+def load_manifest(root):
+    path = Path(root) / "packages/event-gateway/docs/native-bridge/native-workspace-provisioning-assets.json"
+    return json.loads(path.read_bytes())
+
+def download_all(manifest, dns, ca, ca_sha, output):
+    root = Path(__file__).resolve().parents[3]
+    source_path = root / "packages/event-gateway/scripts/native_workspace_provisioning_downloads.py"
+    manifest_path = root / "packages/event-gateway/docs/native-bridge/native-workspace-provisioning-assets.json"
+    assert source_path.stat().st_mode & 0o777 == 0o600
+    assert manifest_path.stat().st_mode & 0o777 == 0o600
+    assert Path(ca).stat().st_mode & 0o777 == 0o600
+    assert Path(output).exists() is False
+    return {"kind": "fixture-download-receipt", "status": "downloaded-only",
+            "qualified": False, "prepared": False}
+'''
         source_hash = _digest(source)
         fixture_root = self.root / "tree"
         (fixture_root / "packages/event-gateway/scripts").mkdir(parents=True)
@@ -90,9 +118,19 @@ class NativeWorkspaceProvisioningGuestTests(unittest.TestCase):
             bundle = guest.build_bundle(fixture_root, self.ca, self.dns)
         return fixture_root, bundle
 
+    def _execute_fixed_loader_fixture(self, loader_source):
+        """Run only the generated fixed loader with this test's in-memory bundle fixture."""
+        if not isinstance(loader_source, str):
+            raise TypeError("expected_fixed_loader_source")
+        namespace = {"__name__": "__main__", "__builtins__": __builtins__}
+        # The generated loader and stub are repository-owned; payload bytes are never code inputs.
+        exec(compile(loader_source, "<fixed-provisioning-loader-fixture>", "exec"),  # nosec B102 -- Fixed loader fixture, explicit namespace, no caller code.
+             namespace, namespace)
+
     def _receive(self, loader, payload, os_version="15.7.0"):
         stdout = io.BytesIO()
         fake_root = self.root / "received-guest-root"
+
         def mkdtemp(*, prefix):
             self.assertEqual(prefix, "knitli-native-provisioning-")
             fake_root.mkdir(mode=0o700)
@@ -106,7 +144,7 @@ class NativeWorkspaceProvisioningGuestTests(unittest.TestCase):
                     patch.object(sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO(payload))), \
                     patch.object(sys, "stdout", types.SimpleNamespace(buffer=stdout)), \
                     patch.object(tempfile, "mkdtemp", side_effect=mkdtemp):
-                exec(compile(loader, "<fixed-loader>", "exec"), {})
+                self._execute_fixed_loader_fixture(loader)
         finally:
             sys.platform = old_platform
             sys.stdin, sys.stdout = old_stdin, old_stdout
@@ -171,8 +209,9 @@ class NativeWorkspaceProvisioningGuestTests(unittest.TestCase):
             self._receive(bundle["loader"], bundle["payload"], os_version="27.0.0")
         self.assertEqual(rejected.exception.code, 31)
 
-    def _valid_result(self):
-        bundle = guest.build_bundle(guest.ROOT, self.ca, self.dns)
+    def _valid_result(self, dns_map=None):
+        selected_dns = self.dns if dns_map is None else dns_map
+        bundle = guest.build_bundle(guest.ROOT, self.ca, selected_dns)
         assets = []
         for asset in self.manifest["assets"]:
             initial = downloader._validate_url(asset["url"])
@@ -180,14 +219,14 @@ class NativeWorkspaceProvisioningGuestTests(unittest.TestCase):
             assets.append({
                 "name": asset["name"], "initialUrl": asset["url"],
                 "finalHost": host, "finalPath": initial.path or "/",
-                "selectedIPv4": self.dns[host][0], "status": 200,
+                "selectedIPv4": selected_dns[host][0], "status": 200,
                 "redirectCount": 0, "outcome": "downloaded", "bytes": 1,
                 "sha256": asset["sha256"],
             })
         receipt = {
             "kind": downloader.KIND, "status": "downloaded-only", "qualified": False,
             "prepared": False, "manifestSha256": guest.MANIFEST_SHA256,
-            "caBundleSha256": bundle["caBundleSha256"], "dnsMap": self.dns,
+            "caBundleSha256": bundle["caBundleSha256"], "dnsMap": selected_dns,
             "totalBytes": len(assets), "assets": assets,
         }
         return bundle, {
@@ -261,6 +300,19 @@ class NativeWorkspaceProvisioningGuestTests(unittest.TestCase):
                                    ca_sha256="invalid", bundle_sha256=bundle["bundleSha256"])
         with self.assertRaisesRegex(ValueError, "result_oversized"):
             self._validate(bundle, b" " * (guest.MAX_OUTPUT_BYTES + 1))
+
+    def test_result_validator_requires_first_pinned_address_not_any_dns_answer(self):
+        dns_map = copy.deepcopy(self.dns)
+        host = downloader._validate_url(self.manifest["assets"][0]["url"]).hostname
+        dns_map[host] = [dns_map[host][0], "8.8.8.8"]
+        bundle, result = self._valid_result(dns_map)
+        self.assertEqual(self._validate(bundle, result), result)
+
+        second_answer = copy.deepcopy(result)
+        second_answer["downloadReceipt"]["assets"][0]["selectedIPv4"] = "8.8.8.8"
+        self.assertIn("8.8.8.8", dns_map[host])
+        with self.assertRaisesRegex(ValueError, "download_asset_destination_invalid"):
+            self._validate(bundle, second_answer)
 
     def test_payload_validator_accepts_built_bundle_before_execution(self):
         ca_bytes = bytes(range(256)) * 1302 + bytes(range(171))
