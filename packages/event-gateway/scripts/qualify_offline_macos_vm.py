@@ -1192,6 +1192,48 @@ def _prepare_native_workspace_guest_inventory(enabled):
         raise CanaryError(*error.args) from None
 
 
+def _prepare_native_workspace_stage_preflight(enabled):
+    if not enabled:
+        return None, None
+    import native_workspace_stage_preflight_probe as probe
+    try:
+        return probe, probe.build_bundle()
+    except (ValueError, probe.canary.CanaryError) as error:
+        raise CanaryError("native_workspace_stage_preflight_bundle_failed") from error
+
+
+def _run_native_workspace_stage_preflight(probe, bundle, tart_path, clone, env, evidence,
+                                          run_bounded, result, commands, cancel_check):
+    if probe is None:
+        return
+    metadata = {"status": "failed", "qualified": False, "prepared": False}
+    result["nativeWorkspaceStagePreflight"] = metadata
+    try:
+        collection = probe.collect(tart_path, clone, env, evidence, bundle,
+                                   run_bounded=run_bounded, cancel_check=cancel_check)
+    except probe.canary.CanaryError as error:
+        code = error.args[0] if error.args else "native_workspace_stage_preflight_failed"
+        metadata["failureCode"] = code
+        normalized = CanaryError(code)
+        _inherit_command_cleanup(error, normalized)
+        raise normalized from error
+    metadata.update(collection)
+    commands.extend(collection.get("hostCommandTemplates", ()))
+    if (metadata.get("status") != "passed" or metadata.get("qualified") is not False
+            or metadata.get("prepared") is not False):
+        raise CanaryError("native_workspace_stage_preflight_failed")
+
+
+def _append_native_workspace_stage_preflight_evidence(probe, result, evidence, cleanup_errors):
+    if probe is not None:
+        limits = {name: probe.MAX_REPORT_BYTES for name in probe.LOG_NAMES}
+        limits["native-workspace-stage-inputs.tar.gz"] = probe.MAX_ARCHIVE_BYTES
+        result["rawEvidence"].update({
+            name: _raw_evidence(evidence / name, limit, cleanup_errors)
+            for name, limit in limits.items()
+        })
+
+
 def _run_native_workspace_guest_inventory(probe, bundle, tart_path, clone, env, evidence,
                                          run_bounded, result, commands):
     if probe is None:
@@ -1315,7 +1357,7 @@ def _validate_gateway_public_root_inventory_flag(enabled):
 def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart", clock=time.monotonic,
             popen=subprocess.Popen, run_bounded=_run_bounded, tart_home=None, scpreferences_api=False,
             softnet_dhcp_binary=None, native_workspace_guest_inventory=False,
-            gateway_public_root_inventory=False):
+            gateway_public_root_inventory=False, native_workspace_stage_inputs_preflight=False):
     """Run one owned clone and return its published summary after cleanup."""
     if not BASE_NAME.fullmatch(base_vm) or "://" in base_vm:
         raise CanaryError("base_vm_must_be_local_name")
@@ -1323,10 +1365,13 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
     _validate_softnet_dhcp_flag(softnet_dhcp_binary)
     _validate_native_workspace_guest_inventory_flag(native_workspace_guest_inventory)
     _validate_gateway_public_root_inventory_flag(gateway_public_root_inventory)
+    if type(native_workspace_stage_inputs_preflight) is not bool:
+        raise CanaryError("invalid_native_workspace_stage_inputs_preflight_flag")
     api_probe = api_bundle = None
     dhcp_probe = dhcp_bundle = dhcp_binary_fd = dhcp_binary = None
     inventory_probe = inventory_bundle = None
     tls_inventory_probe = tls_inventory_bundle = None
+    stage_preflight_probe = stage_preflight_bundle = None
     if not _waitid_available():
         raise CanaryError("nonreaping_wait_unavailable")
     receipt = _read_receipt(receipt_path)
@@ -1343,9 +1388,11 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
         raise CanaryError("insufficient_vm_storage_capacity")
     api_probe, api_bundle = _prepare_scpreferences_api(scpreferences_api)
     inventory_probe, inventory_bundle = _prepare_native_workspace_guest_inventory(
-        native_workspace_guest_inventory)
+        native_workspace_guest_inventory or native_workspace_stage_inputs_preflight)
     tls_inventory_probe, tls_inventory_bundle = _prepare_gateway_public_root_inventory(
         gateway_public_root_inventory)
+    stage_preflight_probe, stage_preflight_bundle = _prepare_native_workspace_stage_preflight(
+        native_workspace_stage_inputs_preflight)
     clone = "offline-canary-" + uuid.uuid4().hex
     clone_created = False
     clone_attempted = False
@@ -1500,6 +1547,9 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
             raise CanaryError(failures[0])
         _run_native_workspace_guest_inventory(inventory_probe, inventory_bundle, tart_path, clone,
                                              env, evidence, run_bounded, result, commands)
+        _run_native_workspace_stage_preflight(
+            stage_preflight_probe, stage_preflight_bundle, tart_path, clone, env, evidence,
+            run_bounded, result, commands, supervision_failed)
         _run_gateway_public_root_inventory(
             tls_inventory_probe, tls_inventory_bundle, tart_path, clone, env, evidence,
             run_bounded, result, commands)
@@ -1669,6 +1719,8 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
             _append_softnet_dhcp_evidence(dhcp_probe, result, evidence, cleanup_errors)
             _append_native_workspace_guest_inventory_evidence(
                 inventory_probe, result, evidence, cleanup_errors)
+            _append_native_workspace_stage_preflight_evidence(
+                stage_preflight_probe, result, evidence, cleanup_errors)
             _append_gateway_public_root_inventory_evidence(
                 tls_inventory_probe, result, evidence, cleanup_errors)
             if result["status"] == "passed" and any(value is None for value in result["rawEvidence"].values()):
@@ -1718,6 +1770,8 @@ def main(argv=None):
                         help="opt in to the fixed DHCP behavior probe using a local pinned helper")
     parser.add_argument("--native-workspace-guest-inventory", action="store_true",
                         help="collect the fixed native workspace guest inventory")
+    parser.add_argument("--native-workspace-stage-inputs-preflight", action="store_true",
+                        help="collect provisioning inventory and verify fixed source transfer/import offline")
     parser.add_argument("--gateway-public-root-inventory", action="store_true",
                         help="collect the fixed default TLS root inventory")
     args = parser.parse_args(argv)
@@ -1729,6 +1783,8 @@ def main(argv=None):
             options["softnet_dhcp_binary"] = args.softnet_dhcp_binary
         if args.native_workspace_guest_inventory:
             options["native_workspace_guest_inventory"] = True
+        if args.native_workspace_stage_inputs_preflight:
+            options["native_workspace_stage_inputs_preflight"] = True
         if args.gateway_public_root_inventory:
             options["gateway_public_root_inventory"] = True
         summary = qualify(args.base_vm, args.receipt, args.evidence_dir, **options)

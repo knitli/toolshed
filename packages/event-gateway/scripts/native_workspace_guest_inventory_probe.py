@@ -21,7 +21,11 @@ MAX_BUNDLE_ARG = 128 * 1024
 MAX_REPORT_BYTES = 16 * 1024
 MAX_COMMAND_BYTES = 2048
 MAX_COMMAND_SECONDS = 2
-GUEST_BUDGET_SECONDS = 24
+GUEST_BUDGET_SECONDS = 30
+MAX_BREW_FORMULAE = 64
+MAX_BREW_LIST_BYTES = 8 * 1024
+MAX_GIT_METADATA_BYTES = 16 * 1024
+MAX_EXECUTABLE_HASH_BYTES = 128 * 1024 * 1024
 MAX_CANDIDATES = 8
 MAX_SCAN_ENTRIES = 4096
 SCAN_SECONDS = 2
@@ -31,7 +35,8 @@ FIXED_ENV = {
     "CARGO_HOME": "/Users/admin/.cargo", "RUSTUP_HOME": "/Users/admin/.rustup",
     "CARGO_NET_OFFLINE": "true", "RUSTUP_AUTO_INSTALL": "0",
     "RUSTUP_NO_UPDATE_CHECK": "1", "HOMEBREW_NO_AUTO_UPDATE": "1",
-    "HOMEBREW_NO_INSTALL_CLEANUP": "1", "PYTHONDONTWRITEBYTECODE": "1",
+    "HOMEBREW_NO_INSTALL_CLEANUP": "1", "HOMEBREW_NO_ANALYTICS": "1",
+    "HOMEBREW_NO_INSTALL_FROM_API": "1", "PYTHONDONTWRITEBYTECODE": "1",
     "LC_ALL": "C", "LANG": "C",
 }
 TOOL_PATH = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -39,6 +44,11 @@ TOOL_ARGS = {name: ("--version",) for name in ("just", "genv", "gtimeout", "pkg-
 MODULES = ("glib-2.0", "gobject-2.0", "gstreamer-1.0", "gstreamer-base-1.0",
            "gstreamer-app-1.0", "gstreamer-audio-1.0")
 RUST_TOOLCHAIN = "/Users/admin/.rustup/toolchains/1.95.0-aarch64-apple-darwin"
+BREW_PATH = "/opt/homebrew/bin/brew"
+BREW_CORE_PATH = "/opt/homebrew/Library/Taps/homebrew/homebrew-core"
+BREW_RUBY_PATH = "/opt/homebrew/Library/Homebrew/vendor/portable-ruby/current/bin/ruby"
+BREW_CORE_REMOTE = "https://github.com/Homebrew/homebrew-core"
+BREW_REPOSITORY_REMOTE = "https://github.com/Homebrew/brew"
 
 
 def build_bundle():
@@ -68,16 +78,16 @@ def _source_hashes():
             for key in SOURCE_FILES}
 
 
-def _run(argv, deadline):
+def _run(argv, deadline, output_limit=MAX_COMMAND_BYTES):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         return {"state": "budget_exhausted", "version": None}
     try:
         out, _ = canary._run_bounded(
             list(argv), timeout=min(MAX_COMMAND_SECONDS, remaining), env=dict(FIXED_ENV),
-            output_limit=MAX_COMMAND_BYTES)
+            output_limit=output_limit)
         value = out.decode("utf-8").strip()
-        return {"state": "present", "version": value if len(value) <= MAX_COMMAND_BYTES else None}
+        return {"state": "present", "version": value if len(value) <= output_limit else None}
     except UnicodeError:
         return {"state": "unsupported", "version": None, "errorCode": "invalid_utf8"}
     except PermissionError:
@@ -238,6 +248,149 @@ def _rust_tools(deadline):
             "cargoNextest": _direct_tool("/Users/admin/.cargo/bin/cargo-nextest", ("--version",), deadline)}
 
 
+def _bounded_text(path, maximum):
+    """Read a fixed metadata file without following symlinks or exceeding its cap."""
+    fd = None
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
+            return None
+        with os.fdopen(fd, "rb") as source:
+            fd = None
+            raw = source.read(maximum + 1)
+        if len(raw) > maximum:
+            return None
+        return raw.decode("utf-8")
+    except (OSError, UnicodeError):
+        return None
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _git_metadata(root, expected_remote):
+    """Read fixed .git metadata; do not run Git or claim the checkout is clean."""
+    git_dir = root + "/.git"
+    try:
+        if not stat.S_ISDIR(os.lstat(git_dir).st_mode):
+            return {"state": "unsupported", "head": None, "remoteOrigin": None,
+                    "remoteExpected": False, "dirtyState": "not_scanned"}
+    except FileNotFoundError:
+        return {"state": "missing", "head": None, "remoteOrigin": None,
+                "remoteExpected": False, "dirtyState": "not_scanned"}
+    except OSError:
+        return {"state": "inaccessible", "head": None, "remoteOrigin": None,
+                "remoteExpected": False, "dirtyState": "not_scanned"}
+    head_text = _bounded_text(git_dir + "/HEAD", 256)
+    head = None
+    if head_text:
+        head_text = head_text.strip()
+        if re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", head_text):
+            head = head_text.lower()
+        else:
+            symbolic = re.fullmatch(r"ref: (refs/[A-Za-z0-9._/-]{1,200})", head_text)
+            if symbolic:
+                ref = symbolic.group(1)
+                if ".." not in ref.split("/") and not ref.endswith("/"):
+                    ref_text = _bounded_text(git_dir + "/" + ref, 256)
+                    if ref_text and re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\s*", ref_text):
+                        head = ref_text.strip().lower()
+                    else:
+                        packed = _bounded_text(git_dir + "/packed-refs", MAX_GIT_METADATA_BYTES)
+                        if packed:
+                            for line in packed.splitlines():
+                                match = re.fullmatch(r"((?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})) " + re.escape(ref), line)
+                                if match:
+                                    head = match.group(1).lower()
+                                    break
+    config = _bounded_text(git_dir + "/config", MAX_GIT_METADATA_BYTES)
+    remote = None
+    if config:
+        section = None
+        for line in config.splitlines():
+            match = re.fullmatch(r"\s*\[remote \"([^\"]{1,128})\"\]\s*", line)
+            if match:
+                section = match.group(1)
+                continue
+            if re.match(r"\s*\[", line):
+                section = None
+                continue
+            if section == "origin":
+                match = re.fullmatch(r"\s*url\s*=\s*(\S{1,512})\s*", line)
+                if match:
+                    remote = match.group(1)
+                    break
+    state = "present" if head else "unsupported"
+    public_remotes = {expected_remote, expected_remote + ".git",
+        "git@github.com:" + expected_remote.split("github.com/")[1] + ".git",
+        "ssh://git@github.com/" + expected_remote.split("github.com/")[1] + ".git"}
+    remote_expected = remote in public_remotes
+    return {"state": state, "head": head, "remoteOrigin": remote if remote_expected else (
+                "unexpected" if remote is not None else None),
+            "remoteExpected": remote_expected,
+            "dirtyState": "not_scanned"}
+
+
+def _brew_inventory(deadline):
+    """Observe only fixed Homebrew paths and its fixed read-only version/list commands."""
+    try:
+        os.lstat(BREW_PATH)
+        resolved = os.path.realpath(BREW_PATH)
+        if (not resolved.startswith("/opt/homebrew/") or not stat.S_ISREG(os.stat(BREW_PATH).st_mode)
+                or not os.access(BREW_PATH, os.X_OK)):
+            raise OSError
+        digest, size = canary._hash_file(Path(resolved), maximum=MAX_EXECUTABLE_HASH_BYTES)
+        identity = {"state": "present", "path": BREW_PATH, "canonicalPath": resolved,
+                    "sha256": digest, "sizeBytes": size}
+    except FileNotFoundError:
+        identity = {"state": "missing", "path": BREW_PATH, "canonicalPath": None,
+                    "sha256": None, "sizeBytes": None}
+    except (OSError, canary.CanaryError):
+        identity = {"state": "inaccessible", "path": BREW_PATH, "canonicalPath": None,
+                    "sha256": None, "sizeBytes": None}
+    if identity["state"] == "present":
+        version = _run([BREW_PATH, "--version"], deadline)
+        raw = _run([BREW_PATH, "list", "--versions", "--formula"], deadline,
+                   output_limit=MAX_BREW_LIST_BYTES)
+        formulae = {"state": raw["state"], "items": []}
+        if raw.get("errorCode") == "tart_command_output_limit":
+            formulae["state"] = "scan_capped"
+        if raw["state"] == "present":
+            lines = (raw["version"] or "").splitlines()
+            formulae["state"] = "scan_capped" if len(lines) > MAX_BREW_FORMULAE else "present"
+            for line in lines[:MAX_BREW_FORMULAE]:
+                if len(line) > 256 or not re.fullmatch(r"[A-Za-z0-9@+_.-]+(?:\s+[A-Za-z0-9@+_.-]+)*", line):
+                    formulae["state"] = "unsupported"
+                    formulae["items"] = []
+                    break
+                parts = line.split()
+                formulae["items"].append({"name": parts[0], "versions": parts[1:]})
+    else:
+        version = {"state": identity["state"], "version": None}
+        formulae = {"state": identity["state"], "items": []}
+    repository = _git_metadata("/opt/homebrew", BREW_REPOSITORY_REMOTE)
+    core = _git_metadata(BREW_CORE_PATH, BREW_CORE_REMOTE)
+    ruby = {"state": "missing", "path": BREW_RUBY_PATH, "canonicalPath": None,
+            "version": None, "sha256": None}
+    try:
+        os.lstat(BREW_RUBY_PATH)
+        ruby_resolved = os.path.realpath(BREW_RUBY_PATH)
+        if (ruby_resolved.startswith("/opt/homebrew/")
+                and stat.S_ISREG(os.stat(BREW_RUBY_PATH).st_mode) and os.access(BREW_RUBY_PATH, os.X_OK)):
+            digest, _ = canary._hash_file(Path(ruby_resolved), maximum=MAX_EXECUTABLE_HASH_BYTES)
+            ruby = {"state": "present", "path": BREW_RUBY_PATH, "canonicalPath": ruby_resolved,
+                    "version": _run([BREW_RUBY_PATH, "--version"], deadline), "sha256": digest}
+        else:
+            ruby["state"] = "unsupported"
+    except FileNotFoundError:
+        pass
+    except (OSError, canary.CanaryError):
+        ruby["state"] = "inaccessible"
+    return {"identity": identity, "version": version, "formulae": formulae,
+            "repository": repository, "core": core, "ruby": ruby}
+
+
 def _xcode_sdk_roots(deadline):
     roots = [("clt", "/Library/Developer/CommandLineTools/SDKs")]
     scanned, capped = 0, False
@@ -327,6 +480,7 @@ def collect_guest():
     modules = {name: ({"state": "missing", "version": None} if pkg is None else
                       _run([pkg, "--modversion", name], deadline)) for name in MODULES}
     sdk = _sdk_inventory(deadline)
+    brew = _brew_inventory(deadline)
     try:
         usage = shutil.disk_usage("/")
         disk = {"state": "present", "totalBytes": usage.total, "freeBytes": usage.free}
@@ -351,6 +505,7 @@ def collect_guest():
                  "rustupShim": _metadata("/Users/admin/.cargo/bin/rustup"),
                  "rustlib": _shallow_inventory(RUST_TOOLCHAIN + "/lib/rustlib", deadline)},
         "tools": tools, "pkgConfigModules": modules,
+        "homebrew": brew,
         "sdk": dict(sdk, developerLink=link),
         "resources": {"disk": disk, "memoryBytes": {"state": memory["state"],
                                                         "bytes": memory_bytes,
@@ -525,9 +680,81 @@ def _valid_resources(resources):
             and _metadata_record(resources["rustupHome"], inventory=True))
 
 
+def _valid_git_inventory(value, expected_remote):
+    keys = {"state", "head", "remoteOrigin", "remoteExpected", "dirtyState"}
+    if type(value) is not dict or set(value) != keys:
+        return False
+    if (type(value["state"]) is not str
+            or value["state"] not in {"present", "missing", "unsupported", "inaccessible"}):
+        return False
+    if value["head"] is not None and (type(value["head"]) is not str
+            or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", value["head"])):
+        return False
+    expected_values = {expected_remote, expected_remote + ".git",
+        "git@github.com:" + expected_remote.split("github.com/")[1] + ".git",
+        "ssh://git@github.com/" + expected_remote.split("github.com/")[1] + ".git"}
+    if (value["remoteOrigin"] is not None and (type(value["remoteOrigin"]) is not str
+            or value["remoteOrigin"] not in {"unexpected", *expected_values})):
+        return False
+    expected = value["remoteOrigin"] in expected_values
+    return (type(value["remoteExpected"]) is bool and value["remoteExpected"] == expected
+            and value["dirtyState"] == "not_scanned"
+            and (value["state"] == "present") == (value["head"] is not None))
+
+
+def _valid_homebrew(value):
+    if type(value) is not dict or set(value) != {"identity", "version", "formulae", "repository", "core", "ruby"}:
+        return False
+    identity = value["identity"]
+    if (type(identity) is not dict or set(identity) != {"state", "path", "canonicalPath", "sha256", "sizeBytes"}
+            or identity["path"] != BREW_PATH or type(identity["state"]) is not str
+            or identity["state"] not in {"present", "missing", "inaccessible"}):
+        return False
+    if identity["state"] == "present":
+        if (type(identity["canonicalPath"]) is not str or not identity["canonicalPath"].startswith("/opt/homebrew/")
+                or type(identity["sha256"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", identity["sha256"])
+                or type(identity["sizeBytes"]) is not int or not 0 <= identity["sizeBytes"] <= MAX_EXECUTABLE_HASH_BYTES):
+            return False
+    elif any(identity[key] is not None for key in ("canonicalPath", "sha256", "sizeBytes")):
+        return False
+    if not _observation(value["version"], required={"state", "version"}, optional={"errorCode"}):
+        return False
+    if identity["state"] != "present" and value["version"] != {"state": identity["state"], "version": None}:
+        return False
+    formulae = value["formulae"]
+    if (type(formulae) is not dict or set(formulae) != {"state", "items"}
+            or type(formulae["state"]) is not str or formulae["state"] not in _STATES
+            or type(formulae["items"]) is not list
+            or len(formulae["items"]) > MAX_BREW_FORMULAE):
+        return False
+    for row in formulae["items"]:
+        if (type(row) is not dict or set(row) != {"name", "versions"}
+                or type(row["name"]) is not str or not re.fullmatch(r"[A-Za-z0-9@+_.-]{1,128}", row["name"])
+                or type(row["versions"]) is not list or len(row["versions"]) > 32
+                or any(type(item) is not str or not re.fullmatch(r"[A-Za-z0-9@+_.-]{1,64}", item)
+                       for item in row["versions"])):
+            return False
+    if (not _valid_git_inventory(value["repository"], BREW_REPOSITORY_REMOTE)
+            or not _valid_git_inventory(value["core"], BREW_CORE_REMOTE)):
+        return False
+    ruby = value["ruby"]
+    if (type(ruby) is not dict or set(ruby) != {"state", "path", "canonicalPath", "version", "sha256"}
+            or ruby["path"] != BREW_RUBY_PATH or type(ruby["state"]) is not str
+            or ruby["state"] not in {"present", "missing", "inaccessible", "unsupported"}):
+        return False
+    if ruby["state"] == "present":
+        if (type(ruby["canonicalPath"]) is not str or not ruby["canonicalPath"].startswith("/opt/homebrew/")
+                or type(ruby["sha256"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", ruby["sha256"])
+                or not _observation(ruby["version"], required={"state", "version"}, optional={"errorCode"})):
+            return False
+    elif ruby["canonicalPath"] is not None or ruby["version"] is not None or ruby["sha256"] is not None:
+        return False
+    return True
+
+
 def _valid_report(report, expected_hashes):
     keys = {"kind", "status", "collectionOnly", "prepared", "nativeQualified", "runtime",
-            "sourceSha256", "pythonCandidates", "rust", "tools", "pkgConfigModules", "sdk", "resources"}
+            "sourceSha256", "pythonCandidates", "rust", "tools", "pkgConfigModules", "sdk", "resources", "homebrew"}
     if type(report) is not dict or set(report) != keys:
         return False
     if (report.get("kind") != KIND or report.get("status") != "passed"
@@ -542,7 +769,8 @@ def _valid_report(report, expected_hashes):
             and _valid_rust(report["rust"])
             and _valid_observation_maps(report["tools"], report["pkgConfigModules"])
             and _valid_sdk(report["sdk"])
-            and _valid_resources(report["resources"]))
+            and _valid_resources(report["resources"])
+            and _valid_homebrew(report["homebrew"]))
 
 
 def _validated_report(stdout, stderr, expected_hashes):
@@ -565,7 +793,7 @@ def collect(tart_path, vm_name, env, evidence, bundle, *, run_bounded=None):
         command[-1] = bundle["argument"]
         stdout_path = evidence / "native-workspace-guest-inventory-stdout.json"
         stderr_path = evidence / "native-workspace-guest-inventory-stderr.bin"
-        stdout, stderr = runner(command, timeout=30, env=env, output_limit=MAX_REPORT_BYTES,
+        stdout, stderr = runner(command, timeout=40, env=env, output_limit=MAX_REPORT_BYTES,
                                 capture_paths=(stdout_path, stderr_path))
         report = _validated_report(stdout, stderr, bundle["sourceSha256"])
         return {"status": "passed", "report": report, "bundleSha256": bundle["bundleSha256"],
