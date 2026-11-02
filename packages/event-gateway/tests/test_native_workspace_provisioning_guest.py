@@ -124,8 +124,10 @@ def download_all(manifest, dns, ca, ca_sha, output):
             raise TypeError("expected_fixed_loader_source")
         namespace = {"__name__": "__main__", "__builtins__": __builtins__}
         # The generated loader and stub are repository-owned; payload bytes are never code inputs.
+        # pylint: disable=exec-used
         exec(compile(loader_source, "<fixed-provisioning-loader-fixture>", "exec"),  # nosec B102 -- Fixed loader fixture, explicit namespace, no caller code.
              namespace, namespace)
+        # pylint: enable=exec-used
 
     def _receive(self, loader, payload, os_version="15.7.0"):
         stdout = io.BytesIO()
