@@ -6,7 +6,7 @@ import os
 from pathlib import Path, PurePosixPath
 import shutil
 import stat
-import subprocess
+import subprocess  # nosec B404 -- fixed local interpreter and receiver/import fixtures; no shell.
 import sys
 import tarfile
 import tempfile
@@ -26,7 +26,9 @@ def digest(data):
 
 class FakeRegistry:
     """Explicit fixture registry: fixture bytes are pinned only for these tests."""
+
     def __init__(self, files):
+        """Pin the test-owned recipe assets without granting production authority."""
         self.files = files
         self.assets = {}
         for name in staging.MEMBERS[-2:]:
@@ -69,7 +71,7 @@ class StageInputBundleTest(unittest.TestCase):
     def run_receiver(self, bundle, data=None):
         environment = dict(os.environ)
         environment["TMPDIR"] = str(self.private_tmp)
-        return subprocess.run([sys.executable, "-I", "-c", bundle["receiver"]],
+        return subprocess.run([sys.executable, "-I", "-c", bundle["receiver"]],  # nosec B603 -- fixed receiver source; hostile inputs remain archive/JSON data.
                               input=bundle["archive"] if data is None else data,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
                               env=environment)
@@ -141,13 +143,13 @@ class StageInputBundleTest(unittest.TestCase):
         import_code = ("import sys; sys.path.insert(0, "
                        + repr(str(root / "packages/event-gateway/scripts"))
                        + "); import stage_native_workspace")
-        imported = subprocess.run([sys.executable, "-I", "-B", "-c", import_code],
+        imported = subprocess.run([sys.executable, "-I", "-B", "-c", import_code],  # nosec B603 -- fixed import of repository-owned staging source.
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
         self.assertEqual(imported.returncode, 0, imported.stderr)
         self.assertEqual((imported.stdout, imported.stderr), (b"", b""))
         launcher = root / "packages/event-gateway/src/event_gateway/launcher.py"
         launcher.unlink()
-        missing = subprocess.run([sys.executable, "-I", "-B", "-c", import_code],
+        missing = subprocess.run([sys.executable, "-I", "-B", "-c", import_code],  # nosec B603 -- same fixed import after removing its test-owned dependency.
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
         self.assertNotEqual(missing.returncode, 0)
         self.assertIn(b"FileNotFoundError", missing.stderr)
