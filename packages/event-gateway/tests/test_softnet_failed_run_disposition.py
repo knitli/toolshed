@@ -165,6 +165,36 @@ class DispositionTests(unittest.TestCase):
                     disposition._observe("/unused", "/unused", wrong)
                 binary.assert_not_called()
 
+    def test_observe_accepts_matching_provisioning_identity_for_expired_admission(self):
+        fields = disposition.controller.PROVISIONING_FIELDS
+        admission = {**self.admission, "kind": "softnet-provisioning-download-admission-v1",
+                     **{field: f"{field}-fixture" for field in fields}}
+        identity = {**self.identity, **{field: admission[field] for field in fields}}
+
+        _, (admission_record, *_runtime) = self.run_observer(admission=admission, identity=identity)
+
+        admission_record.assert_called_once_with(
+            "/unused/admission", allow_expired_inventory=True)
+
+    def test_observe_rejects_changed_provisioning_identity_before_runtime_checks(self):
+        fields = disposition.controller.PROVISIONING_FIELDS
+        admission = {**self.admission, "kind": "softnet-provisioning-download-admission-v1",
+                     **{field: f"{field}-fixture" for field in fields}}
+        identity = {**self.identity, **{field: admission[field] for field in fields}}
+        wrong = {**identity, "provisioningBundleSha256": "0" * 64}
+        with patch.object(disposition.controller, "_admission_record",
+                          return_value=(admission, self.account, "staff", self.digest)) as record, \
+             patch.object(disposition.controller, "_binary") as binary, \
+             patch.object(disposition.controller.canary, "_run_bounded") as bounded, \
+             patch.object(disposition.subprocess, "Popen") as popen:
+            with self.assertRaisesRegex(recovery.RecoveryError,
+                                        "disposition_admission_mismatch"):
+                disposition._observe("/unused/admission", "/unused/run", wrong)
+        record.assert_called_once_with("/unused/admission", allow_expired_inventory=True)
+        binary.assert_not_called()
+        bounded.assert_not_called()
+        popen.assert_not_called()
+
     def test_observe_rejects_vm_identity_and_running_or_inconsistent_state(self):
         cases = (
             (b'{"os":"darwin","arch":"arm64","macAddress":"02:00:00:00:00:02"}',

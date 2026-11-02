@@ -78,7 +78,14 @@ def download_report(admission):
 class DownloadExercise(ExercisePatches):
     """Use the existing supervisor fakes for the one fixed stdin command."""
 
+    def __init__(self, *, initial_get_error=None, **kwargs):
+        """Optionally fail the prelaunch VM state query."""
+        super().__init__(**kwargs)
+        self.initial_get_error = initial_get_error
+
     def bounded(self, argv, **kwargs):
+        if argv[1:2] == ['get'] and self.initial_get_error:
+            raise self.initial_get_error
         if '/opt/homebrew/bin/python3' in argv:
             self.events.append(('command', tuple(argv), kwargs.copy()))
             self.received = os.read(kwargs['input_fd'], 1024)
@@ -379,6 +386,104 @@ class ProvisioningControllerTests(unittest.TestCase):
             self.assertFalse(any(event[:2] == ('record', 'provisioning-download.json') for event in fakes.events))
             names = [event[0] for event in fakes.events]
             self.assertLess(max(index for index, name in enumerate(names) if name == 'stop_owned'), names.index('restore'))
+
+    def test_command_failure_artifact_captures_download_error_and_empty_validation_output(self):
+        output_error = supervisor.canary.CanaryError('tart_command_failed')
+        output_error.command_failure_output = {
+            'stdoutTail': b'partial out', 'stderrTail': b'partial err',
+            'stdoutObservedBytes': 11, 'stderrObservedBytes': 12, 'exitCode': 7}
+        for raw, error, expected in (
+                (b'', output_error, (b'partial out', b'partial err', 7)),
+                (b'{}', None, (b'', b'', None))):
+            with self.subTest(error=error), DownloadExercise(probe_stdout=raw, probe_error=error) as fakes:
+                with self.assertRaises((supervisor.canary.CanaryError, recovery.RecoveryError)):
+                    supervisor._exercise(self.root, self.admission, self.account, 'staff',
+                                         TargetPreferences, provisioning_bundle_fd=self.descriptor())
+            artifact = next(event[2] for event in fakes.events
+                            if event[:2] == ('record', 'command-failure.plist'))
+            self.assertEqual(artifact['kind'], 'softnet-command-failure-v1')
+            self.assertEqual(artifact['phase'],
+                             'provisioning-command' if error is not None else 'provisioning-receipt')
+            self.assertEqual((artifact['stdoutTail'], artifact['stderrTail'], artifact['exitCode']), expected)
+            self.assertFalse(any(event[:2] == ('record', 'provisioning-download.json') for event in fakes.events))
+
+    def test_command_failure_writer_rejects_unknown_phase_before_recording(self):
+        with patch.object(supervisor, '_record') as writer:
+            with self.assertRaisesRegex(recovery.RecoveryError, 'invalid_command_failure_phase'):
+                supervisor._record_command_failure(
+                    self.root, 'unrecognized-stage', recovery.RecoveryError('stage_failed'))
+        writer.assert_not_called()
+
+    def test_readiness_retries_do_not_record_failure_and_terminal_failure_keeps_latest_output(self):
+        retry = supervisor.canary.CanaryError('tart_command_timeout')
+        retry.command_failure_output = {
+            'stdoutTail': b'', 'stderrTail': b'last readiness stderr',
+            'stdoutObservedBytes': 0, 'stderrObservedBytes': 21, 'exitCode': 9}
+        with DownloadExercise(probe_stdout=json.dumps(download_report(self.admission)).encode(),
+                              command_error=[retry]) as fakes:
+            supervisor._exercise(self.root, self.admission, self.account, 'staff', TargetPreferences,
+                                 provisioning_bundle_fd=self.descriptor())
+        self.assertFalse(any(event[:2] == ('record', 'command-failure.plist') for event in fakes.events))
+
+        with DownloadExercise(command_error=retry, monotonic_values=(0, 0, 1000)) as fakes:
+            with self.assertRaisesRegex(recovery.RecoveryError, 'vm_readiness_timeout'):
+                supervisor._exercise(self.root, self.admission, self.account, 'staff', TargetPreferences,
+                                     provisioning_bundle_fd=self.descriptor())
+        artifact = next(event[2] for event in fakes.events
+                        if event[:2] == ('record', 'command-failure.plist'))
+        self.assertEqual(artifact['phase'], 'vm-readiness')
+        self.assertEqual(artifact['errorCode'], 'vm_readiness_timeout')
+        self.assertEqual(artifact['stderrTail'], b'last readiness stderr')
+
+    def test_diagnostic_write_failure_still_cleans_up_and_fails_closed(self):
+        failure = supervisor.canary.CanaryError('tart_command_failed')
+        with DownloadExercise(probe_error=failure) as fakes:
+            original_record = supervisor._record
+
+            def record(directory, name, value):
+                if name == 'command-failure.plist':
+                    raise OSError('diagnostic write failed')
+                return original_record(directory, name, value)
+            with patch.object(supervisor, '_record', side_effect=record):
+                with self.assertRaises(recovery.RecoveryError):
+                    supervisor._exercise(self.root, self.admission, self.account, 'staff',
+                                         TargetPreferences, provisioning_bundle_fd=self.descriptor())
+        names = [event[0] for event in fakes.events]
+        self.assertLess(max(index for index, name in enumerate(names) if name == 'stop_owned'), names.index('restore'))
+
+    def test_diagnostic_write_failure_chains_original_error_for_all_prelaunch_paths(self):
+        for stage in ('get', 'capture'):
+            original = (supervisor.canary.CanaryError('tart_command_failed') if stage == 'get'
+                        else recovery.RecoveryError('capture_failed'))
+            kwargs = {'initial_get_error': original} if stage == 'get' else {'capture_error': original}
+            with self.subTest(stage=stage), DownloadExercise(**kwargs) as fakes:
+                with patch.object(supervisor, '_record', side_effect=OSError('failure record write failed')):
+                    with self.assertRaisesRegex(recovery.RecoveryError,
+                                                'command_failure_record_failed') as raised:
+                        supervisor._exercise(self.root, self.admission, self.account, 'staff',
+                                             TargetPreferences, provisioning_bundle_fd=self.descriptor())
+            self.assertIsInstance(raised.exception.__cause__, OSError)
+            self.assertIs(raised.exception.__cause__.__context__, original)
+            self.assertFalse(any(event[0] == 'popen' for event in fakes.events))
+            self.assertEqual(any(event[0] == 'capture' for event in fakes.events), stage == 'capture')
+
+    def test_terminal_diagnostic_write_failure_chains_writer_then_original_and_cleans_up(self):
+        original = supervisor.canary.CanaryError('tart_command_failed')
+        with DownloadExercise(probe_error=original) as fakes:
+            def record(_directory, name, _value):
+                if name == 'command-failure.plist':
+                    raise OSError('failure record write failed')
+                fakes.events.append(('record', name))
+            with patch.object(supervisor, '_record', side_effect=record):
+                with self.assertRaisesRegex(recovery.RecoveryError,
+                                            'command_failure_record_failed') as raised:
+                    supervisor._exercise(self.root, self.admission, self.account, 'staff',
+                                         TargetPreferences, provisioning_bundle_fd=self.descriptor())
+        writer_error = raised.exception.__cause__
+        self.assertIsInstance(writer_error, OSError)
+        self.assertIs(writer_error.__context__, original)
+        names = [event[0] for event in fakes.events]
+        self.assertLess(max(index for index, name in enumerate(names) if name == 'stop_owned'), names.index('restore'))
 
 
 if __name__ == '__main__':

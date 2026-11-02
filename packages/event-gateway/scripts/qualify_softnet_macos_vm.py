@@ -29,7 +29,13 @@ import qualify_offline_macos_vm as canary
 import softnet_recovery as recovery
 import native_workspace_provisioning_guest as provisioning
 from softnet_preferences import Preferences
-from softnet_run_state import State
+from softnet_run_state import (
+    COMMAND_ERROR_CODE,
+    COMMAND_ERROR_TYPE,
+    COMMAND_FAILURE_KIND,
+    COMMAND_FAILURE_PHASES,
+    State,
+)
 
 TART = Path('/usr/local/libexec/knitli-event-qualification/tart-2.41.1/tart.app/Contents/MacOS/tart')
 SOFTNET = Path('/usr/local/libexec/knitli-event-qualification/softnet-0.22.1/softnet')
@@ -121,8 +127,9 @@ def _binary(path, digest):
     _require(measured == digest, 'binary_digest_mismatch')
 
 
-def _admission_record(root):
+def _admission_record(root, *, allow_expired_inventory=False):
     """Validate the protected operator record and storage identity, before measurement."""
+    _require(type(allow_expired_inventory) is bool, 'invalid_inventory_expiry_mode')
     fd = recovery._directory(root)
     try:
         raw = recovery._read(fd, 'admission.plist')
@@ -146,7 +153,7 @@ def _admission_record(root):
              and type(value['ownerUid']) is int and value['ownerUid'] > 0,
              'invalid_admission')
     if download_admission:
-        _validate_provisioning_admission(value)
+        _validate_provisioning_admission(value, allow_expired_inventory=allow_expired_inventory)
     if probe_admission or route_admission:
         ip_keys = ('probeIPv4',) if probe_admission else ('identityProbeIPv4', 'positiveOriginIPv4')
         for key in ip_keys:
@@ -196,8 +203,9 @@ def _provisioning_binding(admission):
             'bundle_sha256': admission['provisioningBundleSha256']}
 
 
-def _validate_provisioning_admission(admission):
+def _validate_provisioning_admission(admission, *, allow_expired_inventory=False):
     """Bind the fixed public acquisition client to the reviewed destination policy."""
+    _require(type(allow_expired_inventory) is bool, 'invalid_inventory_expiry_mode')
     try:
         _, mapping = provisioning.validate_binding(**_provisioning_binding(admission))
     except (TypeError, ValueError, KeyError):
@@ -234,7 +242,10 @@ def _validate_provisioning_admission(admission):
                 for key in ('accountReadbackSha256', 'originReadbackSha256')),
         'invalid_provisioning_destination_inventory')
     observed = snapshot['observedAtUnixNs']
-    _require(type(observed) is int and 0 <= time.time_ns() - observed <= PROVISIONING_INVENTORY_MAX_AGE_NS,
+    age = time.time_ns() - observed if type(observed) is int else -1
+    # Disposition validates retained policy but performs no provisioning or network requests.
+    _require(type(observed) is int and observed > 0 and age >= 0
+             and (allow_expired_inventory or age <= PROVISIONING_INVENTORY_MAX_AGE_NS),
              'provisioning_inventory_stale')
     for addresses in mapping.values():
         for address in addresses:
@@ -594,6 +605,22 @@ def _record(directory, name, value):
         os.close(fd)
 
 
+def _record_command_failure(run, phase, error, *, command_error=None):
+    _require(phase in COMMAND_FAILURE_PHASES, 'invalid_command_failure_phase')
+    output = (canary._command_failure_output(error)
+              or canary._command_failure_output(command_error) or {
+        'stdoutTail': b'', 'stderrTail': b'', 'stdoutObservedBytes': 0,
+        'stderrObservedBytes': 0, 'exitCode': None})
+    error_type = type(error).__name__
+    error_code = str(error)
+    return _record(run, 'command-failure.plist', {
+        'kind': COMMAND_FAILURE_KIND, 'phase': phase,
+        'errorType': error_type if COMMAND_ERROR_TYPE.fullmatch(error_type)
+        else 'Exception',
+        'errorCode': error_code if COMMAND_ERROR_CODE.fullmatch(error_code)
+        else 'unclassified_failure', **output})
+
+
 def _start_logs(process, directory, failures):
     directory.mkdir(mode=0o700)
     result = {}
@@ -627,6 +654,7 @@ def _reap_children(vm, helper, threads, stop, failures, *, record_error=None):
 
 def _exercise(run, admission, account, group, preferences_factory, *, public_probe_ip=None,
               guest_route_ips=None, provisioning_bundle_fd=None):
+    provisioning_downloads = provisioning_bundle_fd is not None
     env = {**ENV, 'HOME': admission['tartHome'], 'TART_HOME': admission['tartHome'],
            'TART_NO_AUTO_PRUNE': '1'}
     owner_popen = partial(subprocess.Popen, user=account.pw_uid, group=account.pw_gid, extra_groups=[])
@@ -651,15 +679,26 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
             record_command_error(exc)
             raise
     vm_name = admission['vmName']
-    raw, _ = command([str(TART), 'get', vm_name, '--format', 'json'], timeout=10)
-    _require(canary._vm_stopped(raw), 'vm_not_stopped_before_capture')
-    recovery.capture(run, preferences_factory=preferences_factory)
+    try:
+        raw, _ = command([str(TART), 'get', vm_name, '--format', 'json'], timeout=10)
+        _require(canary._vm_stopped(raw), 'vm_not_stopped_before_capture')
+        recovery.capture(run, preferences_factory=preferences_factory)
+    except BaseException as exc:
+        if provisioning_downloads:
+            try:
+                _record_command_failure(run, 'prelaunch', exc)
+            except BaseException as write_error:
+                raise recovery.RecoveryError('command_failure_record_failed') from write_error
+        raise
     vm = helper = None
     vm_attempted = False
     first = second = None
     threads = {}
     failures = []
     error = None
+    phase = 'vm-start'
+    readiness_error = None
+    diagnostic_write_error = None
     stop = {'vmReaped': True, 'helperReaped': True, 'vmStopped': False}
     previous = canary._install_termination_handlers()
     try:
@@ -697,6 +736,7 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
         threads[vm] = _start_logs(vm, run / 'vm-logs', failures)
         second.close()
         second = None
+        phase = 'vm-readiness'
         deadline = time.monotonic() + canary.VM_READY_TIMEOUT
         while True:
             _require(not failures and not _child_exited(helper) and not _child_exited(vm),
@@ -706,6 +746,7 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
                         timeout=canary.VM_READY_PROBE_TIMEOUT)
                 break
             except canary.CanaryError as exc:
+                readiness_error = exc
                 cleanup_errors, unreaped_processes = canary._command_cleanup_metadata(exc)
                 if cleanup_errors or unreaped_processes:
                     # The failure is retryable only when the runner proved that
@@ -715,16 +756,19 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
                     raise
                 _require(time.monotonic() < deadline, 'vm_readiness_timeout')
                 time.sleep(canary.VM_READY_RETRY_INTERVAL)
+        phase = 'preference-readback'
         with preferences_factory() as preferences:
             _require(preferences.equal(preferences.read(), preferences.encode_target()),
                      'softnet_target_not_observed')
         _require(not failures and not _child_exited(helper) and not _child_exited(vm),
                  'owned_child_exited_or_log_failure')
         if provisioning_bundle_fd is not None:
+            phase = 'provisioning-command'
             stdout, _ = command(
                 provisioning.command_template(TART, vm_name), input_fd=provisioning_bundle_fd,
                 timeout=PROVISIONING_TIMEOUT, output_limit=provisioning.MAX_OUTPUT_BYTES,
                 cancel_check=lambda: bool(failures or _child_exited(helper) or _child_exited(vm)))
+            phase = 'provisioning-receipt'
             try:
                 report = provisioning.validate_result(stdout, **_provisioning_binding(admission))
             except (TypeError, ValueError):
@@ -761,6 +805,13 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
             _require(report['verified'], 'guest_route_result_failed')
     except BaseException as exc:
         error = exc
+        if provisioning_downloads:
+            try:
+                _record_command_failure(
+                    run, phase, exc,
+                    command_error=readiness_error if phase == 'vm-readiness' else None)
+            except BaseException as write_error:
+                diagnostic_write_error = write_error
     finally:
         canary._ignore_termination_handlers(previous)
         try:
@@ -799,6 +850,8 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
         finally:
             canary._restore_termination_handlers(previous)
     if error is not None:
+        if diagnostic_write_error is not None:
+            raise recovery.RecoveryError('command_failure_record_failed') from diagnostic_write_error
         raise error
     return stop
 
