@@ -205,6 +205,7 @@ def _tls_context(ca_bundle_bytes):
 
 
 def _set_response_timeout(response, timeout):
+    """Best-effort socket timeout; the absolute alarm enforces the deadline."""
     if response.isclosed():
         return
     file_object = getattr(response, "fp", None)
