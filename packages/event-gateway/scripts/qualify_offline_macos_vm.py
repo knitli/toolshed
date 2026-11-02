@@ -34,6 +34,7 @@ MAX_RECEIPT_BYTES = 64 * 1024
 MAX_CONFIG_BYTES = 1024 * 1024
 MAX_DISK_BYTES = 1024**4
 MAX_SHORT_OUTPUT = 64 * 1024
+COMMAND_FAILURE_TAIL_BYTES = 4096
 MAX_GUEST_OUTPUT = 16 * 1024
 MAX_FRAME = 2048
 MAX_FRAMES = 256
@@ -256,6 +257,30 @@ def _inherit_command_cleanup(source, target):
     _attach_command_cleanup(target, errors, unreaped_processes)
 
 
+def _command_failure_output(error):
+    pending = [error]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        value = getattr(current, "command_failure_output", None)
+        if isinstance(value, dict) and set(value) == {
+                "stdoutTail", "stderrTail", "stdoutObservedBytes", "stderrObservedBytes", "exitCode"}:
+            stdout, stderr = value["stdoutTail"], value["stderrTail"]
+            stdout_count, stderr_count, exit_code = (
+                value["stdoutObservedBytes"], value["stderrObservedBytes"], value["exitCode"])
+            if (isinstance(stdout, bytes) and len(stdout) <= COMMAND_FAILURE_TAIL_BYTES
+                    and isinstance(stderr, bytes) and len(stderr) <= COMMAND_FAILURE_TAIL_BYTES
+                    and type(stdout_count) is int and len(stdout) <= stdout_count <= 16 * 1024 * 1024 + 4096
+                    and type(stderr_count) is int and len(stderr) <= stderr_count <= 16 * 1024 * 1024 + 4096
+                    and (exit_code is None or (type(exit_code) is int and -255 <= exit_code <= 255 and exit_code != 0))):
+                return value
+        pending.extend((getattr(current, "__cause__", None), getattr(current, "__context__", None)))
+    return None
+
+
 def _install_termination_handlers():
     if threading.current_thread() is not threading.main_thread():
         return None
@@ -377,6 +402,9 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
         raise
     selector = selectors.DefaultSelector()
     streams = {process.stdout: bytearray(), process.stderr: bytearray()}
+    observed = {process.stdout: 0, process.stderr: 0}
+    tails = {process.stdout: bytearray(), process.stderr: bytearray()}
+    exit_code = None
     for stream in streams:
         os.set_blocking(stream.fileno(), False)
         selector.register(stream, selectors.EVENT_READ)
@@ -397,6 +425,11 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                     key.fileobj.close()
                     continue
                 output = streams[key.fileobj]
+                observed[key.fileobj] += len(chunk)
+                tail = tails[key.fileobj]
+                tail.extend(chunk)
+                if len(tail) > COMMAND_FAILURE_TAIL_BYTES:
+                    del tail[:-COMMAND_FAILURE_TAIL_BYTES]
                 capture = captures[0 if key.fileobj is process.stdout else 1] if captures else None
                 if capture is not None:
                     remaining_capture = max(0, output_limit - len(output))
@@ -405,7 +438,8 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                 if len(output) + len(chunk) > output_limit:
                     raise CanaryError("tart_command_output_limit")
                 output.extend(chunk)
-        if _bounded_process_exit_status(process) not in (None, 0):
+        exit_code = _bounded_process_exit_status(process)
+        if exit_code not in (None, 0):
             raise CanaryError("tart_command_failed")
         try:
             code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
@@ -415,6 +449,11 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
             raise CanaryError("tart_command_failed")
         return bytes(streams[process.stdout]), bytes(streams[process.stderr])
     except BaseException as primary_error:
+        primary_error.command_failure_output = {
+            "stdoutTail": bytes(tails[process.stdout]), "stderrTail": bytes(tails[process.stderr]),
+            "stdoutObservedBytes": observed[process.stdout], "stderrObservedBytes": observed[process.stderr],
+            "exitCode": exit_code,
+        }
         cleanup_errors = []
         group_quiet = False
         identity_verified = False

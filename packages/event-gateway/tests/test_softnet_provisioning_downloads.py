@@ -380,6 +380,62 @@ class ProvisioningControllerTests(unittest.TestCase):
             names = [event[0] for event in fakes.events]
             self.assertLess(max(index for index, name in enumerate(names) if name == 'stop_owned'), names.index('restore'))
 
+    def test_command_failure_artifact_captures_download_error_and_empty_validation_output(self):
+        output_error = supervisor.canary.CanaryError('tart_command_failed')
+        output_error.command_failure_output = {
+            'stdoutTail': b'partial out', 'stderrTail': b'partial err',
+            'stdoutObservedBytes': 11, 'stderrObservedBytes': 12, 'exitCode': 7}
+        for raw, error, expected in (
+                (b'', output_error, (b'partial out', b'partial err', 7)),
+                (b'{}', None, (b'', b'', None))):
+            with self.subTest(error=error), DownloadExercise(probe_stdout=raw, probe_error=error) as fakes:
+                with self.assertRaises((supervisor.canary.CanaryError, recovery.RecoveryError)):
+                    supervisor._exercise(self.root, self.admission, self.account, 'staff',
+                                         TargetPreferences, provisioning_bundle_fd=self.descriptor())
+            artifact = next(event[2] for event in fakes.events
+                            if event[:2] == ('record', 'command-failure.plist'))
+            self.assertEqual(artifact['kind'], 'softnet-command-failure-v1')
+            self.assertEqual(artifact['phase'],
+                             'provisioning-command' if error is not None else 'provisioning-receipt')
+            self.assertEqual((artifact['stdoutTail'], artifact['stderrTail'], artifact['exitCode']), expected)
+            self.assertFalse(any(event[:2] == ('record', 'provisioning-download.json') for event in fakes.events))
+
+    def test_readiness_retries_do_not_record_failure_and_terminal_failure_keeps_latest_output(self):
+        retry = supervisor.canary.CanaryError('tart_command_timeout')
+        retry.command_failure_output = {
+            'stdoutTail': b'', 'stderrTail': b'last readiness stderr',
+            'stdoutObservedBytes': 0, 'stderrObservedBytes': 21, 'exitCode': 9}
+        with DownloadExercise(probe_stdout=json.dumps(download_report(self.admission)).encode(),
+                              command_error=[retry]) as fakes:
+            supervisor._exercise(self.root, self.admission, self.account, 'staff', TargetPreferences,
+                                 provisioning_bundle_fd=self.descriptor())
+        self.assertFalse(any(event[:2] == ('record', 'command-failure.plist') for event in fakes.events))
+
+        with DownloadExercise(command_error=retry, monotonic_values=(0, 0, 1000)) as fakes:
+            with self.assertRaisesRegex(recovery.RecoveryError, 'vm_readiness_timeout'):
+                supervisor._exercise(self.root, self.admission, self.account, 'staff', TargetPreferences,
+                                     provisioning_bundle_fd=self.descriptor())
+        artifact = next(event[2] for event in fakes.events
+                        if event[:2] == ('record', 'command-failure.plist'))
+        self.assertEqual(artifact['phase'], 'vm-readiness')
+        self.assertEqual(artifact['errorCode'], 'vm_readiness_timeout')
+        self.assertEqual(artifact['stderrTail'], b'last readiness stderr')
+
+    def test_diagnostic_write_failure_still_cleans_up_and_fails_closed(self):
+        failure = supervisor.canary.CanaryError('tart_command_failed')
+        with DownloadExercise(probe_error=failure) as fakes:
+            original_record = supervisor._record
+            def record(directory, name, value):
+                if name == 'command-failure.plist':
+                    raise OSError('diagnostic write failed')
+                return original_record(directory, name, value)
+            with patch.object(supervisor, '_record', side_effect=record):
+                with self.assertRaises(recovery.RecoveryError):
+                    supervisor._exercise(self.root, self.admission, self.account, 'staff',
+                                         TargetPreferences, provisioning_bundle_fd=self.descriptor())
+        names = [event[0] for event in fakes.events]
+        self.assertLess(max(index for index, name in enumerate(names) if name == 'stop_owned'), names.index('restore'))
+
 
 if __name__ == '__main__':
     unittest.main()

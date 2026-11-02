@@ -247,6 +247,68 @@ class OfflineMacosVmCanaryTest(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertFalse(canary._vm_stopped(json.dumps(value)))
 
+    def test_bounded_runner_exposes_failure_output_tail_and_preserves_success(self):
+        with self.assertRaises(canary.CanaryError) as raised:
+            canary._run_bounded(
+                [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'out'); sys.stderr.buffer.write(b'err'); sys.exit(7)"],
+                timeout=5, env=os.environ,
+            )
+
+        self.assertEqual(raised.exception.args, ("tart_command_failed",))
+        self.assertEqual(canary._command_failure_output(raised.exception), {
+            "stdoutTail": b"out", "stderrTail": b"err",
+            "stdoutObservedBytes": 3, "stderrObservedBytes": 3, "exitCode": 7,
+        })
+        self.assertEqual(canary._run_bounded(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'ok')"],
+            timeout=5, env=os.environ,
+        ), (b"ok", b""))
+
+    def test_bounded_runner_failure_output_is_capped_and_survives_cleanup_interruption(self):
+        process_recorder = _PythonChildProcesses(subprocess.Popen)
+        payload = b"x" * (canary.COMMAND_FAILURE_TAIL_BYTES + 73)
+        def interrupt_group_signal(pid, sig):
+            if pid == process_recorder.processes[0].pid and sig == signal.SIGKILL:
+                os.kill(pid, signal.SIGKILL)
+                self.assertTrue(_wait_for_unreaped_exit(pid))
+                raise canary.CanaryError("interrupted_by_sigint")
+            return None
+
+        try:
+            with patch.object(canary.os, "killpg", side_effect=interrupt_group_signal), \
+                    patch.object(canary.subprocess, "Popen", side_effect=process_recorder):
+                with self.assertRaisesRegex(canary.CanaryError, "interrupted_by_sigint") as raised:
+                    canary._run_bounded(
+                        [sys.executable, "-c", "import sys; sys.stderr.buffer.write(b'x' * 4169); sys.exit(3)"],
+                        timeout=5, env=os.environ, output_limit=4096,
+                    )
+            failure_output = canary._command_failure_output(raised.exception)
+            self.assertEqual(failure_output["stderrTail"], payload[-4096:])
+            self.assertEqual(failure_output["stderrObservedBytes"], len(payload))
+            self.assertEqual(failure_output["exitCode"], None)
+            self.assertEqual(raised.exception.__cause__.args, ("tart_command_output_limit",))
+        finally:
+            _reap_test_children(process_recorder.processes)
+
+    def test_bounded_runner_timeout_keeps_output_metadata_on_primary_error(self):
+        with self.assertRaisesRegex(canary.CanaryError, "tart_command_timeout") as raised:
+            canary._run_bounded(
+                [sys.executable, "-c", "import sys,time; sys.stderr.buffer.write(b'before-timeout'); sys.stderr.flush(); time.sleep(60)"],
+                timeout=0.2, env=os.environ,
+            )
+        failure_output = canary._command_failure_output(raised.exception)
+        self.assertEqual(failure_output["stderrTail"], b"before-timeout")
+        self.assertEqual(failure_output["stderrObservedBytes"], len(b"before-timeout"))
+        self.assertIsNone(failure_output["exitCode"])
+
+    def test_command_failure_output_rejects_malformed_metadata(self):
+        error = canary.CanaryError("tart_command_failed")
+        error.command_failure_output = {
+            "stdoutTail": b"x", "stderrTail": b"", "stdoutObservedBytes": 0,
+            "stderrObservedBytes": 0, "exitCode": 1,
+        }
+        self.assertIsNone(canary._command_failure_output(error))
+
     def _write_fake_tart(self, *, frames="none", fail_delete=False, running_after_stop=False,
                          readiness=None, sleep_guest=0, partial_clone_failure=False,
                          spawn_term_ignoring_child=False, exit_run=False):

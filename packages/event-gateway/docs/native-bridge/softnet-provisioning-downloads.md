@@ -70,6 +70,21 @@ Missing or invalid receipts leave an incomplete run subject to the existing
 retained-failure recovery gate. A download failure still runs the existing
 stop/reap/conditional-restoration sequence.
 
+A terminal provisioning failure retains `command-failure.plist` with its fixed
+phase, stable error code, exit status when available, and at most 4 KiB from
+each command output stream. It records no command arguments or environment.
+Readiness retries that later succeed produce no failure record. The record is
+root-owned, validated and included in failed-run disposition hashes; a run
+containing it cannot become complete. Diagnostic write failure still runs
+cleanup and leaves the run failed.
+
+Failed-run disposition binds the provisioning manifest, bundle, CA and frozen
+DNS map to the retained admission. Its read-only observer may validate an
+expired destination inventory while checking current VM, process and original
+preference state. Future timestamps and all static policy and digest failures
+still fail validation. New provisioning and DNS snapshots continue to require
+an inventory no more than 20 minutes old; disposition permits no retry.
+
 ## Operator and later phases
 
 This source mode does not provide a ready-to-run privileged installer or

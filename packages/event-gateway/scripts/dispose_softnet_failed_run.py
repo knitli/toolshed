@@ -20,7 +20,11 @@ import softnet_run_state as state
 
 def _observe(admission_directory, run, identity, *, preferences_factory=controller.Preferences):
     observed_at = time.time_ns()
-    admission, account, _, digest = controller._admission_record(admission_directory)
+    provisioning_admission = (isinstance(identity, dict)
+                              and controller.PROVISIONING_FIELDS <= identity.keys())
+    admission, account, _, digest = (
+        controller._admission_record(admission_directory, allow_expired_inventory=True)
+        if provisioning_admission else controller._admission_record(admission_directory))
     expected_identity = {
         'vmName': admission['vmName'], 'macAddress': admission['macAddress'],
         'admissionSha256': digest, 'tartBinarySha256': controller.canary.TART_BINARY_SHA256,
@@ -33,6 +37,8 @@ def _observe(admission_directory, run, identity, *, preferences_factory=controll
             'positiveOriginIPv4': admission['positiveOriginIPv4'],
             'publicTrustRootsSha256': admission['publicTrustRootsSha256'],
         })
+    if 'provisioningBundleSha256' in admission:
+        expected_identity.update({key: admission[key] for key in controller.PROVISIONING_FIELDS})
     controller._require(identity == expected_identity, 'disposition_admission_mismatch')
     controller._binary(controller.TART, controller.canary.TART_BINARY_SHA256)
     controller._binary(controller.SOFTNET, controller.SOFTNET_SHA256)

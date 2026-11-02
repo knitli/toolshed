@@ -171,6 +171,93 @@ class SoftnetRunStateTests(unittest.TestCase):
         }
 
     @staticmethod
+    def _command_failure_record(**overrides):
+        record = {
+            "kind": "softnet-command-failure-v1", "phase": "provisioning-command",
+            "errorType": "ProvisioningError", "errorCode": "command_failed",
+            "stdoutTail": b"out", "stderrTail": b"err",
+            "stdoutObservedBytes": 3, "stderrObservedBytes": 3, "exitCode": 1,
+        }
+        return {**record, **overrides}
+
+    def test_command_failure_record_is_valid_only_on_incomplete_provisioning_run(self):
+        identity = self._provisioning_identity()
+        run, run_id = self._failed_restored_run(identity)
+        raw = plistlib.dumps(self._command_failure_record(), fmt=plistlib.FMT_BINARY)
+        self._rewrite(run / "command-failure.plist", raw)
+        self.assertFalse(run_state._check_run_directory(self.root, run_id))
+        self.assertEqual(run_state._failed_restored_files(self.root, run_id)[
+            "command-failure.plist"], hashlib.sha256(raw).hexdigest())
+
+        for bad in (
+            self._command_failure_record(kind="other"),
+            self._command_failure_record(phase="unknown"),
+            self._command_failure_record(phase=[]),
+            self._command_failure_record(errorType="bad type"),
+            self._command_failure_record(errorCode="UPPER"),
+            self._command_failure_record(stdoutTail=b"x" * 4097,
+                                         stdoutObservedBytes=4097),
+            self._command_failure_record(stdoutObservedBytes=2),
+            self._command_failure_record(stdoutObservedBytes=True),
+            self._command_failure_record(stderrObservedBytes=16 * 1024 * 1024 + 4097),
+            self._command_failure_record(exitCode=0),
+            self._command_failure_record(exitCode=True),
+            {**self._command_failure_record(), "argv": ["secret"]},
+        ):
+            self._rewrite(run / "command-failure.plist",
+                          plistlib.dumps(bad, fmt=plistlib.FMT_BINARY))
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_command_failure"):
+                with run_state.State(self.root):
+                    self.fail("invalid command failure record accepted")
+
+        self._rewrite(run / "command-failure.plist", b"x" * (run_state.MAX_COMMAND_FAILURE_BYTES + 1))
+        with self.assertRaisesRegex(recovery.RecoveryError, "oversized_command_failure"):
+            run_state._check_run_directory(self.root, run_id)
+
+        with tempfile.TemporaryDirectory(prefix="softnet-mode-test-",
+                                         dir=str(Path(tempfile.gettempdir()).resolve())) as directory:
+            mode_root = Path(directory) / "state"
+            mode_root.mkdir(mode=0o700)
+            mode_root.chmod(0o700)
+            with run_state.State(mode_root) as state:
+                ordinary_run, ordinary_id = self._run_with_recovery_records(state)
+                self._rewrite(ordinary_run / "command-failure.plist", raw)
+                with self.assertRaisesRegex(recovery.RecoveryError,
+                                            "invalid_command_failure_mode"):
+                    run_state._check_run_directory(mode_root, ordinary_id)
+
+    def test_command_failure_record_is_hashed_by_disposition_and_cannot_complete(self):
+        identity = self._provisioning_identity()
+        run, run_id = self._failed_restored_run(identity)
+        raw = plistlib.dumps(self._command_failure_record(), fmt=plistlib.FMT_BINARY)
+        self._rewrite(run / "command-failure.plist", raw)
+        with tempfile.TemporaryDirectory(prefix="softnet-complete-test-",
+                                         dir=str(Path(tempfile.gettempdir()).resolve())) as directory:
+            complete_root = Path(directory) / "state"
+            complete_root.mkdir(mode=0o700)
+            complete_root.chmod(0o700)
+            with run_state.State(complete_root) as state:
+                complete_run, _ = state.begin(identity)
+                self._rewrite(complete_run / "command-failure.plist", raw)
+                with self.assertRaisesRegex(recovery.RecoveryError,
+                                            "invalid_command_failure_completion"):
+                    state.complete(complete_run, self._stop_evidence())
+        run_state.dispose_failed_restored(
+            self.root, run_id, "failure ticket", expected_vm_reaped=False,
+            observe=lambda *_: self._observation())
+        disposition = plistlib.loads((run / "disposition.plist").read_bytes())
+        self.assertEqual(disposition["fileSha256"]["command-failure.plist"],
+                         hashlib.sha256(raw).hexdigest())
+        changed = dict(self._command_failure_record(), stderrTail=b"changed",
+                       stderrObservedBytes=7)
+        self._rewrite(run / "command-failure.plist",
+                      plistlib.dumps(changed, fmt=plistlib.FMT_BINARY))
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_disposition"):
+            with run_state.State(self.root):
+                self.fail("changed command failure record accepted")
+
+
+    @staticmethod
     def _route_timeout_report(duration_ns):
         """Return a valid positive-leg timeout receipt with controlled elapsed time."""
         report = SoftnetRunStateTests._route_report()

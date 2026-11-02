@@ -26,6 +26,11 @@ ROUTE_IDENTITY_KEYS = IDENTITY_KEYS | {
 PROVISIONING_IDENTITY_KEYS = IDENTITY_KEYS | {
     "provisioningBundleSha256", "provisioningCaSha256", "provisioningDnsMap",
     "provisioningManifest"}
+COMMAND_FAILURE_KIND = "softnet-command-failure-v1"
+COMMAND_FAILURE_PHASES = {"prelaunch", "vm-start", "vm-readiness", "preference-readback",
+                          "provisioning-command", "provisioning-receipt"}
+MAX_COMMAND_FAILURE_BYTES = 16 * 1024
+MAX_COMMAND_FAILURE_OUTPUT_BYTES = 16 * 1024 * 1024 + 4096
 PUBLIC_PROBE_HOST = "event-native-probe-83fc4c309835.knitli.workers.dev"
 PUBLIC_PROBE_PATH = "/probe"
 PUBLIC_PROBE_BODY_SHA256 = "773cdcdb36ecbdb7c720d4d135911f7d35252d862b10094f788d96a965b80600"
@@ -35,17 +40,21 @@ ROUTE_POSITIVE_CONTENT_TYPE = "application/manifest+json"
 ROUTE_POSITIVE_BODY_BYTES = 456
 ROUTE_POSITIVE_BODY_SHA256 = "096b1a4b927c04b0417ab1f49372e110c96d4db153cf3d6048f9d25c8b11d493"
 HEX_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+COMMAND_ERROR_TYPE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
+COMMAND_ERROR_CODE = re.compile(r"[a-z0-9_]{1,128}\Z")
 MAC_ADDRESS = re.compile(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\Z")
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
 ROOT_ENTRIES = {"controller.lock"}
 RUN_ENTRIES = {"identity.plist", "complete.plist", "reserved", "snapshot.plist", "restored",
                "launch.plist", "stop.plist", "helper-logs", "vm-logs", "disposition.plist",
-               "probe.plist", "route-probe.plist", "provisioning-download.json"}
+               "probe.plist", "route-probe.plist", "provisioning-download.json",
+               "command-failure.plist"}
 LOG_FILES = {"tart-stdout.bin", "tart-stderr.bin"}
 DISPOSITION_FILES = ("identity.plist", "reserved", "snapshot.plist", "restored",
                      "launch.plist", "stop.plist", "helper-logs/tart-stdout.bin",
                      "helper-logs/tart-stderr.bin", "vm-logs/tart-stdout.bin",
                      "vm-logs/tart-stderr.bin")
+COMMAND_FAILURE_FILE = "command-failure.plist"
 DISPOSITION_KIND = "softnet-failed-restored-disposition"
 MAX_LOG_BYTES = canary.MAX_SHORT_OUTPUT
 PROBE_DURATION_LIMIT_NS = 15_000_000_000
@@ -169,6 +178,9 @@ def _failed_restored_files(root, name, *, receipt_present=False, expected_vm_rea
             _require("provisioningBundleSha256" in identity, "invalid_provisioning_download")
             _check_provisioning_download(fd, identity)
             disposition_files = (*disposition_files, "provisioning-download.json")
+        if COMMAND_FAILURE_FILE in entries:
+            _check_command_failure(fd)
+            disposition_files = (*disposition_files, COMMAND_FAILURE_FILE)
         hashes = {}
         for relative in disposition_files:
             parts = relative.split("/")
@@ -236,6 +248,34 @@ def _check_stop(fd):
     stop = _plist(stop_bytes, "invalid_stop")
     _require(_stop_evidence_shape(stop), "invalid_stop")
     return stop_bytes, stop
+
+
+def _check_command_failure(fd):
+    raw = recovery._read(fd, COMMAND_FAILURE_FILE)
+    _require(len(raw) <= MAX_COMMAND_FAILURE_BYTES, "oversized_command_failure")
+    record = _plist(raw, "invalid_command_failure")
+    keys = {"kind", "phase", "errorType", "errorCode", "stdoutTail", "stderrTail",
+            "stdoutObservedBytes", "stderrObservedBytes", "exitCode"}
+    _require(isinstance(record, dict) and set(record) == keys
+             and record["kind"] == COMMAND_FAILURE_KIND
+             and isinstance(record["phase"], str)
+             and record["phase"] in COMMAND_FAILURE_PHASES
+             and isinstance(record["errorType"], str)
+             and COMMAND_ERROR_TYPE.fullmatch(record["errorType"])
+             and isinstance(record["errorCode"], str)
+             and COMMAND_ERROR_CODE.fullmatch(record["errorCode"])
+             and isinstance(record["stdoutTail"], bytes) and len(record["stdoutTail"]) <= 4096
+             and isinstance(record["stderrTail"], bytes) and len(record["stderrTail"]) <= 4096
+             and type(record["stdoutObservedBytes"]) is int
+             and len(record["stdoutTail"]) <= record["stdoutObservedBytes"]
+             <= MAX_COMMAND_FAILURE_OUTPUT_BYTES
+             and type(record["stderrObservedBytes"]) is int
+             and len(record["stderrTail"]) <= record["stderrObservedBytes"]
+             <= MAX_COMMAND_FAILURE_OUTPUT_BYTES
+             and (record["exitCode"] is None
+                  or (type(record["exitCode"]) is int and record["exitCode"] != 0
+                      and -255 <= record["exitCode"] <= 255)), "invalid_command_failure")
+    return raw, record
 
 
 def _check_probe(fd, identity):
@@ -455,6 +495,10 @@ def _check_run_directory(root, name):
         if "stop.plist" in entries:
             stop_bytes, stop = _check_stop(fd)
         complete_present = "complete.plist" in entries
+        if COMMAND_FAILURE_FILE in entries:
+            _check_command_failure(fd)
+            _require(provisioning_mode and not complete_present,
+                     "invalid_command_failure_mode")
         _require(not (complete_present and "disposition.plist" in entries),
                  "conflicting_disposition")
         for log_name in ("helper-logs", "vm-logs"):
@@ -622,8 +666,13 @@ class State(AbstractContextManager):
                      and ("route-probe.plist" not in entries or route_mode)
                      and ("provisioning-download.json" not in entries or provisioning_mode),
                      "invalid_probe_mode")
-            _require(entries <= RUN_ENTRIES and required <= entries, "invalid_run_entries")
+            _require(entries <= RUN_ENTRIES, "invalid_run_entries")
             _require("disposition.plist" not in entries, "conflicting_disposition")
+            if COMMAND_FAILURE_FILE in entries:
+                _check_command_failure(run_fd)
+                _require(provisioning_mode, "invalid_command_failure_mode")
+                raise recovery.RecoveryError("invalid_command_failure_completion")
+            _require(required <= entries, "invalid_run_entries")
             _require(recovery._read(run_fd, "identity.plist") == identity_bytes,
                      "invalid_identity")
             _check_launch(run_fd, identity)
