@@ -264,9 +264,23 @@ class OfflineMacosVmCanaryTest(unittest.TestCase):
             timeout=5, env=os.environ,
         ), (b"ok", b""))
 
+    def test_bounded_runner_uses_wait_exit_code_when_final_status_poll_is_unknown(self):
+        process_recorder = _PythonChildProcesses(subprocess.Popen)
+        with patch.object(canary, "_bounded_process_exit_status", side_effect=[7, None]), \
+                patch.object(canary.subprocess, "Popen", side_effect=process_recorder):
+            with self.assertRaisesRegex(canary.CanaryError, "tart_command_failed") as raised:
+                canary._run_bounded(
+                    [sys.executable, "-c", "import sys; sys.stderr.buffer.write(b'failed'); sys.exit(7)"],
+                    timeout=5, env=os.environ,
+                )
+
+        self.assertEqual(raised.exception.args, ("tart_command_failed",))
+        self.assertEqual(canary._command_failure_output(raised.exception)["exitCode"], 7)
+
     def test_bounded_runner_failure_output_is_capped_and_survives_cleanup_interruption(self):
         process_recorder = _PythonChildProcesses(subprocess.Popen)
         payload = b"x" * (canary.COMMAND_FAILURE_TAIL_BYTES + 73)
+
         def interrupt_group_signal(pid, sig):
             if pid == process_recorder.processes[0].pid and sig == signal.SIGKILL:
                 os.kill(pid, signal.SIGKILL)

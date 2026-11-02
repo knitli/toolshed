@@ -445,6 +445,7 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
             code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             raise CanaryError("tart_command_timeout") from None
+        exit_code = code
         if code:
             raise CanaryError("tart_command_failed")
         return bytes(streams[process.stdout]), bytes(streams[process.stderr])

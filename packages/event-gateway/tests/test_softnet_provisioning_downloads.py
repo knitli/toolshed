@@ -425,6 +425,7 @@ class ProvisioningControllerTests(unittest.TestCase):
         failure = supervisor.canary.CanaryError('tart_command_failed')
         with DownloadExercise(probe_error=failure) as fakes:
             original_record = supervisor._record
+
             def record(directory, name, value):
                 if name == 'command-failure.plist':
                     raise OSError('diagnostic write failed')
