@@ -134,6 +134,11 @@ later controller must admit the exact address map and public CA inventory,
 supervise only the fixed downloader while online, then disconnect before
 executing installers or downloaded code.
 
+The protected controller's opt-in `--provisioning-downloads` mode supplies that
+fixed guest transport and recovery-journal path. Its admission and remaining
+owner-package gates are documented in
+[protected provisioning downloads](softnet-provisioning-downloads.md).
+
 Offline installation must explicitly cover every bottle in dependency order.
 Homebrew's `--force-bottle` does not propagate to dependency installers. The
 reviewed local-bottle route therefore uses one verified local archive per

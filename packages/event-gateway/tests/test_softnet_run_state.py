@@ -13,6 +13,7 @@ import tempfile
 import time
 from contextlib import redirect_stdout
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 import unittest
 from unittest.mock import Mock, patch
 
@@ -23,6 +24,8 @@ import qualify_softnet_macos_vm as controller  # noqa: E402 -- Script modules lo
 import softnet_public_probe_guest as probe_guest  # noqa: E402 -- Script modules load from their local directory.
 import softnet_recovery as recovery  # noqa: E402 -- Script modules load from their local directory.
 import softnet_run_state as run_state  # noqa: E402 -- Script modules load from their local directory.
+import native_workspace_provisioning_downloads as provisioning_downloads  # noqa: E402
+import native_workspace_provisioning_guest as provisioning_guest  # noqa: E402
 
 
 class SoftnetRunStateTests(unittest.TestCase):
@@ -115,6 +118,56 @@ class SoftnetRunStateTests(unittest.TestCase):
             "positiveBodySha256": run_state.ROUTE_POSITIVE_BODY_SHA256, "positiveError": "",
             "publicTrustRootsSha256": roots, "gatewayCaAbsent": True,
             "startedAtUnixNs": now, "finishedAtUnixNs": now, "verified": True, "error": "",
+        }
+
+    @staticmethod
+    def _provisioning_identity():
+        manifest_raw = (provisioning_downloads.ROOT / provisioning_downloads.MANIFEST).read_bytes()
+        manifest = provisioning_downloads._json_no_duplicates(manifest_raw)
+        hosts = {urlsplit(asset["url"]).hostname for asset in manifest["assets"]}
+        hosts.update(rule["host"] for asset in manifest["assets"]
+                     for rule in asset["redirects"])
+        addresses = iter(("1.1.1.1", "8.8.8.8", "9.9.9.9", "208.67.222.222"))
+        return {
+            "vmName": "softnet-provisioning-test-vm",
+            "macAddress": "02:00:00:00:00:02",
+            "tartBinarySha256": canary.TART_BINARY_SHA256,
+            "softnetBinarySha256": "a" * 64,
+            "admissionSha256": "b" * 64,
+            "provisioningBundleSha256": "c" * 64,
+            "provisioningCaSha256": "d" * 64,
+            "provisioningDnsMap": {host: [next(addresses)] for host in sorted(hosts)},
+            "provisioningManifest": manifest_raw,
+        }
+
+    @staticmethod
+    def _provisioning_result(identity):
+        manifest, dns = provisioning_guest.validate_binding(
+            manifest_bytes=identity["provisioningManifest"],
+            dns_map=identity["provisioningDnsMap"],
+            ca_sha256=identity["provisioningCaSha256"],
+            bundle_sha256=identity["provisioningBundleSha256"])
+        assets = []
+        for asset in manifest["assets"]:
+            parsed = provisioning_downloads._validate_url(asset["url"])
+            assets.append({
+                "name": asset["name"], "initialUrl": asset["url"],
+                "finalHost": parsed.hostname, "finalPath": parsed.path or "/",
+                "selectedIPv4": dns[parsed.hostname][0], "status": 200,
+                "redirectCount": 0, "outcome": "downloaded", "bytes": 1,
+                "sha256": asset["sha256"],
+            })
+        return {
+            "kind": provisioning_guest.RESULT_KIND, "qualified": False, "prepared": False,
+            "guestRoot": "/private/tmp/knitli-native-provisioning-a1b2c3d4",
+            "bundleSha256": identity["provisioningBundleSha256"],
+            "downloadReceipt": {
+                "kind": provisioning_downloads.KIND, "status": "downloaded-only",
+                "qualified": False, "prepared": False,
+                "manifestSha256": provisioning_downloads.MANIFEST_SHA256,
+                "caBundleSha256": identity["provisioningCaSha256"],
+                "dnsMap": dns, "totalBytes": len(assets), "assets": assets,
+            },
         }
 
     @staticmethod
@@ -300,6 +353,103 @@ class SoftnetRunStateTests(unittest.TestCase):
             run, _ = self._run_with_recovery_records(state)
             with self.assertRaisesRegex(recovery.RecoveryError, "invalid_run_entries"):
                 state.complete(run, self._stop_evidence())
+
+    def test_provisioning_identity_uses_pinned_manifest_and_exact_dns_binding(self):
+        identity = self._provisioning_identity()
+        run_state._identity_record("a" * 32, identity)
+        changed = dict(identity, provisioningManifest=identity["provisioningManifest"] + b" ")
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
+            run_state._identity_record("a" * 32, changed)
+        changed = dict(identity, provisioningBundleSha256="E" * 64)
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
+            run_state._identity_record("a" * 32, changed)
+        changed = dict(identity, provisioningCaSha256="not-a-digest")
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
+            run_state._identity_record("a" * 32, changed)
+        bad_dns = dict(identity["provisioningDnsMap"])
+        bad_dns.pop(next(iter(bad_dns)))
+        changed = dict(identity, provisioningDnsMap=bad_dns)
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
+            run_state._identity_record("a" * 32, changed)
+        result = self._provisioning_result(identity)
+        changed = dict(identity, provisioningDnsMap=dict(identity["provisioningDnsMap"]))
+        first_host = next(iter(changed["provisioningDnsMap"]))
+        changed["provisioningDnsMap"][first_host] = ["1.0.0.1"]
+        with self.assertRaises(ValueError):
+            provisioning_guest.validate_result(
+                result, manifest_bytes=changed["provisioningManifest"],
+                dns_map=changed["provisioningDnsMap"],
+                ca_sha256=changed["provisioningCaSha256"],
+                bundle_sha256=changed["provisioningBundleSha256"])
+        bad_dns = dict(identity["provisioningDnsMap"])
+        first_host = next(iter(bad_dns))
+        bad_dns[first_host] = ["192.0.2.1"]
+        changed = dict(identity, provisioningDnsMap=bad_dns)
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
+            run_state._identity_record("a" * 32, changed)
+
+    def test_provisioning_download_completion_validates_receipt_and_binds_hash(self):
+        self.identity = self._provisioning_identity()
+        result = self._provisioning_result(self.identity)
+        receipt = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            try:
+                recovery._publish(fd, "provisioning-download.json", receipt)
+            finally:
+                os.close(fd)
+            state.complete(run, self._stop_evidence())
+        complete = plistlib.loads((run / "complete.plist").read_bytes())
+        self.assertEqual(complete["provisioningDownloadSha256"], hashlib.sha256(receipt).hexdigest())
+        with run_state.State(self.root):
+            pass
+        altered = dict(result, prepared=True)
+        self._rewrite(run / "provisioning-download.json",
+                      json.dumps(altered, sort_keys=True, separators=(",", ":")).encode())
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_provisioning_download"):
+            with run_state.State(self.root):
+                self.fail("prepared provisioning result accepted")
+
+    def test_provisioning_download_requires_a_valid_report_to_complete(self):
+        self.identity = self._provisioning_identity()
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_run_entries"):
+                state.complete(run, self._stop_evidence())
+
+    def test_provisioning_download_rejects_malformed_and_tampered_results(self):
+        self.identity = self._provisioning_identity()
+        valid = self._provisioning_result(self.identity)
+        candidates = [b"not json", json.dumps(dict(valid, qualified=True)).encode()]
+        wrong_bundle = dict(valid, bundleSha256="e" * 64)
+        candidates.append(json.dumps(wrong_bundle).encode())
+        tampered = json.loads(json.dumps(valid))
+        tampered["downloadReceipt"]["assets"][0]["sha256"] = "0" * 64
+        candidates.append(json.dumps(tampered).encode())
+        for receipt in candidates:
+            with self.subTest(receipt=receipt[:30]), run_state.State(self.root) as state:
+                run, _ = self._run_with_recovery_records(state)
+                fd = recovery._directory(run)
+                try:
+                    recovery._publish(fd, "provisioning-download.json", receipt)
+                finally:
+                    os.close(fd)
+                with self.assertRaisesRegex(recovery.RecoveryError,
+                                           "invalid_provisioning_download"):
+                    state.complete(run, self._stop_evidence())
+            shutil.rmtree(run)
+
+    def test_startup_failure_without_provisioning_receipt_remains_disposition_eligible(self):
+        identity = self._provisioning_identity()
+        run, run_id = self._failed_restored_run(identity)
+        run_state.dispose_failed_restored(
+            self.root, run_id, "startup failed before report", expected_vm_reaped=False,
+            observe=lambda *_: self._observation())
+        disposition = plistlib.loads((run / "disposition.plist").read_bytes())
+        self.assertNotIn("provisioning-download.json", disposition["fileSha256"])
+        with run_state.State(self.root):
+            pass
 
     def test_standalone_restored_marker_does_not_complete_a_run(self):
         with run_state.State(self.root) as state:
