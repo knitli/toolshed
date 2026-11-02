@@ -38,6 +38,13 @@ class Scan:
 
 
 class GuestInventoryProbeTests(unittest.TestCase):
+    def setUp(self):
+        self._brew_patch = mock.patch.object(probe, "_brew_inventory", return_value=self._brew_fixture())
+        self._brew_patch.start()
+
+    def tearDown(self):
+        self._brew_patch.stop()
+
     def test_fixed_command_uses_nonroot_identity_and_clean_environment(self):
         command = probe.command_template("/fixed/tart", "owned-vm", "loader")
         self.assertEqual(command[3:12], ["/usr/bin/sudo", "-n", "-u", "admin", "-g", "staff",
@@ -48,6 +55,150 @@ class GuestInventoryProbeTests(unittest.TestCase):
         self.assertEqual(command[-5:], ["/usr/bin/python3", "-I", "-c", "loader",
                                         "<fixed-source-bundle-b64>"])
         self.assertNotIn("AWS_SECRET_ACCESS_KEY=", " ".join(command))
+        self.assertEqual(probe.FIXED_ENV["HOMEBREW_NO_AUTO_UPDATE"], "1")
+        self.assertEqual(probe.FIXED_ENV["HOMEBREW_NO_INSTALL_FROM_API"], "1")
+        self.assertEqual(probe.FIXED_ENV["HOMEBREW_NO_ANALYTICS"], "1")
+
+    def test_brew_observation_uses_only_fixed_version_formula_and_ruby_reads(self):
+        self._brew_patch.stop()
+        calls = []
+        regular = os.stat_result((stat.S_IFREG | 0o755, 1, 1, 1, 501, 20, 10, 0, 0, 0))
+
+        def run(argv, deadline, output_limit=probe.MAX_COMMAND_BYTES):
+            calls.append((argv, output_limit))
+            result = ("Homebrew 5.0.0" if argv[-1] == "--version" and argv[0] == probe.BREW_PATH
+                      else "\n".join(f"formula{i:03d} {i}.0" for i in range(150)))
+            return {"state": "present", "version": result}
+
+        with mock.patch.object(probe.os, "lstat", return_value=regular), \
+                mock.patch.object(probe.os, "stat", return_value=regular), \
+                mock.patch.object(probe.os.path, "realpath", side_effect=lambda path: path), \
+                mock.patch.object(probe.os, "access", return_value=True), \
+                mock.patch.object(probe.canary, "_hash_file", return_value=("a" * 64, 10)), \
+                mock.patch.object(probe, "_git_metadata", return_value={
+                    "state": "missing", "head": None, "remoteOrigin": None,
+                    "remoteExpected": False, "dirtyState": "not_scanned"}), \
+                mock.patch.object(probe, "_run", side_effect=run):
+            result = probe._brew_inventory(10**30)
+        self._brew_patch.start()
+        self.assertEqual(calls, [
+            ([probe.BREW_PATH, "--version"], probe.MAX_COMMAND_BYTES),
+            ([probe.BREW_PATH, "list", "--versions", "--formula"], probe.MAX_BREW_LIST_BYTES),
+            ([probe.BREW_RUBY_PATH, "--version"], probe.MAX_COMMAND_BYTES),
+        ])
+        self.assertEqual(result["formulae"]["state"], "scan_capped")
+        self.assertEqual(len(result["formulae"]["items"]), probe.MAX_BREW_FORMULAE)
+        self.assertEqual(result["ruby"]["sha256"], "a" * 64)
+
+    def test_brew_list_output_over_default_cap_is_preserved_within_its_limit(self):
+        listing = "\n".join(f"formula{i:03d} {i}.0" for i in range(150)).encode()
+        self.assertGreater(len(listing), probe.MAX_COMMAND_BYTES)
+        self.assertLessEqual(len(listing), probe.MAX_BREW_LIST_BYTES)
+        with mock.patch.object(probe.time, "monotonic", return_value=0), \
+                mock.patch.object(probe.canary, "_run_bounded", return_value=(listing, b"")) as runner:
+            result = probe._run([probe.BREW_PATH, "list", "--versions", "--formula"], 10,
+                                 output_limit=probe.MAX_BREW_LIST_BYTES)
+        self.assertEqual(result, {"state": "present", "version": listing.decode()})
+        self.assertEqual(runner.call_args.kwargs["output_limit"], probe.MAX_BREW_LIST_BYTES)
+
+    def test_bounded_metadata_read_does_not_follow_symlinks_or_block_on_fifo(self):
+        with tempfile.TemporaryDirectory() as directory:
+            regular = Path(directory) / "regular"
+            regular.write_text("metadata")
+            link = Path(directory) / "link"
+            link.symlink_to(regular)
+            fifo = Path(directory) / "fifo"
+            os.mkfifo(fifo)
+            self.assertIsNone(probe._bounded_text(str(link), 64))
+            self.assertIsNone(probe._bounded_text(str(fifo), 64))
+
+    def test_brew_out_of_prefix_symlink_is_not_hashed_or_executed(self):
+        self._brew_patch.stop()
+        regular = os.stat_result((stat.S_IFREG | 0o755, 1, 1, 1, 501, 20, 10, 0, 0, 0))
+        with mock.patch.object(probe.os, "lstat", return_value=regular), \
+                mock.patch.object(probe.os, "stat", return_value=regular), \
+                mock.patch.object(probe.os.path, "realpath", return_value="/outside-homebrew/brew"), \
+                mock.patch.object(probe.os, "access", return_value=True), \
+                mock.patch.object(probe.canary, "_hash_file") as hash_file, \
+                mock.patch.object(probe, "_run") as run, \
+                mock.patch.object(probe, "_git_metadata", return_value={
+                    "state": "missing", "head": None, "remoteOrigin": None,
+                    "remoteExpected": False, "dirtyState": "not_scanned"}):
+            result = probe._brew_inventory(10**30)
+        self._brew_patch.start()
+        hash_file.assert_not_called()
+        run.assert_not_called()
+        self.assertEqual(result["identity"]["state"], "inaccessible")
+        self.assertEqual(result["formulae"]["state"], "inaccessible")
+
+    def test_git_inventory_reads_fixed_metadata_and_never_claims_clean(self):
+        with tempfile.TemporaryDirectory() as directory:
+            git_dir = Path(directory) / ".git"
+            (git_dir / "refs" / "heads").mkdir(parents=True)
+            (git_dir / "HEAD").write_text("ref: refs/heads/main\n")
+            (git_dir / "refs" / "heads" / "main").write_text("a" * 40 + "\n")
+            (git_dir / "config").write_text(
+                '[remote "origin"]\n\turl = https://github.com/Homebrew/homebrew-core.git\n')
+            result = probe._git_metadata(directory, probe.BREW_CORE_REMOTE)
+            (git_dir / "config").write_text(
+                '[remote "origin"]\n\turl = https://user:secret@example.test/repo.git\n')
+            unexpected = probe._git_metadata(directory, probe.BREW_CORE_REMOTE)
+        self.assertEqual(result["head"], "a" * 40)
+        self.assertTrue(result["remoteExpected"])
+        self.assertEqual(result["dirtyState"], "not_scanned")
+        self.assertEqual(unexpected["remoteOrigin"], "unexpected")
+        self.assertFalse(unexpected["remoteExpected"])
+
+    def test_homebrew_schema_rejects_malformed_fixed_observations(self):
+        valid = self._brew_fixture()
+        valid["identity"] = {"state": "present", "path": probe.BREW_PATH,
+                              "canonicalPath": "/opt/homebrew/Library/Homebrew/brew",
+                              "sha256": "b" * 64, "sizeBytes": 100}
+        valid["version"] = {"state": "present", "version": "Homebrew 5.0.0"}
+        valid["formulae"] = {"state": "present", "items": [
+            {"name": "git", "versions": ["2.50.0"]}]}
+        valid["core"] = {"state": "present", "head": "c" * 40,
+                          "remoteOrigin": probe.BREW_CORE_REMOTE + ".git",
+                          "remoteExpected": True, "dirtyState": "not_scanned"}
+        valid["ruby"] = {"state": "present", "path": probe.BREW_RUBY_PATH,
+                          "canonicalPath": "/opt/homebrew/Cellar/ruby/4.0/bin/ruby",
+                          "version": {"state": "present", "version": "ruby 4.0.0"},
+                          "sha256": "d" * 64}
+        self.assertTrue(probe._valid_homebrew(valid))
+        variants = []
+        for field, value in (("sha256", "invalid"), ("sizeBytes", True)):
+            changed = json.loads(json.dumps(valid))
+            changed["identity"][field] = value
+            variants.append(changed)
+        changed = json.loads(json.dumps(valid))
+        changed["formulae"]["items"][0]["command"] = "arbitrary"
+        variants.append(changed)
+        changed = json.loads(json.dumps(valid))
+        changed["core"]["remoteExpected"] = False
+        variants.append(changed)
+        changed = json.loads(json.dumps(valid))
+        changed["core"]["remoteOrigin"] = ["malformed"]
+        variants.append(changed)
+        changed = json.loads(json.dumps(valid))
+        changed["formulae"]["state"] = []
+        variants.append(changed)
+        for section in ("identity", "formulae", "core", "repository", "ruby"):
+            for malformed_state in ([], {}):
+                changed = json.loads(json.dumps(valid))
+                changed[section]["state"] = malformed_state
+                variants.append(changed)
+        changed = json.loads(json.dumps(valid))
+        changed["core"]["dirtyState"] = "clean"
+        variants.append(changed)
+        changed = json.loads(json.dumps(valid))
+        changed["core"]["head"] = "a" * 41
+        variants.append(changed)
+        changed = json.loads(json.dumps(valid))
+        changed["ruby"]["path"] = "/user/supplied/ruby"
+        variants.append(changed)
+        for invalid in variants:
+            with self.subTest(homebrew=invalid):
+                self.assertFalse(probe._valid_homebrew(invalid))
 
     def test_shared_bundle_sources_and_guest_hash_binding(self):
         bundle = probe.build_bundle()
@@ -240,7 +391,7 @@ class GuestInventoryProbeTests(unittest.TestCase):
                     "bytesObserved": 0, "entriesObserved": 0,
                     "scanComplete": False}), \
                 mock.patch.object(probe.shutil, "disk_usage", side_effect=OSError), \
-                mock.patch.object(probe.time, "monotonic", side_effect=[0] + [25] * 40):
+                mock.patch.object(probe.time, "monotonic", side_effect=[0] + [31] * 40):
             report = probe.collect_guest()
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["runtime"]["osBuild"]["state"], "budget_exhausted")
@@ -265,7 +416,7 @@ class GuestInventoryProbeTests(unittest.TestCase):
                     "scanComplete": False}), \
                 mock.patch.object(probe.shutil, "disk_usage", side_effect=OSError), \
                 mock.patch.object(probe.canary, "_run_bounded", side_effect=run), \
-                mock.patch.object(probe.time, "monotonic", side_effect=[0, 23, 25]):
+                mock.patch.object(probe.time, "monotonic", side_effect=[0, 0, 31]):
             report = probe.collect_guest()
         self.assertEqual(calls, [["/usr/sbin/sysctl", "-n", "hw.memsize"]])
         self.assertEqual(report["runtime"]["osBuild"]["state"], "budget_exhausted")
@@ -491,6 +642,17 @@ class GuestInventoryProbeTests(unittest.TestCase):
     def _sdk_fixture(self):
         return {"locations": [{"label": "clt", "state": "missing", "sdks": []}],
                 "scanCapped": False, "cltReceipt": {"state": "missing", "version": None}}
+
+    def _brew_fixture(self):
+        absent = {"state": "missing", "head": None, "remoteOrigin": None,
+                  "remoteExpected": False, "dirtyState": "not_scanned"}
+        return {"identity": {"state": "missing", "path": probe.BREW_PATH,
+                              "canonicalPath": None, "sha256": None, "sizeBytes": None},
+                "version": {"state": "missing", "version": None},
+                "formulae": {"state": "missing", "items": []},
+                "repository": dict(absent), "core": dict(absent),
+                "ruby": {"state": "missing", "path": probe.BREW_RUBY_PATH,
+                         "canonicalPath": None, "version": None, "sha256": None}}
 
 
 class _GuestPatches:

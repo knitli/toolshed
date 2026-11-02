@@ -73,6 +73,26 @@ does not admit a VM, configure networking, install tools, or invoke staging.
 Connected staging still requires the separate reviewed controller and egress
 policy described above.
 
+## Offline input preflight
+
+The offline controller's `--native-workspace-stage-inputs-preflight` opt-in
+collects the fixed provisioning inventory, sends the eight-file archive over
+Tart stdin, validates its receipt, and imports the stager with the guest's
+Homebrew Python. It does not call `stage()`. The existing owned clone, NIC-drop
+boundary, bounded child supervision, stopped-state verification, and clone
+cleanup apply throughout.
+
+The inventory also records the guest Homebrew executable and portable Ruby
+hashes, fixed version observations, a capped installed-formula list, and
+Homebrew/core Git metadata. It labels Git cleanliness `not_scanned` and reports
+missing or truncated observations explicitly. These observations help select
+the later provisioning inputs; they do not attest checkout cleanliness or
+replace the stopped VM measurement.
+
+The preflight retains the archive and both commands' bounded output as evidence.
+It remains `qualified: false` and `prepared: false`; successful receipt and
+import establish source transport, not dependency staging or suite success.
+
 ## Fixed preparation
 
 Run `packages/event-gateway/scripts/stage_native_workspace.py --source <upstream>
