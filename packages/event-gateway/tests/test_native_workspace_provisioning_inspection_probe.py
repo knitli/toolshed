@@ -449,6 +449,52 @@ class ProvisioningInspectionTests(unittest.TestCase):
             finally:
                 os.close(root_fd)
 
+    def test_receipt_rejects_malformed_duplicate_noncanonical_constant_and_unbound_json(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest, _, input_doc = self._fixture(directory)
+            downloads = Path(directory) / "downloads"
+            receipt_path = downloads / "receipt.json"
+            valid_raw = receipt_path.read_bytes()
+            root_fd = os.open(downloads, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+
+            def assert_receipt_rejected(raw, error, *, recompute_wrapper=False):
+                receipt_path.write_bytes(raw)
+                if recompute_wrapper:
+                    receipt = json.loads(raw)
+                    wrapper = {"kind": "native-workspace-provisioning-guest-download-v1",
+                               "qualified": False, "prepared": False,
+                               "guestRoot": input_doc["guestRoot"], "bundleSha256": input_doc["bundleSha256"],
+                               "downloadReceipt": receipt}
+                    wrapper_raw = (json.dumps(wrapper, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                    input_doc["downloadReceiptSha256"] = hashlib.sha256(wrapper_raw).hexdigest()
+                with self.assertRaisesRegex(ValueError, error):
+                    probe._inspect_assets(input_doc, manifest, root_fd)
+
+            try:
+                assert_receipt_rejected(b"{broken\n", "download_receipt_invalid")
+                assert_receipt_rejected(valid_raw.replace(b'{"assets":', b'{"assets":[],"assets":'),
+                                        "download_receipt_invalid")
+                nonstandard = json.loads(valid_raw)
+                nonstandard["totalBytes"] = float("nan")
+                nonstandard_raw = (json.dumps(nonstandard, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                assert_receipt_rejected(nonstandard_raw, "download_receipt_invalid",
+                                        recompute_wrapper=True)
+                assert_receipt_rejected(json.dumps(json.loads(valid_raw), indent=2).encode() + b"\n",
+                                        "download_receipt_invalid")
+                unbound = json.loads(valid_raw)
+                unbound["manifestSha256"] = "0" * 64
+                unbound_raw = (json.dumps(unbound, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                assert_receipt_rejected(unbound_raw, "download_receipt_binding_mismatch",
+                                        recompute_wrapper=True)
+                bad_asset = json.loads(valid_raw)
+                bad_asset["assets"][0]["sha256"] = "0" * 64
+                bad_asset_raw = (json.dumps(bad_asset, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                assert_receipt_rejected(bad_asset_raw, "download_receipt_binding_mismatch",
+                                        recompute_wrapper=True)
+            finally:
+                receipt_path.write_bytes(valid_raw)
+                os.close(root_fd)
+
     def test_download_directory_symlink_is_rejected(self):
         with tempfile.TemporaryDirectory() as outside:
             root = Path(tempfile.mkdtemp(prefix=".knitli-native-provisioning-", dir=outside))

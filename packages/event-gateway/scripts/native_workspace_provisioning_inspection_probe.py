@@ -461,7 +461,12 @@ def _inspect_assets(data, manifest, download_fd):
                         raise ValueError("download_receipt_duplicate_key")
                     value[key] = item
                 return value
-            receipt = json.loads(receipt_raw, object_pairs_hook=unique_object)
+
+            def reject_constant(value):
+                raise ValueError("download_receipt_invalid_constant")
+
+            receipt = json.loads(receipt_raw, object_pairs_hook=unique_object,
+                                 parse_constant=reject_constant)
         except (ValueError, UnicodeError, RecursionError):
             raise ValueError("download_receipt_invalid") from None
         if (type(receipt) is not dict or receipt_raw !=
