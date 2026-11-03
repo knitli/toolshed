@@ -75,8 +75,6 @@ class ProvisioningInspectionTests(unittest.TestCase):
         (root / "bottle-a.tar.gz").write_bytes(archive)
         channel_name = "channel-rust-1.95.0.toml"
         (root / channel_name).write_bytes(b"bad" if corrupt_last else rust)
-        for child in root.iterdir():
-            child.chmod(0o600)
         assets = [
             {"name": "bottle-a.tar.gz", "sha256": hashlib.sha256(archive).hexdigest(), "maxBytes": 1024 * 1024},
             {"name": channel_name, "sha256": hashlib.sha256(rust).hexdigest(),
@@ -85,8 +83,33 @@ class ProvisioningInspectionTests(unittest.TestCase):
         manifest = {"kind": "native-workspace-provisioning-assets-v1", "qualified": False,
                     "prepared": False, "assets": assets}
         manifest_raw = json.dumps(manifest, sort_keys=True, indent=2).encode() + b"\n"
-        input_doc = {"guestRoot": "/Users/admin/.knitli-native-provisioning-fixture0",
-                     "manifestSha256": hashlib.sha256(manifest_raw).hexdigest(),
+        manifest_sha256 = hashlib.sha256(manifest_raw).hexdigest()
+
+        def download_record(name, digest, size):
+            return {"name": name, "initialUrl": f"https://example.com/{name}",
+                    "finalHost": "example.com", "finalPath": f"/{name}",
+                    "selectedIPv4": "1.1.1.1", "status": 200, "redirectCount": 0,
+                    "outcome": "downloaded", "bytes": size, "sha256": digest}
+        producer_receipt = json.dumps({"kind": "native-workspace-provisioning-assets-v1",
+                                       "status": "downloaded-only", "qualified": False,
+                                       "prepared": False, "manifestSha256": manifest_sha256,
+                                       "caBundleSha256": "c" * 64, "dnsMap": {"example.com": ["1.1.1.1"]},
+                                       "totalBytes": len(archive) + len(rust), "assets": [
+                                           download_record("bottle-a.tar.gz", hashlib.sha256(archive).hexdigest(), len(archive)),
+                                           download_record(channel_name, hashlib.sha256(rust).hexdigest(), len(rust))]},
+                                      sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        (root / "receipt.json").write_bytes(producer_receipt)
+        for child in root.iterdir():
+            child.chmod(0o600)
+        guest_root = "/Users/admin/.knitli-native-provisioning-fixture0"
+        bundle_sha256 = "b" * 64
+        wrapper = {"kind": "native-workspace-provisioning-guest-download-v1", "qualified": False,
+                   "prepared": False, "guestRoot": guest_root, "bundleSha256": bundle_sha256,
+                   "downloadReceipt": json.loads(producer_receipt)}
+        wrapper_raw = (json.dumps(wrapper, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        input_doc = {"guestRoot": guest_root, "manifestSha256": manifest_sha256,
+                     "downloadReceiptSha256": hashlib.sha256(wrapper_raw).hexdigest(),
+                     "bundleSha256": bundle_sha256,
                      "ownerReceiptSha256": "a" * 64, "postDownloadMeasurement": {}}
         return manifest, manifest_raw, input_doc
 
@@ -365,13 +388,139 @@ class ProvisioningInspectionTests(unittest.TestCase):
             (downloads / "asset.tar.gz").symlink_to(target)
             manifest = {"assets": [{"name": "asset.tar.gz", "sha256": hashlib.sha256(b"pinned").hexdigest(),
                                     "maxBytes": 64}]}
-            data = {"assets": [{"name": "asset.tar.gz", "sha256": hashlib.sha256(b"pinned").hexdigest()}]}
+            asset = {"name": "asset.tar.gz", "sha256": hashlib.sha256(b"pinned").hexdigest(),
+                     "initialUrl": "https://example.com/asset.tar.gz", "finalHost": "example.com",
+                     "finalPath": "/asset.tar.gz", "selectedIPv4": "1.1.1.1", "status": 200,
+                     "redirectCount": 0, "outcome": "downloaded", "bytes": 6}
+            manifest_sha = "d" * 64
+            guest_root, bundle_sha = "/Users/admin/.knitli-native-provisioning-fixture0", "b" * 64
+            receipt = {"kind": "native-workspace-provisioning-assets-v1", "status": "downloaded-only",
+                       "qualified": False, "prepared": False, "manifestSha256": manifest_sha,
+                       "caBundleSha256": "c" * 64, "dnsMap": {}, "totalBytes": 6,
+                       "assets": [asset]}
+            receipt_raw = (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode()
+            (downloads / "receipt.json").write_bytes(receipt_raw)
+            (downloads / "receipt.json").chmod(0o600)
+            wrapper = {"kind": "native-workspace-provisioning-guest-download-v1", "qualified": False,
+                       "prepared": False, "guestRoot": guest_root, "bundleSha256": bundle_sha,
+                       "downloadReceipt": receipt}
+            wrapper_raw = (json.dumps(wrapper, sort_keys=True, separators=(",", ":")) + "\n").encode()
+            data = {"assets": [asset], "manifestSha256": manifest_sha, "guestRoot": guest_root,
+                    "bundleSha256": bundle_sha,
+                    "downloadReceiptSha256": hashlib.sha256(wrapper_raw).hexdigest()}
             fd = os.open(downloads, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
             try:
                 with self.assertRaises(OSError):
                     probe._inspect_assets(data, manifest, fd)
             finally:
                 os.close(fd)
+
+    def test_inspection_accepts_producer_receipt_and_rejects_unexpected_or_unsafe_extras(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest, _, input_doc = self._fixture(directory)
+            downloads = Path(directory) / "downloads"
+            root_fd = os.open(downloads, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                inspected, _ = probe._inspect_assets(input_doc, manifest, root_fd)
+                self.assertEqual(len(inspected), len(manifest["assets"]))
+                channel = downloads / "channel-rust-1.95.0.toml"
+                channel_bytes = channel.read_bytes()
+                channel.unlink()
+                with self.assertRaisesRegex(ValueError, "asset_set_mismatch"):
+                    probe._inspect_assets(input_doc, manifest, root_fd)
+                channel.write_bytes(channel_bytes)
+                channel.chmod(0o600)
+                (downloads / "unexpected").write_bytes(b"extra")
+                with self.assertRaisesRegex(ValueError, "asset_set_mismatch"):
+                    probe._inspect_assets(input_doc, manifest, root_fd)
+                (downloads / "unexpected").unlink()
+                receipt = downloads / "receipt.json"
+                tampered_receipt = json.loads(receipt.read_text())
+                tampered_receipt["caBundleSha256"] = "d" * 64
+                receipt.write_text(json.dumps(tampered_receipt, sort_keys=True, separators=(",", ":")) + "\n")
+                with self.assertRaisesRegex(ValueError, "download_receipt_digest_mismatch"):
+                    probe._inspect_assets(input_doc, manifest, root_fd)
+                receipt.unlink()
+                with self.assertRaisesRegex(ValueError, "asset_set_mismatch"):
+                    probe._inspect_assets(input_doc, manifest, root_fd)
+                (downloads / "receipt.json").symlink_to(downloads / "bottle-a.tar.gz")
+                with self.assertRaises(OSError):
+                    probe._inspect_assets(input_doc, manifest, root_fd)
+            finally:
+                os.close(root_fd)
+
+    def test_receipt_rejects_malformed_duplicate_noncanonical_constant_and_unbound_json(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest, _, input_doc = self._fixture(directory)
+            downloads = Path(directory) / "downloads"
+            receipt_path = downloads / "receipt.json"
+            valid_raw = receipt_path.read_bytes()
+            root_fd = os.open(downloads, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+
+            def assert_receipt_rejected(raw, error, *, recompute_wrapper=False):
+                receipt_path.write_bytes(raw)
+                if recompute_wrapper:
+                    receipt = json.loads(raw)
+                    wrapper = {"kind": "native-workspace-provisioning-guest-download-v1",
+                               "qualified": False, "prepared": False,
+                               "guestRoot": input_doc["guestRoot"], "bundleSha256": input_doc["bundleSha256"],
+                               "downloadReceipt": receipt}
+                    wrapper_raw = (json.dumps(wrapper, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                    input_doc["downloadReceiptSha256"] = hashlib.sha256(wrapper_raw).hexdigest()
+                with self.assertRaisesRegex(ValueError, error):
+                    probe._inspect_assets(input_doc, manifest, root_fd)
+
+            try:
+                assert_receipt_rejected(b"{broken\n", "download_receipt_invalid")
+                assert_receipt_rejected(valid_raw.replace(b'{"assets":', b'{"assets":[],"assets":'),
+                                        "download_receipt_duplicate_key")
+                nonstandard = json.loads(valid_raw)
+                nonstandard["totalBytes"] = float("nan")
+                nonstandard_raw = (json.dumps(nonstandard, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                assert_receipt_rejected(nonstandard_raw, "download_receipt_invalid",
+                                        recompute_wrapper=True)
+                assert_receipt_rejected(json.dumps(json.loads(valid_raw), indent=2).encode() + b"\n",
+                                        "download_receipt_invalid")
+                unbound = json.loads(valid_raw)
+                unbound["manifestSha256"] = "0" * 64
+                unbound_raw = (json.dumps(unbound, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                assert_receipt_rejected(unbound_raw, "download_receipt_binding_mismatch",
+                                        recompute_wrapper=True)
+                bad_asset = json.loads(valid_raw)
+                bad_asset["assets"][0]["sha256"] = "0" * 64
+                bad_asset_raw = (json.dumps(bad_asset, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                assert_receipt_rejected(bad_asset_raw, "download_receipt_binding_mismatch",
+                                        recompute_wrapper=True)
+            finally:
+                receipt_path.write_bytes(valid_raw)
+                os.close(root_fd)
+
+    def test_receipt_change_during_single_bounded_read_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest, _, input_doc = self._fixture(directory)
+            downloads = Path(directory) / "downloads"
+            receipt_path = downloads / "receipt.json"
+            receipt_inode = receipt_path.stat().st_ino
+            root_fd = os.open(downloads, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            real_read = os.read
+            changed = False
+
+            def read_and_change(fd, size):
+                nonlocal changed
+                chunk = real_read(fd, size)
+                if not changed and chunk and os.fstat(fd).st_ino == receipt_inode:
+                    with receipt_path.open("ab") as stream:
+                        stream.write(b" ")
+                    changed = True
+                return chunk
+
+            try:
+                with mock.patch.object(probe.os, "read", side_effect=read_and_change):
+                    with self.assertRaisesRegex(ValueError, "download_receipt_changed_during_read"):
+                        probe._inspect_assets(input_doc, manifest, root_fd)
+                self.assertTrue(changed)
+            finally:
+                os.close(root_fd)
 
     def test_download_directory_symlink_is_rejected(self):
         with tempfile.TemporaryDirectory() as outside:
