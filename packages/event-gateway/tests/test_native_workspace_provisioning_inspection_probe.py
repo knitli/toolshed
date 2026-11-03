@@ -84,6 +84,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
                     "prepared": False, "assets": assets}
         manifest_raw = json.dumps(manifest, sort_keys=True, indent=2).encode() + b"\n"
         manifest_sha256 = hashlib.sha256(manifest_raw).hexdigest()
+
         def download_record(name, digest, size):
             return {"name": name, "initialUrl": f"https://example.com/{name}",
                     "finalHost": "example.com", "finalPath": f"/{name}",
