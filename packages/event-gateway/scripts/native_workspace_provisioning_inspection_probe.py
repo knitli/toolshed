@@ -32,8 +32,8 @@ MAX_FORMULAE = 2048
 MAX_FORMULA_LIST_BYTES = 256 * 1024
 MAX_DIR_ENTRIES = 4096
 TIMEOUT = 180
-GUEST_ROOT = re.compile(r"/private/tmp/knitli-native-provisioning-[A-Za-z0-9_-]+\Z")
-GUEST_TMP = "/private/tmp"
+GUEST_ROOT = re.compile(r"/Users/admin/\.knitli-native-provisioning-[a-z0-9_]{8}\Z")
+GUEST_PARENT = "/Users/admin"
 SOURCE_FILES = {"probe": "native_workspace_provisioning_inspection_probe.py",
                 "canary": "qualify_offline_macos_vm.py", "manifest": "manifest.json",
                 "input": "inspection-input.json"}
@@ -490,12 +490,17 @@ def _inspect_assets(data, manifest, download_fd):
 
 
 def _open_guest_downloads(guest_root):
+    if not isinstance(guest_root, str) or not GUEST_ROOT.fullmatch(guest_root):
+        raise ValueError("guest_root_invalid")
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    tmp_fd = os.open(GUEST_TMP, flags)
+    parent_fd = _open_directory(GUEST_PARENT)
     try:
-        root_fd = os.open(guest_root.rsplit("/", 1)[-1], flags, dir_fd=tmp_fd)
+        parent_info = os.fstat(parent_fd)
+        if parent_info.st_uid != os.getuid() or stat.S_IMODE(parent_info.st_mode) & 0o022:
+            raise ValueError("guest_parent_unsafe")
+        root_fd = os.open(guest_root.rsplit("/", 1)[-1], flags, dir_fd=parent_fd)
     finally:
-        os.close(tmp_fd)
+        os.close(parent_fd)
     try:
         root_info = os.fstat(root_fd)
         if (root_info.st_uid != os.getuid() or stat.S_IMODE(root_info.st_mode) != 0o700):

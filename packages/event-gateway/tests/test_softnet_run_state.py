@@ -180,7 +180,7 @@ class SoftnetRunStateTests(unittest.TestCase):
             })
         return {
             "kind": provisioning_guest.RESULT_KIND, "qualified": False, "prepared": False,
-            "guestRoot": "/private/tmp/knitli-native-provisioning-a1b2c3d4",
+            "guestRoot": "/Users/admin/.knitli-native-provisioning-a1b2c3d4",
             "bundleSha256": identity["provisioningBundleSha256"],
             "downloadReceipt": {
                 "kind": provisioning_downloads.KIND, "status": "downloaded-only",
@@ -525,6 +525,7 @@ class SoftnetRunStateTests(unittest.TestCase):
                 state.begin(identity)
         run_state._identity_record("a" * 32, identity, allow_retained_manifest=True)
         result = self._provisioning_result(identity, allow_retained_manifest=True)
+        result["guestRoot"] = "/private/tmp/knitli-native-provisioning-a1b2c3d4"
         result["downloadReceipt"]["manifestSha256"] = provisioning_guest.RETAINED_MANIFEST_SHA256
         self.assertEqual(provisioning_guest.validate_result(
             result, manifest_bytes=identity["provisioningManifest"],
@@ -595,6 +596,7 @@ class SoftnetRunStateTests(unittest.TestCase):
         self._rewrite(run / "identity.plist", plistlib.dumps(
             identity_record, fmt=plistlib.FMT_BINARY, sort_keys=True))
         result = self._provisioning_result(identity, allow_retained_manifest=True)
+        result["guestRoot"] = "/private/tmp/knitli-native-provisioning-a1b2c3d4"
         result["downloadReceipt"]["manifestSha256"] = provisioning_guest.RETAINED_MANIFEST_SHA256
         receipt_bytes = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
         self._rewrite(run / "provisioning-download.json", receipt_bytes)
@@ -605,6 +607,15 @@ class SoftnetRunStateTests(unittest.TestCase):
             complete, fmt=plistlib.FMT_BINARY, sort_keys=True))
         with run_state.State(self.root):
             pass
+        result["qualified"] = True
+        corrupted = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        self._rewrite(run / "provisioning-download.json", corrupted)
+        complete["provisioningDownloadSha256"] = hashlib.sha256(corrupted).hexdigest()
+        self._rewrite(run / "complete.plist", plistlib.dumps(
+            complete, fmt=plistlib.FMT_BINARY, sort_keys=True))
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_provisioning_download"):
+            with run_state.State(self.root):
+                self.fail("corrupt historical provisioning result accepted")
 
     def test_disposed_retained_manifest_receipt_and_file_hashes_survive_root_scan(self):
         run, run_id = self._failed_restored_run(self._provisioning_identity())
@@ -647,6 +658,8 @@ class SoftnetRunStateTests(unittest.TestCase):
         candidates = [b"not json", json.dumps(dict(valid, qualified=True)).encode()]
         wrong_bundle = dict(valid, bundleSha256="e" * 64)
         candidates.append(json.dumps(wrong_bundle).encode())
+        legacy_root = dict(valid, guestRoot="/private/tmp/knitli-native-provisioning-a1b2c3d4")
+        candidates.append(json.dumps(legacy_root).encode())
         tampered = json.loads(json.dumps(valid))
         tampered["downloadReceipt"]["assets"][0]["sha256"] = "0" * 64
         candidates.append(json.dumps(tampered).encode())

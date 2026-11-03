@@ -5,6 +5,7 @@ import copy
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import platform
 import shutil
@@ -19,6 +20,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import native_workspace_provisioning_downloads as downloader  # noqa: E402
 import native_workspace_provisioning_guest as guest  # noqa: E402
+import native_workspace_provisioning_inspection_probe as inspection  # noqa: E402
 
 
 def _digest(data):
@@ -131,10 +133,11 @@ def download_all(manifest, dns, ca, ca_sha, output):
 
     def _receive(self, loader, payload, os_version="15.7.0"):
         stdout = io.BytesIO()
-        fake_root = self.root / "received-guest-root"
+        fake_root = self.root / ".knitli-native-provisioning-abcdefgh"
 
-        def mkdtemp(*, prefix):
-            self.assertEqual(prefix, "knitli-native-provisioning-")
+        def mkdtemp(*, prefix, **options):
+            self.assertEqual(prefix, ".knitli-native-provisioning-")
+            self.assertEqual(options, {"dir": "/Users/admin"})
             fake_root.mkdir(mode=0o700)
             return str(fake_root)
         old_platform = sys.platform
@@ -177,6 +180,33 @@ def download_all(manifest, dns, ca, ca_sha, output):
             "provisioning-data",
         ):
             self.assertEqual((guest_root / relative).stat().st_mode & 0o777, 0o700, relative)
+
+    def test_generated_loader_root_reopens_after_temp_cleanup(self):
+        _, bundle = self._fixture_bundle()
+        result, guest_root = self._receive(bundle["loader"], bundle["payload"])
+        self.addCleanup(lambda: shutil.rmtree(guest_root, ignore_errors=True))
+        downloads = guest_root / "downloads"
+        downloads.mkdir(mode=0o700)
+        (downloads / "asset").write_bytes(b"downloaded")
+        legacy_tmp = self.root / "private-tmp"
+        legacy_root = legacy_tmp / "knitli-native-provisioning-abcdefgh"
+        legacy_root.mkdir(parents=True, mode=0o700)
+        shutil.rmtree(legacy_tmp)
+
+        self.assertEqual(Path(result["guestRoot"]).name, guest_root.name)
+        canonical_root = f"/Users/admin/{guest_root.name}"
+        self.assertTrue(inspection.GUEST_ROOT.fullmatch(canonical_root))
+        with patch.object(inspection, "GUEST_PARENT", str(guest_root.parent)):
+            root_fd, downloads_fd = inspection._open_guest_downloads(canonical_root)
+        try:
+            asset_fd = os.open("asset", os.O_RDONLY, dir_fd=downloads_fd)
+            try:
+                self.assertEqual(os.read(asset_fd, 16), b"downloaded")
+            finally:
+                os.close(asset_fd)
+        finally:
+            os.close(downloads_fd)
+            os.close(root_fd)
 
     def test_receiver_rejects_tamper_extra_member_duplicate_keys_and_oversized_input(self):
         _, bundle = self._fixture_bundle()
@@ -233,7 +263,7 @@ def download_all(manifest, dns, ca, ca_sha, output):
         }
         return bundle, {
             "kind": guest.RESULT_KIND, "qualified": False, "prepared": False,
-            "guestRoot": "/private/tmp/knitli-native-provisioning-abcdefgh",
+            "guestRoot": "/Users/admin/.knitli-native-provisioning-abcdefgh",
             "bundleSha256": bundle["bundleSha256"], "downloadReceipt": receipt,
         }
 
@@ -302,6 +332,22 @@ def download_all(manifest, dns, ca, ca_sha, output):
                                    ca_sha256="invalid", bundle_sha256=bundle["bundleSha256"])
         with self.assertRaisesRegex(ValueError, "result_oversized"):
             self._validate(bundle, b" " * (guest.MAX_OUTPUT_BYTES + 1))
+
+    def test_result_validator_rejects_legacy_temporary_root(self):
+        bundle, result = self._valid_result()
+        result["guestRoot"] = "/private/tmp/knitli-native-provisioning-abcdefgh"
+        with self.assertRaisesRegex(ValueError, "result_binding_mismatch"):
+            self._validate(bundle, result)
+
+    def test_result_validator_allows_legacy_root_only_for_retained_history(self):
+        bundle, result = self._valid_result()
+        result["guestRoot"] = "/private/tmp/knitli-native-provisioning-abcdefgh"
+        with self.assertRaisesRegex(ValueError, "result_binding_mismatch"):
+            self._validate(bundle, result)
+        self.assertEqual(guest.validate_result(
+            result, manifest_bytes=bundle["manifestBytes"], dns_map=bundle["dnsMap"],
+            ca_sha256=bundle["caBundleSha256"], bundle_sha256=bundle["bundleSha256"],
+            allow_retained_manifest=True), result)
 
     def test_result_validator_requires_first_pinned_address_not_any_dns_answer(self):
         dns_map = copy.deepcopy(self.dns)

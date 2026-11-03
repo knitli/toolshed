@@ -50,6 +50,23 @@ def _rust_xz_archive():
 
 
 class ProvisioningInspectionTests(unittest.TestCase):
+    @staticmethod
+    def _owner_receipt(guest_root):
+        measurement = {"configBytes": 1, "configSha256": "a" * 64,
+                       "diskBytes": 2, "diskSha256": "b" * 64,
+                       "nvramBytes": 3, "nvramSha256": "c" * 64}
+        return {
+            "kind": "native-provisioning-downloaded-only-owner-receipt-v1",
+            "status": "downloaded-only", "qualified": False, "prepared": False,
+            "vmName": "softnet-canary-" + "d" * 32, "guestRoot": guest_root,
+            "baseMeasurementBefore": measurement, "baseMeasurementAfter": measurement,
+            "preDownloadMeasurement": measurement, "postDownloadMeasurement": measurement,
+            "baseUnchanged": True, "vmStopped": True, "vmDeleted": False,
+            "bundleSha256": "e" * 64, "downloadReceiptSha256": "f" * 64,
+            "inventorySha256": "1" * 64, "admissionSha256": "2" * 64,
+            "runId": "3" * 32, "macAddress": "02:00:00:00:00:01",
+        }
+
     def _fixture(self, directory, corrupt_last=False, channel_bytes=None):
         root = Path(directory) / "downloads"
         root.mkdir(mode=0o700)
@@ -68,7 +85,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
         manifest = {"kind": "native-workspace-provisioning-assets-v1", "qualified": False,
                     "prepared": False, "assets": assets}
         manifest_raw = json.dumps(manifest, sort_keys=True, indent=2).encode() + b"\n"
-        input_doc = {"guestRoot": "/private/tmp/knitli-native-provisioning-fixture",
+        input_doc = {"guestRoot": "/Users/admin/.knitli-native-provisioning-fixture0",
                      "manifestSha256": hashlib.sha256(manifest_raw).hexdigest(),
                      "ownerReceiptSha256": "a" * 64, "postDownloadMeasurement": {}}
         return manifest, manifest_raw, input_doc
@@ -231,7 +248,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
 
     def test_collect_runs_fresh_clone_and_preserves_source_base_binding(self):
         bundle = {"baseVmName": "softnet-canary-" + "a" * 32,
-                  "guestRoot": "/private/tmp/knitli-native-provisioning-fixture",
+                  "guestRoot": "/Users/admin/.knitli-native-provisioning-fixture0",
                   "loader": "fixed-loader", "argument": "fixed-b64",
                   "ownerReceiptSha256": "b" * 64, "postDownloadMeasurement": {"diskSha256": "c" * 64},
                   "manifestSha256": "d" * 64, "sourceSha256": {}, "bundleSha256": "e" * 64,
@@ -254,7 +271,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
 
     def test_host_rejects_passed_but_incomplete_guest_report(self):
         bundle = {"baseVmName": "softnet-canary-" + "a" * 32,
-                  "guestRoot": "/private/tmp/knitli-native-provisioning-fixture",
+                  "guestRoot": "/Users/admin/.knitli-native-provisioning-fixture0",
                   "loader": "fixed-loader", "argument": "fixed-b64",
                   "ownerReceiptSha256": "b" * 64, "postDownloadMeasurement": {},
                   "manifestSha256": "d" * 64, "sourceSha256": {}, "bundleSha256": "e" * 64,
@@ -272,7 +289,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
 
     def test_host_rejects_complete_report_missing_pinned_assets(self):
         bundle = {"baseVmName": "softnet-canary-" + "a" * 32,
-                  "guestRoot": "/private/tmp/knitli-native-provisioning-fixture",
+                  "guestRoot": "/Users/admin/.knitli-native-provisioning-fixture0",
                   "loader": "fixed-loader", "argument": "fixed-b64",
                   "ownerReceiptSha256": "b" * 64, "postDownloadMeasurement": {},
                   "manifestSha256": "d" * 64, "sourceSha256": {}, "bundleSha256": "e" * 64,
@@ -358,25 +375,94 @@ class ProvisioningInspectionTests(unittest.TestCase):
 
     def test_download_directory_symlink_is_rejected(self):
         with tempfile.TemporaryDirectory() as outside:
-            root = Path(tempfile.mkdtemp(prefix="knitli-native-provisioning-", dir=outside))
+            root = Path(tempfile.mkdtemp(prefix=".knitli-native-provisioning-", dir=outside))
             try:
                 (root / "downloads").symlink_to(outside, target_is_directory=True)
-                with mock.patch.object(probe, "GUEST_TMP", outside):
+                with mock.patch.object(probe, "GUEST_PARENT", outside):
                     with self.assertRaises(OSError):
-                        probe._open_guest_downloads(str(root))
+                        probe._open_guest_downloads(f"/Users/admin/{root.name}")
             finally:
                 (root / "downloads").unlink()
                 root.rmdir()
 
-    def test_bundle_binds_current_owner_receipt_and_fits_source_limit(self):
-        owner = Path("/private/tmp/event-provisioning-ready-7f7db80a167d40afb4892dd2b9328fe5/owner-result.json")
-        if not owner.exists():
-            self.skipTest("owner receipt unavailable")
-        bundle = probe.build_bundle(owner)
-        self.assertEqual(bundle["baseVmName"], "softnet-canary-e2343dabc5cf4a48983fecea7700d970")
-        self.assertEqual(bundle["guestRoot"], "/private/tmp/knitli-native-provisioning-lz7hvnc7")
-        self.assertTrue(probe.MANIFEST_PATH.exists())
-        self.assertLessEqual(len(bundle["argument"]), 128 * 1024)
+    def test_persistent_download_root_reopens_after_legacy_temp_root_is_removed(self):
+        safe_parent = Path.cwd().resolve()
+        with tempfile.TemporaryDirectory(dir=safe_parent) as parent, tempfile.TemporaryDirectory(dir=safe_parent) as old_tmp:
+            old_root = Path(old_tmp) / "knitli-native-provisioning-abcdefgh"
+            old_root.mkdir(mode=0o700)
+            (old_root / "downloads").mkdir(mode=0o700)
+            (old_root / "downloads/asset").write_bytes(b"legacy")
+            import shutil
+            shutil.rmtree(old_root)
+
+            root_name = ".knitli-native-provisioning-abcdefgh"
+            root = Path(parent) / root_name
+            root.mkdir(mode=0o700)
+            downloads = root / "downloads"
+            downloads.mkdir(mode=0o700)
+            (downloads / "asset").write_bytes(b"persistent")
+            guest_root = f"/Users/admin/{root_name}"
+            self.assertTrue(probe.GUEST_ROOT.fullmatch(guest_root))
+            self.assertFalse(probe.GUEST_ROOT.fullmatch(str(old_root)))
+            with mock.patch.object(probe, "GUEST_PARENT", parent):
+                root_fd, downloads_fd = probe._open_guest_downloads(guest_root)
+            try:
+                asset_fd = os.open("asset", os.O_RDONLY, dir_fd=downloads_fd)
+                try:
+                    self.assertEqual(os.read(asset_fd, 10), b"persistent")
+                finally:
+                    os.close(asset_fd)
+            finally:
+                os.close(downloads_fd)
+                os.close(root_fd)
+
+    def test_guest_rejects_synthetic_legacy_root_before_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest, raw, input_doc = self._fixture(directory)
+            input_doc["guestRoot"] = "/private/tmp/knitli-native-provisioning-abcdefgh"
+            with self.assertRaisesRegex(ValueError, "guest_root_invalid"):
+                self._guest_collect(directory, manifest, raw, input_doc)
+
+    def test_persistent_root_parent_must_be_private_nofollow_directory(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd().resolve()) as parent:
+            root = Path(parent) / ".knitli-native-provisioning-abcdefgh"
+            root.mkdir(mode=0o700)
+            (root / "downloads").mkdir(mode=0o700)
+            asset = root / "downloads/asset"
+            asset.write_bytes(b"read-only")
+            guest_root = f"/Users/admin/{root.name}"
+            # A group-writable parent must fail before downloads are opened.
+            os.chmod(parent, 0o720)  # nosec B103 -- Isolated rejection fixture; restored to 0700 below.
+            try:
+                with mock.patch.object(probe, "GUEST_PARENT", parent):
+                    with self.assertRaisesRegex(ValueError, "guest_parent_unsafe"):
+                        probe._open_guest_downloads(guest_root)
+            finally:
+                os.chmod(parent, 0o700)
+            self.assertEqual(asset.read_bytes(), b"read-only")
+            parent_link = Path(parent).with_name(Path(parent).name + "-link")
+            parent_link.symlink_to(parent, target_is_directory=True)
+            try:
+                with mock.patch.object(probe, "GUEST_PARENT", str(parent_link)):
+                    with self.assertRaises(OSError):
+                        probe._open_guest_downloads(guest_root)
+            finally:
+                parent_link.unlink()
+
+    def test_bundle_accepts_synthetic_persistent_owner_receipt_and_rejects_legacy_root(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd().resolve()) as directory:
+            owner_path = Path(directory) / "owner-result.json"
+            owner = self._owner_receipt("/Users/admin/.knitli-native-provisioning-abcdefgh")
+            owner_path.write_text(json.dumps(owner))
+            bundle = probe.build_bundle(owner_path)
+            self.assertEqual(bundle["guestRoot"], owner["guestRoot"])
+            self.assertEqual(bundle["baseVmName"], owner["vmName"])
+            self.assertLessEqual(len(bundle["argument"]), 128 * 1024)
+
+            owner["guestRoot"] = "/private/tmp/knitli-native-provisioning-abcdefgh"
+            owner_path.write_text(json.dumps(owner))
+            with self.assertRaisesRegex(probe.canary.CanaryError, "invalid_owner_receipt"):
+                probe.build_bundle(owner_path)
 
 
 if __name__ == "__main__":
