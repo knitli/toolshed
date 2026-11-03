@@ -61,7 +61,7 @@ class DispositionTests(unittest.TestCase):
 
     def run_observer(self, *, table=b"  1 /sbin/launchd\n", tart=b'{"Running":false,"State":"stopped"}',
                      config=b'{"os":"darwin","arch":"arm64","macAddress":"02:00:00:00:00:01","afterBoot":true}',
-                     current=b"original", identity=None, admission=None):
+                     current=b"original", identity=None, admission=None, bounded_runner=None):
         admitted = self.admission if admission is None else admission
 
         def preferences_factory():
@@ -77,7 +77,7 @@ class DispositionTests(unittest.TestCase):
                     patch.object(disposition.controller.canary, "_hash_file",
                                  return_value=("e" * 64, len(config), config)),
                     patch.object(disposition.controller.canary, "_run_bounded",
-                                 side_effect=[(tart, 0), (table, 0)]) as bounded,
+                                 side_effect=bounded_runner or [(tart, 0), (table, 0)]) as bounded,
                     patch.object(disposition.controller.recovery, "_directory", return_value=fd),
                     patch.object(disposition.controller.recovery, "_snapshot", return_value=(b"original", b"target")),
                     patch.object(disposition.subprocess, "Popen") as popen,
@@ -115,7 +115,40 @@ class DispositionTests(unittest.TestCase):
             "TART_HOME": self.admission["tartHome"], "TART_NO_AUTO_PRUNE": "1"})
         self.assertEqual(bounded.call_args_list[1].args[0],
                          ["/bin/ps", "-A", "-o", "pid=", "-o", "comm="])
+        self.assertEqual(bounded.call_args_list[1].kwargs["output_limit"],
+                         disposition.controller.canary.MAX_PROCESS_TABLE_BYTES)
         popen.assert_not_called()
+
+    def test_observe_parses_complete_process_table_beyond_short_output_cap(self):
+        quiet_table = b"1 /sbin/launchd\n" * 5000
+        self.assertGreater(len(quiet_table), disposition.controller.canary.MAX_SHORT_OUTPUT)
+
+        def bounded(argv, *, output_limit=disposition.controller.canary.MAX_SHORT_OUTPUT, **kwargs):
+            if argv[0] == "/bin/ps" and len(table) > output_limit:
+                raise disposition.controller.canary.CanaryError("tart_command_output_limit")
+            return (b'{"Running":false,"State":"stopped"}' if argv[0] != "/bin/ps" else table), 0
+
+        table = quiet_table
+        result, _ = self.run_observer(table=table, bounded_runner=bounded)
+        self.assertTrue(result["processesQuiet"])
+
+        table = quiet_table + b"999 /usr/local/bin/tart\n"
+        with self.assertRaisesRegex(recovery.RecoveryError, "runtime_quiescence_unproven"):
+            self.run_observer(table=table, bounded_runner=bounded)
+
+    def test_observe_rejects_process_table_over_process_cap_before_preferences(self):
+        table = b"1 /sbin/launchd\n" * (
+            disposition.controller.canary.MAX_PROCESS_TABLE_BYTES // len(b"1 /sbin/launchd\n") + 1)
+
+        def bounded(argv, *, output_limit=disposition.controller.canary.MAX_SHORT_OUTPUT, **kwargs):
+            if argv[0] == "/bin/ps" and len(table) > output_limit:
+                raise disposition.controller.canary.CanaryError("tart_command_output_limit")
+            return (b'{"Running":false,"State":"stopped"}' if argv[0] != "/bin/ps" else table), 0
+
+        with self.assertRaisesRegex(disposition.controller.canary.CanaryError,
+                                    "tart_command_output_limit"):
+            self.run_observer(table=table, bounded_runner=bounded)
+        self.assertEqual(self.prefs.reads, 0)
 
     def test_observe_rejects_admission_identity_mismatch_before_commands(self):
         wrong = {**self.identity, "admissionSha256": "0" * 64}

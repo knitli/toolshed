@@ -34,6 +34,7 @@ MAX_RECEIPT_BYTES = 64 * 1024
 MAX_CONFIG_BYTES = 1024 * 1024
 MAX_DISK_BYTES = 1024**4
 MAX_SHORT_OUTPUT = 64 * 1024
+MAX_PROCESS_TABLE_BYTES = 1024 * 1024
 COMMAND_FAILURE_TAIL_BYTES = 4096
 COMMAND_READ_BYTES = 4096
 # The observed-byte ceiling allows one full overflow read before the limit is enforced.
@@ -859,7 +860,7 @@ def _owned_group_is_zombie_only(pid, run_bounded, env):
     # Darwin killpg returns EPERM for a zombie-only group; keep its PID reserved.
     try:
         stdout, _ = run_bounded(["/bin/ps", "-A", "-o", "pid=", "-o", "pgid=", "-o", "stat="],
-                                timeout=5, env=env)
+                                timeout=5, env=env, output_limit=MAX_PROCESS_TABLE_BYTES)
         leader_seen = False
         for line in stdout.splitlines():
             member, group, state = line.split()

@@ -1740,20 +1740,25 @@ raise SystemExit(2)
             with self.subTest(output=output):
                 calls = []
 
-                def runner(argv, *, timeout, env):
-                    calls.append((argv, timeout, env))
+                def runner(argv, *, timeout, env, output_limit):
+                    calls.append((argv, timeout, env, output_limit))
                     return output, b""
 
                 self.assertEqual(canary._owned_group_is_zombie_only(pid, runner, {"SAFE": "1"}), expected)
                 self.assertEqual(calls, [
                     (["/bin/ps", "-A", "-o", "pid=", "-o", "pgid=", "-o", "stat="],
-                     5, {"SAFE": "1"}),
+                     5, {"SAFE": "1"}, canary.MAX_PROCESS_TABLE_BYTES),
                 ])
 
         for failure in (OSError("ps unavailable"), canary.CanaryError("ps_failed")):
             with self.subTest(failure=type(failure).__name__):
                 self.assertFalse(canary._owned_group_is_zombie_only(
                     pid, lambda *args, **kwargs: (_ for _ in ()).throw(failure), {}))
+
+        with patch.object(canary, "_run_bounded",
+                          side_effect=canary.CanaryError("tart_command_output_limit")) as run:
+            self.assertFalse(canary._owned_group_is_zombie_only(pid, canary._run_bounded, {}))
+        self.assertEqual(run.call_args.kwargs["output_limit"], canary.MAX_PROCESS_TABLE_BYTES)
 
     def test_failed_final_group_kill_taints_and_retains_clone_before_leader_reaped(self):
         self._write_fake_tart(frames="none")

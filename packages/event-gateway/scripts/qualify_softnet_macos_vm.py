@@ -544,7 +544,7 @@ def _child_exited(process):
 def _group_quiet(pid):
     """Keep the child PID reserved while independently observing every group member."""
     raw, _ = canary._run_bounded(['/bin/ps', '-A', '-o', 'pid=', '-o', 'pgid=', '-o', 'stat='],
-                                 timeout=5, env=ENV)
+                                 timeout=5, env=ENV, output_limit=canary.MAX_PROCESS_TABLE_BYTES)
     leader = False
     quiet = True
     for line in raw.splitlines():
