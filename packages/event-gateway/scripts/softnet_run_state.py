@@ -133,7 +133,8 @@ def _valid_stop_evidence(evidence):
     return _stop_evidence_shape(evidence) and all(evidence.values())
 
 
-def _failed_restored_files(root, name, *, receipt_present=False, expected_vm_reaped=None):
+def _failed_restored_files(root, name, *, receipt_present=False, expected_vm_reaped=None,
+                           allow_legacy_result=False):
     """Validate the narrow failed-restored state and return hashes of retained evidence."""
     path = Path(root) / name
     fd = recovery._directory(path)
@@ -146,7 +147,8 @@ def _failed_restored_files(root, name, *, receipt_present=False, expected_vm_rea
         _require("complete.plist" not in entries
                  and (receipt_present or "disposition.plist" not in entries)
                  and required <= entries, "ineligible_disposition")
-        _require(_check_run_directory(root, name, allow_retained_manifest=receipt_present)
+        _require(_check_run_directory(root, name, allow_retained_manifest=receipt_present,
+                                      allow_legacy_result=allow_legacy_result)
                  is False, "ineligible_disposition")
         identity_bytes = recovery._read(fd, "identity.plist")
         identity = _plist(identity_bytes, "invalid_identity")["identity"]
@@ -182,7 +184,8 @@ def _failed_restored_files(root, name, *, receipt_present=False, expected_vm_rea
         if "provisioning-download.json" in entries:
             _require("provisioningBundleSha256" in identity, "invalid_provisioning_download")
             _check_provisioning_download(
-                fd, identity, allow_retained_manifest=receipt_present)
+                fd, identity, allow_retained_manifest=receipt_present,
+                allow_legacy_result=allow_legacy_result)
             disposition_files = (*disposition_files, "provisioning-download.json")
         if COMMAND_FAILURE_FILE in entries:
             _check_command_failure(fd)
@@ -431,7 +434,8 @@ def _check_route_probe(fd, identity):
     return raw, report
 
 
-def _check_provisioning_download(fd, identity, *, allow_retained_manifest=False):
+def _check_provisioning_download(fd, identity, *, allow_retained_manifest=False,
+                                 allow_legacy_result=False):
     raw = recovery._read(fd, "provisioning-download.json")
     _require(0 < len(raw) <= provisioning_guest.MAX_OUTPUT_BYTES,
              "invalid_provisioning_download")
@@ -441,7 +445,8 @@ def _check_provisioning_download(fd, identity, *, allow_retained_manifest=False)
             dns_map=identity["provisioningDnsMap"],
             ca_sha256=identity["provisioningCaSha256"],
             bundle_sha256=identity["provisioningBundleSha256"],
-            allow_retained_manifest=allow_retained_manifest)
+            allow_retained_manifest=allow_retained_manifest,
+            allow_legacy_result=allow_legacy_result)
     except (TypeError, ValueError, UnicodeError, RecursionError):
         raise recovery.RecoveryError("invalid_provisioning_download") from None
     return raw, result
@@ -462,7 +467,7 @@ def _check_log_directory(root, run_name, name, *, complete):
         os.close(fd)
 
 
-def _check_run_directory(root, name, *, allow_retained_manifest=False):
+def _check_run_directory(root, name, *, allow_retained_manifest=False, allow_legacy_result=False):
     path = Path(root) / name
     fd = recovery._directory(path)
     try:
@@ -501,7 +506,8 @@ def _check_run_directory(root, name, *, allow_retained_manifest=False):
         provisioning_download_bytes = None
         if "provisioning-download.json" in entries:
             provisioning_download_bytes, _ = _check_provisioning_download(
-                fd, identity, allow_retained_manifest=allow_retained_manifest)
+                fd, identity, allow_retained_manifest=allow_retained_manifest,
+                allow_legacy_result=allow_legacy_result)
         stop_bytes = stop = None
         if "stop.plist" in entries:
             stop_bytes, stop = _check_stop(fd)
@@ -731,7 +737,7 @@ def dispose_failed_restored(root, run_id, approval_reference, *, expected_vm_rea
         state._scan(allowed_unresolved=run_id)
         run_path = state.root / run_id
         before = _failed_restored_files(
-            state.root, run_id, expected_vm_reaped=expected_vm_reaped)
+            state.root, run_id, expected_vm_reaped=expected_vm_reaped, allow_legacy_result=True)
         run_fd = recovery._directory(run_path)
         try:
             identity = _plist(recovery._read(run_fd, "identity.plist"), "invalid_identity")["identity"]
@@ -741,7 +747,7 @@ def dispose_failed_restored(root, run_id, approval_reference, *, expected_vm_rea
         _observation(observation)
         state._scan(allowed_unresolved=run_id)
         after = _failed_restored_files(
-            state.root, run_id, expected_vm_reaped=expected_vm_reaped)
+            state.root, run_id, expected_vm_reaped=expected_vm_reaped, allow_legacy_result=True)
         _require(before == after, "disposition_source_changed")
         _require(0 <= time.time_ns() - observation["observedAtUnixNs"] <= 30_000_000_000,
                  "stale_disposition_observation")

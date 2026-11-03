@@ -27,6 +27,10 @@ def _digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def _canonical_receipt(value):
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
 class NativeWorkspaceProvisioningGuestTests(unittest.TestCase):
     """Exercise host verification and the fixed receiver without network access."""
 
@@ -79,11 +83,21 @@ class NativeWorkspaceProvisioningGuestTests(unittest.TestCase):
         self.assertLess(loader.index("sys.version_info < (3, 13)"), loader.index("sys.stdin.buffer.read"))
         self.assertLess(loader.index("version[0] != 15"), loader.index("tempfile.mkdtemp"))
 
-    def _fixture_bundle(self):
-        """Prepare a known stub source; its fixed entry records writes and never downloads."""
-        source = b'''\
+    def _fixture_bundle(self, mode="ok"):
+        """Prepare a pinned synthetic asset whose complete directory can be inspected offline."""
+        payload = b"fixture download"
+        manifest = {"kind": downloader.KIND, "qualified": False, "prepared": False,
+                    "assets": [{"name": "fixture.txt", "url": "https://example.com/fixture.txt",
+                                "sha256": _digest(payload), "maxBytes": 64, "redirects": []}]}
+        manifest_raw = json.dumps(manifest, sort_keys=True, indent=2).encode() + b"\n"
+        source = f'''\
+import hashlib
 import json
+import os
 from pathlib import Path
+
+MODE = {mode!r}
+PAYLOAD = {payload!r}
 
 def _runtime_guard():
     pass
@@ -106,18 +120,47 @@ def download_all(manifest, dns, ca, ca_sha, output):
     assert source_path.stat().st_mode & 0o777 == 0o600
     assert manifest_path.stat().st_mode & 0o777 == 0o600
     assert Path(ca).stat().st_mode & 0o777 == 0o600
-    assert Path(output).exists() is False
-    return {"kind": "fixture-download-receipt", "status": "downloaded-only",
-            "qualified": False, "prepared": False}
+    output.mkdir(mode=0o700)
+    asset = manifest["assets"][0]
+    target = output / asset["name"]
+    target.write_bytes(PAYLOAD)
+    target.chmod(0o600)
+    record = {{"name": asset["name"], "initialUrl": asset["url"],
+              "finalHost": "example.com", "finalPath": "/fixture.txt",
+              "selectedIPv4": dns["example.com"][0], "status": 200,
+              "redirectCount": 0, "outcome": "downloaded", "bytes": len(PAYLOAD),
+              "sha256": hashlib.sha256(PAYLOAD).hexdigest()}}
+    receipt = {{"kind": {downloader.KIND!r}, "status": "downloaded-only",
+                "qualified": False, "prepared": False,
+                "manifestSha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+                "caBundleSha256": ca_sha, "dnsMap": dns,
+                "totalBytes": len(PAYLOAD), "assets": [record]}}
+    receipt_path = output / "receipt.json"
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\\n")
+    receipt_path.chmod(0o600)
+    if MODE == "mismatch": target.write_bytes(b"tampered")
+    elif MODE == "missing": target.unlink()
+    elif MODE == "extra": (output / "extra").write_bytes(b"extra")
+    elif MODE == "symlink":
+        target.unlink()
+        outside = root / "fixture-target"
+        outside.write_bytes(PAYLOAD)
+        outside.chmod(0o600)
+        target.symlink_to(outside)
+    elif MODE == "receipt_mismatch": receipt_path.write_bytes(b"{{}}\\n")
+    return receipt
 '''
+        source = source.encode()
         source_hash = _digest(source)
+        manifest_hash = _digest(manifest_raw)
         fixture_root = self.root / "tree"
-        (fixture_root / "packages/event-gateway/scripts").mkdir(parents=True)
-        (fixture_root / "packages/event-gateway/docs/native-bridge").mkdir(parents=True)
+        (fixture_root / "packages/event-gateway/scripts").mkdir(parents=True, exist_ok=True)
+        (fixture_root / "packages/event-gateway/docs/native-bridge").mkdir(parents=True, exist_ok=True)
         (fixture_root / guest.SOURCE_PATH).write_bytes(source)
-        (fixture_root / guest.MANIFEST_PATH).write_bytes(self.manifest_raw)
-        with patch.object(guest, "SOURCE_SHA256", source_hash):
-            bundle = guest.build_bundle(fixture_root, self.ca, self.dns)
+        (fixture_root / guest.MANIFEST_PATH).write_bytes(manifest_raw)
+        with patch.object(guest, "SOURCE_SHA256", source_hash), \
+                patch.object(guest, "MANIFEST_SHA256", manifest_hash):
+            bundle = guest.build_bundle(fixture_root, self.ca, {"example.com": ["1.1.1.1"]})
         return fixture_root, bundle
 
     def _execute_fixed_loader_fixture(self, loader_source):
@@ -155,23 +198,28 @@ def download_all(manifest, dns, ca, ca_sha, output):
             sys.stdin, sys.stdout = old_stdin, old_stdout
         return json.loads(stdout.getvalue()), fake_root
 
-    def test_fixed_loader_writes_private_pinned_files_and_reports_download_only(self):
+    def test_fixed_loader_writes_private_pinned_files_and_reports_pre_stop_inventory(self):
         fixture_root, bundle = self._fixture_bundle()
         del fixture_root
         result, guest_root = self._receive(bundle["loader"], bundle["payload"])
         self.addCleanup(lambda: shutil.rmtree(guest_root, ignore_errors=True))
         self.assertEqual(set(result), {"kind", "qualified", "prepared", "guestRoot", "bundleSha256",
-                                      "downloadReceipt"})
+                                      "downloadReceipt", "preStopInventory"})
         self.assertEqual(result["kind"], guest.RESULT_KIND)
         self.assertIs(result["qualified"], False)
         self.assertIs(result["prepared"], False)
         self.assertEqual(result["guestRoot"], str(guest_root))
         self.assertEqual(result["bundleSha256"], bundle["bundleSha256"])
         self.assertEqual(result["downloadReceipt"]["status"], "downloaded-only")
+        self.assertEqual(result["preStopInventory"], {"assets": [{"name": "fixture.txt", "bytes": 16,
+                                                                     "sha256": _digest(b"fixture download")}],
+                                                       "receiptSha256": _digest(
+                                                           (json.dumps(result["downloadReceipt"], sort_keys=True,
+                                                                       separators=(",", ":")) + "\n").encode())})
         self.assertEqual((guest_root / guest.SOURCE_PATH).read_bytes(), base64.b64decode(
             json.loads(bundle["payload"])["sourceBase64"], validate=True))
-        self.assertEqual((guest_root / guest.MANIFEST_PATH).read_bytes(), self.manifest_raw)
-        self.assertFalse((guest_root / "downloads").exists())
+        self.assertEqual((guest_root / guest.MANIFEST_PATH).read_bytes(), bundle["manifestBytes"])
+        self.assertEqual((guest_root / "downloads/fixture.txt").read_bytes(), b"fixture download")
         self.assertEqual((guest_root / "provisioning-data/public-roots.pem").read_bytes(), self.ca)
         self.assertEqual(guest_root.stat().st_mode & 0o777, 0o700)
         for relative in (
@@ -186,8 +234,6 @@ def download_all(manifest, dns, ca, ca_sha, output):
         result, guest_root = self._receive(bundle["loader"], bundle["payload"])
         self.addCleanup(lambda: shutil.rmtree(guest_root, ignore_errors=True))
         downloads = guest_root / "downloads"
-        downloads.mkdir(mode=0o700)
-        (downloads / "asset").write_bytes(b"downloaded")
         legacy_tmp = self.root / "private-tmp"
         legacy_root = legacy_tmp / "knitli-native-provisioning-abcdefgh"
         legacy_root.mkdir(parents=True, mode=0o700)
@@ -199,14 +245,45 @@ def download_all(manifest, dns, ca, ca_sha, output):
         with patch.object(inspection, "GUEST_PARENT", str(guest_root.parent)):
             root_fd, downloads_fd = inspection._open_guest_downloads(canonical_root)
         try:
-            asset_fd = os.open("asset", os.O_RDONLY, dir_fd=downloads_fd)
+            asset_fd = os.open("fixture.txt", os.O_RDONLY, dir_fd=downloads_fd)
             try:
-                self.assertEqual(os.read(asset_fd, 16), b"downloaded")
+                self.assertEqual(os.read(asset_fd, 32), b"fixture download")
             finally:
                 os.close(asset_fd)
         finally:
             os.close(downloads_fd)
             os.close(root_fd)
+
+    def test_fixed_loader_inventory_rejects_changed_missing_extra_symlink_and_receipt(self):
+        for mode in ("mismatch", "missing", "extra", "symlink", "receipt_mismatch"):
+            with self.subTest(mode=mode):
+                _, bundle = self._fixture_bundle(mode)
+                with self.assertRaises((OSError, SystemExit)):
+                    self._receive(bundle["loader"], bundle["payload"])
+                self.assertFalse((self.root / ".knitli-native-provisioning-abcdefgh").exists())
+
+    def test_fixed_loader_inventory_rejects_file_mutation_during_hash(self):
+        _, bundle = self._fixture_bundle()
+        fake_root = self.root / ".knitli-native-provisioning-abcdefgh"
+        asset_path = fake_root / "downloads/fixture.txt"
+        real_read = os.read
+        changed = False
+
+        def read_and_change(fd, size):
+            nonlocal changed
+            block = real_read(fd, size)
+            if not changed and block and asset_path.exists() and os.fstat(fd).st_ino == asset_path.stat().st_ino:
+                with asset_path.open("ab") as stream:
+                    stream.write(b"x")
+                changed = True
+            return block
+
+        with patch.object(os, "read", side_effect=read_and_change):
+            with self.assertRaises(SystemExit) as failure:
+                self._receive(bundle["loader"], bundle["payload"])
+        self.assertEqual(failure.exception.code, 43)
+        self.assertTrue(changed)
+        self.assertFalse(fake_root.exists())
 
     def test_receiver_rejects_tamper_extra_member_duplicate_keys_and_oversized_input(self):
         _, bundle = self._fixture_bundle()
@@ -261,11 +338,17 @@ def download_all(manifest, dns, ca, ca_sha, output):
             "caBundleSha256": bundle["caBundleSha256"], "dnsMap": selected_dns,
             "totalBytes": len(assets), "assets": assets,
         }
-        return bundle, {
+        result = {
             "kind": guest.RESULT_KIND, "qualified": False, "prepared": False,
             "guestRoot": "/Users/admin/.knitli-native-provisioning-abcdefgh",
             "bundleSha256": bundle["bundleSha256"], "downloadReceipt": receipt,
         }
+        result["preStopInventory"] = {
+            "assets": [{"name": record["name"], "bytes": record["bytes"],
+                        "sha256": record["sha256"]} for record in assets],
+            "receiptSha256": _digest(_canonical_receipt(receipt)),
+        }
+        return bundle, result
 
     def _validate(self, bundle, result):
         return guest.validate_result(result, manifest_bytes=bundle["manifestBytes"],
@@ -317,6 +400,28 @@ def download_all(manifest, dns, ca, ca_sha, output):
         with self.assertRaisesRegex(ValueError, "result_shape_invalid"):
             self._validate(bundle, extra)
 
+    def test_result_validator_requires_inventory_matching_validated_receipt(self):
+        bundle, original = self._valid_result()
+        missing = copy.deepcopy(original)
+        del missing["preStopInventory"]
+        with self.assertRaisesRegex(ValueError, "result_shape_invalid"):
+            self._validate(bundle, missing)
+
+        changed_asset = copy.deepcopy(original)
+        changed_asset["preStopInventory"]["assets"][0]["bytes"] += 1
+        with self.assertRaisesRegex(ValueError, "pre_stop_inventory_binding_mismatch"):
+            self._validate(bundle, changed_asset)
+
+        bool_size = copy.deepcopy(original)
+        bool_size["preStopInventory"]["assets"][0]["bytes"] = True
+        with self.assertRaisesRegex(ValueError, "pre_stop_inventory_shape_invalid"):
+            self._validate(bundle, bool_size)
+
+        changed_receipt = copy.deepcopy(original)
+        changed_receipt["preStopInventory"]["receiptSha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "pre_stop_inventory_receipt_mismatch"):
+            self._validate(bundle, changed_receipt)
+
     def test_result_validator_rejects_bad_state_binding_and_oversized_json(self):
         bundle, result = self._valid_result()
         qualified = copy.deepcopy(result)
@@ -342,12 +447,36 @@ def download_all(manifest, dns, ca, ca_sha, output):
     def test_result_validator_allows_legacy_root_only_for_retained_history(self):
         bundle, result = self._valid_result()
         result["guestRoot"] = "/private/tmp/knitli-native-provisioning-abcdefgh"
-        with self.assertRaisesRegex(ValueError, "result_binding_mismatch"):
+        result["kind"] = guest.LEGACY_RESULT_KIND
+        del result["preStopInventory"]
+        with self.assertRaisesRegex(ValueError, "result_shape_invalid"):
             self._validate(bundle, result)
+        with self.assertRaisesRegex(ValueError, "result_binding_mismatch"):
+            guest.validate_result(
+                result, manifest_bytes=bundle["manifestBytes"], dns_map=bundle["dnsMap"],
+                ca_sha256=bundle["caBundleSha256"], bundle_sha256=bundle["bundleSha256"],
+                allow_legacy_result=True)
         self.assertEqual(guest.validate_result(
             result, manifest_bytes=bundle["manifestBytes"], dns_map=bundle["dnsMap"],
             ca_sha256=bundle["caBundleSha256"], bundle_sha256=bundle["bundleSha256"],
             allow_retained_manifest=True), result)
+
+    def test_result_validator_legacy_flag_is_independent_from_retained_manifest_policy(self):
+        bundle, result = self._valid_result()
+        legacy = copy.deepcopy(result)
+        legacy["kind"] = guest.LEGACY_RESULT_KIND
+        del legacy["preStopInventory"]
+        kwargs = {"manifest_bytes": bundle["manifestBytes"], "dns_map": bundle["dnsMap"],
+                  "ca_sha256": bundle["caBundleSha256"], "bundle_sha256": bundle["bundleSha256"]}
+        self.assertEqual(guest.validate_result(legacy, **kwargs, allow_legacy_result=True), legacy)
+        with self.assertRaisesRegex(ValueError, "legacy_result_option_invalid"):
+            guest.validate_result(legacy, **kwargs, allow_legacy_result=1)
+
+        # Simulate this manifest digest existing only in the retained-manifest slot.
+        with patch.object(guest, "MANIFEST_SHA256", "0" * 64), \
+                patch.object(guest, "RETAINED_MANIFEST_SHA256", _digest(bundle["manifestBytes"])):
+            with self.assertRaisesRegex(ValueError, "manifest_binding_mismatch"):
+                guest.validate_result(legacy, **kwargs, allow_legacy_result=True)
 
     def test_result_validator_requires_first_pinned_address_not_any_dns_answer(self):
         dns_map = copy.deepcopy(self.dns)
