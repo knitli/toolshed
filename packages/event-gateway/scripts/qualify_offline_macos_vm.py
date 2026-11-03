@@ -1278,6 +1278,64 @@ def _append_native_workspace_stage_preflight_evidence(probe, result, evidence, c
         })
 
 
+def _prepare_native_workspace_provisioning_inspection(receipt_path):
+    if receipt_path is None:
+        return None, None
+    if isinstance(receipt_path, bool) or not isinstance(receipt_path, (str, os.PathLike)):
+        raise CanaryError("invalid_native_workspace_provisioning_inspection_receipt_path")
+    import native_workspace_provisioning_inspection_probe as probe
+    try:
+        return probe, probe.build_bundle(receipt_path)
+    except (ValueError, probe.canary.CanaryError) as error:
+        raise CanaryError("native_workspace_provisioning_inspection_bundle_failed") from error
+
+
+def _validate_native_workspace_provisioning_inspection_binding(base_vm, receipt, bundle):
+    expected = {**receipt["storageMeasurement"],
+                "diskBytes": receipt["preparedSnapshot"]["bytes"],
+                "diskSha256": receipt["preparedSnapshot"]["sha256"]}
+    if bundle["baseVmName"] != base_vm or bundle["postDownloadMeasurement"] != expected:
+        raise CanaryError("native_workspace_provisioning_inspection_base_mismatch")
+
+
+def _run_native_workspace_provisioning_inspection(probe, bundle, tart_path, clone, env, evidence,
+                                                  run_bounded, result, commands, cancel_check):
+    if probe is None:
+        return
+    metadata = {"status": "failed", "collectionOnly": True, "qualified": False,
+                "prepared": False, "sourceSha256": bundle["sourceSha256"],
+                "bundleSha256": bundle["bundleSha256"],
+                "ownerReceiptSha256": bundle["ownerReceiptSha256"],
+                "manifestSha256": bundle["manifestSha256"],
+                "postDownloadMeasurement": bundle["postDownloadMeasurement"]}
+    result["nativeWorkspaceProvisioningInspection"] = metadata
+    commands.append(probe.command_template(tart_path, clone, bundle["loader"]))
+    try:
+        collection = probe.collect(tart_path, clone, env, evidence, bundle,
+                                   run_bounded=run_bounded, cancel_check=cancel_check)
+    except probe.canary.CanaryError as error:
+        code = error.args[0] if error.args else "inspection_collection_failed"
+        metadata["failureCode"] = code
+        normalized = CanaryError(code if _is_interruption(error)
+                                 else "native_workspace_provisioning_inspection_failed")
+        _inherit_command_cleanup(error, normalized)
+        raise normalized from error
+    metadata.update(collection)
+    if (metadata.get("status") != "passed" or metadata.get("complete") is not True
+            or metadata.get("qualified") is not False or metadata.get("prepared") is not False):
+        metadata["status"] = "failed"
+        raise CanaryError("native_workspace_provisioning_inspection_failed")
+
+
+def _append_native_workspace_provisioning_inspection_evidence(probe, result, evidence, cleanup_errors):
+    if probe is not None:
+        records = {name: _raw_evidence(evidence / name, probe.MAX_REPORT_BYTES, cleanup_errors)
+                   for name in probe.LOG_NAMES}
+        result["rawEvidence"].update(records)
+        if "nativeWorkspaceProvisioningInspection" in result:
+            result["nativeWorkspaceProvisioningInspection"]["rawEvidence"] = records
+
+
 def _run_native_workspace_guest_inventory(probe, bundle, tart_path, clone, env, evidence,
                                          run_bounded, result, commands):
     if probe is None:
@@ -1401,7 +1459,8 @@ def _validate_gateway_public_root_inventory_flag(enabled):
 def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart", clock=time.monotonic,
             popen=subprocess.Popen, run_bounded=_run_bounded, tart_home=None, scpreferences_api=False,
             softnet_dhcp_binary=None, native_workspace_guest_inventory=False,
-            gateway_public_root_inventory=False, native_workspace_stage_inputs_preflight=False):
+            gateway_public_root_inventory=False, native_workspace_stage_inputs_preflight=False,
+            native_workspace_provisioning_inspection=None):
     """Run one owned clone and return its published summary after cleanup."""
     if not BASE_NAME.fullmatch(base_vm) or "://" in base_vm:
         raise CanaryError("base_vm_must_be_local_name")
@@ -1411,11 +1470,16 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
     _validate_gateway_public_root_inventory_flag(gateway_public_root_inventory)
     if type(native_workspace_stage_inputs_preflight) is not bool:
         raise CanaryError("invalid_native_workspace_stage_inputs_preflight_flag")
+    if native_workspace_provisioning_inspection is not None and (
+            scpreferences_api or softnet_dhcp_binary is not None or native_workspace_guest_inventory
+            or gateway_public_root_inventory or native_workspace_stage_inputs_preflight):
+        raise CanaryError("native_workspace_provisioning_inspection_incompatible_options")
     api_probe = api_bundle = None
     dhcp_probe = dhcp_bundle = dhcp_binary_fd = dhcp_binary = None
     inventory_probe = inventory_bundle = None
     tls_inventory_probe = tls_inventory_bundle = None
     stage_preflight_probe = stage_preflight_bundle = None
+    provisioning_inspection_probe = provisioning_inspection_bundle = None
     if not _waitid_available():
         raise CanaryError("nonreaping_wait_unavailable")
     receipt = _read_receipt(receipt_path)
@@ -1427,6 +1491,11 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
            "LC_ALL": "C", "LANG": "C", "TART_NO_AUTO_PRUNE": "1"}
     tart_path = _tart_identity(tart, receipt, env, run_bounded=run_bounded)
     _, base_disk_bytes = _base_vm_measurement(tart_home, base_vm, receipt)
+    provisioning_inspection_probe, provisioning_inspection_bundle = \
+        _prepare_native_workspace_provisioning_inspection(native_workspace_provisioning_inspection)
+    if provisioning_inspection_probe is not None:
+        _validate_native_workspace_provisioning_inspection_binding(
+            base_vm, receipt, provisioning_inspection_bundle)
     free = shutil.disk_usage(tart_home).free
     if free < base_disk_bytes + CLONE_LOG_HEADROOM:
         raise CanaryError("insufficient_vm_storage_capacity")
@@ -1593,6 +1662,9 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                                              env, evidence, run_bounded, result, commands)
         _run_native_workspace_stage_preflight(
             stage_preflight_probe, stage_preflight_bundle, tart_path, clone, env, evidence,
+            run_bounded, result, commands, supervision_failed)
+        _run_native_workspace_provisioning_inspection(
+            provisioning_inspection_probe, provisioning_inspection_bundle, tart_path, clone, env, evidence,
             run_bounded, result, commands, supervision_failed)
         _run_gateway_public_root_inventory(
             tls_inventory_probe, tls_inventory_bundle, tart_path, clone, env, evidence,
@@ -1765,6 +1837,8 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 inventory_probe, result, evidence, cleanup_errors)
             _append_native_workspace_stage_preflight_evidence(
                 stage_preflight_probe, result, evidence, cleanup_errors)
+            _append_native_workspace_provisioning_inspection_evidence(
+                provisioning_inspection_probe, result, evidence, cleanup_errors)
             _append_gateway_public_root_inventory_evidence(
                 tls_inventory_probe, result, evidence, cleanup_errors)
             if result["status"] == "passed" and any(value is None for value in result["rawEvidence"].values()):
@@ -1816,6 +1890,9 @@ def main(argv=None):
                         help="collect the fixed native workspace guest inventory")
     parser.add_argument("--native-workspace-stage-inputs-preflight", action="store_true",
                         help="collect provisioning inventory and verify fixed source transfer/import offline")
+    parser.add_argument("--native-workspace-provisioning-inspection", type=Path, default=None,
+                        metavar="DOWNLOADED-ONLY-OWNER-RECEIPT",
+                        help="collect bounded inspection from the exact measured downloaded-only VM")
     parser.add_argument("--gateway-public-root-inventory", action="store_true",
                         help="collect the fixed default TLS root inventory")
     args = parser.parse_args(argv)
@@ -1829,6 +1906,8 @@ def main(argv=None):
             options["native_workspace_guest_inventory"] = True
         if args.native_workspace_stage_inputs_preflight:
             options["native_workspace_stage_inputs_preflight"] = True
+        if args.native_workspace_provisioning_inspection is not None:
+            options["native_workspace_provisioning_inspection"] = args.native_workspace_provisioning_inspection
         if args.gateway_public_root_inventory:
             options["gateway_public_root_inventory"] = True
         summary = qualify(args.base_vm, args.receipt, args.evidence_dir, **options)
