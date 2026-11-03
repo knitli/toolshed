@@ -24,7 +24,8 @@ RETAINED_MANIFEST_SHA256 = "e51eaddfd9697f8f69499186e99d298707b979541df3dec1b9aa
 SOURCE_SHA256 = "6fbc9081316f7eb5f432ed227b7fd05526cd542db9d0392e5af4c9fc3bcf8cc1"
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 ROOT = Path(__file__).resolve().parents[3]
-GUEST_ROOT = re.compile(r"/private/tmp/knitli-native-provisioning-[a-z0-9_]{8}\Z")
+GUEST_ROOT = re.compile(r"/Users/admin/\.knitli-native-provisioning-[a-z0-9_]{8}\Z")
+LEGACY_GUEST_ROOT = re.compile(r"/private/tmp/knitli-native-provisioning-[a-z0-9_]{8}\Z")
 
 
 def _digest(data):
@@ -75,7 +76,7 @@ try:
     manifest = json.loads(manifest_raw, object_pairs_hook=pairs, parse_constant=lambda _: (_ for _ in ()).throw(ValueError('invalid_constant')))
 except (UnicodeError, ValueError, RecursionError): fail(37)
 module = types.ModuleType('native_workspace_provisioning_downloads')
-root = pathlib.Path(tempfile.mkdtemp(prefix='knitli-native-provisioning-'))
+root = pathlib.Path(tempfile.mkdtemp(prefix='.knitli-native-provisioning-', dir='/Users/admin'))
 try:
     os.chmod(root, 0o700)
     module.__file__ = str(root / SOURCE_PATH)
@@ -225,7 +226,7 @@ def validate_binding(*, manifest_bytes, dns_map, ca_sha256, bundle_sha256,
 
 def validate_result(raw, *, manifest_bytes, dns_map, ca_sha256, bundle_sha256,
                     allow_retained_manifest=False):
-    """Validate the exact bounded guest download receipt against retained identity pins."""
+    """Validate the receipt against identity pins; retained mode admits journal history paths."""
     manifest, checked_dns = validate_binding(manifest_bytes=manifest_bytes, dns_map=dns_map,
                                              ca_sha256=ca_sha256,
                                              bundle_sha256=bundle_sha256,
@@ -254,7 +255,9 @@ def validate_result(raw, *, manifest_bytes, dns_map, ca_sha256, bundle_sha256,
     if (result["kind"] != RESULT_KIND or result["qualified"] is not False
             or result["prepared"] is not False or result["bundleSha256"] != bundle_sha256
             or not isinstance(result["guestRoot"], str)
-            or not GUEST_ROOT.fullmatch(result["guestRoot"])):
+            or not (GUEST_ROOT.fullmatch(result["guestRoot"])
+                    # Prior completed journals recorded roots in temporary storage.
+                    or (allow_retained_manifest and LEGACY_GUEST_ROOT.fullmatch(result["guestRoot"])))):
         raise ValueError("result_binding_mismatch")
 
     receipt = result["downloadReceipt"]

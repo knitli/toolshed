@@ -75,7 +75,7 @@ def download_report(admission):
                'dnsMap': admission['provisioningDnsMap'],
                'assets': records, 'totalBytes': sum(item['bytes'] for item in records)}
     return {'kind': guest.RESULT_KIND, 'qualified': False, 'prepared': False,
-            'guestRoot': '/private/tmp/knitli-native-provisioning-abcdefgh',
+            'guestRoot': '/Users/admin/.knitli-native-provisioning-abcdefgh',
             'bundleSha256': admission['provisioningBundleSha256'], 'downloadReceipt': receipt}
 
 

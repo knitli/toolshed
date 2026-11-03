@@ -6,6 +6,17 @@ provisioning downloader in a measured macOS 15 ARM64 guest. It acquires the
 extract them, install tools, fetch Cargo dependencies, compile, or qualify a
 native runtime. Both `prepared` and `qualified` remain false.
 
+Successful downloads are retained under the admin-owned private directory
+`/Users/admin/.knitli-native-provisioning-<8>`. Inspection opens that exact
+root relative to `/Users/admin` with no-follow directory traversal and checks
+the owner and private modes. New admission and inspection reject legacy
+`/private/tmp/knitli-native-provisioning-*` paths. The journal scanner may
+recognize those exact historical receipt paths only when validating retained
+completed history; all receipt pins and journal hashes remain checked, and the
+controller does not migrate them.
+The local regression test simulates removal of `/private/tmp` contents and
+reopens the retained root; an actual postboot guest trial is still pending.
+
 ## Admission
 
 The existing protected `admission.plist` uses kind
