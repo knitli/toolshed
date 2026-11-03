@@ -85,6 +85,12 @@ preference state. Future timestamps and all static policy and digest failures
 still fail validation. New provisioning and DNS snapshots continue to require
 an inventory no more than 20 minutes old; disposition permits no retry.
 
+Root-state scans also recognize the exact PR239 manifest digest when checking
+already completed or disposed journals and retained download receipts. The
+compatibility path still checks the saved manifest, DNS map, CA and bundle
+digests, receipt contents, and disposition file hashes. New admissions and
+active guest downloads accept only the current manifest digest.
+
 ## Operator and later phases
 
 This source mode does not provide a ready-to-run privileged installer or
