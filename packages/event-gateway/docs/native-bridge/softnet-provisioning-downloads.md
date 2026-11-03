@@ -15,7 +15,7 @@ fresh VM identity, and complete pre-run disk/config/NVRAM measurement. It adds:
 - `provisioningManifest`: the exact pinned manifest bytes.
 - `provisioningBundleSha256`: the digest of the complete stdin bundle.
 - `provisioningCaSha256`: the reviewed public CA file digest.
-- `provisioningDnsMap`: all admitted IPv4 answers for the four fixed hosts.
+- `provisioningDnsMap`: all admitted IPv4 answers for the five manifest-derived hosts.
 - `provisioningDeniedIPv4`: the known account destination addresses.
 - `provisioningInventorySha256` and `provisioningInventory`: the digest and raw
   bytes of the trusted operator's destination inventory snapshot.
@@ -34,10 +34,10 @@ The CA pin identifies the reviewed public trust file containing 128 roots,
 without the known Gateway CA. Each candidate address must be globally routable,
 outside the published Cloudflare IPv4 front-door ranges and the known account
 destination list. After validating the bundle and clone, the owner resolves each
-of the four fixed hosts once with IPv4 and IPv6 enabled, validates the complete
-answer set (at most 32 resolver records and 1–8 unique safe IPv4 addresses per
-host), and publishes the numerically sorted IPv4 snapshot in both the admission
-and rebuilt bundle. IPv6 answers are observed but never admitted. The controller
+of the five manifest-derived hosts once with IPv4 and IPv6 enabled, validates
+the complete answer set (at most 32 resolver records and 1–8 unique safe IPv4
+addresses per host), and publishes the numerically sorted IPv4 snapshot in both
+the admission and rebuilt bundle. IPv6 answers are observed but never admitted. The controller
 consumes that frozen protected admission without resolving DNS again.
 
 The protected admission directory also contains `provisioning-bundle.json`.

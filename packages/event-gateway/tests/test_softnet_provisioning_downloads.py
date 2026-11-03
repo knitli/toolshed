@@ -35,7 +35,8 @@ def download_admission():
         'provisioningCaSha256': supervisor.PROVISIONING_CA_SHA256,
         'provisioningDnsMap': {'ghcr.io': ['140.82.112.34'], 'github.com': ['140.82.112.3'],
                                'static.rust-lang.org': ['151.101.2.137'],
-                               'release-assets.githubusercontent.com': ['185.199.108.133']},
+                               'release-assets.githubusercontent.com': ['185.199.108.133'],
+                               'pkg-containers.githubusercontent.com': ['185.199.108.154']},
         'provisioningDeniedIPv4': ['104.16.1.1'], 'provisioningInventorySha256': 'c' * 64,
     }
     bind_inventory(admission)
@@ -60,10 +61,13 @@ def download_report(admission):
     records = []
     for asset in manifest['assets']:
         url = urlsplit(asset['url'])
+        redirect = asset['redirects'][0] if asset['redirects'] else None
+        final_host = redirect['host'] if redirect else url.hostname
+        final_path = redirect['path'] if redirect else url.path
         records.append({'name': asset['name'], 'initialUrl': asset['url'],
-                        'finalHost': url.hostname, 'finalPath': url.path,
-                        'selectedIPv4': admission['provisioningDnsMap'][url.hostname][0],
-                        'status': 200, 'redirectCount': 0, 'outcome': 'downloaded',
+                        'finalHost': final_host, 'finalPath': final_path,
+                        'selectedIPv4': admission['provisioningDnsMap'][final_host][0],
+                        'status': 200, 'redirectCount': int(redirect is not None), 'outcome': 'downloaded',
                         'bytes': asset['maxBytes'], 'sha256': asset['sha256']})
     receipt = {'kind': guest.downloader.KIND, 'status': 'downloaded-only',
                'qualified': False, 'prepared': False, 'manifestSha256': guest.MANIFEST_SHA256,

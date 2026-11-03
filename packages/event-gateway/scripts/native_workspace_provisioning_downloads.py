@@ -24,7 +24,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 ROOT = Path(__file__).resolve().parents[3]
 MANIFEST = Path("packages/event-gateway/docs/native-bridge/native-workspace-provisioning-assets.json")
 # Reviewed manifest byte digest.
-MANIFEST_SHA256 = "e51eaddfd9697f8f69499186e99d298707b979541df3dec1b9aabc19b2081406"
+MANIFEST_SHA256 = "43c54411730f63d11b391f52a15fe4f24bc44607613071192b2085b8cf39de86"
 KIND = "native-workspace-provisioning-assets-v1"
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_ASSET_BYTES = 512 * 1024 * 1024
@@ -35,6 +35,7 @@ TOTAL_TIMEOUT = 1800
 ASSET_TIMEOUT = 300
 CHUNK_SIZE = 64 * 1024
 REDIRECT_HOST = "release-assets.githubusercontent.com"
+GHCR_REDIRECT_HOST = "pkg-containers.githubusercontent.com"
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -142,8 +143,19 @@ def _validate_manifest(document):
         initial = _validate_url(asset["url"])
         for redirect in asset["redirects"]:
             if (type(redirect) is not dict or set(redirect) != {"host", "path"}
-                    or redirect["host"] != REDIRECT_HOST
                     or not isinstance(redirect["path"], str) or not redirect["path"].startswith("/")):
+                raise ValueError("invalid_redirect_allowance")
+            if redirect["host"] == GHCR_REDIRECT_HOST:
+                source_digest = re.search(r"/blobs/sha256:([0-9a-f]{64})\Z", initial.path)
+                path = re.fullmatch(
+                    r"/(?:ghcr1|ghcrblobs(?:0[1-9]|1[0-9]|20))/blobs/sha256:([0-9a-f]{64})",
+                    redirect["path"],
+                )
+                if (initial.hostname != "ghcr.io" or not source_digest
+                        or source_digest.group(1) != asset["sha256"]
+                        or not path or path.group(1) != asset["sha256"]):
+                    raise ValueError("invalid_redirect_allowance")
+            elif redirect["host"] != REDIRECT_HOST:
                 raise ValueError("invalid_redirect_allowance")
             if initial.hostname == redirect["host"]:
                 raise ValueError("redirect_loop_allowance")
