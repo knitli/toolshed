@@ -138,7 +138,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
 
     def test_corrupt_last_asset_prevents_archive_and_local_metadata_inspection(self):
         with tempfile.TemporaryDirectory() as directory:
-            manifest, raw, input_doc = self._fixture(directory, corrupt_last=True)
+            _, raw, input_doc = self._fixture(directory, corrupt_last=True)
             module_dir = Path(directory) / "module"
             module_dir.mkdir(mode=0o700)
             (module_dir / "manifest.json").write_bytes(raw)
@@ -242,6 +242,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
                   "ownerReceiptSha256": bundle["ownerReceiptSha256"],
                   "postDownloadMeasurement": bundle["postDownloadMeasurement"], "homebrew": self._local_ok()}
         calls = []
+
         def runner(argv, **kwargs):
             calls.append(argv)
             return json.dumps(report).encode(), b""
