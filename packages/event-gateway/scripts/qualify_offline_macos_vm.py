@@ -34,6 +34,11 @@ MAX_RECEIPT_BYTES = 64 * 1024
 MAX_CONFIG_BYTES = 1024 * 1024
 MAX_DISK_BYTES = 1024**4
 MAX_SHORT_OUTPUT = 64 * 1024
+MAX_PROCESS_TABLE_BYTES = 1024 * 1024
+COMMAND_FAILURE_TAIL_BYTES = 4096
+COMMAND_READ_BYTES = 4096
+# The observed-byte ceiling allows one full overflow read before the limit is enforced.
+MAX_COMMAND_FAILURE_OBSERVED_BYTES = 16 * 1024 * 1024 + COMMAND_READ_BYTES
 MAX_GUEST_OUTPUT = 16 * 1024
 MAX_FRAME = 2048
 MAX_FRAMES = 256
@@ -55,6 +60,229 @@ _ACL_MUTATING_PERMISSIONS = 4 | 16 | 32 | 64 | 256 | 1024 | 4096 | 8192
 
 class CanaryError(ValueError):
     """Stable, non-sensitive failure code."""
+
+
+class _DarwinSiginfo(ctypes.Structure):
+    # XNU bsd/sys/signal.h: six 32-bit prefix fields followed by the 80-byte
+    # si_addr/si_value/si_band/pad tail on 64-bit Darwin.
+    _fields_ = [("si_signo", ctypes.c_int), ("si_errno", ctypes.c_int), ("si_code", ctypes.c_int),
+                ("si_pid", ctypes.c_int), ("si_uid", ctypes.c_uint), ("si_status", ctypes.c_int),
+                ("_tail", ctypes.c_long * 10)]
+
+
+_DARWIN_WAITID = None
+_DARWIN_WAITID_LOOKED_UP = False
+_DARWIN_P_PID = 1
+_DARWIN_WNOHANG = 0x00000001
+_DARWIN_WSTOPPED = 0x00000008
+_DARWIN_WEXITED = 0x00000004
+_DARWIN_WNOWAIT = 0x00000020
+_DARWIN_CLD_EXITED = 1
+_DARWIN_CLD_KILLED = 2
+_DARWIN_CLD_DUMPED = 3
+_DARWIN_CLD_STOPPED = 5
+
+
+def _python_waitid_available():
+    return all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT", "WSTOPPED"))
+
+
+def _darwin_waitid_function():
+    global _DARWIN_WAITID, _DARWIN_WAITID_LOOKED_UP
+    if not _DARWIN_WAITID_LOOKED_UP:
+        _DARWIN_WAITID_LOOKED_UP = True
+        if ctypes.sizeof(ctypes.c_void_p) == 8 and ctypes.sizeof(_DarwinSiginfo) == 104:
+            try:
+                library = ctypes.CDLL(None, use_errno=True)
+                function = library.waitid
+                function.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.POINTER(_DarwinSiginfo), ctypes.c_int]
+                function.restype = ctypes.c_int
+                _DARWIN_WAITID = (library, function)
+            except (AttributeError, OSError):
+                _DARWIN_WAITID = None
+    return None if _DARWIN_WAITID is None else _DARWIN_WAITID[1]
+
+
+def _waitid_available():
+    if _python_waitid_available():
+        return True
+    return sys.platform == "darwin" and _darwin_waitid_function() is not None
+
+
+def _waitid_no_reap(pid):
+    """Observe terminal child status without releasing its PID/process group."""
+    if _python_waitid_available():
+        try:
+            info = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        except InterruptedError:
+            raise
+        except ChildProcessError:
+            raise
+        if info is None:
+            return None
+        if info.si_pid != pid:
+            raise CanaryError("tart_command_process_status_unavailable")
+        code, status = info.si_code, info.si_status
+    elif sys.platform == "darwin":
+        function = _darwin_waitid_function()
+        if function is None:
+            raise CanaryError("nonreaping_wait_unavailable")
+        while True:
+            info = _DarwinSiginfo()
+            ctypes.set_errno(0)
+            result = function(_DARWIN_P_PID, pid, ctypes.byref(info),
+                              _DARWIN_WEXITED | _DARWIN_WNOHANG | _DARWIN_WNOWAIT)
+            if result == 0:
+                if info.si_pid == 0:
+                    return None
+                if info.si_pid != pid:
+                    raise CanaryError("tart_command_process_status_unavailable")
+                code, status = info.si_code, info.si_status
+                break
+            error = ctypes.get_errno()
+            if error == errno.EINTR:
+                raise InterruptedError(error, os.strerror(error))
+            if error == errno.ECHILD:
+                raise ChildProcessError(error, os.strerror(error))
+            raise OSError(error, os.strerror(error))
+    else:
+        raise CanaryError("nonreaping_wait_unavailable")
+
+    if code == _DARWIN_CLD_STOPPED:
+        # XNU may report a stopped process for WEXITED. Consume that stop
+        # notification (without reaping terminal status); the caller polls again.
+        if _python_waitid_available():
+            try:
+                os.waitid(os.P_PID, pid, os.WSTOPPED | os.WNOHANG)
+            except InterruptedError:
+                raise
+            except ChildProcessError:
+                raise
+        else:
+            function = _darwin_waitid_function()
+            while True:
+                stopped = _DarwinSiginfo()
+                ctypes.set_errno(0)
+                result = function(_DARWIN_P_PID, pid, ctypes.byref(stopped),
+                                  _DARWIN_WSTOPPED | _DARWIN_WNOHANG)
+                if result == 0:
+                    break
+                error = ctypes.get_errno()
+                if error == errno.EINTR:
+                    raise InterruptedError(error, os.strerror(error))
+                if error == errno.ECHILD:
+                    raise ChildProcessError(error, os.strerror(error))
+                raise OSError(error, os.strerror(error))
+        return None
+    if code == _DARWIN_CLD_EXITED:
+        return status
+    if code in (_DARWIN_CLD_KILLED, _DARWIN_CLD_DUMPED):
+        return -status
+    raise CanaryError("tart_command_process_status_unavailable")
+
+
+def _bounded_process_exit_status(process):
+    if getattr(process, "returncode", None) is not None:
+        return process.returncode
+    try:
+        return _waitid_no_reap(process.pid)
+    except ChildProcessError:
+        raise CanaryError("tart_command_process_identity_lost") from None
+    except InterruptedError:
+        return None
+
+
+def _command_cleanup_metadata(error):
+    errors = []
+    unreaped_processes = []
+    pending = [error]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        for item in getattr(current, "cleanup_errors", ()):
+            if isinstance(item, str) and item not in errors:
+                errors.append(item)
+        candidates = (*getattr(current, "unreaped_processes", ()),
+                     getattr(current, "unreaped_process", None))
+        for process in candidates:
+            if process is not None and all(process is not existing for existing in unreaped_processes):
+                unreaped_processes.append(process)
+        pending.extend((getattr(current, "__cause__", None), getattr(current, "__context__", None)))
+    return errors, unreaped_processes
+
+
+def _interruption_in_chain(error):
+    pending = [error]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if current.args and current.args[0] in {"interrupted_by_sigint", "interrupted_by_sigterm"}:
+            return current
+        pending.extend((getattr(current, "__cause__", None), getattr(current, "__context__", None)))
+    return None
+
+
+def _is_interruption(error):
+    return _interruption_in_chain(error) is not None
+
+
+def _record_command_cleanup(error, cleanup_errors):
+    errors, _ = _command_cleanup_metadata(error)
+    for item in errors:
+        if item not in cleanup_errors:
+            cleanup_errors.append(item)
+
+
+def _attach_command_cleanup(target, errors=(), unreaped_processes=()):
+    inherited_errors, inherited_processes = _command_cleanup_metadata(target)
+    combined_errors = list(inherited_errors)
+    for item in errors:
+        if item not in combined_errors:
+            combined_errors.append(item)
+    combined_processes = list(inherited_processes)
+    for process in unreaped_processes:
+        if all(process is not existing for existing in combined_processes):
+            combined_processes.append(process)
+    if combined_errors:
+        target.cleanup_errors = tuple(combined_errors)
+    if combined_processes:
+        target.unreaped_processes = tuple(combined_processes)
+        target.unreaped_process = combined_processes[0]
+
+
+def _inherit_command_cleanup(source, target):
+    errors, unreaped_processes = _command_cleanup_metadata(source)
+    _attach_command_cleanup(target, errors, unreaped_processes)
+
+
+def _command_failure_output(error):
+    pending = [error]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        value = getattr(current, "command_failure_output", None)
+        if isinstance(value, dict) and set(value) == {
+                "stdoutTail", "stderrTail", "stdoutObservedBytes", "stderrObservedBytes", "exitCode"}:
+            stdout, stderr = value["stdoutTail"], value["stderrTail"]
+            stdout_count, stderr_count, exit_code = (
+                value["stdoutObservedBytes"], value["stderrObservedBytes"], value["exitCode"])
+            if (isinstance(stdout, bytes) and len(stdout) <= COMMAND_FAILURE_TAIL_BYTES
+                    and isinstance(stderr, bytes) and len(stderr) <= COMMAND_FAILURE_TAIL_BYTES
+                    and type(stdout_count) is int and len(stdout) <= stdout_count <= MAX_COMMAND_FAILURE_OBSERVED_BYTES
+                    and type(stderr_count) is int and len(stderr) <= stderr_count <= MAX_COMMAND_FAILURE_OBSERVED_BYTES
+                    and (exit_code is None or (type(exit_code) is int and -255 <= exit_code <= 255 and exit_code != 0))):
+                return value
+        pending.extend((getattr(current, "__cause__", None), getattr(current, "__context__", None)))
+    return None
 
 
 def _install_termination_handlers():
@@ -153,7 +381,7 @@ def _read_receipt(path):
 
 
 def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=(), input_fd=None,
-                 capture_paths=None, cancel_check=None, popen=None):
+                 capture_paths=None, cancel_check=None, popen=None, _allow_zombie_proof=True):
     """Run fixed local Tart commands with bounded stdout/stderr and process cleanup."""
     captures = []
     if capture_paths is not None:
@@ -178,24 +406,34 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
         raise
     selector = selectors.DefaultSelector()
     streams = {process.stdout: bytearray(), process.stderr: bytearray()}
+    observed = {process.stdout: 0, process.stderr: 0}
+    tails = {process.stdout: bytearray(), process.stderr: bytearray()}
+    exit_code = None
     for stream in streams:
         os.set_blocking(stream.fileno(), False)
         selector.register(stream, selectors.EVENT_READ)
     deadline = time.monotonic() + timeout
     try:
-        while selector.get_map() or process.poll() is None:
+        # Keep the leader unreaped until the whole process group is swept or
+        # the bounded cleanup path proves that only zombies remain.
+        while selector.get_map() or _bounded_process_exit_status(process) is None:
             if cancel_check is not None and cancel_check():
                 raise CanaryError("tart_command_cancelled")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise CanaryError("tart_command_timeout")
             for key, _ in selector.select(min(0.1, remaining)):
-                chunk = os.read(key.fileobj.fileno(), 4096)
+                chunk = os.read(key.fileobj.fileno(), COMMAND_READ_BYTES)
                 if not chunk:
                     selector.unregister(key.fileobj)
                     key.fileobj.close()
                     continue
                 output = streams[key.fileobj]
+                observed[key.fileobj] += len(chunk)
+                tail = tails[key.fileobj]
+                tail.extend(chunk)
+                if len(tail) > COMMAND_FAILURE_TAIL_BYTES:
+                    del tail[:-COMMAND_FAILURE_TAIL_BYTES]
                 capture = captures[0 if key.fileobj is process.stdout else 1] if captures else None
                 if capture is not None:
                     remaining_capture = max(0, output_limit - len(output))
@@ -204,19 +442,139 @@ def _run_bounded(argv, *, timeout, env, output_limit=MAX_SHORT_OUTPUT, pass_fds=
                 if len(output) + len(chunk) > output_limit:
                     raise CanaryError("tart_command_output_limit")
                 output.extend(chunk)
+        exit_code = _bounded_process_exit_status(process)
+        if exit_code not in (None, 0):
+            raise CanaryError("tart_command_failed")
         try:
             code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             raise CanaryError("tart_command_timeout") from None
+        exit_code = code
         if code:
             raise CanaryError("tart_command_failed")
         return bytes(streams[process.stdout]), bytes(streams[process.stderr])
-    except BaseException:
+    except BaseException as primary_error:
+        primary_error.command_failure_output = {
+            "stdoutTail": bytes(tails[process.stdout]), "stderrTail": bytes(tails[process.stderr]),
+            "stdoutObservedBytes": observed[process.stdout], "stderrObservedBytes": observed[process.stderr],
+            "exitCode": exit_code,
+        }
+        cleanup_errors = []
+        group_quiet = False
+        identity_verified = False
+        cleanup_interruption = None
+        proof_cleanup_error = None
+
+        def remember_interruption(error):
+            nonlocal cleanup_interruption
+            interruption = _interruption_in_chain(error)
+            if interruption is None:
+                return
+            if cleanup_interruption is None:
+                cleanup_interruption = interruption
+            _inherit_command_cleanup(error, cleanup_interruption)
+
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.wait()
+            if getattr(process, "returncode", None) is not None:
+                raise ChildProcessError
+            _wait_owned_vm_exit(process, 0)
+        except (ChildProcessError, OSError):
+            cleanup_errors.append("process_group_identity_lost")
+        except CanaryError as exc:
+            cleanup_errors.append("process_group_identity_lost")
+            remember_interruption(exc)
+        except (KeyboardInterrupt, SystemExit) as exc:
+            cleanup_errors.append("process_group_identity_lost")
+            cleanup_interruption = exc
+        else:
+            identity_verified = True
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+                group_quiet = True
+            except ProcessLookupError:
+                group_quiet = True
+            except CanaryError as exc:
+                cleanup_errors.append("process_group_kill_failed")
+                remember_interruption(exc)
+            except (KeyboardInterrupt, SystemExit) as exc:
+                cleanup_errors.append("process_group_kill_failed")
+                cleanup_interruption = exc
+            except PermissionError:
+                if _allow_zombie_proof:
+                    # The proof is itself bounded. Disable nested proof if its own
+                    # cleanup encounters EPERM so a failed ps cannot recurse.
+                    def proof_runner(proof_argv, *, timeout, env, **kwargs):
+                        return _run_bounded(proof_argv, timeout=timeout, env=env,
+                                            _allow_zombie_proof=False, **kwargs)
+
+                    try:
+                        group_quiet = _owned_group_is_zombie_only(process.pid, proof_runner, env)
+                    except CanaryError as exc:
+                        proof_errors, proof_processes = _command_cleanup_metadata(exc)
+                        interruption = _interruption_in_chain(exc)
+                        if interruption is not None or proof_errors or proof_processes:
+                            proof_cleanup_error = exc
+                            remember_interruption(exc)
+                        else:
+                            raise
+                    except (KeyboardInterrupt, SystemExit) as exc:
+                        cleanup_interruption = exc
+                        cleanup_errors.append("process_group_kill_failed")
+                if not group_quiet:
+                    cleanup_errors.append("process_group_kill_failed")
+            except OSError:
+                cleanup_errors.append("process_group_kill_failed")
+            if identity_verified and not group_quiet:
+                try:
+                    # The leader PID is still reserved by WNOWAIT. Signal it
+                    # directly so Popen.send_signal cannot poll/reap it first.
+                    os.kill(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except OSError:
+                    cleanup_errors.append("process_kill_failed")
+                except CanaryError as exc:
+                    if _interruption_in_chain(exc) is not None:
+                        remember_interruption(exc)
+                    else:
+                        cleanup_errors.append("process_kill_failed")
+                except (KeyboardInterrupt, SystemExit) as exc:
+                    if cleanup_interruption is None:
+                        cleanup_interruption = exc
+                    cleanup_errors.append("process_kill_failed")
+                cleanup_errors.append("process_not_reaped_group_unverified")
+        if proof_cleanup_error is not None:
+            _inherit_command_cleanup(proof_cleanup_error, primary_error)
+        if group_quiet:
+            try:
+                process.wait(timeout=5)
+            except CanaryError as exc:
+                cleanup_errors.append("process_reap_failed")
+                remember_interruption(exc)
+            except (KeyboardInterrupt, SystemExit) as exc:
+                cleanup_errors.append("process_reap_failed")
+                if cleanup_interruption is None:
+                    cleanup_interruption = exc
+            except BaseException:
+                cleanup_errors.append("process_reap_failed")
+        if cleanup_interruption is not None:
+            _inherit_command_cleanup(primary_error, cleanup_interruption)
+            _attach_command_cleanup(cleanup_interruption, cleanup_errors, (process,))
+            if cleanup_interruption is primary_error:
+                raise
+            raise cleanup_interruption from primary_error
+        proof_errors, proof_processes = _command_cleanup_metadata(primary_error)
+        keep_process = ("process_not_reaped_group_unverified" in cleanup_errors
+                        or "process_reap_failed" in cleanup_errors
+                        or "process_group_identity_lost" in cleanup_errors)
+        if cleanup_errors or proof_errors or proof_processes:
+            handles = (process,) if keep_process else ()
+            _attach_command_cleanup(primary_error, cleanup_errors, handles)
+            all_cleanup_errors, _ = _command_cleanup_metadata(primary_error)
+            if hasattr(primary_error, "add_note"):
+                primary_error.add_note("bounded command cleanup failed: " + ", ".join(all_cleanup_errors))
+        else:
+            primary_error.cleanup_errors = ()
         raise
     finally:
         selector.close()
@@ -487,17 +845,22 @@ def _wait_owned_vm_exit(process, timeout):
         raise ChildProcessError
     deadline = time.monotonic() + timeout
     while True:
-        exited = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        try:
+            exited = _waitid_no_reap(process.pid)
+        except InterruptedError:
+            if time.monotonic() >= deadline:
+                raise
+            exited = None
         if exited is not None or time.monotonic() >= deadline:
             return
-        time.sleep(0.05)
+        time.sleep(min(0.05, max(0, deadline - time.monotonic())))
 
 
 def _owned_group_is_zombie_only(pid, run_bounded, env):
     # Darwin killpg returns EPERM for a zombie-only group; keep its PID reserved.
     try:
         stdout, _ = run_bounded(["/bin/ps", "-A", "-o", "pid=", "-o", "pgid=", "-o", "stat="],
-                                timeout=5, env=env)
+                                timeout=5, env=env, output_limit=MAX_PROCESS_TABLE_BYTES)
         leader_seen = False
         for line in stdout.splitlines():
             member, group, state = line.split()
@@ -507,7 +870,12 @@ def _owned_group_is_zombie_only(pid, run_bounded, env):
                 return False
             leader_seen |= int(member) == pid
         return leader_seen
-    except (OSError, CanaryError, ValueError):
+    except CanaryError as exc:
+        cleanup_errors, unreaped_processes = _command_cleanup_metadata(exc)
+        if _is_interruption(exc) or cleanup_errors or unreaped_processes:
+            raise
+        return False
+    except (OSError, ValueError):
         return False
 
 
@@ -806,7 +1174,9 @@ def _run_scpreferences_api(probe, bundle, tart_path, clone, env, evidence, run_b
         result["scpreferencesApi"].update(
             probe.qualify(tart_path, clone, env, evidence, bundle, run_bounded=run_bounded))
     except probe.canary.CanaryError as error:
-        raise CanaryError(*error.args) from None
+        normalized = CanaryError(*error.args)
+        _inherit_command_cleanup(error, normalized)
+        raise normalized from None
 
 
 def _append_scpreferences_api_evidence(probe, result, evidence, cleanup_errors):
@@ -838,7 +1208,9 @@ def _run_softnet_dhcp(probe, bundle, binary_fd, binary, tart_path, clone, env, e
         result["softnetDhcp"].update(probe.qualify(
             tart_path, clone, env, evidence, bundle, binary_fd, run_bounded=run_bounded))
     except probe.canary.CanaryError as error:
-        raise CanaryError(*error.args) from None
+        normalized = CanaryError(*error.args)
+        _inherit_command_cleanup(error, normalized)
+        raise normalized from None
 
 
 def _append_softnet_dhcp_evidence(probe, result, evidence, cleanup_errors):
@@ -854,17 +1226,197 @@ def _validate_softnet_dhcp_flag(binary_path):
         raise CanaryError("invalid_softnet_dhcp_binary_path")
 
 
+def _prepare_native_workspace_guest_inventory(enabled):
+    if not enabled:
+        return None, None
+    import native_workspace_guest_inventory_probe as probe
+    try:
+        return probe, probe.build_bundle()
+    except probe.canary.CanaryError as error:
+        raise CanaryError(*error.args) from None
+
+
+def _prepare_native_workspace_stage_preflight(enabled):
+    if not enabled:
+        return None, None
+    import native_workspace_stage_preflight_probe as probe
+    try:
+        return probe, probe.build_bundle()
+    except (ValueError, probe.canary.CanaryError) as error:
+        raise CanaryError("native_workspace_stage_preflight_bundle_failed") from error
+
+
+def _run_native_workspace_stage_preflight(probe, bundle, tart_path, clone, env, evidence,
+                                          run_bounded, result, commands, cancel_check):
+    if probe is None:
+        return
+    metadata = {"status": "failed", "qualified": False, "prepared": False}
+    result["nativeWorkspaceStagePreflight"] = metadata
+    try:
+        collection = probe.collect(tart_path, clone, env, evidence, bundle,
+                                   run_bounded=run_bounded, cancel_check=cancel_check)
+    except probe.canary.CanaryError as error:
+        code = error.args[0] if error.args else "native_workspace_stage_preflight_failed"
+        metadata["failureCode"] = code
+        normalized = CanaryError(code)
+        _inherit_command_cleanup(error, normalized)
+        raise normalized from error
+    metadata.update(collection)
+    commands.extend(collection.get("hostCommandTemplates", ()))
+    if (metadata.get("status") != "passed" or metadata.get("qualified") is not False
+            or metadata.get("prepared") is not False):
+        raise CanaryError("native_workspace_stage_preflight_failed")
+
+
+def _append_native_workspace_stage_preflight_evidence(probe, result, evidence, cleanup_errors):
+    if probe is not None:
+        limits = {name: probe.MAX_REPORT_BYTES for name in probe.LOG_NAMES}
+        limits["native-workspace-stage-inputs.tar.gz"] = probe.MAX_ARCHIVE_BYTES
+        result["rawEvidence"].update({
+            name: _raw_evidence(evidence / name, limit, cleanup_errors)
+            for name, limit in limits.items()
+        })
+
+
+def _run_native_workspace_guest_inventory(probe, bundle, tart_path, clone, env, evidence,
+                                         run_bounded, result, commands):
+    if probe is None:
+        return
+    metadata = {
+        "sourceSha256": bundle["sourceSha256"], "bundleSha256": bundle["bundleSha256"],
+        "collectionOnly": True, "prepared": False, "nativeQualified": False,
+        "rawReport": {"file": "native-workspace-guest-inventory-stdout.json",
+                       "maxBytes": probe.MAX_REPORT_BYTES},
+        "rawLogs": {"stdout": "native-workspace-guest-inventory-stdout.json",
+                    "stderr": "native-workspace-guest-inventory-stderr.bin",
+                    "maxBytesPerStream": probe.MAX_REPORT_BYTES},
+    }
+    result["nativeWorkspaceGuestInventory"] = metadata
+    commands.append(probe.command_template(tart_path, clone, bundle["loader"]))
+    cleanup_source = None
+    try:
+        collection = probe.collect(tart_path, clone, env, evidence, bundle,
+                                  run_bounded=run_bounded)
+    except probe.canary.CanaryError as error:
+        cleanup_source = error
+        collection = {"status": "failed", "report": None,
+                      "failureCode": error.args[0] if error.args else "collection_failed",
+                      "rawEvidence": {}}
+    metadata.update(collection)
+    if metadata["status"] != "passed":
+        code = (cleanup_source.args[0] if cleanup_source is not None
+                and probe.canary._is_interruption(cleanup_source)
+                and cleanup_source.args else "native_guest_inventory_collection_failed")
+        normalized = CanaryError(code)
+        if cleanup_source is not None:
+            _inherit_command_cleanup(cleanup_source, normalized)
+        raise normalized
+
+
+def _append_native_workspace_guest_inventory_evidence(probe, result, evidence, cleanup_errors):
+    if probe is not None:
+        result["rawEvidence"].update({
+            name: _raw_evidence(evidence / name, probe.MAX_REPORT_BYTES, cleanup_errors)
+            for name in ("native-workspace-guest-inventory-stdout.json",
+                         "native-workspace-guest-inventory-stderr.bin")
+        })
+
+
+def _prepare_gateway_public_root_inventory(enabled):
+    if not enabled:
+        return None, None
+    import gateway_public_root_inventory_probe as probe
+    try:
+        return probe, probe.build_bundle()
+    except probe.ProbeError as error:
+        raise CanaryError(*error.args) from None
+
+
+def _run_gateway_public_root_inventory(probe, bundle, tart_path, clone, env, evidence,
+                                       run_bounded, result, commands):
+    if probe is None:
+        return
+    stdout_name = "gateway-public-root-inventory-stdout.json"
+    stderr_name = "gateway-public-root-inventory-stderr.bin"
+    metadata = {
+        "sourceSha256": bundle["sourceSha256"],
+        "bundleSha256": bundle["bundleSha256"],
+        "collectionOnly": True,
+        "prepared": False,
+        "nativeQualified": False,
+        "rawReport": {"file": stdout_name, "maxBytes": probe.MAX_REPORT_BYTES},
+        "rawLogs": {"stdout": stdout_name, "stderr": stderr_name,
+                    "maxBytesPerStream": probe.MAX_REPORT_BYTES},
+    }
+    result["gatewayPublicRootInventory"] = metadata
+    template = probe.command_template(tart_path, clone, bundle["loader"])
+    commands.append(template)
+    command = list(template)
+    command[-1] = bundle["argument"]
+    try:
+        stdout, stderr = run_bounded(
+            command, timeout=30, env=env, output_limit=probe.MAX_REPORT_BYTES,
+            capture_paths=(evidence / stdout_name, evidence / stderr_name))
+        report = probe.validate_guest_output(stdout, stderr, bundle["sourceSha256"])
+    except probe.ProbeError as exc:
+        metadata.update(status="failed", report=None,
+                        failureCode=exc.args[0] if exc.args else "guest_output_invalid")
+        raise CanaryError("gateway_public_root_inventory_collection_failed") from None
+    except CanaryError as exc:
+        metadata.update(status="failed", report=None,
+                        failureCode=exc.args[0] if exc.args else "collection_failed")
+        if _is_interruption(exc):
+            raise
+        normalized = CanaryError("gateway_public_root_inventory_collection_failed")
+        _inherit_command_cleanup(exc, normalized)
+        raise normalized from None
+    except Exception as exc:  # noqa: BLE001 - retain cause without publishing private details
+        code = "host_os_error" if isinstance(exc, OSError) else "collection_failed"
+        metadata.update(status="failed", report=None, failureCode=code)
+        raise CanaryError("gateway_public_root_inventory_collection_failed") from exc
+    metadata.update(status="passed", report=report, failureCode=None)
+
+
+def _append_gateway_public_root_inventory_evidence(probe, result, evidence, cleanup_errors):
+    if probe is not None:
+        names = ("gateway-public-root-inventory-stdout.json",
+                 "gateway-public-root-inventory-stderr.bin")
+        records = {name: _raw_evidence(evidence / name, probe.MAX_REPORT_BYTES, cleanup_errors)
+                   for name in names}
+        result["rawEvidence"].update(records)
+        if "gatewayPublicRootInventory" in result:
+            result["gatewayPublicRootInventory"]["rawEvidence"] = records
+
+
+def _validate_native_workspace_guest_inventory_flag(enabled):
+    if type(enabled) is not bool:
+        raise CanaryError("invalid_native_workspace_guest_inventory_flag")
+
+
+def _validate_gateway_public_root_inventory_flag(enabled):
+    if type(enabled) is not bool:
+        raise CanaryError("invalid_gateway_public_root_inventory_flag")
+
+
 def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart", clock=time.monotonic,
             popen=subprocess.Popen, run_bounded=_run_bounded, tart_home=None, scpreferences_api=False,
-            softnet_dhcp_binary=None):
+            softnet_dhcp_binary=None, native_workspace_guest_inventory=False,
+            gateway_public_root_inventory=False, native_workspace_stage_inputs_preflight=False):
     """Run one owned clone and return its published summary after cleanup."""
     if not BASE_NAME.fullmatch(base_vm) or "://" in base_vm:
         raise CanaryError("base_vm_must_be_local_name")
     _validate_scpreferences_api_flag(scpreferences_api)
     _validate_softnet_dhcp_flag(softnet_dhcp_binary)
+    _validate_native_workspace_guest_inventory_flag(native_workspace_guest_inventory)
+    _validate_gateway_public_root_inventory_flag(gateway_public_root_inventory)
+    if type(native_workspace_stage_inputs_preflight) is not bool:
+        raise CanaryError("invalid_native_workspace_stage_inputs_preflight_flag")
     api_probe = api_bundle = None
     dhcp_probe = dhcp_bundle = dhcp_binary_fd = dhcp_binary = None
-    if not all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")):
+    inventory_probe = inventory_bundle = None
+    tls_inventory_probe = tls_inventory_bundle = None
+    stage_preflight_probe = stage_preflight_bundle = None
+    if not _waitid_available():
         raise CanaryError("nonreaping_wait_unavailable")
     receipt = _read_receipt(receipt_path)
     if receipt["baseVmName"] != base_vm:
@@ -879,6 +1431,12 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
     if free < base_disk_bytes + CLONE_LOG_HEADROOM:
         raise CanaryError("insufficient_vm_storage_capacity")
     api_probe, api_bundle = _prepare_scpreferences_api(scpreferences_api)
+    inventory_probe, inventory_bundle = _prepare_native_workspace_guest_inventory(
+        native_workspace_guest_inventory or native_workspace_stage_inputs_preflight)
+    tls_inventory_probe, tls_inventory_bundle = _prepare_gateway_public_root_inventory(
+        gateway_public_root_inventory)
+    stage_preflight_probe, stage_preflight_bundle = _prepare_native_workspace_stage_preflight(
+        native_workspace_stage_inputs_preflight)
     clone = "offline-canary-" + uuid.uuid4().hex
     clone_created = False
     clone_attempted = False
@@ -906,7 +1464,16 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
     guest_stdout_path = evidence / "guest-stdout.bin"
     guest_stderr_path = evidence / "guest-stderr.bin"
     cleanup_errors = []
+    cleanup_processes = []
     stop_outcome = {"commandSucceeded": None, "stateConfirmedStopped": False}
+
+    def record_cleanup_exception(error):
+        _record_command_cleanup(error, cleanup_errors)
+        _, processes = _command_cleanup_metadata(error)
+        for process in processes:
+            if all(process is not existing for existing in cleanup_processes):
+                cleanup_processes.append(process)
+
     saved_signal_handlers = _install_termination_handlers()
     try:
         dhcp_probe, dhcp_bundle, dhcp_binary_fd, dhcp_binary = _prepare_softnet_dhcp(softnet_dhcp_binary)
@@ -949,10 +1516,10 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 failures.append("network_drainer_stopped")
                 return True
             if (log_thread.ident is not None and not log_thread.is_alive()
-                    and vm_proc.poll() is None):
+                    and _bounded_process_exit_status(vm_proc) is None):
                 failures.append("tart_log_drainer_stopped")
                 return True
-            return vm_proc.poll() is not None
+            return _bounded_process_exit_status(vm_proc) is not None
 
         readiness_argv = [str(tart_path), "exec", clone, "/usr/bin/true"]
         result["readinessProbe"]["argv"] = readiness_argv
@@ -965,7 +1532,7 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 if failures:
                     raise CanaryError(failures[0])
                 raise CanaryError("tart_vm_exited_before_guest_ready")
-            if vm_proc.poll() is not None:
+            if _bounded_process_exit_status(vm_proc) is not None:
                 raise CanaryError("tart_vm_exited_before_guest_ready")
             result["readinessProbe"]["attempts"] += 1
             try:
@@ -975,9 +1542,13 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 result["readinessProbe"]["ready"] = True
                 break
             except CanaryError as exc:
+                record_cleanup_exception(exc)
+                retry_cleanup_errors, retry_processes = _command_cleanup_metadata(exc)
+                if retry_cleanup_errors or retry_processes:
+                    raise
                 if failures:
                     raise CanaryError(failures[0]) from None
-                if vm_proc.poll() is not None:
+                if _bounded_process_exit_status(vm_proc) is not None:
                     raise CanaryError("tart_vm_exited_before_guest_ready") from None
                 if exc.args and exc.args[0] in {"tart_command_failed", "tart_command_timeout"}:
                     time.sleep(min(VM_READY_RETRY_INTERVAL, max(0, ready_deadline - clock())))
@@ -993,10 +1564,11 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 guest_argv, timeout=max(1, deadline - clock()), env=env,
                 output_limit=MAX_GUEST_OUTPUT, capture_paths=(guest_stdout_path, guest_stderr_path),
                 cancel_check=supervision_failed)
-        except CanaryError:
+        except CanaryError as exc:
+            record_cleanup_exception(exc)
             if failures:
                 raise CanaryError(failures[0]) from None
-            if vm_proc.poll() is not None:
+            if _bounded_process_exit_status(vm_proc) is not None:
                 raise CanaryError("tart_vm_exited_during_guest_canary") from None
             raise
         result["guestOutput"] = {"bytes": len(guest_stdout), "sha256": _sha256(guest_stdout),
@@ -1010,19 +1582,28 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 if failures:
                     raise CanaryError(failures[0])
                 raise CanaryError("tart_vm_exited_during_canary")
-            if vm_proc.poll() is not None:
+            if _bounded_process_exit_status(vm_proc) is not None:
                 raise CanaryError("tart_vm_exited_during_canary")
             time.sleep(0.05)
         if "ipv4" not in records or "ipv6" not in records:
             raise CanaryError("guest_external_frames_not_observed")
         if failures:
             raise CanaryError(failures[0])
+        _run_native_workspace_guest_inventory(inventory_probe, inventory_bundle, tart_path, clone,
+                                             env, evidence, run_bounded, result, commands)
+        _run_native_workspace_stage_preflight(
+            stage_preflight_probe, stage_preflight_bundle, tart_path, clone, env, evidence,
+            run_bounded, result, commands, supervision_failed)
+        _run_gateway_public_root_inventory(
+            tls_inventory_probe, tls_inventory_bundle, tart_path, clone, env, evidence,
+            run_bounded, result, commands)
         _run_scpreferences_api(api_probe, api_bundle, tart_path, clone, env, evidence,
                                run_bounded, result, commands)
         _run_softnet_dhcp(dhcp_probe, dhcp_bundle, dhcp_binary_fd, dhcp_binary,
                           tart_path, clone, env, evidence, run_bounded, result, commands)
         result["status"] = "passed"
     except BaseException as exc:
+        record_cleanup_exception(exc)
         result["error"] = exc.args[0] if isinstance(exc, CanaryError) and exc.args else "canary_failed"
         raise
     finally:
@@ -1044,7 +1625,8 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 # disconnected. Request exact-VM stop, then terminate its owned Tart process group.
                 try:
                     run_bounded([str(tart_path), "stop", clone], timeout=15, env=env)
-                except BaseException:
+                except BaseException as exc:
+                    record_cleanup_exception(exc)
                     stop_outcome["commandSucceeded"] = False
                 else:
                     stop_outcome["commandSucceeded"] = True
@@ -1055,46 +1637,103 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
                 except OSError:
                     group_owned = False
                     cleanup_errors.append("owned_clone_process_group_identity_lost")
+                except CanaryError as exc:
+                    group_owned = False
+                    cleanup_errors.append("owned_clone_process_group_identity_lost")
+                    record_cleanup_exception(exc)
+                except (KeyboardInterrupt, SystemExit) as exc:
+                    group_owned = False
+                    cleanup_errors.append("owned_clone_process_group_identity_lost")
+                    record_cleanup_exception(exc)
                 if group_owned:
                     try:
                         os.killpg(vm_proc.pid, signal.SIGTERM)
                     except ProcessLookupError:
                         pass
+                    except CanaryError as exc:
+                        group_owned = False
+                        cleanup_errors.append("owned_clone_process_group_kill_failed")
+                        record_cleanup_exception(exc)
+                    except (KeyboardInterrupt, SystemExit) as exc:
+                        group_owned = False
+                        cleanup_errors.append("owned_clone_process_group_kill_failed")
+                        record_cleanup_exception(exc)
                     except OSError:
                         # Popen.terminate() can reap the leader; the group KILL below is authoritative.
                         pass
+                if group_owned:
                     try:
                         _wait_owned_vm_exit(vm_proc, 10)
                     except OSError:
                         group_owned = False
                         cleanup_errors.append("owned_clone_process_group_identity_lost")
+                    except CanaryError as exc:
+                        group_owned = False
+                        cleanup_errors.append("owned_clone_process_group_identity_lost")
+                        record_cleanup_exception(exc)
+                    except (KeyboardInterrupt, SystemExit) as exc:
+                        group_owned = False
+                        cleanup_errors.append("owned_clone_process_group_identity_lost")
+                        record_cleanup_exception(exc)
                 if group_owned:
                     # Sweep descendants before reaping can release the group's PID.
                     try:
                         os.killpg(vm_proc.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
+                    except CanaryError as exc:
+                        group_kill_failed = True
+                        cleanup_errors.append("owned_clone_process_group_kill_failed")
+                        record_cleanup_exception(exc)
+                    except (KeyboardInterrupt, SystemExit) as exc:
+                        group_kill_failed = True
+                        cleanup_errors.append("owned_clone_process_group_kill_failed")
+                        record_cleanup_exception(exc)
                     except OSError as exc:
-                        zombie_only = isinstance(exc, PermissionError) and _owned_group_is_zombie_only(
-                            vm_proc.pid, run_bounded, env)
+                        zombie_only = False
+                        proof_failed = False
+                        if isinstance(exc, PermissionError):
+                            try:
+                                zombie_only = _owned_group_is_zombie_only(vm_proc.pid, run_bounded, env)
+                            except BaseException as proof_error:
+                                # A raised proof error means the group state is unknown. Keep
+                                # the leader unreaped and its clone retained while recording
+                                # any bounded proof-process handles for the rest of teardown.
+                                proof_failed = True
+                                record_cleanup_exception(proof_error)
                         if not zombie_only:
                             group_kill_failed = True
                             cleanup_errors.append("owned_clone_process_group_kill_failed")
-                            try:
-                                vm_proc.kill()
-                            except OSError:
-                                cleanup_errors.append("tart_process_kill_failed")
-                try:
-                    vm_proc.wait(timeout=5)
-                    vm_reaped = group_owned and not group_kill_failed
-                except BaseException:
-                    cleanup_errors.append("tart_process_reap_failed")
+                            if not proof_failed:
+                                try:
+                                    # Group identity is still reserved; avoid
+                                    # Popen.kill(), whose poll can reap first.
+                                    os.kill(vm_proc.pid, signal.SIGKILL)
+                                except ProcessLookupError:
+                                    pass
+                                except OSError:
+                                    cleanup_errors.append("tart_process_kill_failed")
+                if group_owned and not group_kill_failed:
+                    try:
+                        vm_proc.wait(timeout=5)
+                        vm_reaped = True
+                    except CanaryError as exc:
+                        cleanup_errors.append("tart_process_reap_failed")
+                        record_cleanup_exception(exc)
+                    except (KeyboardInterrupt, SystemExit) as exc:
+                        cleanup_errors.append("tart_process_reap_failed")
+                        record_cleanup_exception(exc)
+                    except BaseException:
+                        cleanup_errors.append("tart_process_reap_failed")
+                elif not vm_reaped:
+                    cleanup_errors.append("owned_clone_retained_vm_process_unreaped")
             if clone_created:
                 try:
                     state_output, _ = run_bounded(
                         [str(tart_path), "get", clone, "--format", "json"], timeout=10, env=env)
                     stop_outcome["stateConfirmedStopped"] = _vm_stopped(state_output)
-                except BaseException:
+                except BaseException as exc:
+                    record_cleanup_exception(exc)
                     stop_outcome["stateConfirmedStopped"] = False
                 if not stop_outcome["stateConfirmedStopped"]:
                     cleanup_errors.append("owned_clone_vm_state_not_confirmed_stopped")
@@ -1122,13 +1761,20 @@ def qualify(base_vm, receipt_path, evidence_dir, *, tart="/opt/homebrew/bin/tart
             }
             _append_scpreferences_api_evidence(api_probe, result, evidence, cleanup_errors)
             _append_softnet_dhcp_evidence(dhcp_probe, result, evidence, cleanup_errors)
+            _append_native_workspace_guest_inventory_evidence(
+                inventory_probe, result, evidence, cleanup_errors)
+            _append_native_workspace_stage_preflight_evidence(
+                stage_preflight_probe, result, evidence, cleanup_errors)
+            _append_gateway_public_root_inventory_evidence(
+                tls_inventory_probe, result, evidence, cleanup_errors)
             if result["status"] == "passed" and any(value is None for value in result["rawEvidence"].values()):
                 cleanup_errors.append("raw_evidence_incomplete")
             # Delete only our random clone. The prepared base is never modified or removed.
             if clone_created and vm_reaped and stop_outcome["stateConfirmedStopped"]:
                 try:
                     run_bounded([str(tart_path), "delete", clone], timeout=20, env=env)
-                except BaseException:
+                except BaseException as exc:
+                    record_cleanup_exception(exc)
                     cleanup_errors.append("owned_clone_delete_failed")
             elif clone_created and not vm_reaped:
                 cleanup_errors.append("owned_clone_retained_vm_process_unreaped")
@@ -1166,6 +1812,12 @@ def main(argv=None):
                         help="also qualify the fixed guest SCPreferences APIs")
     parser.add_argument("--softnet-dhcp-binary", type=Path, default=None,
                         help="opt in to the fixed DHCP behavior probe using a local pinned helper")
+    parser.add_argument("--native-workspace-guest-inventory", action="store_true",
+                        help="collect the fixed native workspace guest inventory")
+    parser.add_argument("--native-workspace-stage-inputs-preflight", action="store_true",
+                        help="collect provisioning inventory and verify fixed source transfer/import offline")
+    parser.add_argument("--gateway-public-root-inventory", action="store_true",
+                        help="collect the fixed default TLS root inventory")
     args = parser.parse_args(argv)
     try:
         options = {"tart": str(args.tart), "tart_home": args.tart_home}
@@ -1173,6 +1825,12 @@ def main(argv=None):
             options["scpreferences_api"] = True
         if args.softnet_dhcp_binary is not None:
             options["softnet_dhcp_binary"] = args.softnet_dhcp_binary
+        if args.native_workspace_guest_inventory:
+            options["native_workspace_guest_inventory"] = True
+        if args.native_workspace_stage_inputs_preflight:
+            options["native_workspace_stage_inputs_preflight"] = True
+        if args.gateway_public_root_inventory:
+            options["gateway_public_root_inventory"] = True
         summary = qualify(args.base_vm, args.receipt, args.evidence_dir, **options)
     except CanaryError as exc:
         print(str(exc), file=sys.stderr)

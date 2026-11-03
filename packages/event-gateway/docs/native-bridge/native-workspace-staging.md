@@ -27,6 +27,14 @@ later build needs no other inputs. The host must measure the powered-off VM's
 config, disk, and NVRAM and bind that receipt to the staging receipt before an
 offline clone can be admitted. The original prepared base remains unchanged.
 
+## Inspect the current guest
+
+The optional [fixed guest inventory](native-workspace-guest-inventory.md) records
+available interpreters, tool versions, SDK metadata, and resource estimates
+inside a NIC-isolated disposable clone. It runs without the Softnet helper or
+SCPreferences probe when only its flag is selected. Collection does not prepare
+the workspace or establish compatibility.
+
 ## Provisioned inputs
 
 Before staging, the guest must already have the reviewed tools used by the
@@ -44,7 +52,108 @@ existing [workspace workflow](../../../../.github/workflows/event-native-workspa
 The command does not bootstrap these tools. Record how their public inputs were
 acquired; successful version checks are not a supply-chain attestation.
 
+## Transfer the staging source inputs
+
+`scripts/native_workspace_stage_inputs.py` builds a deterministic archive of the
+fixed staging scripts, their launcher dependency, and the registered recipe assets.
+It preserves their repository-relative layout, checks the recipe asset pins, and
+binds every file's length and digest into the archive manifest.
+
+Its fixed receiver reads the archive from stdin and validates its bounds, exact
+member set, regular-file types, and digests before creating a private temporary
+tree. It writes `receipt.json` last and reports `inputs-received` with
+`qualified: false`. Receiving these files does not execute them or prepare the
+workspace.
+
+The host controller can use the helper's fixed `command_template` with Tart
+`exec -i` and the existing bounded runner's `input_fd`. The caller must verify the
+archive file and its private location, supply the pinned Tart and admitted VM,
+and close its descriptor after the runner completes child cleanup. This helper
+does not admit a VM, configure networking, install tools, or invoke staging.
+Connected staging still requires the separate reviewed controller and egress
+policy described above.
+
+## Offline input preflight
+
+The offline controller's `--native-workspace-stage-inputs-preflight` opt-in
+collects the fixed provisioning inventory, sends the eight-file archive over
+Tart stdin, validates its receipt, and imports the stager with the guest's
+Homebrew Python. It does not call `stage()`. The existing owned clone, NIC-drop
+boundary, bounded child supervision, stopped-state verification, and clone
+cleanup apply throughout.
+
+The inventory also records the guest Homebrew executable and portable Ruby
+hashes, fixed version observations, a capped installed-formula list, and
+Homebrew/core Git metadata. It labels Git cleanliness `not_scanned` and reports
+missing or truncated observations explicitly. These observations help select
+the later provisioning inputs; they do not attest checkout cleanliness or
+replace the stopped VM measurement.
+
+The preflight retains the archive and both commands' bounded output as evidence.
+It remains `qualified: false` and `prepared: false`; successful receipt and
+import establish source transport, not dependency staging or suite success.
+
 ## Fixed preparation
+
+### Provisioning acquisition inputs
+
+`native-workspace-provisioning-assets.json` pins 120 data files: 113 Homebrew
+bottles, the Rust 1.95.0 distribution manifest and checksum, three ARM64 Rust
+components, rustup-init 1.29.2, and cargo-nextest 0.9.128. The bottle selection
+uses the runtime dependency closure of `glib`, `gstreamer`, `pkgconf`, `just`,
+and `coreutils`: 110 `arm64_sequoia` bottles and three `all` bottles. The
+[Homebrew formula API](https://formulae.brew.sh/docs/api/) supplied the bottle
+digests at core commit `ce79745293177f69e488c3cbd857b8cf9fd6bbdd`; the formula
+sources were checked against that commit's source checksums. Rust component
+digests come from the pinned [official channel manifest](https://static.rust-lang.org/dist/channel-rust-1.95.0.toml).
+The nextest digest comes from its [versioned release](https://github.com/nextest-rs/nextest/releases/tag/cargo-nextest-0.9.128).
+
+`scripts/native_workspace_provisioning_downloads.py` loads only this
+digest-pinned manifest. Its per-file byte caps match the observed file sizes;
+all 120 caps sum to 445,949,854 bytes, below its 512 MiB aggregate limit. It
+connects to an admitted public IPv4 address while retaining the manifest hostname for TLS
+certificate verification, SNI and HTTP authority. It sends no ambient proxy,
+cookie or authentication settings. GHCR requests use Homebrew's public anonymous
+`Bearer QQ==` marker; this is not an issued token. Redirects are refused unless
+their HTTPS hostname and exact path are in the selected asset's manifest entry;
+redirect query parameters are neither persisted nor reported. The nextest entry
+permits its observed immutable GitHub release-asset path. Each GHCR bottle entry
+permits its observed exact `pkg-containers.githubusercontent.com` path, whose
+`sha256` path component must match that bottle's pinned digest. The path is
+restricted to the observed `ghcr1` or `ghcrblobs01` through `ghcrblobs20`
+forms; host-wide and path-prefix allowances are refused. A new redirect stops
+acquisition for review.
+
+The command requires macOS 15 ARM64 and Python 3.13 or newer, and runs in the
+main thread so an absolute alarm covers connection, TLS, headers and body reads.
+It publishes its receipt atomically after every digest matches, binding the
+manifest, verified CA bytes, address map and each final host/path/address.
+
+This downloader is a data-only building block. It does not configure Softnet,
+admit DNS/address snapshots, launch a VM, install or extract archives, fetch
+Cargo dependencies, or invoke staging. Its output receipt stays `prepared:
+false` and `qualified: false`. Successful download does not attest the guest's
+identity isolation or establish a general hostname-aware egress policy. The
+later controller must admit the exact address map and public CA inventory,
+supervise only the fixed downloader while online, then disconnect before
+executing installers or downloaded code.
+
+The protected controller's opt-in `--provisioning-downloads` mode supplies that
+fixed guest transport and recovery-journal path. Its admission and remaining
+owner-package gates are documented in
+[protected provisioning downloads](softnet-provisioning-downloads.md).
+
+Offline installation must explicitly cover every bottle in dependency order.
+Homebrew's `--force-bottle` does not propagate to dependency installers. The
+reviewed local-bottle route therefore uses one verified local archive per
+command with `--ignore-dependencies --force-bottle`, inside a network-denied
+guest action. Before that action, bind a complete Cellar/link inventory and
+check each bottle's embedded formula identity. Preserve conflicts for diagnosis;
+do not use blanket overwrite or uninstall flags. Downloaded filenames are data
+identifiers, not Homebrew's install arguments. A local Rust distribution mirror
+must retain the verified manifest and component hashes and support the existing
+`rustup run 1.95.0` toolchain identity. Installation and its receipts remain a
+separate implementation and live qualification step.
 
 Run `packages/event-gateway/scripts/stage_native_workspace.py --source <upstream>
 --output <new-stage-directory>` inside that guest with the selected Cargo and

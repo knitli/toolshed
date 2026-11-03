@@ -5,10 +5,17 @@ import errno
 import os
 import json
 from pathlib import Path
+import ssl
 import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 import uuid
+from datetime import datetime, timedelta, timezone
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from event_gateway.client_runtime import (
     _https_send, _pending_lock, clear_pending_commit, load_cloud_client, load_pending_commit,
@@ -113,6 +120,35 @@ class ClientRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaisesRegex(SecurityError, "^invalid_cloud_config$"):
                     load_cloud_client(self.config, self.state)
 
+    def test_https_transport_is_gateway_only_and_has_closed_values(self):
+        settings = {"nodePath": "/absolute/node", "helperPath": "/absolute/knitli-agent.mjs"}
+        for transport in (None, True, 1, [], {}, "warp-local", "https://proxy.example"):
+            with self.subTest(mode="gateway", transport=transport):
+                self.write_config(authMode="gateway", agentTokenProvider=settings,
+                                  httpsTransport=transport)
+                with self.assertRaisesRegex(SecurityError, "^invalid_cloud_config$"):
+                    load_cloud_client(self.config, self.state)
+        for transport in ("direct", "warp-local-proxy"):
+            with self.subTest(mode="access", transport=transport):
+                self.write_config(authMode="access", httpsTransport=transport)
+                with self.assertRaisesRegex(SecurityError, "^invalid_cloud_config$"):
+                    load_cloud_client(self.config, self.state)
+
+    async def test_gateway_transport_choice_reaches_cloudclient_send_port(self):
+        settings = {"nodePath": "/absolute/node", "helperPath": "/absolute/knitli-agent.mjs"}
+        self.write_config(authMode="gateway", agentTokenProvider=settings,
+                          httpsTransport="warp-local-proxy")
+        provider = AsyncMock(return_value="agent.jwt.signature")
+        with (patch("event_gateway.client_runtime.AgentTokenProvider", return_value=provider),
+              patch("event_gateway.client_runtime._https_send", new=AsyncMock(
+                  return_value=(200, {"content-type": "application/json"}, b"{}"))) as send):
+            client = load_cloud_client(self.config, self.state)
+            with self.assertRaises(CloudError) as error:
+                await client.runtime_status(str(uuid.uuid4()))
+        self.assertEqual(error.exception.code, "invalid_response")
+        send.assert_awaited_once()
+        self.assertEqual(send.await_args.kwargs["https_transport"], "warp-local-proxy")
+
     async def test_config_and_tokens_require_closed_owner_only_files(self):
         for changes in ({"extra": True}, {"version": True}, {"version": False},
                         {"credentialsFile": "../tokens.json"},
@@ -169,6 +205,160 @@ class ClientRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("access-secret", " ".join(command))
         self.assertIn("agent-secret", process.stdin.text)
         self.assertIn("access-secret", process.stdin.text)
+        self.assertIn('noproxy = "*"', process.stdin.text)
+        self.assertFalse(any(line.startswith("proxy = ") for line in process.stdin.text.splitlines()))
+        self.assertNotIn("--suppress-connect-headers", create.call_args.args)
+
+    async def test_opted_transport_uses_only_fixed_proxy_and_clears_no_proxy(self):
+        process = _FakeCurlProcess(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{}")
+        proxy_env = {"HTTP_PROXY": "http://attacker.invalid:81", "https_proxy": "http://attacker.invalid:82",
+                     "ALL_PROXY": "http://attacker.invalid:83", "NO_PROXY": "*", "no_proxy": "*"}
+        with (patch.dict(os.environ, proxy_env, clear=False),
+              patch("event_gateway.client_runtime.asyncio.create_subprocess_exec",
+                    new=AsyncMock(return_value=process)) as create):
+            result = await _https_send(
+                method="POST", url="https://reserved.invalid/v1/runtimes/status",
+                headers={}, body=b"{}", timeout=1, max_response_bytes=8192,
+                follow_redirects=False, https_transport="warp-local-proxy",
+            )
+        self.assertEqual(result, (200, {"content-type": "application/json"}, b"{}"))
+        self.assertIn('proxy = "http://127.0.0.1:40000"', process.stdin.text)
+        self.assertIn('noproxy = ""', process.stdin.text)
+        self.assertIn("--suppress-connect-headers", create.call_args.args)
+        self.assertNotIn("attacker.invalid", process.stdin.text)
+        environment = create.call_args.kwargs["env"]
+        self.assertFalse({"HTTP_PROXY", "https_proxy", "ALL_PROXY", "NO_PROXY", "no_proxy"} & set(environment))
+
+    async def test_invalid_transport_fails_before_subprocess(self):
+        request = dict(method="POST", url="https://events.example.com/v1/runtimes/attach",
+                       headers={}, body=b"{}", timeout=1, max_response_bytes=8192,
+                       follow_redirects=False)
+        with patch("event_gateway.client_runtime.asyncio.create_subprocess_exec") as create:
+            for value in (None, True, 1, [], {}, "proxy"):
+                with self.subTest(value=value):
+                    with self.assertRaisesRegex(ValueError, "^invalid_transport_request$"):
+                        await _https_send(**request, https_transport=value)
+            create.assert_not_called()
+
+    async def test_warp_local_proxy_connects_to_fixed_loopback_and_never_falls_back(self):
+        requests = []
+
+        async def reject_connect(reader, writer):
+            requests.append(await reader.readuntil(b"\r\n\r\n"))
+            writer.write(b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n")
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        try:
+            server = await asyncio.start_server(reject_connect, "127.0.0.1", 40000)
+        except OSError as error:
+            if error.errno == errno.EADDRINUSE:
+                self.fail("fixed WARP local-proxy port 127.0.0.1:40000 is busy; preserving existing listener")
+            raise
+        async with server:
+            with self.assertRaisesRegex(OSError, "^https_transport_failed$"):
+                await _https_send(
+                    method="POST", url="https://reserved.invalid/v1/runtimes/status",
+                    headers={}, body=b"{}", timeout=1, max_response_bytes=8192,
+                    follow_redirects=False, https_transport="warp-local-proxy",
+                )
+            await asyncio.sleep(0)
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0].split(b"\r\n", 1)[0], b"CONNECT reserved.invalid:443 HTTP/1.1")
+
+    async def test_warp_local_proxy_success_suppresses_connect_headers(self):
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        now = datetime.now(timezone.utc)
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "reserved.invalid")])
+        certificate = (
+            x509.CertificateBuilder().subject_name(name).issuer_name(name)
+            .public_key(private_key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=1)).not_valid_after(now + timedelta(days=1))
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName("reserved.invalid")]), critical=False)
+            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+            .sign(private_key, hashes.SHA256())
+        )
+        cert_path = self.root / "ephemeral-test-ca.pem"
+        key_path = self.root / "ephemeral-test-key.pem"
+        cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+        key_path.write_bytes(private_key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ))
+        key_path.chmod(0o600)
+        tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls_context.load_cert_chain(cert_path, key_path)
+        backend_requests = []
+        connect_requests = []
+        captured_command = []
+
+        async def serve_origin(reader, writer):
+            backend_requests.append(await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 2))
+            body = b'{"ok":true}'
+            writer.write(b"HTTP/1.1 201 Created\r\ncontent-type: application/json\r\n"
+                         + f"content-length: {len(body)}\r\nconnection: close\r\n\r\n".encode()
+                         + body)
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        async def relay(reader, writer):
+            try:
+                while chunk := await reader.read(16_384):
+                    writer.write(chunk)
+                    await writer.drain()
+            except (ConnectionError, OSError):
+                pass
+            finally:
+                writer.close()
+
+        async def proxy_connect(reader, writer):
+            connect_requests.append(await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 2))
+            upstream_reader, upstream_writer = await asyncio.open_connection(*backend_address)
+            writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
+            await writer.drain()
+            await asyncio.gather(relay(reader, upstream_writer), relay(upstream_reader, writer))
+
+        backend = await asyncio.start_server(serve_origin, "127.0.0.1", 0, ssl=tls_context)
+        async with backend:
+            backend_address = backend.sockets[0].getsockname()
+            try:
+                proxy = await asyncio.start_server(proxy_connect, "127.0.0.1", 40000)
+            except OSError as error:
+                if error.errno == errno.EADDRINUSE:
+                    self.fail("fixed WARP local-proxy port 127.0.0.1:40000 is busy; preserving existing listener")
+                raise
+            async with proxy:
+                real_factory = asyncio.create_subprocess_exec
+
+                async def trusted_test_curl(*command, **kwargs):
+                    self.assertEqual(command[:2], ("/usr/bin/curl", "-q"))
+                    captured_command.extend(command)
+                    return await real_factory(*command[:2], "--cacert", str(cert_path),
+                                              *command[2:], **kwargs)
+
+                with patch("event_gateway.client_runtime.asyncio.create_subprocess_exec",
+                           new=trusted_test_curl):
+                    result = await _https_send(
+                        method="POST", url="https://reserved.invalid/v1/runtimes/status",
+                        headers={"content-type": "application/json"}, body=b"{}", timeout=3,
+                        max_response_bytes=8192, follow_redirects=False,
+                        https_transport="warp-local-proxy",
+                    )
+            self.assertEqual(result, (201, {"content-type": "application/json",
+                                            "content-length": "11", "connection": "close"},
+                                      b'{"ok":true}'))
+        command = captured_command
+        self.assertEqual(command[0], "/usr/bin/curl")
+        self.assertEqual(command[1], "-q")
+        self.assertIn("--suppress-connect-headers", command)
+        self.assertEqual(len(connect_requests), 1)
+        self.assertEqual(connect_requests[0].split(b"\r\n", 1)[0],
+                         b"CONNECT reserved.invalid:443 HTTP/1.1")
+        self.assertEqual(len(backend_requests), 1)
+        self.assertEqual(backend_requests[0].split(b"\r\n", 1)[0],
+                         b"POST /v1/runtimes/status HTTP/1.1")
 
     async def test_https_transport_kills_owned_process_on_deadline_or_oversized_body(self):
         blocked = _FakeCurlProcess(block=True)

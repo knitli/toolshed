@@ -313,6 +313,13 @@ network checks. It stages a pinned helper only inside the disposable clone and
 retains bounded frames and logs. This opt-in phase has a separate 60-second
 command timeout; full native qualification remains a separate gate.
 
+## Optional guest TLS root inventory
+
+Add `--gateway-public-root-inventory` to collect the selected guest Python's
+materialized default TLS roots in a separate bounded report. It makes no TLS
+connection and cannot enumerate roots Python has not loaded from `capath`; see
+[the inventory scope and limits](gateway-public-root-inventory.md).
+
 ## Next qualification gate
 
 This boundary canary does not contain the upstream Rust source, build

@@ -275,7 +275,7 @@ class NativeRecipeRegistryTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     R.validate_recipe()
 
-    def test_only_verifier_and_builder_may_adopt_registry_without_runtime_actions(self):
+    def test_only_reviewed_consumers_reference_registry_without_runtime_actions(self):
         consumers = set()
         for directory in (PACKAGE / "src", PACKAGE / "scripts"):
             for path in directory.rglob("*.py"):
@@ -283,10 +283,19 @@ class NativeRecipeRegistryTests(unittest.TestCase):
                     continue
                 if "native_recipe_registry" in path.read_text():
                     consumers.add(path.relative_to(PACKAGE).as_posix())
-        # Verifier policy lands first; builder adoption follows in a separate change.
+        # The source-input bundler copies registry bytes and validates only the core recipe.
         self.assertIn("scripts/verify_native_ci_provenance.py", consumers)
         self.assertLessEqual(consumers, {"scripts/verify_native_ci_provenance.py",
-                                        "scripts/package_native_client.py"})
+                                        "scripts/package_native_client.py",
+                                        "scripts/native_workspace_stage_inputs.py"})
+        bundler = ast.parse((PACKAGE / "scripts/native_workspace_stage_inputs.py").read_text())
+        validations = [node for node in ast.walk(bundler) if isinstance(node, ast.Call)
+                       and isinstance(node.func, ast.Attribute)
+                       and node.func.attr == "validate_recipe"]
+        self.assertEqual(len(validations), 1)
+        self.assertEqual([ast.literal_eval(arg) for arg in validations[0].args],
+                         ["core-idle-v1", 1])
+        self.assertEqual(validations[0].keywords, [])
         tree = ast.parse(SCRIPT.read_text())
         imports = {item.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import)
                    for item in node.names}

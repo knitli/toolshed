@@ -1,6 +1,8 @@
 """Offline supervisor tests: no host preferences, Tart binary, or Softnet helper."""
 
 import hashlib
+import io
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -12,18 +14,31 @@ import stat
 import subprocess  # nosec B404 - subprocesses use fixed Python test argv only.
 import sys
 import tempfile
+import threading
 import unittest
-from contextlib import ExitStack
+import time
+from contextlib import ExitStack, redirect_stdout
 from functools import partial
 from types import SimpleNamespace
 from unittest.mock import call, patch
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+TEST_PUBLIC_ROOT_CERTS = (b"\x30\x03\x02\x01\x00", b"\x30\x03\x02\x01\x01")
+
+
+def root_inventory_sha256(certificates):
+    """Hash a deterministic root inventory using the route contract's encoding."""
+    fingerprints = sorted({hashlib.sha256(certificate).hexdigest()
+                           for certificate in certificates})
+    return hashlib.sha256("\n".join(fingerprints).encode("ascii")).hexdigest()
+
+
 sys.path.insert(0, str(SCRIPTS))
 import qualify_offline_macos_vm as canary  # noqa: E402
 import qualify_softnet_macos_vm as supervisor  # noqa: E402
 import softnet_recovery as recovery  # noqa: E402
 import softnet_run_state as run_state  # noqa: E402
+import softnet_public_probe_guest as probe_guest  # noqa: E402
 
 
 class FakeProcess:
@@ -66,6 +81,60 @@ class FakeThread:
         return self.alive
 
 
+class SocketResponseHarness:
+    """Serve fixed HTTP responses over local socket pairs for route tests."""
+
+    def __init__(self, responses):
+        """Retain response bytes and socket-pair cleanup state."""
+        self.responses = responses
+        self.clients = []
+        self.servers = []
+        self.threads = []
+
+    def connect(self, _destination, timeout=None):
+        client, server = socket.socketpair()
+        index = len(self.servers)
+        self.clients.append(client)
+        self.servers.append(server)
+
+        def serve():
+            try:
+                server.recv(4096)
+                server.sendall(self.responses[index])
+            except OSError:
+                pass
+
+        thread = threading.Thread(target=serve, daemon=True)
+        self.threads.append(thread)
+        thread.start()
+        return client
+
+    def close(self):
+        for sock in self.clients + self.servers:
+            sock.close()
+        for thread in self.threads:
+            thread.join(timeout=1)
+
+
+class ManualTimer:
+    """Timer fixture that never fires or remains alive."""
+
+    def __init__(self, *_args):
+        """Accept the real timer arguments without scheduling a callback."""
+
+    def start(self):
+        pass
+
+    def cancel(self):
+        pass
+
+    def is_alive(self):
+        return False
+
+    def join(self, timeout=None):
+        pass
+
+
 class TargetPreferences:
     """Tiny Softnet preference fake for supervisor branch tests."""
 
@@ -94,7 +163,9 @@ class ExercisePatches:
     """Inject process, log, preference and recovery fakes into one exercise."""
 
     def __init__(self, *, capture_error=None, restore_error=None, stop_error=None,
-                 stopped=True, log_alive=False, command_error=None,
+                 stopped=True, log_alive=False, command_error=None, reap_metadata_error=None,
+                 probe_stdout=b"",
+                 probe_error=None,
                  monotonic_values=(0, 0, 0, 0, 1000)):
         """Configure only the failure point exercised by the test."""
         self.capture_error = capture_error
@@ -103,6 +174,9 @@ class ExercisePatches:
         self.stopped = stopped
         self.log_alive = log_alive
         self.command_error = command_error
+        self.reap_metadata_error = reap_metadata_error
+        self.probe_stdout = probe_stdout
+        self.probe_error = probe_error
         self.monotonic_values = monotonic_values
         self.events = []
         self.processes = []
@@ -115,7 +189,7 @@ class ExercisePatches:
             patch.object(supervisor.canary, "_run_bounded", side_effect=self.bounded),
             patch.object(supervisor.subprocess, "Popen", side_effect=self.popen),
             patch.object(supervisor, "_start_logs", side_effect=self.start_logs),
-            patch.object(supervisor, "_record"),
+            patch.object(supervisor, "_record", side_effect=self.record),
             patch.object(supervisor, "_stop_owned", side_effect=self.stop_owned),
             patch.object(supervisor, "_child_exited", return_value=False),
             patch.object(supervisor.canary, "_install_termination_handlers", return_value=None),
@@ -143,9 +217,22 @@ class ExercisePatches:
                    if self.get_count == 1 or self.stopped else
                    b'{"Running":true,"State":"running"}')
             return raw, 0
-        if argv[1:2] == ["exec"] and self.command_error:
-            raise self.command_error
+        if argv[1:2] == ["exec"] and "/usr/bin/true" in argv and self.command_error:
+            if isinstance(self.command_error, list):
+                error = self.command_error.pop(0) if self.command_error else None
+            else:
+                error = self.command_error
+            if error is not None:
+                raise error
+        if argv[1:2] == ["exec"] and "/usr/bin/python3" in argv:
+            if self.probe_error:
+                raise self.probe_error
+            return self.probe_stdout, b""
         return b"", 0
+
+    def record(self, _directory, name, value):
+        """Retain only test-visible record metadata."""
+        self.events.append(("record", name, value))
 
     def popen(self, argv, **kwargs):
         """Record a fixed helper or Tart launch without starting a binary."""
@@ -163,6 +250,8 @@ class ExercisePatches:
     def stop_owned(self, process, log_thread=None):
         """Inject an unproven child when requested by the test."""
         self.events.append(("stop_owned", process.name, log_thread))
+        if process.name == "vm" and self.reap_metadata_error is not None:
+            raise self.reap_metadata_error
         if self.stop_error == process.name:
             raise RuntimeError("unproven child")
 
@@ -367,6 +456,105 @@ class SoftnetSupervisorTests(unittest.TestCase):
 
         self.assertEqual(admission_dirs, [self.root / "admission-one", self.root / "admission-two"])
         self.assertEqual(state_roots, [supervisor.STATE_ROOT, supervisor.STATE_ROOT])
+
+    def test_qualify_public_probe_binds_the_admitted_dns_destination(self):
+        destination = "104.20.0.1"
+        admission = {**self.admission, "kind": "softnet-public-probe-admission-v1",
+                     "probeIPv4": destination}
+        account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_name="owner")
+        captured = {}
+
+        class State:
+            def __init__(self, root):
+                self.root = root
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def begin(self, identity):
+                captured["identity"] = identity
+                return self_outer.root / "run", "d" * 32
+
+            def complete(self, run, stop):
+                captured["complete"] = (run, stop)
+
+        self_outer = self
+        with patch.object(supervisor.os, "geteuid", return_value=0), \
+                patch.object(supervisor.sys, "platform", "darwin"), \
+                patch.object(supervisor, "State", State), \
+                patch.object(supervisor, "_admission", return_value=(admission, account, "staff", "e" * 64)), \
+                patch.object(supervisor, "_resolve_public_probe_ip", return_value=destination), \
+                patch.object(supervisor, "_exercise", return_value={
+                    "vmReaped": True, "helperReaped": True, "vmStopped": True}) as exercise:
+            result = supervisor.qualify(self.root, public_probe=True)
+
+        self.assertEqual(result["kind"], "softnet-public-probe-canary-v1")
+        self.assertEqual(captured["identity"]["probeIPv4"], destination)
+        self.assertEqual(captured["identity"]["admissionSha256"], "e" * 64)
+        self.assertEqual(exercise.call_args.kwargs["public_probe_ip"], destination)
+
+    def test_qualify_guest_route_pins_both_hosts_before_state_begin(self):
+        identity_ip, positive_ip, roots = "104.20.0.1", "104.20.0.2", "f" * 64
+        admission = {**self.admission, "kind": "softnet-guest-route-admission-v1",
+                     "identityProbeIPv4": identity_ip, "positiveOriginIPv4": positive_ip,
+                     "publicTrustRootsSha256": roots}
+        account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_name="owner")
+        events = []
+
+        class State:
+            def __init__(self, root):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def begin(self, identity):
+                events.append(("begin", identity.copy()))
+                return self_outer.root / "run", "d" * 32
+
+            def complete(self, run, stop):
+                events.append(("complete", run, stop))
+        self_outer = self
+
+        def resolve(host=supervisor.PUBLIC_PROBE_HOST, resolver=None):
+            events.append(("resolve", host))
+            return identity_ip if host == supervisor.GUEST_ROUTE_IDENTITY_HOST else positive_ip
+        with patch.object(supervisor.os, "geteuid", return_value=0), \
+             patch.object(supervisor.sys, "platform", "darwin"), \
+             patch.object(supervisor, "State", State), \
+             patch.object(supervisor, "_admission", return_value=(admission, account, "staff", "e" * 64)), \
+             patch.object(supervisor, "_resolve_public_probe_ip", side_effect=resolve), \
+             patch.object(supervisor, "_exercise", return_value={
+                 "vmReaped": True, "helperReaped": True, "vmStopped": True}) as exercise:
+            result = supervisor.qualify(self.root, guest_route_contract=True)
+        self.assertEqual(events[:2], [("resolve", supervisor.GUEST_ROUTE_IDENTITY_HOST),
+                                      ("resolve", supervisor.GUEST_ROUTE_POSITIVE_HOST)])
+        self.assertEqual(events[2][0], "begin")
+        self.assertEqual(events[2][1]["identityProbeIPv4"], identity_ip)
+        self.assertEqual(events[2][1]["positiveOriginIPv4"], positive_ip)
+        self.assertEqual(events[2][1]["publicTrustRootsSha256"], roots)
+        self.assertEqual(exercise.call_args.kwargs["guest_route_ips"], (identity_ip, positive_ip))
+        self.assertEqual(result["kind"], "softnet-guest-route-canary-v1")
+
+    def test_qualify_guest_route_rejects_mismatched_admission_before_begin(self):
+        admission = {**self.admission, "kind": "softnet-guest-route-admission-v1",
+                     "identityProbeIPv4": "104.20.0.1", "positiveOriginIPv4": "104.20.0.2",
+                     "publicTrustRootsSha256": "f" * 64}
+        account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_name="owner")
+        with patch.object(supervisor.os, "geteuid", return_value=0), \
+             patch.object(supervisor.sys, "platform", "darwin"), \
+             patch.object(supervisor, "State") as state, \
+             patch.object(supervisor, "_admission", return_value=(admission, account, "staff", "e" * 64)), \
+             patch.object(supervisor, "_resolve_public_probe_ip", side_effect=["104.20.0.1", "104.20.0.3"]):
+            with self.assertRaisesRegex(recovery.RecoveryError, "guest_route_admission_mismatch"):
+                supervisor.qualify(self.root, guest_route_contract=True)
+        state.return_value.__enter__.return_value.begin.assert_not_called()
 
     def test_real_state_capture_exercise_restore_complete_and_reopen_integration(self):
         state_root = self.root / "state"
@@ -592,12 +780,13 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertTrue(calls[0][1]["start_new_session"])
 
     def _exercise_patches(self, *, capture_error=None, restore_error=None, stop_error=None,
-                          stopped=True, log_alive=False, command_error=None,
+                          stopped=True, log_alive=False, command_error=None, reap_metadata_error=None,
                           monotonic_values=(0, 0, 0, 0, 1000)):
         """Build the narrow fake context used by supervisor exercise tests."""
         return ExercisePatches(capture_error=capture_error, restore_error=restore_error,
                                stop_error=stop_error, stopped=stopped, log_alive=log_alive,
-                               command_error=command_error, monotonic_values=monotonic_values)
+                               command_error=command_error, reap_metadata_error=reap_metadata_error,
+                               monotonic_values=monotonic_values)
 
     def test_capture_precedes_launch_and_tart_is_owner_scoped_fixed_argv(self):
         with self._exercise_patches() as harness:
@@ -629,6 +818,1095 @@ class SoftnetSupervisorTests(unittest.TestCase):
                                                "TART_NO_AUTO_PRUNE": "1"})
             self.assertEqual(getattr(kwargs.get("popen"), "keywords", None),
                              {"user": 501, "group": 20, "extra_groups": []})
+
+    @staticmethod
+    def _public_probe_stdout(destination, *, status=200, body=b"knitli-probe-v1\n", tls=True,
+                             error="", host_posture="1", gateway_marker="v1"):
+        gateway_context_verified = (gateway_marker == "v1" and host_posture in {"0", "1"})
+        if not gateway_context_verified and not error:
+            error = "gateway_context_invalid"
+        report = {
+            "kind": "native-guest-public-probe-v1", "method": "GET",
+            "host": supervisor.PUBLIC_PROBE_HOST, "path": supervisor.PUBLIC_PROBE_PATH,
+            "destinationIPv4": destination, "port": 443,
+            "startedAtUnixNs": time.time_ns(), "finishedAtUnixNs": time.time_ns(),
+            "tlsVerified": tls, "gatewayContextVerified": gateway_context_verified,
+            "expectedHostPosturePassed": host_posture == "1",
+            "status": status, "bodyBytes": len(body),
+            "bodySha256": hashlib.sha256(body).hexdigest(),
+            "verified": (tls and gateway_context_verified and status == 200
+                         and body == b"knitli-probe-v1\n" and not error),
+            "error": error,
+        }
+        return json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+
+    @staticmethod
+    def _guest_route_stdout(identity_ip="104.20.0.1", positive_ip="104.20.0.2", **changes):
+        now = time.time_ns()
+        report = {
+            "kind": "native-guest-route-contract-v1",
+            "identityHost": supervisor.GUEST_ROUTE_IDENTITY_HOST,
+            "identityPath": supervisor.GUEST_ROUTE_IDENTITY_PATH,
+            "identityDestinationIPv4": identity_ip, "identityStatus": 404,
+            "identityTlsVerified": True, "identityBodyBytes": 0,
+            "identityBodySha256": hashlib.sha256(b"").hexdigest(),
+            "identityNoStore": True, "identityNoGatewayMarkers": True,
+            "identityError": "", "positiveHost": supervisor.GUEST_ROUTE_POSITIVE_HOST,
+            "positivePath": supervisor.GUEST_ROUTE_POSITIVE_PATH,
+            "positiveDestinationIPv4": positive_ip, "positiveStatus": 200,
+            "positiveTlsVerified": True,
+            "positiveContentType": supervisor.GUEST_ROUTE_POSITIVE_CONTENT_TYPE,
+            "positiveBodyBytes": supervisor.GUEST_ROUTE_POSITIVE_BODY_BYTES,
+            "positiveBodySha256": supervisor.GUEST_ROUTE_POSITIVE_BODY_SHA256,
+            "positiveError": "", "publicTrustRootsSha256": "f" * 64,
+            "gatewayCaAbsent": True, "startedAtUnixNs": now, "finishedAtUnixNs": now,
+            "verified": True, "error": "",
+        }
+        report.update(changes)
+        return json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+
+    def test_guest_route_report_has_two_independent_fixed_success_predicates(self):
+        identity, positive, roots = "104.20.0.1", "104.20.0.2", "f" * 64
+        good = self._guest_route_stdout(identity, positive)
+        self.assertTrue(supervisor._validate_guest_route_report(good, identity, positive, roots)["verified"])
+        mutations = (
+            {"positiveStatus": 503}, {"positiveContentType": "text/html"},
+            {"positiveBodyBytes": 455}, {"positiveBodySha256": "0" * 64},
+            {"identityStatus": 200}, {"identityStatus": 503}, {"identityBodyBytes": 1},
+            {"identityNoGatewayMarkers": False}, {"identityNoStore": False},
+            {"identityTlsVerified": False}, {"positiveTlsVerified": False},
+            {"positiveDestinationIPv4": "104.20.0.3"},
+            {"identityDestinationIPv4": "104.20.0.3"}, {"publicTrustRootsSha256": "0" * 64},
+            {"gatewayCaAbsent": False}, {"finishedAtUnixNs": time.time_ns() + 13_000_000_000},
+            {"verified": False}, {"error": "predicate_failed"}, {"error": {}},
+            {"positiveContentType": []}, {"positiveError": []},
+        )
+        for change in mutations:
+            with self.subTest(change=change):
+                report = json.loads(good)
+                report.update(change)
+                with self.assertRaises(recovery.RecoveryError):
+                    supervisor._validate_guest_route_report(
+                        json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+                        identity, positive, roots)
+        empty_hash = hashlib.sha256(b"").hexdigest()
+        timeout = json.loads(good)
+        timeout.update({
+            "finishedAtUnixNs": timeout["startedAtUnixNs"] + 13_000_000_000,
+            "positiveStatus": 0, "positiveTlsVerified": False, "positiveContentType": "",
+            "positiveBodyBytes": 0, "positiveBodySha256": empty_hash,
+            "positiveError": "timeout", "verified": False, "error": "timeout",
+        })
+        timed_out = json.dumps(timeout, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        self.assertFalse(supervisor._validate_guest_route_report(
+            timed_out, identity, positive, roots)["verified"])
+        timeout["finishedAtUnixNs"] = timeout["startedAtUnixNs"] + 25_000_000_000
+        at_backstop = json.dumps(timeout, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        self.assertFalse(supervisor._validate_guest_route_report(
+            at_backstop, identity, positive, roots)["verified"])
+        timeout["finishedAtUnixNs"] += 1
+        beyond_backstop = json.dumps(timeout, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        with self.assertRaises(recovery.RecoveryError):
+            supervisor._validate_guest_route_report(beyond_backstop, identity, positive, roots)
+        with self.assertRaisesRegex(recovery.RecoveryError, "guest_route_report_size"):
+            supervisor._validate_guest_route_report(b" " * 4097, identity, positive, roots)
+
+    def test_guest_route_cli_trust_preflight_emits_exact_failed_receipt_and_runs_cleanup(self):
+        identity, positive, roots = "104.20.0.1", "104.20.0.2", "f" * 64
+        output = io.StringIO()
+        with patch.dict(probe_guest.os.environ, {"SSL_CERT_FILE": "/untrusted/ca.pem"}), \
+             redirect_stdout(output):
+            self.assertEqual(probe_guest.main([
+                "--guest-route-contract", identity, positive, roots]), 0)
+        stdout = output.getvalue().encode("utf-8") + b"\n"
+        report = supervisor._validate_guest_route_report(stdout, identity, positive, roots)
+        self.assertFalse(report["verified"])
+        self.assertEqual(report["error"], "trust_override")
+        self.assertEqual(report["publicTrustRootsSha256"], "")
+
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        with ExitStack() as patches:
+            harness = patches.enter_context(ExercisePatches(probe_stdout=stdout))
+            patches.enter_context(patch.object(
+                supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
+            with self.assertRaisesRegex(recovery.RecoveryError, "guest_route_result_failed"):
+                supervisor._exercise(self.root, {**self.admission,
+                                                  "publicTrustRootsSha256": roots},
+                                     account, "staff", TargetPreferences,
+                                     guest_route_ips=(identity, positive))
+        retained, = [event[2] for event in harness.events
+                     if event[0] == "record" and event[1] == "route-probe.plist"]
+        self.assertEqual(retained["error"], "trust_override")
+        self.assertFalse(retained["verified"])
+        self.assertTrue(any(event[0] == "stop_owned" for event in harness.events))
+        self.assertTrue(any(event[0] == "restore" for event in harness.events))
+
+    def test_guest_route_exercise_allows_only_two_pinned_ips_and_retains_failed_leg(self):
+        identity, positive = "104.20.0.1", "104.20.0.2"
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        with ExitStack() as patches:
+            harness = patches.enter_context(ExercisePatches(
+                probe_stdout=self._guest_route_stdout(positive, identity, positiveStatus=503,
+                                                      positiveBodyBytes=0, positiveBodySha256=hashlib.sha256(b"").hexdigest(),
+                                                      verified=False, error="predicate_failed")))
+            patches.enter_context(patch.object(supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
+            with self.assertRaisesRegex(recovery.RecoveryError, "guest_route_result_failed"):
+                supervisor._exercise(self.root, {**self.admission, "publicTrustRootsSha256": "f" * 64},
+                                     account, "staff", TargetPreferences,
+                                     guest_route_ips=(positive, identity))
+        helper, = [event for event in harness.events
+                   if event[0] == "popen" and event[1][0] == str(supervisor.SOFTNET)]
+        allow_args = [arg for arg in helper[1] if arg.startswith("--allow=")]
+        self.assertEqual(allow_args, ["--allow=out 104.20.0.1/32,out 104.20.0.2/32"])
+        self.assertIn("--block=0.0.0.0/0", helper[1])
+        route_records = [event[2] for event in harness.events
+                         if event[0] == "record" and event[1] == "route-probe.plist"]
+        self.assertEqual(len(route_records), 1)
+        self.assertFalse(route_records[0]["verified"])
+        self.assertTrue(any(event[0] == "stop_owned" for event in harness.events))
+        self.assertTrue(any(event[0] == "restore" for event in harness.events))
+
+    def test_guest_route_deduplicates_equal_pinned_addresses(self):
+        address = "104.20.0.1"
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        with ExitStack() as patches:
+            harness = patches.enter_context(ExercisePatches(
+                probe_stdout=self._guest_route_stdout(address, address)))
+            patches.enter_context(patch.object(supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
+            result = supervisor._exercise(self.root, {**self.admission,
+                                                     "publicTrustRootsSha256": "f" * 64},
+                                          account, "staff", TargetPreferences,
+                                          guest_route_ips=(address, address))
+        self.assertTrue(all(result.values()))
+        helper, = [event for event in harness.events
+                   if event[0] == "popen" and event[1][0] == str(supervisor.SOFTNET)]
+        self.assertEqual([arg for arg in helper[1] if arg.startswith("--allow=")],
+                         ["--allow=out 104.20.0.1/32"])
+
+    def test_public_probe_uses_only_pinned_destination_and_runs_after_readiness(self):
+        destination = "104.20.0.1"
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        with ExitStack() as patches:
+            harness = patches.enter_context(ExercisePatches(
+                probe_stdout=self._public_probe_stdout(destination, host_posture="0")))
+            patches.enter_context(patch.object(supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
+            result = supervisor._exercise(self.root, self.admission, account, "staff", TargetPreferences,
+                                          public_probe_ip=destination)
+        self.assertTrue(all(result.values()))
+        helper, = [event for event in harness.events
+                   if event[0] == "popen" and event[1][0] == str(supervisor.SOFTNET)]
+        self.assertIn("--allow=out " + destination + "/32", helper[1])
+        self.assertIn("--block=0.0.0.0/0", helper[1])
+        commands = [event[1] for event in harness.events if event[0] == "command"]
+        readiness = next(i for i, argv in enumerate(commands) if "/usr/bin/true" in argv)
+        probe_indexes = [i for i, argv in enumerate(commands) if "/usr/bin/python3" in argv]
+        self.assertEqual(len(probe_indexes), 1)
+        self.assertGreater(probe_indexes[0], readiness)
+        probe = commands[probe_indexes[0]]
+        self.assertEqual(probe[1:5], ("exec", self.admission["vmName"], "/usr/bin/python3", "-I"))
+        self.assertEqual(probe[-1], destination)
+        self.assertEqual(sum(event[:2] == ("record", "probe.plist") for event in harness.events), 1)
+        stored = next(event[2] for event in harness.events
+                      if event[:2] == ("record", "probe.plist"))
+        self.assertNotIn("body", stored)
+        self.assertTrue(stored["gatewayContextVerified"])
+        self.assertFalse(stored["expectedHostPosturePassed"])
+        self.assertTrue(stored["verified"])
+
+    def test_public_probe_failure_still_stops_reaps_and_restores(self):
+        destination = "104.20.0.1"
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        failed_report = self._public_probe_stdout(destination, status=503, body=b"unavailable")
+        with ExitStack() as patches:
+            harness = patches.enter_context(ExercisePatches(probe_stdout=failed_report))
+            patches.enter_context(patch.object(supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
+            with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_result_failed"):
+                supervisor._exercise(self.root, self.admission, account, "staff", TargetPreferences,
+                                     public_probe_ip=destination)
+        self.assertTrue(any(event[0] == "stop_owned" for event in harness.events))
+        self.assertTrue(any(event[0] == "restore" for event in harness.events))
+        self.assertEqual(sum(event[0] == "record" and event[1] == "probe.plist"
+                             for event in harness.events), 1)
+
+    def test_public_probe_missing_or_invalid_gateway_headers_fail_closed(self):
+        destination = "104.20.0.1"
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        for host_posture, gateway_marker in ((None, None), ("2", "v1"), ("1", "invalid")):
+            with self.subTest(host_posture=host_posture, gateway_marker=gateway_marker):
+                invalid_headers = self._public_probe_stdout(
+                    destination, host_posture=host_posture, gateway_marker=gateway_marker)
+                with ExitStack() as patches:
+                    harness = patches.enter_context(ExercisePatches(probe_stdout=invalid_headers))
+                    patches.enter_context(patch.object(
+                        supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
+                    with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_result_failed"):
+                        supervisor._exercise(
+                            self.root, self.admission, account, "staff", TargetPreferences,
+                            public_probe_ip=destination)
+                stored = next(event[2] for event in harness.events
+                              if event[0] == "record" and event[1] == "probe.plist")
+                self.assertFalse(stored["gatewayContextVerified"])
+                self.assertFalse(stored["verified"])
+                self.assertEqual(stored["error"], "gateway_context_invalid")
+
+    def test_controller_rejects_missing_gateway_context_without_failure_reason(self):
+        destination = "104.20.0.1"
+        report = json.loads(self._public_probe_stdout(
+            destination, host_posture=None, gateway_marker=None))
+        report["error"] = ""
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
+            supervisor._validate_public_probe_report(
+                json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+                destination)
+
+    def test_probe_dns_resolution_is_deterministic_and_rejects_nonpublic_answers(self):
+        def answer(ip):
+            return (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))
+        result = supervisor._resolve_public_probe_ip(
+            lambda *_args: [answer("104.20.0.2"), answer("104.20.0.1"), answer("104.20.0.2")])
+        self.assertEqual(result, "104.20.0.1")
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_dns_answer_not_global"):
+            supervisor._resolve_public_probe_ip(lambda *_args: [answer("127.0.0.1")])
+
+    def test_probe_dns_rejects_integer_ipv4_answers(self):
+        destination = int(ipaddress.IPv4Address("104.20.0.1"))
+        answer = (socket.AF_INET, socket.SOCK_STREAM, 6, "", (destination, 443))
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_dns_answer_invalid"):
+            supervisor._resolve_public_probe_ip(lambda *_args: [answer])
+
+    def test_guest_probe_total_deadline_interrupts_detached_tls_socket(self):
+        client, server = socket.socketpair()
+        server.settimeout(1)
+
+        class TransferredTLS:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+
+            def do_handshake(self):
+                return None
+
+            def __getattr__(self, name):
+                return getattr(self.wrapped, name)
+
+        class FakeTLSContext:
+            def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=True):
+                self_test.assertEqual(server_hostname, probe_guest.HOST)
+                self_test.assertFalse(do_handshake_on_connect)
+                return TransferredTLS(socket.socket(fileno=raw.detach()))
+
+        def trickle_headers():
+            try:
+                server.recv(4096)
+                server.sendall(b"HTTP/1.1 200 OK\r\n")
+                for byte in b"X-Slow: " + b"x" * 24 + b"\r\nContent-Length: 16\r\n\r\n":
+                    server.sendall(bytes((byte,)))
+                    time.sleep(0.03)
+            except OSError:
+                pass
+
+        self_test = self
+        server_thread = threading.Thread(target=trickle_headers, daemon=True)
+        server_thread.start()
+        started = time.monotonic()
+        try:
+            with patch.object(probe_guest.socket, "create_connection", return_value=client), \
+                    patch.object(probe_guest.ssl, "create_default_context", return_value=FakeTLSContext()), \
+                    patch.object(probe_guest, "TOTAL_TIMEOUT", 0.15):
+                report = probe_guest.probe_once("104.20.0.1")
+            elapsed = time.monotonic() - started
+        finally:
+            server.close()
+            server_thread.join(timeout=1)
+        self.assertFalse(server_thread.is_alive())
+        self.assertLess(elapsed, 0.75)
+        self.assertEqual(report["kind"], "native-guest-public-probe-v1")
+        self.assertEqual(report["error"], "total_timeout")
+        destination = "104.20.0.1"
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        with ExitStack() as patches:
+            harness = patches.enter_context(ExercisePatches(
+                probe_stdout=json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n"))
+            patches.enter_context(patch.object(
+                supervisor, "_protected", side_effect=lambda path, *_a, **_k: path))
+            with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_result_failed"):
+                supervisor._exercise(self.root, self.admission, account, "staff", TargetPreferences,
+                                     public_probe_ip=destination)
+        retained = next(event[2] for event in harness.events
+                        if event[0] == "record" and event[1] == "probe.plist")
+        self.assertEqual(retained["error"], "total_timeout")
+        self.assertEqual(sum(event[0] == "record" and event[1] == "probe.plist"
+                             for event in harness.events), 1)
+        self.assertTrue(any(event[0] == "stop_owned" for event in harness.events))
+        self.assertTrue(any(event[0] == "restore" for event in harness.events))
+
+    def test_guest_route_uses_public_context_and_positive_first_fixed_host_requests(self):
+        root_certs = TEST_PUBLIC_ROOT_CERTS
+        fingerprints = sorted(hashlib.sha256(cert).hexdigest() for cert in root_certs)
+        roots = hashlib.sha256("\n".join(fingerprints).encode("ascii")).hexdigest()
+        wire = [
+            b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/manifest+json; charset=utf-8\r\n"
+            b"X-Long-Header: " + b"x" * 8192 + b"\r\nContent-Length: 3\r\n\r\nbad",
+            b"HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nContent-Length: 0\r\n\r\n",
+        ]
+        destinations = []
+        hostnames = []
+        requests = []
+        servers = []
+        clients = []
+
+        class WrappedSocket:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+
+            def do_handshake(self):
+                return None
+
+            def __getattr__(self, name):
+                return getattr(self.wrapped, name)
+
+        class DefaultContext:
+            def get_ca_certs(self, binary_form=False):
+                self_test.assertTrue(binary_form)
+                return root_certs
+
+        class TLSContext:
+            def __init__(self, protocol):
+                self_test.assertEqual(protocol, probe_guest.ssl.PROTOCOL_TLS_CLIENT)
+
+            def load_verify_locations(self, *, cadata):
+                self_test.assertIn("-----BEGIN CERTIFICATE-----", cadata)
+
+            def get_ca_certs(self, binary_form=False):
+                self_test.assertTrue(binary_form)
+                return root_certs
+
+            def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=False):
+                hostnames.append(server_hostname)
+                self_test.assertFalse(do_handshake_on_connect)
+                return WrappedSocket(raw)
+
+        def connect(destination, timeout=None):
+            destinations.append((destination, timeout))
+            client, server = socket.socketpair()
+            clients.append(client)
+            servers.append(server)
+            index = len(servers) - 1
+
+            def serve():
+                try:
+                    requests.append(server.recv(4096))
+                    server.sendall(wire[index])
+                except OSError:
+                    pass
+            threading.Thread(target=serve, daemon=True).start()
+            return client
+        self_test = self
+        report = None
+        try:
+            with patch.object(probe_guest.socket, "create_connection", side_effect=connect), \
+                 patch.object(probe_guest.ssl, "create_default_context", return_value=DefaultContext()), \
+                 patch.object(probe_guest.ssl, "SSLContext", TLSContext), \
+                 patch.dict(probe_guest.os.environ, {}, clear=False):
+                probe_guest.os.environ.pop("SSL_CERT_FILE", None)
+                probe_guest.os.environ.pop("SSL_CERT_DIR", None)
+                report = probe_guest.route_contract("104.20.0.1", "104.20.0.2", roots)
+        finally:
+            for sock in clients + servers:
+                sock.close()
+        self.assertFalse(report["verified"])
+        self.assertEqual(report["error"], "predicate_failed")
+        self.assertEqual(report["identityStatus"], 404)
+        self.assertEqual(report["positiveContentType"], "")
+        self.assertTrue(report["identityNoStore"])
+        self.assertTrue(report["identityNoGatewayMarkers"])
+        self.assertEqual(destinations[0][0], ("104.20.0.2", 443))
+        self.assertEqual(destinations[1][0], ("104.20.0.1", 443))
+        self.assertEqual(hostnames, [probe_guest.POSITIVE_HOST, probe_guest.HOST])
+        self.assertIn(b"GET /site.webmanifest HTTP/1.1\r\nHost: knitli.app", requests[0])
+        self.assertIn(b"GET /probe HTTP/1.1\r\nHost: " + probe_guest.HOST.encode(), requests[1])
+        self.assertEqual(report["publicTrustRootsSha256"], roots)
+        self.assertTrue(report["gatewayCaAbsent"])
+
+    def test_guest_route_rejects_root_override_and_gateway_ca_only_roots_before_sockets(self):
+        with patch.dict(probe_guest.os.environ, {"SSL_CERT_FILE": "/untrusted/ca.pem"}), \
+             patch.object(probe_guest.ssl, "create_default_context") as create_context:
+            with self.assertRaisesRegex(probe_guest.ProbeError, "trust_override"):
+                probe_guest._public_context("a" * 64)
+            create_context.assert_not_called()
+        gateway_der = probe_guest.ssl.PEM_cert_to_DER_cert(probe_guest.GATEWAY_CA_PEM)
+        gateway_hash = hashlib.sha256(gateway_der).hexdigest()
+        roots = hashlib.sha256(gateway_hash.encode("ascii")).hexdigest()
+
+        class GatewayOnlyContext:
+            def get_ca_certs(self, binary_form=False):
+                return [gateway_der]
+        with patch.dict(probe_guest.os.environ, {}, clear=False), \
+             patch.object(probe_guest.ssl, "create_default_context", return_value=GatewayOnlyContext()):
+            probe_guest.os.environ.pop("SSL_CERT_FILE", None)
+            probe_guest.os.environ.pop("SSL_CERT_DIR", None)
+            with self.assertRaisesRegex(probe_guest.ProbeError, "trust_roots_mismatch"):
+                probe_guest._public_context(roots)
+
+    def test_guest_route_freezes_default_root_inventory_into_fresh_tls_context(self):
+        root_certs = TEST_PUBLIC_ROOT_CERTS
+        fingerprints = sorted({hashlib.sha256(cert).hexdigest() for cert in root_certs})
+        roots = root_inventory_sha256(root_certs)
+        certificates_by_fingerprint = {
+            hashlib.sha256(certificate).hexdigest(): certificate for certificate in root_certs
+        }
+        expected_bundle = "".join(
+            probe_guest.ssl.DER_cert_to_PEM_cert(certificates_by_fingerprint[fingerprint])
+            for fingerprint in fingerprints
+        )
+
+        class DefaultContext:
+            def get_ca_certs(self, binary_form=False):
+                self.asserted_binary = binary_form
+                return root_certs
+
+        class FreshContext:
+            def __init__(self, protocol):
+                self.protocol = protocol
+                self.verify_mode = None
+                self.check_hostname = False
+
+            def load_verify_locations(self, *, cadata):
+                self.loaded_bundle = cadata
+
+            def get_ca_certs(self, binary_form=False):
+                return root_certs
+
+        default_context = DefaultContext()
+        with patch.object(probe_guest.ssl, "create_default_context", return_value=default_context), \
+             patch.object(probe_guest.ssl, "SSLContext", FreshContext):
+            context, actual, gateway_absent = probe_guest._public_context(roots)
+        self.assertIsNot(context, default_context)
+        self.assertEqual(actual, roots)
+        self.assertTrue(gateway_absent)
+        self.assertTrue(default_context.asserted_binary)
+        self.assertEqual(context.protocol, probe_guest.ssl.PROTOCOL_TLS_CLIENT)
+        effective = sorted({hashlib.sha256(cert).hexdigest()
+                            for cert in context.get_ca_certs(binary_form=True)})
+        self.assertEqual(effective, fingerprints)
+        self.assertEqual(context.verify_mode, probe_guest.ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(context.loaded_bundle, expected_bundle)
+
+    def test_guest_route_identity_leg_rejects_status_body_headers_redirect(self):
+        root_certs = TEST_PUBLIC_ROOT_CERTS[:1]
+        roots = root_inventory_sha256(root_certs)
+        positive_response = (b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n")
+        cases = (
+            (b"HTTP/1.1 200 OK\r\nCache-Control: no-store\r\nContent-Length: 0\r\n\r\n",
+             "identityStatus", 200),
+            (b"HTTP/1.1 503 Unavailable\r\nCache-Control: no-store\r\nContent-Length: 0\r\n\r\n",
+             "identityStatus", 503),
+            (b"HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nContent-Length: 1\r\n\r\nx",
+             "identityBodyBytes", 1),
+            (b"HTTP/1.1 302 Found\r\nLocation: https://elsewhere.invalid/\r\n"
+             b"Cache-Control: no-store\r\nContent-Length: 0\r\n\r\n", "identityStatus", 302),
+            (b"HTTP/1.1 404 Not Found\r\nx-knitli-probe-gateway: v1\r\n"
+             b"Cache-Control: no-store\r\nContent-Length: 0\r\n\r\n", "identityNoGatewayMarkers", False),
+            (b"HTTP/1.1 404 Not Found\r\nx-knitli-probe-host: 1\r\n"
+             b"Cache-Control: no-store\r\nContent-Length: 0\r\n\r\n", "identityNoGatewayMarkers", False),
+            (b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n", "identityNoStore", False),
+            (b"HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nContent-Length: 8193\r\n\r\n"
+             + b"x" * 8193, "identityError", "body_too_large"),
+        )
+        for identity_response, field, expected in cases:
+            with self.subTest(field=field, expected=expected):
+                responses = [positive_response, identity_response]
+                harness = SocketResponseHarness(responses)
+
+                class Wrapped:
+                    def __init__(self, sock, fail=False):
+                        self.sock, self.fail = sock, fail
+
+                    def do_handshake(self):
+                        if self.fail:
+                            raise probe_guest.ssl.SSLError("untrusted")
+
+                    def __getattr__(self, name):
+                        return getattr(self.sock, name)
+
+                class DefaultContext:
+                    def get_ca_certs(self, binary_form=False):
+                        return root_certs
+
+                class Context:
+                    def __init__(self, protocol):
+                        self_test.assertEqual(protocol, probe_guest.ssl.PROTOCOL_TLS_CLIENT)
+
+                    def load_verify_locations(self, *, cadata):
+                        self_test.assertIn("-----BEGIN CERTIFICATE-----", cadata)
+
+                    def get_ca_certs(self, binary_form=False):
+                        return root_certs
+
+                    def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=False):
+                        self_test.assertFalse(do_handshake_on_connect)
+                        return Wrapped(raw)
+
+                self_test = self
+                try:
+                    with patch.object(probe_guest.socket, "create_connection",
+                                      side_effect=harness.connect), \
+                         patch.object(probe_guest.ssl, "create_default_context",
+                                      return_value=DefaultContext()), \
+                         patch.object(probe_guest.ssl, "SSLContext", Context), \
+                         patch.dict(probe_guest.os.environ, {}, clear=False):
+                        probe_guest.os.environ.pop("SSL_CERT_FILE", None)
+                        probe_guest.os.environ.pop("SSL_CERT_DIR", None)
+                        report = probe_guest.route_contract("104.20.0.1", "104.20.0.2", roots)
+                finally:
+                    harness.close()
+                self.assertFalse(report["verified"])
+                self.assertEqual(report[field], expected)
+
+    def test_guest_route_identity_leg_classifies_tls_handshake_failure(self):
+        """The second leg reports TLS errors when the identity handshake fails."""
+        root_certs = TEST_PUBLIC_ROOT_CERTS[:1]
+        roots = root_inventory_sha256(root_certs)
+        positive_response = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n"
+        harness = SocketResponseHarness([positive_response, b""])
+        handshake_calls = [0]
+
+        class Wrapped:
+            def __init__(self, sock, fail=False):
+                self.sock = sock
+                self.fail = fail
+
+            def do_handshake(self):
+                if self.fail:
+                    raise probe_guest.ssl.SSLError("untrusted")
+
+            def __getattr__(self, name):
+                return getattr(self.sock, name)
+
+        class FailingHandshakeContext:
+            def __init__(self, protocol):
+                self.protocol = protocol
+
+            def load_verify_locations(self, *, cadata):
+                pass
+
+            def get_ca_certs(self, binary_form=False):
+                return root_certs
+
+            def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=False):
+                handshake_calls[0] += 1
+                return Wrapped(raw, fail=handshake_calls[0] == 2)
+
+        class TlsCaseDefaultContext:
+            def get_ca_certs(self, binary_form=False):
+                return root_certs
+
+        try:
+            with patch.object(probe_guest.socket, "create_connection",
+                              side_effect=harness.connect), \
+                 patch.object(probe_guest.ssl, "create_default_context",
+                              return_value=TlsCaseDefaultContext()), \
+                 patch.object(probe_guest.ssl, "SSLContext", FailingHandshakeContext), \
+                 patch.dict(probe_guest.os.environ, {}, clear=False):
+                probe_guest.os.environ.pop("SSL_CERT_FILE", None)
+                probe_guest.os.environ.pop("SSL_CERT_DIR", None)
+                report = probe_guest.route_contract("104.20.0.1", "104.20.0.2", roots)
+        finally:
+            harness.close()
+        self.assertFalse(report["verified"])
+        self.assertEqual(report["identityError"], "tls_error")
+
+    def test_guest_route_leg_timer_interrupts_a_slow_drip_response(self):
+        root_certs = TEST_PUBLIC_ROOT_CERTS[:1]
+        roots = root_inventory_sha256(root_certs)
+        clients, servers, threads = [], [], []
+
+        class Wrapped:
+            def __init__(self, sock):
+                self.sock = sock
+
+            def do_handshake(self):
+                return None
+
+            def __getattr__(self, name):
+                return getattr(self.sock, name)
+
+        def connect(_destination, timeout=None):
+            client, server = socket.socketpair()
+            index = len(servers)
+            clients.append(client)
+            servers.append(server)
+
+            def serve():
+                try:
+                    server.recv(4096)
+                    if index == 0:
+                        for byte in b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n":
+                            server.sendall(bytes((byte,)))
+                            time.sleep(0.04)
+                    else:
+                        server.sendall(b"HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\n"
+                                       b"Content-Length: 0\r\n\r\n")
+                except OSError:
+                    pass
+            thread = threading.Thread(target=serve, daemon=True)
+            threads.append(thread)
+            thread.start()
+            return client
+        started = time.monotonic()
+        try:
+            with patch.object(probe_guest.socket, "create_connection", side_effect=connect), \
+                 patch.object(probe_guest, "ROUTE_LEG_TIMEOUT", 0.15), \
+                 patch.object(probe_guest, "ROUTE_TIMEOUT", 0.5):
+                class Context:
+                    def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=False):
+                        return Wrapped(raw)
+                with patch.object(probe_guest, "_public_context", return_value=(Context(), roots, True)):
+                    report = probe_guest.route_contract("104.20.0.1", "104.20.0.2", roots)
+        finally:
+            for sock in clients + servers:
+                sock.close()
+            for thread in threads:
+                thread.join(timeout=1)
+        self.assertLess(time.monotonic() - started, 1)
+        self.assertEqual(report["positiveError"], "timeout")
+        self.assertTrue(report["identityNoStore"])
+        self.assertFalse(report["verified"])
+
+    def test_guest_route_aggregate_budget_interrupts_in_progress_second_leg(self):
+        """The identity leg timer uses only the aggregate time left after leg one."""
+        roots = "a" * 64
+        timers = []
+        positive_response = (b"HTTP/1.1 200 OK\r\n"
+                             b"Content-Type: application/manifest+json\r\n"
+                             b"Content-Length: 456\r\n\r\n" + b"x" * 456)
+        harness = SocketResponseHarness([positive_response, b""])
+
+        class ControlledTimer(ManualTimer):
+            def __init__(self, interval, function):
+                super().__init__(interval, function)
+                self.interval = interval
+                self.function = function
+                timers.append(self)
+
+        class WrappedSocket:
+            def __init__(self, sock):
+                self.sock = sock
+
+            def do_handshake(self):
+                pass
+
+            def sendall(self, request):
+                self.sock.sendall(request)
+                if request.startswith(b"GET /probe "):
+                    second_leg_timer = timers[-1]
+                    active_leg_timer_intervals.append(second_leg_timer.interval)
+                    second_leg_timer.function()
+
+            def __getattr__(self, name):
+                return getattr(self.sock, name)
+
+        class Context:
+            def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=False):
+                return WrappedSocket(raw)
+
+        active_leg_timer_intervals = []
+
+        try:
+            with patch.object(probe_guest, "ROUTE_TIMEOUT", 0.5), \
+                 patch.object(probe_guest, "ROUTE_LEG_TIMEOUT", 1.5), \
+                 patch.object(probe_guest.threading, "Timer", ControlledTimer), \
+                 patch.object(probe_guest.socket, "create_connection",
+                              side_effect=harness.connect), \
+                 patch.object(probe_guest, "_public_context",
+                              return_value=(Context(), roots, True)):
+                report = probe_guest.route_contract("104.20.0.1", "104.20.0.2", roots)
+        finally:
+            harness.close()
+
+        self.assertEqual(len(active_leg_timer_intervals), 1)
+        self.assertGreater(active_leg_timer_intervals[0], 0)
+        self.assertLessEqual(active_leg_timer_intervals[0], 0.5)
+        self.assertEqual(report["identityError"], "timeout")
+        self.assertFalse(report["verified"])
+
+    def test_guest_route_aggregate_requires_each_fixed_leg_predicate(self):
+        roots = "f" * 64
+        positive = {"status": 200, "tlsVerified": True, "bodyBytes": 456,
+                    "bodySha256": probe_guest.POSITIVE_BODY_SHA256,
+                    "contentType": probe_guest.POSITIVE_CONTENT_TYPE, "noStore": False,
+                    "noGatewayMarkers": False, "error": ""}
+        identity = {"status": 404, "tlsVerified": True, "bodyBytes": 0,
+                    "bodySha256": hashlib.sha256(b"").hexdigest(), "contentType": "",
+                    "noStore": True, "noGatewayMarkers": True, "error": ""}
+
+        def observe(positive_result=None, identity_result=None):
+            positive_result = positive if positive_result is None else positive_result
+            identity_result = identity if identity_result is None else identity_result
+            with patch.object(probe_guest, "_public_context", return_value=(object(), roots, True)), \
+                 patch.object(probe_guest, "_route_request",
+                              side_effect=[(positive_result, b"ignored"), (identity_result, b"")]):
+                return probe_guest.route_contract("104.20.0.1", "104.20.0.2", roots)
+        self.assertTrue(observe()["verified"])
+        positive_failures = (
+            {"status": 503}, {"tlsVerified": False}, {"contentType": "text/html"},
+            {"bodyBytes": 455}, {"bodySha256": "0" * 64}, {"error": "timeout"},
+        )
+        for change in positive_failures:
+            with self.subTest(positive=change):
+                self.assertFalse(observe({**positive, **change})["verified"])
+        identity_failures = (
+            {"status": 200}, {"status": 503}, {"bodyBytes": 1},
+            {"noStore": False}, {"noGatewayMarkers": False},
+            {"tlsVerified": False}, {"error": "tls_error"},
+        )
+        for change in identity_failures:
+            with self.subTest(identity=change):
+                self.assertFalse(observe(positive, {**identity, **change})["verified"])
+
+    def test_guest_probe_classifies_socket_deadline_without_timer(self):
+        now = [100.0]
+
+        def monotonic():
+            return now[0]
+
+        def timeout_at_deadline(*_args, **_kwargs):
+            now[0] = 115.0
+            raise TimeoutError("socket timed out")
+
+        with patch.object(probe_guest, "TOTAL_TIMEOUT", 15.0), \
+                patch.object(probe_guest.threading, "Timer", ManualTimer), \
+                patch.object(probe_guest.time, "monotonic", side_effect=monotonic), \
+                patch.object(probe_guest.socket, "create_connection", side_effect=timeout_at_deadline):
+            report = probe_guest.probe_once("104.20.0.1")
+        self.assertEqual(report["error"], "total_timeout")
+
+    def test_guest_probe_classifies_early_transport_error(self):
+        now = [200.0]
+
+        def monotonic():
+            return now[0]
+
+        def early_transport_error(*_args, **_kwargs):
+            now[0] = 201.0
+            raise OSError("connection refused")
+
+        with patch.object(probe_guest, "TOTAL_TIMEOUT", 15.0), \
+                patch.object(probe_guest.threading, "Timer", ManualTimer), \
+                patch.object(probe_guest.time, "monotonic", side_effect=monotonic), \
+                patch.object(probe_guest.socket, "create_connection", side_effect=early_transport_error):
+            report = probe_guest.probe_once("104.20.0.1")
+        self.assertEqual(report["error"], "transport_error")
+
+    def test_guest_probe_rejects_a_certificate_from_a_mismatched_ca(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            certificate = Path(temporary_directory) / "server.pem"
+            private_key = Path(temporary_directory) / "server-key.pem"
+            subprocess.run(  # nosec B603 -- Fixed local OpenSSL argv and private temporary fixture paths.
+                ["/usr/bin/openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                 "-days", "1", "-subj", f"/CN={probe_guest.HOST}", "-addext",
+                 f"subjectAltName=DNS:{probe_guest.HOST}", "-keyout", str(private_key),
+                 "-out", str(certificate)],
+                check=True, capture_output=True, timeout=10)
+            private_key.chmod(0o600)
+
+            server_context = probe_guest.ssl.SSLContext(probe_guest.ssl.PROTOCOL_TLS_SERVER)
+            server_context.load_cert_chain(certificate, private_key)
+            client, server = socket.socketpair()
+            server.settimeout(3)
+            verification_errors = []
+            server_errors = []
+            original_handshake = probe_guest.ssl.SSLSocket.do_handshake
+
+            def record_verification_error(tls_socket, *args, **kwargs):
+                try:
+                    return original_handshake(tls_socket, *args, **kwargs)
+                except probe_guest.ssl.SSLCertVerificationError as error:
+                    verification_errors.append(error)
+                    raise
+
+            def serve_valid_probe_response():
+                try:
+                    with server_context.wrap_socket(server, server_side=True) as tls_socket:
+                        tls_socket.recv(4096)
+                        tls_socket.sendall(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\n"
+                            b"x-knitli-probe-gateway: v1\r\n"
+                            b"x-knitli-probe-host: 1\r\n\r\nknitli-probe-v1\n")
+                except (OSError, probe_guest.ssl.SSLError) as error:
+                    server_errors.append(error)
+
+            server_thread = threading.Thread(target=serve_valid_probe_response)
+            server_thread.start()
+
+            def paired_connection(*_args, **_kwargs):
+                return client
+
+            try:
+                with patch.object(probe_guest, "TOTAL_TIMEOUT", 5.0), \
+                        patch.object(probe_guest.socket, "create_connection",
+                                     side_effect=paired_connection) as create_connection, \
+                        patch.object(probe_guest.ssl.SSLSocket, "do_handshake",
+                                     new=record_verification_error):
+                    report = probe_guest.probe_once("104.20.0.1")
+            finally:
+                client.close()
+                server.close()
+                server_thread.join(timeout=4)
+
+        self.assertEqual(create_connection.call_count, 1)
+        self.assertFalse(server_thread.is_alive())
+        self.assertFalse(report["verified"])
+        self.assertFalse(report["tlsVerified"])
+        self.assertEqual(report["error"], "transport_error")
+        self.assertEqual(len(verification_errors), 1)
+        self.assertGreater(verification_errors[0].verify_code, 0)
+        self.assertEqual(len(server_errors), 1)
+        self.assertIsInstance(server_errors[0], probe_guest.ssl.SSLError)
+
+    def test_guest_probe_classifies_cleanup_overrun_as_total_timeout(self):
+        client, server = socket.socketpair()
+
+        class TransferredTLS:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+
+            def do_handshake(self):
+                pass
+
+            def __getattr__(self, name):
+                return getattr(self.wrapped, name)
+
+        class FakeTLSContext:
+            def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=True):
+                return TransferredTLS(socket.socket(fileno=raw.detach()))
+
+        def respond():
+            try:
+                server.recv(4096)
+                server.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\n"
+                               b"x-knitli-probe-gateway: v1\r\n"
+                               b"x-knitli-probe-host: 1\r\n\r\nknitli-probe-v1\n")
+            except OSError:
+                pass
+
+        clock = iter((300.0, 300.1, 300.2, 300.3, 300.4, 316.0))
+        server_thread = threading.Thread(target=respond, daemon=True)
+        server_thread.start()
+        try:
+            with patch.object(probe_guest, "TOTAL_TIMEOUT", 15.0), \
+                    patch.object(probe_guest.threading, "Timer", ManualTimer), \
+                    patch.object(probe_guest.time, "monotonic", side_effect=lambda: next(clock)), \
+                    patch.object(probe_guest.socket, "create_connection", return_value=client), \
+                    patch.object(probe_guest.ssl, "create_default_context",
+                                 return_value=FakeTLSContext()):
+                report = probe_guest.probe_once("104.20.0.1")
+        finally:
+            server.close()
+            server_thread.join(timeout=1)
+        self.assertFalse(server_thread.is_alive())
+        self.assertEqual(report["error"], "total_timeout")
+
+    def test_gateway_tls_context_pins_only_the_verified_root(self):
+        context = probe_guest.ssl.create_default_context(cadata=probe_guest.GATEWAY_CA_PEM)
+        certificates = context.get_ca_certs(binary_form=True)
+        self.assertEqual(context.verify_mode, probe_guest.ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(len(certificates), 1)
+        self.assertEqual(hashlib.sha256(certificates[0]).hexdigest(),
+                         "a1c2722d8f42c698d98dad65487eb2467fb9117c60205d84907231ecf6aa9102")
+
+    def test_guest_probe_source_matches_supervisor_digest_pin(self):
+        source_digest = hashlib.sha256(supervisor.PUBLIC_PROBE_SOURCE.read_bytes()).hexdigest()
+        self.assertEqual(source_digest, supervisor.PUBLIC_PROBE_SOURCE_SHA256)
+        self.assertEqual(source_digest, supervisor.GUEST_ROUTE_SOURCE_SHA256)
+
+    def test_guest_probe_reports_gateway_context_and_boolean_host_posture_only(self):
+        cases = (("1", "v1", True, True), ("0", "v1", True, False),
+                 (None, "v1", False, False), ("2", "v1", False, False),
+                 ("1", None, False, True))
+        for host_posture, gateway_marker, context_verified, expected_host_passed in cases:
+            with self.subTest(host_posture=host_posture, gateway_marker=gateway_marker):
+                client, server = socket.socketpair()
+                headers = ["HTTP/1.1 200 OK", "Content-Length: 16", "Connection: close"]
+                if host_posture is not None:
+                    headers.append(f"x-knitli-probe-host: {host_posture}")
+                if gateway_marker is not None:
+                    headers.append(f"x-knitli-probe-gateway: {gateway_marker}")
+                response_bytes = ("\r\n".join(headers) + "\r\n\r\n").encode() + b"knitli-probe-v1\n"
+
+                class TransferredTLS:
+                    def __init__(self, wrapped):
+                        self.wrapped = wrapped
+
+                    def do_handshake(self):
+                        return None
+
+                    def __getattr__(self, name):
+                        return getattr(self.wrapped, name)
+
+                class FakeTLSContext:
+                    def wrap_socket(self, raw, *, server_hostname, do_handshake_on_connect=True):
+                        return TransferredTLS(socket.socket(fileno=raw.detach()))
+
+                def respond():
+                    try:
+                        server.recv(4096)
+                        server.sendall(response_bytes)
+                    except OSError:
+                        pass
+
+                server_thread = threading.Thread(target=respond, daemon=True)
+                server_thread.start()
+
+                def create_context(**kwargs):
+                    self.assertEqual(kwargs, {"cadata": probe_guest.GATEWAY_CA_PEM})
+                    return FakeTLSContext()
+
+                try:
+                    with patch.object(probe_guest.socket, "create_connection", return_value=client), \
+                            patch.object(probe_guest.ssl, "create_default_context",
+                                         side_effect=create_context):
+                        report = probe_guest.probe_once("104.20.0.1")
+                finally:
+                    server.close()
+                    server_thread.join(timeout=1)
+                self.assertFalse(server_thread.is_alive())
+                self.assertEqual(report["gatewayContextVerified"], context_verified)
+                self.assertEqual(report["expectedHostPosturePassed"], expected_host_passed)
+                self.assertEqual(report["verified"], context_verified)
+                self.assertEqual(report["error"], "" if context_verified else "gateway_context_invalid")
+                self.assertFalse(any("header" in key.lower() for key in report))
+
+    def test_public_probe_admission_rejects_integer_ipv4(self):
+        admission_root = self.root / "public-probe-admission"
+        admission_root.mkdir(mode=0o700)
+        home = self.root / "probe-owner-home"
+        home.mkdir(mode=0o700)
+        value = {**self.admission, "kind": "softnet-public-probe-admission-v1",
+                 "probeIPv4": int(ipaddress.IPv4Address("104.20.0.1")),
+                 "ownerUid": os.getuid(), "tartHome": str(home)}
+        admission_file = admission_root / "admission.plist"
+        admission_file.write_bytes(plistlib.dumps(value))
+        admission_file.chmod(0o600)
+        account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_name="owner")
+        with patch.object(supervisor.recovery, "_directory",
+                           side_effect=lambda _: os.open(admission_root, os.O_RDONLY)), \
+                patch.object(supervisor.recovery, "_read", return_value=plistlib.dumps(value)), \
+                patch.object(supervisor, "_protected", side_effect=lambda path, *_a, **_k: Path(path)), \
+                patch.object(supervisor.pwd, "getpwuid", return_value=account), \
+                patch.object(supervisor.grp, "getgrgid", return_value=SimpleNamespace(gr_name="staff")):
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_admission"):
+                supervisor._admission_record(admission_root)
+
+    def test_guest_route_admission_has_exact_two_global_ips_and_trust_digest(self):
+        admission_root = self.root / "guest-route-admission"
+        admission_root.mkdir(mode=0o700)
+        home = self.root / "guest-route-home"
+        home.mkdir(mode=0o700)
+        base = {**self.admission, "kind": "softnet-guest-route-admission-v1",
+                "identityProbeIPv4": "104.20.0.1", "positiveOriginIPv4": "104.20.0.2",
+                "publicTrustRootsSha256": "f" * 64,
+                "ownerUid": os.getuid(), "tartHome": str(home)}
+        account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_name="owner")
+
+        def read(value):
+            return plistlib.dumps(value)
+        common = (patch.object(supervisor.recovery, "_directory",
+                               side_effect=lambda _: os.open(admission_root, os.O_RDONLY)),
+                  patch.object(supervisor.recovery, "_read", side_effect=lambda *_: read(value)),
+                  patch.object(supervisor, "_protected", side_effect=lambda path, *_a, **_k: Path(path)),
+                  patch.object(supervisor.pwd, "getpwuid", return_value=account),
+                  patch.object(supervisor.grp, "getgrgid", return_value=SimpleNamespace(gr_name="staff")))
+        value = dict(base)
+        with ExitStack() as patches:
+            for patcher in common:
+                patches.enter_context(patcher)
+            parsed, _, _, _ = supervisor._admission_record(admission_root)
+        self.assertEqual(parsed, base)
+        invalid = (
+            {**base, "probeIPv4": "104.20.0.3"},
+            {key: item for key, item in base.items() if key != "positiveOriginIPv4"},
+            {**base, "publicTrustRootsSha256": "not-a-digest"},
+            {**base, "identityProbeIPv4": "127.0.0.1"},
+            {**base, "positiveOriginIPv4": "2001:db8::1"},
+        )
+        for value in invalid:
+            with self.subTest(admission=value), ExitStack() as patches:
+                for patcher in common:
+                    patches.enter_context(patcher)
+                with self.assertRaisesRegex(recovery.RecoveryError, "invalid_admission"):
+                    supervisor._admission_record(admission_root)
+
+    def test_fixed_host_dns_rejects_oversized_and_malformed_answer_sets(self):
+        def answer(ip):
+            return (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))
+        calls = []
+
+        def resolver(host, port, family, socktype):
+            calls.append((host, port, family, socktype))
+            return [answer("104.20.0.1")]
+        self.assertEqual(supervisor._resolve_public_probe_ip(resolver, supervisor.GUEST_ROUTE_POSITIVE_HOST),
+                         "104.20.0.1")
+        self.assertEqual(calls, [(supervisor.GUEST_ROUTE_POSITIVE_HOST, 443,
+                                  socket.AF_INET, socket.SOCK_STREAM)])
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_dns_answer_count"):
+            supervisor._resolve_public_probe_ip(lambda *_: [answer("104.20.0.1")] * 33,
+                                                supervisor.GUEST_ROUTE_IDENTITY_HOST)
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_dns_answer_invalid"):
+            supervisor._resolve_public_probe_ip(lambda *_: [(socket.AF_INET,)],
+                                                supervisor.GUEST_ROUTE_IDENTITY_HOST)
+
+    def test_probe_report_rejects_changed_destination_and_body_fields(self):
+        destination = "104.20.0.1"
+        report = self._public_probe_stdout(destination)
+        self.assertTrue(supervisor._validate_public_probe_report(report, destination)["verified"])
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
+            supervisor._validate_public_probe_report(report, "104.20.0.2")
+        altered = json.loads(report)
+        altered["body"] = "knitli-probe-v1\n"
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
+            supervisor._validate_public_probe_report(json.dumps(altered).encode() + b"\n", destination)
+
+    def test_timeout_probe_report_allows_bounded_timer_cleanup_overhead(self):
+        destination = "104.20.0.1"
+        report = json.loads(self._public_probe_stdout(
+            destination, status=0, body=b"", error="total_timeout",
+            host_posture=None, gateway_marker=None))
+        report["finishedAtUnixNs"] = report["startedAtUnixNs"] + 15_000_763_492
+        accepted = supervisor._validate_public_probe_report(
+            json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+            destination)
+        self.assertEqual(accepted["error"], "total_timeout")
+        self.assertFalse(accepted["verified"])
+
+    def test_probe_report_duration_limits_keep_success_at_15s_and_timeout_at_25s(self):
+        destination = "104.20.0.1"
+        success = json.loads(self._public_probe_stdout(destination))
+        success["finishedAtUnixNs"] = success["startedAtUnixNs"] + 15_000_000_001
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
+            supervisor._validate_public_probe_report(
+                json.dumps(success, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+                destination)
+
+        transport_error = json.loads(self._public_probe_stdout(
+            destination, status=0, body=b"", error="transport_error",
+            host_posture=None, gateway_marker=None))
+        transport_error["finishedAtUnixNs"] = (
+            transport_error["startedAtUnixNs"] + 15_000_000_001)
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
+            supervisor._validate_public_probe_report(
+                json.dumps(transport_error, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+                destination)
+
+        timeout = json.loads(self._public_probe_stdout(
+            destination, status=0, body=b"", error="total_timeout",
+            host_posture=None, gateway_marker=None))
+        timeout["finishedAtUnixNs"] = timeout["startedAtUnixNs"] + 25_000_000_001
+        with self.assertRaisesRegex(recovery.RecoveryError, "public_probe_report_invalid"):
+            supervisor._validate_public_probe_report(
+                json.dumps(timeout, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+                destination)
 
     def test_capture_failure_never_launches_and_failed_restore_never_completes(self):
         with self._exercise_patches(capture_error=RuntimeError("capture")) as harness:
@@ -665,6 +1943,23 @@ class SoftnetSupervisorTests(unittest.TestCase):
                                              "staff", TargetPreferences)
                 self.assertFalse(any(event[0] == "restore" for event in harness.events))
 
+    def test_reaper_preserves_command_cleanup_metadata_and_finishes_remaining_children(self):
+        process = FakeProcess("unreaped-ps-proof")
+        failure = canary.CanaryError("tart_command_failed")
+        failure.cleanup_errors = ("process_not_reaped_group_unverified",)
+        failure.unreaped_processes = (process,)
+        with self._exercise_patches(reap_metadata_error=failure) as harness:
+            with self.assertRaisesRegex(recovery.RecoveryError, "cleanup_unproven") as raised:
+                supervisor._exercise(
+                    self.root, self.admission,
+                    SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner"),
+                    "staff", TargetPreferences)
+        self.assertIn("process_not_reaped_group_unverified", raised.exception.cleanup_errors)
+        self.assertIs(raised.exception.unreaped_processes[0], process)
+        reaped = [event[1] for event in harness.events if event[0] == "stop_owned"]
+        self.assertEqual(reaped, ["vm", "helper"])
+        self.assertFalse(any(event[0] == "restore" for event in harness.events))
+
     def test_readiness_timeout_is_bounded_and_does_not_restore_until_owned_children_proven(self):
         timeout = canary.CanaryError("tart_command_timeout")
         with self._exercise_patches(command_error=timeout,
@@ -679,6 +1974,56 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertTrue(any(event[0] == "restore" for event in harness.events))
         self.assertLess(next(i for i, event in enumerate(harness.events) if event[0] == "stop_owned"),
                         next(i for i, event in enumerate(harness.events) if event[0] == "restore"))
+
+    def test_readiness_cleanup_metadata_fails_closed_and_keeps_failed_run_and_process(self):
+        state_root = self.root / "state-with-unreaped-command"
+        state_root.mkdir(mode=0o700)
+        owner_uid = os.getuid()
+        process = FakeProcess("unreaped-tart-exec")
+        failure = canary.CanaryError("tart_command_failed")
+        failure.cleanup_errors = ("process_not_reaped_group_unverified",)
+        failure.unreaped_process = process
+        failure.unreaped_processes = (process,)
+        account = SimpleNamespace(pw_uid=owner_uid, pw_gid=os.getgid(), pw_name="owner")
+        identity = {"vmName": self.admission["vmName"],
+                    "macAddress": self.admission["macAddress"],
+                    "tartBinarySha256": canary.TART_BINARY_SHA256,
+                    "softnetBinarySha256": supervisor.SOFTNET_SHA256,
+                    "admissionSha256": "f" * 64}
+        with patch.object(recovery, "OWNER_UID", owner_uid), \
+                patch.object(recovery.os, "geteuid", return_value=owner_uid), \
+                self._exercise_patches(command_error=[failure, None]) as harness:
+            with run_state.State(state_root) as state:
+                run, run_id = state.begin(identity)
+                with self.assertRaises(canary.CanaryError) as raised:
+                    supervisor._exercise(run, self.admission, account, "staff", TargetPreferences)
+
+            error = raised.exception
+            self.assertIn("process_not_reaped_group_unverified", error.cleanup_errors)
+            self.assertIs(error.unreaped_processes[0], process)
+            self.assertFalse(any(event[0] == "restore" for event in harness.events))
+            readiness_attempts = [event for event in harness.events
+                                  if event[0] == "command" and event[1][1:2] == ("exec",)
+                                  and "/usr/bin/true" in event[1]]
+            self.assertEqual(len(readiness_attempts), 1)
+            self.assertFalse((run / "complete.plist").exists())
+            with self.assertRaisesRegex(recovery.RecoveryError, "unresolved_run"):
+                run_state.State(state_root).__enter__()
+        self.assertEqual(run.name, run_id)
+
+    def test_verified_transient_readiness_failure_still_retries(self):
+        transient = canary.CanaryError("tart_command_failed")
+        with self._exercise_patches(command_error=[transient, None]) as harness:
+            result = supervisor._exercise(
+                self.root, self.admission,
+                SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner"),
+                "staff", TargetPreferences)
+        self.assertTrue(all(result.values()))
+        attempts = [event for event in harness.events
+                    if event[0] == "command" and event[1][1:2] == ("exec",)
+                    and "/usr/bin/true" in event[1]]
+        self.assertEqual(len(attempts), 2)
+        self.assertTrue(any(event[0] == "restore" for event in harness.events))
 
     def test_owned_python_process_group_is_quiet_before_wnowait_then_reaped(self):
         child_code = "import signal,time; signal.signal(signal.SIGINT, signal.SIG_IGN); time.sleep(30)"
@@ -796,6 +2141,152 @@ class SoftnetSupervisorTests(unittest.TestCase):
             supervisor._stop_owned(process)
         self.assertEqual(order, ["wnowait", ("signal", signal.SIGINT),
                                  ("signal", signal.SIGKILL), "quiet", "wnowait", "wait"])
+
+    def test_exited_unreaped_child_uses_nonreaping_group_proof_when_darwin_identity_lookup_fails(self):
+        process = FakeProcess("already-exited")
+        order = []
+
+        def observe(*args):
+            self.assertEqual(args[:2], (os.P_PID, process.pid))
+            self.assertTrue(args[2] & os.WNOWAIT, "exit observation must use WNOWAIT")
+            self.assertIsNone(process.returncode, "WNOWAIT observation must preserve the PID")
+            order.append("wnowait")
+            return True
+
+        quiet_results = iter((False, True))
+
+        def quiet(pid):
+            self.assertEqual(pid, process.pid)
+            self.assertIsNone(process.returncode, "group proof must precede reap")
+            order.append("quiet")
+            return next(quiet_results)
+
+        def killpg(pid, sig):
+            self.assertEqual(pid, process.pid)
+            order.append(("signal", sig))
+            raise ProcessLookupError("zombie-only group")
+
+        def wait(timeout=None):
+            self.assertEqual(order[-2:], ["quiet", "wnowait"])
+            order.append("wait")
+            process.returncode = 0
+            return 0
+
+        process.wait = wait
+        with patch.object(supervisor.os, "getpgid", side_effect=ProcessLookupError), \
+                patch.object(supervisor.os, "getsid", return_value=process.pid), \
+                patch.object(supervisor.os, "waitid", side_effect=observe), \
+                patch.object(supervisor.os, "killpg", side_effect=killpg), \
+                patch.object(canary, "_wait_owned_vm_exit"), \
+                patch.object(supervisor, "_group_quiet", side_effect=quiet):
+            supervisor._stop_owned(process)
+        self.assertEqual(order, ["wnowait", "quiet", ("signal", signal.SIGINT),
+                                 ("signal", signal.SIGKILL), "quiet", "wnowait", "wait"])
+
+    def test_group_quiet_validates_status_only_for_owned_process_group(self):
+        cases = (
+            (b"71001 71001 Z\n71002 71002 ?\n", True, None),
+            (b"71001 71001 ?\n", None, "invalid_process_table"),
+            (b"71001 71001 R\n", False, None),
+            (b"71002 71002 Z\n", None, "owned_group_identity_lost"),
+            (b"not-a-pid 71001 ?\n71001 71001 Z\n", None, "invalid_process_table"),
+        )
+        for raw, expected, error in cases:
+            with self.subTest(raw=raw):
+                with patch.object(canary, "_run_bounded", return_value=(raw, 0)) as run:
+                    if error:
+                        with self.assertRaisesRegex(recovery.RecoveryError, error):
+                            supervisor._group_quiet(71001)
+                    else:
+                        self.assertIs(supervisor._group_quiet(71001), expected)
+                self.assertEqual(run.call_args.kwargs["output_limit"], canary.MAX_PROCESS_TABLE_BYTES)
+
+        with patch.object(canary, "_run_bounded",
+                          side_effect=canary.CanaryError("tart_command_output_limit")) as run:
+            with self.assertRaisesRegex(canary.CanaryError, "tart_command_output_limit"):
+                supervisor._group_quiet(71001)
+        self.assertEqual(run.call_args.kwargs["output_limit"], canary.MAX_PROCESS_TABLE_BYTES)
+
+    def test_identity_lookup_failure_does_not_signal_or_reap_without_exit_and_leader_proofs(self):
+        for exited, leader_present in ((False, True), (True, False)):
+            with self.subTest(exited=exited, leader_present=leader_present):
+                process = FakeProcess("unproven-identity")
+                events = []
+
+                def observe(child):
+                    self.assertIs(child, process)
+                    self.assertIsNone(child.returncode)
+                    events.append("wnowait")
+                    return exited
+
+                def quiet(pid):
+                    self.assertEqual(pid, process.pid)
+                    events.append("leader-proof")
+                    if not leader_present:
+                        raise recovery.RecoveryError("owned_group_identity_lost")
+                    return True
+
+                def killpg(*args):
+                    events.append("signal")
+
+                process.wait = lambda **kwargs: events.append("wait")
+                with patch.object(supervisor.os, "getpgid", side_effect=ProcessLookupError), \
+                        patch.object(supervisor.os, "getsid", return_value=process.pid), \
+                        patch.object(supervisor, "_child_exited", side_effect=observe), \
+                        patch.object(supervisor, "_group_quiet", side_effect=quiet), \
+                        patch.object(supervisor.os, "killpg", side_effect=killpg), \
+                        patch.object(canary, "_wait_owned_vm_exit"):
+                    with self.assertRaisesRegex(recovery.RecoveryError, "owned_group_identity_lost"):
+                        supervisor._stop_owned(process)
+                self.assertNotIn("signal", events)
+                self.assertNotIn("wait", events)
+                self.assertEqual(events, ["wnowait"] + (["leader-proof"] if exited else []))
+
+    def test_real_exited_unreaped_child_with_identity_lookup_failure_is_reaped_after_group_proof(self):
+        process = subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"],  # nosec B603 -- Fixed test argv.
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, start_new_session=True)
+        original_waitid = os.waitid
+        proof_seen = []
+
+        def waitid(*args, **kwargs):
+            self.assertIsNone(process.returncode, "child was reaped before WNOWAIT observation")
+            self.assertTrue(args[2] & os.WNOWAIT)
+            return original_waitid(*args, **kwargs)
+
+        def quiet(pid):
+            self.assertEqual(pid, process.pid)
+            self.assertIsNone(process.returncode, "child was reaped before process-table proof")
+            proof_seen.append(pid)
+            return original_quiet(pid)
+
+        def wait(timeout=None):
+            self.assertTrue(proof_seen, "child was reaped before process-table proof")
+            return original_wait(timeout=timeout)
+
+        original_wait = process.wait
+        original_quiet = supervisor._group_quiet
+        process.wait = wait
+        try:
+            deadline = supervisor.time.monotonic() + 3
+            while original_waitid(os.P_PID, process.pid,
+                                  os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+                self.assertLess(supervisor.time.monotonic(), deadline, "child did not exit")
+                supervisor.time.sleep(0.01)
+            with patch.object(supervisor.os, "getpgid", side_effect=ProcessLookupError), \
+                    patch.object(supervisor.os, "getsid", return_value=process.pid), \
+                    patch.object(supervisor.os, "waitid", side_effect=waitid), \
+                    patch.object(supervisor, "_group_quiet", side_effect=quiet), \
+                    patch.object(canary, "_wait_owned_vm_exit"):
+                supervisor._stop_owned(process)
+            self.assertTrue(proof_seen)
+            self.assertIsNotNone(process.returncode)
+        finally:
+            if process.returncode is None:
+                process.kill()
+                original_wait(timeout=3)
+            process.stdout.close()
+            process.stderr.close()
 
     def test_signals_without_group_quiet_proof_do_not_reap_child(self):
         process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],  # nosec B603 -- Fixed bounded sleep fixture.

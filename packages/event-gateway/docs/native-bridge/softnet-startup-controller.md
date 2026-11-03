@@ -86,9 +86,54 @@ failed early. Restoration requires both children reaped, `Running: false` and
 `State: stopped`, and no cleanup/log errors. The immutable controller completion
 record binds the run identity, snapshot, restoration marker and stop evidence.
 A startup error is still reported as failure even when cleanup restored the
-preferences; it leaves an unresolved run for explicit reconciliation. Journals,
+preferences; it leaves an unresolved run until an explicit disposition below. Journals,
 logs and the disposable VM are retained. No automatic stale-PID recovery, journal
 pruning or boot-time recovery is implemented.
+
+## Explicit failed-restored disposition
+
+`scripts/dispose_softnet_failed_run.py` is a separate root operator command for
+one narrow failure: `helperReaped=true`, `vmStopped=true`, and either recorded
+boolean value of `vmReaped`, with an existing restoration marker and all original
+records and bounded logs intact. The operator must acknowledge the exact recorded
+`vmReaped` value; a mismatched acknowledgement is rejected under the controller lock.
+Installation and use require separate owner approval. The preference recovery
+approval alone does not authorize clearing this gate or starting another canary.
+
+The command requires `--admission-dir`, the exact `--run-id`, a nonempty
+`--approval-reference`, and exactly one of `--accept-historical-vm-reaping-unknown`
+or `--accept-fully-reaped-failure`. The former acknowledges `vmReaped=false`; the
+latter acknowledges `vmReaped=true`. Under the same global controller lock, it
+validates the original protected admission digest
+and current VM identity, runs only the pinned `tart get` as the admitted nonroot
+account, rejects any named Tart/Softnet process in a bounded process snapshot,
+and reads the saved original preference through a fresh locked API session. The
+disposition receipt hashes the original `stop.plist` along with the other retained
+records; it does not rewrite that historical evidence.
+It neither starts a VM/helper nor writes preferences. The prepared guest and host
+owner must stay quiescent, as for startup admission; current `vmStopped` evidence
+does not replace the recorded child-reaping evidence.
+
+Boot can legitimately change disk/NVRAM bytes. Disposition therefore validates the
+original admission record and present VM identity without comparing those assets
+to their preboot measurements. Ordinary startup still requires the full exact
+measurements and has no exception flag.
+
+An immutable `disposition.plist` binds the run, all ten retained record/log file
+hashes, the operator's approval reference, and the fresh observation timestamp.
+Observations must be no older than 30 seconds when published. The receipt permits
+future admission after every retained run is checked; it never creates
+`complete.plist`, rewrites `stop.plist`, claims qualification, or asserts that the
+historical VM child was reaped. Its observations are a publication-time fact, not
+perpetual quiescence. The approval reference records the trusted root operator's
+acknowledgment; it does not cryptographically authenticate the owner. Protect this
+script, its interpreter and all imports before any root invocation.
+
+Missing, conflicting, changed or malformed evidence still blocks admission.
+Other unresolved runs are not exempted, and a disposition cannot be overwritten.
+A failed invocation must be inspected before any retry: publication may already
+have committed even if a later check or output failed. No automatic reconciliation,
+archive, journal pruning, preference recovery or new canary is performed here.
 
 ## Live gates
 
@@ -100,3 +145,52 @@ review the concrete installation and recovery procedure with the owner.
 Apply acceptance is asynchronous; neither startup success nor a readback proves
 effective daemon completion. Full Rust qualification, native pair promotion,
 attach, and automatic turns remain held.
+
+## Public probe TLS
+
+The opt-in `--public-probe` mode sends one anonymous HTTPS request to its fixed
+probe endpoint. Its TLS context trusts only the embedded account Gateway CA,
+with certificate and hostname verification enabled. It does not modify the
+guest's system trust store or accept caller-supplied CA paths.
+
+The pinned CA expires on March 27, 2030. If Gateway rotates it, verify the active
+public CA through the account certificate API, update `GATEWAY_CA_PEM` and the
+supervisor's guest-source digest, and review/test both changes before the next
+probe. A mismatched CA fails certificate verification; there is no fallback.
+
+
+## Guest public route contract
+
+The separate `--guest-route-contract` mode makes two anonymous, fixed HTTPS
+observations: `knitli.app/site.webmanifest` must return the pinned 456-byte
+manifest with status 200; the identity probe's `/probe` must return an empty,
+`no-store` 404 without either Gateway or host marker. Each leg is bounded to
+five seconds, with a twelve-second route budget and no redirects or retries.
+
+Its protected admission uses kind `softnet-guest-route-admission-v1` and adds
+`identityProbeIPv4`, `positiveOriginIPv4`, and `publicTrustRootsSha256` to the
+startup fields. Both fixed names are resolved and compared with their admitted
+global IPv4 addresses before run-state or VM side effects. Softnet allows only
+those exact `/32` destinations. This mode cannot use a v1 `probeIPv4` admission
+or run together with `--public-probe`.
+
+Before live use, inventory and review the selected guest image's materialized
+default CA roots. The admitted digest is SHA-256 of their sorted unique
+lowercase DER SHA-256 fingerprints, joined with newlines and no trailing
+newline. The guest rejects trust-store environment overrides and the embedded
+Gateway CA, then freezes only that measured root set into a fresh verifying TLS
+context. It does not load default certificate directories into the network
+context: their certificates can otherwise be loaded lazily after inventory.
+There is no Gateway-CA fallback or caller-supplied CA input.
+
+The bounded `route-probe.plist` binds both addresses and the trust digest into
+completion or failed-run disposition. Failed observations still stop and reap
+the owned children and restore the saved preference; they remain unqualified.
+Existing startup and v1 probe records retain their original interpretation.
+
+Install and verify a new protected source closure before invoking this mode.
+Keep the host's observed WARP posture unchanged during the next guest route
+measurement. A trial that also changes a temporary WARP profile needs an
+independent guest-stop/reap gate before profile disable can restore host
+routing. A route pass and the separate host transport 409 are distinct evidence;
+neither enables native admission or automatic turns.
