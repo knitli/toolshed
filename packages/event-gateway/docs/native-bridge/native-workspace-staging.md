@@ -117,8 +117,12 @@ cookie or authentication settings. GHCR requests use Homebrew's public anonymous
 `Bearer QQ==` marker; this is not an issued token. Redirects are refused unless
 their HTTPS hostname and exact path are in the selected asset's manifest entry;
 redirect query parameters are neither persisted nor reported. The nextest entry
-permits its observed immutable GitHub release-asset path. Bottle redirects have
-no allowance yet: a new redirect stops acquisition for review.
+permits its observed immutable GitHub release-asset path. Each GHCR bottle entry
+permits its observed exact `pkg-containers.githubusercontent.com` path, whose
+`sha256` path component must match that bottle's pinned digest. The path is
+restricted to the observed `ghcr1` or `ghcrblobs01` through `ghcrblobs20`
+forms; host-wide and path-prefix allowances are refused. A new redirect stops
+acquisition for review.
 
 The command requires macOS 15 ARM64 and Python 3.13 or newer, and runs in the
 main thread so an absolute alarm covers connection, TLS, headers and body reads.

@@ -154,8 +154,15 @@ class ProvisioningDownloadTests(unittest.TestCase):
         self.assertEqual(result["assets"][0]["selectedIPv4"], "185.199.108.133")
 
     def test_direct_https_sends_only_fixed_initial_ghcr_auth_and_connects_to_pinned_ips(self):
-        _, item, responses = release_fixture()
-        redirect, final = responses
+        body = b"release"
+        digest = hashlib.sha256(body).hexdigest()
+        path = f"/ghcr1/blobs/sha256:{digest}"
+        item = asset(body, url="https://ghcr.io/v2/homebrew/core/data/blobs/sha256:" + digest,
+                     redirects=[{"host": downloads.GHCR_REDIRECT_HOST, "path": path}])
+        redirect = FakeResponse(307, headers={
+            "Location": f"https://{downloads.GHCR_REDIRECT_HOST}{path}?token=secret"})
+        final = FakeResponse(body=body)
+        responses = [redirect, final]
         requests = []
         connections = []
 
@@ -183,7 +190,7 @@ class ProvisioningDownloadTests(unittest.TestCase):
                 pass
 
         output = self.root / "private-output"
-        dns = {"ghcr.io": ["140.82.112.33"], downloads.REDIRECT_HOST: ["185.199.108.133"]}
+        dns = {"ghcr.io": ["140.82.112.33"], downloads.GHCR_REDIRECT_HOST: ["185.199.108.133"]}
         with (patch.object(downloads, "_PinnedHTTPSConnection", FakeConnection),
               patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:9",
                                      "HTTP_AUTHORIZATION": "Bearer ambient",
@@ -196,8 +203,8 @@ class ProvisioningDownloadTests(unittest.TestCase):
         self.assertNotIn("authorization", requests[1]["headers"])
         self.assertNotIn("cookie", requests[0]["headers"])
         self.assertNotIn("cookie", requests[1]["headers"])
-        self.assertEqual(requests[1]["headers"]["host"], downloads.REDIRECT_HOST)
-        self.assertEqual(requests[1]["path"], "/download/exact?token=secret")
+        self.assertEqual(requests[1]["headers"]["host"], downloads.GHCR_REDIRECT_HOST)
+        self.assertEqual(requests[1]["path"], path + "?token=secret")
         self.assertNotIn("token=secret", json.dumps(receipt))
         self.assertEqual([redirect.close_calls, final.close_calls], [1, 1])
 
@@ -220,6 +227,84 @@ class ProvisioningDownloadTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(response.close_calls, 1)
         self.assertFalse(output.exists())
+
+    def test_checked_in_first_bottle_allows_observed_exact_ghcr_redirect(self):
+        item = next(item for item in downloads.load_manifest()["assets"]
+                    if item["name"] == "bottle-aom.tar.gz")
+        location = (
+            "https://pkg-containers.githubusercontent.com"
+            "/ghcrblobs08/blobs/sha256:39acbc6e2fc0c0e02623a314fc1247153288cd4c30d8945e45e4629da963f784"
+            "?token=fixture"
+        )
+        self.assertEqual(downloads._redirect_target(item["url"], location, item["redirects"]), location)
+
+    def test_ghcr_redirect_requires_source_and_path_digest_binding(self):
+        body = b"fixture"
+        digest = hashlib.sha256(body).hexdigest()
+        path = f"/ghcrblobs08/blobs/sha256:{digest}"
+        valid = asset(body, url="https://ghcr.io/v2/homebrew/core/data/blobs/sha256:" + digest,
+                      redirects=[{"host": downloads.GHCR_REDIRECT_HOST, "path": path}])
+        downloads._validate_manifest(manifest(valid))
+        for bad in (
+            {**valid, "redirects": [{"host": downloads.GHCR_REDIRECT_HOST,
+                                     "path": path.replace(digest, "0" * 64)}]},
+            {**valid, "redirects": [{"host": downloads.GHCR_REDIRECT_HOST,
+                                     "path": path.replace("ghcrblobs08", "ghcrblobs21")}]},
+            {**valid, "redirects": [{"host": "attacker.example", "path": path}]},
+            {**valid, "url": "https://example.test/data.bin"},
+            {**valid, "url": "https://ghcr.io/v2/homebrew/core/data/blobs/sha256:" + "0" * 64},
+            {**valid, "url": "https://ghcr.io/v2/homebrew/core/data"},
+        ):
+            with self.subTest(asset=bad), self.assertRaisesRegex(ValueError, "invalid_redirect_allowance"):
+                downloads._validate_manifest(manifest(bad))
+
+    def test_ghcr_redirect_download_is_pinned_hash_checked_and_strips_query_from_receipt(self):
+        body = b"fixture"
+        digest = hashlib.sha256(body).hexdigest()
+        path = f"/ghcrblobs08/blobs/sha256:{digest}"
+        item = asset(body, url="https://ghcr.io/v2/homebrew/core/data/blobs/sha256:" + digest,
+                     redirects=[{"host": downloads.GHCR_REDIRECT_HOST, "path": path}])
+        location = f"https://{downloads.GHCR_REDIRECT_HOST}{path}?token=fixture"
+        redirect = FakeResponse(307, headers={"Location": location})
+        final = FakeResponse(body=body)
+        result, calls, output = self.run_download(body, [redirect, final], item)
+        self.assertEqual([call[0] for call in calls], ["ghcr.io", downloads.GHCR_REDIRECT_HOST])
+        self.assertEqual(calls[1][1], ["185.199.108.133"])
+        self.assertEqual([call[4] for call in calls], [True, False])
+        self.assertEqual(result["assets"][0]["finalPath"], path)
+        self.assertEqual(result["assets"][0]["redirectCount"], 1)
+        self.assertNotIn("token=fixture", json.dumps(result))
+        self.assertEqual((output / item["name"]).read_bytes(), body)
+        self.assertEqual([redirect.close_calls, final.close_calls], [1, 1])
+
+    def test_ghcr_redirect_rejects_wrong_target_host_or_path_before_second_request(self):
+        body = b"fixture"
+        digest = hashlib.sha256(body).hexdigest()
+        path = f"/ghcrblobs08/blobs/sha256:{digest}"
+        item = asset(body, url="https://ghcr.io/v2/homebrew/core/data/blobs/sha256:" + digest,
+                     redirects=[{"host": downloads.GHCR_REDIRECT_HOST, "path": path}])
+        locations = (
+            f"https://attacker.example{path}?token=fixture",
+            f"https://{downloads.GHCR_REDIRECT_HOST}{path}/extra?token=fixture",
+        )
+        for location in locations:
+            with self.subTest(location=location):
+                redirect = FakeResponse(307, headers={"Location": location})
+                calls = []
+
+                def opener(*args):
+                    calls.append(args)
+                    return redirect
+
+                output = self.root / ("private-output-" + str(len(calls)))
+                with self.assertRaisesRegex(ValueError, "redirect_not_allowed"):
+                    downloads.download_all(
+                        manifest(item), {"ghcr.io": ["140.82.112.33"],
+                                         downloads.GHCR_REDIRECT_HOST: ["185.199.108.133"]}, self.ca,
+                        hashlib.sha256(self.ca.read_bytes()).hexdigest(), output, opener=opener)
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(redirect.close_calls, 1)
+                self.assertFalse(output.exists())
 
     def test_wrong_hash_or_size_cap_removes_partial_output_and_receipt(self):
         item = asset(b"expected", maximum=4)
@@ -419,7 +504,17 @@ print("pipe-read-interrupted")
         self.assertLessEqual(sum(item["maxBytes"] for item in assets), downloads.MAX_TOTAL_BYTES)
         self.assertEqual({downloads._validate_url(item["url"]).hostname for item in assets},
                          {"ghcr.io", "static.rust-lang.org", "github.com"})
-        self.assertEqual(sum(bool(item["redirects"]) for item in assets), 1)
+        self.assertEqual({rule["host"] for item in assets for rule in item["redirects"]},
+                         {downloads.REDIRECT_HOST, downloads.GHCR_REDIRECT_HOST})
+        self.assertEqual(sum(bool(item["redirects"]) for item in assets), 114)
+        bottles = [item for item in assets if item["url"].startswith("https://ghcr.io/")]
+        self.assertEqual(len(bottles), 113)
+        for item in bottles:
+            self.assertEqual(len(item["redirects"]), 1)
+            redirect = item["redirects"][0]
+            self.assertEqual(redirect["host"], downloads.GHCR_REDIRECT_HOST)
+            self.assertRegex(redirect["path"],
+                             rf"^/ghcr(?:1|blobs(?:0[1-9]|1[0-9]|20))/blobs/sha256:{item['sha256']}$")
 
     def test_pinned_tls_connection_uses_ip_socket_and_manifest_host_sni(self):
         connection = downloads._PinnedHTTPSConnection("assets.example", "93.184.216.34", self.context, 7)

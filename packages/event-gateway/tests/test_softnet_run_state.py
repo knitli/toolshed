@@ -127,7 +127,8 @@ class SoftnetRunStateTests(unittest.TestCase):
         hosts = {urlsplit(asset["url"]).hostname for asset in manifest["assets"]}
         hosts.update(rule["host"] for asset in manifest["assets"]
                      for rule in asset["redirects"])
-        addresses = iter(("1.1.1.1", "8.8.8.8", "9.9.9.9", "208.67.222.222"))
+        addresses = iter(("1.1.1.1", "8.8.8.8", "9.9.9.9", "208.67.222.222",
+                          "185.199.108.154"))
         return {
             "vmName": "softnet-provisioning-test-vm",
             "macAddress": "02:00:00:00:00:02",
