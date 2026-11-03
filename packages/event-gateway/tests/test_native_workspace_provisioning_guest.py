@@ -135,9 +135,9 @@ def download_all(manifest, dns, ca, ca_sha, output):
         stdout = io.BytesIO()
         fake_root = self.root / ".knitli-native-provisioning-abcdefgh"
 
-        def mkdtemp(*, prefix, dir):
+        def mkdtemp(*, prefix, **options):
             self.assertEqual(prefix, ".knitli-native-provisioning-")
-            self.assertEqual(dir, "/Users/admin")
+            self.assertEqual(options, {"dir": "/Users/admin"})
             fake_root.mkdir(mode=0o700)
             return str(fake_root)
         old_platform = sys.platform

@@ -431,7 +431,8 @@ class ProvisioningInspectionTests(unittest.TestCase):
             asset = root / "downloads/asset"
             asset.write_bytes(b"read-only")
             guest_root = f"/Users/admin/{root.name}"
-            os.chmod(parent, 0o777)
+            # A group-writable parent must fail before downloads are opened.
+            os.chmod(parent, 0o720)
             try:
                 with mock.patch.object(probe, "GUEST_PARENT", parent):
                     with self.assertRaisesRegex(ValueError, "guest_parent_unsafe"):
