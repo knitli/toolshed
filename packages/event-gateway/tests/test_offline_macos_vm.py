@@ -2581,5 +2581,125 @@ raise SystemExit(2)
         self.assertEqual(forged["status"], "passed")
 
 
+class NativeWorkspaceProvisioningInspectionWiringTest(unittest.TestCase):
+    def test_inspection_binding_requires_exact_measured_downloaded_base(self):
+        receipt = {"storageMeasurement": {"configSha256": "a" * 64, "configBytes": 10,
+                                          "nvramSha256": "b" * 64, "nvramBytes": 20},
+                   "preparedSnapshot": {"sha256": "c" * 64, "bytes": 30}}
+        expected = {**receipt["storageMeasurement"], "diskSha256": "c" * 64, "diskBytes": 30}
+        bundle = {"baseVmName": "prepared-macos15", "postDownloadMeasurement": expected}
+        canary._validate_native_workspace_provisioning_inspection_binding("prepared-macos15", receipt, bundle)
+        with self.assertRaisesRegex(canary.CanaryError, "native_workspace_provisioning_inspection_base_mismatch"):
+            canary._validate_native_workspace_provisioning_inspection_binding("other-vm", receipt, bundle)
+        bundle["postDownloadMeasurement"] = {**expected, "diskBytes": 31}
+        with self.assertRaisesRegex(canary.CanaryError, "native_workspace_provisioning_inspection_base_mismatch"):
+            canary._validate_native_workspace_provisioning_inspection_binding("prepared-macos15", receipt, bundle)
+
+    def test_collection_targets_owned_clone_and_propagates_cancel_check(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence = Path(temporary)
+            bundle = {"baseVmName": "softnet-canary-" + "a" * 32,
+                      "loader": "<loader>",
+                      "sourceSha256": {"probe": "a" * 64}, "bundleSha256": "b" * 64,
+                      "ownerReceiptSha256": "c" * 64, "manifestSha256": "d" * 64,
+                      "postDownloadMeasurement": {"diskBytes": 30}}
+            clone = "offline-canary-" + "e" * 32
+            observed = {}
+
+            def cancel_check():
+                return False
+
+            def collect(tart, vm, env, output_dir, received_bundle, *, run_bounded, cancel_check):
+                observed.update(vm=vm, cancel_check=cancel_check)
+                for name in ("stdout.bin", "stderr.bin"):
+                    (output_dir / name).write_bytes(b"log")
+                return {"status": "passed", "complete": True, "qualified": False,
+                        "prepared": False, "report": {}}
+
+            probe = SimpleNamespace(
+                canary=canary, MAX_REPORT_BYTES=32,
+                LOG_NAMES=("stdout.bin", "stderr.bin"),
+                command_template=lambda tart, vm, loader: [str(tart), "exec", vm, loader],
+                collect=collect)
+            result, commands = {"rawEvidence": {}}, []
+            canary._run_native_workspace_provisioning_inspection(
+                probe, bundle, "/fake/tart", clone, {}, evidence, lambda *args, **kwargs: None,
+                result, commands, cancel_check)
+            canary._append_native_workspace_provisioning_inspection_evidence(
+                probe, result, evidence, [])
+            self.assertEqual(observed, {"vm": clone, "cancel_check": cancel_check})
+            self.assertEqual(commands, [["/fake/tart", "exec", clone, "<loader>"]])
+            self.assertTrue(all(record["bytes"] == 3 for record in result["rawEvidence"].values()))
+            self.assertIs(result["nativeWorkspaceProvisioningInspection"]["qualified"], False)
+            self.assertIs(result["nativeWorkspaceProvisioningInspection"]["prepared"], False)
+
+    def test_incomplete_collection_fails_closed(self):
+        from types import SimpleNamespace
+        bundle = {"baseVmName": "softnet-canary-" + "a" * 32, "loader": "<loader>",
+                  "sourceSha256": {}, "bundleSha256": "b" * 64,
+                  "ownerReceiptSha256": "c" * 64, "manifestSha256": "d" * 64,
+                  "postDownloadMeasurement": {}}
+        probe = SimpleNamespace(canary=canary,
+                                command_template=lambda tart, vm, loader: [str(tart), "exec", vm, loader],
+                                collect=lambda *args, **kwargs: {"status": "passed", "complete": False,
+                                                                  "qualified": False, "prepared": False})
+        result = {"rawEvidence": {}}
+        with self.assertRaisesRegex(canary.CanaryError,
+                                    "native_workspace_provisioning_inspection_failed"):
+            canary._run_native_workspace_provisioning_inspection(
+                probe, bundle, "/fake/tart", "offline-canary-" + "e" * 32, {}, Path("."),
+                lambda *args, **kwargs: None, result, [], lambda: False)
+        metadata = result["nativeWorkspaceProvisioningInspection"]
+        self.assertEqual(metadata["status"], "failed")
+        self.assertFalse(metadata["complete"])
+        self.assertIs(metadata["qualified"], False)
+        self.assertIs(metadata["prepared"], False)
+
+    def test_interruption_preserves_failed_metadata_and_cleanup_attributes(self):
+        from types import SimpleNamespace
+        bundle = {"baseVmName": "softnet-canary-" + "a" * 32, "loader": "<loader>",
+                  "sourceSha256": {}, "bundleSha256": "b" * 64,
+                  "ownerReceiptSha256": "c" * 64, "manifestSha256": "d" * 64,
+                  "postDownloadMeasurement": {}}
+        process = object()
+        interruption = canary.CanaryError("interrupted_by_sigterm")
+        interruption.cleanup_errors = ("process_group_kill_failed",)
+        interruption.unreaped_processes = (process,)
+        probe = SimpleNamespace(canary=canary,
+                                command_template=lambda tart, vm, loader: [str(tart), "exec", vm, loader],
+                                collect=lambda *args, **kwargs: (_ for _ in ()).throw(interruption))
+        result = {"rawEvidence": {}}
+        with self.assertRaises(canary.CanaryError) as raised:
+            canary._run_native_workspace_provisioning_inspection(
+                probe, bundle, "/fake/tart", "offline-canary-" + "e" * 32, {}, Path("."),
+                lambda *args, **kwargs: None, result, [], lambda: True)
+        self.assertEqual(raised.exception.args, ("interrupted_by_sigterm",))
+        self.assertEqual(result["nativeWorkspaceProvisioningInspection"]["status"], "failed")
+        self.assertEqual(result["nativeWorkspaceProvisioningInspection"]["failureCode"],
+                         "interrupted_by_sigterm")
+        self.assertEqual(raised.exception.cleanup_errors, ("process_group_kill_failed",))
+        self.assertEqual(raised.exception.unreaped_processes, (process,))
+
+    def test_inspection_option_rejects_bool_and_other_probe_modes(self):
+        with self.assertRaisesRegex(canary.CanaryError, "invalid_native_workspace_provisioning_inspection_receipt_path"):
+            canary._prepare_native_workspace_provisioning_inspection(True)
+        with self.assertRaisesRegex(canary.CanaryError, "native_workspace_provisioning_inspection_incompatible_options"):
+            canary.qualify("bad", "receipt", "evidence", scpreferences_api=True,
+                           native_workspace_provisioning_inspection="owner.json")
+
+    def test_cli_dispatches_only_the_explicit_owner_receipt_path(self):
+        expected = Path("downloaded-owner-receipt.json")
+        captured = {}
+        with patch.object(canary, "qualify", side_effect=lambda *args, **kwargs: (
+                captured.update(kwargs) or {"status": "passed"})):
+            with redirect_stdout(StringIO()):
+                code = canary.main(["--base-vm", "base", "--receipt", "receipt.json",
+                                    "--evidence-dir", "evidence", "--native-workspace-provisioning-inspection",
+                                    str(expected)])
+        self.assertEqual(code, 0)
+        self.assertEqual(captured["native_workspace_provisioning_inspection"], expected)
+
+
 if __name__ == "__main__":
     unittest.main()
