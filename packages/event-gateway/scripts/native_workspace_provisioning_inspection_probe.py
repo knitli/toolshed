@@ -179,7 +179,7 @@ def _stat_identity(info):
             info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
-def _hash_fd(fd, maximum):
+def _hash_fd(fd, maximum, capture=False):
     info = os.fstat(fd)
     if (not stat.S_ISREG(info.st_mode) or info.st_size > maximum
             or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.getuid()
@@ -188,6 +188,7 @@ def _hash_fd(fd, maximum):
     identity = _stat_identity(info)
     os.lseek(fd, 0, os.SEEK_SET)
     digest, size = hashlib.sha256(), 0
+    chunks = [] if capture else None
     while True:
         block = os.read(fd, 65536)
         if not block:
@@ -196,10 +197,13 @@ def _hash_fd(fd, maximum):
         if size > maximum:
             raise ValueError("asset_oversized")
         digest.update(block)
+        if capture:
+            chunks.append(block)
     if _stat_identity(os.fstat(fd)) != identity or size != info.st_size:
         raise ValueError("asset_changed_during_read")
     os.lseek(fd, 0, os.SEEK_SET)
-    return digest.hexdigest(), size, identity
+    result = (digest.hexdigest(), size, identity)
+    return result + (b"".join(chunks),) if capture else result
 
 
 class _LimitedReader:
@@ -440,19 +444,12 @@ def _inspect_assets(data, manifest, download_fd):
     receipt_fd = os.open("receipt.json", os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) |
                          getattr(os, "O_NONBLOCK", 0), dir_fd=download_fd)
     try:
-        _, receipt_size, receipt_identity = _hash_fd(receipt_fd, 1024 * 1024)
-        os.lseek(receipt_fd, 0, os.SEEK_SET)
-        chunks = []
-        remaining = receipt_size + 1
-        while remaining:
-            chunk = os.read(receipt_fd, min(65536, remaining))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        receipt_raw = b"".join(chunks)
-        if _stat_identity(os.fstat(receipt_fd)) != receipt_identity or len(receipt_raw) != receipt_size:
-            raise ValueError("download_receipt_changed_during_read")
+        try:
+            _, _, _, receipt_raw = _hash_fd(receipt_fd, 1024 * 1024, capture=True)
+        except ValueError as exc:
+            if str(exc) == "asset_changed_during_read":
+                raise ValueError("download_receipt_changed_during_read") from None
+            raise
         try:
             def unique_object(pairs):
                 value = {}
@@ -463,11 +460,11 @@ def _inspect_assets(data, manifest, download_fd):
                 return value
 
             def reject_constant(value):
-                raise ValueError("download_receipt_invalid_constant")
+                raise ValueError("download_receipt_invalid")
 
             receipt = json.loads(receipt_raw, object_pairs_hook=unique_object,
                                  parse_constant=reject_constant)
-        except (ValueError, UnicodeError, RecursionError):
+        except (json.JSONDecodeError, UnicodeError, RecursionError):
             raise ValueError("download_receipt_invalid") from None
         if (type(receipt) is not dict or receipt_raw !=
                 (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode()):

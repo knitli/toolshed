@@ -473,7 +473,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
             try:
                 assert_receipt_rejected(b"{broken\n", "download_receipt_invalid")
                 assert_receipt_rejected(valid_raw.replace(b'{"assets":', b'{"assets":[],"assets":'),
-                                        "download_receipt_invalid")
+                                        "download_receipt_duplicate_key")
                 nonstandard = json.loads(valid_raw)
                 nonstandard["totalBytes"] = float("nan")
                 nonstandard_raw = (json.dumps(nonstandard, sort_keys=True, separators=(",", ":")) + "\n").encode()
@@ -493,6 +493,33 @@ class ProvisioningInspectionTests(unittest.TestCase):
                                         recompute_wrapper=True)
             finally:
                 receipt_path.write_bytes(valid_raw)
+                os.close(root_fd)
+
+    def test_receipt_change_during_single_bounded_read_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest, _, input_doc = self._fixture(directory)
+            downloads = Path(directory) / "downloads"
+            receipt_path = downloads / "receipt.json"
+            receipt_inode = receipt_path.stat().st_ino
+            root_fd = os.open(downloads, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            real_read = os.read
+            changed = False
+
+            def read_and_change(fd, size):
+                nonlocal changed
+                chunk = real_read(fd, size)
+                if not changed and chunk and os.fstat(fd).st_ino == receipt_inode:
+                    with receipt_path.open("ab") as stream:
+                        stream.write(b" ")
+                    changed = True
+                return chunk
+
+            try:
+                with mock.patch.object(probe.os, "read", side_effect=read_and_change):
+                    with self.assertRaisesRegex(ValueError, "download_receipt_changed_during_read"):
+                        probe._inspect_assets(input_doc, manifest, root_fd)
+                self.assertTrue(changed)
+            finally:
                 os.close(root_fd)
 
     def test_download_directory_symlink_is_rejected(self):
