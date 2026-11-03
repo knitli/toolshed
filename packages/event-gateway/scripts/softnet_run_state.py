@@ -77,7 +77,8 @@ def _digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def _identity_record(run_id, identity):
+def _identity_record(run_id, identity, *, allow_retained_manifest=False):
+    _require(type(allow_retained_manifest) is bool, "invalid_identity")
     _require(isinstance(identity, dict) and set(identity) in (
         IDENTITY_KEYS, PROBE_IDENTITY_KEYS, ROUTE_IDENTITY_KEYS, PROVISIONING_IDENTITY_KEYS),
              "invalid_identity")
@@ -107,7 +108,8 @@ def _identity_record(run_id, identity):
                 manifest_bytes=identity["provisioningManifest"],
                 dns_map=identity["provisioningDnsMap"],
                 ca_sha256=identity["provisioningCaSha256"],
-                bundle_sha256=identity["provisioningBundleSha256"])
+                bundle_sha256=identity["provisioningBundleSha256"],
+                allow_retained_manifest=allow_retained_manifest)
         except (TypeError, ValueError, UnicodeError, RecursionError):
             raise recovery.RecoveryError("invalid_identity") from None
     return {"kind": STATE_KIND, "version": STATE_VERSION, "runId": run_id,
@@ -144,7 +146,8 @@ def _failed_restored_files(root, name, *, receipt_present=False, expected_vm_rea
         _require("complete.plist" not in entries
                  and (receipt_present or "disposition.plist" not in entries)
                  and required <= entries, "ineligible_disposition")
-        _require(_check_run_directory(root, name) is False, "ineligible_disposition")
+        _require(_check_run_directory(root, name, allow_retained_manifest=receipt_present)
+                 is False, "ineligible_disposition")
         identity_bytes = recovery._read(fd, "identity.plist")
         identity = _plist(identity_bytes, "invalid_identity")["identity"]
         _check_launch(fd, identity)
@@ -178,7 +181,8 @@ def _failed_restored_files(root, name, *, receipt_present=False, expected_vm_rea
             disposition_files = (*disposition_files, "route-probe.plist")
         if "provisioning-download.json" in entries:
             _require("provisioningBundleSha256" in identity, "invalid_provisioning_download")
-            _check_provisioning_download(fd, identity)
+            _check_provisioning_download(
+                fd, identity, allow_retained_manifest=receipt_present)
             disposition_files = (*disposition_files, "provisioning-download.json")
         if COMMAND_FAILURE_FILE in entries:
             _check_command_failure(fd)
@@ -427,7 +431,7 @@ def _check_route_probe(fd, identity):
     return raw, report
 
 
-def _check_provisioning_download(fd, identity):
+def _check_provisioning_download(fd, identity, *, allow_retained_manifest=False):
     raw = recovery._read(fd, "provisioning-download.json")
     _require(0 < len(raw) <= provisioning_guest.MAX_OUTPUT_BYTES,
              "invalid_provisioning_download")
@@ -436,7 +440,8 @@ def _check_provisioning_download(fd, identity):
             raw, manifest_bytes=identity["provisioningManifest"],
             dns_map=identity["provisioningDnsMap"],
             ca_sha256=identity["provisioningCaSha256"],
-            bundle_sha256=identity["provisioningBundleSha256"])
+            bundle_sha256=identity["provisioningBundleSha256"],
+            allow_retained_manifest=allow_retained_manifest)
     except (TypeError, ValueError, UnicodeError, RecursionError):
         raise recovery.RecoveryError("invalid_provisioning_download") from None
     return raw, result
@@ -457,7 +462,7 @@ def _check_log_directory(root, run_name, name, *, complete):
         os.close(fd)
 
 
-def _check_run_directory(root, name):
+def _check_run_directory(root, name, *, allow_retained_manifest=False):
     path = Path(root) / name
     fd = recovery._directory(path)
     try:
@@ -471,7 +476,8 @@ def _check_run_directory(root, name):
                  and type(identity_record["version"]) is int
                  and identity_record["version"] == STATE_VERSION
                  and identity_record["runId"] == name, "invalid_identity")
-        expected = _identity_record(name, identity_record["identity"])
+        expected = _identity_record(name, identity_record["identity"],
+                                    allow_retained_manifest=allow_retained_manifest)
         _require(identity_record == expected, "invalid_identity")
         identity = identity_record["identity"]
         probe_mode = "probeIPv4" in identity
@@ -494,7 +500,8 @@ def _check_run_directory(root, name):
             route_probe_bytes, route_probe = _check_route_probe(fd, identity)
         provisioning_download_bytes = None
         if "provisioning-download.json" in entries:
-            provisioning_download_bytes, _ = _check_provisioning_download(fd, identity)
+            provisioning_download_bytes, _ = _check_provisioning_download(
+                fd, identity, allow_retained_manifest=allow_retained_manifest)
         stop_bytes = stop = None
         if "stop.plist" in entries:
             stop_bytes, stop = _check_stop(fd)
@@ -624,7 +631,7 @@ class State(AbstractContextManager):
                      and stat.S_IMODE(info.st_mode) == 0o700, "invalid_run_directory")
             if "disposition.plist" in os.listdir(self.root / name):
                 _check_disposition(self.root, name)
-            elif not _check_run_directory(self.root, name):
+            elif not _check_run_directory(self.root, name, allow_retained_manifest=True):
                 unresolved.append(name)
         _require(set(unresolved) <= ({allowed_unresolved} if allowed_unresolved else set()),
                  "unresolved_run")

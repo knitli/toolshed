@@ -19,6 +19,8 @@ MAX_MANIFEST_BYTES = 1024 * 1024
 SOURCE_PATH = "packages/event-gateway/scripts/native_workspace_provisioning_downloads.py"
 MANIFEST_PATH = "packages/event-gateway/docs/native-bridge/native-workspace-provisioning-assets.json"
 MANIFEST_SHA256 = downloader.MANIFEST_SHA256
+# PR239 sealed this exact manifest before GHCR redirect destinations were added.
+RETAINED_MANIFEST_SHA256 = "e51eaddfd9697f8f69499186e99d298707b979541df3dec1b9aabc19b2081406"
 SOURCE_SHA256 = "6fbc9081316f7eb5f432ed227b7fd05526cd542db9d0392e5af4c9fc3bcf8cc1"
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 ROOT = Path(__file__).resolve().parents[3]
@@ -197,11 +199,15 @@ def validate_payload(raw, *, manifest_bytes, dns_map, ca_sha256, bundle_sha256):
     return document
 
 
-def validate_binding(*, manifest_bytes, dns_map, ca_sha256, bundle_sha256):
+def validate_binding(*, manifest_bytes, dns_map, ca_sha256, bundle_sha256,
+                     allow_retained_manifest=False):
     """Validate identity inputs retained by root state without reading repo or guest files."""
+    if type(allow_retained_manifest) is not bool:
+        raise ValueError("retained_manifest_option_invalid")
     if (not isinstance(manifest_bytes, bytes) or not manifest_bytes
             or len(manifest_bytes) > MAX_MANIFEST_BYTES
-            or _digest(manifest_bytes) != MANIFEST_SHA256):
+            or _digest(manifest_bytes) not in ({MANIFEST_SHA256, RETAINED_MANIFEST_SHA256}
+                                                if allow_retained_manifest else {MANIFEST_SHA256})):
         raise ValueError("manifest_binding_mismatch")
     if (not isinstance(ca_sha256, str) or not HEX.fullmatch(ca_sha256)
             or not isinstance(bundle_sha256, str) or not HEX.fullmatch(bundle_sha256)):
@@ -217,11 +223,13 @@ def validate_binding(*, manifest_bytes, dns_map, ca_sha256, bundle_sha256):
     return manifest, checked_dns
 
 
-def validate_result(raw, *, manifest_bytes, dns_map, ca_sha256, bundle_sha256):
+def validate_result(raw, *, manifest_bytes, dns_map, ca_sha256, bundle_sha256,
+                    allow_retained_manifest=False):
     """Validate the exact bounded guest download receipt against retained identity pins."""
     manifest, checked_dns = validate_binding(manifest_bytes=manifest_bytes, dns_map=dns_map,
                                              ca_sha256=ca_sha256,
-                                             bundle_sha256=bundle_sha256)
+                                             bundle_sha256=bundle_sha256,
+                                             allow_retained_manifest=allow_retained_manifest)
     if isinstance(raw, bytes):
         if len(raw) > MAX_OUTPUT_BYTES:
             raise ValueError("result_oversized")
@@ -256,7 +264,7 @@ def validate_result(raw, *, manifest_bytes, dns_map, ca_sha256, bundle_sha256):
         raise ValueError("download_receipt_shape_invalid")
     if (receipt["kind"] != downloader.KIND or receipt["status"] != "downloaded-only"
             or receipt["qualified"] is not False or receipt["prepared"] is not False
-            or receipt["manifestSha256"] != MANIFEST_SHA256
+            or receipt["manifestSha256"] != _digest(manifest_bytes)
             or receipt["caBundleSha256"] != ca_sha256 or receipt["dnsMap"] != checked_dns
             or type(receipt["totalBytes"]) is not int or not 0 <= receipt["totalBytes"] <= downloader.MAX_TOTAL_BYTES
             or type(receipt["assets"]) is not list

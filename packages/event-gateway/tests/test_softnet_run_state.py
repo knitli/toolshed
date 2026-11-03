@@ -142,12 +142,32 @@ class SoftnetRunStateTests(unittest.TestCase):
         }
 
     @staticmethod
-    def _provisioning_result(identity):
+    def _retained_provisioning_identity():
+        identity = SoftnetRunStateTests._provisioning_identity()
+        manifest = provisioning_downloads._json_no_duplicates(identity["provisioningManifest"])
+        for asset in manifest["assets"]:
+            asset["redirects"] = [rule for rule in asset["redirects"]
+                                  if rule["host"] != provisioning_downloads.GHCR_REDIRECT_HOST]
+        raw = provisioning_downloads._canonical_manifest_bytes(manifest)
+        if hashlib.sha256(raw).hexdigest() != provisioning_guest.RETAINED_MANIFEST_SHA256:
+            raise AssertionError("legacy manifest fixture no longer has its reviewed digest")
+        hosts = {urlsplit(asset["url"]).hostname for asset in manifest["assets"]}
+        hosts.update(rule["host"] for asset in manifest["assets"] for rule in asset["redirects"])
+        identity["provisioningDnsMap"] = {
+            host: addresses for host, addresses in identity["provisioningDnsMap"].items()
+            if host in hosts
+        }
+        identity["provisioningManifest"] = raw
+        return identity
+
+    @staticmethod
+    def _provisioning_result(identity, *, allow_retained_manifest=False):
         manifest, dns = provisioning_guest.validate_binding(
             manifest_bytes=identity["provisioningManifest"],
             dns_map=identity["provisioningDnsMap"],
             ca_sha256=identity["provisioningCaSha256"],
-            bundle_sha256=identity["provisioningBundleSha256"])
+            bundle_sha256=identity["provisioningBundleSha256"],
+            allow_retained_manifest=allow_retained_manifest)
         assets = []
         for asset in manifest["assets"]:
             parsed = provisioning_downloads._validate_url(asset["url"])
@@ -496,6 +516,43 @@ class SoftnetRunStateTests(unittest.TestCase):
         with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
             run_state._identity_record("a" * 32, changed)
 
+    def test_retained_manifest_is_read_only_compatibility_for_known_history(self):
+        identity = self._retained_provisioning_identity()
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
+            run_state._identity_record("a" * 32, identity)
+        with run_state.State(self.root) as state:
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
+                state.begin(identity)
+        run_state._identity_record("a" * 32, identity, allow_retained_manifest=True)
+        result = self._provisioning_result(identity, allow_retained_manifest=True)
+        result["downloadReceipt"]["manifestSha256"] = provisioning_guest.RETAINED_MANIFEST_SHA256
+        self.assertEqual(provisioning_guest.validate_result(
+            result, manifest_bytes=identity["provisioningManifest"],
+            dns_map=identity["provisioningDnsMap"], ca_sha256=identity["provisioningCaSha256"],
+            bundle_sha256=identity["provisioningBundleSha256"],
+            allow_retained_manifest=True), result)
+        with self.assertRaisesRegex(ValueError, "manifest_binding_mismatch"):
+            provisioning_guest.validate_result(
+                result, manifest_bytes=identity["provisioningManifest"],
+                dns_map=identity["provisioningDnsMap"], ca_sha256=identity["provisioningCaSha256"],
+                bundle_sha256=identity["provisioningBundleSha256"])
+        changed = dict(identity, provisioningManifest=identity["provisioningManifest"] + b" ")
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
+            run_state._identity_record("a" * 32, changed, allow_retained_manifest=True)
+        bad_dns = dict(identity["provisioningDnsMap"])
+        bad_dns[next(iter(bad_dns))] = ["192.0.2.1"]
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
+            run_state._identity_record("a" * 32,
+                dict(identity, provisioningDnsMap=bad_dns), allow_retained_manifest=True)
+        with run_state.State(self.root) as state:
+            run, run_id = state.begin(self._provisioning_identity())
+        self._rewrite(run / "identity.plist", plistlib.dumps(
+            run_state._identity_record(run_id, identity, allow_retained_manifest=True),
+            fmt=plistlib.FMT_BINARY, sort_keys=True))
+        with self.assertRaisesRegex(recovery.RecoveryError, "unresolved_run"):
+            with run_state.State(self.root):
+                self.fail("unresolved retained historical run was admitted")
+
     def test_provisioning_download_completion_validates_receipt_and_binds_hash(self):
         self.identity = self._provisioning_identity()
         result = self._provisioning_result(self.identity)
@@ -518,6 +575,64 @@ class SoftnetRunStateTests(unittest.TestCase):
         with self.assertRaisesRegex(recovery.RecoveryError, "invalid_provisioning_download"):
             with run_state.State(self.root):
                 self.fail("prepared provisioning result accepted")
+
+    def test_completed_retained_manifest_receipt_survives_root_scan(self):
+        self.identity = self._provisioning_identity()
+        result = self._provisioning_result(self.identity)
+        receipt_bytes = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        with run_state.State(self.root) as state:
+            run, run_id = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            try:
+                recovery._publish(fd, "provisioning-download.json", receipt_bytes)
+            finally:
+                os.close(fd)
+            state.complete(run, self._stop_evidence())
+
+        identity = self._retained_provisioning_identity()
+        identity_record = run_state._identity_record(
+            run_id, identity, allow_retained_manifest=True)
+        self._rewrite(run / "identity.plist", plistlib.dumps(
+            identity_record, fmt=plistlib.FMT_BINARY, sort_keys=True))
+        result = self._provisioning_result(identity, allow_retained_manifest=True)
+        result["downloadReceipt"]["manifestSha256"] = provisioning_guest.RETAINED_MANIFEST_SHA256
+        receipt_bytes = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        self._rewrite(run / "provisioning-download.json", receipt_bytes)
+        complete = plistlib.loads((run / "complete.plist").read_bytes())
+        complete["identitySha256"] = hashlib.sha256((run / "identity.plist").read_bytes()).hexdigest()
+        complete["provisioningDownloadSha256"] = hashlib.sha256(receipt_bytes).hexdigest()
+        self._rewrite(run / "complete.plist", plistlib.dumps(
+            complete, fmt=plistlib.FMT_BINARY, sort_keys=True))
+        with run_state.State(self.root):
+            pass
+
+    def test_disposed_retained_manifest_receipt_and_file_hashes_survive_root_scan(self):
+        run, run_id = self._failed_restored_run(self._provisioning_identity())
+        identity = self._retained_provisioning_identity()
+        self._rewrite(run / "identity.plist", plistlib.dumps(
+            run_state._identity_record(run_id, identity, allow_retained_manifest=True),
+            fmt=plistlib.FMT_BINARY, sort_keys=True))
+        result = self._provisioning_result(identity, allow_retained_manifest=True)
+        result["downloadReceipt"]["manifestSha256"] = provisioning_guest.RETAINED_MANIFEST_SHA256
+        receipt = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        self._rewrite(run / "provisioning-download.json", receipt)
+        hashes = run_state._failed_restored_files(self.root, run_id, receipt_present=True)
+        disposition = {
+            "kind": run_state.DISPOSITION_KIND, "version": 1, "runId": run_id,
+            "approvalReference": "reviewed historical disposition",
+            "observation": self._observation(), "fileSha256": hashes,
+        }
+        self._rewrite(run / "disposition.plist", plistlib.dumps(
+            disposition, fmt=plistlib.FMT_BINARY, sort_keys=True))
+        with run_state.State(self.root):
+            pass
+        hashes["provisioning-download.json"] = "0" * 64
+        disposition["fileSha256"] = hashes
+        self._rewrite(run / "disposition.plist", plistlib.dumps(
+            disposition, fmt=plistlib.FMT_BINARY, sort_keys=True))
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_disposition"):
+            with run_state.State(self.root):
+                self.fail("tampered retained file hash accepted")
 
     def test_provisioning_download_requires_a_valid_report_to_complete(self):
         self.identity = self._provisioning_identity()
