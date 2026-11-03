@@ -2193,12 +2193,19 @@ class SoftnetSupervisorTests(unittest.TestCase):
         )
         for raw, expected, error in cases:
             with self.subTest(raw=raw):
-                with patch.object(canary, "_run_bounded", return_value=(raw, 0)):
+                with patch.object(canary, "_run_bounded", return_value=(raw, 0)) as run:
                     if error:
                         with self.assertRaisesRegex(recovery.RecoveryError, error):
                             supervisor._group_quiet(71001)
                     else:
                         self.assertIs(supervisor._group_quiet(71001), expected)
+                self.assertEqual(run.call_args.kwargs["output_limit"], canary.MAX_PROCESS_TABLE_BYTES)
+
+        with patch.object(canary, "_run_bounded",
+                          side_effect=canary.CanaryError("tart_command_output_limit")) as run:
+            with self.assertRaisesRegex(canary.CanaryError, "tart_command_output_limit"):
+                supervisor._group_quiet(71001)
+        self.assertEqual(run.call_args.kwargs["output_limit"], canary.MAX_PROCESS_TABLE_BYTES)
 
     def test_identity_lookup_failure_does_not_signal_or_reap_without_exit_and_leader_proofs(self):
         for exited, leader_present in ((False, True), (True, False)):

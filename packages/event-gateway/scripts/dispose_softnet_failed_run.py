@@ -58,7 +58,8 @@ def _observe(admission_directory, run, identity, *, preferences_factory=controll
         timeout=10, env=env, popen=owner_popen)
     controller._require(controller.canary._vm_stopped(raw), 'vm_not_stopped')
     table, _ = controller.canary._run_bounded(
-        ['/bin/ps', '-A', '-o', 'pid=', '-o', 'comm='], timeout=5, env=controller.ENV)
+        ['/bin/ps', '-A', '-o', 'pid=', '-o', 'comm='], timeout=5, env=controller.ENV,
+        output_limit=controller.canary.MAX_PROCESS_TABLE_BYTES)
     controller._require(bool(table.strip()), 'invalid_process_table')
     for line in table.splitlines():
         fields = line.split(None, 1)
