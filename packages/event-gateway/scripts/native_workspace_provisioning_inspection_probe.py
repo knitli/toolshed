@@ -434,8 +434,54 @@ def _inspect_assets(data, manifest, download_fd):
                 names.append(entry.name)
     except OSError as exc:
         raise ValueError("downloads_directory_unreadable") from exc
-    if len(names) != len(set(names)) or set(names) != set(downloaded):
+    if (len(names) != len(set(names))
+            or set(names) != set(downloaded) | {"receipt.json"}):
         raise ValueError("asset_set_mismatch")
+    receipt_fd = os.open("receipt.json", os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) |
+                         getattr(os, "O_NONBLOCK", 0), dir_fd=download_fd)
+    try:
+        _, receipt_size, receipt_identity = _hash_fd(receipt_fd, 1024 * 1024)
+        os.lseek(receipt_fd, 0, os.SEEK_SET)
+        chunks = []
+        remaining = receipt_size + 1
+        while remaining:
+            chunk = os.read(receipt_fd, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        receipt_raw = b"".join(chunks)
+        if _stat_identity(os.fstat(receipt_fd)) != receipt_identity or len(receipt_raw) != receipt_size:
+            raise ValueError("download_receipt_changed_during_read")
+        try:
+            def unique_object(pairs):
+                value = {}
+                for key, item in pairs:
+                    if key in value:
+                        raise ValueError("download_receipt_duplicate_key")
+                    value[key] = item
+                return value
+            receipt = json.loads(receipt_raw, object_pairs_hook=unique_object)
+        except (ValueError, UnicodeError, RecursionError):
+            raise ValueError("download_receipt_invalid") from None
+        if (type(receipt) is not dict or receipt_raw !=
+                (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode()):
+            raise ValueError("download_receipt_invalid")
+        receipt_assets = receipt.get("assets")
+        if (receipt.get("manifestSha256") != data.get("manifestSha256")
+                or type(receipt_assets) is not list or len(receipt_assets) != len(assets)
+                or any(type(record) is not dict or record.get("name") != asset["name"]
+                       or record.get("sha256") != asset["sha256"]
+                       for record, asset in zip(receipt_assets, assets))):
+            raise ValueError("download_receipt_binding_mismatch")
+        wrapper = {"kind": "native-workspace-provisioning-guest-download-v1",
+                   "qualified": False, "prepared": False, "guestRoot": data.get("guestRoot"),
+                   "bundleSha256": data.get("bundleSha256"), "downloadReceipt": receipt}
+        wrapper_raw = (json.dumps(wrapper, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        if hashlib.sha256(wrapper_raw).hexdigest() != data.get("downloadReceiptSha256"):
+            raise ValueError("download_receipt_digest_mismatch")
+    finally:
+        os.close(receipt_fd)
     verified = []
     inspected = []
     try:
@@ -593,6 +639,8 @@ def build_bundle(owner_receipt_path, root=ROOT):
     if hashlib.sha256(manifest_raw).hexdigest() != downloads.MANIFEST_SHA256:
         raise canary.CanaryError("manifest_pin_mismatch")
     input_raw = json.dumps({"guestRoot": owner["guestRoot"], "manifestSha256": downloads.MANIFEST_SHA256,
+                            "downloadReceiptSha256": owner["downloadReceiptSha256"],
+                            "bundleSha256": owner["bundleSha256"],
                             "ownerReceiptSha256": hashlib.sha256(owner_raw).hexdigest(),
                             "postDownloadMeasurement": owner["postDownloadMeasurement"]},
                            sort_keys=True, separators=(",", ":")).encode()
