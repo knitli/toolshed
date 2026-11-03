@@ -233,7 +233,6 @@ def download_all(manifest, dns, ca, ca_sha, output):
         _, bundle = self._fixture_bundle()
         result, guest_root = self._receive(bundle["loader"], bundle["payload"])
         self.addCleanup(lambda: shutil.rmtree(guest_root, ignore_errors=True))
-        downloads = guest_root / "downloads"
         legacy_tmp = self.root / "private-tmp"
         legacy_root = legacy_tmp / "knitli-native-provisioning-abcdefgh"
         legacy_root.mkdir(parents=True, mode=0o700)
