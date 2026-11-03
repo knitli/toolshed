@@ -432,7 +432,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
             asset.write_bytes(b"read-only")
             guest_root = f"/Users/admin/{root.name}"
             # A group-writable parent must fail before downloads are opened.
-            os.chmod(parent, 0o720)
+            os.chmod(parent, 0o720)  # nosec B103 -- Isolated rejection fixture; restored to 0700 below.
             try:
                 with mock.patch.object(probe, "GUEST_PARENT", parent):
                     with self.assertRaisesRegex(ValueError, "guest_parent_unsafe"):
