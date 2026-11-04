@@ -808,7 +808,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
     def test_guest_rejects_synthetic_legacy_root_before_open(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest, raw, input_doc = self._fixture(directory)
-            input_doc["guestRoot"] = "/tmp/knitli-native-provisioning-abcdefgh"
+            input_doc["guestRoot"] = "/tmp/knitli-native-provisioning-abcdefgh"  # nosec B108 -- Invalid input fixture rejected before filesystem access.
             with self.assertRaisesRegex(ValueError, "guest_root_invalid"):
                 self._guest_collect(directory, manifest, raw, input_doc)
 
@@ -862,7 +862,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
                                                     "native_provisioning_inspection_bundle_oversized"):
                             probe.build_bundle(owner_path)
 
-            owner["guestRoot"] = "/tmp/knitli-native-provisioning-abcdefgh"
+            owner["guestRoot"] = "/tmp/knitli-native-provisioning-abcdefgh"  # nosec B108 -- Invalid receipt fixture rejected before filesystem access.
             owner_path.write_text(json.dumps(owner))
             with self.assertRaisesRegex(probe.canary.CanaryError, "invalid_owner_receipt"):
                 probe.build_bundle(owner_path)

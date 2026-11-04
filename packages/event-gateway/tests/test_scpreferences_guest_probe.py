@@ -148,7 +148,7 @@ def qualify_guest_apis():
                                       max_bundle_bytes=260 * 1024)
 
         def run(loader, bundle_arg):
-            return subprocess.run([sys.executable, "-I", "-B", "-c", loader, bundle_arg],
+            return subprocess.run([sys.executable, "-I", "-B", "-c", loader, bundle_arg],  # nosec B603 -- Fixed interpreter, generated test loader, synthetic bundle, and no shell.
                                   capture_output=True, text=True, check=False)
 
         at_256 = argument(256 * 1024)
