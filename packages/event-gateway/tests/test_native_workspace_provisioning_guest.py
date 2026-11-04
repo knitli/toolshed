@@ -138,7 +138,7 @@ def download_all(manifest, dns, ca, ca_sha, output):
     receipt_path = output / "receipt.json"
     receipt_path.write_text(json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\\n")
     receipt_path.chmod(0o600)
-    if MODE == "mismatch": target.write_bytes(b"tampered")
+    if MODE == "mismatch": target.write_bytes(b"X" * len(PAYLOAD))
     elif MODE == "missing": target.unlink()
     elif MODE == "extra": (output / "extra").write_bytes(b"extra")
     elif MODE == "symlink":
