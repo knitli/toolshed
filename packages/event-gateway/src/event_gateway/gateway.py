@@ -57,12 +57,13 @@ class _RuntimeLock:
 
 class Gateway:
     def __init__(self, store, authority, adapter_factory, *, audience, keys, clock=time.time,
-                 stock_codex_binary=None):
+                 stock_codex_binary=None, stock_only=False):
         """Bind durable storage to explicitly injected authority and native providers."""
         self.store, self.authority = store, authority
         self.adapter_factory, self.clock = adapter_factory, clock
         self.audience, self.keys = audience, dict(keys)
         self.stock_codex_binary = stock_codex_binary
+        self.stock_only = stock_only
         self._locks = {}  # runtimeId -> _RuntimeLock, only while in flight
 
     def accept(self, body, *, signature, audience, key_id):
@@ -351,6 +352,8 @@ class Gateway:
     async def _dispatch_locked(self, delivery_id):
         """Run the admitted-submission pipeline under the runtime lock."""
         envelope = self._require_envelope(delivery_id)
+        if self.stock_only and envelope.get("runtimeProfile") is None:
+            return self._row(delivery_id, "stock_profile_native_delivery_disabled")
         if envelope.get("runtimeProfile") is not None:
             return await self._dispatch_stock_locked(delivery_id, envelope)
         if envelope.get("schemaVersion") != 1:
@@ -563,6 +566,9 @@ class Gateway:
         envelope = self.store.delivery_envelope(delivery_id)
         if envelope is None:
             return None
+        if self.stock_only and envelope.get("runtimeProfile") is None:
+            # Preserve uncertain native evidence; a stock-only process cannot reconcile it.
+            return self._row(delivery_id, "stock_profile_native_reconciliation_disabled")
         if envelope.get("runtimeProfile") is not None:
             async with self._runtime_guard(envelope["runtimeId"]):
                 attempt = self.store.current_attempt(delivery_id)

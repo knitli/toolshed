@@ -160,6 +160,18 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("nativeCorrelation", attempt["native_ack"])
         self.assertEqual(self.store.list_pending(), [])
 
+    async def test_stock_only_gateway_delivers_valid_stock_event_once(self):
+        delivery = self.accept()
+        self.gateway.stock_only = True
+        submit_mock = self.stock_submit_mock(result={"status": "command_accepted"})
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit", new=submit_mock):
+            result = await self.gateway.dispatch(delivery)
+        self.assertEqual(result["status"], "command_accepted")
+        self.assert_stock_submit_once(submit_mock)
+        self.assertEqual(len(self.authority.acks), 1)
+        self.assertEqual(self.authority.acks[0]["status"], "command_accepted")
+        self.assertEqual(self.store.current_attempt(delivery)["native_ack"]["status"], "command_accepted")
+
     async def test_lost_ack_survives_restart_and_retries_only_the_stored_ack(self):
         delivery = self.accept()
         self.authority.drop_ack = True

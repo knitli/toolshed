@@ -45,7 +45,14 @@ def enrollment_main(argv=None):
     return _run(args, parser)
 
 
-def _parser(*, enrollment_only=False):
+def stock_main(argv=None):
+    """Run only the stock Codex control and assigned-stock client commands."""
+    parser = _parser(stock_only=True)
+    args = parser.parse_args(argv)
+    return _run(args, parser, stock_only=True)
+
+
+def _parser(*, enrollment_only=False, stock_only=False):
     parser = argparse.ArgumentParser(prog="knitli-event-gateway")
     parser.add_argument(
         "--state-dir",
@@ -62,6 +69,15 @@ def _parser(*, enrollment_only=False):
     enroll.add_argument("--mesh-port", type=int)
     enroll.add_argument("--agent", action="append", help="Explicit agent binding; repeat as needed")
     if enrollment_only:
+        return parser
+    detach = commands.add_parser("detach")
+    detach.add_argument("runtime_id")
+    if stock_only:
+        run = commands.add_parser("run", help="Run the stock-only control daemon")
+        run.add_argument("--dispatch-config", type=Path, required=True,
+                         help="Private configuration with stockCodexBinary enabled")
+        _add_stock_control_commands(commands)
+        _add_github_read_commands(commands)
         return parser
     run = commands.add_parser("run", help="Run the private control daemon")
     run.add_argument("--dispatch-config", type=Path, help="Private configuration for qualified event delivery")
@@ -93,6 +109,17 @@ def _parser(*, enrollment_only=False):
     transfer.add_argument("--expected-replacement-attachment-generation", type=int, required=True)
     transfer.add_argument("--session-id", required=True)
     transfer.add_argument("--cloud-config", type=Path, required=True)
+    _add_stock_control_commands(commands)
+    _add_github_read_commands(commands)
+    reconcile = commands.add_parser("reconcile", help="Reconcile retained attach/renew evidence with a fresh session")
+    reconcile.add_argument("--operation", choices=("attach", "renew", "transfer"), required=True)
+    reconcile.add_argument("--original-session-id", required=True)
+    reconcile.add_argument("--session-id", required=True)
+    reconcile.add_argument("--cloud-config", type=Path, required=True)
+    return parser
+
+
+def _add_stock_control_commands(commands):
     runtime_status = commands.add_parser("runtime-status", help="Read stored cloud runtime authority")
     runtime_status.add_argument("--runtime-id", required=True)
     runtime_status.add_argument("--cloud-config", type=Path, required=True)
@@ -103,6 +130,9 @@ def _parser(*, enrollment_only=False):
     stock.add_argument("--cloud-config", type=Path, required=True)
     stock.add_argument("--expected-runtime-generation", type=int)
     stock.add_argument("--expected-attachment-generation", type=int)
+
+
+def _add_github_read_commands(commands):
     event_read = commands.add_parser("github-event-read", help="Resolve a queued GitHub event reference")
     event_read.add_argument("--cloud-config", type=Path, required=True)
     event_read.add_argument("--event-reference", required=True)
@@ -118,23 +148,14 @@ def _parser(*, enrollment_only=False):
     material.add_argument("--source-id", required=True)
     material.add_argument("--fingerprint", required=True)
     material.add_argument("--private-output", type=Path, required=True)
-    reconcile = commands.add_parser("reconcile", help="Reconcile retained attach/renew evidence with a fresh session")
-    reconcile.add_argument("--operation", choices=("attach", "renew", "transfer"), required=True)
-    reconcile.add_argument("--original-session-id", required=True)
-    reconcile.add_argument("--session-id", required=True)
-    reconcile.add_argument("--cloud-config", type=Path, required=True)
-    detach = commands.add_parser("detach")
-    detach.add_argument("runtime_id")
-    return parser
 
-
-def _run(args, parser):
+def _run(args, parser, *, stock_only=False):
     # Keep component identity: resolving symlinks would hide unsafe input.
     state_dir = args.state_dir.absolute()
     if any(part.is_symlink() for part in (state_dir, *state_dir.parents)):
         parser.error("unsafe_state")
     try:
-        return _execute_command(args, state_dir, parser)
+        return _execute_command(args, state_dir, parser, stock_only=stock_only)
     except LaunchError as error:
         print(json.dumps({"reason": str(error)}), file=sys.stderr)
         return 2
@@ -160,7 +181,7 @@ def _run(args, parser):
         return 2
 
 
-def _execute_command(args, state_dir, parser):
+def _execute_command(args, state_dir, parser, *, stock_only=False):
     if args.command == "launch":
         return launch(state_dir, args.codex_binary, args.binary_sha256, args.cwd, resume=args.resume)
     if args.command == "client-status":
@@ -168,7 +189,7 @@ def _execute_command(args, state_dir, parser):
                           "presence": session_status(state_dir, args.session_id)}))
         return 0
     if args.command == "run":
-        asyncio.run(serve(state_dir, dispatch_config=args.dispatch_config))
+        asyncio.run(serve(state_dir, dispatch_config=args.dispatch_config, stock_only=stock_only))
         return 0
     if args.command == "github-source-material":
         return _execute_github_source_material(args, state_dir)

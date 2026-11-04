@@ -90,7 +90,27 @@ the restricted `event_gateway.cli:enrollment_main` entry point, which accepts
 only `enroll`, `status`, and `--help`. It does not enable native launch, attach,
 or delivery. This is a trusted local installation boundary, not a same-user Python
 sandbox: the owner of the environment can alter or invoke installed code directly.
-Raw `uv tool install` does not provide either install profile's verification.
+Raw `uv tool install` does not provide the install profiles' verification.
+
+For stock Codex assignment and daemon use without a promoted native pair, install
+the stock profile:
+
+```sh
+python3 -I scripts/install_paired_client.py \
+  --wheel /absolute/path/to/knitli_event_gateway-0.1.0-py3-none-any.whl \
+  --destination /absolute/path/to/new-stock-environment \
+  --stock-only
+```
+
+It performs the same protected-main source, wheel, lock, dependency and hash checks,
+but installs no native artifact and exposes only `status`, `enroll`, `run`,
+`stock-control`, `runtime-status`, `detach`, and the screened GitHub read/material
+commands. `run` requires an explicit dispatch config with `stockCodexBinary`; the
+stock-only daemon refuses native delivery and leaves any prior native attempt
+evidence untouched. The profile cannot launch a native TUI or invoke native
+attach, renew, transfer, or reconciliation commands. Keep the dispatch config
+private as described below. Like enrollment-only, stock-only restricts the
+installed console entry point and is not a same-user Python sandbox.
 
 The installer uses PyPI only for runtime dependencies pinned by main's `uv.lock`,
 requires approved wheel hashes and refuses source builds. It verifies the fresh
