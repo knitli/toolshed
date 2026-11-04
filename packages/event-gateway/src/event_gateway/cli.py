@@ -77,6 +77,7 @@ def _parser(*, enrollment_only=False, stock_only=False):
         run.add_argument("--dispatch-config", type=Path, required=True,
                          help="Private configuration with stockCodexBinary enabled")
         _add_stock_control_commands(commands)
+        _add_stock_recovery_commands(commands)
         _add_github_read_commands(commands)
         return parser
     run = commands.add_parser("run", help="Run the private control daemon")
@@ -110,6 +111,7 @@ def _parser(*, enrollment_only=False, stock_only=False):
     transfer.add_argument("--session-id", required=True)
     transfer.add_argument("--cloud-config", type=Path, required=True)
     _add_stock_control_commands(commands)
+    _add_stock_recovery_commands(commands)
     _add_github_read_commands(commands)
     reconcile = commands.add_parser("reconcile", help="Reconcile retained attach/renew evidence with a fresh session")
     reconcile.add_argument("--operation", choices=("attach", "renew", "transfer"), required=True)
@@ -130,6 +132,13 @@ def _add_stock_control_commands(commands):
     stock.add_argument("--cloud-config", type=Path, required=True)
     stock.add_argument("--expected-runtime-generation", type=int)
     stock.add_argument("--expected-attachment-generation", type=int)
+
+def _add_stock_recovery_commands(commands):
+    recovery = commands.add_parser("stock-recovery", help="Inspect or locally abandon an ambiguous stock delivery")
+    recovery.add_argument("operation", choices=("list", "abandon"))
+    recovery.add_argument("--delivery-id")
+    recovery.add_argument("--attempt-id")
+    recovery.add_argument("--expected-identity-sha256")
 
 
 def _add_github_read_commands(commands):
@@ -208,6 +217,29 @@ def _execute_command(args, state_dir, parser, *, stock_only=False):
         return 0
     if args.command == "stock-control":
         return _execute_stock_control(args, state_dir)
+    if args.command == "stock-recovery":
+        if args.operation == "abandon" and not all((args.delivery_id, args.attempt_id,
+                                                      args.expected_identity_sha256)):
+            parser.error("stock-recovery abandon requires --delivery-id, --attempt-id, and --expected-identity-sha256")
+        if args.operation == "list" and any((args.attempt_id, args.expected_identity_sha256)):
+            parser.error("stock-recovery list accepts only --delivery-id")
+        request_value = ({"command": "stock-recovery-list", **(
+            {"deliveryId": args.delivery_id} if args.delivery_id is not None else {}
+        )} if args.operation == "list" else {
+            "command": "stock-recovery-abandon", "deliveryId": args.delivery_id,
+            "attemptId": args.attempt_id, "expectedIdentitySha256": args.expected_identity_sha256,
+        })
+        if (state_dir / "control.sock").exists():
+            result = asyncio.run(request(state_dir, request_value))
+        else:
+            with Store(state_dir) as store:
+                result = (store.list_stock_recovery(delivery_id=args.delivery_id) if args.operation == "list" else {
+                    "disposition": store.abandon_stock_delivery(
+                        args.delivery_id, args.attempt_id, args.expected_identity_sha256,
+                    ),
+                })
+        print(json.dumps(result))
+        return 0 if "reason" not in result else 2
     if args.command == "reconcile":
         result = _reconcile_native(args, state_dir)
         print(json.dumps(result))

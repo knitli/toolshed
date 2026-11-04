@@ -284,6 +284,16 @@ the TUI closes. Fully stopped-runtime behavior remains unqualified; the
 [0.163.0 upstream command](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/tui/src/session_archive_commands.rs)
 can choose an embedded server when no shared daemon is available.
 
+Inspect unresolved stock input with `knitli-event-gateway stock-recovery list`.
+The list is capped to fit the private control socket; inspect a known row with
+`stock-recovery list --delivery-id DELIVERY-ID` when the output says `truncated`.
+For a specific ambiguous row, `stock-recovery abandon` requires its delivery ID,
+attempt ID, and the exact `expectedIdentitySha256` printed by the list command.
+This records a bounded local operator disposition only: the machine state stays
+`unknown`, the cloud obligation stays `unresolved`, and retained evidence and
+budget remain intact. It does not confirm receipt, cancel cloud work, or retry
+the input; detaching the exact runtime remains the separate stop fence.
+
 Existing Access-mode installations use `cloud-config.json` and its sibling
 `cloud-credentials.json` in a private directory. Omitted `authMode` means
 `access`; credentials are reread for each request:

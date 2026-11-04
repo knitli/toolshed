@@ -225,6 +225,50 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         submit.assert_awaited_once()
         self.assertEqual(self.authority.acks, [])
 
+    async def test_ambiguous_stock_delivery_can_be_locally_abandoned_without_settlement(self):
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(error=TimeoutError("lost CLI response"))) as submit:
+            self.assertEqual((await self.gateway.dispatch(delivery))["status"], "ambiguous")
+        submit.assert_awaited_once()
+        summary = self.store.list_stock_recovery()
+        self.assertFalse(summary["truncated"])
+        item = summary["deliveries"][0]
+        self.assertEqual(item["deliveryId"], delivery)
+        self.assertEqual(item["attemptId"], self.event["attemptId"])
+        self.assertEqual(item["conversationId"], self.event["runtimeProfile"]["conversationId"])
+        self.assertEqual(item["machineState"], "unknown")
+        self.assertEqual(item["cloudObligation"], "unresolved")
+        attempt_before = self.store.current_attempt(delivery)
+        with self.assertRaisesRegex(StoreError, "^stale_recovery_identity$"):
+            self.store.abandon_stock_delivery(
+                delivery, item["attemptId"], "0" * 64,
+            )
+        with self.assertRaisesRegex(StoreError, "^not_found$"):
+            self.store.abandon_stock_delivery(
+                delivery, str(uuid.uuid4()), item["expectedIdentitySha256"],
+            )
+
+        first = self.store.abandon_stock_delivery(
+            delivery, item["attemptId"], item["expectedIdentitySha256"],
+        )
+        second = self.store.abandon_stock_delivery(
+            delivery, item["attemptId"], item["expectedIdentitySha256"],
+        )
+        attempt_after = self.store.current_attempt(delivery)
+        self.assertEqual(first, second)
+        self.assertEqual(first["action"], "abandoned")
+        self.assertEqual(first["machineState"], "unknown")
+        self.assertEqual(first["cloudObligation"], "unresolved")
+        self.assertEqual(self.store.get(delivery)["status"], "ambiguous")
+        self.assertEqual(attempt_after["native_request"], attempt_before["native_request"])
+        self.assertEqual(attempt_after["evidence"], attempt_before["evidence"])
+        self.assertEqual(attempt_after["reserved_bytes"], attempt_before["reserved_bytes"])
+        self.assertEqual(len(self.authority.acks), 0)
+        self.assertEqual(len(self.authority.settlements), 0)
+        listed_again = self.store.list_stock_recovery()["deliveries"][0]
+        self.assertEqual(listed_again["operatorDisposition"], first)
+
     async def test_crash_before_and_after_client_send_recover_as_ambiguous(self):
         class Crash(BaseException):
             pass

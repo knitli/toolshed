@@ -41,6 +41,22 @@ def status(store, dispatch=None):
 def _execute_control_command(store, request_value, dispatch=None):
     if request_value == {"command": "status"}:
         return status(store, dispatch)
+    if request_value == {"command": "stock-recovery-list"}:
+        return store.list_stock_recovery()
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "deliveryId"}
+            and request_value["command"] == "stock-recovery-list"
+            and isinstance(request_value["deliveryId"], str)):
+        return store.list_stock_recovery(delivery_id=request_value["deliveryId"])
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "deliveryId", "attemptId", "expectedIdentitySha256"}
+            and request_value["command"] == "stock-recovery-abandon"
+            and all(isinstance(request_value[key], str) for key in
+                    ("deliveryId", "attemptId", "expectedIdentitySha256"))):
+        return {"disposition": store.abandon_stock_delivery(
+            request_value["deliveryId"], request_value["attemptId"],
+            request_value["expectedIdentitySha256"],
+        )}
     if (isinstance(request_value, dict)
             and set(request_value) == {"command", "runtimeId"}
             and request_value["command"] == "get-attachment"

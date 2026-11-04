@@ -1,6 +1,7 @@
 """Exercise bounded Store error replies over the private Unix control socket."""
 from contextlib import asynccontextmanager, redirect_stdout
 import asyncio
+import copy
 import io
 import json
 from pathlib import Path
@@ -14,10 +15,14 @@ from unittest.mock import patch
 
 from event_gateway import cli, daemon
 from event_gateway.cloud import CloudError, _iso
-from event_gateway.store import Store, StoreError
+from event_gateway.protocol import derive_delivery_id
+from event_gateway.store import IDENTITY, Store, StoreError
 
 
 TEMPORARY_ROOT = Path("/tmp").resolve()  # nosec B108 - private subdirectory with a short Unix socket path
+EVENT_FIXTURES = json.loads((Path(__file__).resolve().parents[1] / "contracts/event-v1/protocol-v1.json").read_text())
+STOCK_EVENT = next(event for event in EVENT_FIXTURES["validEnvelopes"] if "runtimeProfile" in event)
+NOW = 1791201630
 
 
 def control_socket_ready(path):
@@ -62,6 +67,83 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaisesRegex(daemon.SecurityError, "stock_profile_requires_stock_client"):
                     await daemon.serve(Path(directory), dispatch_config=config_path, stock_only=True)
             load_config.assert_called_once_with(config_path, Path(directory))
+
+    async def test_stock_recovery_controls_use_store_and_reject_extra_fields(self):
+        calls = []
+
+        class RecoveryStore:
+            def list_stock_recovery(self):
+                calls.append(("list",))
+                return {"deliveries": [], "truncated": False}
+
+            def abandon_stock_delivery(self, delivery_id, attempt_id, identity):
+                calls.append(("abandon", delivery_id, attempt_id, identity))
+                return {"action": "abandoned", "machineState": "unknown",
+                        "cloudObligation": "unresolved"}
+
+        store = RecoveryStore()
+        self.assertEqual(daemon._execute_control_command(
+            store, {"command": "stock-recovery-list"},
+        ), {"deliveries": [], "truncated": False})
+        command = {"command": "stock-recovery-abandon", "deliveryId": "d", "attemptId": "a",
+                   "expectedIdentitySha256": "0" * 64}
+        self.assertEqual(daemon._execute_control_command(store, command), {
+            "disposition": {"action": "abandoned", "machineState": "unknown",
+                             "cloudObligation": "unresolved"},
+        })
+        self.assertEqual(daemon._execute_control_command(store, {**command, "extra": True}),
+                         {"reason": "unsupported_command"})
+        self.assertEqual(calls, [("list",), ("abandon", "d", "a", "0" * 64)])
+
+    async def test_stock_recovery_wire_list_fits_and_exact_lookup_survives_truncation(self):
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory:
+            state = await self.state_dir(directory, "stock-recovery-wire")
+            store = Store(state, clock=lambda: NOW)
+            delivery_ids = []
+            for index in range(40):
+                event = copy.deepcopy(STOCK_EVENT)
+                event["eventId"] = str(uuid.uuid4())
+                event["attemptId"] = str(uuid.uuid4())
+                event["runtimeId"] = str(uuid.uuid4())
+                event["principal"] = f"operator-{index}@example.com"
+                event["agent"] = f"stock-{index}"
+                event["runtimeProfile"]["conversationId"] = str(uuid.uuid4())
+                event["deliveryId"] = derive_delivery_id(event)
+                mapping = {key: event[key] for key in IDENTITY}
+                mapping.update(consumerGeneration=event["consumerGeneration"],
+                               runtimeProfile=event["runtimeProfile"], leaseExpiresAt=NOW + 3600)
+                store.put_attachment(mapping)
+                store.accept(event)
+                admission = {"envelope": event, "nodeId": str(uuid.uuid4())}
+                with store.db:
+                    store.db.execute(
+                        "INSERT INTO attempts (delivery_id,attempt_id,state,envelope,admission,reserved_bytes,updated,claim_uncertain) "
+                        "VALUES (?,?,'ambiguous',?,?,0,?,0)",
+                        (event["deliveryId"], event["attemptId"], json.dumps(event),
+                         json.dumps(admission), NOW),
+                    )
+                    store.db.execute("UPDATE deliveries SET state='ambiguous' WHERE id=?",
+                                     (event["deliveryId"],))
+                delivery_ids.append(event["deliveryId"])
+            store.close()
+
+            async with running_daemon(state):
+                result = await daemon.request(state, {"command": "stock-recovery-list"})
+                self.assertTrue(result["truncated"])
+                self.assertGreater(len(delivery_ids), len(result["deliveries"]))
+                self.assertLess(len(json.dumps(result).encode()) + 1, 8192)
+
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    code = await asyncio.to_thread(cli.main, [
+                        "--state-dir", str(state), "stock-recovery", "list",
+                        "--delivery-id", delivery_ids[-1],
+                    ])
+                exact = json.loads(output.getvalue())
+                self.assertEqual(code, 0)
+                self.assertFalse(exact["truncated"])
+                self.assertEqual([row["deliveryId"] for row in exact["deliveries"]],
+                                 [delivery_ids[-1]])
 
     async def test_stock_renew_control_uses_exact_cas_for_expired_local_record(self):
         now = [100]
