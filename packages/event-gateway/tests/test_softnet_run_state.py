@@ -83,6 +83,17 @@ class SoftnetRunStateTests(unittest.TestCase):
         return run, run_id
 
     @staticmethod
+    def _publish_guest_shutdown(run):
+        fd = recovery._directory(run)
+        try:
+            recovery._publish(fd, "guest-shutdown.plist", plistlib.dumps({
+                "kind": "softnet-guest-shutdown-v1", "version": 1,
+                "requestAccepted": True, "vmRunExitCode": 0, "vmStopped": True,
+            }, fmt=plistlib.FMT_BINARY))
+        finally:
+            os.close(fd)
+
+    @staticmethod
     def _stop_evidence():
         return {"vmReaped": True, "helperReaped": True, "vmStopped": True}
 
@@ -578,6 +589,7 @@ class SoftnetRunStateTests(unittest.TestCase):
                 recovery._publish(fd, "provisioning-download.json", receipt)
             finally:
                 os.close(fd)
+            self._publish_guest_shutdown(run)
             state.complete(run, self._stop_evidence())
         complete = plistlib.loads((run / "complete.plist").read_bytes())
         self.assertEqual(complete["provisioningDownloadSha256"], hashlib.sha256(receipt).hexdigest())
@@ -601,6 +613,7 @@ class SoftnetRunStateTests(unittest.TestCase):
                 recovery._publish(fd, "provisioning-download.json", receipt_bytes)
             finally:
                 os.close(fd)
+            self._publish_guest_shutdown(run)
             state.complete(run, self._stop_evidence())
 
         identity = self._retained_provisioning_identity()
@@ -641,6 +654,7 @@ class SoftnetRunStateTests(unittest.TestCase):
                                   json.dumps(v2, sort_keys=True, separators=(",", ":")).encode() + b"\n")
             finally:
                 os.close(recovery_fd)
+            self._publish_guest_shutdown(run)
             state.complete(run, self._stop_evidence())
 
         # Model an older completed journal written before the v2 wrapper existed.
@@ -736,6 +750,68 @@ class SoftnetRunStateTests(unittest.TestCase):
             with self.assertRaisesRegex(recovery.RecoveryError, "invalid_run_entries"):
                 state.complete(run, self._stop_evidence())
 
+    def test_new_provisioning_completion_binds_shutdown_proof_and_legacy_journals_still_open(self):
+        self.identity = self._provisioning_identity()
+        result = self._provisioning_result(self.identity)
+        receipt = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        with run_state.State(self.root) as state:
+            run, run_id = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            try:
+                recovery._publish(fd, "provisioning-download.json", receipt)
+            finally:
+                os.close(fd)
+            self._publish_guest_shutdown(run)
+            state.complete(run, self._stop_evidence())
+
+        completion = plistlib.loads((run / "complete.plist").read_bytes())
+        shutdown_bytes = (run / "guest-shutdown.plist").read_bytes()
+        self.assertEqual(completion["guestShutdownSha256"], hashlib.sha256(shutdown_bytes).hexdigest())
+        self.assertTrue(run_state._check_run_directory(self.root, run_id))
+
+        # A semantically equivalent sidecar with different bytes must not pass its completion pin.
+        proof = plistlib.loads(shutdown_bytes)
+        self._rewrite(run / "guest-shutdown.plist", plistlib.dumps(proof, fmt=plistlib.FMT_XML))
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_completion"):
+            run_state._check_run_directory(self.root, run_id)
+        self._rewrite(run / "guest-shutdown.plist", shutdown_bytes)
+
+        # Historical completed provisioning journals predate this sidecar and remain readable.
+        (run / "guest-shutdown.plist").unlink()
+        completion.pop("guestShutdownSha256")
+        self._rewrite(run / "complete.plist", plistlib.dumps(
+            completion, fmt=plistlib.FMT_BINARY, sort_keys=True))
+        self.assertTrue(run_state._check_run_directory(self.root, run_id))
+        with run_state.State(self.root):
+            pass
+
+    def test_guest_shutdown_sidecar_is_rejected_for_nonprovisioning_runs(self):
+        with run_state.State(self.root) as state:
+            run, run_id = self._run_with_recovery_records(state)
+        self._publish_guest_shutdown(run)
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_guest_shutdown"):
+            run_state._check_run_directory(self.root, run_id)
+
+    def test_new_provisioning_completion_rejects_missing_or_invalid_shutdown_proof(self):
+        self.identity = self._provisioning_identity()
+        result = self._provisioning_result(self.identity)
+        receipt = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            fd = recovery._directory(run)
+            try:
+                recovery._publish(fd, "provisioning-download.json", receipt)
+            finally:
+                os.close(fd)
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_run_entries"):
+                state.complete(run, self._stop_evidence())
+            proof = {"kind": "softnet-guest-shutdown-v1", "version": 1,
+                     "requestAccepted": True, "vmRunExitCode": 1, "vmStopped": True}
+            self._rewrite(run / "guest-shutdown.plist", plistlib.dumps(
+                proof, fmt=plistlib.FMT_BINARY, sort_keys=True))
+            with self.assertRaisesRegex(recovery.RecoveryError, "invalid_guest_shutdown"):
+                state.complete(run, self._stop_evidence())
+
     def test_provisioning_download_rejects_malformed_and_tampered_results(self):
         self.identity = self._provisioning_identity()
         valid = self._provisioning_result(self.identity)
@@ -763,6 +839,7 @@ class SoftnetRunStateTests(unittest.TestCase):
                     recovery._publish(fd, "provisioning-download.json", receipt)
                 finally:
                     os.close(fd)
+                self._publish_guest_shutdown(run)
                 with self.assertRaisesRegex(recovery.RecoveryError,
                                            "invalid_provisioning_download"):
                     state.complete(run, self._stop_evidence())
