@@ -1,0 +1,64 @@
+{
+  "acceptedCommands": {
+    "queueAWhileBOpen": {
+      "exit": 0,
+      "queuedMessageId": "01a1a8cd-444a-7253-a0c4-554b5036bcbc",
+      "threadId": "01a1a8cd-3290-7153-8ddc-c5d85a799409"
+    },
+    "queueAWithTuiClosed": {
+      "exit": 0,
+      "queuedMessageId": "01a1a8cd-4ece-77e2-bad3-4a70a47bf94b",
+      "threadId": "01a1a8cd-3290-7153-8ddc-c5d85a799409"
+    }
+  },
+  "checks": {
+    "BStillOpen": true,
+    "closedTuiDaemonResume": true,
+    "crossSessionTargetedA": true,
+    "daemonAfterTuiExit": "running",
+    "duplicateAcceptedSeparately": true,
+    "queueAWhileBOpenTargetsExactUUID": true,
+    "queueAWithTuiClosedTargetsExactUUID": true,
+    "reopenCausedNoNewProviderRequestDuringOneSecondObservation": true,
+    "reopenedA": true
+  },
+  "codex": {
+    "sha256": "39acf979729dd290f9a24ee38b2914e036c91b65952872e28ae2a6b88a7db7c1",
+    "version": "codex-cli 0.166.0"
+  },
+  "daemonCleanup": {
+    "exit": 0,
+    "status": "stopped"
+  },
+  "duplicateAcceptance": {
+    "first": {
+      "queuedMessageId": "01a1a8cd-5cb8-7303-81ee-58fb8c6451e0",
+      "threadId": "01a1a8cd-5a98-7323-b0fd-20e53db7aae9"
+    },
+    "reference": "ref_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "second": {
+      "queuedMessageId": "01a1a8cd-5cd3-7f80-a19b-de26abcf007d",
+      "threadId": "01a1a8cd-5a98-7323-b0fd-20e53db7aae9"
+    }
+  },
+  "loopbackRequestsContainingReferences": [
+    {
+      "number": 3,
+      "syntheticReferences": [
+        "ref_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+      ]
+    },
+    {
+      "number": 4,
+      "syntheticReferences": [
+        "ref_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "ref_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+      ]
+    }
+  ],
+  "scope": "Disposable private CODEX_HOME; loopback-only synthetic provider; prompt/config payloads omitted.",
+  "sessions": {
+    "A": "01a1a8cd-3290-7153-8ddc-c5d85a799409",
+    "B": "01a1a8cd-340a-7d93-9484-7d17456b08c6"
+  }
+}

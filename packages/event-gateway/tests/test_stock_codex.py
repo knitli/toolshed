@@ -53,7 +53,7 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(spawn.await_count, 1)
         self.assertEqual(spawn.call_args.args,
                          (str(self.binary), "queue", "--thread", THREAD,
-                          "--message", REFERENCE))
+                          "--message", REFERENCE, "--resume"))
         self.assertEqual(spawn.call_args.kwargs["stdin"], asyncio.subprocess.DEVNULL)
         self.assertEqual(spawn.call_args.kwargs["stdout"], asyncio.subprocess.DEVNULL)
         self.assertEqual(spawn.call_args.kwargs["stderr"], asyncio.subprocess.DEVNULL)

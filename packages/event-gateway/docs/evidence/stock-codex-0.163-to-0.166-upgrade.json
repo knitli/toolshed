@@ -1,0 +1,50 @@
+{
+  "currentClient": {
+    "sha256": "39acf979729dd290f9a24ee38b2914e036c91b65952872e28ae2a6b88a7db7c1",
+    "version": "codex-cli 0.166.0"
+  },
+  "distribution": {
+    "integrityProvenance": "npm pack platform package SRI matched the independently computed local tarball SHA-512; the root package metadata names the platform package as an optional dependency.",
+    "platformPackage": {
+      "integrity": "sha512-i7Dzk2a5aGmuGM9aNZgaUVTojZ/4bc5lRfosz++Y7X2BGhDkz+cySgbD+NYS1pOxfm0VEbLi9PZ3pAulI4kchw==",
+      "name": "@openai/codex-darwin-arm64",
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.163.0-darwin-arm64.tgz",
+      "version": "0.163.0-darwin-arm64"
+    },
+    "publisherSignatureChecked": false,
+    "rootPackage": {
+      "integrity": "sha512-HNd7vR9oTK6M2ikxFnvNDCdYUgAsyo9VVnd5KnEd2ON0GYI++7MiX9XNPUkhtdgGKFPsWS+CEppQ1UU63uVhUw==",
+      "name": "@openai/codex",
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.163.0.tgz",
+      "version": "0.163.0"
+    }
+  },
+  "previousClient": {
+    "sha256": "8813367285524ac798dd96d1b071aea30d58708c7226fd236cd275cf1cfdee31",
+    "version": "codex-cli 0.163.0"
+  },
+  "queue": {
+    "exactPriorUUIDTarget": true,
+    "exit": 0,
+    "matchingLoopbackRequestNumber": 2,
+    "queuedMessageId": "01a1a8c7-19e3-7422-831a-5ebbf21069e5",
+    "sameThreadResumedAfterUpgrade": true,
+    "syntheticReference": "ref_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    "threadId": "01a1a8c7-0d88-7393-aae1-0390682a943f"
+  },
+  "sameHomeTransition": {
+    "currentDaemonStarted": "started",
+    "currentDaemonVersion": "0.166.0",
+    "finalDaemonCleanup": {
+      "current": {
+        "exit": 0,
+        "status": "stopped"
+      }
+    },
+    "previousDaemonStarted": "started",
+    "previousDaemonStopExit": 0,
+    "previousDaemonStopStatus": "stopped",
+    "threadId": "01a1a8c7-0d88-7393-aae1-0390682a943f"
+  },
+  "scope": "One disposable CODEX_HOME, seeded by official 0.163.0 CLI and resumed by installed 0.166.0 CLI against loopback-only synthetic provider. Prompts/config payloads omitted."
+}
