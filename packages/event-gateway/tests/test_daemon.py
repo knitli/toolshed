@@ -49,11 +49,19 @@ async def running_daemon(state_dir):
 
 class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
     async def test_stock_only_serve_requires_dispatch_client_config(self):
-        for configured in (None, ({"version": 1}, object())):
-            with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory, self.subTest(configured=configured), patch.object(
-                    daemon, "load_dispatch_config", return_value=configured):
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory, \
+                patch.object(daemon, "load_dispatch_config") as load_config:
+            with self.assertRaisesRegex(daemon.SecurityError, "stock_profile_requires_stock_client"):
+                await daemon.serve(Path(directory), stock_only=True)
+            load_config.assert_not_called()
+
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory, \
+                self.subTest(configured="missing stockCodexBinary"):
+            config_path = Path(directory) / "dispatch.json"
+            with patch.object(daemon, "load_dispatch_config", return_value=({"version": 1}, object())) as load_config:
                 with self.assertRaisesRegex(daemon.SecurityError, "stock_profile_requires_stock_client"):
-                    await daemon.serve(Path(directory), stock_only=True)
+                    await daemon.serve(Path(directory), dispatch_config=config_path, stock_only=True)
+            load_config.assert_called_once_with(config_path, Path(directory))
 
     async def test_stock_renew_control_uses_exact_cas_for_expired_local_record(self):
         now = [100]

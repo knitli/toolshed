@@ -74,16 +74,7 @@ def _parser(*, enrollment_only=False, stock_only=False):
         run = commands.add_parser("run", help="Run the stock-only control daemon")
         run.add_argument("--dispatch-config", type=Path, required=True,
                          help="Private configuration with stockCodexBinary enabled")
-        runtime_status = commands.add_parser("runtime-status", help="Read stored cloud runtime authority")
-        runtime_status.add_argument("--runtime-id", required=True)
-        runtime_status.add_argument("--cloud-config", type=Path, required=True)
-        stock = commands.add_parser("stock-control", help="Assign an existing Codex conversation to a stock runtime")
-        stock.add_argument("operation", choices=("attach", "renew"))
-        stock.add_argument("--runtime-id", required=True)
-        stock.add_argument("--conversation-id", required=True, help="Canonical Codex conversation UUID")
-        stock.add_argument("--cloud-config", type=Path, required=True)
-        stock.add_argument("--expected-runtime-generation", type=int)
-        stock.add_argument("--expected-attachment-generation", type=int)
+        _add_stock_control_commands(commands)
         _add_github_read_commands(commands)
         detach = commands.add_parser("detach")
         detach.add_argument("runtime_id")
@@ -118,6 +109,19 @@ def _parser(*, enrollment_only=False, stock_only=False):
     transfer.add_argument("--expected-replacement-attachment-generation", type=int, required=True)
     transfer.add_argument("--session-id", required=True)
     transfer.add_argument("--cloud-config", type=Path, required=True)
+    _add_stock_control_commands(commands)
+    _add_github_read_commands(commands)
+    reconcile = commands.add_parser("reconcile", help="Reconcile retained attach/renew evidence with a fresh session")
+    reconcile.add_argument("--operation", choices=("attach", "renew", "transfer"), required=True)
+    reconcile.add_argument("--original-session-id", required=True)
+    reconcile.add_argument("--session-id", required=True)
+    reconcile.add_argument("--cloud-config", type=Path, required=True)
+    detach = commands.add_parser("detach")
+    detach.add_argument("runtime_id")
+    return parser
+
+
+def _add_stock_control_commands(commands):
     runtime_status = commands.add_parser("runtime-status", help="Read stored cloud runtime authority")
     runtime_status.add_argument("--runtime-id", required=True)
     runtime_status.add_argument("--cloud-config", type=Path, required=True)
@@ -128,15 +132,6 @@ def _parser(*, enrollment_only=False, stock_only=False):
     stock.add_argument("--cloud-config", type=Path, required=True)
     stock.add_argument("--expected-runtime-generation", type=int)
     stock.add_argument("--expected-attachment-generation", type=int)
-    _add_github_read_commands(commands)
-    reconcile = commands.add_parser("reconcile", help="Reconcile retained attach/renew evidence with a fresh session")
-    reconcile.add_argument("--operation", choices=("attach", "renew", "transfer"), required=True)
-    reconcile.add_argument("--original-session-id", required=True)
-    reconcile.add_argument("--session-id", required=True)
-    reconcile.add_argument("--cloud-config", type=Path, required=True)
-    detach = commands.add_parser("detach")
-    detach.add_argument("runtime_id")
-    return parser
 
 
 def _add_github_read_commands(commands):

@@ -353,10 +353,7 @@ def install(plan):
         if restricted:
             profile = 'stock' if plan.get('stock_only', False) else 'enrollment'
             restrict_entrypoint(destination, profile)
-            if plan.get('stock_only', False):
-                verify_restricted_destination(destination, source, helper, profile)
-            else:
-                verify_enrollment_destination(destination, source, helper)
+            verify_restricted_destination(destination, source, helper, profile)
             return {'sourceRevision': plan['main'], 'wheelSha256': V.digest(plan['wheel']),
                     'environment': str(destination), 'command': str(destination / 'bin/knitli-event-gateway'),
                     'profile': profile + '-only'}

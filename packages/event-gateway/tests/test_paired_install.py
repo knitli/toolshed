@@ -428,7 +428,7 @@ class PairedInstallTests(unittest.TestCase):
             (destination / 'bin/knitli-event-gateway').chmod(0o700)
 
         with patch.object(INSTALL, 'install_wheel', side_effect=install_fake), \
-                patch.object(INSTALL, 'verify_enrollment_destination', side_effect=RuntimeError('postcheck failed')):
+                patch.object(INSTALL, 'verify_restricted_destination', side_effect=RuntimeError('postcheck failed')):
             with self.assertRaisesRegex(RuntimeError, 'postcheck failed'):
                 INSTALL.install(plan)
         self.unchanged()
@@ -793,16 +793,6 @@ class PairedInstallTests(unittest.TestCase):
         self.assertFalse((self.destination / 'native').exists())
         self.assertFalse(marker.exists())
         self.assertEqual(command.read_bytes(), INSTALL.restricted_entrypoint(self.destination, profile))
-        if profile == 'stock':
-            help_result = INSTALL.subprocess.run([str(command), '--help'], capture_output=True, text=True)
-            launch_result = INSTALL.subprocess.run([str(command), 'launch'], capture_output=True, text=True)
-            self.assertEqual(help_result.returncode, 0)
-            self.assertNotIn('launch', help_result.stdout)
-            self.assertIn('stock-control', help_result.stdout)
-            self.assertNotEqual(launch_result.returncode, 0, launch_result.stdout + launch_result.stderr)
-            self.assertFalse(marker.exists())
-            self.assertEqual(self.existing.read_bytes(), b'keep working installation')
-            return command
         trusted_entrypoint = command.with_name('trusted-entrypoint')
         original_lstat = Path.lstat
         swapped = False
@@ -819,9 +809,10 @@ class PairedInstallTests(unittest.TestCase):
         try:
             with patch.object(INSTALL.Path, 'lstat', autospec=True, side_effect=swap_entrypoint_after_lstat):
                 with self.assertRaises(OSError):
-                    INSTALL.verify_enrollment_destination(
+                    INSTALL.verify_restricted_destination(
                         self.destination, self.destination / '.paired-source',
                         self.destination / '.paired-source/qualification-installed.py',
+                        profile,
                     )
         finally:
             if command.is_symlink():
@@ -833,6 +824,10 @@ class PairedInstallTests(unittest.TestCase):
         launch_result = INSTALL.subprocess.run([str(command), 'launch'], capture_output=True, text=True)
         self.assertEqual(help_result.returncode, 0)
         self.assertNotIn('launch', help_result.stdout)
+        if profile == 'stock':
+            self.assertIn('stock-control', help_result.stdout)
+        else:
+            self.assertIn('enroll', help_result.stdout)
         self.assertNotEqual(launch_result.returncode, 0, launch_result.stdout + launch_result.stderr)
         self.assertFalse(marker.exists())
         self.assertEqual(self.existing.read_bytes(), b'keep working installation')
