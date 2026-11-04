@@ -279,10 +279,6 @@ def restricted_entrypoint(destination, profile):
             + shlex.quote(command) + ' "$@"\n').encode()
 
 
-def enrollment_entrypoint(destination):
-    return restricted_entrypoint(destination, 'enrollment')
-
-
 def restrict_entrypoint(destination, profile):
     entrypoint = destination / 'bin/knitli-event-gateway'
     info = entrypoint.lstat()
@@ -292,10 +288,6 @@ def restrict_entrypoint(destination, profile):
         stream.write(restricted_entrypoint(destination, profile))
     entrypoint.chmod(0o700)
     return entrypoint
-
-
-def restrict_enrollment_entrypoint(destination):
-    return restrict_entrypoint(destination, 'enrollment')
 
 
 RESTRICTED_POSTCHECK = '''import importlib.util, sys
@@ -320,10 +312,6 @@ def verify_restricted_destination(destination, source, helper, profile):
     actual = read_file(entrypoint, len(expected))
     require(stat.S_ISREG(info.st_mode) and info.st_uid in (0, os.getuid()) and info.st_mode & 0o111
             and actual == expected, profile + '_entrypoint_mismatch')
-
-
-def verify_enrollment_destination(destination, source, helper):
-    return verify_restricted_destination(destination, source, helper, 'enrollment')
 
 
 def install(plan):
