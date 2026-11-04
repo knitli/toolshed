@@ -578,6 +578,64 @@ class ProvisioningInspectionTests(unittest.TestCase):
                               bundle, run_bounded=lambda *args, **kwargs: (
                                   json.dumps(report).encode(), b""))
 
+    def test_non_archive_asset_rejects_unexpected_archive_metadata(self):
+        digest = "f" * 64
+        bundle = {"baseVmName": "softnet-canary-" + "a" * 32,
+                  "guestRoot": "/Users/admin/.knitli-native-provisioning-fixture0",
+                  "loader": "fixed-loader", "argument": "fixed-b64",
+                  "ownerReceiptSha256": "b" * 64, "postDownloadMeasurement": {},
+                  "manifestSha256": "d" * 64, "sourceSha256": {}, "bundleSha256": "e" * 64,
+                  "expectedAssets": {"rustup-init": {"sha256": digest, "maxBytes": 1024}}}
+        for forged_archive in ({}, "invalid", {"complete": True, "status": "present",
+                                                  "inventorySha256": "a" * 64,
+                                                  "memberCount": probe.MAX_MEMBERS + 1}):
+            report = {"kind": probe.KIND, "status": "passed", "qualified": False, "prepared": False,
+                      "complete": True, "assets": [{"name": "rustup-init", "sha256": digest,
+                                                        "bytes": 10, "archive": forged_archive}],
+                      "preStopComparison": "matched", "manifestSha256": bundle["manifestSha256"],
+                      "ownerReceiptSha256": bundle["ownerReceiptSha256"],
+                      "postDownloadMeasurement": bundle["postDownloadMeasurement"],
+                      "homebrew": self._local_ok()}
+            with self.subTest(forged_archive=forged_archive), tempfile.TemporaryDirectory() as evidence:
+                with self.assertRaisesRegex(probe.canary.CanaryError,
+                                            "inspection_report_unexpected_archive"):
+                    probe.collect("tart", "offline-canary-" + "f" * 32, {}, evidence, bundle,
+                                  run_bounded=lambda *args, **kwargs: (
+                                      json.dumps(report).encode(), b""))
+
+    def test_host_rejects_malformed_asset_name_and_archive_digest_types(self):
+        digest = "f" * 64
+        bundle = {"baseVmName": "softnet-canary-" + "a" * 32,
+                  "guestRoot": "/Users/admin/.knitli-native-provisioning-fixture0",
+                  "loader": "fixed-loader", "argument": "fixed-b64",
+                  "ownerReceiptSha256": "b" * 64, "postDownloadMeasurement": {},
+                  "manifestSha256": "d" * 64, "sourceSha256": {}, "bundleSha256": "e" * 64,
+                  "expectedAssets": {"archive.tar.gz": {"sha256": digest, "maxBytes": 1024}}}
+        cases = (({"name": [], "sha256": digest, "bytes": 10,
+                   "archive": {"complete": True, "status": "present",
+                               "inventorySha256": "a" * 64, "memberCount": 1}},
+                  "inspection_report_assets_invalid"),
+                 ({"name": "archive.tar.gz", "sha256": digest, "bytes": 10,
+                   "archive": {"complete": True, "status": "present",
+                               "inventorySha256": 123, "memberCount": 1}},
+                  "inspection_report_archive_incomplete"),
+                 ({"name": "archive.tar.gz", "sha256": digest, "bytes": 10,
+                   "archive": {"complete": True, "status": "present",
+                               "inventorySha256": {}, "memberCount": 1}},
+                  "inspection_report_archive_incomplete"))
+        for row, code in cases:
+            report = {"kind": probe.KIND, "status": "passed", "qualified": False, "prepared": False,
+                      "complete": True, "assets": [row], "preStopComparison": "matched",
+                      "manifestSha256": bundle["manifestSha256"],
+                      "ownerReceiptSha256": bundle["ownerReceiptSha256"],
+                      "postDownloadMeasurement": bundle["postDownloadMeasurement"],
+                      "homebrew": self._local_ok()}
+            with self.subTest(row=row), tempfile.TemporaryDirectory() as evidence:
+                with self.assertRaisesRegex(probe.canary.CanaryError, code):
+                    probe.collect("tart", "offline-canary-" + "f" * 32, {}, evidence, bundle,
+                                  run_bounded=lambda *args, **kwargs: (
+                                      json.dumps(report).encode(), b""))
+
     def test_host_rejects_missing_or_unknown_pre_stop_comparison(self):
         bundle = {"baseVmName": "softnet-canary-" + "a" * 32,
                   "guestRoot": "/Users/admin/.knitli-native-provisioning-fixture0",

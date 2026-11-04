@@ -749,7 +749,7 @@ def collect(tart, vm, env, evidence, bundle, *, run_bounded=None, cancel_check=N
     expected_assets = bundle.get("expectedAssets")
     rows = report["assets"]
     if (type(expected_assets) is not dict or len(rows) != len(expected_assets)
-            or any(type(row) is not dict for row in rows)):
+            or any(type(row) is not dict or type(row.get("name")) is not str for row in rows)):
         raise canary.CanaryError("inspection_report_assets_invalid")
     actual_assets = {row.get("name"): row for row in rows}
     if len(actual_assets) != len(rows) or set(actual_assets) != set(expected_assets):
@@ -763,10 +763,13 @@ def collect(tart, vm, env, evidence, bundle, *, run_bounded=None, cancel_check=N
             archive = row.get("archive")
             if (type(archive) is not dict or archive.get("complete") is not True
                     or archive.get("status") != "present"
+                    or type(archive.get("inventorySha256")) is not str
                     or not re.fullmatch(r"[a-f0-9]{64}", archive.get("inventorySha256", ""))
                     or type(archive.get("memberCount")) is not int
                     or archive["memberCount"] < 0 or archive["memberCount"] > MAX_MEMBERS):
                 raise canary.CanaryError("inspection_report_archive_incomplete")
+        elif "archive" in row:
+            raise canary.CanaryError("inspection_report_unexpected_archive")
         if name.startswith("channel-rust-") and not isinstance(row.get("textMetadata"), str):
             raise canary.CanaryError("inspection_report_rust_metadata_missing")
     homebrew = report.get("homebrew")
