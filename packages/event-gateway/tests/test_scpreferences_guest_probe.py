@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 from io import StringIO
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess  # nosec B404 -- fixed Python child with fake preference/source fixtures only.
@@ -22,6 +23,14 @@ import qualify_offline_macos_vm as canary  # noqa: E402
 import scpreferences_guest_probe as probe  # noqa: E402
 
 SOURCE_SCRIPTS = HERE.parent / "scripts"
+
+
+def portable_loader(*args, **kwargs):
+    loader = probe._source_loader(*args, **kwargs)
+    path_literal = 'dir="/private/tmp"'
+    if loader.count(path_literal) != 1:
+        raise AssertionError("generated loader must contain one fixed temp-root literal")
+    return loader.replace(path_literal, f"dir={os.path.realpath(tempfile.gettempdir())!r}")
 
 
 @contextmanager
@@ -73,11 +82,9 @@ class SCPreferencesGuestProbeTests(unittest.TestCase):
         self.assertEqual(bundle["bundleSha256"], hashlib.sha256(bundle["argument"].encode()).hexdigest())
 
     def test_guest_loader_executes_only_fake_modules_and_reports_verified_source_hashes(self):
-        # The production loader is fixed to macOS's /private/tmp. Redirect only this test copy to
-        # the persistent platform temp root so Linux can run it and the invalid second run does
-        # not point into the deleted source-fixture directory.
-        self.assertEqual(probe.LOADER.count('dir="/private/tmp"'), 1)
-        loader = probe.LOADER.replace('dir="/private/tmp"', f"dir={tempfile.gettempdir()!r}")
+        loader = portable_loader(
+            set(probe.SOURCE_FILES.values()), "qualify_scpreferences_guest", "qualify_guest_apis",
+            "softnet-scpreferences-modules-")
         with tempfile.TemporaryDirectory(prefix="fake-scpreferences-sources-") as temp:
             source_dir = Path(temp)
             (source_dir / "qualify_offline_macos_vm.py").write_text("BOUNDARY_MODULE = True\n")
@@ -124,6 +131,43 @@ def qualify_guest_apis():
             check=False, capture_output=True, timeout=10, text=True)
         self.assertNotEqual(invalid.returncode, 0)
         self.assertEqual(invalid.stdout, "")
+
+    def test_source_loader_enforces_default_and_inspection_raw_bundle_limits(self):
+        content = b'def run(): return {"status": "passed"}\n#' + b"x" * 190_000
+        item = {"sha256": hashlib.sha256(content).hexdigest(),
+                "content": base64.b64encode(content).decode("ascii")}
+
+        def argument(raw_size):
+            raw = json.dumps({"entry.py": item}, sort_keys=True, separators=(",", ":")).encode()
+            self.assertLessEqual(len(raw), raw_size)
+            raw += b" " * (raw_size - len(raw))
+            return base64.b64encode(zlib.compress(raw, 9)).decode("ascii")
+
+        loader_256 = portable_loader({"entry.py"}, "entry", "run", "bundle-test-")
+        loader_260 = portable_loader({"entry.py"}, "entry", "run", "bundle-test-",
+                                      max_bundle_bytes=260 * 1024)
+
+        def run(loader, bundle_arg):
+            return subprocess.run(  # nosec B603 -- Fixed interpreter, generated test loader, and synthetic bundle; no shell.
+                [sys.executable, "-I", "-B", "-c", loader, bundle_arg],
+                capture_output=True, text=True, check=False)
+
+        at_256 = argument(256 * 1024)
+        over_256 = argument(256 * 1024 + 1)
+        at_260 = argument(260 * 1024)
+        over_260 = argument(260 * 1024 + 1)
+        for loader, accepted, rejected in ((loader_256, at_256, over_256),
+                                            (loader_260, at_260, over_260)):
+            result = run(loader, accepted)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), {"status": "passed"})
+            result = run(loader, rejected)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stderr.strip(), "invalid_source_bundle")
+
+        result = run(loader_256, at_260)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stderr.strip(), "invalid_source_bundle")
 
     def test_report_rejects_unqualified_extra_and_mismatched_source_records(self):
         hashes = {name: "a" * 64 for name in probe.SOURCE_FILES}
