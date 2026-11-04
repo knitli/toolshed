@@ -67,7 +67,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
             "runId": "3" * 32, "macAddress": "02:00:00:00:00:01",
         }
 
-    def _fixture(self, directory, corrupt_last=False, channel_bytes=None):
+    def _fixture(self, directory, corrupt_last=False, channel_bytes=None, wrapper_version=1):
         root = Path(directory) / "downloads"
         root.mkdir(mode=0o700)
         archive = _archive()
@@ -103,9 +103,16 @@ class ProvisioningInspectionTests(unittest.TestCase):
             child.chmod(0o600)
         guest_root = "/Users/admin/.knitli-native-provisioning-fixture0"
         bundle_sha256 = "b" * 64
-        wrapper = {"kind": "native-workspace-provisioning-guest-download-v1", "qualified": False,
-                   "prepared": False, "guestRoot": guest_root, "bundleSha256": bundle_sha256,
-                   "downloadReceipt": json.loads(producer_receipt)}
+        receipt = json.loads(producer_receipt)
+        wrapper = {"kind": f"native-workspace-provisioning-guest-download-v{wrapper_version}",
+                   "qualified": False, "prepared": False, "guestRoot": guest_root,
+                   "bundleSha256": bundle_sha256, "downloadReceipt": receipt}
+        if wrapper_version == 2:
+            wrapper["preStopInventory"] = {
+                "assets": [{"name": row["name"], "bytes": row["bytes"], "sha256": row["sha256"]}
+                           for row in receipt["assets"]],
+                "receiptSha256": hashlib.sha256(producer_receipt).hexdigest(),
+            }
         wrapper_raw = (json.dumps(wrapper, sort_keys=True, separators=(",", ":")) + "\n").encode()
         input_doc = {"guestRoot": guest_root, "manifestSha256": manifest_sha256,
                      "downloadReceiptSha256": hashlib.sha256(wrapper_raw).hexdigest(),
@@ -147,6 +154,98 @@ class ProvisioningInspectionTests(unittest.TestCase):
         self.assertEqual(result["ownerReceiptSha256"], "a" * 64)
         self.assertEqual(result["status"], "passed")
         self.assertIn("channel", result["assets"][1]["textMetadata"])
+
+    def test_v2_download_receipt_reports_pre_stop_inventory_match(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest, raw, input_doc = self._fixture(directory, wrapper_version=2)
+            result = self._guest_collect(directory, manifest, raw, input_doc)
+        self.assertEqual(result["preStopComparison"], "matched")
+
+    def test_v1_download_receipt_reports_comparison_unavailable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest, raw, input_doc = self._fixture(directory, wrapper_version=1)
+            result = self._guest_collect(directory, manifest, raw, input_doc)
+        self.assertEqual(result["preStopComparison"], "unavailable_legacy_v1")
+
+    def test_v2_actual_asset_size_must_match_receipt_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest, _, input_doc = self._fixture(directory, wrapper_version=2)
+            downloads = Path(directory) / "downloads"
+            receipt_path = downloads / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["assets"][0]["bytes"] += 1
+            receipt_raw = (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode()
+            receipt_path.write_bytes(receipt_raw)
+            wrapper = {"kind": "native-workspace-provisioning-guest-download-v2",
+                       "qualified": False, "prepared": False, "guestRoot": input_doc["guestRoot"],
+                       "bundleSha256": input_doc["bundleSha256"], "downloadReceipt": receipt,
+                       "preStopInventory": {
+                           "assets": [{"name": row["name"], "bytes": row["bytes"], "sha256": row["sha256"]}
+                                      for row in receipt["assets"]],
+                           "receiptSha256": hashlib.sha256(receipt_raw).hexdigest(),
+                       }}
+            wrapper_raw = (json.dumps(wrapper, sort_keys=True, separators=(",", ":")) + "\n").encode()
+            input_doc["downloadReceiptSha256"] = hashlib.sha256(wrapper_raw).hexdigest()
+            root_fd = os.open(downloads, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                with self.assertRaisesRegex(ValueError, "asset_digest_mismatch"):
+                    probe._inspect_assets(input_doc, manifest, root_fd)
+            finally:
+                os.close(root_fd)
+
+    def test_receipt_asset_bytes_must_be_positive_and_within_manifest_cap(self):
+        for invalid_size in (0, 1024 * 1024 + 1):
+            with self.subTest(invalid_size=invalid_size), tempfile.TemporaryDirectory() as directory:
+                manifest, _, input_doc = self._fixture(directory, wrapper_version=2)
+                downloads = Path(directory) / "downloads"
+                receipt_path = downloads / "receipt.json"
+                receipt = json.loads(receipt_path.read_text())
+                receipt["assets"][0]["bytes"] = invalid_size
+                receipt_raw = (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                receipt_path.write_bytes(receipt_raw)
+                wrapper = {"kind": "native-workspace-provisioning-guest-download-v2",
+                           "qualified": False, "prepared": False, "guestRoot": input_doc["guestRoot"],
+                           "bundleSha256": input_doc["bundleSha256"], "downloadReceipt": receipt,
+                           "preStopInventory": {
+                               "assets": [{"name": row["name"], "bytes": row["bytes"], "sha256": row["sha256"]}
+                                          for row in receipt["assets"]],
+                               "receiptSha256": hashlib.sha256(receipt_raw).hexdigest(),
+                           }}
+                wrapper_raw = (json.dumps(wrapper, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                input_doc["downloadReceiptSha256"] = hashlib.sha256(wrapper_raw).hexdigest()
+                root_fd = os.open(downloads, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                try:
+                    with self.assertRaisesRegex(ValueError, "download_receipt_binding_mismatch"):
+                        probe._inspect_assets(input_doc, manifest, root_fd)
+                finally:
+                    os.close(root_fd)
+
+    def test_two_matching_wrapper_hashes_are_rejected_as_ambiguous(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest, _, input_doc = self._fixture(directory)
+            input_doc["downloadReceiptSha256"] = "a" * 64
+            root_fd = os.open(Path(directory) / "downloads", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            real_sha256 = hashlib.sha256
+
+            class AmbiguousHash:
+                def __init__(self, delegate):
+                    self.delegate = delegate
+
+                def update(self, data):
+                    self.delegate.update(data)
+
+                def hexdigest(self):
+                    return "a" * 64
+
+            def ambiguous_sha256(data=b""):
+                return AmbiguousHash(real_sha256(data))
+
+            try:
+                with mock.patch.object(probe.hashlib, "sha256", side_effect=ambiguous_sha256):
+                    with self.assertRaisesRegex(ValueError, "download_receipt_digest_mismatch"):
+                        probe._inspect_assets(input_doc, manifest, root_fd)
+            finally:
+                os.close(root_fd)
 
     def test_large_pinned_channel_toml_flows_through_guest_and_host(self):
         channel = b"channel = 'stable'\n" + b"#" + b"x" * (70 * 1024)
@@ -278,6 +377,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
                   "expectedAssets": {"fixture.txt": {"sha256": "f" * 64, "maxBytes": 10}}}
         report = {"kind": probe.KIND, "status": "passed", "qualified": False, "prepared": False,
                   "complete": True, "assets": [{"name": "fixture.txt", "sha256": "f" * 64, "bytes": 3}],
+                  "preStopComparison": "unavailable_legacy_v1",
                   "manifestSha256": bundle["manifestSha256"],
                   "ownerReceiptSha256": bundle["ownerReceiptSha256"],
                   "postDownloadMeasurement": bundle["postDownloadMeasurement"], "homebrew": self._local_ok()}
@@ -291,6 +391,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
                                    bundle, run_bounded=runner)
         self.assertEqual(calls[0][2], "offline-canary-" + "f" * 32)
         self.assertEqual(result["baseVmName"], bundle["baseVmName"])
+        self.assertEqual(result["preStopComparison"], "unavailable_legacy_v1")
 
     def test_host_rejects_passed_but_incomplete_guest_report(self):
         bundle = {"baseVmName": "softnet-canary-" + "a" * 32,
@@ -318,13 +419,38 @@ class ProvisioningInspectionTests(unittest.TestCase):
                   "manifestSha256": "d" * 64, "sourceSha256": {}, "bundleSha256": "e" * 64,
                   "expectedAssets": {"fixture.txt": {"sha256": "f" * 64, "maxBytes": 10}}}
         report = {"kind": probe.KIND, "status": "passed", "qualified": False, "prepared": False,
-                  "complete": True, "assets": [], "manifestSha256": bundle["manifestSha256"],
+                  "complete": True, "assets": [], "preStopComparison": "unavailable_legacy_v1",
+                  "manifestSha256": bundle["manifestSha256"],
                   "ownerReceiptSha256": bundle["ownerReceiptSha256"],
                   "postDownloadMeasurement": bundle["postDownloadMeasurement"], "homebrew": self._local_ok()}
         with tempfile.TemporaryDirectory() as evidence:
             with self.assertRaisesRegex(probe.canary.CanaryError, "inspection_report_assets_invalid"):
                 probe.collect("tart", "offline-canary-" + "f" * 32, {}, evidence,
                               bundle, run_bounded=lambda *args, **kwargs: (json.dumps(report).encode(), b""))
+
+    def test_host_rejects_missing_or_unknown_pre_stop_comparison(self):
+        bundle = {"baseVmName": "softnet-canary-" + "a" * 32,
+                  "guestRoot": "/Users/admin/.knitli-native-provisioning-fixture0",
+                  "loader": "fixed-loader", "argument": "fixed-b64",
+                  "ownerReceiptSha256": "b" * 64, "postDownloadMeasurement": {},
+                  "manifestSha256": "d" * 64, "sourceSha256": {}, "bundleSha256": "e" * 64,
+                  "expectedAssets": {"fixture.txt": {"sha256": "f" * 64, "maxBytes": 10}}}
+        base_report = {"kind": probe.KIND, "status": "passed", "qualified": False, "prepared": False,
+                       "complete": True,
+                       "assets": [{"name": "fixture.txt", "sha256": "f" * 64, "bytes": 3}],
+                       "manifestSha256": bundle["manifestSha256"],
+                       "ownerReceiptSha256": bundle["ownerReceiptSha256"],
+                       "postDownloadMeasurement": bundle["postDownloadMeasurement"],
+                       "homebrew": self._local_ok()}
+        for comparison in (None, "unrecognized"):
+            with self.subTest(comparison=comparison), tempfile.TemporaryDirectory() as evidence:
+                report = dict(base_report)
+                if comparison is not None:
+                    report["preStopComparison"] = comparison
+                with self.assertRaisesRegex(probe.canary.CanaryError, "inspection_report_unqualified"):
+                    probe.collect("tart", "offline-canary-" + "f" * 32, {}, evidence,
+                                  bundle, run_bounded=lambda *args, **kwargs: (
+                                      json.dumps(report).encode(), b""))
 
     def test_decompressed_stream_is_bounded(self):
         reader = probe._LimitedReader(io.BytesIO(b"123456"))
@@ -421,8 +547,9 @@ class ProvisioningInspectionTests(unittest.TestCase):
             downloads = Path(directory) / "downloads"
             root_fd = os.open(downloads, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
             try:
-                inspected, _ = probe._inspect_assets(input_doc, manifest, root_fd)
+                inspected, _, comparison = probe._inspect_assets(input_doc, manifest, root_fd)
                 self.assertEqual(len(inspected), len(manifest["assets"]))
+                self.assertEqual(comparison["state"], "unavailable_legacy_v1")
                 channel = downloads / "channel-rust-1.95.0.toml"
                 channel_bytes = channel.read_bytes()
                 channel.unlink()

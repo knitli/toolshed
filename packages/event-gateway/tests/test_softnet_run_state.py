@@ -161,7 +161,7 @@ class SoftnetRunStateTests(unittest.TestCase):
         return identity
 
     @staticmethod
-    def _provisioning_result(identity, *, allow_retained_manifest=False):
+    def _provisioning_result(identity, *, allow_retained_manifest=False, legacy_v1=None):
         manifest, dns = provisioning_guest.validate_binding(
             manifest_bytes=identity["provisioningManifest"],
             dns_map=identity["provisioningDnsMap"],
@@ -178,18 +178,31 @@ class SoftnetRunStateTests(unittest.TestCase):
                 "redirectCount": 0, "outcome": "downloaded", "bytes": 1,
                 "sha256": asset["sha256"],
             })
-        return {
-            "kind": provisioning_guest.RESULT_KIND, "qualified": False, "prepared": False,
+        receipt = {
+            "kind": provisioning_downloads.KIND, "status": "downloaded-only",
+            "qualified": False, "prepared": False,
+            "manifestSha256": provisioning_downloads.MANIFEST_SHA256,
+            "caBundleSha256": identity["provisioningCaSha256"],
+            "dnsMap": dns, "totalBytes": len(assets), "assets": assets,
+        }
+        result = {
+            "kind": ("native-workspace-provisioning-guest-download-v1"
+                     if (allow_retained_manifest if legacy_v1 is None else legacy_v1)
+                     else provisioning_guest.RESULT_KIND),
+            "qualified": False, "prepared": False,
             "guestRoot": "/Users/admin/.knitli-native-provisioning-a1b2c3d4",
             "bundleSha256": identity["provisioningBundleSha256"],
-            "downloadReceipt": {
-                "kind": provisioning_downloads.KIND, "status": "downloaded-only",
-                "qualified": False, "prepared": False,
-                "manifestSha256": provisioning_downloads.MANIFEST_SHA256,
-                "caBundleSha256": identity["provisioningCaSha256"],
-                "dnsMap": dns, "totalBytes": len(assets), "assets": assets,
-            },
+            "downloadReceipt": receipt,
         }
+        if not (allow_retained_manifest if legacy_v1 is None else legacy_v1):
+            receipt_bytes = json.dumps(receipt, sort_keys=True, separators=(",", ":"),
+                                       allow_nan=False).encode() + b"\n"
+            result["preStopInventory"] = {
+                "assets": [{"name": item["name"], "bytes": item["bytes"],
+                            "sha256": item["sha256"]} for item in assets],
+                "receiptSha256": hashlib.sha256(receipt_bytes).hexdigest(),
+            }
+        return result
 
     @staticmethod
     def _command_failure_record(**overrides):
@@ -617,6 +630,77 @@ class SoftnetRunStateTests(unittest.TestCase):
             with run_state.State(self.root):
                 self.fail("corrupt historical provisioning result accepted")
 
+    def test_completed_current_manifest_v1_receipt_survives_upgrade_scan(self):
+        self.identity = self._provisioning_identity()
+        with run_state.State(self.root) as state:
+            run, _ = self._run_with_recovery_records(state)
+            v2 = self._provisioning_result(self.identity)
+            recovery_fd = recovery._directory(run)
+            try:
+                recovery._publish(recovery_fd, "provisioning-download.json",
+                                  json.dumps(v2, sort_keys=True, separators=(",", ":")).encode() + b"\n")
+            finally:
+                os.close(recovery_fd)
+            state.complete(run, self._stop_evidence())
+
+        # Model an older completed journal written before the v2 wrapper existed.
+        v1 = self._provisioning_result(self.identity, legacy_v1=True)
+        receipt_bytes = json.dumps(v1, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        self._rewrite(run / "provisioning-download.json", receipt_bytes)
+        complete = plistlib.loads((run / "complete.plist").read_bytes())
+        complete["provisioningDownloadSha256"] = hashlib.sha256(receipt_bytes).hexdigest()
+        self._rewrite(run / "complete.plist", plistlib.dumps(
+            complete, fmt=plistlib.FMT_BINARY, sort_keys=True))
+        with run_state.State(self.root):
+            pass
+
+    def test_disposed_current_manifest_v1_receipt_survives_root_scan(self):
+        identity = self._provisioning_identity()
+        run, run_id = self._failed_restored_run(identity)
+        v1 = self._provisioning_result(identity, legacy_v1=True)
+        receipt = json.dumps(v1, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        self._rewrite(run / "provisioning-download.json", receipt)
+        self.assertFalse(run_state._check_run_directory(self.root, run_id, allow_retained_manifest=True))
+        hashes = run_state._failed_restored_files(self.root, run_id, receipt_present=True)
+        self.assertEqual(hashes["provisioning-download.json"], hashlib.sha256(receipt).hexdigest())
+        disposition = {
+            "kind": run_state.DISPOSITION_KIND, "version": 1, "runId": run_id,
+            "approvalReference": "historical current-manifest v1 disposition",
+            "observation": self._observation(), "fileSha256": hashes,
+        }
+        self._rewrite(run / "disposition.plist", plistlib.dumps(
+            disposition, fmt=plistlib.FMT_BINARY, sort_keys=True))
+        with run_state.State(self.root):
+            pass
+
+    def test_dispose_incomplete_current_manifest_v1_receipt_after_upgrade(self):
+        identity = self._provisioning_identity()
+        run, run_id = self._failed_restored_run(identity)
+        v1 = self._provisioning_result(identity, legacy_v1=True)
+        receipt = json.dumps(v1, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        self._rewrite(run / "provisioning-download.json", receipt)
+        run_state.dispose_failed_restored(
+            self.root, run_id, "historical current-manifest v1 disposition",
+            expected_vm_reaped=False, observe=lambda *_: self._observation())
+        with run_state.State(self.root):
+            pass
+
+    def test_dispose_incomplete_retained_manifest_v1_receipt_is_rejected(self):
+        run, run_id = self._failed_restored_run(self._provisioning_identity())
+        identity = self._retained_provisioning_identity()
+        self._rewrite(run / "identity.plist", plistlib.dumps(
+            run_state._identity_record(run_id, identity, allow_retained_manifest=True),
+            fmt=plistlib.FMT_BINARY, sort_keys=True))
+        v1 = self._provisioning_result(identity, allow_retained_manifest=True)
+        v1["downloadReceipt"]["manifestSha256"] = provisioning_guest.RETAINED_MANIFEST_SHA256
+        receipt = json.dumps(v1, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        self._rewrite(run / "provisioning-download.json", receipt)
+        with self.assertRaisesRegex(recovery.RecoveryError, "invalid_identity"):
+            run_state.dispose_failed_restored(
+                self.root, run_id, "retained-manifest v1 disposition must stay historical",
+                expected_vm_reaped=False, observe=lambda *_: self._observation())
+        self.assertFalse((run / "disposition.plist").exists())
+
     def test_disposed_retained_manifest_receipt_and_file_hashes_survive_root_scan(self):
         run, run_id = self._failed_restored_run(self._provisioning_identity())
         identity = self._retained_provisioning_identity()
@@ -656,6 +740,8 @@ class SoftnetRunStateTests(unittest.TestCase):
         self.identity = self._provisioning_identity()
         valid = self._provisioning_result(self.identity)
         candidates = [b"not json", json.dumps(dict(valid, qualified=True)).encode()]
+        legacy_v1 = self._provisioning_result(self.identity, legacy_v1=True)
+        candidates.append(json.dumps(legacy_v1, sort_keys=True, separators=(",", ":")).encode())
         wrong_bundle = dict(valid, bundleSha256="e" * 64)
         candidates.append(json.dumps(wrong_bundle).encode())
         legacy_root = dict(valid, guestRoot="/private/tmp/knitli-native-provisioning-a1b2c3d4")
@@ -663,6 +749,12 @@ class SoftnetRunStateTests(unittest.TestCase):
         tampered = json.loads(json.dumps(valid))
         tampered["downloadReceipt"]["assets"][0]["sha256"] = "0" * 64
         candidates.append(json.dumps(tampered).encode())
+        tampered_inventory = json.loads(json.dumps(valid))
+        tampered_inventory["preStopInventory"]["receiptSha256"] = "0" * 64
+        candidates.append(json.dumps(tampered_inventory).encode())
+        missing_inventory = dict(valid)
+        del missing_inventory["preStopInventory"]
+        candidates.append(json.dumps(missing_inventory).encode())
         for receipt in candidates:
             with self.subTest(receipt=receipt[:30]), run_state.State(self.root) as state:
                 run, _ = self._run_with_recovery_records(state)

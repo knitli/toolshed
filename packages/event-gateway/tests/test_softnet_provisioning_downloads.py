@@ -74,9 +74,16 @@ def download_report(admission):
                'caBundleSha256': admission['provisioningCaSha256'],
                'dnsMap': admission['provisioningDnsMap'],
                'assets': records, 'totalBytes': sum(item['bytes'] for item in records)}
+    receipt_bytes = json.dumps(receipt, sort_keys=True, separators=(',', ':'),
+                               allow_nan=False).encode() + b'\n'
     return {'kind': guest.RESULT_KIND, 'qualified': False, 'prepared': False,
             'guestRoot': '/Users/admin/.knitli-native-provisioning-abcdefgh',
-            'bundleSha256': admission['provisioningBundleSha256'], 'downloadReceipt': receipt}
+            'bundleSha256': admission['provisioningBundleSha256'], 'downloadReceipt': receipt,
+            'preStopInventory': {
+                'assets': [{'name': item['name'], 'bytes': item['bytes'], 'sha256': item['sha256']}
+                           for item in records],
+                'receiptSha256': hashlib.sha256(receipt_bytes).hexdigest(),
+            }}
 
 
 class DownloadExercise(ExercisePatches):
@@ -379,7 +386,11 @@ class ProvisioningControllerTests(unittest.TestCase):
     def test_failed_download_never_publishes_a_report_and_still_stops_before_restore(self):
         malformed = download_report(self.admission)
         malformed['downloadReceipt']['assets'][0]['sha256'] = '0' * 64
+        malformed_inventory = download_report(self.admission)
+        malformed_inventory['preStopInventory']['assets'][0]['sha256'] = '0' * 64
         cases = ((json.dumps(malformed).encode(), None, recovery.RecoveryError, 'invalid_provisioning_report'),
+                 (json.dumps(malformed_inventory).encode(), None, recovery.RecoveryError,
+                  'invalid_provisioning_report'),
                  (b'', supervisor.canary.CanaryError('tart_command_timeout'),
                   supervisor.canary.CanaryError, 'tart_command_timeout'))
         for raw, error, error_type, message in cases:

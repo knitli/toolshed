@@ -11,7 +11,8 @@ import native_workspace_provisioning_downloads as downloader
 
 
 KIND = "native-workspace-provisioning-guest-bundle-v1"
-RESULT_KIND = "native-workspace-provisioning-guest-download-v1"
+LEGACY_RESULT_KIND = "native-workspace-provisioning-guest-download-v1"
+RESULT_KIND = "native-workspace-provisioning-guest-download-v2"
 MAX_BUNDLE_BYTES = 1024 * 1024
 MAX_CA_BYTES = 512 * 1024
 MAX_OUTPUT_BYTES = 128 * 1024
@@ -108,7 +109,62 @@ try:
     loaded_manifest = module.load_manifest(root=root)
     downloads = root / 'downloads'
     receipt = module.download_all(loaded_manifest, dns, ca_path, doc['caBundleSha256'], downloads)
-    result = {'kind':'native-workspace-provisioning-guest-download-v1','qualified':False,'prepared':False,'guestRoot':str(root),'bundleSha256':digest(raw),'downloadReceipt':receipt}
+    def identity(info): return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    directory_flags = os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    root_fd = os.open(root, directory_flags)
+    try:
+        root_info = os.fstat(root_fd)
+        if root_info.st_uid != os.getuid() or stat.S_IMODE(root_info.st_mode) != 0o700: fail(40)
+        downloads_fd = os.open('downloads', directory_flags, dir_fd=root_fd)
+        try:
+            downloads_info = os.fstat(downloads_fd)
+            if downloads_info.st_uid != os.getuid() or stat.S_IMODE(downloads_info.st_mode) != 0o700: fail(40)
+            downloads_identity = identity(downloads_info)
+            records = {item['name']: item for item in receipt['assets']}
+            expected_names = {asset['name'] for asset in loaded_manifest['assets']} | {'receipt.json'}
+            names = []
+            with os.scandir(downloads_fd) as entries:
+                for entry in entries:
+                    if len(names) >= len(expected_names): fail(41)
+                    names.append(entry.name)
+            if len(names) != len(expected_names) or set(names) != expected_names: fail(41)
+            def read_file(name, maximum, capture=False):
+                fd = os.open(name, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0), dir_fd=downloads_fd)
+                try:
+                    info = os.fstat(fd)
+                    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                            or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1
+                            or not 1 <= info.st_size <= maximum): fail(42)
+                    before = identity(info)
+                    digest, size, chunks = hashlib.sha256(), 0, []
+                    while True:
+                        block = os.read(fd, 65536)
+                        if not block: break
+                        size += len(block)
+                        if size > maximum: fail(42)
+                        digest.update(block)
+                        if capture: chunks.append(block)
+                    if identity(os.fstat(fd)) != before or size != info.st_size: fail(43)
+                    return size, digest.hexdigest(), b''.join(chunks) if capture else None
+                finally:
+                    os.close(fd)
+            inventory_assets = []
+            for asset in loaded_manifest['assets']:
+                record = records.get(asset['name'])
+                if type(record) is not dict: fail(44)
+                size, checksum, _ = read_file(asset['name'], asset['maxBytes'])
+                if (size != record['bytes'] or checksum != asset['sha256']
+                        or checksum != record['sha256']): fail(44)
+                inventory_assets.append({'name': asset['name'], 'bytes': size, 'sha256': checksum})
+            _, receipt_digest, receipt_bytes = read_file('receipt.json', 1048576, capture=True)
+            if receipt_bytes != (json.dumps(receipt, sort_keys=True, separators=(',', ':'), allow_nan=False).encode() + b'\n'): fail(45)
+            if identity(os.fstat(downloads_fd)) != downloads_identity: fail(43)
+            pre_stop_inventory = {'assets': inventory_assets, 'receiptSha256': receipt_digest}
+        finally:
+            os.close(downloads_fd)
+    finally:
+        os.close(root_fd)
+    result = {'kind':'native-workspace-provisioning-guest-download-v2','qualified':False,'prepared':False,'guestRoot':str(root),'bundleSha256':digest(raw),'downloadReceipt':receipt,'preStopInventory':pre_stop_inventory}
     encoded = json.dumps(result, sort_keys=True, separators=(',', ':')).encode() + b'\n'
     if len(encoded) > 131072: fail(39)
     sys.stdout.buffer.write(encoded)
@@ -225,8 +281,10 @@ def validate_binding(*, manifest_bytes, dns_map, ca_sha256, bundle_sha256,
 
 
 def validate_result(raw, *, manifest_bytes, dns_map, ca_sha256, bundle_sha256,
-                    allow_retained_manifest=False):
+                    allow_retained_manifest=False, allow_legacy_result=False):
     """Validate the receipt against identity pins; retained mode admits journal history paths."""
+    if type(allow_legacy_result) is not bool:
+        raise ValueError("legacy_result_option_invalid")
     manifest, checked_dns = validate_binding(manifest_bytes=manifest_bytes, dns_map=dns_map,
                                              ca_sha256=ca_sha256,
                                              bundle_sha256=bundle_sha256,
@@ -248,11 +306,14 @@ def validate_result(raw, *, manifest_bytes, dns_map, ca_sha256, bundle_sha256,
     else:
         raise ValueError("result_type_invalid")
 
+    result_kind = result.get("kind") if type(result) is dict else None
+    legacy_result = (allow_retained_manifest or allow_legacy_result) and result_kind == LEGACY_RESULT_KIND
     expected_wrapper = {"kind", "qualified", "prepared", "guestRoot", "bundleSha256",
-                        "downloadReceipt"}
+                        "downloadReceipt"} | (set() if legacy_result else {"preStopInventory"})
     if type(result) is not dict or set(result) != expected_wrapper:
         raise ValueError("result_shape_invalid")
-    if (result["kind"] != RESULT_KIND or result["qualified"] is not False
+    if (result["kind"] != (LEGACY_RESULT_KIND if legacy_result else RESULT_KIND)
+            or result["qualified"] is not False
             or result["prepared"] is not False or result["bundleSha256"] != bundle_sha256
             or not isinstance(result["guestRoot"], str)
             or not (GUEST_ROOT.fullmatch(result["guestRoot"])
@@ -306,6 +367,25 @@ def validate_result(raw, *, manifest_bytes, dns_map, ca_sha256, bundle_sha256,
         total += record["bytes"]
     if total != receipt["totalBytes"]:
         raise ValueError("download_receipt_total_mismatch")
+    if not legacy_result:
+        inventory = result["preStopInventory"]
+        if (type(inventory) is not dict or set(inventory) != {"assets", "receiptSha256"}
+                or type(inventory["assets"]) is not list
+                or not isinstance(inventory["receiptSha256"], str)
+                or not HEX.fullmatch(inventory["receiptSha256"])):
+            raise ValueError("pre_stop_inventory_shape_invalid")
+        expected_inventory = [{"name": record["name"], "bytes": record["bytes"],
+                               "sha256": record["sha256"]} for record in receipt["assets"]]
+        if (len(inventory["assets"]) != len(expected_inventory)
+                or any(type(row) is not dict or set(row) != {"name", "bytes", "sha256"}
+                       or not isinstance(row["name"], str) or type(row["bytes"]) is not int
+                       or not isinstance(row["sha256"], str) or not HEX.fullmatch(row["sha256"])
+                       for row in inventory["assets"])):
+            raise ValueError("pre_stop_inventory_shape_invalid")
+        if inventory["assets"] != expected_inventory:
+            raise ValueError("pre_stop_inventory_binding_mismatch")
+        if inventory["receiptSha256"] != _digest(_canonical(receipt) + b"\n"):
+            raise ValueError("pre_stop_inventory_receipt_mismatch")
     return result
 
 

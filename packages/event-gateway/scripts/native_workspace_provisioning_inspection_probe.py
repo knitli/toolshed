@@ -15,6 +15,8 @@ import zlib
 import qualify_offline_macos_vm as canary
 
 KIND = "native-workspace-provisioning-inspection-v1"
+GUEST_DOWNLOAD_V1 = "native-workspace-provisioning-guest-download-v1"
+GUEST_DOWNLOAD_V2 = "native-workspace-provisioning-guest-download-v2"
 MAX_REPORT_BYTES = 4 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 MAX_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
@@ -472,16 +474,35 @@ def _inspect_assets(data, manifest, download_fd):
         receipt_assets = receipt.get("assets")
         if (receipt.get("manifestSha256") != data.get("manifestSha256")
                 or type(receipt_assets) is not list or len(receipt_assets) != len(assets)
-                or any(type(record) is not dict or record.get("name") != asset["name"]
+                or any(type(record) is not dict or set(record) != {
+                           "name", "initialUrl", "finalHost", "finalPath", "selectedIPv4",
+                           "status", "redirectCount", "outcome", "bytes", "sha256"}
+                       or not isinstance(record.get("name"), str) or len(record["name"]) > 200
+                       or record.get("name") != asset["name"]
+                       or not isinstance(record.get("sha256"), str)
+                       or not re.fullmatch(r"[a-f0-9]{64}", record["sha256"])
                        or record.get("sha256") != asset["sha256"]
+                       or type(record.get("bytes")) is not int or not 0 < record["bytes"] <= asset["maxBytes"]
                        for record, asset in zip(receipt_assets, assets))):
             raise ValueError("download_receipt_binding_mismatch")
-        wrapper = {"kind": "native-workspace-provisioning-guest-download-v1",
-                   "qualified": False, "prepared": False, "guestRoot": data.get("guestRoot"),
-                   "bundleSha256": data.get("bundleSha256"), "downloadReceipt": receipt}
-        wrapper_raw = (json.dumps(wrapper, sort_keys=True, separators=(",", ":")) + "\n").encode()
-        if hashlib.sha256(wrapper_raw).hexdigest() != data.get("downloadReceiptSha256"):
+        receipt_sha = hashlib.sha256(receipt_raw).hexdigest()
+        inventory = {"assets": [{"name": record["name"], "bytes": record["bytes"],
+                                  "sha256": record["sha256"]} for record in receipt_assets],
+                     "receiptSha256": receipt_sha}
+        wrapper_base = {"qualified": False, "prepared": False, "guestRoot": data.get("guestRoot"),
+                        "bundleSha256": data.get("bundleSha256"), "downloadReceipt": receipt}
+        wrappers = []
+        wrappers.append(("v1", {"kind": GUEST_DOWNLOAD_V1, **wrapper_base}))
+        wrappers.append(("v2", {"kind": GUEST_DOWNLOAD_V2, **wrapper_base,
+                                 "preStopInventory": inventory}))
+        matched_versions = []
+        for version, wrapper in wrappers:
+            wrapper_raw = (json.dumps(wrapper, sort_keys=True, separators=(",", ":")) + "\n").encode()
+            if hashlib.sha256(wrapper_raw).hexdigest() == data.get("downloadReceiptSha256"):
+                matched_versions.append(version)
+        if len(matched_versions) != 1:
             raise ValueError("download_receipt_digest_mismatch")
+        matched_version = matched_versions[0]
     finally:
         os.close(receipt_fd)
     verified = []
@@ -494,7 +515,9 @@ def _inspect_assets(data, manifest, download_fd):
                          getattr(os, "O_NONBLOCK", 0), dir_fd=download_fd)
             try:
                 digest, size, identity = _hash_fd(fd, min(asset["maxBytes"], MAX_ARCHIVE_BYTES))
-                if digest != asset["sha256"] or digest != item["sha256"]:
+                receipt_record = receipt_assets[len(verified)]
+                if (digest != asset["sha256"] or digest != item["sha256"]
+                        or digest != receipt_record["sha256"] or size != receipt_record["bytes"]):
                     raise ValueError("asset_digest_mismatch")
                 total_bytes += size
                 if total_bytes > MAX_ARCHIVE_BYTES:
@@ -531,7 +554,9 @@ def _inspect_assets(data, manifest, download_fd):
             if _stat_identity(os.fstat(fd)) != item["identity"]:
                 raise ValueError("asset_changed_during_inspection")
             inspected.append(row)
-        return inspected, total_bytes
+        return inspected, total_bytes, {
+            "state": "matched" if matched_version == "v2" else "unavailable_legacy_v1",
+        }
     finally:
         for item in verified:
             os.close(item["fd"])
@@ -574,7 +599,7 @@ def collect_guest():
         raise ValueError("guest_root_invalid")
     root_fd, downloads_fd = _open_guest_downloads(input_doc["guestRoot"])
     try:
-        inspected, _ = _inspect_assets(input_doc, manifest, downloads_fd)
+        inspected, _, pre_stop_inventory_comparison = _inspect_assets(input_doc, manifest, downloads_fd)
     finally:
         os.close(downloads_fd)
         os.close(root_fd)
@@ -586,12 +611,14 @@ def collect_guest():
     report = {"kind": KIND, "status": "passed" if complete else "incomplete", "qualified": False, "prepared": False,
             "complete": complete, "assets": inspected, "manifestSha256": input_doc["manifestSha256"],
             "ownerReceiptSha256": input_doc["ownerReceiptSha256"],
+            "preStopComparison": pre_stop_inventory_comparison["state"],
             "postDownloadMeasurement": input_doc["postDownloadMeasurement"], "homebrew": local}
     if len(json.dumps(report, sort_keys=True, separators=(",", ":")).encode("utf-8")) > MAX_REPORT_BYTES - 1024:
         return {"kind": KIND, "status": "incomplete", "qualified": False, "prepared": False,
                 "complete": False, "failureCode": "inspection_report_cap",
                 "manifestSha256": input_doc["manifestSha256"],
                 "ownerReceiptSha256": input_doc["ownerReceiptSha256"],
+                "preStopComparison": pre_stop_inventory_comparison["state"],
                 "postDownloadMeasurement": input_doc["postDownloadMeasurement"]}
     return report
 
@@ -708,7 +735,8 @@ def collect(tart, vm, env, evidence, bundle, *, run_bounded=None, cancel_check=N
             or report.get("manifestSha256") != bundle["manifestSha256"]
             or report.get("ownerReceiptSha256") != bundle["ownerReceiptSha256"]
             or report.get("postDownloadMeasurement") != bundle["postDownloadMeasurement"]
-            or report.get("complete") is not True or type(report.get("assets")) is not list):
+            or report.get("complete") is not True or type(report.get("assets")) is not list
+            or report.get("preStopComparison") not in ("matched", "unavailable_legacy_v1")):
         raise canary.CanaryError("inspection_report_unqualified")
     expected_assets = bundle.get("expectedAssets")
     rows = report["assets"]
@@ -740,6 +768,7 @@ def collect(tart, vm, env, evidence, bundle, *, run_bounded=None, cancel_check=N
             "postDownloadMeasurement": bundle["postDownloadMeasurement"],
             "manifestSha256": bundle["manifestSha256"], "sourceSha256": bundle["sourceSha256"],
             "bundleSha256": bundle["bundleSha256"], "report": report,
+            "preStopComparison": report["preStopComparison"],
             "reportRawSha": hashlib.sha256(stdout).hexdigest(),
             "reportRawSha256": hashlib.sha256(stdout).hexdigest(),
             "stdoutEvidence": str(stdout_path), "stderrEvidence": str(stderr_path)}
