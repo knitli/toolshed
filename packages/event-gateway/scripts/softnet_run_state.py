@@ -28,7 +28,7 @@ PROVISIONING_IDENTITY_KEYS = IDENTITY_KEYS | {
     "provisioningManifest"}
 COMMAND_FAILURE_KIND = "softnet-command-failure-v1"
 COMMAND_FAILURE_PHASES = {"prelaunch", "vm-start", "vm-readiness", "preference-readback",
-                          "provisioning-command", "provisioning-receipt"}
+                          "provisioning-command", "provisioning-receipt", "guest-shutdown"}
 # Keep the fixed record cap aligned with both retained tails plus metadata.
 MAX_COMMAND_FAILURE_BYTES = 2 * canary.COMMAND_FAILURE_TAIL_BYTES + 8 * 1024
 # Match the shared runner's observed-byte limit.
@@ -50,7 +50,7 @@ ROOT_ENTRIES = {"controller.lock"}
 RUN_ENTRIES = {"identity.plist", "complete.plist", "reserved", "snapshot.plist", "restored",
                "launch.plist", "stop.plist", "helper-logs", "vm-logs", "disposition.plist",
                "probe.plist", "route-probe.plist", "provisioning-download.json",
-               "command-failure.plist"}
+               "guest-shutdown.plist", "command-failure.plist"}
 LOG_FILES = {"tart-stdout.bin", "tart-stderr.bin"}
 DISPOSITION_FILES = ("identity.plist", "reserved", "snapshot.plist", "restored",
                      "launch.plist", "stop.plist", "helper-logs/tart-stdout.bin",
@@ -133,6 +133,19 @@ def _valid_stop_evidence(evidence):
     return _stop_evidence_shape(evidence) and all(evidence.values())
 
 
+def _check_guest_shutdown(fd):
+    raw = recovery._read(fd, "guest-shutdown.plist")
+    value = _plist(raw, "invalid_guest_shutdown")
+    _require(isinstance(value, dict) and set(value) == {
+        "kind", "version", "requestAccepted", "vmRunExitCode", "vmStopped"}
+        and value["kind"] == "softnet-guest-shutdown-v1"
+        and type(value["version"]) is int and value["version"] == 1
+        and value["requestAccepted"] is True
+        and type(value["vmRunExitCode"]) is int and value["vmRunExitCode"] == 0
+        and value["vmStopped"] is True, "invalid_guest_shutdown")
+    return raw, value
+
+
 def _failed_restored_files(root, name, *, receipt_present=False, expected_vm_reaped=None,
                            allow_legacy_result=False):
     """Validate the narrow failed-restored state and return hashes of retained evidence."""
@@ -187,6 +200,12 @@ def _failed_restored_files(root, name, *, receipt_present=False, expected_vm_rea
                 fd, identity, allow_retained_manifest=receipt_present,
                 allow_legacy_result=allow_legacy_result)
             disposition_files = (*disposition_files, "provisioning-download.json")
+        if "guest-shutdown.plist" in entries:
+            _require("provisioningBundleSha256" in identity
+                     and "provisioning-download.json" in entries,
+                     "invalid_guest_shutdown")
+            _check_guest_shutdown(fd)
+            disposition_files = (*disposition_files, "guest-shutdown.plist")
         if COMMAND_FAILURE_FILE in entries:
             _check_command_failure(fd)
             disposition_files = (*disposition_files, COMMAND_FAILURE_FILE)
@@ -508,6 +527,11 @@ def _check_run_directory(root, name, *, allow_retained_manifest=False, allow_leg
             provisioning_download_bytes, _ = _check_provisioning_download(
                 fd, identity, allow_retained_manifest=allow_retained_manifest,
                 allow_legacy_result=allow_legacy_result)
+        guest_shutdown_bytes = None
+        if "guest-shutdown.plist" in entries:
+            _require(provisioning_mode and provisioning_download_bytes is not None,
+                     "invalid_guest_shutdown")
+            guest_shutdown_bytes, _ = _check_guest_shutdown(fd)
         stop_bytes = stop = None
         if "stop.plist" in entries:
             stop_bytes, stop = _check_stop(fd)
@@ -554,6 +578,8 @@ def _check_run_directory(root, name, *, allow_retained_manifest=False, allow_leg
             complete_keys.add("routeProbeSha256")
         if provisioning_mode:
             complete_keys.add("provisioningDownloadSha256")
+        if guest_shutdown_bytes is not None:
+            complete_keys.add("guestShutdownSha256")
         _require(isinstance(complete, dict)
                  and set(complete) == complete_keys
                  and type(complete["version"]) is int and complete["version"] == 1
@@ -566,6 +592,8 @@ def _check_run_directory(root, name, *, allow_retained_manifest=False, allow_leg
                  and (not route_mode or complete["routeProbeSha256"] == _digest(route_probe_bytes))
                  and (not provisioning_mode or complete["provisioningDownloadSha256"]
                       == _digest(provisioning_download_bytes))
+                 and (guest_shutdown_bytes is None or complete["guestShutdownSha256"]
+                      == _digest(guest_shutdown_bytes))
                  and _valid_stop_evidence(complete["stopEvidence"]), "invalid_completion")
         return True
     finally:
@@ -678,9 +706,11 @@ class State(AbstractContextManager):
                 required.add("route-probe.plist")
             if provisioning_mode:
                 required.add("provisioning-download.json")
+                required.add("guest-shutdown.plist")
             _require(sum((probe_mode, route_mode, provisioning_mode)) <= 1
                      and ("probe.plist" not in entries or probe_mode)
                      and ("route-probe.plist" not in entries or route_mode)
+                     and ("guest-shutdown.plist" not in entries or provisioning_mode)
                      and ("provisioning-download.json" not in entries or provisioning_mode),
                      "invalid_probe_mode")
             _require(entries <= RUN_ENTRIES, "invalid_run_entries")
@@ -716,6 +746,8 @@ class State(AbstractContextManager):
             if provisioning_mode:
                 download_bytes, _ = _check_provisioning_download(run_fd, identity)
                 record["provisioningDownloadSha256"] = _digest(download_bytes)
+                guest_shutdown_bytes, _ = _check_guest_shutdown(run_fd)
+                record["guestShutdownSha256"] = _digest(guest_shutdown_bytes)
             recovery._publish(run_fd, "complete.plist",
                               plistlib.dumps(record, fmt=plistlib.FMT_BINARY, sort_keys=True))
         finally:

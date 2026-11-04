@@ -49,6 +49,8 @@ PROVISIONING_POLICY_FIELDS = {'provisioningDeniedIPv4', 'provisioningInventorySh
 PROVISIONING_INVENTORY_MAX_AGE_NS = 20 * 60 * 1_000_000_000
 PROVISIONING_CA_SHA256 = '9dae8d76e55cb08991f2b672d58999ea15560d910759c16b544f843bdffbb994'
 PROVISIONING_TIMEOUT = 1830
+GUEST_SHUTDOWN_TIMEOUT = 120
+GUEST_SHUTDOWN_KIND = 'softnet-guest-shutdown-v1'
 # Published Cloudflare front-door ranges, verified 2026-11-02: https://www.cloudflare.com/ips-v4
 # This supplements the fresh account-owned destination inventory in the protected admission.
 PROVISIONING_EXCLUDED_NETWORKS = tuple(ipaddress.IPv4Network(value) for value in (
@@ -541,6 +543,36 @@ def _child_exited(process):
     return os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
 
 
+def _child_exit_status(process):
+    """Read an owned child's status without reaping its PID or releasing its process group."""
+    _require(process.returncode is None, 'owned_child_already_reaped')
+    info = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    if info is None:
+        return None
+    _require(info.si_pid == process.pid and info.si_code == os.CLD_EXITED,
+             'owned_child_abnormal_exit')
+    return info.si_status
+
+
+def _await_guest_shutdown(vm, vm_name, command):
+    """Require the acknowledged guest shutdown to end Tart naturally and cleanly."""
+    command([str(TART), 'exec', vm_name, '/bin/sh', '-c',
+             'exec /usr/bin/sudo -n /sbin/shutdown -h +10sec </dev/null >/dev/null 2>&1'], timeout=15,
+            output_limit=canary.MAX_SHORT_OUTPUT)
+    deadline = time.monotonic() + GUEST_SHUTDOWN_TIMEOUT
+    exit_code = _child_exit_status(vm)
+    while exit_code is None:
+        _require(time.monotonic() < deadline, 'guest_shutdown_timeout')
+        time.sleep(0.2)
+        exit_code = _child_exit_status(vm)
+    _require(_group_quiet(vm.pid), 'guest_shutdown_process_group_not_quiet')
+    _require(type(exit_code) is int and exit_code == 0, 'guest_shutdown_abnormal_exit')
+    raw, _ = command([str(TART), 'get', vm_name, '--format', 'json'], timeout=10)
+    _require(canary._vm_stopped(raw), 'guest_shutdown_state_unconfirmed')
+    return {'kind': GUEST_SHUTDOWN_KIND, 'version': 1,
+            'requestAccepted': True, 'vmRunExitCode': exit_code, 'vmStopped': True}
+
+
 def _group_quiet(pid):
     """Keep the child PID reserved while independently observing every group member."""
     raw, _ = canary._run_bounded(['/bin/ps', '-A', '-o', 'pid=', '-o', 'pgid=', '-o', 'stat='],
@@ -636,9 +668,12 @@ def _start_logs(process, directory, failures):
     return thread
 
 
-def _reap_children(vm, helper, threads, stop, failures, *, record_error=None):
+def _reap_children(vm, helper, threads, stop, failures, *, record_error=None,
+                   vm_naturally_exited=False):
     for key, process in (('vmReaped', vm), ('helperReaped', helper)):
         if process is not None:
+            if key == 'vmReaped' and vm_naturally_exited:
+                continue
             try:
                 _stop_owned(process, log_thread=threads.get(process))
                 stop[key] = True
@@ -650,6 +685,35 @@ def _reap_children(vm, helper, threads, stop, failures, *, record_error=None):
         thread.join(timeout=2)
         if thread.is_alive():
             failures.append('log_drainer_unjoined')
+    if vm is not None and vm_naturally_exited:
+        vm_thread = threads.get(vm)
+        if vm_thread is not None and vm_thread.is_alive():
+            reap_error = recovery.RecoveryError('log_drainer_unjoined')
+        else:
+            reap_error = None
+            try:
+                _require(_group_quiet(vm.pid), 'guest_shutdown_process_group_not_quiet')
+                _require(_child_exited(vm), 'owned_child_not_exited')
+                exit_code = vm.wait(timeout=5)
+                _require(type(exit_code) is int and exit_code == 0,
+                         'guest_shutdown_abnormal_exit')
+                stop['vmReaped'] = True
+            except BaseException as exc:
+                reap_error = exc
+        if reap_error is not None:
+            failures.append('vm_natural_reap_unproven')
+            if record_error is not None:
+                record_error(reap_error)
+            if vm.returncode is None:
+                try:
+                    # This is safety cleanup only: the earlier failure remains fatal,
+                    # and the host Tart stop command stays disabled on the natural path.
+                    _stop_owned(vm, log_thread=vm_thread)
+                    stop['vmReaped'] = True
+                except BaseException as cleanup_error:
+                    failures.append('vm_natural_cleanup_unproven')
+                    if record_error is not None:
+                        record_error(cleanup_error)
 
 
 def _exercise(run, admission, account, group, preferences_factory, *, public_probe_ip=None,
@@ -699,6 +763,7 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
     phase = 'vm-start'
     readiness_error = None
     diagnostic_write_error = None
+    guest_shutdown_confirmed = False
     stop = {'vmReaped': True, 'helperReaped': True, 'vmStopped': False}
     previous = canary._install_termination_handlers()
     try:
@@ -774,6 +839,10 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
             except (TypeError, ValueError):
                 raise recovery.RecoveryError('invalid_provisioning_report') from None
             _record(run, 'provisioning-download.json', report)
+            phase = 'guest-shutdown'
+            shutdown_receipt = _await_guest_shutdown(vm, vm_name, command)
+            guest_shutdown_confirmed = True
+            _record(run, 'guest-shutdown.plist', shutdown_receipt)
         elif public_probe_ip is not None:
             source = _protected(PUBLIC_PROBE_SOURCE, 0)
             source_bytes = source.read_bytes()
@@ -819,12 +888,14 @@ def _exercise(run, admission, account, group, preferences_factory, *, public_pro
                 if endpoint is not None:
                     endpoint.close()
             if vm_attempted:
-                try:
-                    command([str(TART), 'stop', vm_name], timeout=15)
-                except BaseException:
-                    failures.append('vm_stop_command_failed')
+                if not guest_shutdown_confirmed:
+                    try:
+                        command([str(TART), 'stop', vm_name], timeout=15)
+                    except BaseException:
+                        failures.append('vm_stop_command_failed')
             _reap_children(vm, helper, threads, stop, failures,
-                           record_error=record_command_error)
+                           record_error=record_command_error,
+                           vm_naturally_exited=guest_shutdown_confirmed)
             try:
                 raw, _ = command([str(TART), 'get', vm_name, '--format', 'json'], timeout=10)
                 stop['vmStopped'] = canary._vm_stopped(raw)
@@ -861,7 +932,8 @@ def qualify(admission_directory, *, public_probe=False, guest_route_contract=Fal
     """Run the fixed startup canary or one fixed public-probe observation."""
     _require(os.geteuid() == 0 and sys.platform == 'darwin', 'root_macos_required')
     _require(sys.version_info >= (3, 13) and callable(getattr(os, 'waitid', None))
-             and all(hasattr(os, name) for name in ('P_PID', 'WEXITED', 'WNOHANG', 'WNOWAIT')),
+             and all(hasattr(os, name) for name in (
+                 'P_PID', 'WEXITED', 'WNOHANG', 'WNOWAIT', 'CLD_EXITED')),
              'python_3_13_nonreaping_wait_required')
     root = Path(admission_directory)
     # Admission is root-only; no executable paths, guest commands, or helper flags are accepted.

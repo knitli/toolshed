@@ -788,6 +788,272 @@ class SoftnetSupervisorTests(unittest.TestCase):
                                command_error=command_error, reap_metadata_error=reap_metadata_error,
                                monotonic_values=monotonic_values)
 
+    def test_guest_shutdown_requires_ack_natural_zero_exit_and_stopped_readback(self):
+        process = FakeProcess("vm")
+        events = []
+
+        def command(argv, **kwargs):
+            events.append((tuple(argv), kwargs))
+            if argv[1:2] == ["get"]:
+                return b'{"Running":false,"State":"stopped"}', 0
+            return b"", 0
+
+        with patch.object(supervisor, "_child_exited", return_value=True), \
+             patch.object(supervisor, "_child_exit_status", return_value=0), \
+             patch.object(supervisor, "_group_quiet", return_value=True), \
+             patch.object(supervisor.time, "monotonic", return_value=10):
+            evidence = supervisor._await_guest_shutdown(process, "fixed-vm", command)
+
+        self.assertEqual(events[0][0], (
+            str(supervisor.TART), "exec", "fixed-vm", "/bin/sh", "-c",
+            "exec /usr/bin/sudo -n /sbin/shutdown -h +10sec </dev/null >/dev/null 2>&1"))
+        self.assertEqual(events[0][1]["timeout"], 15)
+        self.assertEqual(events[1][0], (str(supervisor.TART), "get", "fixed-vm", "--format", "json"))
+        self.assertEqual(process.wait_calls, [])
+        self.assertEqual(evidence, {
+            "kind": "softnet-guest-shutdown-v1", "version": 1,
+            "requestAccepted": True, "vmRunExitCode": 0, "vmStopped": True})
+
+    def test_child_exit_status_uses_nonreaping_waitid_and_never_polls(self):
+        process = FakeProcess("vm")
+        info = SimpleNamespace(si_pid=process.pid, si_code=os.CLD_EXITED, si_status=0)
+        with patch.object(supervisor.os, "waitid", return_value=info) as waitid:
+            self.assertEqual(supervisor._child_exit_status(process), 0)
+        waitid.assert_called_once_with(
+            os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        self.assertIsNone(process.returncode)
+        self.assertEqual(process.wait_calls, [])
+        self.assertFalse(hasattr(process, "poll"))
+
+    def test_child_exit_status_distinguishes_running_and_signaled_children(self):
+        process = FakeProcess("vm")
+        with patch.object(supervisor.os, "waitid", return_value=None):
+            self.assertIsNone(supervisor._child_exit_status(process))
+        signal_info = SimpleNamespace(si_pid=process.pid,
+                                      si_code=getattr(os, "CLD_KILLED", 2), si_status=9)
+        with patch.object(supervisor.os, "waitid", return_value=signal_info):
+            with self.assertRaisesRegex(recovery.RecoveryError, "owned_child_abnormal_exit"):
+                supervisor._child_exit_status(process)
+        self.assertIsNone(process.returncode)
+        self.assertEqual(process.wait_calls, [])
+
+    def test_guest_shutdown_rejects_nonquiet_natural_exit_without_get_or_reap(self):
+        process = FakeProcess("vm")
+        commands = []
+
+        def command(argv, **kwargs):
+            commands.append(tuple(argv))
+            return b"", 0
+
+        with patch.object(supervisor, "_child_exit_status", return_value=0), \
+             patch.object(supervisor, "_group_quiet", return_value=False):
+            with self.assertRaisesRegex(recovery.RecoveryError,
+                                        "guest_shutdown_process_group_not_quiet"):
+                supervisor._await_guest_shutdown(process, "fixed-vm", command)
+        self.assertEqual(len(commands), 1)
+        self.assertIsNone(process.returncode)
+        self.assertEqual(process.wait_calls, [])
+
+    def test_guest_shutdown_rejects_missing_ack_and_shutdown_timeout(self):
+        process = FakeProcess("vm")
+        calls = []
+
+        def failed_ack(argv, **kwargs):
+            calls.append(tuple(argv))
+            raise supervisor.recovery.RecoveryError("request_unacknowledged")
+
+        with self.assertRaisesRegex(recovery.RecoveryError, "request_unacknowledged"), \
+             patch.object(supervisor, "_child_exited", return_value=True), \
+             patch.object(supervisor, "_group_quiet", return_value=True):
+            supervisor._await_guest_shutdown(process, "fixed-vm", failed_ack)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(process.wait_calls, [])
+
+        with patch.object(supervisor, "_child_exited", return_value=False), \
+             patch.object(supervisor, "_child_exit_status", return_value=None), \
+             patch.object(supervisor.time, "monotonic", side_effect=[0, 121]), \
+             patch.object(supervisor.time, "sleep"):
+            with self.assertRaisesRegex(recovery.RecoveryError, "guest_shutdown_timeout"):
+                supervisor._await_guest_shutdown(process, "fixed-vm", lambda *_a, **_k: (b"", 0))
+
+    def test_guest_shutdown_requires_tart_stopped_readback_after_natural_exit(self):
+        process = FakeProcess("vm")
+        calls = []
+
+        def command(argv, **kwargs):
+            calls.append(tuple(argv))
+            if argv[1:2] == ["get"]:
+                return b'{"Running":true,"State":"running"}', 0
+            return b"", 0
+
+        with patch.object(supervisor, "_child_exited", return_value=True), \
+             patch.object(supervisor, "_child_exit_status", return_value=0), \
+             patch.object(supervisor, "_group_quiet", return_value=True), \
+             patch.object(supervisor.time, "monotonic", return_value=10):
+            with self.assertRaisesRegex(recovery.RecoveryError, "guest_shutdown_state_unconfirmed"):
+                supervisor._await_guest_shutdown(process, "fixed-vm", command)
+        self.assertEqual(process.wait_calls, [])
+
+    def test_guest_shutdown_keeps_unreaped_leader_on_readback_failure(self):
+        process = FakeProcess("vm")
+
+        def command(argv, **kwargs):
+            if argv[1:2] == ["get"]:
+                raise recovery.RecoveryError("tart_command_failed")
+            return b"", 0
+
+        with patch.object(supervisor, "_child_exit_status", return_value=0), \
+             patch.object(supervisor, "_group_quiet", return_value=True):
+            with self.assertRaisesRegex(recovery.RecoveryError, "tart_command_failed"):
+                supervisor._await_guest_shutdown(process, "fixed-vm", command)
+        self.assertIsNone(process.returncode)
+        self.assertEqual(process.wait_calls, [])
+
+    def test_guest_shutdown_rejects_abnormal_tart_exit_without_reaping(self):
+        process = FakeProcess("vm")
+        with patch.object(supervisor, "_child_exit_status", return_value=7), \
+             patch.object(supervisor, "_group_quiet", return_value=True):
+            with self.assertRaisesRegex(recovery.RecoveryError, "guest_shutdown_abnormal_exit"):
+                supervisor._await_guest_shutdown(
+                    process, "fixed-vm", lambda *_a, **_k: (b"", 0))
+        self.assertIsNone(process.returncode)
+        self.assertEqual(process.wait_calls, [])
+
+    def test_provisioning_success_uses_natural_exit_without_tart_stop(self):
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        admission = {**self.admission, "provisioningBundleSha256": "a" * 64,
+                     "provisioningCaSha256": "b" * 64,
+                     "provisioningDnsMap": {"example.test": ["192.0.2.1"]},
+                     "provisioningManifest": b"{}"}
+        bundle_fd = os.open(os.devnull, os.O_RDONLY)
+        self.addCleanup(os.close, bundle_fd)
+        vm_exited = {"value": False}
+
+        def await_shutdown(vm, vm_name, command):
+            vm_exited["value"] = True
+            original_wait = vm.wait
+
+            def wait(timeout=None):
+                harness.events.append(("wait", "vm", timeout))
+                return original_wait(timeout)
+
+            vm.wait = wait
+            return {"kind": "softnet-guest-shutdown-v1", "version": 1,
+                    "requestAccepted": True, "vmRunExitCode": 0, "vmStopped": True}
+
+        with ExitStack() as patches:
+            harness = patches.enter_context(self._exercise_patches())
+            patches.enter_context(patch.object(
+                supervisor.provisioning, "command_template",
+                return_value=[str(supervisor.TART), "exec", admission["vmName"], "download"]))
+            patches.enter_context(patch.object(supervisor.provisioning, "validate_result", return_value={}))
+            patches.enter_context(patch.object(supervisor, "_await_guest_shutdown",
+                                               side_effect=await_shutdown))
+            patches.enter_context(patch.object(
+                supervisor, "_child_exited",
+                side_effect=lambda process: process.name == "vm" and vm_exited["value"]))
+            patches.enter_context(patch.object(supervisor, "_group_quiet", return_value=True))
+            result = supervisor._exercise(self.root, admission, account, "staff", TargetPreferences,
+                                          provisioning_bundle_fd=bundle_fd)
+
+        self.assertEqual(result, {"vmReaped": True, "helperReaped": True, "vmStopped": True})
+        commands = [event[1] for event in harness.events if event[0] == "command"]
+        self.assertNotIn((str(supervisor.TART), "stop", admission["vmName"]), commands)
+        self.assertIn("guest-shutdown.plist",
+                      [event[1] for event in harness.events if event[0] == "record"])
+        vm = next(process for process in harness.processes if process.name == "vm")
+        self.assertEqual(vm.wait_calls, [5])
+        self.assertLess(harness.events.index(("join", "vm", 2)),
+                        harness.events.index(("wait", "vm", 5)))
+
+    def test_provisioning_vm_log_drainer_failure_keeps_completion_unproven(self):
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        admission = {**self.admission, "provisioningBundleSha256": "a" * 64,
+                     "provisioningCaSha256": "b" * 64,
+                     "provisioningDnsMap": {"example.test": ["192.0.2.1"]},
+                     "provisioningManifest": b"{}"}
+        bundle_fd = os.open(os.devnull, os.O_RDONLY)
+        self.addCleanup(os.close, bundle_fd)
+        vm_exited = {"value": False}
+
+        def await_shutdown(vm, vm_name, command):
+            vm_exited["value"] = True
+            return {"kind": "softnet-guest-shutdown-v1", "version": 1,
+                    "requestAccepted": True, "vmRunExitCode": 0, "vmStopped": True}
+
+        with ExitStack() as patches:
+            harness = patches.enter_context(self._exercise_patches(log_alive=True, stop_error="vm"))
+            patches.enter_context(patch.object(
+                supervisor.provisioning, "command_template",
+                return_value=[str(supervisor.TART), "exec", admission["vmName"], "download"]))
+            patches.enter_context(patch.object(supervisor.provisioning, "validate_result", return_value={}))
+            patches.enter_context(patch.object(supervisor, "_await_guest_shutdown",
+                                               side_effect=await_shutdown))
+            patches.enter_context(patch.object(
+                supervisor, "_child_exited",
+                side_effect=lambda process: process.name == "vm" and vm_exited["value"]))
+            patches.enter_context(patch.object(supervisor, "_group_quiet", return_value=True))
+            with self.assertRaisesRegex(recovery.RecoveryError, "cleanup_unproven"):
+                supervisor._exercise(self.root, admission, account, "staff", TargetPreferences,
+                                     provisioning_bundle_fd=bundle_fd)
+
+        commands = [event[1] for event in harness.events if event[0] == "command"]
+        self.assertNotIn((str(supervisor.TART), "stop", admission["vmName"]), commands)
+        records = {event[1]: event[2] for event in harness.events if event[0] == "record"}
+        self.assertIn("guest-shutdown.plist", records)
+        self.assertFalse(records["stop.plist"]["vmReaped"])
+        self.assertTrue(any(event[0] == "stop_owned" and event[1] == "vm"
+                            for event in harness.events))
+        vm = next(process for process in harness.processes if process.name == "vm")
+        self.assertEqual(vm.wait_calls, [])
+
+    def test_natural_shutdown_records_stuck_vm_log_drainer_once(self):
+        vm = FakeProcess("vm")
+        thread = FakeThread(alive=True)
+        failures = []
+        recorded_errors = []
+
+        with patch.object(supervisor, "_stop_owned",
+                          side_effect=recovery.RecoveryError("cleanup_unproven")):
+            supervisor._reap_children(
+                vm, None, {vm: thread}, {"vmReaped": False}, failures,
+                record_error=recorded_errors.append, vm_naturally_exited=True)
+
+        self.assertEqual(failures.count("log_drainer_unjoined"), 1)
+        self.assertNotIn("vm_log_drainer_unjoined", failures)
+        self.assertIn("vm_natural_reap_unproven", failures)
+        self.assertIn("vm_natural_cleanup_unproven", failures)
+        self.assertEqual([str(error) for error in recorded_errors],
+                         ["log_drainer_unjoined", "cleanup_unproven"])
+
+    def test_provisioning_shutdown_failure_uses_force_stop_and_never_records_success(self):
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
+        admission = {**self.admission, "provisioningBundleSha256": "a" * 64,
+                     "provisioningCaSha256": "b" * 64,
+                     "provisioningDnsMap": {"example.test": ["192.0.2.1"]},
+                     "provisioningManifest": b"{}"}
+        bundle_fd = os.open(os.devnull, os.O_RDONLY)
+        self.addCleanup(os.close, bundle_fd)
+        with ExitStack() as patches:
+            harness = patches.enter_context(self._exercise_patches())
+            patches.enter_context(patch.object(
+                supervisor.provisioning, "command_template",
+                return_value=[str(supervisor.TART), "exec", admission["vmName"], "download"]))
+            patches.enter_context(patch.object(supervisor.provisioning, "validate_result", return_value={}))
+            patches.enter_context(patch.object(
+                supervisor, "_await_guest_shutdown",
+                side_effect=recovery.RecoveryError("guest_shutdown_timeout")))
+            with self.assertRaisesRegex(recovery.RecoveryError, "guest_shutdown_timeout"):
+                supervisor._exercise(self.root, admission, account, "staff", TargetPreferences,
+                                     provisioning_bundle_fd=bundle_fd)
+
+        commands = [event[1] for event in harness.events if event[0] == "command"]
+        self.assertIn((str(supervisor.TART), "stop", admission["vmName"]), commands)
+        record_names = [event[1] for event in harness.events if event[0] == "record"]
+        self.assertIn("command-failure.plist", record_names)
+        self.assertNotIn("guest-shutdown.plist", record_names)
+        self.assertTrue(any(event[0] == "restore" for event in harness.events))
+
     def test_capture_precedes_launch_and_tart_is_owner_scoped_fixed_argv(self):
         with self._exercise_patches() as harness:
             result = supervisor._exercise(self.root, self.admission,
@@ -811,6 +1077,7 @@ class SoftnetSupervisorTests(unittest.TestCase):
         self.assertNotIn("--user", vm[1])
         commands = [event for event in harness.events if event[0] == "command"]
         self.assertGreaterEqual(len(commands), 4)
+        self.assertFalse(any("shutdown" in argv for _, argv, _ in commands))
         for _, _, kwargs in commands:
             self.assertEqual(kwargs["env"], {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C",
                                                "LANG": "C", "HOME": self.admission["tartHome"],

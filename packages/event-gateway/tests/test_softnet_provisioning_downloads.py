@@ -93,6 +93,27 @@ class DownloadExercise(ExercisePatches):
         """Optionally fail the prelaunch VM state query."""
         super().__init__(**kwargs)
         self.initial_get_error = initial_get_error
+        self.shutdown_requested = False
+
+    def __enter__(self):
+        """Model the acknowledged natural VM exit after readiness and download."""
+        super().__enter__()
+        self.stack.enter_context(patch.object(
+            supervisor, '_child_exit_status', side_effect=self.child_exit_status))
+        self.stack.enter_context(patch.object(
+            supervisor, '_child_exited', side_effect=self.child_exited))
+        self.stack.enter_context(patch.object(supervisor, '_group_quiet', return_value=True))
+        return self
+
+    def child_exit_status(self, process):
+        """Return a non-reaping zero exit only when graceful shutdown was requested."""
+        if process.name != 'vm' or not self.shutdown_requested:
+            return None
+        return 0
+
+    def child_exited(self, process):
+        """Keep readiness children live, then expose the naturally exited VM to reaping."""
+        return process.name == 'vm' and self.shutdown_requested
 
     def bounded(self, argv, **kwargs):
         if argv[1:2] == ['get'] and self.initial_get_error:
@@ -105,6 +126,8 @@ class DownloadExercise(ExercisePatches):
             if kwargs['cancel_check']():
                 raise supervisor.canary.CanaryError('tart_command_cancelled')
             return self.probe_stdout, b''
+        if argv[1:2] == ['exec'] and '/bin/sh' in argv:
+            self.shutdown_requested = True
         return super().bounded(argv, **kwargs)
 
 
@@ -382,6 +405,9 @@ class ProvisioningControllerTests(unittest.TestCase):
         names = [event[0] for event in fakes.events]
         self.assertLess(max(index for index, name in enumerate(names) if name == 'stop_owned'), names.index('restore'))
         self.assertTrue(any(event[:2] == ('record', 'provisioning-download.json') for event in fakes.events))
+        self.assertTrue(any(event[0] == 'command' and event[1][1:5] == (
+            'exec', self.admission['vmName'], '/bin/sh', '-c') for event in fakes.events))
+        self.assertTrue(any(event[:2] == ('record', 'guest-shutdown.plist') for event in fakes.events))
 
     def test_failed_download_never_publishes_a_report_and_still_stops_before_restore(self):
         malformed = download_report(self.admission)
