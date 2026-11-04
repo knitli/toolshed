@@ -39,6 +39,12 @@ def _json(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+def _assigned_stock_v2(envelope):
+    profile = envelope.get("runtimeProfile") if isinstance(envelope, dict) else None
+    return (envelope.get("schemaVersion") == 2 and isinstance(profile, dict)
+            and profile.get("profile") == "assigned_stock_client")
+
+
 def validate_native_route(mapping, *, allow_legacy=False):
     """Validate an exact launcher route; live adapter factories cannot omit it."""
     from .cloud import CloudError, _native_binding, _uuid
@@ -360,14 +366,15 @@ class Store:
         except sqlite3.Error:
             raise StoreError("storage_unavailable") from None
 
-    def put_messaging_attachment(self, mapping):
+    def put_messaging_attachment(self, mapping, *, expected_mapping=None):
         """Persist trusted v2 metadata only; no activation, transfer, or counter reset."""
         from .messaging_admission_v2 import ATTACHMENT_FIELDS, _finite
         from . import messaging_protocol_v2 as protocol
 
         # Closed DTOs require exact built-in types, not user-defined subclasses.
+        required = set(ATTACHMENT_FIELDS) | {"namespace", "agentIncarnation", "leaseExpiresAt"}
         if (type(mapping) is not dict  # pylint: disable=unidiomatic-typecheck
-                or set(mapping) != set(ATTACHMENT_FIELDS) | {"namespace", "agentIncarnation", "leaseExpiresAt"}):
+                or set(mapping) not in (required, required | {"runtimeProfile"})):
             raise StoreError("invalid_attachment")
         try:
             mapping = json.loads(protocol._json_bytes(mapping))
@@ -385,12 +392,47 @@ class Store:
                 or type(namespace) is not str or not 1 <= protocol._code_points(namespace) <= 256  # pylint: disable=unidiomatic-typecheck
                 or re.search(r"[\x00-\x1f\x7f]", namespace)):
             raise StoreError("invalid_attachment")
+        if "runtimeProfile" in mapping and not protocol._runtime_profile(mapping["runtimeProfile"]):
+            raise StoreError("invalid_attachment")
+        if expected_mapping is not None:
+            expected_fields = set(IDENTITY) | {
+                "nodeId", "consumerGeneration", "leaseExpiresAt", "runtimeProfile",
+            }
+            if (type(expected_mapping) is not dict  # pylint: disable=unidiomatic-typecheck
+                    or set(expected_mapping) not in (
+                        expected_fields, expected_fields | set(MESSAGING_METADATA),
+                    )):
+                raise StoreError("invalid_attachment")
+            try:
+                expected_mapping = json.loads(protocol._json_bytes(expected_mapping))
+            except (TypeError, ValueError, RecursionError, OverflowError):
+                raise StoreError("invalid_attachment") from None
+            profile = expected_mapping["runtimeProfile"]
+            try:
+                self._validate_attachment(expected_mapping, None)
+            except StoreError:
+                raise StoreError("invalid_attachment") from None
+            identity_fields = (
+                "runtimeId", "principal", "agent", "nodeId", "nodeGeneration",
+                "runtimeGeneration", "attachmentGeneration", "consumerGeneration",
+                "runtimeProfile",
+            )
+            if set(expected_mapping) == expected_fields | set(MESSAGING_METADATA):
+                identity_fields += MESSAGING_METADATA
+            if (not protocol._runtime_profile(profile)
+                    or profile.get("profile") != "assigned_stock_client"
+                    or any(expected_mapping.get(key) != mapping.get(key) for key in identity_fields)):
+                raise StoreError("invalid_attachment")
         try:
-            return self._put_attachment(mapping)
+            return self._put_attachment(
+                mapping, allow_stock_messaging_upgrade=True,
+                expected_existing=expected_mapping,
+            )
         except sqlite3.Error:
             raise StoreError("storage_unavailable") from None
 
-    def _put_attachment(self, mapping, *, transfer=None):
+    def _put_attachment(self, mapping, *, transfer=None, allow_stock_messaging_upgrade=False,
+                        expected_existing=None):
         self._validate_attachment(mapping, transfer)
         if mapping["leaseExpiresAt"] <= self.clock():
             raise StoreError("invalid_attachment")
@@ -399,9 +441,21 @@ class Store:
         row = self.db.execute(
             "SELECT data FROM attachments WHERE runtime=?", (mapping["runtimeId"],)
         ).fetchone()
-        old = json.loads(row[0]) if row else None
+        old_data = row[0] if row else None
+        old = json.loads(old_data) if row else None
+        if expected_existing is not None and old != expected_existing:
+            raise StoreError("stale")
         if old and ("routingGeneration" in old) != messaging:
-            raise StoreError("invalid_attachment")
+            stock_messaging_upgrade = (
+                allow_stock_messaging_upgrade and messaging and "routingGeneration" not in old
+                and not any(key in old for key in ("nativeBinding", "nativeThreadId", "sessionId"))
+                and old.get("runtimeProfile") == mapping.get("runtimeProfile")
+                and isinstance(old.get("runtimeProfile"), dict)
+                and old["runtimeProfile"].get("profile") == "assigned_stock_client"
+                and all(old.get(key) == mapping.get(key) for key in (*IDENTITY, "consumerGeneration"))
+            )
+            if not stock_messaging_upgrade:
+                raise StoreError("invalid_attachment")
         target_error = None
         try:
             if (
@@ -459,10 +513,18 @@ class Store:
                               "runtimeProfile")
                 ):
                     self._fence(mapping["runtimeId"])
-                self.db.execute(
-                    "INSERT OR REPLACE INTO attachments VALUES (?,?)",
-                    (mapping["runtimeId"], data),
-                )
+                if expected_existing is None:
+                    self.db.execute(
+                        "INSERT OR REPLACE INTO attachments VALUES (?,?)",
+                        (mapping["runtimeId"], data),
+                    )
+                else:
+                    cursor = self.db.execute(
+                        "UPDATE attachments SET data=? WHERE runtime=? AND data=?",
+                        (data, mapping["runtimeId"], old_data),
+                    )
+                    if cursor.rowcount != 1:
+                        raise StoreError("stale")
         if target_error is not None:
             raise target_error
         return mapping.copy()
@@ -841,10 +903,12 @@ class Store:
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             row = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
-            if row is None or row["state"] != "queued":
+            if row is None:
                 return False
             envelope = json.loads(row["envelope"])
-            if envelope.get("schemaVersion") != 1:
+            stock_v2 = _assigned_stock_v2(envelope)
+            if (row["state"] != ("held" if stock_v2 else "queued")
+                    or (envelope.get("schemaVersion") != 1 and not stock_v2)):
                 return False
             try:
                 self._matches(envelope)
@@ -1021,7 +1085,7 @@ class Store:
                     or attempt["claim_uncertain"] or attempt["fenced"]):
                 raise StoreError("invalid_transition")
             envelope = json.loads(delivery["envelope"])
-            if (envelope.get("schemaVersion") != 1
+            if (envelope.get("schemaVersion") not in (1, 2)
                     or not isinstance(envelope.get("runtimeProfile"), dict)
                     or envelope["runtimeProfile"].get("profile") != "assigned_stock_client"):
                 raise StoreError("invalid_transition")
@@ -1053,10 +1117,19 @@ class Store:
                 raise StoreError("invalid_transition")
             envelope = json.loads(delivery["envelope"])
             try:
-                normalized = parse_acknowledgment(_json(acknowledgment), now_ms=self.clock() * 1000)
-                valid = (acknowledgment_matches_delivery(envelope, normalized)
-                         and normalized.get("status") == "command_accepted")
-            except (ProtocolError, TypeError, ValueError):
+                if envelope.get("schemaVersion") == 2:
+                    from . import messaging_protocol_v2 as messaging
+
+                    normalized = messaging.parse_acknowledgment(_json(acknowledgment), now_ms=self.clock() * 1000)
+                    valid = (messaging.acknowledgment_matches_delivery(envelope, normalized)
+                             and normalized.get("status") == "command_accepted"
+                             and attempt["admission"] is not None
+                             and normalized.get("permitId") == json.loads(attempt["admission"])["permitId"])
+                else:
+                    normalized = parse_acknowledgment(_json(acknowledgment), now_ms=self.clock() * 1000)
+                    valid = (acknowledgment_matches_delivery(envelope, normalized)
+                             and normalized.get("status") == "command_accepted")
+            except (ProtocolError, TypeError, ValueError, KeyError):
                 valid = False
             if not valid:
                 raise StoreError("invalid_acknowledgment")
@@ -1100,10 +1173,23 @@ class Store:
             row = self._attempt(delivery_id)
             if row is None:
                 raise StoreError("invalid_transition")
-            try:
-                admitted = validate_admission(admission, json.loads(row["envelope"]), now_ms=self.clock() * 1000)
-            except CloudError as exc:
-                raise StoreError("invalid_admission") from exc
+            expected = json.loads(row["envelope"])
+            if expected.get("schemaVersion") == 2:
+                from .messaging_admission_v2 import validate_admission as validate_v2_admission
+                from .messaging_protocol_v2 import MessagingProtocolError
+
+                try:
+                    admitted = validate_v2_admission(admission, expected, now_ms=self.clock() * 1000,
+                                                     node_id=expected["nodeId"])
+                except MessagingProtocolError as exc:
+                    raise StoreError("invalid_admission") from exc
+                if _json(admitted["envelope"]) != row["envelope"]:
+                    raise StoreError("invalid_admission")
+            else:
+                try:
+                    admitted = validate_admission(admission, expected, now_ms=self.clock() * 1000)
+                except CloudError as exc:
+                    raise StoreError("invalid_admission") from exc
             encoded = _json(admitted)
             if row["admission"] is not None:
                 if row["admission"] != encoded:
@@ -1454,8 +1540,12 @@ class Store:
         ).fetchone()
         if not row:
             raise StoreError("not_found")
-        if json.loads(row["envelope"]).get("schemaVersion") == 2 and (
+        envelope = json.loads(row["envelope"])
+        stock_v2 = _assigned_stock_v2(envelope)
+        if envelope.get("schemaVersion") == 2 and not stock_v2 and (
                 status not in ("held", "stale") or submission_id is not None or turn_id is not None):
+            raise StoreError("invalid_transition")
+        if stock_v2 and (status in ("submitted", "observed") or submission_id is not None or turn_id is not None):
             raise StoreError("invalid_transition")
         if attempt_id is not None and json.loads(row["envelope"])["attemptId"] != attempt_id:
             raise StoreError("attempt_conflict")
@@ -1574,9 +1664,10 @@ class Store:
         return [
             self._public(row)
             for row in self.db.execute(
-                "SELECT * FROM deliveries WHERE state='queued' ORDER BY created,id"
+                "SELECT * FROM deliveries WHERE state IN ('queued','held') ORDER BY created,id"
             )
-            if json.loads(row["envelope"]).get("schemaVersion") == 1
+            if (envelope := json.loads(row["envelope"])).get("schemaVersion") == 1
+            or _assigned_stock_v2(envelope)
         ]
 
     def list_reconcilable(self):
@@ -1589,7 +1680,8 @@ class Store:
                 "OR (state='command_accepted' AND ack_state IS NOT state)) "
                 "ORDER BY created,id"
             )
-            if json.loads(row["envelope"]).get("schemaVersion") == 1
+            if (envelope := json.loads(row["envelope"])).get("schemaVersion") == 1
+            or _assigned_stock_v2(envelope)
         ]
 
     def _messaging_obligations(self):

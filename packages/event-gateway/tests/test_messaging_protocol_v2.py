@@ -164,6 +164,22 @@ def decoded_cases():
     return result
 
 
+def _stock_vectors():
+    envelope = dict(ENVELOPE, runtimeProfile={
+        'profile': 'assigned_stock_client', 'client': 'codex', 'conversationId': OTHER,
+    })
+    envelope['deliveryId'] = protocol.derive_delivery_id(envelope)
+    acknowledgment = {
+        **{key: envelope[key] for key in protocol._ATTEMPT_FIELDS},
+        'deliveredSourceStateVersion': envelope['sourceStateVersion'],
+        'acknowledgedAt': '2026-10-17T12:00:30.000Z',
+        'status': 'command_accepted',
+        'runtimeProfile': dict(envelope['runtimeProfile']),
+        'permitId': OTHER,
+    }
+    return envelope, acknowledgment
+
+
 class MessagingProtocolV2Tests(unittest.TestCase):
     def test_all_decoded_portable_vectors(self):
         for case in decoded_cases():
@@ -179,6 +195,29 @@ class MessagingProtocolV2Tests(unittest.TestCase):
         self.assertFalse(receipt['trustedPolicyAdoption'])
         self.assertEqual(len(receipt['sourceCommit']), 40)
         self.assertTrue(all(len(file['sha256']) == 64 for file in receipt['sourceFiles']))
+
+    def test_assigned_stock_envelope_and_command_ack_are_exact(self):
+        envelope, acknowledgment = _stock_vectors()
+        parsed_envelope = protocol.parse_envelope(protocol._json_bytes(envelope), NOW)
+        parsed_ack = protocol.parse_acknowledgment(protocol._json_bytes(acknowledgment), NOW)
+        self.assertEqual(parsed_envelope, envelope)
+        self.assertEqual(parsed_ack, acknowledgment)
+        self.assertTrue(protocol.acknowledgment_matches_delivery(envelope, acknowledgment))
+        for changes in (
+                {'runtimeProfile': dict(acknowledgment['runtimeProfile'], conversationId=ENVELOPE['eventId'])},
+                {'permitId': 'bad'}, {'deliveryId': 'dly_' + '0' * 64},
+                {'deliveredSourceStateVersion': 'msg:' + 'b' * 64}, {'nodeGeneration': 2},
+                {'runtimeGeneration': 3}, {'attachmentGeneration': 4, 'consumerGeneration': 4},
+                {'consumerGeneration': 4}, {'routingGeneration': 5},
+                {'nativeCorrelation': {'kind': 'native_turn_started'}},
+        ):
+            changed = dict(acknowledgment, **changes)
+            self.assertFalse(protocol.acknowledgment_matches_delivery(envelope, changed))
+            if changes.get('permitId') == 'bad' or 'nativeCorrelation' in changes:
+                self.assertFalse(protocol.validate_acknowledgment(changed, NOW))
+        mismatched = dict(envelope, runtimeProfile=dict(envelope['runtimeProfile'], conversationId=ENVELOPE['eventId']))
+        self.assertFalse(protocol.acknowledgment_matches_delivery(mismatched, acknowledgment))
+        self.assertFalse(protocol.acknowledgment_matches_delivery(ENVELOPE, acknowledgment))
 
     def test_nonfinite_and_exact_numeric_types(self):
         for base, validator in [(ENVELOPE, protocol.validate_envelope), (ACK, protocol.validate_acknowledgment)]:

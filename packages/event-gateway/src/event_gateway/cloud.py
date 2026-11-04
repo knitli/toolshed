@@ -995,6 +995,17 @@ class CloudClient:
         return parsed
 
     async def claim(self, envelope):
+        if isinstance(envelope, dict) and envelope.get("schemaVersion") == 2:
+            from .messaging_admission_v2 import _historical_envelope
+            from .messaging_protocol_v2 import _runtime_profile
+
+            try:
+                expected = _historical_envelope(envelope, self._clock() * 1000)
+            except (ValueError, TypeError, KeyError):
+                raise CloudError("invalid_envelope") from None
+            if not _runtime_profile(expected.get("runtimeProfile")):
+                raise CloudError("messaging_v2_native_claim_disabled")
+            return await self.claim_messaging_history(expected)
         expected = self._envelope(envelope, historical=True)
         result = await self._post("/v1/dispatch/claim", {key: expected[key] for key in ("deliveryId", "attemptId")})
         try:
@@ -1050,6 +1061,25 @@ class CloudClient:
 
     async def acknowledge(self, envelope, acknowledgment):
         # ACK may outlive transport freshness; future timestamps remain fenced.
+        if isinstance(envelope, dict) and envelope.get("schemaVersion") == 2:
+            from .messaging_admission_v2 import _historical_envelope
+            from . import messaging_protocol_v2 as messaging
+            from .messaging_protocol_v2 import MessagingProtocolError
+
+            try:
+                parsed = _historical_envelope(envelope, self._clock() * 1000)
+                ack = messaging.parse_acknowledgment(_json(acknowledgment), now_ms=self._clock() * 1000)
+            except (MessagingProtocolError, TypeError, ValueError, KeyError, RecursionError):
+                raise CloudError("invalid_acknowledgment") from None
+            if (not messaging._runtime_profile(parsed.get("runtimeProfile"))
+                    or not messaging.acknowledgment_matches_delivery(parsed, ack)
+                    or ack.get("status") != "command_accepted"):
+                raise CloudError("identity_mismatch")
+            result = await self._post("/v1/ack", ack)
+            _closed(result, ("status", "current"))
+            if result["status"] != "command_accepted" or not isinstance(result["current"], bool):
+                raise CloudError("invalid_response")
+            return result
         parsed = self._envelope(envelope, historical=True)
         try:
             ack = parse_acknowledgment(_json(acknowledgment), now_ms=self._clock() * 1000)

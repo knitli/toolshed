@@ -26,10 +26,12 @@ from event_gateway.cloud import (
 )
 from event_gateway.gateway import Gateway
 from event_gateway.protocol import _timestamp, derive_delivery_id
+from event_gateway import messaging_protocol_v2
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = json.loads((ROOT / "contracts/event-control-v1/fixtures.json").read_text())
+MESSAGING_FIXTURE = json.loads((ROOT / "contracts/messaging-v2/messaging-protocol-semantics-v2.json").read_text())
 NOW = _timestamp(FIXTURE["admitted"]["permitIssuedAt"]) / 1000
 NODE = FIXTURE["admitted"]["nodeId"]
 JSON_HEADERS = {"content-type": "application/json"}
@@ -160,6 +162,37 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             credentials=credentials or (lambda: asyncio.sleep(0, result=Credentials(None, "gateway-agent"))),
             send=self.send, auth_mode="gateway", clock=lambda: self.now,
         )
+
+    def messaging_client(self):
+        envelope = MESSAGING_FIXTURE['envelope']
+        return CloudClient(
+            origin="https://events.example.com", principal=envelope['principal'], agent=envelope['agent'],
+            node_id=envelope['nodeId'], node_generation=envelope['nodeGeneration'],
+            private_key=self.key, credentials=self.credentials, send=self.send,
+            clock=lambda: MESSAGING_FIXTURE['nowMs'] / 1000,
+        )
+
+    def stock_messaging_vectors(self):
+        envelope = copy.deepcopy(MESSAGING_FIXTURE['envelope'])
+        envelope['runtimeProfile'] = {
+            'profile': 'assigned_stock_client', 'client': 'codex',
+            'conversationId': '01234567-89ab-4def-8123-456789abcdef',
+        }
+        envelope['deliveryId'] = messaging_protocol_v2.derive_delivery_id(envelope)
+        permit = str(uuid.uuid4())
+        now = MESSAGING_FIXTURE['nowMs'] / 1000
+        admission = {
+            'status': 'admitted', 'permitId': permit, 'nodeId': envelope['nodeId'],
+            'permitIssuedAt': _iso(now - 2), 'permitExpiresAt': _iso(now + 3),
+            'envelope': copy.deepcopy(envelope),
+        }
+        acknowledgment = {
+            **{key: envelope[key] for key in messaging_protocol_v2._ATTEMPT_FIELDS},
+            'deliveredSourceStateVersion': envelope['sourceStateVersion'],
+            'acknowledgedAt': _iso(now), 'status': 'command_accepted',
+            'runtimeProfile': copy.deepcopy(envelope['runtimeProfile']), 'permitId': permit,
+        }
+        return envelope, admission, acknowledgment
 
     async def test_auth_modes_validate_credentials_and_keep_secrets_out_of_repr(self):
         self.assertNotIn("human-proof", repr(Credentials("human-proof", "agent-proof")))
@@ -303,6 +336,59 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         self.key.public_key().verify(base64.urlsafe_b64decode(proof["signature"] + "=="),
                                      canonical_node_proof(self.client.principal, self.client.origin,
                                                           "/v1/dispatch/claim", request["body"], proof))
+
+    async def test_stock_v2_claim_and_ack_use_exact_cloud_dtos(self):
+        envelope, admission, acknowledgment = self.stock_messaging_vectors()
+        client = self.messaging_client()
+        self.now = MESSAGING_FIXTURE['nowMs'] / 1000
+        self.result = admission
+        self.assertEqual(await client.claim(envelope), admission)
+        claim = self.requests[-1]
+        self.assertEqual(claim['url'], client.origin + '/v1/dispatch/claim')
+        self.assertEqual(json.loads(claim['body']), {
+            'deliveryId': envelope['deliveryId'], 'attemptId': envelope['attemptId'],
+        })
+
+        self.result = {'status': 'command_accepted', 'current': False}
+        self.assertEqual(await client.acknowledge(envelope, acknowledgment), self.result)
+        ack = self.requests[-1]
+        self.assertEqual(ack['url'], client.origin + '/v1/ack')
+        self.assertEqual(json.loads(ack['body']), acknowledgment)
+
+    async def test_stock_v2_claim_rejects_admission_identity_mutations(self):
+        envelope, admission, _acknowledgment = self.stock_messaging_vectors()
+        mutations = {
+            "profile": lambda value: value["envelope"]["runtimeProfile"].update(
+                profile="native"),
+            "conversation": lambda value: value["envelope"]["runtimeProfile"].update(
+                conversationId="11111111-1111-4111-8111-111111111111"),
+            "generation": lambda value: value["envelope"].update(routingGeneration=99),
+            "permit": lambda value: value.update(permitId="invalid-permit"),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                self.requests.clear()
+                self.result = copy.deepcopy(admission)
+                mutate(self.result)
+                if name in ("conversation", "generation"):
+                    # Keep the changed envelope internally well-formed so the
+                    # validator must reject its mismatch against the request.
+                    changed = self.result["envelope"]
+                    changed["deliveryId"] = messaging_protocol_v2.derive_delivery_id(changed)
+                with self.assertRaisesRegex(CloudError, "^invalid_response$") as raised:
+                    await self.messaging_client().claim(envelope)
+                self.assertTrue(raised.exception.ambiguous)
+                self.assertEqual(len(self.requests), 1)
+
+    async def test_v2_native_claim_and_ack_remain_disabled(self):
+        envelope = copy.deepcopy(MESSAGING_FIXTURE['envelope'])
+        client = self.messaging_client()
+        with self.assertRaisesRegex(CloudError, '^messaging_v2_native_claim_disabled$'):
+            await client.claim(envelope)
+        native_ack = copy.deepcopy(MESSAGING_FIXTURE['acknowledgment'])
+        with self.assertRaisesRegex(CloudError, '^identity_mismatch$'):
+            await client.acknowledge(envelope, native_ack)
+        self.assertEqual(self.requests, [])
 
     async def test_github_event_response_binds_kind_to_reason_code(self):
         request = {"eventReference": "ref_22222222-2222-4222-8222-222222222222"}

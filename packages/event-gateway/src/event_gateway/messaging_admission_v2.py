@@ -33,9 +33,20 @@ def attachment_matches(attachment, envelope):
     expected = {key: envelope[key] for key in ATTACHMENT_FIELDS}
     expected.update((key, envelope['canonicalSubject'][key])
                     for key in ('namespace', 'agentIncarnation'))
+    if 'runtimeProfile' in envelope:
+        expected['runtimeProfile'] = envelope['runtimeProfile']
+    elif 'runtimeProfile' in attachment:
+        return False
     # Canonical JSON keeps bool distinct from integers but accepts integral floats.
+    def canonical(value):
+        if type(value) is dict:
+            return {key: canonical(value[key]) for key in sorted(value)}
+        if type(value) is list:
+            return [canonical(item) for item in value]
+        return value
+
     try:
-        return all(protocol._json_bytes(attachment.get(key)) == protocol._json_bytes(value)
+        return all(protocol._json_bytes(canonical(attachment.get(key))) == protocol._json_bytes(canonical(value))
                    for key, value in expected.items())
     except (ValueError, TypeError, RecursionError, OverflowError):
         return False

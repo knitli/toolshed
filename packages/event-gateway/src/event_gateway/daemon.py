@@ -76,6 +76,13 @@ def _execute_control_command(store, request_value, dispatch=None):
         stored = store.put_attachment(request_value["mapping"])
         return {"stored": True, "runtimeId": stored["runtimeId"]}
     if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "mapping", "expectedMapping"}
+            and request_value["command"] == "put-messaging-attachment"):
+        stored = store.put_messaging_attachment(
+            request_value["mapping"], expected_mapping=request_value["expectedMapping"],
+        )
+        return {"stored": True, "runtimeId": stored["runtimeId"]}
+    if (isinstance(request_value, dict)
             and set(request_value) == {"command", "expectedMapping", "leaseExpiresAt"}
             and request_value["command"] == "renew-stock-attachment"):
         renewed = store.renew_stock_attachment(

@@ -132,6 +132,8 @@ def _add_stock_control_commands(commands):
     stock.add_argument("--cloud-config", type=Path, required=True)
     stock.add_argument("--expected-runtime-generation", type=int)
     stock.add_argument("--expected-attachment-generation", type=int)
+    stock.add_argument("--messaging-handoff", type=Path,
+                       help="Private owner route-readback JSON for explicit Messaging assignment import (renew only)")
 
 def _add_stock_recovery_commands(commands):
     recovery = commands.add_parser("stock-recovery", help="Inspect or locally abandon an ambiguous stock delivery")
@@ -374,6 +376,9 @@ def _execute_stock_control(args, state_dir):
         "expectedAttachmentGeneration": args.expected_attachment_generation,
     }
     try:
+        handoff_path = getattr(args, "messaging_handoff", None)
+        if handoff_path is not None and args.operation != "renew":
+            raise CloudError("invalid_messaging_handoff")
         cloud = load_cloud_client(args.cloud_config, state_dir)
         expected_mapping = None
         if args.operation == "renew":
@@ -385,8 +390,10 @@ def _execute_stock_control(args, state_dir):
             if not _stock_renew_mapping_matches(expected_mapping, args, cloud):
                 print(json.dumps({"assignment": None, "reason": "stale"}))
                 return 2
+        handoff = (_load_stock_messaging_handoff(handoff_path, args, cloud, expected_mapping)
+                   if handoff_path is not None else None)
         response = asyncio.run(cloud.assigned_stock(request_value))
-    except CloudError as error:
+    except (CloudError, SecurityError) as error:
         result = {"assignment": None, "reason": error.code}
         if error.ambiguous:
             if args.operation == "attach":
@@ -423,9 +430,27 @@ def _execute_stock_control(args, state_dir):
             print(json.dumps({"assignment": "cloud_committed_local_mapping_failed",
                               "runtimeId": response["runtimeId"], "reason": "invalid_response"}))
             return 2
-        stored, error_code = _renew_stock_attachment(
-            state_dir, expected_mapping, mapping["leaseExpiresAt"],
-        )
+        if handoff is not None:
+            if any(handoff["consumer"].get(key) != mapping.get(key) for key in (
+                    "runtimeId", "nodeId", "nodeGeneration", "runtimeGeneration",
+                    "attachmentGeneration", "consumerGeneration")):
+                print(json.dumps({"assignment": "cloud_committed_local_mapping_failed",
+                                  "runtimeId": response["runtimeId"], "reason": "invalid_response"}))
+                return 2
+            message_mapping = {
+                **handoff["consumer"], "principal": handoff["principal"], "agent": handoff["agent"],
+                "namespace": handoff["namespace"], "agentIncarnation": handoff["agentIncarnation"],
+                "routingGeneration": handoff["routeGeneration"],
+                "leaseExpiresAt": mapping["leaseExpiresAt"],
+                "runtimeProfile": handoff["runtimeProfile"],
+            }
+            stored, error_code = _store_messaging_mapping(
+                state_dir, message_mapping, expected_mapping,
+            )
+        else:
+            stored, error_code = _renew_stock_attachment(
+                state_dir, expected_mapping, mapping["leaseExpiresAt"],
+            )
     else:
         stored, error_code = _store_native_mapping(state_dir, args.operation, mapping, None)
     if not stored:
@@ -458,6 +483,65 @@ def _stock_renew_mapping_matches(mapping, args, cloud):
             "conversationId": args.conversation_id,
         }
     )
+
+
+def _load_stock_messaging_handoff(path, args, cloud, expected_mapping):
+    """Validate a private owner route export before any Cloud stock renewal."""
+    from . import messaging_protocol_v2 as messaging
+
+    try:
+        value, _path = _private_json(path, 4096, "invalid_messaging_handoff")
+    except SecurityError:
+        raise CloudError("invalid_messaging_handoff") from None
+    fields = {"version", "namespace", "principal", "agent", "agentIncarnation",
+              "routeGeneration", "consumer", "runtimeProfile"}
+    consumer_fields = {"nodeId", "runtimeId", "nodeGeneration", "runtimeGeneration",
+                       "attachmentGeneration", "consumerGeneration"}
+    if (type(value) is not dict or value.keys() != fields
+            or type(value["version"]) is not int or value["version"] != 1
+            or type(value["consumer"]) is not dict or value["consumer"].keys() != consumer_fields):
+        raise CloudError("invalid_messaging_handoff")
+    try:
+        valid_profile = messaging._runtime_profile(value["runtimeProfile"])
+        valid = (
+            valid_profile
+            and type(value["namespace"]) is str
+            and value["namespace"] == value["namespace"].strip()
+            and 1 <= messaging._code_points(value["namespace"]) <= 256
+            and not any(ord(char) < 32 or ord(char) == 127 for char in value["namespace"])
+            and type(value["agentIncarnation"]) is int and 0 < value["agentIncarnation"] <= messaging.MAX_SAFE_INTEGER
+            and messaging._integer(value["routeGeneration"])
+            and value["principal"] == cloud.principal
+            and value["agent"] == cloud.agent
+            and value["runtimeProfile"]["conversationId"] == args.conversation_id
+            and all(messaging._matches(messaging._UUID, value["consumer"][key])
+                    for key in ("nodeId", "runtimeId"))
+            and messaging._matches(messaging._PRINCIPAL, value["principal"])
+            and messaging._matches(re.compile(r"[a-z0-9-]{1,32}"), value["agent"])
+            and all(messaging._integer(value["consumer"][key]) for key in (
+                "nodeGeneration", "runtimeGeneration", "attachmentGeneration", "consumerGeneration"))
+            and value["consumer"]["consumerGeneration"] == value["consumer"]["attachmentGeneration"]
+            and value["consumer"]["runtimeId"] == args.runtime_id
+            and value["consumer"]["nodeId"] == cloud.node_id
+            and value["consumer"]["nodeGeneration"] == cloud.node_generation
+            and value["consumer"]["runtimeGeneration"] == args.expected_runtime_generation
+            and value["consumer"]["attachmentGeneration"] == args.expected_attachment_generation
+            and expected_mapping is not None
+            and all(value["consumer"].get(key) == expected_mapping.get(key) for key in (
+                "runtimeId", "nodeId", "nodeGeneration", "runtimeGeneration",
+                "attachmentGeneration", "consumerGeneration"))
+            and value["runtimeProfile"] == expected_mapping.get("runtimeProfile")
+        )
+    except (TypeError, ValueError, KeyError, RecursionError):
+        valid = False
+    if not valid:
+        raise CloudError("stale_messaging_handoff")
+    if "routingGeneration" in expected_mapping and any(
+            expected_mapping.get(key) != value.get(handoff_key)
+            for key, handoff_key in (("namespace", "namespace"), ("agentIncarnation", "agentIncarnation"),
+                                     ("routingGeneration", "routeGeneration"))):
+        raise CloudError("stale_messaging_handoff")
+    return value
 
 
 def _renew_stock_attachment(state_dir, expected_mapping, lease_expires_at):
@@ -884,6 +968,34 @@ def _store_native_mapping(state_dir, operation, mapping, transfer):
                 stored = asyncio.run(request(state_dir, command))
             except (ConnectionRefusedError, FileNotFoundError):
                 # Only a definite missing listener permits the Store lock to arbitrate.
+                stored = store_mapping_directly()
+    except StoreError as error:
+        return False, error.code
+    except (OSError, ValueError, TimeoutError):
+        return False, "local_operation_unavailable"
+    if stored == {"stored": True, "runtimeId": mapping["runtimeId"]}:
+        return True, None
+    return False, _store_response_error(stored)
+
+
+def _store_messaging_mapping(state_dir, mapping, expected_mapping):
+    """Persist one explicit owner handoff through the existing single writer."""
+    command = {"command": "put-messaging-attachment", "mapping": mapping,
+               "expectedMapping": expected_mapping}
+
+    def store_mapping_directly():
+        with Store(state_dir) as store:
+            stored = store.put_messaging_attachment(mapping, expected_mapping=expected_mapping)
+        return {"stored": True, "runtimeId": stored["runtimeId"]}
+
+    socket_path = state_dir / "control.sock"
+    try:
+        if not (socket_path.exists() or socket_path.is_symlink()):
+            stored = store_mapping_directly()
+        else:
+            try:
+                stored = asyncio.run(request(state_dir, command))
+            except (ConnectionRefusedError, FileNotFoundError):
                 stored = store_mapping_directly()
     except StoreError as error:
         return False, error.code

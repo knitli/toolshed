@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from event_gateway.cloud import _iso
 from event_gateway.gateway import Gateway
+from event_gateway import messaging_protocol_v2
 from event_gateway.protocol import derive_delivery_id
 from event_gateway.store import IDENTITY, Store, StoreError
 from event_gateway.stock_codex import StockCodexError, StockCodexPreflightCancelled
@@ -21,6 +22,7 @@ from event_gateway.stock_codex import StockCodexError, StockCodexPreflightCancel
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = json.loads((ROOT / "contracts/event-v1/protocol-v1.json").read_text())
 EVENT = next(event for event in FIXTURES["validEnvelopes"] if "runtimeProfile" in event)
+MESSAGING_FIXTURE = json.loads((ROOT / "contracts/messaging-v2/messaging-protocol-semantics-v2.json").read_text())
 NOW = 1791201630
 
 
@@ -42,7 +44,7 @@ class Authority:
         issued = _iso(self.test.now)
         return {
             "status": "admitted", "permitId": str(uuid.uuid4()),
-            "nodeId": str(uuid.uuid4()), "permitIssuedAt": issued,
+            "nodeId": envelope.get("nodeId", str(uuid.uuid4())), "permitIssuedAt": issued,
             "permitExpiresAt": _iso(self.test.now + 5), "envelope": copy.deepcopy(envelope),
         }
 
@@ -142,6 +144,68 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(submit.await_count, 1)
         self.assertEqual(submit.await_args.args, (self.event["eventReference"],))
         self.assertIn("before_start", submit.await_args.kwargs)
+
+    def setup_messaging_v2_stock(self):
+        self.now = MESSAGING_FIXTURE["nowMs"] / 1000
+        self.event = copy.deepcopy(MESSAGING_FIXTURE["envelope"])
+        self.event["runtimeProfile"] = {
+            "profile": "assigned_stock_client", "client": "codex",
+            "conversationId": str(uuid.uuid4()),
+        }
+        self.event["deliveryId"] = messaging_protocol_v2.derive_delivery_id(self.event)
+        self.mapping = {key: self.event[key] for key in (
+            "principal", "agent", "nodeId", "runtimeId", "nodeGeneration", "runtimeGeneration",
+            "attachmentGeneration", "consumerGeneration", "routingGeneration",
+        )}
+        self.mapping.update(namespace=self.event["canonicalSubject"]["namespace"],
+                            agentIncarnation=self.event["canonicalSubject"]["agentIncarnation"],
+                            runtimeProfile=copy.deepcopy(self.event["runtimeProfile"]),
+                            leaseExpiresAt=self.now + 3600)
+        self.store.put_messaging_attachment(self.mapping)
+
+    async def test_v2_stock_uses_existing_durable_queue_and_exact_ack(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        self.assertEqual(self.store.delivery(delivery)["status"], "held")
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})) as submit:
+            result = await self.gateway.dispatch(delivery)
+            again = await self.gateway.dispatch(delivery)
+        self.assertEqual(result["status"], "command_accepted")
+        self.assertEqual(again["status"], "command_accepted")
+        self.assert_stock_submit_once(submit)
+        attempt = self.store.current_attempt(delivery)
+        acknowledgment = attempt["native_ack"]
+        self.assertEqual(acknowledgment["schemaVersion"], 2)
+        self.assertEqual(acknowledgment["runtimeProfile"], self.event["runtimeProfile"])
+        self.assertEqual(acknowledgment["permitId"], attempt["admission"]["permitId"])
+        self.assertEqual(acknowledgment["status"], "command_accepted")
+        self.assertNotIn("nativeCorrelation", acknowledgment)
+        self.assertEqual(attempt["state"], "command_accepted")
+
+    async def test_v2_stock_unknown_restart_does_not_replay_codex(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(error=TimeoutError("lost CLI response"))) as submit:
+            self.assertEqual((await self.gateway.dispatch(delivery))["status"], "ambiguous")
+            self.restart()
+            self.assertEqual((await self.gateway.reconcile(delivery))["status"], "ambiguous")
+        submit.assert_awaited_once()
+        self.assertEqual(self.authority.acks, [])
+
+    async def test_v2_stock_lost_cloud_ack_retries_exact_ack_after_restart(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        self.authority.drop_ack = True
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})) as submit:
+            self.assertEqual((await self.gateway.dispatch(delivery))["reason"], "stock_ack_pending")
+            stored_ack = self.store.current_attempt(delivery)["native_ack"]
+            self.restart()
+            self.assertEqual((await self.gateway.reconcile(delivery))["status"], "command_accepted")
+        submit.assert_awaited_once()
+        self.assertEqual(self.authority.acks, [stored_ack, stored_ack])
 
     async def test_duplicate_and_command_acceptance_never_relaunch(self):
         delivery = self.accept()

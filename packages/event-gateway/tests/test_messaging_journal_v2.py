@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from event_gateway import messaging_admission_v2 as admission
 from event_gateway import messaging_protocol_v2 as protocol
-from event_gateway.gateway import Gateway
+from event_gateway.gateway import Gateway, Refused
 from event_gateway.security import sign
 from event_gateway.store import Store, StoreError, IDENTITY
 from event_gateway.protocol import derive_delivery_id
@@ -73,6 +73,14 @@ class MessagingJournalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.list_reconcilable(), [])
         self.assertEqual(self.store.status()['counts'], {'held': 1})
         self.assertEqual(self.store.status()['pending'], 1)
+
+    def test_stock_only_ingress_refuses_native_v2_without_journal_writes(self):
+        self.provision()
+        self.gateway.stock_only = True
+        before = self.snapshot()
+        with self.assertRaisesRegex(Refused, '^stock_profile_native_delivery_disabled$'):
+            self.accept()
+        self.assertEqual(self.snapshot(), before)
 
     def test_invalid_authentication_has_zero_journal_writes(self):
         self.provision()

@@ -145,6 +145,33 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual([row["deliveryId"] for row in exact["deliveries"]],
                                  [delivery_ids[-1]])
 
+    async def test_messaging_handoff_command_cas_does_not_resurrect_detached_stock(self):
+        now = time.time()
+        runtime_id, node_id, conversation_id = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
+        stock_mapping = {
+            "runtimeId": runtime_id, "principal": "owner@example.com", "agent": "codex",
+            "nodeId": node_id, "nodeGeneration": 2, "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "consumerGeneration": 7,
+            "leaseExpiresAt": now + 30,
+            "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                               "conversationId": conversation_id},
+        }
+        messaging_mapping = {
+            **stock_mapping, "namespace": "team/inbox", "agentIncarnation": 3,
+            "routingGeneration": 5, "leaseExpiresAt": now + 90,
+        }
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory:
+            with Store(directory) as store:
+                store.put_attachment(stock_mapping)
+                command = {"command": "put-messaging-attachment", "mapping": messaging_mapping,
+                           "expectedMapping": stock_mapping}
+
+                # Model detach after Cloud renewal but before the daemon's local write.
+                store.detach(runtime_id)
+                with self.assertRaisesRegex(StoreError, "^stale$"):
+                    daemon._execute_control_command(store, command)
+                self.assertIsNone(store.get_attachment(runtime_id))
+
     async def test_stock_renew_control_uses_exact_cas_for_expired_local_record(self):
         now = [100]
         mapping = {
