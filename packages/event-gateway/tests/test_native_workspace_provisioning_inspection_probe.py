@@ -636,6 +636,36 @@ class ProvisioningInspectionTests(unittest.TestCase):
                                   run_bounded=lambda *args, **kwargs: (
                                       json.dumps(report).encode(), b""))
 
+    def test_compact_asset_digest_binds_per_archive_member_count_distribution(self):
+        digest = "f" * 64
+        bundle = {"baseVmName": "softnet-canary-" + "a" * 32,
+                  "guestRoot": "/Users/admin/.knitli-native-provisioning-fixture0",
+                  "loader": "fixed-loader", "argument": "fixed-b64",
+                  "ownerReceiptSha256": "b" * 64, "postDownloadMeasurement": {},
+                  "manifestSha256": "d" * 64, "sourceSha256": {}, "bundleSha256": "e" * 64,
+                  "expectedAssets": {name: {"sha256": digest, "maxBytes": 1024}
+                                     for name in ("a.tar.gz", "b.tar.gz")}}
+        report = {"kind": probe.KIND, "status": "passed", "qualified": False, "prepared": False,
+                  "complete": True,
+                  "assets": [{"name": name, "sha256": digest, "bytes": 10,
+                              "archive": {"complete": True, "status": "present",
+                                          "inventorySha256": "a" * 64, "memberCount": count}}
+                             for name, count in (("a.tar.gz", 1), ("b.tar.gz", 2))],
+                  "preStopComparison": "matched", "manifestSha256": bundle["manifestSha256"],
+                  "ownerReceiptSha256": bundle["ownerReceiptSha256"],
+                  "postDownloadMeasurement": bundle["postDownloadMeasurement"],
+                  "homebrew": self._local_ok()}
+        summaries = []
+        for counts in ((1, 2), (2, 1)):
+            for row, member_count in zip(report["assets"], counts):
+                row["archive"]["memberCount"] = member_count
+            raw = json.dumps(report).encode()
+            with tempfile.TemporaryDirectory() as evidence:
+                result = probe.collect("tart", "offline-canary-" + "f" * 32, {}, evidence,
+                                       bundle, run_bounded=lambda *args, **kwargs: (raw, b""))
+            summaries.append(result["report"]["assets"]["sha256"])
+        self.assertNotEqual(summaries[0], summaries[1])
+
     def test_host_rejects_missing_or_unknown_pre_stop_comparison(self):
         bundle = {"baseVmName": "softnet-canary-" + "a" * 32,
                   "guestRoot": "/Users/admin/.knitli-native-provisioning-fixture0",

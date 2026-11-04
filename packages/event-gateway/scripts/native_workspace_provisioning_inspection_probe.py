@@ -782,7 +782,8 @@ def collect(tart, vm, env, evidence, bundle, *, run_bounded=None, cancel_check=N
         total_asset_bytes += row["bytes"]
         archive = row.get("archive")
         inventory_row = [name, row["sha256"], row["bytes"],
-                         archive.get("inventorySha256") if type(archive) is dict else None]
+                         archive.get("inventorySha256") if type(archive) is dict else None,
+                         archive["memberCount"] if type(archive) is dict else None]
         asset_inventory.update(json.dumps(inventory_row, separators=(",", ":"),
                                            ensure_ascii=True).encode("ascii") + b"\n")
         if type(archive) is dict:
