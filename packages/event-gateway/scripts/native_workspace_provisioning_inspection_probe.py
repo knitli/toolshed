@@ -546,15 +546,14 @@ def _inspect_assets(data, manifest, download_fd):
                 expanded_total += row["archive"].get("expandedStreamBytes", 0)
                 if expanded_total > MAX_TOTAL_EXPANDED_BYTES:
                     raise ValueError("archive_total_expansion_cap")
-            elif "rust" in asset["name"].lower():
-                text_cap = MAX_CHANNEL_TEXT_BYTES if asset["name"].startswith("channel-rust-") else MAX_METADATA_BYTES
-                if item["size"] > text_cap:
+            elif asset["name"].startswith("channel-rust-"):
+                if item["size"] > MAX_CHANNEL_TEXT_BYTES:
                     row["metadataState"] = "capped"
                     inspected.append(row)
                     continue
                 os.lseek(fd, 0, os.SEEK_SET)
-                raw = os.read(fd, text_cap + 1)
-                if len(raw) <= text_cap:
+                raw = os.read(fd, MAX_CHANNEL_TEXT_BYTES + 1)
+                if len(raw) <= MAX_CHANNEL_TEXT_BYTES:
                     row["textMetadata"] = raw.decode("utf-8", "replace")
                 else:
                     row["metadataState"] = "capped"

@@ -48,13 +48,14 @@ def _xz_archive_with_dictionary(dictionary_bytes):
                          filters=[{"id": lzma.FILTER_LZMA2, "dict_size": dictionary_bytes}])
 
 
-def _rust_xz_archive():
+def _rust_xz_archive(oversized_version=False):
     raw = io.BytesIO()
     with tarfile.open(fileobj=raw, mode="w") as tar:
         for name, payload in (("rustc-1.95.0/components", b"rustc\nrust-std-aarch64-apple-darwin\n"),
                               ("rustc-1.95.0/rust-installer-version", b"3\n"),
                               ("rustc-1.95.0/rustc/manifest.in", b"[pkg.rustc]\nversion = 1.95.0\n"),
-                              ("rustc-1.95.0/rustc/version", b"1.95.0\n"),
+                              ("rustc-1.95.0/rustc/version",
+                               b"x" * (probe.MAX_METADATA_BYTES + 1) if oversized_version else b"1.95.0\n"),
                               ("rustc-1.95.0/rustc/git-commit-hash", b"deadbeef\n")):
             info = tarfile.TarInfo(name)
             info.size = len(payload)
@@ -80,7 +81,8 @@ class ProvisioningInspectionTests(unittest.TestCase):
             "runId": "3" * 32, "macAddress": "02:00:00:00:00:01",
         }
 
-    def _fixture(self, directory, corrupt_last=False, channel_bytes=None, wrapper_version=1):
+    def _fixture(self, directory, corrupt_last=False, channel_bytes=None, wrapper_version=1,
+                 rustup_init_bytes=None):
         root = Path(directory) / "downloads"
         root.mkdir(mode=0o700)
         archive = _archive()
@@ -93,6 +95,11 @@ class ProvisioningInspectionTests(unittest.TestCase):
             {"name": channel_name, "sha256": hashlib.sha256(rust).hexdigest(),
              "maxBytes": max(1024, len(rust))},
         ]
+        if rustup_init_bytes is not None:
+            rustup_init = b"R" * rustup_init_bytes
+            (root / "rustup-init").write_bytes(rustup_init)
+            assets.append({"name": "rustup-init", "sha256": hashlib.sha256(rustup_init).hexdigest(),
+                          "maxBytes": rustup_init_bytes})
         manifest = {"kind": "native-workspace-provisioning-assets-v1", "qualified": False,
                     "prepared": False, "assets": assets}
         manifest_raw = json.dumps(manifest, sort_keys=True, indent=2).encode() + b"\n"
@@ -103,13 +110,18 @@ class ProvisioningInspectionTests(unittest.TestCase):
                     "finalHost": "example.com", "finalPath": f"/{name}",
                     "selectedIPv4": "1.1.1.1", "status": 200, "redirectCount": 0,
                     "outcome": "downloaded", "bytes": size, "sha256": digest}
+        receipt_assets = [download_record("bottle-a.tar.gz", hashlib.sha256(archive).hexdigest(), len(archive)),
+                          download_record(channel_name, hashlib.sha256(rust).hexdigest(), len(rust))]
+        total_bytes = len(archive) + len(rust)
+        if rustup_init_bytes is not None:
+            receipt_assets.append(download_record("rustup-init", hashlib.sha256(rustup_init).hexdigest(),
+                                                  len(rustup_init)))
+            total_bytes += len(rustup_init)
         producer_receipt = json.dumps({"kind": "native-workspace-provisioning-assets-v1",
                                        "status": "downloaded-only", "qualified": False,
                                        "prepared": False, "manifestSha256": manifest_sha256,
                                        "caBundleSha256": "c" * 64, "dnsMap": {"example.com": ["1.1.1.1"]},
-                                       "totalBytes": len(archive) + len(rust), "assets": [
-                                           download_record("bottle-a.tar.gz", hashlib.sha256(archive).hexdigest(), len(archive)),
-                                           download_record(channel_name, hashlib.sha256(rust).hexdigest(), len(rust))]},
+                                       "totalBytes": total_bytes, "assets": receipt_assets},
                                       sort_keys=True, separators=(",", ":")).encode() + b"\n"
         (root / "receipt.json").write_bytes(producer_receipt)
         for child in root.iterdir():
@@ -288,6 +300,16 @@ class ProvisioningInspectionTests(unittest.TestCase):
                                             json.dumps(guest_report).encode(), b""))
         self.assertEqual(host_result["status"], "passed")
 
+    def test_rustup_init_binary_is_hash_verified_without_rust_metadata_cap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest, raw, input_doc = self._fixture(directory, rustup_init_bytes=11_321_792)
+            result = self._guest_collect(directory, manifest, raw, input_doc)
+        rustup_asset = next(row for row in result["assets"] if row["name"] == "rustup-init")
+        self.assertEqual(rustup_asset["bytes"], 11_321_792)
+        self.assertEqual(rustup_asset["sha256"], manifest["assets"][2]["sha256"])
+        self.assertNotIn("metadataState", rustup_asset)
+        self.assertEqual(result["status"], "passed")
+
     def test_corrupt_last_asset_prevents_archive_and_local_metadata_inspection(self):
         with tempfile.TemporaryDirectory() as directory:
             _, raw, input_doc = self._fixture(directory, corrupt_last=True)
@@ -366,6 +388,22 @@ class ProvisioningInspectionTests(unittest.TestCase):
                     for row in report["members"] if "rustInstallerMetadata" in row}
         self.assertEqual(metadata["components"], "rustc\nrust-std-aarch64-apple-darwin\n")
         self.assertIn("version = 1.95.0", metadata["manifest.in"])
+
+    def test_oversized_rust_installer_metadata_remains_incomplete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "asset"
+            path.write_bytes(_rust_xz_archive(oversized_version=True))
+            path.chmod(0o600)
+            fd = os.open(path, os.O_RDONLY)
+            try:
+                report = probe._archive_fd(fd, "xz")
+            finally:
+                os.close(fd)
+        self.assertFalse(report["complete"])
+        self.assertEqual(report["failureCode"], "archive_metadata_incomplete")
+        oversized = next(row for row in report["members"]
+                         if row["path"] == "rustc-1.95.0/rustc/version")
+        self.assertEqual(oversized["metadataState"], "capped")
 
     def test_xz_decoder_accepts_128_mib_dictionary_and_rejects_256_mib(self):
         for dictionary_bytes, should_complete in ((128 * 1024 * 1024, True),
