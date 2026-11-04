@@ -93,6 +93,29 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             self.after_check(self.check_calls)
         return 'busy' if self.busy else 'available'
 
+    async def test_stock_only_process_refuses_existing_native_delivery_without_cloud_or_adapter_calls(self):
+        delivery_id, _runtime_id = self.fresh_runtime_delivery()
+        self.gateway.stock_only = True
+        before = (len(self.claims), len(self.submissions))
+        row = await self.gateway.dispatch(delivery_id)
+        self.assertEqual(row['reason'], 'stock_profile_native_delivery_disabled')
+        self.assertEqual((len(self.claims), len(self.submissions)), before)
+
+    async def test_stock_only_process_preserves_native_attempt_without_reconciliation(self):
+        delivery_id, _runtime_id = self.fresh_runtime_delivery()
+        self.assertTrue(self.store.begin_claim(delivery_id))
+        with self.store.db:
+            self.store.db.execute("UPDATE attempts SET state='ambiguous' WHERE delivery_id=?", (delivery_id,))
+            self.store.db.execute("UPDATE deliveries SET state='ambiguous' WHERE id=?", (delivery_id,))
+        self.gateway.stock_only = True
+        before = self.store.current_attempt(delivery_id)
+        row = await self.gateway.reconcile(delivery_id)
+        self.assertEqual(row['reason'], 'stock_profile_native_reconciliation_disabled')
+        self.assertEqual(self.store.delivery(delivery_id)['status'], 'ambiguous')
+        self.assertEqual(self.store.current_attempt(delivery_id), before)
+        self.assertEqual(self.claims, [])
+        self.assertEqual(self.settlements, [])
+
     async def claim(self, envelope):
         self.claims.append(copy.deepcopy(envelope))
         if envelope['attemptId'] not in self.admissions:

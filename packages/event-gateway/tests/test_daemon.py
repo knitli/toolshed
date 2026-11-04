@@ -48,6 +48,13 @@ async def running_daemon(state_dir):
 
 
 class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stock_only_serve_requires_dispatch_client_config(self):
+        for configured in (None, ({"version": 1}, object())):
+            with self.subTest(configured=configured), patch.object(
+                    daemon, "load_dispatch_config", return_value=configured):
+                with self.assertRaisesRegex(daemon.SecurityError, "stock_profile_requires_stock_client"):
+                    await daemon.serve(Path("/tmp/unused-stock-state"), stock_only=True)
+
     async def test_stock_renew_control_uses_exact_cas_for_expired_local_record(self):
         now = [100]
         mapping = {

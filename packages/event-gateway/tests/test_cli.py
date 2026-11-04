@@ -71,6 +71,27 @@ class CliTests(unittest.TestCase):
             ]), 0)
         enroll.assert_called_once()
 
+    def test_stock_cli_exposes_control_and_read_commands_but_no_native_lifecycle(self):
+        parser = cli._parser(stock_only=True)
+        commands = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+        self.assertEqual(set(commands.choices), {
+            "status", "enroll", "run", "runtime-status", "stock-control",
+            "github-event-read", "github-source-read", "github-source-material", "detach",
+        })
+        output = io.StringIO()
+        with redirect_stderr(output), self.assertRaises(SystemExit) as exit_info:
+            cli.stock_main(["launch", "--help"])
+        self.assertEqual(exit_info.exception.code, 2)
+        self.assertIn("invalid choice", output.getvalue())
+
+    def test_stock_daemon_requires_explicit_dispatch_config(self):
+        parser = cli._parser(stock_only=True)
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit) as exit_info:
+            parser.parse_args(["run"])
+        self.assertEqual(exit_info.exception.code, 2)
+        self.assertIn("--dispatch-config", stderr.getvalue())
+
     def test_enrollment_cli_rejects_runtime_commands_before_state_or_external_work(self):
         commands = (
             "run", "launch", "client-status", "attach", "renew", "transfer",

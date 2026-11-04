@@ -45,7 +45,14 @@ def enrollment_main(argv=None):
     return _run(args, parser)
 
 
-def _parser(*, enrollment_only=False):
+def stock_main(argv=None):
+    """Run only the stock Codex control and assigned-stock client commands."""
+    parser = _parser(stock_only=True)
+    args = parser.parse_args(argv)
+    return _run(args, parser, stock_only=True)
+
+
+def _parser(*, enrollment_only=False, stock_only=False):
     parser = argparse.ArgumentParser(prog="knitli-event-gateway")
     parser.add_argument(
         "--state-dir",
@@ -62,6 +69,38 @@ def _parser(*, enrollment_only=False):
     enroll.add_argument("--mesh-port", type=int)
     enroll.add_argument("--agent", action="append", help="Explicit agent binding; repeat as needed")
     if enrollment_only:
+        return parser
+    if stock_only:
+        run = commands.add_parser("run", help="Run the stock-only control daemon")
+        run.add_argument("--dispatch-config", type=Path, required=True,
+                         help="Private configuration with stockCodexBinary enabled")
+        runtime_status = commands.add_parser("runtime-status", help="Read stored cloud runtime authority")
+        runtime_status.add_argument("--runtime-id", required=True)
+        runtime_status.add_argument("--cloud-config", type=Path, required=True)
+        stock = commands.add_parser("stock-control", help="Assign an existing Codex conversation to a stock runtime")
+        stock.add_argument("operation", choices=("attach", "renew"))
+        stock.add_argument("--runtime-id", required=True)
+        stock.add_argument("--conversation-id", required=True, help="Canonical Codex conversation UUID")
+        stock.add_argument("--cloud-config", type=Path, required=True)
+        stock.add_argument("--expected-runtime-generation", type=int)
+        stock.add_argument("--expected-attachment-generation", type=int)
+        event_read = commands.add_parser("github-event-read", help="Resolve a queued GitHub event reference")
+        event_read.add_argument("--cloud-config", type=Path, required=True)
+        event_read.add_argument("--event-reference", required=True)
+        source_read = commands.add_parser("github-source-read", help="Read one retained GitHub source page")
+        source_read.add_argument("--cloud-config", type=Path, required=True)
+        for flag in ("installation-id", "repository-id", "pr-number", "from-version", "to-version"):
+            source_read.add_argument("--" + flag, type=int, required=True)
+        source_read.add_argument("--cursor", help="Exact nextCursor JSON from the preceding page")
+        material = commands.add_parser("github-source-material", help="Verify all finding text pages into a new private file")
+        material.add_argument("--cloud-config", type=Path, required=True)
+        for flag in ("installation-id", "repository-id", "pr-number", "from-version", "to-version"):
+            material.add_argument("--" + flag, type=int, required=True)
+        material.add_argument("--source-id", required=True)
+        material.add_argument("--fingerprint", required=True)
+        material.add_argument("--private-output", type=Path, required=True)
+        detach = commands.add_parser("detach")
+        detach.add_argument("runtime_id")
         return parser
     run = commands.add_parser("run", help="Run the private control daemon")
     run.add_argument("--dispatch-config", type=Path, help="Private configuration for qualified event delivery")
@@ -128,13 +167,13 @@ def _parser(*, enrollment_only=False):
     return parser
 
 
-def _run(args, parser):
+def _run(args, parser, *, stock_only=False):
     # Keep component identity: resolving symlinks would hide unsafe input.
     state_dir = args.state_dir.absolute()
     if any(part.is_symlink() for part in (state_dir, *state_dir.parents)):
         parser.error("unsafe_state")
     try:
-        return _execute_command(args, state_dir, parser)
+        return _execute_command(args, state_dir, parser, stock_only=stock_only)
     except LaunchError as error:
         print(json.dumps({"reason": str(error)}), file=sys.stderr)
         return 2
@@ -160,7 +199,7 @@ def _run(args, parser):
         return 2
 
 
-def _execute_command(args, state_dir, parser):
+def _execute_command(args, state_dir, parser, *, stock_only=False):
     if args.command == "launch":
         return launch(state_dir, args.codex_binary, args.binary_sha256, args.cwd, resume=args.resume)
     if args.command == "client-status":
@@ -168,7 +207,7 @@ def _execute_command(args, state_dir, parser):
                           "presence": session_status(state_dir, args.session_id)}))
         return 0
     if args.command == "run":
-        asyncio.run(serve(state_dir, dispatch_config=args.dispatch_config))
+        asyncio.run(serve(state_dir, dispatch_config=args.dispatch_config, stock_only=stock_only))
         return 0
     if args.command == "github-source-material":
         return _execute_github_source_material(args, state_dir)

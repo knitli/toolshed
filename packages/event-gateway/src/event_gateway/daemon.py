@@ -374,8 +374,10 @@ def _control_handler(store, dispatch):
     return control
 
 
-async def serve(state_dir, *, dispatch_config=None):
+async def serve(state_dir, *, dispatch_config=None, stock_only=False):
     configured = load_dispatch_config(dispatch_config, state_dir) if dispatch_config is not None else None
+    if stock_only and (configured is None or not configured[0].get("stockCodexBinary")):
+        raise SecurityError("stock_profile_requires_stock_client")
     with Store(state_dir) as store:
         path = Path(state_dir) / "control.sock"
         if path.exists() or path.is_symlink():
@@ -408,6 +410,7 @@ async def serve(state_dir, *, dispatch_config=None):
                     lambda mapping: NativeBridgeAdapter(mapping, SessionNativeBridge(state_dir, mapping)),
                     audience=cloud.node_id, keys=config["transportKeys"],
                     stock_codex_binary=config.get("stockCodexBinary"),
+                    stock_only=stock_only,
                 )
                 listener = Listener(gateway)
                 await listener.start(config["listenHost"], config["listenPort"])

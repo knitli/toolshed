@@ -166,11 +166,14 @@ def locked_requirements(data, project):
     return '\n'.join(selected[name] for name in sorted(selected)) + '\n'
 
 
-def preflight(api, wheel, artifact, destination, *, enrollment_only=False):
+def preflight(api, wheel, artifact, destination, *, enrollment_only=False, stock_only=False):
     """Authenticate the protected-main wheel; paired installs also require native release proof."""
     destination = destination_path(destination)
-    require(artifact is not None or enrollment_only, "native_artifact_required")
+    restricted = enrollment_only or stock_only
+    require(not (enrollment_only and stock_only), "conflicting_install_profiles")
+    require(artifact is not None or restricted, "native_artifact_required")
     require(artifact is None or not enrollment_only, "native_artifact_not_allowed_for_enrollment_only")
+    require(artifact is None or not stock_only, "native_artifact_not_allowed_for_stock_only")
     require(api.request('')['id'] == V.REPOSITORY_ID, "wrong_repository")
     branch = api.request('branches/main')
     require(branch.get('protected') is True, "main_not_protected")
@@ -203,7 +206,7 @@ def preflight(api, wheel, artifact, destination, *, enrollment_only=False):
     wheel_bytes = read_file(wheel, WHEEL_LIMIT)
     wheel_payload(wheel_bytes, expected, project)
     selected = None
-    if not enrollment_only:
+    if not restricted:
         selected = V.selection(json.loads(api.blob(V.PROVENANCE, main)))
         pins = V.pins(expected['event_gateway/launcher.py'])
         require(pins['QUALIFIED_SHA256'] == selected['binarySha256']
@@ -226,10 +229,11 @@ def preflight(api, wheel, artifact, destination, *, enrollment_only=False):
         V.verify_archive(artifact, selected, inputs, manifest)
     require(api.request('branches/main')['commit']['sha'] == main, "main_changed_during_preflight")
     return {'main': main, 'destination': destination, 'wheel_name': wheel.name, 'wheel': wheel_bytes,
-            'expected': expected, 'selected': selected, 'inputs': None if enrollment_only else inputs,
-            'manifest': None if enrollment_only else manifest,
-            'artifact': None if enrollment_only else artifact, 'requirements': requirements,
-            'helper': trusted_helpers[HELPER], 'enrollment_only': enrollment_only}
+            'expected': expected, 'selected': selected, 'inputs': None if restricted else inputs,
+            'manifest': None if restricted else manifest,
+            'artifact': None if restricted else artifact, 'requirements': requirements,
+            'helper': trusted_helpers[HELPER], 'enrollment_only': enrollment_only,
+            'stock_only': stock_only}
 
 
 def install_wheel(destination, wheel, requirements, wheel_sha256):
@@ -269,24 +273,32 @@ def verify_destination(destination, source, helper, selected):
                    env={'PATH': '/usr/bin:/bin', 'HOME': str(destination)})
 
 
-def enrollment_entrypoint(destination):
-    command = 'from event_gateway.cli import enrollment_main; raise SystemExit(enrollment_main())'
+def restricted_entrypoint(destination, profile):
+    command = f'from event_gateway.cli import {profile}_main; raise SystemExit({profile}_main())'
     return ('#!/bin/sh\nexec ' + shlex.quote(str(destination / 'bin/python')) + ' -I -c '
             + shlex.quote(command) + ' "$@"\n').encode()
 
 
-def restrict_enrollment_entrypoint(destination):
+def enrollment_entrypoint(destination):
+    return restricted_entrypoint(destination, 'enrollment')
+
+
+def restrict_entrypoint(destination, profile):
     entrypoint = destination / 'bin/knitli-event-gateway'
     info = entrypoint.lstat()
     require(stat.S_ISREG(info.st_mode) and info.st_uid in (0, os.getuid()), 'unsafe_installed_entrypoint')
     fd = os.open(entrypoint, os.O_WRONLY | os.O_NOFOLLOW | os.O_TRUNC)
     with os.fdopen(fd, 'wb') as stream:
-        stream.write(enrollment_entrypoint(destination))
+        stream.write(restricted_entrypoint(destination, profile))
     entrypoint.chmod(0o700)
     return entrypoint
 
 
-ENROLLMENT_POSTCHECK = '''import importlib.util, sys
+def restrict_enrollment_entrypoint(destination):
+    return restrict_entrypoint(destination, 'enrollment')
+
+
+RESTRICTED_POSTCHECK = '''import importlib.util, sys
 from pathlib import Path
 helper, source = sys.argv[1:]
 spec = importlib.util.spec_from_file_location("paired_installed", helper)
@@ -298,22 +310,27 @@ module.verified_executable(Path(sys.prefix) / "bin/knitli-event-gateway")
 '''
 
 
-def verify_enrollment_destination(destination, source, helper):
-    subprocess.run([str(destination / 'bin/python'), '-I', '-c', ENROLLMENT_POSTCHECK,
+def verify_restricted_destination(destination, source, helper, profile):
+    subprocess.run([str(destination / 'bin/python'), '-I', '-c', RESTRICTED_POSTCHECK,
                     str(helper), str(source / 'src/event_gateway')], check=True,
                    env={'PATH': '/usr/bin:/bin', 'HOME': str(destination)})
     entrypoint = destination / 'bin/knitli-event-gateway'
     info = entrypoint.lstat()
-    expected = enrollment_entrypoint(destination)
+    expected = restricted_entrypoint(destination, profile)
     actual = read_file(entrypoint, len(expected))
     require(stat.S_ISREG(info.st_mode) and info.st_uid in (0, os.getuid()) and info.st_mode & 0o111
-            and actual == expected, 'enrollment_entrypoint_mismatch')
+            and actual == expected, profile + '_entrypoint_mismatch')
+
+
+def verify_enrollment_destination(destination, source, helper):
+    return verify_restricted_destination(destination, source, helper, 'enrollment')
 
 
 def install(plan):
     """Populate only a fresh private destination; hand off only after verification."""
     destination = destination_path(plan['destination'])
-    if not plan['enrollment_only']:
+    restricted = plan['enrollment_only'] or plan.get('stock_only', False)
+    if not restricted:
         V.verify_archive(plan['artifact'], plan['selected'], plan['inputs'], plan['manifest'])
     parent, identity = create_destination(destination)
     try:
@@ -333,12 +350,16 @@ def install(plan):
         requirements = destination / '.paired-requirements.txt'
         requirements.write_text(plan['requirements'])
         install_wheel(destination, wheel, requirements, V.digest(plan['wheel']))
-        if plan['enrollment_only']:
-            restrict_enrollment_entrypoint(destination)
-            verify_enrollment_destination(destination, source, helper)
+        if restricted:
+            profile = 'stock' if plan.get('stock_only', False) else 'enrollment'
+            restrict_entrypoint(destination, profile)
+            if plan.get('stock_only', False):
+                verify_restricted_destination(destination, source, helper, profile)
+            else:
+                verify_enrollment_destination(destination, source, helper)
             return {'sourceRevision': plan['main'], 'wheelSha256': V.digest(plan['wheel']),
                     'environment': str(destination), 'command': str(destination / 'bin/knitli-event-gateway'),
-                    'profile': 'enrollment-only'}
+                    'profile': profile + '-only'}
         native = destination / 'native'
         native.mkdir(mode=0o700)
         with zipfile.ZipFile(plan['artifact']) as archive:
@@ -380,19 +401,25 @@ def main():
     parser.add_argument('--native-artifact')
     parser.add_argument('--enrollment-only', action='store_true',
                         help='Install only enrollment/status/help commands; native launch remains unavailable')
+    parser.add_argument('--stock-only', action='store_true',
+                        help='Install stock assignment/daemon commands; native commands remain unavailable')
     parser.add_argument('--destination', required=True)
     args = parser.parse_args()
-    if not args.enrollment_only and args.native_artifact is None:
-        parser.error('--native-artifact is required unless --enrollment-only is selected')
+    if args.enrollment_only and args.stock_only:
+        parser.error('--enrollment-only and --stock-only are mutually exclusive')
+    if not args.enrollment_only and not args.stock_only and args.native_artifact is None:
+        parser.error('--native-artifact is required unless a restricted profile is selected')
     if args.enrollment_only and args.native_artifact is not None:
         parser.error('--native-artifact cannot be used with --enrollment-only')
+    if args.stock_only and args.native_artifact is not None:
+        parser.error('--native-artifact cannot be used with --stock-only')
     require(sys.flags.isolated and sys.version_info >= (3, 13) and sys.platform == "darwin"
             and platform.machine() == "arm64" and sys.implementation.name == "cpython",
             "requires_isolated_macos_arm64_cpython_3_13")
     token = os.environ.get('GITHUB_TOKEN')
     require(bool(token), "github_token_required")
     result = install(preflight(V.GitHub(token), args.wheel, args.native_artifact, args.destination,
-                               enrollment_only=args.enrollment_only))
+                               enrollment_only=args.enrollment_only, stock_only=args.stock_only))
     print(json.dumps(result, sort_keys=True))
 
 
