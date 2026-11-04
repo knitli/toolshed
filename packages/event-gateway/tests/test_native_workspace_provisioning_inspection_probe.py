@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import io
 import json
@@ -9,6 +10,7 @@ import tarfile
 import tempfile
 import unittest
 from unittest import mock
+import zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import native_workspace_provisioning_inspection_probe as probe  # noqa: E402
@@ -33,6 +35,17 @@ def _xz_archive():
         info.size = len(payload)
         tar.addfile(info, io.BytesIO(payload))
     return lzma.compress(raw.getvalue())
+
+
+def _xz_archive_with_dictionary(dictionary_bytes):
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w") as tar:
+        payload = b'{"name":"foo","version":"1"}'
+        info = tarfile.TarInfo("opt/homebrew/Cellar/foo/1/INSTALL_RECEIPT.json")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    return lzma.compress(raw.getvalue(), format=lzma.FORMAT_XZ,
+                         filters=[{"id": lzma.FILTER_LZMA2, "dict_size": dictionary_bytes}])
 
 
 def _rust_xz_archive():
@@ -354,6 +367,22 @@ class ProvisioningInspectionTests(unittest.TestCase):
         self.assertEqual(metadata["components"], "rustc\nrust-std-aarch64-apple-darwin\n")
         self.assertIn("version = 1.95.0", metadata["manifest.in"])
 
+    def test_xz_decoder_accepts_128_mib_dictionary_and_rejects_256_mib(self):
+        for dictionary_bytes, should_complete in ((128 * 1024 * 1024, True),
+                                                  (256 * 1024 * 1024, False)):
+            with self.subTest(dictionary_bytes=dictionary_bytes), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "asset"
+                path.write_bytes(_xz_archive_with_dictionary(dictionary_bytes))
+                path.chmod(0o600)
+                fd = os.open(path, os.O_RDONLY)
+                try:
+                    report = probe._archive_fd(fd, "xz")
+                finally:
+                    os.close(fd)
+            self.assertEqual(report["complete"], should_complete)
+            if not should_complete:
+                self.assertIn("memory", report["failureCode"].lower())
+
     def test_invalid_embedded_receipt_metadata_marks_archive_incomplete(self):
         for malformed in (b"not-json", b"[]", b"null"):
             with tempfile.TemporaryDirectory() as directory:
@@ -495,14 +524,98 @@ class ProvisioningInspectionTests(unittest.TestCase):
             if argv[-1] == "origin":
                 return {"state": "present", "value": "https://github.com/Homebrew/homebrew-core"}
             return {"state": "present", "value": "?? untracked.rb"}
-        with mock.patch.object(probe, "_fixed_command", side_effect=command) as commands, \
-                mock.patch.object(probe, "_cellar_inventory", return_value={"state": "present", "items": []}), \
-                mock.patch.object(probe, "_directories", return_value={"state": "present", "items": [
-                    {"name": "foo", "kind": "symlink", "target": "../Cellar/foo/1"}]}):
-            report = probe._local_homebrew()
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            core = Path(directory) / "homebrew-core"
+            core.mkdir()
+            with mock.patch.object(probe, "CORE", str(core)), \
+                    mock.patch.object(probe, "_fixed_command", side_effect=command) as commands, \
+                    mock.patch.object(probe, "_cellar_inventory", return_value={"state": "present", "items": []}), \
+                    mock.patch.object(probe, "_directories", return_value={"state": "present", "items": [
+                        {"name": "foo", "kind": "symlink", "target": "../Cellar/foo/1"}]}):
+                report = probe._local_homebrew()
         self.assertEqual(report["state"], "incomplete")
         self.assertIn("--porcelain", commands.call_args_list[-1].args[0])
         self.assertNotIn("--untracked-files=no", commands.call_args_list[-1].args[0])
+
+    def test_only_downloaded_stage_accepts_a_proven_missing_core_tap(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            core = Path(directory) / "homebrew-core"
+
+            def command(argv, _limit):
+                if argv[1] == "--version":
+                    return {"state": "present", "value": "Homebrew 5.0"}
+                if argv[1:4] == ["list", "--versions", "--formula"]:
+                    return {"state": "present", "value": ""}
+                self.fail("git must not run for a securely absent core tap")
+
+            def directories(path):
+                if path == str(core):
+                    return real_directories(path)
+                return {"state": "present", "items": []}
+
+            real_directories = probe._directories
+            with mock.patch.object(probe, "CORE", str(core)), \
+                    mock.patch.object(probe, "_fixed_command", side_effect=command), \
+                    mock.patch.object(probe, "_cellar_inventory", return_value={"state": "present", "items": []}), \
+                    mock.patch.object(probe, "_directories", side_effect=directories):
+                downloaded = probe._local_homebrew(downloaded_only=True)
+                other_stage = probe._local_homebrew()
+
+        self.assertEqual(downloaded["state"], "present")
+        self.assertEqual(downloaded["coreGit"], {"state": "not_initialized"})
+        self.assertEqual(other_stage["state"], "incomplete")
+        self.assertEqual(other_stage["coreGit"], {"state": "incomplete"})
+
+    def test_downloaded_stage_does_not_tolerate_existing_broken_core(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            core = Path(directory) / "homebrew-core"
+            core.mkdir()
+
+            def command(argv, _limit):
+                if argv[1] == "--version":
+                    return {"state": "present", "value": "Homebrew 5.0"}
+                if argv[1:4] == ["list", "--versions", "--formula"]:
+                    return {"state": "present", "value": ""}
+                return {"state": "incomplete", "errorCode": "exit_2"}
+
+            with mock.patch.object(probe, "CORE", str(core)), \
+                    mock.patch.object(probe, "_fixed_command", side_effect=command), \
+                    mock.patch.object(probe, "_cellar_inventory", return_value={"state": "present", "items": []}), \
+                    mock.patch.object(probe, "_directories", return_value={"state": "present", "items": []}):
+                report = probe._local_homebrew(downloaded_only=True)
+
+        self.assertEqual(report["state"], "incomplete")
+        self.assertEqual(report["coreGit"]["head"]["state"], "incomplete")
+
+    def test_downloaded_stage_does_not_tolerate_symlinked_core_path(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            root = Path(directory)
+            target = root / "real-core"
+            target.mkdir()
+            core = root / "homebrew-core"
+            core.symlink_to(target, target_is_directory=True)
+
+            def command(argv, _limit):
+                if argv[1] == "--version":
+                    return {"state": "present", "value": "Homebrew 5.0"}
+                if argv[1:4] == ["list", "--versions", "--formula"]:
+                    return {"state": "present", "value": ""}
+                self.fail("git must not run for a symlinked core tap")
+
+            def directories(path):
+                if path == str(core):
+                    return real_directories(path)
+                return {"state": "present", "items": []}
+
+            real_directories = probe._directories
+            with mock.patch.object(probe, "CORE", str(core)), \
+                    mock.patch.object(probe, "_fixed_command", side_effect=command), \
+                    mock.patch.object(probe, "_cellar_inventory", return_value={"state": "present", "items": []}), \
+                    mock.patch.object(probe, "_directories", side_effect=directories):
+                report = probe._local_homebrew(downloaded_only=True)
+
+        self.assertEqual(report["state"], "incomplete")
+        self.assertEqual(report["coreGit"], {"state": "incomplete"})
 
     def test_asset_inventory_rejects_symlink_at_exact_pinned_filename(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -734,6 +847,18 @@ class ProvisioningInspectionTests(unittest.TestCase):
             self.assertEqual(bundle["guestRoot"], owner["guestRoot"])
             self.assertEqual(bundle["baseVmName"], owner["vmName"])
             self.assertLessEqual(len(bundle["argument"]), 128 * 1024)
+            compressed = base64.b64decode(bundle["argument"])
+            packed_size = len(zlib.decompress(compressed))
+            encoded_size = len(bundle["argument"].encode("ascii"))
+            for limit_name, size in (("MAX_PACKED_BUNDLE_BYTES", packed_size),
+                                     ("MAX_ENCODED_BUNDLE_BYTES", encoded_size)):
+                with self.subTest(limit=limit_name):
+                    with mock.patch.object(probe, limit_name, size):
+                        self.assertEqual(probe.build_bundle(owner_path)["argument"], bundle["argument"])
+                    with mock.patch.object(probe, limit_name, size - 1):
+                        with self.assertRaisesRegex(probe.canary.CanaryError,
+                                                    "native_provisioning_inspection_bundle_oversized"):
+                            probe.build_bundle(owner_path)
 
             owner["guestRoot"] = "/private/tmp/knitli-native-provisioning-abcdefgh"
             owner_path.write_text(json.dumps(owner))

@@ -26,10 +26,13 @@ MAX_MEMBERS = 100_000
 MAX_METADATA_BYTES = 64 * 1024
 MAX_CHANNEL_TEXT_BYTES = 1024 * 1024
 MAX_HEADER_BYTES = 64 * 1024
+MAX_XZ_MEMORY_BYTES = 192 * 1024 * 1024
 MAX_ARCHIVE_DETAILS = 64
 RUST_INSTALLER_METADATA = {"components", "rust-installer-version", "manifest.in",
                            "git-commit-hash", "version"}
 MAX_OUTPUT_BYTES = 256 * 1024
+MAX_PACKED_BUNDLE_BYTES = 260 * 1024
+MAX_ENCODED_BUNDLE_BYTES = 128 * 1024
 MAX_FORMULAE = 2048
 MAX_FORMULA_LIST_BYTES = 256 * 1024
 MAX_DIR_ENTRIES = 4096
@@ -114,7 +117,7 @@ def _directories(path):
         os.close(descriptor)
 
 
-def _local_homebrew():
+def _local_homebrew(*, downloaded_only=False):
     version = _fixed_command([BREW, "--version"], 4096)
     formula = _fixed_command([BREW, "list", "--versions", "--formula"], MAX_FORMULA_LIST_BYTES)
     if formula["state"] == "present":
@@ -124,15 +127,19 @@ def _local_homebrew():
         else:
             formula["items"] = rows
         formula.pop("value", None)
-    git = {name: _fixed_command(["/opt/homebrew/bin/git", "-C", CORE, *args], 16 * 1024)
-           for name, args in (("head", ("rev-parse", "HEAD")),
-                              ("origin", ("remote", "get-url", "origin")),
-                              ("dirty", ("status", "--porcelain")))}
+    core_state = _directories(CORE)["state"]
+    git = {"state": "not_initialized" if core_state == "missing" and downloaded_only else "incomplete"}
+    if core_state == "present":
+        git = {name: _fixed_command(["/opt/homebrew/bin/git", "-C", CORE, *args], 16 * 1024)
+               for name, args in (("head", ("rev-parse", "HEAD")),
+                                  ("origin", ("remote", "get-url", "origin")),
+                                  ("dirty", ("status", "--porcelain")))}
     cellar = _cellar_inventory()
     opt_links = _directories("/opt/homebrew/opt")
     if opt_links["state"] == "present" and any(item["kind"] != "symlink" for item in opt_links["items"]):
         opt_links["state"] = "incomplete"
-    git_valid = (all(item["state"] == "present" for item in git.values())
+    git_valid = git.get("state") == "not_initialized" or (
+                 "state" not in git and all(item["state"] == "present" for item in git.values())
                  and bool(re.fullmatch(r"[a-f0-9]{40,64}", git["head"]["value"]))
                  and git["origin"]["value"] == "https://github.com/Homebrew/homebrew-core"
                  and git["dirty"]["value"] == "")
@@ -225,7 +232,7 @@ class _LimitedReader:
 class _BoundedXZReader:
     def __init__(self, stream):
         self.stream = stream
-        self.decoder = lzma.LZMADecompressor(memlimit=128 * 1024 * 1024)
+        self.decoder = lzma.LZMADecompressor(memlimit=MAX_XZ_MEMORY_BYTES)
         self.buffer = bytearray()
         self.count = 0
 
@@ -603,7 +610,7 @@ def collect_guest():
     finally:
         os.close(downloads_fd)
         os.close(root_fd)
-    local = _local_homebrew()
+    local = _local_homebrew(downloaded_only=True)
     archives_complete = all(item.get("archive", {}).get("complete", True)
                             and item.get("metadataState") != "capped" for item in inspected)
     local_complete = local["state"] == "present"
@@ -689,7 +696,7 @@ def build_bundle(owner_receipt_path, root=ROOT):
               for name, data in files.items()}
     raw_bundle = json.dumps(packed, sort_keys=True, separators=(",", ":")).encode()
     encoded = base64.b64encode(zlib.compress(raw_bundle, 9))
-    if len(raw_bundle) > 256 * 1024 or len(encoded) > 128 * 1024:
+    if len(raw_bundle) > MAX_PACKED_BUNDLE_BYTES or len(encoded) > MAX_ENCODED_BUNDLE_BYTES:
         raise canary.CanaryError("native_provisioning_inspection_bundle_oversized")
     from scpreferences_guest_probe import _source_loader
     bundle["argument"] = encoded.decode("ascii")
