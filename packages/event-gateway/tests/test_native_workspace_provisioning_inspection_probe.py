@@ -524,7 +524,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
             if argv[-1] == "origin":
                 return {"state": "present", "value": "https://github.com/Homebrew/homebrew-core"}
             return {"state": "present", "value": "?? untracked.rb"}
-        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+        with tempfile.TemporaryDirectory(dir=os.path.realpath(tempfile.gettempdir())) as directory:
             core = Path(directory) / "homebrew-core"
             core.mkdir()
             with mock.patch.object(probe, "CORE", str(core)), \
@@ -538,7 +538,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
         self.assertNotIn("--untracked-files=no", commands.call_args_list[-1].args[0])
 
     def test_only_downloaded_stage_accepts_a_proven_missing_core_tap(self):
-        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+        with tempfile.TemporaryDirectory(dir=os.path.realpath(tempfile.gettempdir())) as directory:
             core = Path(directory) / "homebrew-core"
 
             def command(argv, _limit):
@@ -567,7 +567,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
         self.assertEqual(other_stage["coreGit"], {"state": "incomplete"})
 
     def test_downloaded_stage_does_not_tolerate_existing_broken_core(self):
-        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+        with tempfile.TemporaryDirectory(dir=os.path.realpath(tempfile.gettempdir())) as directory:
             core = Path(directory) / "homebrew-core"
             core.mkdir()
 
@@ -588,7 +588,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
         self.assertEqual(report["coreGit"]["head"]["state"], "incomplete")
 
     def test_downloaded_stage_does_not_tolerate_symlinked_core_path(self):
-        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+        with tempfile.TemporaryDirectory(dir=os.path.realpath(tempfile.gettempdir())) as directory:
             root = Path(directory)
             target = root / "real-core"
             target.mkdir()
@@ -808,7 +808,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
     def test_guest_rejects_synthetic_legacy_root_before_open(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest, raw, input_doc = self._fixture(directory)
-            input_doc["guestRoot"] = "/private/tmp/knitli-native-provisioning-abcdefgh"
+            input_doc["guestRoot"] = "/tmp/knitli-native-provisioning-abcdefgh"
             with self.assertRaisesRegex(ValueError, "guest_root_invalid"):
                 self._guest_collect(directory, manifest, raw, input_doc)
 
@@ -847,6 +847,8 @@ class ProvisioningInspectionTests(unittest.TestCase):
             self.assertEqual(bundle["guestRoot"], owner["guestRoot"])
             self.assertEqual(bundle["baseVmName"], owner["vmName"])
             self.assertLessEqual(len(bundle["argument"]), 128 * 1024)
+            self.assertIn(f"decoder.decompress(packed, {probe.MAX_PACKED_BUNDLE_BYTES} + 1)", bundle["loader"])
+            self.assertIn(f"len(raw) > {probe.MAX_PACKED_BUNDLE_BYTES}", bundle["loader"])
             compressed = base64.b64decode(bundle["argument"])
             packed_size = len(zlib.decompress(compressed))
             encoded_size = len(bundle["argument"].encode("ascii"))
@@ -860,7 +862,7 @@ class ProvisioningInspectionTests(unittest.TestCase):
                                                     "native_provisioning_inspection_bundle_oversized"):
                             probe.build_bundle(owner_path)
 
-            owner["guestRoot"] = "/private/tmp/knitli-native-provisioning-abcdefgh"
+            owner["guestRoot"] = "/tmp/knitli-native-provisioning-abcdefgh"
             owner_path.write_text(json.dumps(owner))
             with self.assertRaisesRegex(probe.canary.CanaryError, "invalid_owner_receipt"):
                 probe.build_bundle(owner_path)

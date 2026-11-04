@@ -704,7 +704,8 @@ def build_bundle(owner_receipt_path, root=ROOT):
     bundle["bundleSha256"] = hashlib.sha256(encoded).hexdigest()
     bundle["loader"] = _source_loader(set(files), "native_workspace_provisioning_inspection_probe",
                                       "collect_guest", "native-provision-inspection-", guest_setup=(
-        "os.environ.clear()\nos.environ.update(" + repr(ENV) + ")\nsys.dont_write_bytecode = True"))
+        "os.environ.clear()\nos.environ.update(" + repr(ENV) + ")\nsys.dont_write_bytecode = True"),
+        max_bundle_bytes=MAX_PACKED_BUNDLE_BYTES)
     bundle.update(baseVmName=owner["vmName"], guestRoot=owner["guestRoot"],
                   ownerReceiptSha256=hashlib.sha256(owner_raw).hexdigest(),
                   postDownloadMeasurement=owner["postDownloadMeasurement"],

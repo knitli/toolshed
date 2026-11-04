@@ -29,7 +29,8 @@ MAX_BUNDLE_ARG = 128 * 1024
 MAX_REPORT_BYTES = 16 * 1024
 TIMEOUT = 30
 
-def _source_loader(expected_files, module_name, function_name, temp_prefix, *, guest_setup="", call_args=""):
+def _source_loader(expected_files, module_name, function_name, temp_prefix, *, guest_setup="", call_args="",
+                   max_bundle_bytes=256 * 1024):
     """Build one fixed loader from a source whitelist and fixed guest entry point."""
     guest_setup = textwrap.indent(guest_setup, "    ")
     return r'''import base64, hashlib, json, os, re, shutil, stat, sys, tempfile, zlib
@@ -38,8 +39,8 @@ if len(sys.argv) != 2 or len(sys.argv[1]) > 131072:
 try:
     packed = base64.b64decode(sys.argv[1], validate=True)
     decoder = zlib.decompressobj()
-    raw = decoder.decompress(packed, 262145)
-    if len(raw) > 262144 or decoder.unconsumed_tail or not decoder.eof or decoder.unused_data:
+    raw = decoder.decompress(packed, MAX_BUNDLE_BYTES + 1)
+    if len(raw) > MAX_BUNDLE_BYTES or decoder.unconsumed_tail or not decoder.eof or decoder.unused_data:
         raise ValueError("invalid_bundle_size")
     bundle = json.loads(raw)
     expected = EXPECTED_FILES
@@ -91,6 +92,7 @@ finally:
 ''' .replace("EXPECTED_FILES", repr(set(expected_files))).replace(
         "TEMP_PREFIX", repr(temp_prefix)).replace("MODULE_NAME", repr(module_name)).replace(
             "FUNCTION_NAME", repr(function_name)).replace("CALL_ARGS", call_args).replace(
+                "MAX_BUNDLE_BYTES", str(max_bundle_bytes)).replace(
             "GUEST_SETUP", guest_setup)
 
 
