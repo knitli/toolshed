@@ -659,6 +659,9 @@ class PairedInstallTests(unittest.TestCase):
             (['--wheel', str(self.wheel), '--destination', str(self.destination),
               '--stock-only', '--native-artifact', str(self.artifact)],
              '--native-artifact cannot be used with --stock-only'),
+            (['--wheel', str(self.wheel), '--destination', str(self.destination),
+              '--enrollment-only', '--stock-only'],
+             '--enrollment-only and --stock-only are mutually exclusive'),
         )
         for profile, expected_error in profiles:
             with self.subTest(profile=profile), ExitStack() as stack:
@@ -723,7 +726,7 @@ class PairedInstallTests(unittest.TestCase):
         self.assertEqual(INSTALL.V.digest((self.destination / 'native/codex').read_bytes()), result['binarySha256'])
         self.assertEqual(self.existing.read_bytes(), b'keep working installation')
 
-    def test_offline_enrollment_install_restricts_console_entrypoint_without_native_files(self):
+    def install_offline_restricted_profile(self, profile):
         self.api.project['dependencies'] = []
         self.api.payload['event_gateway/__init__.py'] = b''
         self.api.payload['event_gateway/cli.py'] = (
@@ -741,6 +744,13 @@ class PairedInstallTests(unittest.TestCase):
             b'    commands.add_parser("status")\n'
             b'    commands.add_parser("enroll")\n'
             b'    commands.add_parser("launch")\n'
+            b'    parser.parse_args(argv)\n'
+            b'    return 0\n'
+            b'def stock_main(argv=None):\n'
+            b'    parser = argparse.ArgumentParser(prog="knitli-event-gateway")\n'
+            b'    commands = parser.add_subparsers(dest="command", required=True)\n'
+            b'    commands.add_parser("status")\n'
+            b'    commands.add_parser("stock-control")\n'
             b'    parser.parse_args(argv)\n'
             b'    return 0\n'
         )
@@ -762,7 +772,8 @@ class PairedInstallTests(unittest.TestCase):
             'version = 1\n[[package]]\nname = "knitli-event-gateway"\nversion = "0.1.0"\ndependencies = []\n'
         ).encode()
         self.wheel.write_bytes(wheel_bytes(self.api.payload, self.api.project))
-        plan = INSTALL.preflight(self.api, self.wheel, None, self.destination, enrollment_only=True)
+        plan = INSTALL.preflight(self.api, self.wheel, None, self.destination,
+                                 enrollment_only=profile == 'enrollment', stock_only=profile == 'stock')
         real_run = INSTALL.subprocess.run
 
         def offline_run(command, *args, **kwargs):
@@ -778,10 +789,20 @@ class PairedInstallTests(unittest.TestCase):
         with patch.object(INSTALL.subprocess, 'run', side_effect=offline_run):
             result = INSTALL.install(plan)
         command = Path(result['command'])
-        self.assertEqual(result['profile'], 'enrollment-only')
+        self.assertEqual(result['profile'], profile + '-only')
         self.assertFalse((self.destination / 'native').exists())
         self.assertFalse(marker.exists())
-        self.assertEqual(command.read_bytes(), INSTALL.enrollment_entrypoint(self.destination))
+        self.assertEqual(command.read_bytes(), INSTALL.restricted_entrypoint(self.destination, profile))
+        if profile == 'stock':
+            help_result = INSTALL.subprocess.run([str(command), '--help'], capture_output=True, text=True)
+            launch_result = INSTALL.subprocess.run([str(command), 'launch'], capture_output=True, text=True)
+            self.assertEqual(help_result.returncode, 0)
+            self.assertNotIn('launch', help_result.stdout)
+            self.assertIn('stock-control', help_result.stdout)
+            self.assertNotEqual(launch_result.returncode, 0, launch_result.stdout + launch_result.stderr)
+            self.assertFalse(marker.exists())
+            self.assertEqual(self.existing.read_bytes(), b'keep working installation')
+            return command
         trusted_entrypoint = command.with_name('trusted-entrypoint')
         original_lstat = Path.lstat
         swapped = False
@@ -815,6 +836,12 @@ class PairedInstallTests(unittest.TestCase):
         self.assertNotEqual(launch_result.returncode, 0, launch_result.stdout + launch_result.stderr)
         self.assertFalse(marker.exists())
         self.assertEqual(self.existing.read_bytes(), b'keep working installation')
+
+    def test_offline_enrollment_install_restricts_console_entrypoint_without_native_files(self):
+        self.install_offline_restricted_profile('enrollment')
+
+    def test_offline_stock_install_runs_pip_postcheck_and_restricts_entrypoint(self):
+        self.install_offline_restricted_profile('stock')
 
     def test_identity_failure_rolls_back_only_new_empty_destination(self):
         plan = self.preflight()

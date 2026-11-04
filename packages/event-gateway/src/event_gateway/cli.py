@@ -84,21 +84,7 @@ def _parser(*, enrollment_only=False, stock_only=False):
         stock.add_argument("--cloud-config", type=Path, required=True)
         stock.add_argument("--expected-runtime-generation", type=int)
         stock.add_argument("--expected-attachment-generation", type=int)
-        event_read = commands.add_parser("github-event-read", help="Resolve a queued GitHub event reference")
-        event_read.add_argument("--cloud-config", type=Path, required=True)
-        event_read.add_argument("--event-reference", required=True)
-        source_read = commands.add_parser("github-source-read", help="Read one retained GitHub source page")
-        source_read.add_argument("--cloud-config", type=Path, required=True)
-        for flag in ("installation-id", "repository-id", "pr-number", "from-version", "to-version"):
-            source_read.add_argument("--" + flag, type=int, required=True)
-        source_read.add_argument("--cursor", help="Exact nextCursor JSON from the preceding page")
-        material = commands.add_parser("github-source-material", help="Verify all finding text pages into a new private file")
-        material.add_argument("--cloud-config", type=Path, required=True)
-        for flag in ("installation-id", "repository-id", "pr-number", "from-version", "to-version"):
-            material.add_argument("--" + flag, type=int, required=True)
-        material.add_argument("--source-id", required=True)
-        material.add_argument("--fingerprint", required=True)
-        material.add_argument("--private-output", type=Path, required=True)
+        _add_github_read_commands(commands)
         detach = commands.add_parser("detach")
         detach.add_argument("runtime_id")
         return parser
@@ -142,6 +128,18 @@ def _parser(*, enrollment_only=False, stock_only=False):
     stock.add_argument("--cloud-config", type=Path, required=True)
     stock.add_argument("--expected-runtime-generation", type=int)
     stock.add_argument("--expected-attachment-generation", type=int)
+    _add_github_read_commands(commands)
+    reconcile = commands.add_parser("reconcile", help="Reconcile retained attach/renew evidence with a fresh session")
+    reconcile.add_argument("--operation", choices=("attach", "renew", "transfer"), required=True)
+    reconcile.add_argument("--original-session-id", required=True)
+    reconcile.add_argument("--session-id", required=True)
+    reconcile.add_argument("--cloud-config", type=Path, required=True)
+    detach = commands.add_parser("detach")
+    detach.add_argument("runtime_id")
+    return parser
+
+
+def _add_github_read_commands(commands):
     event_read = commands.add_parser("github-event-read", help="Resolve a queued GitHub event reference")
     event_read.add_argument("--cloud-config", type=Path, required=True)
     event_read.add_argument("--event-reference", required=True)
@@ -157,15 +155,6 @@ def _parser(*, enrollment_only=False, stock_only=False):
     material.add_argument("--source-id", required=True)
     material.add_argument("--fingerprint", required=True)
     material.add_argument("--private-output", type=Path, required=True)
-    reconcile = commands.add_parser("reconcile", help="Reconcile retained attach/renew evidence with a fresh session")
-    reconcile.add_argument("--operation", choices=("attach", "renew", "transfer"), required=True)
-    reconcile.add_argument("--original-session-id", required=True)
-    reconcile.add_argument("--session-id", required=True)
-    reconcile.add_argument("--cloud-config", type=Path, required=True)
-    detach = commands.add_parser("detach")
-    detach.add_argument("runtime_id")
-    return parser
-
 
 def _run(args, parser, *, stock_only=False):
     # Keep component identity: resolving symlinks would hide unsafe input.
