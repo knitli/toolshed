@@ -686,7 +686,8 @@ def build_bundle(owner_receipt_path, root=ROOT):
     bundle = shared._build_source_bundle(
         {"probe": SOURCE_FILES["probe"], "canary": SOURCE_FILES["canary"], "manifest": SOURCE_FILES["manifest"]},
         source_paths, error_prefix="native_provisioning_inspection",
-        max_source_bytes=256 * 1024, max_bundle_arg=128 * 1024)
+        # The final bundle below enforces this same aggregate raw-size bound.
+        max_source_bytes=MAX_PACKED_BUNDLE_BYTES, max_bundle_arg=128 * 1024)
     files = {"native_workspace_provisioning_inspection_probe.py": Path(__file__).read_bytes(),
              "qualify_offline_macos_vm.py": Path(canary.__file__).read_bytes(),
              "manifest.json": manifest_raw, "inspection-input.json": input_raw}
@@ -748,7 +749,7 @@ def collect(tart, vm, env, evidence, bundle, *, run_bounded=None, cancel_check=N
     expected_assets = bundle.get("expectedAssets")
     rows = report["assets"]
     if (type(expected_assets) is not dict or len(rows) != len(expected_assets)
-            or any(type(row) is not dict for row in rows)):
+            or any(type(row) is not dict or type(row.get("name")) is not str for row in rows)):
         raise canary.CanaryError("inspection_report_assets_invalid")
     actual_assets = {row.get("name"): row for row in rows}
     if len(actual_assets) != len(rows) or set(actual_assets) != set(expected_assets):
@@ -762,19 +763,53 @@ def collect(tart, vm, env, evidence, bundle, *, run_bounded=None, cancel_check=N
             archive = row.get("archive")
             if (type(archive) is not dict or archive.get("complete") is not True
                     or archive.get("status") != "present"
-                    or not re.fullmatch(r"[a-f0-9]{64}", archive.get("inventorySha256", ""))):
+                    or type(archive.get("inventorySha256")) is not str
+                    or not re.fullmatch(r"[a-f0-9]{64}", archive.get("inventorySha256", ""))
+                    or type(archive.get("memberCount")) is not int
+                    or archive["memberCount"] < 0 or archive["memberCount"] > MAX_MEMBERS):
                 raise canary.CanaryError("inspection_report_archive_incomplete")
+        elif "archive" in row:
+            raise canary.CanaryError("inspection_report_unexpected_archive")
         if name.startswith("channel-rust-") and not isinstance(row.get("textMetadata"), str):
             raise canary.CanaryError("inspection_report_rust_metadata_missing")
     homebrew = report.get("homebrew")
     if type(homebrew) is not dict or homebrew.get("state") != "present":
         raise canary.CanaryError("inspection_report_local_state_incomplete")
+    asset_inventory = hashlib.sha256()
+    archive_count = archive_member_count = total_asset_bytes = 0
+    for name in sorted(actual_assets):
+        row = actual_assets[name]
+        total_asset_bytes += row["bytes"]
+        archive = row.get("archive")
+        inventory_row = [name, row["sha256"], row["bytes"],
+                         archive.get("inventorySha256") if type(archive) is dict else None,
+                         archive["memberCount"] if type(archive) is dict else None]
+        asset_inventory.update(json.dumps(inventory_row, separators=(",", ":"),
+                                           ensure_ascii=True).encode("ascii") + b"\n")
+        if type(archive) is dict:
+            archive_count += 1
+            archive_member_count += archive["memberCount"]
+    compact_report = {
+        "kind": report["kind"], "status": report["status"], "qualified": report["qualified"],
+        "prepared": report["prepared"], "complete": report["complete"],
+        "manifestSha256": report["manifestSha256"],
+        "ownerReceiptSha256": report["ownerReceiptSha256"],
+        "postDownloadMeasurement": report["postDownloadMeasurement"],
+        "preStopComparison": report["preStopComparison"],
+        "assets": {"count": len(rows), "bytes": total_asset_bytes,
+                   "sha256": asset_inventory.hexdigest(), "archiveCount": archive_count,
+                   "archiveMemberCount": archive_member_count},
+        "homebrew": {"state": homebrew["state"],
+                     "sha256": hashlib.sha256(json.dumps(
+                         homebrew, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=True).encode("ascii")).hexdigest()},
+    }
     return {"kind": KIND, "status": "passed", "qualified": False, "prepared": False,
             "complete": report["complete"], "baseVmName": bundle["baseVmName"],
             "guestRoot": bundle["guestRoot"], "ownerReceiptSha256": bundle["ownerReceiptSha256"],
             "postDownloadMeasurement": bundle["postDownloadMeasurement"],
             "manifestSha256": bundle["manifestSha256"], "sourceSha256": bundle["sourceSha256"],
-            "bundleSha256": bundle["bundleSha256"], "report": report,
+            "bundleSha256": bundle["bundleSha256"], "report": compact_report,
             "preStopComparison": report["preStopComparison"],
             "reportRawSha": hashlib.sha256(stdout).hexdigest(),
             "reportRawSha256": hashlib.sha256(stdout).hexdigest(),
