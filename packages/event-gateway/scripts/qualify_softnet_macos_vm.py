@@ -688,8 +688,7 @@ def _reap_children(vm, helper, threads, stop, failures, *, record_error=None,
     if vm is not None and vm_naturally_exited:
         vm_thread = threads.get(vm)
         if vm_thread is not None and vm_thread.is_alive():
-            failures.append('vm_log_drainer_unjoined')
-            reap_error = recovery.RecoveryError('vm_log_drainer_unjoined')
+            reap_error = recovery.RecoveryError('log_drainer_unjoined')
         else:
             reap_error = None
             try:

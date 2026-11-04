@@ -1007,6 +1007,25 @@ class SoftnetSupervisorTests(unittest.TestCase):
         vm = next(process for process in harness.processes if process.name == "vm")
         self.assertEqual(vm.wait_calls, [])
 
+    def test_natural_shutdown_records_stuck_vm_log_drainer_once(self):
+        vm = FakeProcess("vm")
+        thread = FakeThread(alive=True)
+        failures = []
+        recorded_errors = []
+
+        with patch.object(supervisor, "_stop_owned",
+                          side_effect=recovery.RecoveryError("cleanup_unproven")):
+            supervisor._reap_children(
+                vm, None, {vm: thread}, {"vmReaped": False}, failures,
+                record_error=recorded_errors.append, vm_naturally_exited=True)
+
+        self.assertEqual(failures.count("log_drainer_unjoined"), 1)
+        self.assertNotIn("vm_log_drainer_unjoined", failures)
+        self.assertIn("vm_natural_reap_unproven", failures)
+        self.assertIn("vm_natural_cleanup_unproven", failures)
+        self.assertEqual([str(error) for error in recorded_errors],
+                         ["log_drainer_unjoined", "cleanup_unproven"])
+
     def test_provisioning_shutdown_failure_uses_force_stop_and_never_records_success(self):
         account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_name="owner")
         admission = {**self.admission, "provisioningBundleSha256": "a" * 64,
