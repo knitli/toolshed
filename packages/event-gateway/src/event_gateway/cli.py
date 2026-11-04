@@ -70,14 +70,14 @@ def _parser(*, enrollment_only=False, stock_only=False):
     enroll.add_argument("--agent", action="append", help="Explicit agent binding; repeat as needed")
     if enrollment_only:
         return parser
+    detach = commands.add_parser("detach")
+    detach.add_argument("runtime_id")
     if stock_only:
         run = commands.add_parser("run", help="Run the stock-only control daemon")
         run.add_argument("--dispatch-config", type=Path, required=True,
                          help="Private configuration with stockCodexBinary enabled")
         _add_stock_control_commands(commands)
         _add_github_read_commands(commands)
-        detach = commands.add_parser("detach")
-        detach.add_argument("runtime_id")
         return parser
     run = commands.add_parser("run", help="Run the private control daemon")
     run.add_argument("--dispatch-config", type=Path, help="Private configuration for qualified event delivery")
@@ -116,8 +116,6 @@ def _parser(*, enrollment_only=False, stock_only=False):
     reconcile.add_argument("--original-session-id", required=True)
     reconcile.add_argument("--session-id", required=True)
     reconcile.add_argument("--cloud-config", type=Path, required=True)
-    detach = commands.add_parser("detach")
-    detach.add_argument("runtime_id")
     return parser
 
 
