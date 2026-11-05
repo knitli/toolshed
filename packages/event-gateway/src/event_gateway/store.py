@@ -699,7 +699,7 @@ class Store:
         profile = envelope.get("runtimeProfile")
         admitted = admission.get("envelope") if isinstance(admission, dict) else None
         required = ("deliveryId", "attemptId", *IDENTITY, "consumerGeneration", "runtimeProfile")
-        if (type(envelope.get("schemaVersion")) is not int or envelope["schemaVersion"] != 1
+        if (not _safe_uint(envelope.get("schemaVersion")) or envelope["schemaVersion"] != 1
                 or any(key not in envelope for key in required)
                 or not isinstance(admitted, dict)):
             return None
