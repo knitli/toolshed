@@ -11,8 +11,9 @@ from unittest.mock import AsyncMock, patch
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from event_gateway.cloud import _iso
+from event_gateway.cloud import CloudError, _iso
 from event_gateway.gateway import Gateway
+from event_gateway import messaging_protocol_v2
 from event_gateway.protocol import derive_delivery_id
 from event_gateway.store import IDENTITY, Store, StoreError
 from event_gateway.stock_codex import StockCodexError, StockCodexPreflightCancelled
@@ -21,6 +22,7 @@ from event_gateway.stock_codex import StockCodexError, StockCodexPreflightCancel
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = json.loads((ROOT / "contracts/event-v1/protocol-v1.json").read_text())
 EVENT = next(event for event in FIXTURES["validEnvelopes"] if "runtimeProfile" in event)
+MESSAGING_FIXTURE = json.loads((ROOT / "contracts/messaging-v2/messaging-protocol-semantics-v2.json").read_text())
 NOW = 1791201630
 
 
@@ -42,7 +44,7 @@ class Authority:
         issued = _iso(self.test.now)
         return {
             "status": "admitted", "permitId": str(uuid.uuid4()),
-            "nodeId": str(uuid.uuid4()), "permitIssuedAt": issued,
+            "nodeId": envelope.get("nodeId", str(uuid.uuid4())), "permitIssuedAt": issued,
             "permitExpiresAt": _iso(self.test.now + 5), "envelope": copy.deepcopy(envelope),
         }
 
@@ -142,6 +144,342 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(submit.await_count, 1)
         self.assertEqual(submit.await_args.args, (self.event["eventReference"],))
         self.assertIn("before_start", submit.await_args.kwargs)
+
+    def setup_messaging_v2_stock(self):
+        self.now = MESSAGING_FIXTURE["nowMs"] / 1000
+        self.event = copy.deepcopy(MESSAGING_FIXTURE["envelope"])
+        self.event["runtimeProfile"] = {
+            "profile": "assigned_stock_client", "client": "codex",
+            "conversationId": str(uuid.uuid4()),
+        }
+        self.event["deliveryId"] = messaging_protocol_v2.derive_delivery_id(self.event)
+        self.mapping = {key: self.event[key] for key in (
+            "principal", "agent", "nodeId", "runtimeId", "nodeGeneration", "runtimeGeneration",
+            "attachmentGeneration", "consumerGeneration", "routingGeneration",
+        )}
+        self.mapping.update(namespace=self.event["canonicalSubject"]["namespace"],
+                            agentIncarnation=self.event["canonicalSubject"]["agentIncarnation"],
+                            runtimeProfile=copy.deepcopy(self.event["runtimeProfile"]),
+                            leaseExpiresAt=self.now + 3600)
+        self.store.put_messaging_attachment(self.mapping)
+
+    async def test_v2_stock_uses_existing_durable_queue_and_exact_ack(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        self.assertEqual(self.store.delivery(delivery)["status"], "held")
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})) as submit:
+            result = await self.gateway.dispatch(delivery)
+            again = await self.gateway.dispatch(delivery)
+        self.assertEqual(result["status"], "command_accepted")
+        self.assertEqual(again["status"], "command_accepted")
+        self.assert_stock_submit_once(submit)
+        attempt = self.store.current_attempt(delivery)
+        acknowledgment = attempt["native_ack"]
+        self.assertEqual(acknowledgment["schemaVersion"], 2)
+        self.assertEqual(acknowledgment["runtimeProfile"], self.event["runtimeProfile"])
+        self.assertEqual(acknowledgment["permitId"], attempt["admission"]["permitId"])
+        self.assertEqual(acknowledgment["status"], "command_accepted")
+        self.assertNotIn("nativeCorrelation", acknowledgment)
+        self.assertEqual(attempt["state"], "command_accepted")
+
+    async def test_v2_completed_ack_releases_pending_capacity_and_expires(self):
+        self.setup_messaging_v2_stock()
+        self.store.max_rows = 1
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})):
+            await self.gateway.dispatch(delivery)
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.assertIsNone(self.store.status()["blockedReason"])
+        next_event = dict(self.event, eventId=str(uuid.uuid4()), attemptId=str(uuid.uuid4()))
+        next_event["deliveryId"] = messaging_protocol_v2.derive_delivery_id(next_event)
+        self.store.accept(next_event)
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.now += 8 * 86400
+        self.store.cleanup()
+        self.assertIsNone(self.store.delivery(delivery))
+        self.assertIsNone(self.store.current_attempt(delivery))
+
+    async def test_v2_lost_ack_remains_pending_and_retained_until_exact_retry(self):
+        self.setup_messaging_v2_stock()
+        self.store.max_rows = 1
+        self.authority.drop_ack = True
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})) as submit:
+            await self.gateway.dispatch(delivery)
+            self.assertEqual(self.store.status()["pending"], 1)
+            self.now += 8 * 86400
+            self.store.cleanup()
+            self.assertIsNotNone(self.store.delivery(delivery))
+            self.assertIsNotNone(self.store.current_attempt(delivery))
+            await self.gateway.reconcile(delivery)
+        self.assert_stock_submit_once(submit)
+        self.assertEqual(self.authority.acks[0], self.authority.acks[1])
+        self.assertEqual(self.store.status()["pending"], 0)
+
+    async def test_v2_no_start_retries_settlement_before_any_new_client_submission(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        self.authority.fail_settlement_once = True
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(error=StockCodexError("client_not_started"))) as submit:
+            result = await self.gateway.dispatch(delivery)
+            self.assertEqual(result["status"], "settlement_pending")
+            attempt_id = self.store.current_attempt(delivery)["attempt_id"]
+            self.restart()
+            recovered = await self.gateway.reconcile(delivery)
+        self.assert_stock_submit_once(submit)
+        self.assertEqual(recovered["status"], "held")
+        self.assertIsNone(self.store.current_attempt(delivery))
+        self.assertNotEqual(self.store.delivery_envelope(delivery)["attemptId"], attempt_id)
+        self.assertEqual(self.authority.settlements[0], self.authority.settlements[1])
+        self.assertEqual(self.authority.acks, [])
+
+    async def test_v2_definitive_claim_refusal_releases_capacity_and_expires(self):
+        self.setup_messaging_v2_stock()
+        self.store.max_rows = 1
+        delivery = self.accept()
+        refusal = CloudError("denied", definitive_refusal=True)
+        with patch.object(self.authority, "claim", side_effect=refusal):
+            self.assertEqual((await self.gateway.dispatch(delivery))["status"], "stale")
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.assertTrue(self.store.accept(self.event)["duplicate"])
+        self.restart()
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.now += 8 * 86400
+        self.assertEqual(self.store.cleanup(), 1)
+        self.assertIsNone(self.store.current_attempt(delivery))
+
+    async def test_v2_definitive_refusal_cannot_release_prior_claim_uncertainty(self):
+        self.setup_messaging_v2_stock()
+        refusal = CloudError("denied", definitive_refusal=True)
+        uncertain = self.accept()
+        with patch.object(self.authority, "claim", side_effect=TimeoutError()):
+            await self.gateway.dispatch(uncertain)
+        with patch.object(self.authority, "claim", side_effect=refusal):
+            self.assertEqual((await self.gateway.reconcile(uncertain))["status"], "claiming")
+        self.now += 8 * 86400
+        self.store.cleanup()
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.assertEqual(self.store.current_attempt(uncertain)["claim_uncertain"], 1)
+        self.assertEqual(self.authority.acks, [])
+        self.assertEqual(self.authority.settlements, [])
+
+    async def test_v2_claim_refusal_survives_detach_for_capacity_and_retention(self):
+        self.setup_messaging_v2_stock()
+        self.store.max_rows = 1
+        delivery = self.accept()
+        refusal = CloudError("denied", definitive_refusal=True)
+        with patch.object(self.authority, "claim", side_effect=refusal):
+            await self.gateway.dispatch(delivery)
+        self.assertEqual(self.store.current_attempt(delivery)["reason"], "claim_refused")
+        self.assertEqual(self.store.accept(copy.deepcopy(self.event))["duplicate"], True)
+        self.store.detach(self.event["runtimeId"])
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.assertEqual(self.store.get(delivery)["reason"], "claim_refused")
+        self.assertEqual(self.store.current_attempt(delivery)["reason"], "claim_refused")
+        self.restart()
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.now += 8 * 86400
+        self.assertEqual(self.store.cleanup(), 1)
+        self.assertIsNone(self.store.get(delivery))
+
+    async def test_v2_claim_refusal_survives_attachment_replacement(self):
+        self.setup_messaging_v2_stock()
+        self.store.max_rows = 1
+        delivery = self.accept()
+        refusal = CloudError("denied", definitive_refusal=True)
+        with patch.object(self.authority, "claim", side_effect=refusal):
+            await self.gateway.dispatch(delivery)
+        self.assertTrue(self.store.accept(copy.deepcopy(self.event))["duplicate"])
+
+        replacement_profile = dict(self.mapping["runtimeProfile"], conversationId=str(uuid.uuid4()))
+        replacement = dict(
+            self.mapping,
+            runtimeGeneration=self.mapping["runtimeGeneration"] + 1,
+            attachmentGeneration=self.mapping["attachmentGeneration"] + 1,
+            consumerGeneration=self.mapping["consumerGeneration"] + 1,
+            routingGeneration=self.mapping["routingGeneration"] + 1,
+            runtimeProfile=replacement_profile,
+            leaseExpiresAt=self.now + 3600,
+        )
+        self.store.put_messaging_attachment(replacement)
+        attempt = self.store.current_attempt(delivery)
+        self.assertEqual((attempt["state"], attempt["reason"]), ("stale", "claim_refused"))
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.assertTrue(self.store.get(delivery) is not None)
+
+        next_event = copy.deepcopy(self.event)
+        next_event.update(
+            eventId=str(uuid.uuid4()),
+            attemptId=str(uuid.uuid4()),
+            runtimeGeneration=replacement["runtimeGeneration"],
+            attachmentGeneration=replacement["attachmentGeneration"],
+            consumerGeneration=replacement["consumerGeneration"],
+            routingGeneration=replacement["routingGeneration"],
+            runtimeProfile=replacement_profile,
+        )
+        next_event["deliveryId"] = messaging_protocol_v2.derive_delivery_id(next_event)
+        self.store.max_rows = 1
+        next_delivery = self.store.accept(next_event)["deliveryId"]
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.assertTrue(self.store.get(delivery) is not None)
+        self.restart()
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.now += 8 * 86400
+        self.assertEqual(self.store.cleanup(), 1)
+        self.assertIsNone(self.store.get(delivery))
+        self.assertIsNotNone(self.store.get(next_delivery))
+
+    async def test_v2_uncertain_claim_remains_an_obligation_after_detach(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        with patch.object(self.authority, "claim", side_effect=TimeoutError()):
+            await self.gateway.dispatch(delivery)
+        self.store.detach(self.event["runtimeId"])
+        self.assertEqual(self.store.current_attempt(delivery)["state"], "claiming")
+        self.assertEqual(self.store.current_attempt(delivery)["claim_uncertain"], 1)
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.now += 8 * 86400
+        self.store.cleanup()
+        self.assertIsNotNone(self.store.get(delivery))
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.assertEqual(self.authority.acks, [])
+        self.assertEqual(self.authority.settlements, [])
+
+    async def test_v2_stock_unknown_restart_does_not_replay_codex(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(error=TimeoutError("lost CLI response"))) as submit:
+            self.assertEqual((await self.gateway.dispatch(delivery))["status"], "ambiguous")
+            self.restart()
+            self.assertEqual((await self.gateway.reconcile(delivery))["status"], "ambiguous")
+        submit.assert_awaited_once()
+        self.assertEqual(self.authority.acks, [])
+
+    async def test_v2_ambiguous_stock_recovery_survives_restart_and_detach(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(error=TimeoutError("lost CLI response"))) as submit:
+            self.assertEqual((await self.gateway.dispatch(delivery))["status"], "ambiguous")
+            self.restart()
+            self.store.detach(self.event["runtimeId"])
+            self.assertEqual((await self.gateway.reconcile(delivery))["status"], "ambiguous")
+        submit.assert_awaited_once()
+        summary = self.store.list_stock_recovery(delivery_id=delivery)
+        self.assertEqual(summary["truncated"], False)
+        item, = summary["deliveries"]
+        self.assertEqual(item["deliveryId"], delivery)
+        self.assertEqual(item["attemptId"], self.event["attemptId"])
+        self.assertEqual(item["conversationId"], self.event["runtimeProfile"]["conversationId"])
+        self.assertEqual(item["machineState"], "unknown")
+        self.assertEqual(item["cloudObligation"], "unresolved")
+
+        before = self.store.current_attempt(delivery)
+        first = self.store.abandon_stock_delivery(delivery, item["attemptId"], item["expectedIdentitySha256"])
+        second = self.store.abandon_stock_delivery(delivery, item["attemptId"], item["expectedIdentitySha256"])
+        after = self.store.current_attempt(delivery)
+        self.assertEqual(first, second)
+        self.assertEqual(first["action"], "abandoned")
+        self.assertEqual(first["cloudObligation"], "unresolved")
+        self.assertEqual(self.store.get(delivery)["status"], "ambiguous")
+        self.assertEqual(after["native_ack"], before["native_ack"])
+        self.assertEqual(after["reserved_bytes"], before["reserved_bytes"])
+        self.assertEqual(self.authority.acks, [])
+        self.assertEqual(self.authority.settlements, [])
+
+    async def test_v2_stock_recovery_identity_binds_all_message_and_destination_fields(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(error=TimeoutError("lost CLI response"))):
+            await self.gateway.dispatch(delivery)
+        attempt = self.store.current_attempt(delivery)
+        base = self.store._stock_recovery_identity(
+            attempt["envelope"], attempt["admission"], now_ms=self.now * 1000,
+        )
+        self.assertIsNotNone(base)
+        original_digest = base[1]
+        changes = (
+            ("runtimeProfile", lambda event: event["runtimeProfile"].update(conversationId=str(uuid.uuid4())), None),
+            ("namespace", lambda event: event["canonicalSubject"].update(namespace="changed.example"), None),
+            ("messageId", lambda event: event["canonicalSubject"].update(messageId=str(uuid.uuid4())), None),
+            ("agentIncarnation", lambda event: event["canonicalSubject"].update(agentIncarnation=event["canonicalSubject"]["agentIncarnation"] + 1), None),
+            ("sourceStateVersion", lambda event: event.update(sourceStateVersion="msg:" + "b" * 64), None),
+            ("routingGeneration", lambda event: event.update(routingGeneration=event["routingGeneration"] + 1), None),
+            ("nodeId", lambda event: event.update(nodeId=str(uuid.uuid4())), None),
+            ("nodeGeneration", lambda event: event.update(nodeGeneration=event["nodeGeneration"] + 1), None),
+            ("runtimeGeneration", lambda event: event.update(runtimeGeneration=event["runtimeGeneration"] + 1), None),
+            ("attachmentGeneration", lambda event: event.update(
+                attachmentGeneration=event["attachmentGeneration"] + 1,
+                consumerGeneration=event["consumerGeneration"] + 1,
+            ), None),
+            ("permitId", lambda _event: None, lambda admission: admission.update(permitId=str(uuid.uuid4()))),
+            ("permitIssuedAt", lambda event: event.update(
+                issuedAt=_iso(self.now - 1), expiresAt=_iso(self.now + 59),
+            ), lambda admission: (
+                admission.update(permitIssuedAt=_iso(self.now - 1), permitExpiresAt=_iso(self.now + 4)),
+                admission["envelope"].update(issuedAt=_iso(self.now - 1), expiresAt=_iso(self.now + 59)),
+            )),
+            ("permitExpiresAt", lambda event: event.update(
+                issuedAt=_iso(self.now - 1), expiresAt=_iso(self.now + 59),
+            ), lambda admission: (
+                admission.update(permitIssuedAt=_iso(self.now - 1), permitExpiresAt=_iso(self.now + 4)),
+                admission["envelope"].update(issuedAt=_iso(self.now - 1), expiresAt=_iso(self.now + 59)),
+            )),
+        )
+        for label, change_event, change_admission in changes:
+            with self.subTest(field=label):
+                changed = copy.deepcopy(attempt["envelope"])
+                change_event(changed)
+                changed["deliveryId"] = messaging_protocol_v2.derive_delivery_id(changed)
+                changed_admission = copy.deepcopy(attempt["admission"])
+                changed_admission["nodeId"] = changed["nodeId"]
+                changed_admission["envelope"] = copy.deepcopy(changed)
+                if change_admission:
+                    change_admission(changed_admission)
+                identity = self.store._stock_recovery_identity(
+                    changed, changed_admission, now_ms=self.now * 1000,
+                )
+                self.assertIsNotNone(identity)
+                self.assertNotEqual(identity[1], original_digest)
+                self.store.db.execute(
+                    "UPDATE deliveries SET envelope=? WHERE id=?",
+                    (json.dumps(changed), delivery),
+                )
+                self.store.db.execute(
+                    "UPDATE attempts SET envelope=?, admission=? WHERE delivery_id=?",
+                    (json.dumps(changed), json.dumps(changed_admission), delivery),
+                )
+                self.store.db.commit()
+                with self.assertRaisesRegex(StoreError, "^stale_recovery_identity$"):
+                    self.store.abandon_stock_delivery(delivery, attempt["attempt_id"], original_digest)
+                self.store.db.execute(
+                    "UPDATE deliveries SET envelope=? WHERE id=?",
+                    (json.dumps(attempt["envelope"]), delivery),
+                )
+                self.store.db.execute(
+                    "UPDATE attempts SET envelope=?, admission=? WHERE delivery_id=?",
+                    (json.dumps(attempt["envelope"]), json.dumps(attempt["admission"]), delivery),
+                )
+                self.store.db.commit()
+
+    async def test_v2_stock_lost_cloud_ack_retries_exact_ack_after_restart(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        self.authority.drop_ack = True
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})) as submit:
+            self.assertEqual((await self.gateway.dispatch(delivery))["reason"], "stock_ack_pending")
+            stored_ack = self.store.current_attempt(delivery)["native_ack"]
+            self.restart()
+            self.assertEqual((await self.gateway.reconcile(delivery))["status"], "command_accepted")
+        submit.assert_awaited_once()
+        self.assertEqual(self.authority.acks, [stored_ack, stored_ack])
 
     async def test_duplicate_and_command_acceptance_never_relaunch(self):
         delivery = self.accept()

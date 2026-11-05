@@ -38,6 +38,8 @@ MESSAGING_V2_ADOPTION_FIXTURE = {
     "adoption": "trusted",
     "hashes": {path: "0" * 64 for path in MESSAGING_V2_PATHS},
 }
+DORMANT_V2_ARCHIVE = "tests/fixtures/messaging-v2-dormant-contract.zip"
+DORMANT_V2_ARCHIVE_SHA256 = "6e19bee4a5ee9ae77fc33e465f1dc113bf78d0f9495bfe77b35ab22c8850113e"
 ACTIVE_V2_NAME = "active-assigned-stock-v2"
 ACTIVE_V2_SOURCE_SHA = "e954904603b3467e30bbeaf7446977b61fbcb9ef"
 ACTIVE_V2_SOURCE_TREE = "f47bb9345aa17f9b504965bd5c319163b569c9df"
@@ -153,6 +155,14 @@ class ContractWorkflowTests(unittest.TestCase):
                     for path in MESSAGING_V2_PATHS}
 
     def test_dormant_messaging_v2_profile_is_provenance_only(self):
+        archive_path = PACKAGE / DORMANT_V2_ARCHIVE
+        self.assertEqual(hashlib.sha256(archive_path.read_bytes()).hexdigest(),
+                         DORMANT_V2_ARCHIVE_SHA256)
+        with zipfile.ZipFile(archive_path) as archive:
+            self.assertCountEqual(archive.namelist(), MESSAGING_V2_PATHS)
+            self.messaging_v2 = {SNAPSHOT + path: archive.read(path)
+                                 for path in MESSAGING_V2_PATHS}
+        self.blobs.update(self.messaging_v2)
         self.assertEqual(self.verify_messaging_v2(),
                          ("dormant-source-conformance", "dormant"))
         receipt = json.loads(self.messaging_v2[SNAPSHOT + MESSAGING_V2_PATHS[2]])
@@ -1114,7 +1124,7 @@ class ContractWorkflowTests(unittest.TestCase):
             self.assertIn(payload["context"], ("Event Gateway / trusted contract",
                                                 "Event Gateway / Messaging v2 contract"))
             self.assertEqual(payload["target_url"], "https://example.test/run")
-        self.assertIn("Dormant Messaging v2 provenance verified; not adopted",
+        self.assertIn("Active trusted Messaging v2 profile verified: " + ACTIVE_V2_NAME,
                       [payload["description"] for _, payload in posts])
 
     def test_trusted_messaging_v2_profile_has_distinct_status(self):

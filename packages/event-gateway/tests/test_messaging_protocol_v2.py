@@ -13,6 +13,17 @@ PACKAGE = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = PACKAGE / 'contracts/messaging-v2/messaging-protocol-semantics-v2.json'
 FIXTURE = json.loads(FIXTURE_PATH.read_text())
 ENVELOPE, ACK, NOW = FIXTURE['envelope'], FIXTURE['acknowledgment'], FIXTURE['nowMs']
+ACTIVE_SOURCE_COMMIT = 'e954904603b3467e30bbeaf7446977b61fbcb9ef'
+ACTIVE_SOURCE_FILES = {
+    'apps/os/packages/event-runtime/src/messaging/protocol-v2.ts': '3f91122c7bd2d78d072ad51a9fb2fef4adfb99e3277bf4052196a54a74238193',
+    'apps/os/packages/event-runtime/src/protocol.ts': 'b9927658cd80cfb52222bcc20ffe748acbea0c16da06f0f283b55c6046b9284d',
+    'apps/os/packages/event-runtime/src/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+    'apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json': (
+        '0553380db6fbe8c9af557aea5847ce22cb52917da1daadb4491524e1f2cdf22f'
+    ),
+    'apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json': 'a66d74967f5470e193bfcb250cdc130fd22081b88c42b62c24fecf01d269f032',
+    'apps/os/pnpm-lock.yaml': '62f84801e3d426df4a97a54bc48c1a547d9ae3f0205166cc92d9b7391e581549',
+}
 OTHER = '01234567-89ab-4def-8123-456789abcdef'
 GENERATIONS = ('nodeGeneration', 'runtimeGeneration', 'attachmentGeneration',
                'consumerGeneration', 'routingGeneration')
@@ -149,8 +160,11 @@ def decoded_cases():
     """All JSON-representable schema/freshness cases, for both language drivers."""
     result = []
 
-    def add(kind, name, value, expected, now=NOW):
-        result.append(dict(kind=kind, case=name, value=value, nowMs=now, expected=expected))
+    def add(kind, name, value, expected, now=NOW, matches=None):
+        case = dict(kind=kind, case=name, value=value, nowMs=now, expected=expected)
+        if matches is not None:
+            case['matchesAssignedStockEnvelope'] = matches
+        result.append(case)
 
     for kind, base in [('envelope', ENVELOPE), ('acknowledgment', ACK)]:
         _add_identity_cases(add, kind, base)
@@ -161,7 +175,34 @@ def decoded_cases():
     _add_subject_cases(add)
     _add_correlation_cases(add)
     _add_freshness_cases(add)
+    stock_envelope, stock_ack = _stock_vectors()
+    mutations = FIXTURE['assigned_stock_mutations']
+    add('envelope', 'assigned-stock-base', stock_envelope, True)
+    add('acknowledgment', 'assigned-stock-command-accepted-base', stock_ack, True,
+        matches=True)
+    add('envelope', 'assigned-stock-profile-mismatch',
+        dict(stock_envelope, **mutations['profile_mismatch']), False)
+    profile_mismatch_ack = dict(stock_ack, **mutations['profile_mismatch'])
+    add('acknowledgment', 'assigned-stock-profile-mismatch', profile_mismatch_ack, False,
+        matches=False)
+    conversation_mismatch = dict(stock_ack, **mutations['conversation_mismatch'])
+    add('acknowledgment', 'assigned-stock-conversation-mismatch', conversation_mismatch, True,
+        matches=False)
+    routing_mismatch = dict(stock_ack, **mutations['routing_generation_mismatch'])
+    add('acknowledgment', 'assigned-stock-routing-generation-mismatch', routing_mismatch, True,
+        matches=False)
+    permit_invalid = dict(stock_ack, **mutations['permit_invalid'])
+    add('acknowledgment', 'assigned-stock-permit-invalid', permit_invalid, False,
+        matches=False)
+    native_correlation_present = dict(stock_ack, **mutations['native_correlation_present'])
+    add('acknowledgment', 'assigned-stock-native-correlation-present', native_correlation_present, False,
+        matches=False)
     return result
+
+
+def _stock_vectors():
+    return (copy.deepcopy(FIXTURE['assigned_stock_envelope']),
+            copy.deepcopy(FIXTURE['assigned_stock_command_accepted_ack']))
 
 
 class MessagingProtocolV2Tests(unittest.TestCase):
@@ -170,15 +211,60 @@ class MessagingProtocolV2Tests(unittest.TestCase):
             with self.subTest(kind=case['kind'], case=case['case']):
                 validator = protocol.validate_envelope if case['kind'] == 'envelope' else protocol.validate_acknowledgment
                 self.assertIs(validator(case['value'], case['nowMs']), case['expected'])
+                if 'matchesAssignedStockEnvelope' in case:
+                    stock_envelope, _ = _stock_vectors()
+                    self.assertIs(protocol.acknowledgment_matches_delivery(stock_envelope, case['value']),
+                                  case['matchesAssignedStockEnvelope'])
 
-    def test_source_receipt_and_exact_fixture_bytes(self):
+    def test_source_receipt_records_active_policy_provenance_and_exact_fixture_bytes(self):
         receipt = json.loads((FIXTURE_PATH.parent / 'source-receipt.json').read_text())
         self.assertEqual(hashlib.sha256(FIXTURE_PATH.read_bytes()).hexdigest(), receipt['fixture']['sha256'])
-        self.assertEqual(receipt['purpose'], 'dormant_source_conformance_only')
+        self.assertEqual(receipt['purpose'], 'active_assigned_stock_v2_policy_adoption')
         self.assertEqual(receipt['protocolVersion'], 2)
-        self.assertFalse(receipt['trustedPolicyAdoption'])
-        self.assertEqual(len(receipt['sourceCommit']), 40)
-        self.assertTrue(all(len(file['sha256']) == 64 for file in receipt['sourceFiles']))
+        self.assertTrue(receipt['trustedPolicyAdoption'])
+        self.assertEqual(receipt['profile'], 'active-assigned-stock-v2')
+        self.assertEqual(receipt['sourceCommit'], ACTIVE_SOURCE_COMMIT)
+        self.assertEqual({file['path']: file['sha256'] for file in receipt['sourceFiles']},
+                         ACTIVE_SOURCE_FILES)
+        self.assertEqual(receipt['fixture']['file'],
+                         'apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json')
+        self.assertEqual((receipt['schemaDependency']['package'], receipt['schemaDependency']['version']),
+                         ('zod', '4.6.5'))
+        # Receipt metadata is provenance only. Trust comes from the separate
+        # immutable four-blob profile in the trusted workflow policy.
+
+    def test_assigned_stock_envelope_and_command_ack_are_exact(self):
+        envelope, acknowledgment = _stock_vectors()
+        parsed_envelope = protocol.parse_envelope(protocol._json_bytes(envelope), NOW)
+        parsed_ack = protocol.parse_acknowledgment(protocol._json_bytes(acknowledgment), NOW)
+        self.assertEqual(parsed_envelope, envelope)
+        self.assertEqual(parsed_ack, acknowledgment)
+        self.assertTrue(protocol.acknowledgment_matches_delivery(envelope, acknowledgment))
+        mutations = FIXTURE['assigned_stock_mutations']
+        for changes in (
+                mutations['conversation_mismatch'], mutations['routing_generation_mismatch'],
+                {'permitId': 'bad'}, {'deliveryId': 'dly_' + '0' * 64},
+                {'deliveredSourceStateVersion': 'msg:' + 'b' * 64}, {'nodeGeneration': 2},
+                {'runtimeGeneration': 3}, {'attachmentGeneration': 4, 'consumerGeneration': 4},
+                {'consumerGeneration': 4}, {'routingGeneration': 5},
+                {'nativeCorrelation': {'kind': 'native_turn_started'}},
+        ):
+            changed = dict(acknowledgment, **changes)
+            self.assertFalse(protocol.acknowledgment_matches_delivery(envelope, changed))
+            if (changes.get('permitId') == 'bad' or 'nativeCorrelation' in changes
+                    or changes == {'consumerGeneration': 4}):
+                self.assertFalse(protocol.validate_acknowledgment(changed, NOW))
+            else:
+                self.assertTrue(protocol.validate_acknowledgment(changed, NOW))
+        self.assertFalse(protocol.validate_envelope(dict(envelope, **mutations['profile_mismatch']), NOW))
+        self.assertFalse(protocol.validate_acknowledgment(dict(acknowledgment, **mutations['profile_mismatch']), NOW))
+        self.assertFalse(protocol.validate_acknowledgment(
+            dict(acknowledgment, **mutations['permit_invalid']), NOW))
+        self.assertFalse(protocol.validate_acknowledgment(
+            dict(acknowledgment, **mutations['native_correlation_present']), NOW))
+        mismatched = dict(envelope, runtimeProfile=dict(envelope['runtimeProfile'], conversationId=ENVELOPE['eventId']))
+        self.assertFalse(protocol.acknowledgment_matches_delivery(mismatched, acknowledgment))
+        self.assertFalse(protocol.acknowledgment_matches_delivery(ENVELOPE, acknowledgment))
 
     def test_nonfinite_and_exact_numeric_types(self):
         for base, validator in [(ENVELOPE, protocol.validate_envelope), (ACK, protocol.validate_acknowledgment)]:

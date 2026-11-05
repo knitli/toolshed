@@ -15,7 +15,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from event_gateway import cli, daemon
 from event_gateway.cloud import CloudClient, CloudError, Credentials, _iso
+from event_gateway.gateway import Gateway
+from event_gateway import messaging_protocol_v2
 from event_gateway.protocol import derive_delivery_id
+from event_gateway.security import sign
 from event_gateway.store import Store
 
 
@@ -37,6 +40,357 @@ def response(status="attached", **changes):
 
 
 class StockControlTests(unittest.IsolatedAsyncioTestCase):
+    def test_invalid_cloud_config_returns_safe_refusal_without_mutation(self):
+        for operation in ("attach", "renew"):
+            for invalid in ("missing", "malformed", "permissions"):
+                with self.subTest(operation=operation, invalid=invalid), tempfile.TemporaryDirectory() as temp:
+                    state = Path(temp).resolve() / "state"
+                    original = self._stock_mapping(time.time())
+                    with Store(state) as store:
+                        store.put_attachment(original)
+                    config = Path(temp).resolve() / "cloud.json"
+                    if invalid != "missing":
+                        config.write_text("{" if invalid == "malformed" else "{}")
+                        config.chmod(0o600 if invalid == "malformed" else 0o644)
+                    output = io.StringIO()
+                    with patch.object(CloudClient, "assigned_stock") as cloud_call, \
+                            patch.object(cli, "Store") as local_store, \
+                            patch.object(cli, "request") as control_call, redirect_stdout(output):
+                        code = cli.stock_main([
+                            "--state-dir", str(state), "stock-control", operation,
+                            "--runtime-id", RUNTIME, "--conversation-id", CONVERSATION,
+                            "--cloud-config", str(config),
+                            "--expected-runtime-generation", "1",
+                            "--expected-attachment-generation", "1",
+                        ])
+                    self.assertEqual(code, 2)
+                    self.assertEqual(json.loads(output.getvalue()),
+                                     {"assignment": None, "reason": "invalid_cloud_config"})
+                    cloud_call.assert_not_called()
+                    local_store.assert_not_called()
+                    control_call.assert_not_called()
+                    with Store(state) as store:
+                        self.assertEqual(store.get_attachment(RUNTIME), original)
+
+    def _handoff(self, *, namespace="team/inbox", route_generation=1, agent_incarnation=1):
+        return {
+            "version": 1, "namespace": namespace, "principal": "owner@example.com", "agent": "codex",
+            "agentIncarnation": agent_incarnation, "routeGeneration": route_generation,
+            "consumer": {"nodeId": NODE, "runtimeId": RUNTIME, "nodeGeneration": 2,
+                         "runtimeGeneration": 1, "attachmentGeneration": 1,
+                         "consumerGeneration": 1},
+            "runtimeProfile": PROFILE,
+        }
+
+    def _stock_mapping(self, now):
+        return {
+            "runtimeId": RUNTIME, "principal": "owner@example.com", "agent": "codex",
+            "nodeId": NODE, "nodeGeneration": 2, "runtimeGeneration": 1,
+            "attachmentGeneration": 1, "consumerGeneration": 1,
+            "leaseExpiresAt": now + 30, "runtimeProfile": PROFILE,
+        }
+
+    def _messaging_mapping(self, now):
+        return {
+            **self._stock_mapping(now), "namespace": "team/inbox", "agentIncarnation": 1,
+            "routingGeneration": 1,
+        }
+
+    def _stock_renew_args(self, handoff_path):
+        return type("Args", (), {
+            "operation": "renew", "runtime_id": RUNTIME,
+            "conversation_id": CONVERSATION, "cloud_config": Path("cloud.json"),
+            "expected_runtime_generation": 1, "expected_attachment_generation": 1,
+            "messaging_handoff": handoff_path,
+        })()
+
+    def test_owner_handoff_import_makes_real_v2_ingress_usable(self):
+        fixture_now = __import__("json").loads(
+            (Path(__file__).resolve().parents[1] /
+             "contracts/messaging-v2/messaging-protocol-semantics-v2.json").read_text()
+        )["nowMs"] / 1000
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+            handoff_path = Path(temp).resolve() / "messaging-handoff.json"
+            handoff_path.write_text(json.dumps(self._handoff()))
+            handoff_path.chmod(0o600)
+            with Store(state, clock=lambda: fixture_now) as store:
+                store.put_attachment(self._stock_mapping(fixture_now))
+
+            class FakeCloud:
+                principal, agent = "owner@example.com", "codex"
+                node_id, node_generation = NODE, 2
+
+                async def assigned_stock(self, request):
+                    self.assert_request = request
+                    return response("renewed", leaseUntil=_iso(fixture_now + 120))
+
+            daemon_store = Store(state, clock=lambda: fixture_now)
+            daemon_store.put_attachment(self._stock_mapping(fixture_now))
+            (state / "control.sock").touch()
+            daemon_commands = []
+
+            def daemon_request(_state, command):
+                daemon_commands.append(command)
+                return daemon._execute_control_command(daemon_store, command)
+
+            output = io.StringIO()
+            with patch.object(cli, "load_cloud_client", return_value=FakeCloud()), \
+                    patch.object(cli, "Store", side_effect=lambda path: Store(
+                        path, clock=lambda: fixture_now)), \
+                    patch.object(cli, "request", side_effect=daemon_request), redirect_stdout(output):
+                exit_code = cli.main([
+                    "--state-dir", str(state), "stock-control", "renew",
+                    "--runtime-id", RUNTIME, "--conversation-id", CONVERSATION,
+                    "--cloud-config", str(state / "cloud.json"),
+                    "--expected-runtime-generation", "1",
+                    "--expected-attachment-generation", "1",
+                    "--messaging-handoff", str(handoff_path),
+                ])
+            self.assertEqual(exit_code, 0, f"{output.getvalue()} {daemon_commands!r}")
+            self.assertEqual(json.loads(output.getvalue())["localMapping"], "stored")
+            self.assertEqual([item["command"] for item in daemon_commands],
+                             ["get-attachment", "put-messaging-attachment"])
+            self.assertEqual(daemon_commands[1]["expectedMapping"], self._stock_mapping(fixture_now))
+            daemon_store.close()
+
+            event_fixture = json.loads((Path(__file__).resolve().parents[1] /
+                                        "contracts/messaging-v2/messaging-protocol-semantics-v2.json").read_text())
+            event = copy.deepcopy(event_fixture["envelope"])
+            event.update(principal="owner@example.com", agent="codex", nodeId=NODE,
+                         runtimeId=RUNTIME, nodeGeneration=2, runtimeGeneration=1,
+                         attachmentGeneration=1, consumerGeneration=1, routingGeneration=1,
+                         runtimeProfile=PROFILE)
+            event["canonicalSubject"].update(namespace="team/inbox", agentIncarnation=1)
+            event["deliveryId"] = messaging_protocol_v2.derive_delivery_id(event)
+            key = Ed25519PrivateKey.generate()
+            body = messaging_protocol_v2._json_bytes(event)
+            gateway = Gateway(Store(state, clock=lambda: fixture_now), None, None,
+                              audience="local", keys={"owner": key.public_key()},
+                              clock=lambda: fixture_now, stock_only=True)
+            self.addCleanup(gateway.store.close)
+            result = gateway.accept_messaging_v2(
+                body, signature=sign(body, key, "local"), audience="local", key_id="owner",
+                node_id=NODE, runtime_id=RUNTIME,
+            )
+            self.assertEqual(result["status"], "held")
+
+    def test_invalid_or_stale_handoff_fails_before_cloud_renew(self):
+        for change, source_mapping in (
+                ({"runtimeProfile": {**PROFILE, "conversationId": NODE}}, "stock"),
+                ({"agentIncarnation": 2}, "messaging"),
+                ({"routeGeneration": 2}, "messaging"),
+                ({"consumer": {**self._handoff()["consumer"], "runtimeGeneration": 9}}, "stock"),
+        ):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temp:
+                now = 1_791_201_630
+                state = Path(temp).resolve() / "state"
+                handoff_path = Path(temp).resolve() / "messaging-handoff.json"
+                handoff_path.write_text(json.dumps({**self._handoff(), **change}))
+                handoff_path.chmod(0o600)
+                with Store(state, clock=lambda: now) as store:
+                    if source_mapping == "messaging":
+                        store.put_messaging_attachment(self._messaging_mapping(now))
+                    else:
+                        store.put_attachment(self._stock_mapping(now))
+                cloud_calls = []
+
+                class FakeCloud:
+                    principal, agent = "owner@example.com", "codex"
+                    node_id, node_generation = NODE, 2
+
+                    async def assigned_stock(self, _request):
+                        cloud_calls.append(True)
+                        return response("renewed", leaseUntil=_iso(now + 120))
+
+                output = io.StringIO()
+                with patch.object(cli, "load_cloud_client", return_value=FakeCloud()), \
+                        patch.object(cli, "Store", side_effect=lambda path: Store(
+                            path, clock=lambda: now)), redirect_stdout(output):
+                    self.assertEqual(cli._execute_stock_control(
+                        self._stock_renew_args(handoff_path), state), 2)
+                self.assertEqual(cloud_calls, [])
+                self.assertEqual(json.loads(output.getvalue())["reason"], "stale_messaging_handoff")
+
+    def test_messaging_handoff_accepts_zero_incarnation_and_rejects_negative(self):
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+        with tempfile.TemporaryDirectory() as temp:
+            handoff_path = Path(temp).resolve() / "messaging-handoff.json"
+            expected = self._stock_mapping(NOW)
+            handoff_path.write_text(json.dumps(self._handoff(agent_incarnation=0)))
+            handoff_path.chmod(0o600)
+            accepted = cli._load_stock_messaging_handoff(
+                handoff_path, self._stock_renew_args(handoff_path), FakeCloud(), expected,
+            )
+            self.assertEqual(accepted["agentIncarnation"], 0)
+
+            handoff_path.write_text(json.dumps(self._handoff(agent_incarnation=-1)))
+            handoff_path.chmod(0o600)
+            with self.assertRaisesRegex(CloudError, "stale_messaging_handoff"):
+                cli._load_stock_messaging_handoff(
+                    handoff_path, self._stock_renew_args(handoff_path), FakeCloud(), expected,
+                )
+
+    def test_detach_during_cloud_renew_does_not_resurrect_mapping(self):
+        fixture_now = __import__("json").loads(
+            (Path(__file__).resolve().parents[1] /
+             "contracts/messaging-v2/messaging-protocol-semantics-v2.json").read_text()
+        )["nowMs"] / 1000
+        for daemon_mode in (False, True):
+            with self.subTest(daemon_mode=daemon_mode), tempfile.TemporaryDirectory() as temp:
+                state = Path(temp).resolve() / "state"
+                handoff_path = Path(temp).resolve() / "handoff.json"
+                handoff_path.write_text(json.dumps(self._handoff()))
+                handoff_path.chmod(0o600)
+                daemon_store = None
+                with Store(state, clock=lambda: fixture_now) as store:
+                    store.put_attachment(self._stock_mapping(fixture_now))
+                if daemon_mode:
+                    daemon_store = Store(state, clock=lambda: fixture_now)
+                    (state / "control.sock").touch()
+
+                class FakeCloud:
+                    principal, agent = "owner@example.com", "codex"
+                    node_id, node_generation = NODE, 2
+
+                    async def assigned_stock(self, _request):
+                        if daemon_store is not None:
+                            daemon_store.detach(RUNTIME)
+                        else:
+                            with Store(state, clock=lambda: fixture_now) as store:
+                                store.detach(RUNTIME)
+                        return response("renewed", leaseUntil=_iso(fixture_now + 120))
+
+                def daemon_request(_state, command):
+                    return daemon._execute_control_command(daemon_store, command)
+
+                args = [
+                    "--state-dir", str(state), "stock-control", "renew",
+                    "--runtime-id", RUNTIME, "--conversation-id", CONVERSATION,
+                    "--cloud-config", str(state / "cloud.json"),
+                    "--expected-runtime-generation", "1",
+                    "--expected-attachment-generation", "1",
+                    "--messaging-handoff", str(handoff_path),
+                ]
+                output = io.StringIO()
+                with patch.object(cli, "load_cloud_client", return_value=FakeCloud()), \
+                        patch.object(cli, "request", side_effect=daemon_request), \
+                        redirect_stdout(output):
+                    exit_code = cli.main(args)
+                result = json.loads(output.getvalue())
+                self.assertEqual(exit_code, 2)
+                self.assertEqual(result["assignment"], "cloud_committed_local_mapping_failed")
+                self.assertIn(result["reason"], ("stale", "invalid_attachment"))
+                if daemon_store is not None:
+                    self.assertIsNone(daemon_store.get_attachment(RUNTIME))
+                    daemon_store.close()
+                else:
+                    with Store(state, clock=lambda: fixture_now) as store:
+                        self.assertIsNone(store.get_attachment(RUNTIME))
+
+    def test_repeated_messaging_handoff_renewals_keep_exact_route_tuple(self):
+        fixture_now = __import__("json").loads(
+            (Path(__file__).resolve().parents[1] /
+             "contracts/messaging-v2/messaging-protocol-semantics-v2.json").read_text()
+        )["nowMs"] / 1000
+        for daemon_mode in (False, True):
+            with self.subTest(daemon_mode=daemon_mode), tempfile.TemporaryDirectory() as temp:
+                state = Path(temp).resolve() / "state"
+                handoff_path = Path(temp).resolve() / "handoff.json"
+                handoff_path.write_text(json.dumps(self._handoff()))
+                handoff_path.chmod(0o600)
+                initial = self._messaging_mapping(fixture_now)
+                with Store(state, clock=lambda: fixture_now) as store:
+                    store.put_messaging_attachment(initial)
+                daemon_store = Store(state, clock=lambda: fixture_now) if daemon_mode else None
+                if daemon_mode:
+                    (state / "control.sock").touch()
+
+                class FakeCloud:
+                    principal, agent = "owner@example.com", "codex"
+                    node_id, node_generation = NODE, 2
+
+                    def __init__(self):
+                        self.lease = fixture_now + 120
+
+                    async def assigned_stock(self, _request):
+                        self.lease += 60
+                        return response("renewed", leaseUntil=_iso(self.lease))
+
+                cloud = FakeCloud()
+
+                def daemon_request(_state, command):
+                    return daemon._execute_control_command(daemon_store, command)
+
+                for _ in range(2):
+                    output = io.StringIO()
+                    with patch.object(cli, "load_cloud_client", return_value=cloud), \
+                            patch.object(cli, "Store", side_effect=lambda path: Store(
+                                path, clock=lambda: fixture_now)), \
+                            patch.object(cli, "request", side_effect=daemon_request), \
+                            redirect_stdout(output):
+                        exit_code = cli.main([
+                            "--state-dir", str(state), "stock-control", "renew",
+                            "--runtime-id", RUNTIME, "--conversation-id", CONVERSATION,
+                            "--cloud-config", str(state / "cloud.json"),
+                            "--expected-runtime-generation", "1",
+                            "--expected-attachment-generation", "1",
+                            "--messaging-handoff", str(handoff_path),
+                        ])
+                    self.assertEqual(exit_code, 0, output.getvalue())
+                    self.assertEqual(json.loads(output.getvalue())["localMapping"], "stored")
+
+                if daemon_store is not None:
+                    renewed = daemon_store.get_attachment(RUNTIME)
+                    daemon_store.close()
+                else:
+                    with Store(state, clock=lambda: fixture_now) as store:
+                        renewed = store.get_attachment(RUNTIME)
+                for key in ("namespace", "agentIncarnation", "routingGeneration", "runtimeProfile",
+                            "nodeId", "runtimeId", "nodeGeneration", "runtimeGeneration",
+                            "attachmentGeneration", "consumerGeneration"):
+                    self.assertEqual(renewed[key], initial[key], key)
+                self.assertGreater(renewed["leaseExpiresAt"], initial["leaseExpiresAt"])
+
+    def test_stock_renew_without_handoff_preserves_messaging_tuple(self):
+        fixture_now = __import__("json").loads(
+            (Path(__file__).resolve().parents[1] /
+             "contracts/messaging-v2/messaging-protocol-semantics-v2.json").read_text()
+        )["nowMs"] / 1000
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+            initial = self._messaging_mapping(fixture_now)
+            with Store(state, clock=lambda: fixture_now) as store:
+                store.put_messaging_attachment(initial)
+
+            class FakeCloud:
+                principal, agent = "owner@example.com", "codex"
+                node_id, node_generation = NODE, 2
+
+                async def assigned_stock(self, _request):
+                    return response("renewed", leaseUntil=_iso(fixture_now + 180))
+
+            output = io.StringIO()
+            args = [
+                "--state-dir", str(state), "stock-control", "renew",
+                "--runtime-id", RUNTIME, "--conversation-id", CONVERSATION,
+                "--cloud-config", str(state / "cloud.json"),
+                "--expected-runtime-generation", "1",
+                "--expected-attachment-generation", "1",
+            ]
+            with patch.object(cli, "load_cloud_client", return_value=FakeCloud()), \
+                    patch.object(cli, "Store", side_effect=lambda path: Store(
+                        path, clock=lambda: fixture_now)), redirect_stdout(output):
+                self.assertEqual(cli.main(args), 0, output.getvalue())
+            with Store(state, clock=lambda: fixture_now) as store:
+                renewed = store.get_attachment(RUNTIME)
+            for key in ("namespace", "agentIncarnation", "routingGeneration", "runtimeProfile"):
+                self.assertEqual(renewed[key], initial[key], key)
+            self.assertGreater(renewed["leaseExpiresAt"], initial["leaseExpiresAt"])
+
     def test_expired_exact_stock_mapping_renews_via_direct_and_daemon_store(self):
         for daemon_mode in (False, True):
             with self.subTest(daemon_mode=daemon_mode), tempfile.TemporaryDirectory() as temp:

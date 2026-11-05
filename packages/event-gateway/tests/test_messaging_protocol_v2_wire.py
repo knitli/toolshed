@@ -13,6 +13,17 @@ from event_gateway import messaging_protocol_v2 as protocol
 CONTRACTS = Path(__file__).resolve().parents[1] / 'contracts/messaging-v2'
 SEMANTICS = json.loads((CONTRACTS / 'messaging-protocol-semantics-v2.json').read_text())
 NOW = SEMANTICS['nowMs']
+ACTIVE_SOURCE_COMMIT = 'e954904603b3467e30bbeaf7446977b61fbcb9ef'
+ACTIVE_SOURCE_FILES = {
+    'apps/os/packages/event-runtime/src/messaging/protocol-v2.ts': '3f91122c7bd2d78d072ad51a9fb2fef4adfb99e3277bf4052196a54a74238193',
+    'apps/os/packages/event-runtime/src/protocol.ts': 'b9927658cd80cfb52222bcc20ffe748acbea0c16da06f0f283b55c6046b9284d',
+    'apps/os/packages/event-runtime/src/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+    'apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json': (
+        '0553380db6fbe8c9af557aea5847ce22cb52917da1daadb4491524e1f2cdf22f'
+    ),
+    'apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json': 'a66d74967f5470e193bfcb250cdc130fd22081b88c42b62c24fecf01d269f032',
+    'apps/os/pnpm-lock.yaml': '62f84801e3d426df4a97a54bc48c1a547d9ae3f0205166cc92d9b7391e581549',
+}
 
 
 def _body(value):
@@ -32,6 +43,11 @@ class MessagingProtocolV2WireTests(unittest.TestCase):
                 if expected['ok']:
                     parsed = parser(raw, case['nowMs'])
                     self.assertEqual(parsed, json.loads(raw))
+                    if 'matchesAssignedStockEnvelope' in case:
+                        self.assertEqual(
+                            protocol.acknowledgment_matches_delivery(
+                                SEMANTICS['assigned_stock_envelope'], parsed),
+                            case['matchesAssignedStockEnvelope'])
                 else:
                     with self.assertRaises(protocol.MessagingProtocolError) as raised:
                         parser(raw, case['nowMs'])
@@ -47,14 +63,21 @@ class MessagingProtocolV2WireTests(unittest.TestCase):
                         parser(text, case['nowMs'])
                     self.assertEqual(raised.exception.code, expected.get('pythonCode', expected.get('code')))
 
-    def test_wire_fixture_provenance_is_not_policy_adoption(self):
+    def test_wire_receipt_records_active_profile_provenance_but_is_not_authorizer(self):
         receipt = json.loads((CONTRACTS / 'wire-source-receipt.json').read_text())
-        fixture = CONTRACTS / receipt['fixture']['file']
+        fixture = CONTRACTS / Path(receipt['fixture']['file']).name
         self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), receipt['fixture']['sha256'])
-        self.assertEqual(receipt['purpose'], 'dormant_source_conformance_only')
-        self.assertFalse(receipt['trustedPolicyAdoption'])
+        self.assertEqual(receipt['purpose'], 'active_assigned_stock_v2_policy_adoption')
+        self.assertTrue(receipt['trustedPolicyAdoption'])
+        self.assertEqual(receipt['profile'], 'active-assigned-stock-v2')
+        self.assertEqual(receipt['sourceCommit'], ACTIVE_SOURCE_COMMIT)
+        self.assertEqual({entry['path']: entry['sha256'] for entry in receipt['sourceFiles']},
+                         ACTIVE_SOURCE_FILES)
+        self.assertEqual(receipt['fixture']['file'],
+                         'apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json')
         self.assertEqual(receipt['protocolVersion'], 2)
-        self.assertTrue(all(len(entry['sha256']) == 64 for entry in receipt['sourceFiles']))
+        # The receipt records provenance; the trusted workflow's exact blob
+        # hashes authorize the profile independently.
 
     def test_exact_raw_input_types_and_safe_errors(self):
         class StringSubclass(str):

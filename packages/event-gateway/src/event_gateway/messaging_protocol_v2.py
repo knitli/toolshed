@@ -35,6 +35,8 @@ _ENVELOPE_FIELDS = frozenset((*_ATTEMPT_FIELDS, 'source', 'eventKind', 'reasonCo
     'observedAt', 'issuedAt', 'expiresAt'))
 _ACK_FIELDS = frozenset((*_ATTEMPT_FIELDS, 'deliveredSourceStateVersion',
                         'acknowledgedAt', 'status', 'nativeCorrelation'))
+_STOCK_ACK_FIELDS = frozenset((*_ATTEMPT_FIELDS, 'deliveredSourceStateVersion',
+                              'acknowledgedAt', 'status', 'runtimeProfile', 'permitId'))
 
 
 class MessagingProtocolError(ValueError):
@@ -119,13 +121,22 @@ def _attempt(value: dict) -> bool:
             and _matches(re.compile(r'[a-z0-9-]{1,32}'), value.get('agent')))
 
 
+def _runtime_profile(value: object) -> bool:
+    return (_exact(value, ('profile', 'client', 'conversationId'))
+            and value['profile'] == 'assigned_stock_client' and value['client'] == 'codex'
+            and _matches(_UUID, value['conversationId']))
+
+
 def _code_points(value: str) -> int:
     # Locked Zod 4.6.5 uses codePointLength, including paired surrogate strings.
     return len(value) - len(re.findall(r'[\ud800-\udbff][\udc00-\udfff]', value))
 
 
 def _envelope_shape(value: object) -> bool:
-    if not _exact(value, _ENVELOPE_FIELDS) or not _attempt(value):
+    fields = _ENVELOPE_FIELDS | ({'runtimeProfile'} if type(value) is dict and 'runtimeProfile' in value else set())
+    if not _exact(value, fields) or not _attempt(value):
+        return False
+    if 'runtimeProfile' in value and not _runtime_profile(value['runtimeProfile']):
         return False
     subject = value['canonicalSubject']
     if not _exact(subject, ('kind', 'namespace', 'messageId', 'agentIncarnation')):
@@ -163,6 +174,14 @@ def _ack_shape(value: object) -> bool:
     return False
 
 
+def _stock_ack_shape(value: object) -> bool:
+    return (_exact(value, _STOCK_ACK_FIELDS) and _attempt(value)
+            and _matches(_UUID, value['permitId']) and _runtime_profile(value['runtimeProfile'])
+            and value['status'] == 'command_accepted'
+            and _matches(re.compile(r'msg:[a-f0-9]{64}'), value['deliveredSourceStateVersion'])
+            and _timestamp(value['acknowledgedAt']) is not None)
+
+
 def validate_envelope(value: object, now_ms: int | float | None = None) -> bool:
     """Validate an already-decoded plain DTO, without authenticating its source."""
     now = time.time() * 1000 if now_ms is None else now_ms
@@ -182,7 +201,8 @@ def validate_envelope(value: object, now_ms: int | float | None = None) -> bool:
 def validate_acknowledgment(value: object, now_ms: int | float | None = None) -> bool:
     """Validate an already-decoded ACK; runtime authentication remains external."""
     now = time.time() * 1000 if now_ms is None else now_ms
-    if type(now) not in (int, float) or not _ack_shape(value) or not _fits(value):
+    if (type(now) not in (int, float) or not (_ack_shape(value) or _stock_ack_shape(value))
+            or not _fits(value)):
         return False
     try:
         return math.isfinite(now) and _timestamp(value['acknowledgedAt']) <= now + CLOCK_SKEW_MS
@@ -200,8 +220,8 @@ def _parse_wire(body: str | bytes, acknowledgment: bool, now_ms: int | float | N
         value = _decode(body)
     except ProtocolError as exc:
         raise MessagingProtocolError(exc.code) from None
-    shape = _ack_shape if acknowledgment else _envelope_shape
-    if not shape(value):
+    valid_shape = (_ack_shape(value) or _stock_ack_shape(value)) if acknowledgment else _envelope_shape(value)
+    if not valid_shape:
         raise MessagingProtocolError('invalid_acknowledgment' if acknowledgment else 'invalid_envelope')
     validate = validate_acknowledgment if acknowledgment else validate_envelope
     if not validate(value, now_ms):
@@ -238,6 +258,10 @@ def matches_delivery_id(envelope: object) -> bool:
 def acknowledgment_matches_delivery(envelope: object, acknowledgment: object) -> bool:
     """Exact validated-shape mapping, not freshness/current-authority/settlement."""
     # Shape checks prevent Python's True == 1 or absent None == None from matching.
-    return (_envelope_shape(envelope) and _ack_shape(acknowledgment)
-            and all(acknowledgment[key] == envelope[key] for key in _ATTEMPT_FIELDS)
-            and acknowledgment['deliveredSourceStateVersion'] == envelope['sourceStateVersion'])
+    if not _envelope_shape(envelope):
+        return False
+    stock = 'runtimeProfile' in envelope
+    shape = _stock_ack_shape(acknowledgment) if stock else _ack_shape(acknowledgment)
+    return (shape and all(acknowledgment[key] == envelope[key] for key in _ATTEMPT_FIELDS)
+            and acknowledgment['deliveredSourceStateVersion'] == envelope['sourceStateVersion']
+            and (not stock or acknowledgment['runtimeProfile'] == envelope['runtimeProfile']))

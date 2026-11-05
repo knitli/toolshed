@@ -4,7 +4,7 @@ import asyncio
 import json
 
 from .gateway import Refused
-from .protocol import ProtocolError
+from .protocol import ProtocolError, _decode
 from .security import SecurityError
 from .store import StoreError
 
@@ -85,12 +85,24 @@ class Listener:
                 if self.closing:
                     await self._reply(writer, 503, {"reason": "listener_stopping"})
                     return
-                result = self.gateway.accept(
-                    body,
-                    signature=headers.get("x-event-signature", ""),
-                    audience=headers.get("x-event-audience", ""),
-                    key_id=headers.get("x-event-key-id", ""),
-                )
+                transport = {
+                    "signature": headers.get("x-event-signature", ""),
+                    "audience": headers.get("x-event-audience", ""),
+                    "key_id": headers.get("x-event-key-id", ""),
+                }
+                value = None
+                if getattr(self.gateway, "stock_only", False):
+                    try:
+                        value = _decode(body)
+                    except ProtocolError:
+                        pass
+                if isinstance(value, dict) and value.get("schemaVersion") == 2:
+                    result = self.gateway.accept_messaging_v2(
+                        body, **transport, node_id=self.gateway.audience,
+                        runtime_id=value.get("runtimeId"),
+                    )
+                else:
+                    result = self.gateway.accept(body, **transport)
                 await self._reply(writer, 202, result)
         except ConnectionError:
             pass

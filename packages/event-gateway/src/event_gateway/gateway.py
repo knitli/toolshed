@@ -84,7 +84,7 @@ class Gateway:
         return self.store.accept(envelope)
 
     def accept_messaging_v2(self, body, *, signature, audience, key_id, node_id, runtime_id):
-        """Callable-only authenticated journal entry; the active listener remains v1."""
+        """Authenticate a strict V2 envelope and hold it in the shared durable journal."""
         from .messaging_admission_v2 import validate_authenticated_envelope
 
         if audience != self.audience or key_id not in self.keys:
@@ -94,6 +94,8 @@ class Gateway:
             expected_audience=self.audience, node_id=node_id,
             attachment=self.store.get_attachment(runtime_id), now_ms=self.clock() * 1000,
         )
+        if self.stock_only and "runtimeProfile" not in envelope:
+            raise Refused("stock_profile_native_delivery_disabled")
         return self.store.accept(envelope)
 
     def _row(self, delivery_id, reason=None):
@@ -378,7 +380,21 @@ class Gateway:
         attempt = self.store.current_attempt(delivery_id)
         return await self._submit_native(delivery_id, adapter, attempt, request)
 
-    def _stock_acknowledgment(self, envelope):
+    def _stock_acknowledgment(self, envelope, admission=None):
+        if envelope.get("schemaVersion") == 2:
+            return {
+                "schemaVersion": 2,
+                **{key: envelope[key] for key in (
+                    "eventId", "deliveryId", "attemptId", "principal", "agent", "nodeId", "runtimeId",
+                    "nodeGeneration", "runtimeGeneration", "attachmentGeneration", "consumerGeneration",
+                    "routingGeneration",
+                )},
+                "deliveredSourceStateVersion": envelope["sourceStateVersion"],
+                "acknowledgedAt": _iso(self.clock()),
+                "status": "command_accepted",
+                "runtimeProfile": envelope["runtimeProfile"],
+                "permitId": admission["permitId"],
+            }
         acknowledgment = {
             "schemaVersion": 1,
             **{key: envelope[key] for key in (
@@ -427,7 +443,10 @@ class Gateway:
         from .protocol import ProtocolError, validate_runtime_profile
 
         row = self._row(delivery_id)
-        if row["status"] not in ("queued", "claiming", "admitted"):
+        allowed_rows = ("queued", "claiming", "admitted")
+        if envelope.get("schemaVersion") == 2:
+            allowed_rows = (*allowed_rows, "held")
+        if row["status"] not in allowed_rows:
             return row
         try:
             profile = validate_runtime_profile(envelope.get("runtimeProfile"))
@@ -521,7 +540,7 @@ class Gateway:
         try:
             acknowledgment = self.store.record_stock_command_accepted(
                 delivery_id, envelope["attemptId"],
-                self._stock_acknowledgment(admission["envelope"]),
+                self._stock_acknowledgment(admission["envelope"], admission),
             )
         except Exception:
             # CLI launch may have succeeded; an unwritten result must never be replayed.
@@ -578,7 +597,7 @@ class Gateway:
                         and attempt.get("native_ack")):
                     return await self._send_stock_acknowledgment(delivery_id, attempt)
                 if ((not attempt or attempt["state"] in ("claiming", "admitted"))
-                        and self._row(delivery_id)["status"] in ("queued", "claiming", "admitted")):
+                        and self._row(delivery_id)["status"] in ("queued", "held", "claiming", "admitted")):
                     return await self._dispatch_stock_locked(delivery_id, envelope)
                 return self._row(delivery_id)
         if envelope.get("schemaVersion") != 1:

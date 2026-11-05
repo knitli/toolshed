@@ -9,6 +9,9 @@ from event_gateway.security import SecurityError
 class ListenerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.accepted = 0
+        self.stock_only = False
+        self.audience = "node-id"
+        self.stock_envelopes = []
         self.reject_signature = False
         self.listener = Listener(self, deadline=0.1, concurrency=1)
         self.server = await self.listener.start('127.0.0.1', 0)
@@ -23,6 +26,10 @@ class ListenerTests(unittest.IsolatedAsyncioTestCase):
             raise SecurityError('invalid_signature')
         self.accepted += 1
         return {'status': 'queued'}
+
+    def accept_messaging_v2(self, body, **kwargs):
+        self.stock_envelopes.append((body, kwargs))
+        return {'status': 'held'}
 
     async def connect(self):
         reader, writer = await asyncio.open_connection('127.0.0.1', self.server.sockets[0].getsockname()[1])
@@ -48,6 +55,18 @@ class ListenerTests(unittest.IsolatedAsyncioTestCase):
         for extra in (b'content-length: 2\r\n', b'Transfer-Encoding: chunked\r\n'):
             self.assertIn(b'400 Result', await self.request(raw.replace(b'\r\n\r\n', b'\r\n' + extra + b'\r\n')))
         self.assertEqual(self.accepted, 1)
+
+    async def test_stock_only_listener_routes_v2_to_authenticated_stock_ingress(self):
+        self.stock_only = True
+        body = b'{"schemaVersion":2,"runtimeId":"runtime-id"}'
+        raw = (b'POST /v1/deliver HTTP/1.1\r\nContent-Type: application/json\r\n'
+               + f'Content-Length: {len(body)}\r\n'.encode() + b'\r\n' + body)
+        self.assertIn(b'202 Result', await self.request(raw))
+        self.assertEqual(self.accepted, 0)
+        self.assertEqual(self.stock_envelopes, [(body, {
+            'signature': '', 'audience': '', 'key_id': '', 'node_id': 'node-id',
+            'runtime_id': 'runtime-id',
+        })])
 
     async def test_header_deadline_is_absolute_despite_progress(self):
         loop = asyncio.get_running_loop()
